@@ -94,7 +94,7 @@ variant.
 Generic functions and mixed precision
 -------------------------------------
 
-rocSPARSE provides generic functions that allow for mixed precision operations. These functions use data type
+rocSPARSE provides generic functions that allow for mixed-precision operations. These functions use data type
 enumerations to specify precision when creating matrix/vector descriptors and during computation.
 
 For example, when creating a sparse matrix descriptor:
@@ -127,7 +127,7 @@ This approach enables:
 
 * Using different precision types for matrices and vectors.
 * Specifying computation precision independently of storage precision.
-* Supporting mixed precision workflows with a unified API.
+* Supporting mixed-precision workflows with a unified API.
 
 The advantage of using different data types is to save on memory bandwidth and storage when a user application
 allows while performing the actual computation in a higher precision.

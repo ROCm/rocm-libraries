@@ -1312,7 +1312,6 @@ namespace rocRoller
                         ShowValue(load.varType));
             n /= packing;
 
-            co_yield Instruction::Lock(Scheduling::Dependency::M0, "Lock M0");
             co_yield moveTile<MemoryInstructions::MemoryDirection::Load>(
                 MemoryInstructions::MemoryKind::Buffer2LDS,
                 m,
@@ -1324,7 +1323,6 @@ namespace rocRoller
                 coords,
                 {})
                 .map(MemoryInstructions::addExtraDst(ldsAllocation));
-            co_yield Instruction::Unlock("Unlock M0");
         }
 
         Generator<Instruction> LoadStoreTileGenerator::loadMacroTileWAVELDS(int                tag,

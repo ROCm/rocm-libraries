@@ -1,6 +1,6 @@
 .. meta::
-  :description: rocSPARSE documentation and API reference library
-  :keywords: rocSPARSE, ROCm, API, documentation
+  :description: rocSPARSE auxiliary functions API documentation
+  :keywords: rocSPARSE, ROCm, API, documentation, auxiliary functions
 
 .. _rocsparse_auxiliary_functions_:
 
@@ -8,11 +8,10 @@
 Sparse auxiliary functions
 ********************************************************************
 
-This module holds all sparse auxiliary functions.
+This module contains all sparse auxiliary functions.
 
 The functions that are contained in the auxiliary module describe all available helper functions that are required for subsequent library calls.
-
-The functions in this module do not support execution in a hipGraph context.
+These functions do not support execution in a ``hipGraph`` context.
 
 .. _rocsparse_create_handle_:
 

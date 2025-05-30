@@ -3,15 +3,18 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
-## (Unreleased) rocSPARSE 3.5.0
+## rocSPARSE 4.0.0 for ROCm 7.0.0
 
 ### Added
 
 * Adds `SpGEAM` generic routine for computing sparse matrix addition in CSR format
 * Adds `v2_SpMV` generic routine for computing sparse matrix vector multiplication. As opposed to the deprecated `rocsparse_spmv` routine, this routine does not use a fallback algorithm if a non-implemented configuration is encountered and will return an error in such a case. For the deprecated routine `rocsparse_spmv`, the user can enable warning messages in situations where a fallback algorithm is used by either calling upfront the routine `rocsparse_enable_debug` or exporting the variable `ROCSPARSE_DEBUG` (with the shell command `export ROCSPARSE_DEBUG=1`).
+* Adds half float mixed precision to `rocsparse_axpby` where X and Y use float16 and result and the compute type use float
 * Adds half float mixed precision to `rocsparse_spvv` where X and Y use float16 and result and the compute type use float
-* Adds half float uniform precision to `rocsparse_scatter` and `rocsparse_gather` routines
 * Adds half float mixed precision to `rocsparse_spmm` where A and B use float16 and C and the compute type use float
+* Adds half float mixed precision to `rocsparse_sddmm` where A and B use float16 and C and the compute type use float
+* Adds half float uniform precision to `rocsparse_scatter` and `rocsparse_gather` routines
+* Adds half float uniform precision to `rocsparse_sddmm` routine
 * Added `rocsparse_spmv_alg_csr_rowsplit` algorithm.
 * Added support for gfx950
 * Add ROC-TX instrumentation that can be enabled when compiling rocSPARSE from source.

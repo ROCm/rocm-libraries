@@ -1,6 +1,6 @@
 .. meta::
-  :description: rocSPARSE documentation and API reference library
-  :keywords: rocSPARSE, ROCm, API, documentation
+  :description: rocSPARSE data types documentation
+  :keywords: rocSPARSE, ROCm, API, documentation, data types
 
 .. _rocsparse_types_:
 

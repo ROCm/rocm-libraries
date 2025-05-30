@@ -83,7 +83,7 @@ def main():
                 if (idx != 0):
                     bashprecmd += ","
                 bashprecmd += "$(( " + str(
-                    args.gpusperrank) + " * " + args.gpuidvar + " + " + str(
+                    args.gpusperrank) + " * ${" + args.gpuidvar + "} + " + str(
                         idx) + " ))"
             bashprecmd += "; "
             cmd = ["bash", "-c", bashprecmd + " " + " ".join(workercmd)]

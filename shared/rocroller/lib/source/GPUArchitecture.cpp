@@ -39,7 +39,7 @@
 #include <rocRoller/Serialization/YAML.hpp>
 #include <rocRoller/Serialization/msgpack/Msgpack.hpp>
 
-#ifndef ROCROLLER_NO_EMBED_ARCH_DEF
+#ifdef ROCROLLER_EMBED_ARCH_DEF
 #include <cmrc/cmrc.hpp>
 
 CMRC_DECLARE(rocRoller);
@@ -95,7 +95,7 @@ namespace rocRoller
 
     std::map<GPUArchitectureTarget, GPUArchitecture> GPUArchitecture::readEmbeddedMsgpack()
     {
-#ifndef ROCROLLER_NO_EMBED_ARCH_DEF
+#ifdef ROCROLLER_EMBED_ARCH_DEF
         try
         {
             auto                   fs = cmrc::rocRoller::get_filesystem();

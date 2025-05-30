@@ -1,6 +1,6 @@
 .. meta::
-  :description: rocSPARSE documentation and API reference library
-  :keywords: rocSPARSE, ROCm, API, documentation
+  :description: rocSPARSE user guide and documentation
+  :keywords: rocSPARSE, ROCm, API, documentation, user guide
 
 .. _rocsparse_docs:
 
@@ -8,59 +8,92 @@
 rocSPARSE user guide
 ********************************************************************
 
-HIP Device Management
+This topic discusses how to use rocSPARSE, including a discussion of device and stream management, storage formats, pointer mode,
+and how hipSPARSE interacts with rocSPARSE.
+
+HIP device management
 =====================
-Before starting a HIP kernel you can call :cpp:func:`hipSetDevice` to set the device to run the kernel on, for example device 2. Unless you explicitly specify a different device HIP kernels always run on device 0. This is a HIP (and CUDA) device management approach and is not specific to the rocSPARSE library. rocSPARSE honors this approach and assumes you have set the preferred device before a rocSPARSE routine call.
 
-Once you set the device, you can create a handle with :ref:`rocsparse_create_handle_`. Subsequent rocSPARSE routines take this handle as an input parameter. rocSPARSE ONLY queries (by :cpp:func:`hipGetDevice`) the user's device; rocSPARSE does NOT set the device for users. If rocSPARSE does not see a valid device, it returns an error message. It is your responsibility to provide a valid device to rocSPARSE and ensure the device safety.
+Before starting a HIP kernel, you can call :cpp:func:`hipSetDevice` to set the device to run the kernel on,
+for example, device ``2``. Unless you explicitly specify a different device, HIP kernels always run on device ``0``.
+This HIP (and CUDA) device management approach is not specific to the rocSPARSE library.
+rocSPARSE honors this approach and assumes you have already set the preferred device before a rocSPARSE routine call.
 
-The handle should be destroyed at the end using :ref:`rocsparse_destroy_handle_` to release the resources consumed by the rocSPARSE library. You CANNOT switch devices between :ref:`rocsparse_create_handle_` and :ref:`rocsparse_destroy_handle_`. If you want to change the device, you must destroy the current handle and create another rocSPARSE handle on a new device.
+After you set the device, you can create a handle with :ref:`rocsparse_create_handle_`.
+Subsequent rocSPARSE routines take this handle as an input parameter.
+rocSPARSE only queries the specified device (using :cpp:func:`hipGetDevice`) and does not set the device for users.
+It's your responsibility to provide a valid device to rocSPARSE and ensure device safety.
+If it's not a valid device, rocSPARSE returns an error message.
+
+The handle should be destroyed at the end using :ref:`rocsparse_destroy_handle_` to release the resources
+consumed by the rocSPARSE library. You **cannot** switch devices
+between :ref:`rocsparse_create_handle_` and :ref:`rocsparse_destroy_handle_`. To change the device,
+you must destroy the current handle and create another rocSPARSE handle on a new device.
 
 .. note::
 
-   :cpp:func:`hipSetDevice` and :cpp:func:`hipGetDevice` are NOT part of the rocSPARSE API. They are part of the `HIP Runtime API - Device Management <https://rocm.docs.amd.com/projects/HIP/en/latest/doxygen/html/group___device.html>`_.
+   :cpp:func:`hipSetDevice` and :cpp:func:`hipGetDevice` are not part of the rocSPARSE API.
+   They are part of the `HIP Device Management API <https://rocm.docs.amd.com/projects/HIP/en/latest/doxygen/html/group___device.html>`_.
 
-
-HIP Stream Management
+HIP stream management
 =====================
-HIP kernels are always launched in a queue (also known as a stream). If you do not explicitly specify a stream, the system provides and maintains a default stream. You cannot create or destroy the default stream. However, you can freely create new streams (with :cpp:func:`hipStreamCreate`) and bind it to a rocSPARSE handle using :ref:`rocsparse_set_stream_`. HIP kernels are invoked in rocSPARSE routines. The rocSPARSE handle is always associated with a stream, and rocSPARSE passes its stream to the kernels inside the routine. One rocSPARSE routine only takes one stream in a single invocation. If you create a stream, you are responsible for destroying it. Refer to `HIP Runtime API - Stream Management <https://rocm.docs.amd.com/projects/HIP/en/latest/doxygen/html/group___stream.html>`_ for more information.
 
-Asynchronous Execution
+HIP kernels are always launched in a queue, which is also known as a stream. If you don't explicitly specify a stream,
+the system provides and maintains a default stream, which you cannot create or destroy.
+However, you can freely create a new stream using :cpp:func:`hipStreamCreate` and bind it to a rocSPARSE handle
+using :ref:`rocsparse_set_stream_`. The rocSPARSE routines invoke HIP kernels.
+A rocSPARSE handle is always associated with a stream, which rocSPARSE passes to the kernels inside the routine.
+One rocSPARSE routine only takes one stream in a single invocation.
+If you create a stream, you are responsible for destroying it.
+See the `HIP Stream Management API <https://rocm.docs.amd.com/projects/HIP/en/latest/doxygen/html/group___stream.html>`_ for more information.
+
+Asynchronous execution
 ======================
-All rocSPARSE library functions are non-blocking and executed asynchronously with respect to the host, except functions having memory allocation inside preventing asynchronicity. The function may return immediately, or before the actual computation has finished. To force synchronization, use either :cpp:func:`hipDeviceSynchronize` or :cpp:func:`hipStreamSynchronize`. This will ensure that all previously executed rocSPARSE functions on the device, or in the particular stream, have completed.
 
-Multiple Streams and Multiple Devices
+All rocSPARSE library functions are non-blocking and execute asynchronously with respect to the host,
+except for functions which allocate memory themselves, preventing asynchronicity.
+These functions might return immediately or before the actual computation has finished.
+To force synchronization, use either :cpp:func:`hipDeviceSynchronize` or :cpp:func:`hipStreamSynchronize`.
+This ensures all previously executed rocSPARSE functions on the device or the stream have completed.
+
+Multiple streams and multiple devices
 =====================================
-If a system has multiple HIP devices, you can run multiple rocSPARSE handles concurrently. However, you can NOT run a single rocSPARSE handle concurrently on multiple discrete devices. Each handle can only be associated with a single device, and a new handle should be created for each additional device.
 
-Graph Support for rocSPARSE
+If a system has multiple HIP devices, you can run multiple rocSPARSE handles concurrently.
+However, you **cannot** run a single rocSPARSE handle concurrently on multiple discrete devices.
+Each handle can only be associated with a single device, and a new handle should be created for each additional device.
+
+Graph support for rocSPARSE
 ===========================
 
-Many of the rocSPARSE functions can be captured into a graph node via Graph Management HIP APIs. See :ref:`Functions Supported with Graph Capture` to determine
-whether a rocSPARSE routine is supported or not. For a list of graph related HIP APIs, refer to `Graph Management HIP API <https://rocm.docs.amd.com/projects/HIP/en/latest/doxygen/html/group___graph.html#graph-management>`_.
+Many of the rocSPARSE functions can be captured into a graph node using the HIP Graph Management APIs. See :ref:`Functions supported with Graph Capture` to determine
+whether a rocSPARSE routine is supported or not. For a list of graph-related HIP APIs, see the `HIP Graph Management API <https://rocm.docs.amd.com/projects/HIP/en/latest/doxygen/html/group___graph.html#graph-management>`_.
+
+The following code creates a graph with ``rocsparse_function()`` as the graph node. 
 
 .. code-block:: c++
 
-      CHECK_HIP_ERROR((hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-      rocsparse_<function>(<arguments>);
-      CHECK_HIP_ERROR(hipStreamEndCapture(stream, &graph));
+   CHECK_HIP_ERROR((hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+   rocsparse_<function>(<arguments>);
+   CHECK_HIP_ERROR(hipStreamEndCapture(stream, &graph));
 
-The above code will create a graph with ``rocsparse_function()`` as graph node. The captured graph can be launched as shown below:
+The captured graph can be launched as shown below:
 
 .. code-block:: c++
 
-      CHECK_HIP_ERROR(hipGraphInstantiate(&instance, graph, NULL, NULL, 0));
-      CHECK_HIP_ERROR(hipGraphLaunch(instance, stream));
+   CHECK_HIP_ERROR(hipGraphInstantiate(&instance, graph, NULL, NULL, 0));
+   CHECK_HIP_ERROR(hipGraphLaunch(instance, stream));
 
-
-Graph support requires Asynchronous HIP APIs.
+Graph support requires asynchronous HIP APIs.
 
 .. _Functions Supported with Graph Capture:
 
-Functions Supported with Graph Capture
+Functions supported with graph capture
 ========================================
 
-Sparse Level 1 Functions
+The following functions support graph capture:
+
+Sparse level 1 functions
 ------------------------
 
 ================================================= === ==
@@ -75,7 +108,7 @@ Function name                                     yes no
 :cpp:func:`rocsparse_Xsctr() <rocsparse_ssctr>`   x
 ================================================= === ==
 
-Sparse Level 2 Functions
+Sparse level 2 functions
 ------------------------
 
 ============================================================================= === ==
@@ -112,7 +145,7 @@ Function name                                                                 ye
 :cpp:func:`rocsparse_Xhybmv() <rocsparse_shybmv>`                             x
 ============================================================================= === ==
 
-Sparse Level 3 Functions
+Sparse level 3 functions
 ------------------------
 
 ========================================================================= === ==
@@ -134,7 +167,7 @@ Function name                                                             yes no
 :cpp:func:`rocsparse_Xgemmi() <rocsparse_sgemmi>`                         x
 ========================================================================= === ==
 
-Sparse Extra Functions
+Sparse extra functions
 ----------------------
 
 ============================================================================= === ==
@@ -154,7 +187,7 @@ Function name                                                                 ye
 :cpp:func:`rocsparse_Xcsrgemm_numeric() <rocsparse_scsrgemm_numeric>`             x
 ============================================================================= === ==
 
-Preconditioner Functions
+Preconditioner functions
 ------------------------
 
 ===================================================================================================================== === ==
@@ -199,7 +232,7 @@ Function name                                                                   
 :cpp:func:`rocsparse_Xgpsv_interleaved_batch() <rocsparse_sgpsv_interleaved_batch>`                                   x
 ===================================================================================================================== === ==
 
-Conversion Functions
+Conversion functions
 --------------------
 
 ========================================================================================================================= === ==
@@ -261,7 +294,7 @@ Function name                                                                   
 :cpp:func:`rocsparse_Xbsrpad_value() <rocsparse_sbsrpad_value>`                                                           x
 ========================================================================================================================= === ==
 
-Reordering Functions
+Reordering functions
 --------------------
 
 ======================================================= === ==
@@ -270,7 +303,7 @@ Function name                                           yes no
 :cpp:func:`rocsparse_Xcsrcolor() <rocsparse_scsrcolor>`     x
 ======================================================= === ==
 
-Utility Functions
+Utility functions
 -----------------
 
 =================================================================================================== === ==
@@ -292,7 +325,7 @@ Function name                                                                   
 :cpp:func:`rocsparse_check_matrix_hyb() <rocsparse_check_matrix_hyb>`                                   x
 =================================================================================================== === ==
 
-Sparse Generic Functions
+Sparse generic functions
 ------------------------
 
 ==================================================== === ==
@@ -318,36 +351,39 @@ Function name                                        yes no
 :cpp:func:`rocsparse_extract()`                      x
 ==================================================== === ==
 
-For :cpp:func:`rocsparse_spmv()`, :cpp:func:`rocsparse_spmm()`, :cpp:func:`rocsparse_spsv()`, and :cpp:func:`rocsparse_spsm()`
-``hipGraph`` is supported when passing buffer size or compute stages but is not supported when passing the preprocess stage.
+For :cpp:func:`rocsparse_spmv()`, :cpp:func:`rocsparse_spmm()`, :cpp:func:`rocsparse_spsv()`, and :cpp:func:`rocsparse_spsm()`,
+``hipGraph`` is supported when passing the buffer size or compute stages but is not supported when passing the preprocess stage.
 
-For :cpp:func:`rocsparse_v2_spmv()`
+For :cpp:func:`rocsparse_v2_spmv()`,
 ``hipGraph`` is supported when passing the compute stage but is not supported when passing the analysis stage.
 
-For :cpp:func:`rocsparse_sddmm()` hipGraph is supported only when using the default algorithm.
+For :cpp:func:`rocsparse_sddmm()`, ``hipGraph`` is supported only when using the default algorithm.
 
-Storage Formats
+Storage formats
 ===============
-The following describes supported matrix storage formats.
+
+This section describes the supported matrix storage formats.  
 
 .. note::
     The different storage formats support indexing from a base of 0 or 1 as described in :ref:`index_base`.
 
 COO storage format
 ------------------
-The Coordinate (COO) storage format represents a :math:`m \times n` matrix by
+
+The Coordinate (COO) storage format represents an :math:`m \times n` matrix by:
 
 =========== ==================================================================
-m           number of rows (integer).
-n           number of columns (integer).
-nnz         number of non-zero elements (integer).
-coo_val     array of ``nnz`` elements containing the data (floating point).
-coo_row_ind array of ``nnz`` elements containing the row indices (integer).
-coo_col_ind array of ``nnz`` elements containing the column indices (integer).
+m           Number of rows (integer).
+n           Number of columns (integer).
+nnz         Number of non-zero elements (integer).
+coo_val     Array of ``nnz`` elements containing the data (floating point).
+coo_row_ind Array of ``nnz`` elements containing the row indices (integer).
+coo_col_ind Array of ``nnz`` elements containing the column indices (integer).
 =========== ==================================================================
 
 The COO matrix is expected to be sorted by row indices and column indices per row. Furthermore, each pair of indices should appear only once.
-Consider the following :math:`3 \times 5` matrix and the corresponding COO structures, with :math:`m = 3, n = 5` and :math:`\text{nnz} = 8` using zero based indexing:
+Consider the following :math:`3 \times 5` matrix and the corresponding COO structures,
+with :math:`m = 3, n = 5`, and :math:`\text{nnz} = 8` using zero-based indexing:
 
 .. math::
 
@@ -369,18 +405,21 @@ where
 
 COO (AoS) storage format
 ------------------------
-The Coordinate (COO) Array of Structure (AoS) storage format represents a :math:`m \times n` matrix by
+
+The Coordinate (COO) Array of Structure (AoS) storage format represents an :math:`m \times n` matrix by:
 
 ======= ==========================================================================================
-m           number of rows (integer).
-n           number of columns (integer).
-nnz         number of non-zero elements (integer).
-coo_val     array of ``nnz`` elements containing the data (floating point).
-coo_ind     array of ``2 * nnz`` elements containing alternating row and column indices (integer).
+m           Number of rows (integer).
+n           Number of columns (integer).
+nnz         Number of non-zero elements (integer).
+coo_val     Array of ``nnz`` elements containing the data (floating point).
+coo_ind     Array of ``2 * nnz`` elements containing alternating row and column indices (integer).
 ======= ==========================================================================================
 
-The COO (AoS) matrix is expected to be sorted by row indices and column indices per row. Furthermore, each pair of indices should appear only once.
-Consider the following :math:`3 \times 5` matrix and the corresponding COO (AoS) structures, with :math:`m = 3, n = 5` and :math:`\text{nnz} = 8` using zero based indexing:
+The COO (AoS) matrix is expected to be sorted by row indices and column indices per row.
+Each pair of indices should appear only once.
+Consider the following :math:`3 \times 5` matrix and the corresponding COO (AoS) structures,
+with :math:`m = 3, n = 5`, and :math:`\text{nnz} = 8` using zero-based indexing:
 
 .. math::
 
@@ -401,19 +440,21 @@ where
 
 CSR storage format
 ------------------
-The Compressed Sparse Row (CSR) storage format represents a :math:`m \times n` matrix by
+
+The Compressed Sparse Row (CSR) storage format represents an :math:`m \times n` matrix by:
 
 =========== =========================================================================
-m           number of rows (integer).
-n           number of columns (integer).
-nnz         number of non-zero elements (integer).
-csr_val     array of ``nnz`` elements containing the data (floating point).
-csr_row_ptr array of ``m+1`` elements that point to the start of every row (integer).
-csr_col_ind array of ``nnz`` elements containing the column indices (integer).
+m           Number of rows (integer).
+n           Number of columns (integer).
+nnz         Number of non-zero elements (integer).
+csr_val     Array of ``nnz`` elements containing the data (floating point).
+csr_row_ptr Array of ``m+1`` elements that point to the start of every row (integer).
+csr_col_ind Array of ``nnz`` elements containing the column indices (integer).
 =========== =========================================================================
 
-The CSR matrix is expected to be sorted by column indices within each row. Furthermore, each pair of indices should appear only once.
-Consider the following :math:`3 \times 5` matrix and the corresponding CSR structures, with :math:`m = 3, n = 5` and :math:`\text{nnz} = 8` using one based indexing:
+The CSR matrix is expected to be sorted by column indices within each row. Each pair of indices should appear only once.
+Consider the following :math:`3 \times 5` matrix and the corresponding CSR structures,
+with :math:`m = 3, n = 5`, and :math:`\text{nnz} = 8` using one-based indexing:
 
 .. math::
 
@@ -435,19 +476,21 @@ where
 
 CSC storage format
 ------------------
-The Compressed Sparse Column (CSC) storage format represents a :math:`m \times n` matrix by
+
+The Compressed Sparse Column (CSC) storage format represents an :math:`m \times n` matrix by:
 
 =========== =========================================================================
-m           number of rows (integer).
-n           number of columns (integer).
-nnz         number of non-zero elements (integer).
-csc_val     array of ``nnz`` elements containing the data (floating point).
-csc_col_ptr array of ``n+1`` elements that point to the start of every column (integer).
-csc_row_ind array of ``nnz`` elements containing the row indices (integer).
+m           Number of rows (integer).
+n           Number of columns (integer).
+nnz         Number of non-zero elements (integer).
+csc_val     Array of ``nnz`` elements containing the data (floating point).
+csc_col_ptr Array of ``n+1`` elements that point to the start of every column (integer).
+csc_row_ind Array of ``nnz`` elements containing the row indices (integer).
 =========== =========================================================================
 
-The CSC matrix is expected to be sorted by row indices within each column. Furthermore, each pair of indices should appear only once.
-Consider the following :math:`3 \times 5` matrix and the corresponding CSC structures, with :math:`m = 3, n = 5` and :math:`\text{nnz} = 8` using one based indexing:
+The CSC matrix is expected to be sorted by row indices within each column. Each pair of indices should appear only once.
+Consider the following :math:`3 \times 5` matrix and the corresponding CSC structures,
+with :math:`m = 3, n = 5`, and :math:`\text{nnz} = 8` using one-based indexing:
 
 .. math::
 
@@ -469,20 +512,24 @@ where
 
 BSR storage format
 ------------------
-The Block Compressed Sparse Row (BSR) storage format represents a :math:`(mb \cdot \text{bsr_dim}) \times (nb \cdot \text{bsr_dim})` matrix by
 
-=========== ====================================================================================================================================
-mb          number of block rows (integer)
-nb          number of block columns (integer)
-nnzb        number of non-zero blocks (integer)
-bsr_val     array of ``nnzb * bsr_dim * bsr_dim`` elements containing the data (floating point). Blocks can be stored column-major or row-major.
-bsr_row_ptr array of ``mb+1`` elements that point to the start of every block row (integer).
-bsr_col_ind array of ``nnzb`` elements containing the block column indices (integer).
-bsr_dim     dimension of each block (integer).
-=========== ====================================================================================================================================
+The Block Compressed Sparse Row (BSR) storage format represents an :math:`(mb \cdot \text{bsr_dim}) \times (nb \cdot \text{bsr_dim})` matrix by:
 
-The BSR matrix is expected to be sorted by column indices within each row. If :math:`m` or :math:`n` are not evenly divisible by the block dimension, then zeros are padded to the matrix, such that :math:`mb = (m + \text{bsr_dim} - 1) / \text{bsr_dim}` and :math:`nb = (n + \text{bsr_dim} - 1) / \text{bsr_dim}`.
-Consider the following :math:`4 \times 3` matrix and the corresponding BSR structures, with :math:`\text{bsr_dim} = 2, mb = 2, nb = 2` and :math:`\text{nnzb} = 4` using zero based indexing and column-major storage:
+=========== ==============================================================================================================================================
+mb          Number of block rows (integer).
+nb          Number of block columns (integer).
+nnzb        Number of non-zero blocks (integer).
+bsr_val     Array of ``nnzb * bsr_dim * bsr_dim`` elements containing the data (floating point). Blocks can be stored in column-major or row-major format.
+bsr_row_ptr Array of ``mb+1`` elements that point to the start of every block row (integer).
+bsr_col_ind Array of ``nnzb`` elements containing the block column indices (integer).
+bsr_dim     Dimension of each block (integer).
+=========== ==============================================================================================================================================
+
+The BSR matrix is expected to be sorted by column indices within each row.
+If :math:`m` or :math:`n` are not evenly divisible by the block dimension, then zeros are padded to the matrix,
+such that :math:`mb = (m + \text{bsr_dim} - 1) / \text{bsr_dim}` and :math:`nb = (n + \text{bsr_dim} - 1) / \text{bsr_dim}`.
+Consider the following :math:`4 \times 3` matrix and the corresponding BSR structures,
+with :math:`\text{bsr_dim} = 2, mb = 2, nb = 2`, and :math:`\text{nnzb} = 4` using zero-based indexing and column-major storage:
 
 .. math::
 
@@ -523,7 +570,7 @@ such that
         A_{10} & A_{11} \\
       \end{pmatrix}
 
-with arrays representation
+with arrays represented as
 
 .. math::
 
@@ -535,23 +582,28 @@ with arrays representation
 
 GEBSR storage format
 --------------------
-The General Block Compressed Sparse Row (GEBSR) storage format represents a :math:`(mb \cdot \text{bsr_row_dim}) \times (nb \cdot \text{bsr_col_dim})` matrix by
 
-=========== ====================================================================================================================================
-mb          number of block rows (integer)
-nb          number of block columns (integer)
-nnzb        number of non-zero blocks (integer)
-bsr_val     array of ``nnzb * bsr_row_dim * bsr_col_dim`` elements containing the data (floating point). Blocks can be stored column-major or row-major.
-bsr_row_ptr array of ``mb+1`` elements that point to the start of every block row (integer).
-bsr_col_ind array of ``nnzb`` elements containing the block column indices (integer).
-bsr_row_dim row dimension of each block (integer).
-bsr_col_dim column dimension of each block (integer).
-=========== ====================================================================================================================================
+The General Block Compressed Sparse Row (GEBSR) storage format represents an :math:`(mb \cdot \text{bsr_row_dim}) \times (nb \cdot \text{bsr_col_dim})` matrix by:
 
-The GEBSR matrix is expected to be sorted by column indices within each row. If :math:`m` is not evenly divisible by the row block dimension or :math:`n` is not evenly
-divisible by the column block dimension, then zeros are padded to the matrix, such that :math:`mb = (m + \text{bsr_row_dim} - 1) / \text{bsr_row_dim}` and
-:math:`nb = (n + \text{bsr_col_dim} - 1) / \text{bsr_col_dim}`. Consider the following :math:`4 \times 5` matrix and the corresponding GEBSR structures,
-with :math:`\text{bsr_row_dim} = 2`, :math:`\text{bsr_col_dim} = 3`, mb = 2, nb = 2` and :math:`\text{nnzb} = 4` using zero based indexing and column-major storage:
+=========== ======================================================================================================================================================
+mb          Number of block rows (integer).
+nb          Number of block columns (integer).
+nnzb        Number of non-zero blocks (integer).
+bsr_val     Array of ``nnzb * bsr_row_dim * bsr_col_dim`` elements containing the data (floating point). Blocks can be stored in column-major or row-major format.
+bsr_row_ptr Array of ``mb+1`` elements that point to the start of every block row (integer).
+bsr_col_ind Array of ``nnzb`` elements containing the block column indices (integer).
+bsr_row_dim Row dimension of each block (integer).
+bsr_col_dim Column dimension of each block (integer).
+=========== ======================================================================================================================================================
+
+The GEBSR matrix is expected to be sorted by column indices within each row.
+If :math:`m` is not evenly divisible by the row block dimension or :math:`n` is not evenly
+divisible by the column block dimension, then zeros are padded to the matrix,
+such that :math:`mb = (m + \text{bsr_row_dim} - 1) / \text{bsr_row_dim}` and
+:math:`nb = (n + \text{bsr_col_dim} - 1) / \text{bsr_col_dim}`. Consider the following :math:`4 \times 5` matrix
+and the corresponding GEBSR structures,
+with :math:`\text{bsr_row_dim} = 2`, :math:`\text{bsr_col_dim} = 3`, :math:`mb = 2`, :math:`nb = 2`,
+and :math:`\text{nnzb} = 4` using zero-based indexing and column-major storage:
 
 .. math::
 
@@ -592,7 +644,7 @@ such that
         A_{10} & A_{11} \\
       \end{pmatrix}
 
-with arrays representation
+with arrays represented as
 
 .. math::
 
@@ -604,18 +656,21 @@ with arrays representation
 
 ELL storage format
 ------------------
-The Ellpack-Itpack (ELL) storage format represents a :math:`m \times n` matrix by
+
+The Ellpack-Itpack (ELL) storage format represents an :math:`m \times n` matrix by:
 
 =========== ================================================================================
-m           number of rows (integer).
-n           number of columns (integer).
-ell_width   maximum number of non-zero elements per row (integer)
-ell_val     array of ``m * ell_width`` elements containing the data (floating point).
-ell_col_ind array of ``m * ell_width`` elements containing the column indices (integer).
+m           Number of rows (integer).
+n           Number of columns (integer).
+ell_width   Maximum number of non-zero elements per row (integer).
+ell_val     Array of ``m * ell_width`` elements containing the data (floating point).
+ell_col_ind Array of ``m * ell_width`` elements containing the column indices (integer).
 =========== ================================================================================
 
-The ELL matrix is assumed to be stored in column-major format. Rows with less than ``ell_width`` non-zero elements are padded with zeros (``ell_val``) and :math:`-1` (``ell_col_ind``).
-Consider the following :math:`3 \times 5` matrix and the corresponding ELL structures, with :math:`m = 3, n = 5` and :math:`\text{ell_width} = 3` using zero based indexing:
+The ELL matrix is assumed to be stored in column-major format. Rows with less
+than ``ell_width`` non-zero elements are padded with zeros (``ell_val``) and :math:`-1` (``ell_col_ind``).
+Consider the following :math:`3 \times 5` matrix and the corresponding ELL structures,
+with :math:`m = 3, n = 5` and :math:`\text{ell_width} = 3` using zero-based indexing:
 
 .. math::
 
@@ -638,117 +693,139 @@ where
 
 HYB storage format
 ------------------
-The Hybrid (HYB) storage format represents a :math:`m \times n` matrix by
+
+The Hybrid (HYB) storage format represents an :math:`m \times n` matrix by:
 
 =========== =========================================================================================
-m           number of rows (integer).
-n           number of columns (integer).
-nnz         number of non-zero elements of the COO part (integer)
-ell_width   maximum number of non-zero elements per row of the ELL part (integer)
-ell_val     array of ``m * ell_width`` elements containing the ELL part data (floating point).
-ell_col_ind array of ``m * ell_width`` elements containing the ELL part column indices (integer).
-coo_val     array of ``nnz`` elements containing the COO part data (floating point).
-coo_row_ind array of ``nnz`` elements containing the COO part row indices (integer).
-coo_col_ind array of ``nnz`` elements containing the COO part column indices (integer).
+m           Number of rows (integer).
+n           Number of columns (integer).
+nnz         Number of non-zero elements of the COO part (integer).
+ell_width   Maximum number of non-zero elements per row of the ELL part (integer).
+ell_val     Array of ``m * ell_width`` elements containing the data for the ELL part (floating point).
+ell_col_ind Array of ``m * ell_width`` elements containing the column indices for the ELL part (integer).
+coo_val     Array of ``nnz`` elements containing the data for the COO part (floating point).
+coo_row_ind Array of ``nnz`` elements containing the row indices for the COO part (integer).
+coo_col_ind Array of ``nnz`` elements containing the column indices for the COO part (integer).
 =========== =========================================================================================
 
-The HYB format is a combination of the ELL and COO sparse matrix formats. Typically, the regular part of the matrix is stored in
-ELL storage format, and the irregular part of the matrix is stored in COO storage format. Three different partitioning schemes can
-be applied when converting a CSR matrix to a matrix in HYB storage format. For further details on the partitioning schemes,
+The HYB format is a combination of the ELL and COO sparse matrix formats.
+Typically, the regular part of the matrix is stored in
+ELL storage format, and the irregular part of the matrix is stored
+in COO storage format. Three different partitioning schemes can
+be applied when converting a CSR matrix to a matrix in
+HYB storage format. For further details on the partitioning schemes,
 see :ref:`rocsparse_hyb_partition_`.
 
 .. _index_base:
 
 Storage schemes and indexing base
 =================================
-rocSPARSE supports 0 and 1 based indexing.
-The index base is selected by the :cpp:enum:`rocsparse_index_base` type which is either passed as standalone parameter or as part of the :cpp:type:`rocsparse_mat_descr` type.
 
-Furthermore, dense vectors are represented with a 1D array, stored linearly in memory.
-Sparse vectors are represented by a 1D data array stored linearly in memory that hold all non-zero elements and a 1D indexing array stored linearly in memory that hold the positions of the corresponding non-zero elements.
+rocSPARSE supports 0-based and 1-based indexing.
+The index base is selected by the :cpp:enum:`rocsparse_index_base` type,
+which is either passed as a standalone parameter or as part of the :cpp:type:`rocsparse_mat_descr` type.
+
+Dense vectors are represented with a 1D array, stored linearly in memory.
+Sparse vectors are represented by a 1D data array that holds all non-zero elements
+and a 1D indexing array that holds the positions of the corresponding non-zero elements,
+both stored linearly in memory.
 
 Pointer mode
 ============
-The auxiliary functions :cpp:func:`rocsparse_set_pointer_mode` and :cpp:func:`rocsparse_get_pointer_mode` are used to set and get the value of the state variable :cpp:enum:`rocsparse_pointer_mode`.
-If :cpp:enum:`rocsparse_pointer_mode` is equal to :cpp:enumerator:`rocsparse_pointer_mode_host`, then scalar parameters must be allocated on the host.
-If :cpp:enum:`rocsparse_pointer_mode` is equal to :cpp:enumerator:`rocsparse_pointer_mode_device`, then scalar parameters must be allocated on the device.
+
+The auxiliary functions :cpp:func:`rocsparse_set_pointer_mode` and :cpp:func:`rocsparse_get_pointer_mode`
+are used to set and get the value of the state variable :cpp:enum:`rocsparse_pointer_mode`.
+If :cpp:enum:`rocsparse_pointer_mode` is equal to :cpp:enumerator:`rocsparse_pointer_mode_host`,
+then scalar parameters must be allocated on the host.
+If :cpp:enum:`rocsparse_pointer_mode` is equal to :cpp:enumerator:`rocsparse_pointer_mode_device`,
+then scalar parameters must be allocated on the device.
 
 There are two types of scalar parameter:
 
-  1. Scaling parameters, such as `alpha` and `beta` used for example in :cpp:func:`rocsparse_scsrmv` and :cpp:func:`rocsparse_scoomv`
-  2. Scalar results from functions such as :cpp:func:`rocsparse_sdoti` or :cpp:func:`rocsparse_cdotci`
+#. Scaling parameters, such as ``alpha`` and ``beta``, used, for example, in :cpp:func:`rocsparse_scsrmv` and :cpp:func:`rocsparse_scoomv`.
+#. Scalar results from functions such as :cpp:func:`rocsparse_sdoti` or :cpp:func:`rocsparse_cdotci`.
 
-For scalar parameters such as alpha and beta, memory can be allocated on the host heap or stack, when :cpp:enum:`rocsparse_pointer_mode` is equal to :cpp:enumerator:`rocsparse_pointer_mode_host`.
-The kernel launch is asynchronous, and if the scalar parameter is on the heap, it can be freed after the return from the kernel launch.
-When :cpp:enum:`rocsparse_pointer_mode` is equal to :cpp:enumerator:`rocsparse_pointer_mode_device`, the scalar parameter must not be changed till the kernel completes.
+For scalar parameters such as ``alpha`` and ``beta``, memory can be allocated on the host heap or stack
+when :cpp:enum:`rocsparse_pointer_mode` is equal to :cpp:enumerator:`rocsparse_pointer_mode_host`.
+The kernel launch is asynchronous, and if the scalar parameter is on the heap, it can be freed after the kernel launch returns.
+When :cpp:enum:`rocsparse_pointer_mode` is equal to :cpp:enumerator:`rocsparse_pointer_mode_device`,
+the scalar parameter must not be changed until the kernel completes.
 
-For scalar results, when :cpp:enum:`rocsparse_pointer_mode` is equal to :cpp:enumerator:`rocsparse_pointer_mode_host`, the function blocks the CPU till the GPU has copied the result back to the host.
-Using :cpp:enum:`rocsparse_pointer_mode` equal to :cpp:enumerator:`rocsparse_pointer_mode_device`, the function will return after the asynchronous launch.
-Similarly to vector and matrix results, the scalar result is only available when the kernel has completed execution.
+For scalar results, when :cpp:enum:`rocsparse_pointer_mode` is equal to :cpp:enumerator:`rocsparse_pointer_mode_host`,
+the function blocks the CPU until the GPU has copied the result back to the host.
+When :cpp:enum:`rocsparse_pointer_mode` is equal to :cpp:enumerator:`rocsparse_pointer_mode_device`,
+the function returns after the asynchronous launch.
+Similar to the vector and matrix results, the scalar result is only available when the kernel has completed execution.
 
 .. _rocsparse_logging:
 
-Activity Logging
+Activity logging
 ================
 
-Four different environment variables can be set to enable logging in rocSPARSE: ``ROCSPARSE_LAYER``, ``ROCSPARSE_LOG_TRACE_PATH``, ``ROCSPARSE_LOG_BENCH_PATH`` and ``ROCSPARSE_LOG_DEBUG_PATH``.
+Four different environment variables can be set to enable logging in rocSPARSE:
+``ROCSPARSE_LAYER``, ``ROCSPARSE_LOG_TRACE_PATH``, ``ROCSPARSE_LOG_BENCH_PATH``, and ``ROCSPARSE_LOG_DEBUG_PATH``.
 
-``ROCSPARSE_LAYER`` is a bit mask that enables logging, and where several logging modes (:ref:`rocsparse_layer_mode_`) can be specified as follows:
+``ROCSPARSE_LAYER`` is a bit mask that enables logging, where several logging modes for :ref:`rocsparse_layer_mode_`
+can be specified as follows:
 
-================================  =============================================================
-``ROCSPARSE_LAYER`` unset         logging is disabled.
-``ROCSPARSE_LAYER`` set to ``1``  trace logging is enabled.
-``ROCSPARSE_LAYER`` set to ``2``  bench logging is enabled.
-``ROCSPARSE_LAYER`` set to ``3``  trace logging and bench logging are enabled.
-``ROCSPARSE_LAYER`` set to ``4``  debug logging is enabled.
-``ROCSPARSE_LAYER`` set to ``5``  trace logging and debug logging are enabled.
-``ROCSPARSE_LAYER`` set to ``6``  bench logging and debug logging are enabled.
-``ROCSPARSE_LAYER`` set to ``7``  trace logging and bench logging and debug logging are enabled.
-================================  =============================================================
+================================  ==============================================================
+``ROCSPARSE_LAYER`` not set       Logging is disabled.
+``ROCSPARSE_LAYER`` set to ``1``  Trace logging is enabled.
+``ROCSPARSE_LAYER`` set to ``2``  Bench logging is enabled.
+``ROCSPARSE_LAYER`` set to ``3``  Trace logging and bench logging are enabled.
+``ROCSPARSE_LAYER`` set to ``4``  Debug logging is enabled.
+``ROCSPARSE_LAYER`` set to ``5``  Trace logging and debug logging are enabled.
+``ROCSPARSE_LAYER`` set to ``6``  Bench logging and debug logging are enabled.
+``ROCSPARSE_LAYER`` set to ``7``  Trace logging and bench logging and debug logging are enabled.
+================================  ==============================================================
 
-When logging is enabled, each rocSPARSE function call will write the function name and function arguments to the logging stream. The default logging output is streamed to ``stderr``.
-
-.. note::
-
-    Performance will degrade when logging is enabled. By default, the environment variable ``ROCSPARSE_LAYER`` is unset and logging is disabled.
-
-To capture activity logging in a file set the following environment variables as needed:
-
-  * ``ROCSPARSE_LOG_TRACE_PATH`` specifies a path and file name to capture trace logging streamed to that file
-  * ``ROCSPARSE_LOG_BENCH_PATH`` specifies a path and file name to capture bench logging
-  * ``ROCSPARSE_LOG_DEBUG_PATH`` specifies a path and file name to capture debug logging
+When logging is enabled, each rocSPARSE function call writes the function name and function arguments to the logging stream.
+The default logging output is streamed to ``stderr``.
 
 .. note::
 
-    If the file cannot be opened, logging output is streamed to ``stderr``.
+   Performance will degrade when logging is enabled. By default, the environment variable ``ROCSPARSE_LAYER`` is not set and
+   logging is disabled.
 
-rocTX support in rocSPARSE
-==========================
+To capture activity logging in a file, set the following environment variables as required:
 
-The `rocTX <https://rocm.docs.amd.com/projects/roctracer/en/latest/reference/roctx-spec.html>`_ library contains application code
-instrumentation APIs to support high-level correlation of runtime API or activity events. When integrated with rocSPARSE, rocTX
-enables users to view the call stack of rocSPARSE and HIP API functions in profiling tools such as rocProf, offering better insights
+*  ``ROCSPARSE_LOG_TRACE_PATH`` specifies a path and file name to capture trace logging streamed to that file.
+*  ``ROCSPARSE_LOG_BENCH_PATH`` specifies a path and file name to capture bench logging.
+*  ``ROCSPARSE_LOG_DEBUG_PATH`` specifies a path and file name to capture debug logging.
+
+.. note::
+
+   If the file cannot be opened, the logging output is streamed to ``stderr``.
+
+ROC-TX support in rocSPARSE
+============================
+
+The `ROC-TX <https://rocm.docs.amd.com/projects/roctracer/en/latest/reference/roctx-spec.html>`_ library contains application code
+instrumentation APIs to support the high-level correlation of runtime API or activity events. When integrated with rocSPARSE, ROC-TX
+enables users to view the call stack of rocSPARSE and HIP API functions in profiling tools such as :doc:`rocProfiler <rocprofiler:index>`, offering better insights
 into runtime behavior and performance bottlenecks.
 
-To enable rocTX profiling, set the environment variable ``ROCSPARSE_ROCTX=1`` when running the program with rocProf:
+To enable ROC-TX profiling, set the environment variable ``ROCSPARSE_ROCTX=1`` when running the program with rocProf:
 
 .. code-block:: shell
 
    ROCSPARSE_ROCTX=1 /opt/rocm/bin/rocprofv3 --kernel-trace --marker-trace --hip-trace --output-format pftrace -- ./example_program
 
-This will generate a ``.pftrace`` file which can then be viewed using `perfetto ui <https://ui.perfetto.dev/>`_.
+This will generate a ``.pftrace`` file which can then be viewed using the `Perfetto UI <https://ui.perfetto.dev/>`_.
 
 .. note::
 
-   rocTX support in rocSPARSE is unavailable on Windows and is not supported in the static library version on Linux.
+   ROC-TX support in rocSPARSE is unavailable on Windows and is not supported in the static library version on Linux.
 
 hipSPARSE
 =========
-hipSPARSE is a SPARSE marshalling library, with multiple supported backends. It sits between the application and a `worker`
+
+:doc:`hipSPARSE <hipsparse:index>` is a SPARSE marshalling library with multiple supported backends.
+It sits between the application and a "worker"
 SPARSE library, marshalling inputs into the backend library and marshalling results back to the application. hipSPARSE exports
 an interface that does not require the client to change, regardless of the chosen backend.
-hipSPARSE supports rocSPARSE and cuSPARSE as backends.
+hipSPARSE supports rocSPARSE and NVIDIA CUDA cuSPARSE as backends.
 
 hipSPARSE focuses on convenience and portability.
-If performance outweighs these factors, then using rocSPARSE itself is highly recommended.
+If performance outweighs these factors, then it's best to use rocSPARSE itself.
 hipSPARSE can be found on `GitHub <https://github.com/ROCm/hipSPARSE/>`_.

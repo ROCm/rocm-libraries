@@ -1,6 +1,6 @@
 .. meta::
-  :description: rocSPARSE documentation and API reference library
-  :keywords: rocSPARSE, ROCm, API, documentation
+  :description: rocSPARSE level 2 functions API documentation
+  :keywords: rocSPARSE, ROCm, API, documentation, level 2 functions
 
 .. _rocsparse_level2_functions_:
 
@@ -8,7 +8,7 @@
 Sparse level 2 functions
 ********************************************************************
 
-This module holds all sparse level 2 routines.
+This module contains all sparse level 2 routines.
 
 The sparse level 2 routines describe operations between a matrix in sparse format and a vector in dense format.
 

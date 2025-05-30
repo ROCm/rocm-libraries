@@ -1,6 +1,6 @@
 .. meta::
-  :description: rocSPARSE documentation and API reference library
-  :keywords: rocSPARSE, ROCm, API, documentation
+  :description: rocSPARSE enumerations API documentation
+  :keywords: rocSPARSE, ROCm, API, documentation, enumerations
 
 .. _rocsparse_enumerations_:
 

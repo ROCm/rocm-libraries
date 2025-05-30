@@ -182,12 +182,14 @@ else()
     set(MISC_TARGETS
       gfx942
       gfx950
+      gfx10-1-generic
+      gfx10-3-generic
       gfx1100
       gfx1101
       gfx1102
       gfx1151
-      gfx1200
-      gfx1201)
+      gfx12-generic
+    )
     if(BUILD_ADDRESS_SANITIZER)
       set(OPTIONAL_TARGETS_QUERY ${XNACK_PLUS_TARGETS})
     else()
@@ -196,8 +198,7 @@ else()
         gfx900
         gfx906:xnack-
         gfx908:xnack-
-        gfx1010
-        gfx1030)
+      )
     endif()
     # Query for compiler support of GPU archs
     rocm_check_target_ids(OPTIONAL_AMDGPU_TARGETS TARGETS ${OPTIONAL_TARGETS_QUERY})

@@ -1,6 +1,6 @@
 .. meta::
-  :description: rocSPARSE documentation and API reference library
-  :keywords: rocSPARSE, ROCm, API, documentation
+  :description: rocSPARSE utility functions API documentation
+  :keywords: rocSPARSE, ROCm, API, documentation, utility functions
 
 .. _rocsparse_utility_functions_:
 
@@ -8,11 +8,10 @@
 Sparse utility functions
 ********************************************************************
 
-This module holds all sparse utility routines.
+This module contains all sparse utility routines.
 
-The sparse utility routines allow for testing whether matrix data is valid for different matrix formats
-
-The routines in this module do not support execution in a hipGraph context.
+The sparse utility routines allow for testing whether matrix data is valid for different matrix formats.
+These routines do not support execution in a ``hipGraph`` context.
 
 rocsparse_check_matrix_csr_buffer_size()
 ----------------------------------------

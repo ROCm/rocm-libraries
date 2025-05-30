@@ -282,8 +282,7 @@ target_link_libraries(rocroller
 )
 if(ROCROLLER_EMBED_ARCH_DEF)
     target_link_libraries(rocroller PRIVATE $<BUILD_INTERFACE:rocRoller::GPUArchitecture_def>)
-else()
-    target_compile_definitions(rocroller PRIVATE ROCROLLER_NO_EMBED_ARCH_DEF)
+    target_compile_definitions(rocroller PRIVATE ROCROLLER_EMBED_ARCH_DEF)
 endif()
 
 # Users of rocroller should link with rocroller_interface for GPUArchitecture_def dependency

@@ -31,6 +31,7 @@ subtrees:
       - file: reference/api.rst
       - file: reference/types.rst
       - file: reference/precision.rst
+      - file: reference/env_variables.rst
       - file: reference/enumerations.rst
       - file: reference/auxiliary.rst
       - file: reference/level1.rst
