@@ -1,0 +1,24 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_RADIX_SORT_ONESWEEP_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+radix_sort_onesweep_config<kernel_config<{{ measurement['cfg']['histogram']['bs'] }}, {{ measurement['cfg']['histogram']['ipt'] }}>,
+kernel_config<{{ measurement['cfg']['sort']['bs'] }}, {{ measurement['cfg']['sort']['ipt'] }}>, {{ measurement['cfg']['bits_per_place'] }}, {{ measurement['cfg']['algorithm'] }}> { };
+{%- endmacro %}
+
+{% macro general_case() -%}
+template<unsigned int arch, class key_type, class value_type = rocprim::empty_type, class enable = void> struct default_radix_sort_onesweep_config :
+radix_sort_onesweep_config_base<key_type, value_type>::type { };
+{%- endmacro %}
+
+{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
+// Based on {{ based_on_type }}
+template<class key_type, class value_type> struct default_radix_sort_onesweep_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), key_type, value_type, {{ fallback_selection_criteria }}> :
+{%- endmacro %}
+
+
+
+
