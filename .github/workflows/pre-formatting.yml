@@ -100,5 +100,5 @@ jobs:
           git fetch origin "${{github.head_ref}}"  
           if ! git diff --cached --quiet; then
             git commit -m "ci: apply pre-commit fixes"
-            git push origin HEAD:${{ github.head_ref }}
+            git push --force-with-lease origin HEAD:${{ github.head_ref }}
           fi
