@@ -314,7 +314,7 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
         throw std::length_error("thread::thread: width must not exceed " + std::to_string(MAX_THREAD_WIDTH));
     }
 
-    std::unique_ptr worknode_h = make_worknode(width, std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
+    auto worknode_h = make_worknode(width, std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
     using WorkNode_t = typename decltype(worknode_h)::element_type;
     // First two are prerequisites for the third, and produce more user-friendly error messages
     // Note: is_trivially_copyable can behave strangely for extended lambdas. See
