@@ -21,20 +21,17 @@
 
 #include "test_macros.h"
 
-std::mutex m;
+gpu::spin_mutex m;
 int foo __attribute__((guarded_by(m)));
 
-static void scoped() {
-#if TEST_STD_VER >= 17
-  gpu::scoped_lock<std::mutex> lock(m);
+void increment() __attribute__((requires_capability(m))) {
   foo++;
-#endif
 }
 
 int main(int, char**) {
-  scoped();
-  gpu::lock_guard<std::mutex> lock(m);
-  foo++;
+  m.lock();
+  increment();
+  m.unlock();
 
   return 0;
 }
