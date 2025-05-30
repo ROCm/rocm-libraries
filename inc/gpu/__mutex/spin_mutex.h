@@ -33,7 +33,7 @@ namespace gpu {
 //====================================================================================================================//
 
 // TODO: add a scope paramter
-class _LIBGPU_TYPE_VIS spin_mutex {
+class _LIBGPU_TYPE_VIS _LIBGPU_THREAD_SAFETY_ANNOTATION(capability("spin_mutex")) spin_mutex {
     // HIP requires that (gridDim * blockDim) < 2^32
     enum : uint64_t { INVALID_OWNER = -1ULL };
     uint64_t owner = INVALID_OWNER; // stores the owner's blockId
@@ -45,7 +45,7 @@ class _LIBGPU_TYPE_VIS spin_mutex {
     __device__ spin_mutex &operator=(const spin_mutex &) = delete;
     __device__ _LIBGPU_HIDE_FROM_ABI ~spin_mutex() = default;
 
-    __device__ void lock() {
+    __device__ void lock() _LIBGPU_THREAD_SAFETY_ANNOTATION(acquire_capability()) {
         const uint64_t myBlockId = blockIdx.x + gridDim.x*blockIdx.y + gridDim.x*gridDim.y*blockIdx.z;
         // The read operation here by atomicCAS counts as an atomic acquire operation, which the 'release fence'
         // operation in unlock() synchronizes-with.
@@ -63,13 +63,13 @@ class _LIBGPU_TYPE_VIS spin_mutex {
      * no memory order relationship between lock and try_lock or between try_lock and itself. Only unlock() establishes
      * any memory order relationship. (see https://en.cppreference.com/w/cpp/thread/mutex/try_lock)
      */
-    __device__ bool try_lock() _NOEXCEPT {
+    __device__ bool try_lock() _NOEXCEPT _LIBGPU_THREAD_SAFETY_ANNOTATION(try_acquire_capability(true)) {
         const uint64_t myBlockId = blockIdx.x + gridDim.x*blockIdx.y + gridDim.x*gridDim.y*blockIdx.z;
         // The read operation here by atomicCAS counts as an atomic acquire operation, which the 'release fence'
         // operation in unlock() synchronizes-with.
         return atomicCAS(&owner, INVALID_OWNER, myBlockId) == INVALID_OWNER;
     }
-    __device__ void unlock() _NOEXCEPT {
+    __device__ void unlock() _NOEXCEPT _LIBGPU_THREAD_SAFETY_ANNOTATION(release_capability()) {
         // Create a 'release fence' operation which synchronizes-with the atomic acquire operation in lock() and
         // try_lock(). This establishes the synchronizes-with relationship required by the C++ standard:
         //  - Unlock "synchronizes-with any subsequent lock operation that obtains ownership of the same mutex"
