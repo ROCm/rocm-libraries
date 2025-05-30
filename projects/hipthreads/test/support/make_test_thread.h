@@ -15,7 +15,11 @@
 namespace support {
 
 template <class F, class ...Args>
-__host__ __device__ gpu::thread make_test_thread(F&& f, Args&& ...args) {
+__host__ gpu::thread make_test_thread(F&& f, Args&& ...args) {
+    return gpu::thread(std::forward<F>(f), std::forward<Args>(args)...);
+}
+template <class F, class ...Args>
+__device__ gpu::thread make_test_thread(F&& f, Args&& ...args) {
     return gpu::thread(std::forward<F>(f), std::forward<Args>(args)...);
 }
 
