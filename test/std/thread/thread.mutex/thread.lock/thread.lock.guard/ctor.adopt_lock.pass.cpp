@@ -23,7 +23,7 @@ int main(int, char**) {
   MyMutex m;
   {
     m.lock();
-    std::lock_guard<MyMutex> lg(m, std::adopt_lock);
+    gpu::lock_guard<MyMutex> lg(m, std::adopt_lock);
     assert(m.locked);
   }
   assert(!m.locked);

@@ -39,39 +39,39 @@ constexpr bool has_mutex_type() {
 int main(int, char**)
 {
     {
-        using T = std::scoped_lock<>;
+        using T = gpu::scoped_lock<>;
         static_assert(!has_mutex_type<T>(), "");
     }
     {
         using M1 = std::mutex;
-        using T = std::scoped_lock<M1>;
+        using T = gpu::scoped_lock<M1>;
         static_assert(std::is_same<T::mutex_type, M1>::value, "");
     }
     {
         using M1 = std::recursive_mutex;
-        using T = std::scoped_lock<M1>;
+        using T = gpu::scoped_lock<M1>;
         static_assert(std::is_same<T::mutex_type, M1>::value, "");
     }
     {
         using M1 = std::mutex;
         using M2 = std::recursive_mutex;
-        using T = std::scoped_lock<M1, M2>;
+        using T = gpu::scoped_lock<M1, M2>;
         static_assert(!has_mutex_type<T>(), "");
     }
     {
         using M1 = std::mutex;
         using M2 = std::recursive_mutex;
-        using T = std::scoped_lock<M1, M1, M2>;
+        using T = gpu::scoped_lock<M1, M1, M2>;
         static_assert(!has_mutex_type<T>(), "");
     }
     {
         using M1 = std::mutex;
-        using T = std::scoped_lock<M1, M1>;
+        using T = gpu::scoped_lock<M1, M1>;
         static_assert(!has_mutex_type<T>(), "");
     }
     {
         using M1 = std::recursive_mutex;
-        using T = std::scoped_lock<M1, M1, M1>;
+        using T = gpu::scoped_lock<M1, M1, M1>;
         static_assert(!has_mutex_type<T>(), "");
     }
 

@@ -24,24 +24,24 @@ int main(int, char**)
     M m0, m1, m2;
     M om0, om1, om2;
     {
-        using LG = std::scoped_lock<>;
+        using LG = gpu::scoped_lock<>;
         LG lg1, lg2;
         lg1 = lg2; // expected-error{{overload resolution selected deleted operator '='}}
     }
     {
-        using LG = std::scoped_lock<M>;
+        using LG = gpu::scoped_lock<M>;
         LG lg1(m0);
         LG lg2(om0);
         lg1 = lg2; // expected-error{{overload resolution selected deleted operator '='}}
     }
     {
-        using LG = std::scoped_lock<M, M>;
+        using LG = gpu::scoped_lock<M, M>;
         LG lg1(m0, m1);
         LG lg2(om0, om1);
         lg1 = lg2; // expected-error{{overload resolution selected deleted operator '='}}
     }
     {
-        using LG = std::scoped_lock<M, M, M>;
+        using LG = gpu::scoped_lock<M, M, M>;
         LG lg1(m0, m1, m2);
         LG lg2(om0, om1, om2);
         lg1 = lg2; // expected-error{{overload resolution selected deleted operator '='}}

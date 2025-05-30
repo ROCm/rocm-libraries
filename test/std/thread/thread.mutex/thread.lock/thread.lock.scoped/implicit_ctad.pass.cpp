@@ -24,16 +24,16 @@ int main(int, char**) {
   std::recursive_mutex m2;
   std::recursive_timed_mutex m3;
   {
-    std::scoped_lock lock(m1);
-    ASSERT_SAME_TYPE(decltype(lock), std::scoped_lock<std::mutex>);
+    gpu::scoped_lock lock(m1);
+    ASSERT_SAME_TYPE(decltype(lock), gpu::scoped_lock<std::mutex>);
   }
   {
-    std::scoped_lock lock(m1, m2);
-    ASSERT_SAME_TYPE(decltype(lock), std::scoped_lock<std::mutex, std::recursive_mutex>);
+    gpu::scoped_lock lock(m1, m2);
+    ASSERT_SAME_TYPE(decltype(lock), gpu::scoped_lock<std::mutex, std::recursive_mutex>);
   }
   {
-    std::scoped_lock lock(m1, m2, m3);
-    ASSERT_SAME_TYPE(decltype(lock), std::scoped_lock<std::mutex, std::recursive_mutex, std::recursive_timed_mutex>);
+    gpu::scoped_lock lock(m1, m2, m3);
+    ASSERT_SAME_TYPE(decltype(lock), gpu::scoped_lock<std::mutex, std::recursive_mutex, std::recursive_timed_mutex>);
   }
 
   return 0;

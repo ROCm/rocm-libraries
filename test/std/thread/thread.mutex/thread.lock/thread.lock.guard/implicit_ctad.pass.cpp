@@ -22,8 +22,8 @@
 int main(int, char**) {
   MyMutex m;
   {
-    std::lock_guard lg(m);
-    ASSERT_SAME_TYPE(decltype(lg), std::lock_guard<MyMutex>);
+    gpu::lock_guard lg(m);
+    ASSERT_SAME_TYPE(decltype(lg), gpu::lock_guard<MyMutex>);
   }
 
   return 0;

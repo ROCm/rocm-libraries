@@ -19,6 +19,8 @@
 #include <cassert>
 #include <hip/std/chrono>
 
+#include "force_include_hip.h"
+
 int main(int, char**)
 {
   typedef cuda::std::chrono::system_clock Clock;
