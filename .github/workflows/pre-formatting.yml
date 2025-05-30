@@ -15,7 +15,7 @@ jobs:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          
+
       - name: Checkout code (initial)
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -62,7 +62,7 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.generate-token.outputs.token }}
           submodules: false
-          
+
       - name: Get list of changed files
         id: changed-files
         shell: bash
@@ -71,14 +71,14 @@ jobs:
           changed=$(git diff --name-only FETCH_HEAD HEAD)
           files=$(echo "$changed" | tr '\n' ' ' | sed 's/ *$//')
           echo "all_modified_files=$files" >> $GITHUB_OUTPUT
-          
+
       - name: Show changed-files output
         run: |
           echo "Changed files are: ${{ steps.changed-files.outputs.all_modified_files }}"
-          
+
       - name: Disable submodule recursion
         run: git config submodule.recurse false
-        
+
       - name: Run and auto-commit pre-commit fixes
         env:
           GIT_AUTHOR_NAME: "assistant-librarian[bot]"
@@ -97,7 +97,7 @@ jobs:
           pre-commit run --files "${files[@]}" --show-diff-on-failure
           set -e
           git add "${files[@]}"
-          git fetch origin "${{github.head_ref}}"  
+          git fetch origin "${{github.head_ref}}"
           if ! git diff --cached --quiet; then
             git commit -m "ci: apply pre-commit fixes"
             git push --force-with-lease origin HEAD:${{ github.head_ref }}
