@@ -3,7 +3,7 @@ on:
   pull_request:
     branches:
       - develop
-      - staging
+      - release-staging/rocm-rel-*
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
