@@ -100,4 +100,4 @@ jobs:
     uses: ./.github/workflows/therock-ci-linux.yml
     with:
       flag: ${{ matrix.projects.flag }}
-      test: ${{ matrix.projects.test }}
+      project_to_test: ${{ matrix.projects.test }}

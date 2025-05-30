@@ -5,7 +5,7 @@ on:
     inputs:
       flag:
         type: string
-      test:
+      project_to_test:
         type: string
 
 permissions:
@@ -24,11 +24,11 @@ jobs:
       extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ inputs.flag }}"
 
   therock-test-linux:
-    name: "TheRock test packages"
+    name: "Test"
     needs: [therock-build-linux]
     uses: ./.github/workflows/therock-test-packages.yml
     with:
-      test: ${{ inputs.test }}
+      project_to_test: ${{ inputs.project_to_test }}
       amdgpu_families: "gfx94X-dcgpu"
       test_runs_on: "linux-mi300-1gpu-ossci-rocm"
       platform: "linux"
