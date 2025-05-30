@@ -10,8 +10,6 @@ Documentation for rocRAND is available at
 * Changed return type for `rocrand_generate_poisson` for `SOBOL64` and `SCRAMBLED_SOBOL64` engines
 * Changed unnecessarily large 64-bit data type of constants used for skipping in `MRG32K3A` to 32-bit data type 
 
-## rocRAND 3.4.0 for ROCm 6.5
-
 ### Added
 
 * gfx950 support
@@ -31,6 +29,8 @@ Documentation for rocRAND is available at
 * New unit tests for `include/rocrand/rocrand_mrg31k3p.h` in `test_rocrand_mrg31k3p_prng.cpp`
 * New unit tests for `include/rocrand/rocrand_mrg32k3a.h` in `test_rocrand_mrg32k3a_prng.cpp`
 * New unit tests for `include/rocrand/rocrand_poisson.h` in `test_rocrand_poisson.cpp`
+
+## rocRAND 3.4.0 for ROCm 6.5
 
 ### Changed
 
