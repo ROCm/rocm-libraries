@@ -1,0 +1,19 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_SEARCH_N_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+search_n_config<{{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }}, {{ measurement['cfg']['threshold'] }}> { };
+{%- endmacro %}
+
+{% macro general_case() -%}
+template<unsigned int arch, class data_type, class enable = void> struct default_search_n_config :
+default_search_n_config_base<data_type>::type { };
+{%- endmacro %}
+
+{% macro configuration_fallback(benchmark_of_architecture, based_on_type, fallback_selection_criteria) -%}
+// Based on {{ based_on_type }}
+template<class data_type> struct default_search_n_config<static_cast<unsigned int>({{ benchmark_of_architecture.name }}), data_type, {{ fallback_selection_criteria }}> :
+{%- endmacro %}

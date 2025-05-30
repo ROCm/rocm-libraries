@@ -1,0 +1,11 @@
+/**
+@brief rocPRIM Thread-level parallel primitives
+@author
+@file
+*/
+
+/**
+ * \defgroup threadmodule Thread-level
+ * \ingroup primitivesmodule
+ *
+ */
