@@ -436,7 +436,7 @@ build:cuda-and-omp:
   tags:
     - build
   variables:
-    CCCL_GIT_BRANCH: v2.7.0
+    CCCL_GIT_BRANCH: v2.8.0
     CCCL_DIR: ${CI_PROJECT_DIR}/cccl
   needs: []
   script:
@@ -445,11 +445,13 @@ build:cuda-and-omp:
     - rm -R $CCCL_DIR/thrust/thrust
     - cp -r $CI_PROJECT_DIR/thrust $CCCL_DIR/thrust
     - cp $CI_PROJECT_DIR/testing/type_traits.cu $CCCL_DIR/thrust/testing
+    - sed -i '/include(cmake\/ThrustAddSubdir.cmake)/i \  include(../cmake/CCCLAddSubdirHelper.cmake)' $CCCL_DIR/thrust/CMakeLists.txt
     # Build tests and examples from CCCL Thrust
     - cmake
       -G Ninja
       -D CMAKE_BUILD_TYPE=Release
       -D CMAKE_CUDA_ARCHITECTURES="$GPU_TARGETS"
+      -D CCCL_SOURCE_DIR="$CCCL_DIR"
       -D THRUST_ENABLE_TESTING=ON
       -D THRUST_ENABLE_EXAMPLES=ON
       -D THRUST_ENABLE_BENCHMARKS=OFF
