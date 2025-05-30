@@ -34,12 +34,12 @@ struct TestMutex {
 int main(int, char**)
 {
     {
-        using LG = std::scoped_lock<>;
+        using LG = gpu::scoped_lock<>;
         LG lg(std::adopt_lock);
     }
     {
         TestMutex m1;
-        using LG = std::scoped_lock<TestMutex>;
+        using LG = gpu::scoped_lock<TestMutex>;
         m1.lock();
         {
             LG lg(std::adopt_lock, m1);
@@ -49,7 +49,7 @@ int main(int, char**)
     }
     {
         TestMutex m1, m2;
-        using LG = std::scoped_lock<TestMutex, TestMutex>;
+        using LG = gpu::scoped_lock<TestMutex, TestMutex>;
         m1.lock(); m2.lock();
         {
             LG lg(std::adopt_lock, m1, m2);
@@ -59,7 +59,7 @@ int main(int, char**)
     }
     {
         TestMutex m1, m2, m3;
-        using LG = std::scoped_lock<TestMutex, TestMutex, TestMutex>;
+        using LG = gpu::scoped_lock<TestMutex, TestMutex, TestMutex>;
         m1.lock(); m2.lock(); m3.lock();
         {
             LG lg(std::adopt_lock, m1, m2, m3);

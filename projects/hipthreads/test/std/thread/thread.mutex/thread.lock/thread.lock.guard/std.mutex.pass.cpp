@@ -9,7 +9,7 @@
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: c++03
 
-// Test the interoperation of std::lock_guard with std::mutex, since that is such
+// Test the interoperation of gpu::lock_guard with std::mutex, since that is such
 // a common use case.
 
 #include <cassert>
@@ -26,7 +26,7 @@ int main(int, char**) {
   {
     std::mutex m;
     {
-      std::lock_guard<std::mutex> lg(m);
+      gpu::lock_guard<std::mutex> lg(m);
       gpu::thread t = support::make_test_thread(do_try_lock, std::ref(m));
       t.join();
     }
@@ -40,8 +40,8 @@ int main(int, char**) {
 #if TEST_STD_VER >= 17
   {
     std::mutex m;
-    std::lock_guard lg(m);
-    static_assert(std::is_same<decltype(lg), std::lock_guard<std::mutex>>::value, "");
+    gpu::lock_guard lg(m);
+    static_assert(std::is_same<decltype(lg), gpu::lock_guard<std::mutex>>::value, "");
   }
 #endif
 

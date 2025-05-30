@@ -7,6 +7,8 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: no-threads
+// there is no such thing as a signal on the GPU
+// UNSUPPORTED: target={{.*}}
 
 // This test uses the POSIX header <sys/time.h> which Windows doesn't provide
 // UNSUPPORTED: windows
@@ -30,6 +32,8 @@
 #include <sys/time.h>
 
 #include "test_macros.h"
+
+#include "force_include_hip.h"
 
 void sig_action(int) {}
 

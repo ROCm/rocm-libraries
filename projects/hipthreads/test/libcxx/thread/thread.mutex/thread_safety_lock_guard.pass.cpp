@@ -26,14 +26,14 @@ int foo __attribute__((guarded_by(m)));
 
 static void scoped() {
 #if TEST_STD_VER >= 17
-  std::scoped_lock<std::mutex> lock(m);
+  gpu::scoped_lock<std::mutex> lock(m);
   foo++;
 #endif
 }
 
 int main(int, char**) {
   scoped();
-  std::lock_guard<std::mutex> lock(m);
+  gpu::lock_guard<std::mutex> lock(m);
   foo++;
 
   return 0;

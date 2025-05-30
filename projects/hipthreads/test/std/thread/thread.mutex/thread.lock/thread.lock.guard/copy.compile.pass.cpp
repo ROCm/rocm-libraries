@@ -16,4 +16,4 @@
 
 #include "types.h"
 
-static_assert(!std::is_copy_constructible<std::lock_guard<MyMutex> >::value, "");
+static_assert(!std::is_copy_constructible<gpu::lock_guard<MyMutex> >::value, "");

@@ -24,7 +24,7 @@
 
 int main(int, char**)
 {
-    std::recursive_mutex m;
+    gpu::recursive_mutex m;
     pthread_mutex_t* h = m.native_handle();
     assert(h);
 

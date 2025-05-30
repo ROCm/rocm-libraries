@@ -21,4 +21,4 @@
 
 #include "types.h"
 
-static_assert(std::is_same<std::lock_guard<MyMutex>::mutex_type, MyMutex>::value, "");
+static_assert(std::is_same<gpu::lock_guard<MyMutex>::mutex_type, MyMutex>::value, "");

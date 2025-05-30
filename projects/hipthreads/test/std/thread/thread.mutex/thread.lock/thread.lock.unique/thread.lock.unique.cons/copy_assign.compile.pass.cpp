@@ -16,4 +16,4 @@
 
 #include "checking_mutex.h"
 
-static_assert(!std::is_copy_assignable<std::lock_guard<checking_mutex> >::value, "");
+static_assert(!std::is_copy_assignable<gpu::lock_guard<checking_mutex> >::value, "");
