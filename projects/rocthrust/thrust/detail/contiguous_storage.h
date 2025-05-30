@@ -91,11 +91,11 @@ public:
   // note that allocate does *not* automatically call deallocate
   THRUST_HOST_DEVICE void allocate(size_type n);
 
-  THRUST_HOST_DEVICE void deallocate();
+  THRUST_HOST_DEVICE void deallocate() noexcept;
 
   THRUST_HOST_DEVICE void swap(contiguous_storage& x);
 
-  THRUST_HOST_DEVICE void default_construct_n(iterator first, size_type n);
+  THRUST_HOST_DEVICE void value_initialize_n(iterator first, size_type n);
 
   THRUST_HOST_DEVICE void uninitialized_fill_n(iterator first, size_type n, const value_type& value);
 
@@ -113,11 +113,12 @@ public:
   THRUST_HOST_DEVICE iterator
   uninitialized_copy_n(thrust::execution_policy<System>& from_system, InputIterator first, Size n, iterator result);
 
-  THRUST_HOST_DEVICE void destroy(iterator first, iterator last);
+  THRUST_HOST_DEVICE void destroy(iterator first, iterator last) noexcept;
 
-  THRUST_HOST_DEVICE void deallocate_on_allocator_mismatch(const contiguous_storage& other);
+  THRUST_HOST_DEVICE void deallocate_on_allocator_mismatch(const contiguous_storage& other) noexcept;
 
-  THRUST_HOST_DEVICE void destroy_on_allocator_mismatch(const contiguous_storage& other, iterator first, iterator last);
+  THRUST_HOST_DEVICE void
+  destroy_on_allocator_mismatch(const contiguous_storage& other, iterator first, iterator last) noexcept;
 
   THRUST_HOST_DEVICE void set_allocator(const allocator_type& alloc);
 
@@ -152,15 +153,16 @@ private:
 
   THRUST_HOST_DEVICE bool is_allocator_not_equal_dispatch(false_type, const allocator_type&) const;
 
-  THRUST_HOST_DEVICE void deallocate_on_allocator_mismatch_dispatch(true_type, const contiguous_storage& other);
-
-  THRUST_HOST_DEVICE void deallocate_on_allocator_mismatch_dispatch(false_type, const contiguous_storage& other);
+  THRUST_HOST_DEVICE void deallocate_on_allocator_mismatch_dispatch(true_type, const contiguous_storage& other) noexcept;
 
   THRUST_HOST_DEVICE void
-  destroy_on_allocator_mismatch_dispatch(true_type, const contiguous_storage& other, iterator first, iterator last);
+  deallocate_on_allocator_mismatch_dispatch(false_type, const contiguous_storage& other) noexcept;
 
-  THRUST_HOST_DEVICE void
-  destroy_on_allocator_mismatch_dispatch(false_type, const contiguous_storage& other, iterator first, iterator last);
+  THRUST_HOST_DEVICE void destroy_on_allocator_mismatch_dispatch(
+    true_type, const contiguous_storage& other, iterator first, iterator last) noexcept;
+
+  THRUST_HOST_DEVICE void destroy_on_allocator_mismatch_dispatch(
+    false_type, const contiguous_storage& other, iterator first, iterator last) noexcept;
 
   THRUST_HOST_DEVICE void propagate_allocator_dispatch(true_type, const contiguous_storage& other);
 

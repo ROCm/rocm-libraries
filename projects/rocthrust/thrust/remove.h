@@ -544,7 +544,7 @@ OutputIterator remove_copy_if(InputIterator first, InputIterator last, OutputIte
  *
  *  \pre The range <tt>[first, last)</tt> shall not overlap the range <tt>[result, result + (last - first))</tt>.
  *  \pre The range <tt>[stencil, stencil + (last - first))</tt> shall not overlap the range
- * <tt>[result, result + (last - first))</tt>.
+ *  <tt>[result, result + (last - first))</tt>.
  *
  *  The following code snippet demonstrates how to use \p remove_if to remove
  *  specific elements from an array of integers using the \p thrust::host execution policy for
@@ -604,7 +604,7 @@ THRUST_HOST_DEVICE ForwardIterator remove_if(
  *
  *  \pre The range <tt>[first, last)</tt> shall not overlap the range <tt>[result, result + (last - first))</tt>.
  *  \pre The range <tt>[stencil, stencil + (last - first))</tt> shall not overlap the range
- * <tt>[result, result + (last - first))</tt>.
+ *  <tt>[result, result + (last - first))</tt>.
  *
  *  The following code snippet demonstrates how to use \p remove_if to remove
  *  specific elements from an array of integers.
@@ -662,7 +662,7 @@ ForwardIterator remove_if(ForwardIterator first, ForwardIterator last, InputIter
  * of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
  *  \pre The range <tt>[stencil, stencil + (last - first))</tt> shall not overlap the range
- * <tt>[result, result + (last - first))</tt>.
+ *  <tt>[result, result + (last - first))</tt>.
  *
  *  The following code snippet demonstrates how to use \p remove_copy_if to copy
  *  a sequence of numbers to an output range while omitting specific elements using the \p thrust::host
@@ -726,7 +726,7 @@ THRUST_HOST_DEVICE OutputIterator remove_copy_if(
  * of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
  *  \pre The range <tt>[stencil, stencil + (last - first))</tt> shall not overlap the range
- * <tt>[result, result + (last - first))</tt>.
+ *  <tt>[result, result + (last - first))</tt>.
  *
  *  The following code snippet demonstrates how to use \p remove_copy_if to copy
  *  a sequence of numbers to an output range while omitting specific elements.

@@ -103,7 +103,7 @@ struct my_allocator_with_custom_destroy
 
   THRUST_HOST ~my_allocator_with_custom_destroy() {}
 
-  THRUST_HOST_DEVICE void destroy(T*)
+  THRUST_HOST_DEVICE void destroy(T*) noexcept
   {
     NV_IF_TARGET(NV_IS_HOST, (g_state = true;));
   }
@@ -113,7 +113,7 @@ struct my_allocator_with_custom_destroy
     return use_me_to_alloc.allocate(n);
   }
 
-  void deallocate(value_type* ptr, std::ptrdiff_t n)
+  void deallocate(value_type* ptr, std::ptrdiff_t n) noexcept
   {
     use_me_to_alloc.deallocate(ptr, n);
   }
@@ -175,7 +175,7 @@ struct my_minimal_allocator
     return use_me_to_alloc.allocate(n);
   }
 
-  void deallocate(value_type* ptr, std::ptrdiff_t n)
+  void deallocate(value_type* ptr, std::ptrdiff_t n) noexcept
   {
     use_me_to_alloc.deallocate(ptr, n);
   }

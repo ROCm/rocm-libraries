@@ -18,21 +18,14 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/detail/functional/actor.h>
-#include <thrust/detail/functional/argument.h>
-
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
-namespace functional
-{
 
-template <unsigned int i>
-struct placeholder
-{
-  using type = actor<argument<i>>;
-};
+template <typename Allocator, typename Pointer, typename Size>
+THRUST_HOST_DEVICE inline void value_initialize_range(Allocator& a, Pointer p, Size n);
 
-} // namespace functional
 } // namespace detail
 THRUST_NAMESPACE_END
+
+#include <thrust/detail/allocator/value_initialize_range.inl>
