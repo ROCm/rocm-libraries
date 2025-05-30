@@ -20,10 +20,10 @@
 #include "test_macros.h"
 
 int main(int, char**) {
-  std::mutex m;
+  gpu::spin_mutex m;
   m.lock();
   {
-    gpu::unique_lock<std::mutex> g(m, std::adopt_lock);
+    gpu::unique_lock<gpu::spin_mutex> g(m, std::adopt_lock);
   }
 
   return 0;

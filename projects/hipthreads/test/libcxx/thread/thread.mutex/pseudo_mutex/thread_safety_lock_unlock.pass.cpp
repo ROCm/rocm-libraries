@@ -5,28 +5,29 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// UNSUPPORTED: no-threads, libcpp-has-thread-api-external
 
-// XFAIL: windows
+// On Windows Clang bugs out when both __declspec and __attribute__ are present,
+// the processing goes awry preventing the definition of the types.
+// XFAIL: msvc
+
+// UNSUPPORTED: no-threads
+// REQUIRES: thread-safety
 
 // <mutex>
 
-// class recursive_mutex;
-
-// typedef pthread_mutex_t* native_handle_type;
-// native_handle_type native_handle();
+// ADDITIONAL_COMPILE_FLAGS: -D_LIBCPP_ENABLE_THREAD_SAFETY_ANNOTATIONS
 
 #include <mutex>
-#include <cassert>
 
 #include "test_macros.h"
 
-int main(int, char**)
-{
-    gpu::recursive_mutex m;
-    pthread_mutex_t* h = m.native_handle();
-    assert(h);
+gpu::pseudo_mutex m;
+int foo __attribute__((guarded_by(m)));
+
+int main(int, char**) {
+  m.lock();
+  foo++;
+  m.unlock();
 
   return 0;
 }

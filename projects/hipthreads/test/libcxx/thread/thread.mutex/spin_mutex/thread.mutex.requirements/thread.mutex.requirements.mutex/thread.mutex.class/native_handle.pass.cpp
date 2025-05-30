@@ -10,27 +10,26 @@
 
 // XFAIL: windows
 
-// <condition_variable>
+// spin_mutex currently don't support native_handle()
+// XFAIL: *
 
-// class condition_variable;
+// <mutex>
 
-// typedef pthread_cond_t* native_handle_type;
+// class mutex;
+
+// typedef pthread_mutex_t* native_handle_type;
 // native_handle_type native_handle();
 
+#include <mutex>
 #include <cassert>
-#include <condition_variable>
-#include <pthread.h>
-#include <type_traits>
 
 #include "test_macros.h"
 
 int main(int, char**)
 {
-    static_assert((std::is_same<std::condition_variable::native_handle_type,
-                                pthread_cond_t*>::value), "");
-    std::condition_variable cv;
-    std::condition_variable::native_handle_type h = cv.native_handle();
-    assert(h != nullptr);
+    gpu::spin_mutex m;
+    pthread_mutex_t* h = m.native_handle();
+    assert(h);
 
   return 0;
 }

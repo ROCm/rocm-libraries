@@ -10,6 +10,9 @@
 
 // XFAIL: windows
 
+// pseudo_mutex currently don't support native_handle()
+// XFAIL: *
+
 // <mutex>
 
 // class mutex;
@@ -24,7 +27,7 @@
 
 int main(int, char**)
 {
-    std::mutex m;
+    gpu::pseudo_mutex m;
     pthread_mutex_t* h = m.native_handle();
     assert(h);
 

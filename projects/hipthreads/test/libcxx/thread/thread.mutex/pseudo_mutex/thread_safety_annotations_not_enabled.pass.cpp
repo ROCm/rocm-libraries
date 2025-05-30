@@ -6,21 +6,25 @@
 //
 //===----------------------------------------------------------------------===//
 
-// On Windows Clang bugs out when both __declspec and __attribute__ are present,
-// the processing goes awry preventing the definition of the types.
-// XFAIL: msvc
-
 // UNSUPPORTED: no-threads
-// REQUIRES: thread-safety
+// UNSUPPORTED: c++03
 
 // <mutex>
 
-// ADDITIONAL_COMPILE_FLAGS: -D_LIBCPP_ENABLE_THREAD_SAFETY_ANNOTATIONS
+// This test does not define _LIBCPP_ENABLE_THREAD_SAFETY_ANNOTATIONS so it
+// should compile without any warnings or errors even though this pattern is not
+// understood by the thread safety annotations.
 
 #include <mutex>
 
-std::mutex m;
+#include "test_macros.h"
 
-void f() {
+int main(int, char**) {
+  gpu::pseudo_mutex m;
   m.lock();
-} // expected-error {{mutex 'm' is still held at the end of function}}
+  {
+    gpu::unique_lock<gpu::pseudo_mutex> g(m, std::adopt_lock);
+  }
+
+  return 0;
+}
