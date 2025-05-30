@@ -407,7 +407,7 @@ def splitArchsFromPredicates(archSpecs: List[str]) -> Tuple[List[str], Optional[
         if arch not in architectureMap:
             raise ValueError(f"Architecture {spec} not supported")
             
-        architectures.add(re.sub(":", "-", arch))
+        architectures.add(arch)
 
     return list(architectures), predicateMap or None
 
