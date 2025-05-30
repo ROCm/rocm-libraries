@@ -38,6 +38,9 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * The `hipcub::detail::accumulator_t` in rocPRIM backend has been changed to utilise `rocprim::accumulator_t`.
 * The usage of `rocprim::invoke_result_binary_op_t` has been replaced with `rocprim::accumulator_t`.
 
+### Resolved issues
+* Fixed an issue where `Sort(keys, compare_op, valid_items, oob_default)` in `block_merge_sort.hpp` would not fill in elements that are out of range (items after `valid_items`) with `oob_default`.
+
 ### Known issues
 
 * `BlockAdjacentDifference::FlagHeads`, `BlockAdjacentDifference::FlagTails` and `BlockAdjacentDifference::FlagHeadsAndTails` have been removed from hipCUB's CUB backend. They were already deprecated as of version 2.12.0 of hipCUB and they were removed from CCCL (CUB) as of CCCL's 2.6.0 release.
