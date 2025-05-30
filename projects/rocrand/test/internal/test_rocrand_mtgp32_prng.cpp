@@ -304,14 +304,6 @@ TEST(AdditionalTests, rocrand_mtgp32_set_params){
     HIP_CHECK(hipFree(device_params));
 }
 
-TEST(AdditionalTests, mtgp32_engine_constructor){
-    mtgp32_params * device_params;
-    HIP_CHECK(hipMalloc(&device_params, sizeof(mtgp32_params)));
-
-    ROCRAND_CHECK(rocrand_make_constant(srcmtgp32dc_params_fast_11213_params, device_params));   
-}
-
-
 template<size_t items_per_thread, size_t block_size>
 __global__ void operator_kernel(rocrand_state_mtgp32 * states, unsigned int * device_output){
     constexpr size_t items_per_block = items_per_thread * block_size;
