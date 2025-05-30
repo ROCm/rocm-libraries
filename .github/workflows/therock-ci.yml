@@ -94,7 +94,7 @@ jobs:
       fail-fast: false
       matrix:
         projects: ${{ fromJSON(needs.setup.outputs.projects) }}
-    uses: ./rocm-libraries/.github/workflows/therock-ci-linux.yml
+    uses: ./.github/workflows/therock-ci-linux.yml
     with:
       flag: ${{ matrix.projects.flag }}
       test: ${{ matrix.projects.test }}
