@@ -32,8 +32,8 @@
 #include "hipfft/hipfftMp.h"
 #endif
 
-#include "../../../shared/arithmetic.h"
-#include "../../../shared/gpubuf.h"
+#include "../../../shared/arithmetic.h"      
+#include "../../../shared/gpubuf.h"      
 #include "../../../shared/ptrdiff.h"
 #include "../../../shared/rocfft_hip.h"
 
@@ -103,7 +103,7 @@ struct hipfftIOType
             break;
         case HIPFFT_C2C:
             inputType  = HIP_C_32F;
-            outputType = HIP_C_32F;
+            outputType = HIP_C_32F;       
             break;
         case HIPFFT_D2Z:
             inputType  = HIP_R_64F;
