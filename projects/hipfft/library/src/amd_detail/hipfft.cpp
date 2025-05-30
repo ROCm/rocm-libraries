@@ -25,17 +25,17 @@
 #include <algorithm>
 #include <memory>
 #include <sstream>
-#include <string>
+#include <string>         
 #include <vector>
 
 #ifdef HIPFFT_MPI_ENABLE
-#include "hipfft/hipfftMp.h"
+#include "hipfft/hipfftMp.h"     
 #endif
 
 #include "../../../shared/arithmetic.h"
 #include "../../../shared/gpubuf.h"
 #include "../../../shared/ptrdiff.h"
-#include "../../../shared/rocfft_hip.h"
+#include "../../../shared/rocfft_hip.h"     
 
 #define ROC_FFT_CHECK_ALLOC_FAILED(ret)   \
     {                                     \
