@@ -1,0 +1,42 @@
+name: TheRock CI
+
+on:
+  workflow_call:
+    inputs:
+      flag:
+        type: string
+      test:
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # A PR number if a pull request and otherwise the commit hash. This cancels
+  # queued and in-progress runs for the same PR (presubmit) or commit
+  # (postsubmit). The workflow name is prepended to avoid conflicts between
+  # different workflows.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  therock-build-linux:
+    name: Build Linux Packages
+    permissions:
+      contents: read
+      id-token: write
+    uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@0730cccf8b98e012d64750f26032bd760360fa45
+    with:
+      amdgpu_families: "gfx94X-dcgpu"
+      expect_failure: false
+      extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ inputs.flag }}"
+
+  therock-test-linux:
+    name: "TheRock test packages"
+    needs: [therock-build-linux]
+    uses: ./.github/workflows/therock-test-packages.yml
+    with:
+      test: ${{ inputs.test }}
+      amdgpu_families: "gfx94X-dcgpu"
+      test_runs_on: "linux-mi300-1gpu-ossci-rocm"
+      platform: "linux"

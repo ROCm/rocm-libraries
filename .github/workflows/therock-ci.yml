@@ -27,7 +27,7 @@ jobs:
     name: "Setup"
     runs-on: ubuntu-24.04
     outputs:
-      job: ${{ steps.job.outputs.job }}
+      projects: ${{ steps.projects.outputs.projects }}
     steps:
       # Checkout the mono-repo which includes the PR.
       - name: Checkout rocm-libraries Repository
@@ -40,7 +40,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: fb0863bc0a191051df965251b3d08875f07e607b
+          ref: 0730cccf8b98e012d64750f26032bd760360fa45
 
       - name: Generate a token
         id: generate-token
@@ -77,32 +77,24 @@ jobs:
             --pr "${{ github.event.pull_request.number }}" \
             --config "rocm-libraries/.github/repos-config.json"
 
-      - name: Determine jobs to run
-        id: job
+      - name: Determine projects to run
+        id: projects
         env:
-          SUBTREES: ${{ steps.detect.outputs.subtrees }}
+          # temporary for testing
+          SUBTREES: "projects/rocprim\nprojects/hipcub"
+          # SUBTREES: ${{ steps.detect.outputs.subtrees }}
         run: |
           python ./TheRock/build_tools/github_actions/monorepo_configure_ci.py
 
-  therock-build-linux:
-    name: Build Linux Packages
+  therock-ci-linux:
+    name: TheRock CI Linux
     needs: setup
-    if: ${{ needs.setup.outputs.job != 'null' }}
-    permissions:
-      contents: read
-      id-token: write
-    uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@fb0863bc0a191051df965251b3d08875f07e607b
+    if: ${{ needs.setup.outputs.projects != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        projects: ${{ fromJSON(needs.setup.outputs.projects) }}
+    uses: ./rocm-libraries/.github/workflows/therock-ci-linux.yml
     with:
-      amdgpu_families: "gfx94X-dcgpu"
-      expect_failure: false
-      extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ fromJSON(needs.setup.outputs.job).flag }}"
-
-  therock-test-linux:
-    name: "TheRock test packages"
-    needs: [setup, therock-build-linux]
-    uses: ./.github/workflows/therock-test-packages.yml
-    with:
-      test: ${{ fromJSON(needs.setup.outputs.job).test }}
-      amdgpu_families: "gfx94X-dcgpu"
-      test_runs_on: "linux-mi300-1gpu-ossci-rocm"
-      platform: "linux"
+      flag: ${{ matrix.projects.flag }}
+      test: ${{ matrix.projects.test }}
