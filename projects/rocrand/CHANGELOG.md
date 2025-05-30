@@ -17,12 +17,20 @@ Documentation for rocRAND is available at
 * gfx950 support
 * Additional unit tests for `test_log_normal_distribution.cpp`
 * Additional unit tests for `test_normal_distribution.cpp`
-* Additional unit tests for `test_uniform_distribution.cpp`
+* Additional unit tests for `test_rocrand_mtgp32_prng.cpp`
+* Additional unit tests for `test_rocrand_scrambled_sobol32_qrng.cpp`
+* Additional unit tests for `test_rocrand_scrambled_sobol64_qrng.cpp`
+* Additional unit tests for `test_rocrand_sobol32_qrng.cpp`
+* Additional unit tests for `test_rocrand_sobol64_qrng.cpp`
 * Additional unit tests for `test_rocrand_threefry2x32_20_prng.cpp`
 * Additional unit tests for `test_rocrand_threefry2x64_20_prng.cpp`
 * Additional unit tests for `test_rocrand_threefry4x32_20_prng.cpp`
 * Additional unit tests for `test_rocrand_threefry4x64_20_prng.cpp`
-* New unit tests for `include/rocrand/rocrand_discrete.h` in `test_discrete_distribution.cpp`
+* Additional unit tests for `test_uniform_distribution.cpp`
+* New unit tests for `include/rocrand/rocrand_discrete.h` in `test_rocrand_discrete.cpp`
+* New unit tests for `include/rocrand/rocrand_mrg31k3p.h` in `test_rocrand_mrg31k3p_prng.cpp`
+* New unit tests for `include/rocrand/rocrand_mrg32k3a.h` in `test_rocrand_mrg32k3a_prng.cpp`
+* New unit tests for `include/rocrand/rocrand_poisson.h` in `test_rocrand_poisson.cpp`
 
 ### Changed
 
