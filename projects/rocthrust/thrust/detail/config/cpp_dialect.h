@@ -21,7 +21,15 @@
 
 #pragma once
 
-#include <thrust/detail/config/compiler.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#include <thrust/detail/config/compiler.h> // IWYU pragma: export
 
 // Deprecation warnings may be silenced by defining the following macros. These
 // may be combined.
@@ -54,7 +62,9 @@
 #ifdef THRUST_IGNORE_DEPRECATED_CPP_DIALECT
 #  define THRUST_IGNORE_DEPRECATED_CPP_11
 #  define THRUST_IGNORE_DEPRECATED_CPP_14
-#  define THRUST_IGNORE_DEPRECATED_COMPILER
+#  ifndef THRUST_IGNORE_DEPRECATED_COMPILER
+#    define THRUST_IGNORE_DEPRECATED_COMPILER
+#  endif
 #endif
 
 // Define this to override the built-in detection.
@@ -74,16 +84,20 @@
 #  endif
 
 // Detect current dialect:
-#  if THRUST_CPLUSPLUS < 201103L
+#  if THRUST_CPLUSPLUS <= 199711L
 #    define THRUST_CPP_DIALECT 2003
-#  elif THRUST_CPLUSPLUS < 201402L
+#  elif THRUST_CPLUSPLUS <= 201103L
 #    define THRUST_CPP_DIALECT 2011
-#  elif THRUST_CPLUSPLUS < 201703L
+#  elif THRUST_CPLUSPLUS <= 201402L
 #    define THRUST_CPP_DIALECT 2014
-#  elif THRUST_CPLUSPLUS == 201703L
+#  elif THRUST_CPLUSPLUS <= 201703L
 #    define THRUST_CPP_DIALECT 2017
-#  elif THRUST_CPLUSPLUS > 201703L // unknown, but is higher than 2017.
+#  elif THRUST_CPLUSPLUS <= 202002L
 #    define THRUST_CPP_DIALECT 2020
+#  elif THRUST_CPLUSPLUS <= 202302L
+#    define THRUST_CPP_DIALECT 2023
+#  else
+#    define THRUST_CPP_DIALECT 2024 // current year, or date of c++2c ratification
 #  endif
 
 #  undef THRUST_CPLUSPLUS // cleanup
@@ -92,13 +106,9 @@
 
 // Define THRUST_COMPILER_DEPRECATION macro:
 #if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
-#  define THRUST_COMP_DEPR_IMPL(msg) __pragma(message(__FILE__ ":" THRUST_COMP_DEPR_IMPL0(__LINE__) ": warning: " #msg))
-#  define THRUST_COMP_DEPR_IMPL0(x)  THRUST_COMP_DEPR_IMPL1(x)
-#  define THRUST_COMP_DEPR_IMPL1(x)  #x
+#  define THRUST_COMP_DEPR_IMPL(msg) THRUST_PRAGMA(message(__FILE__ ":" THRUST_TO_STRING(__LINE__) ": warning: " #msg))
 #else // clang / gcc:
-#  define THRUST_COMP_DEPR_IMPL(msg)   THRUST_COMP_DEPR_IMPL0(GCC warning #msg)
-#  define THRUST_COMP_DEPR_IMPL0(expr) _Pragma(#expr)
-#  define THRUST_COMP_DEPR_IMPL1       /* intentionally blank */
+#  define THRUST_COMP_DEPR_IMPL(msg) THRUST_PRAGMA(GCC warning #msg)
 #endif
 
 #define THRUST_COMPILER_DEPRECATION(REQ) \
@@ -111,7 +121,6 @@
 
 #ifndef THRUST_IGNORE_DEPRECATED_COMPILER
 
-// clang-format off
 // Compiler checks:
 #  if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC && THRUST_GCC_VERSION < 50000
 THRUST_COMPILER_DEPRECATION(GCC 5.0);
@@ -136,11 +145,10 @@ THRUST_COMPILER_DEPRECATION(C++ 17);
 #  elif THRUST_CPP_DIALECT == 2011 && !defined(THRUST_IGNORE_DEPRECATED_CPP_11)
 // =C++11. Soft upgrade message:
 THRUST_COMPILER_DEPRECATION_SOFT(C++ 17, C++ 11);
-#  elif _CCCL_STD_VER == 2014 && !defined(THRUST_IGNORE_DEPRECATED_CPP_14)
+#  elif THRUST_CPP_DIALECT == 2014 && !defined(THRUST_IGNORE_DEPRECATED_CPP_14)
 // =C++14. Soft upgrade message:
 THRUST_COMPILER_DEPRECATION_SOFT(C++ 17, C++ 14);
 #  endif
-// clang-format on
 
 #endif // THRUST_IGNORE_DEPRECATED_DIALECT
 
