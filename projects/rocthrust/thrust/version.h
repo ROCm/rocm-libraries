@@ -28,10 +28,22 @@
 
 #pragma once
 
-#include <thrust/detail/config/config.h>
+#include <thrust/detail/config/config.h> // IWYU pragma: export
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/version>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#    include <cuda/version> // IWYU pragma: export
+#  else
+#    include <hip/version> // IWYU pragma: export
+#  endif
 #endif
 
 //  This is the only Thrust header that is guaranteed to
@@ -49,11 +61,13 @@
  *  \brief The preprocessor macro \p THRUST_VERSION encodes the version
  *         number of the Thrust library as MMMmmmpp.
  *
+ *  \note THRUST_VERSION is formatted as `MMMmmmpp`, which differs from `CCCL_VERSION` that uses `MMMmmmppp`.
+ *
  *         <tt>THRUST_VERSION % 100</tt> is the sub-minor version.
  *         <tt>THRUST_VERSION / 100 % 1000</tt> is the minor version.
  *         <tt>THRUST_VERSION / 100000</tt> is the major version.
  */
-#define THRUST_VERSION 200700 // macro expansion with ## requires this to be a single value
+#define THRUST_VERSION 200800 // macro expansion with ## requires this to be a single value
 
 /*! \def THRUST_MAJOR_VERSION
  *  \brief The preprocessor macro \p THRUST_MAJOR_VERSION encodes the
