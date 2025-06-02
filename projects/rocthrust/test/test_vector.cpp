@@ -46,23 +46,13 @@ TEST(VectorTests, TestVectorBool)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::host_vector<bool> h(3);
-  thrust::device_vector<bool> d(3);
+  thrust::host_vector<bool> h{true, false, true};
+  thrust::device_vector<bool> d{true, false, true};
 
-  h[0] = true;
-  h[1] = false;
-  h[2] = true;
-  d[0] = true;
-  d[1] = false;
-  d[2] = true;
-
-  ASSERT_EQ(h[0], true);
-  ASSERT_EQ(h[1], false);
-  ASSERT_EQ(h[2], true);
-
-  ASSERT_EQ(d[0], true);
-  ASSERT_EQ(d[1], false);
-  ASSERT_EQ(d[2], true);
+  thrust::host_vector<bool> h_ref{true, false, true};
+  thrust::device_vector<bool> d_ref{true, false, true};
+  ASSERT_EQ(h, h_ref);
+  ASSERT_EQ(d, d_ref);
 }
 
 TYPED_TEST(VectorTests, TestVectorInitializerList)
@@ -73,23 +63,19 @@ TYPED_TEST(VectorTests, TestVectorInitializerList)
 
   Vector v{1, 2, 3};
   ASSERT_EQ(v.size(), 3lu);
-  ASSERT_EQ(v[0], 1);
-  ASSERT_EQ(v[1], 2);
-  ASSERT_EQ(v[2], 3);
+  Vector ref{1, 2, 3};
+  ASSERT_EQ(v, ref);
 
   v = {1, 2, 3, 4};
   ASSERT_EQ(v.size(), 4lu);
-  ASSERT_EQ(v[0], 1);
-  ASSERT_EQ(v[1], 2);
-  ASSERT_EQ(v[2], 3);
-  ASSERT_EQ(v[3], 4);
+  Vector v_ref = {1, 2, 3, 4};
+  ASSERT_EQ(v, v_ref);
 
   const auto alloc = v.get_allocator();
   Vector v2{{1, 2, 3}, alloc};
   ASSERT_EQ(v2.size(), 3lu);
-  ASSERT_EQ(v2[0], 1);
-  ASSERT_EQ(v2[1], 2);
-  ASSERT_EQ(v2[2], 3);
+  Vector v2_ref = {1, 2, 3};
+  ASSERT_EQ(v2, v2_ref);
 }
 
 TYPED_TEST(VectorTests, TestVectorFrontBack)
@@ -99,10 +85,7 @@ TYPED_TEST(VectorTests, TestVectorFrontBack)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector v(3);
-  v[0] = 0;
-  v[1] = 1;
-  v[2] = 2;
+  Vector v{0, 1, 2};
 
   ASSERT_EQ(v.front(), T(0));
   ASSERT_EQ(v.back(), T(2));
@@ -116,10 +99,7 @@ TYPED_TEST(VectorTests, TestVectorData)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector v(3);
-  v[0] = 0;
-  v[1] = 1;
-  v[2] = 2;
+  Vector v{0, 1, 2};
 
   ASSERT_EQ(0, *v.data());
   ASSERT_EQ(1, *(v.data() + 1));
@@ -144,29 +124,16 @@ TYPED_TEST(VectorTests, TestVectorElementAssignment)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector v(3);
+  Vector v{0, 1, 2};
 
-  v[0] = 0;
-  v[1] = 1;
-  v[2] = 2;
+  Vector ref{0, 1, 2};
+  ASSERT_EQ(v, ref);
 
-  ASSERT_EQ(v[0], 0);
-  ASSERT_EQ(v[1], 1);
-  ASSERT_EQ(v[2], 2);
+  v   = {10, 11, 12};
+  ref = {10, 11, 12};
+  ASSERT_EQ(v, ref);
 
-  v[0] = 10;
-  v[1] = 11;
-  v[2] = 12;
-
-  ASSERT_EQ(v[0], 10);
-  ASSERT_EQ(v[1], 11);
-  ASSERT_EQ(v[2], 12);
-
-  Vector w(3);
-  w[0] = v[0];
-  w[1] = v[1];
-  w[2] = v[2];
-
+  Vector w = v;
   ASSERT_EQ(v, w);
 }
 
@@ -177,24 +144,18 @@ TYPED_TEST(VectorTests, TestVectorFromSTLVector)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  std::vector<T> stl_vector(3);
-  stl_vector[0] = 0;
-  stl_vector[1] = 1;
-  stl_vector[2] = 2;
+  std::vector<T> stl_vector{0, 1, 2};
 
   thrust::host_vector<T> v(stl_vector);
 
   ASSERT_EQ(v.size(), 3lu);
-  ASSERT_EQ(v[0], 0);
-  ASSERT_EQ(v[1], 1);
-  ASSERT_EQ(v[2], 2);
+  thrust::host_vector<T> ref{0, 1, 2};
+  ASSERT_EQ(v, ref);
 
   v = stl_vector;
 
   ASSERT_EQ(v.size(), 3lu);
-  ASSERT_EQ(v[0], 0);
-  ASSERT_EQ(v[1], 1);
-  ASSERT_EQ(v[2], 2);
+  ASSERT_EQ(v, ref);
 }
 
 TYPED_TEST(VectorTests, TestVectorFillAssign)
@@ -208,9 +169,8 @@ TYPED_TEST(VectorTests, TestVectorFillAssign)
   v.assign(3, 13);
 
   ASSERT_EQ(v.size(), 3lu);
-  ASSERT_EQ(v[0], 13);
-  ASSERT_EQ(v[1], 13);
-  ASSERT_EQ(v[2], 13);
+  thrust::host_vector<T> ref{13, 13, 13};
+  ASSERT_EQ(v, ref);
 }
 
 TYPED_TEST(VectorTests, TestVectorAssignFromSTLVector)
@@ -220,18 +180,14 @@ TYPED_TEST(VectorTests, TestVectorAssignFromSTLVector)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  std::vector<T> stl_vector(3);
-  stl_vector[0] = 0;
-  stl_vector[1] = 1;
-  stl_vector[2] = 2;
+  std::vector<T> stl_vector{0, 1, 2};
 
   thrust::host_vector<T> v;
   v.assign(stl_vector.begin(), stl_vector.end());
 
   ASSERT_EQ(v.size(), 3lu);
-  ASSERT_EQ(v[0], 0);
-  ASSERT_EQ(v[1], 1);
-  ASSERT_EQ(v[2], 2);
+  thrust::host_vector<T> ref{0, 1, 2};
+  ASSERT_EQ(v, ref);
 }
 
 TYPED_TEST(VectorTests, TestVectorFromBiDirectionalIterator)
@@ -249,9 +205,8 @@ TYPED_TEST(VectorTests, TestVectorFromBiDirectionalIterator)
   Vector v(stl_list.begin(), stl_list.end());
 
   ASSERT_EQ(v.size(), 3lu);
-  ASSERT_EQ(v[0], 0);
-  ASSERT_EQ(v[1], 1);
-  ASSERT_EQ(v[2], 2);
+  Vector ref{0, 1, 2};
+  ASSERT_EQ(v, ref);
 }
 
 TYPED_TEST(VectorTests, TestVectorAssignFromBiDirectionalIterator)
@@ -270,9 +225,8 @@ TYPED_TEST(VectorTests, TestVectorAssignFromBiDirectionalIterator)
   v.assign(stl_list.begin(), stl_list.end());
 
   ASSERT_EQ(v.size(), 3lu);
-  ASSERT_EQ(v[0], 0);
-  ASSERT_EQ(v[1], 1);
-  ASSERT_EQ(v[2], 2);
+  Vector ref{0, 1, 2};
+  ASSERT_EQ(v, ref);
 }
 
 TYPED_TEST(VectorTests, TestVectorAssignFromHostVector)
@@ -282,16 +236,16 @@ TYPED_TEST(VectorTests, TestVectorAssignFromHostVector)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::host_vector<T> h(3);
-  h[0] = 0;
-  h[1] = 1;
-  h[2] = 2;
+  thrust::host_vector<T> h{0, 1, 2};
 
   Vector v;
   v.assign(h.begin(), h.end());
 
   ASSERT_EQ(v, h);
 }
+
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_CLANG("-Wself-assign")
 
 TYPED_TEST(VectorTests, TestVectorToAndFromHostVector)
 {
@@ -300,32 +254,22 @@ TYPED_TEST(VectorTests, TestVectorToAndFromHostVector)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::host_vector<T> h(3);
-  h[0] = 0;
-  h[1] = 1;
-  h[2] = 2;
+  thrust::host_vector<T> h{0, 1, 2};
 
   Vector v(h);
 
   ASSERT_EQ(v, h);
 
-  THRUST_DIAG_PUSH
-  THRUST_DIAG_SUPPRESS_CLANG("-Wself-assign")
   v = v;
-  THRUST_DIAG_POP
 
   ASSERT_EQ(v, h);
 
-  v[0] = 10;
-  v[1] = 11;
-  v[2] = 12;
+  v = {10, 11, 12};
+  Vector v_ref{10, 11, 12};
+  ASSERT_EQ(v, v_ref);
 
-  ASSERT_EQ(h[0], 0);
-  ASSERT_EQ(v[0], 10);
-  ASSERT_EQ(h[1], 1);
-  ASSERT_EQ(v[1], 11);
-  ASSERT_EQ(h[2], 2);
-  ASSERT_EQ(v[2], 12);
+  Vector h_ref{0, 1, 2};
+  ASSERT_EQ(h, h_ref);
 
   h = v;
 
@@ -337,6 +281,8 @@ TYPED_TEST(VectorTests, TestVectorToAndFromHostVector)
 
   ASSERT_EQ(v, h);
 }
+
+THRUST_DIAG_POP
 
 TYPED_TEST(VectorTests, TestVectorAssignFromDeviceVector)
 {
@@ -345,16 +291,16 @@ TYPED_TEST(VectorTests, TestVectorAssignFromDeviceVector)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::device_vector<T> d(3);
-  d[0] = 0;
-  d[1] = 1;
-  d[2] = 2;
+  thrust::device_vector<T> d{0, 1, 2};
 
   Vector v;
   v.assign(d.begin(), d.end());
 
   ASSERT_EQ(v, d);
 }
+
+THRUST_DIAG_PUSH
+THRUST_DIAG_SUPPRESS_CLANG("-Wself-assign")
 
 TYPED_TEST(VectorTests, TestVectorToAndFromDeviceVector)
 {
@@ -363,32 +309,22 @@ TYPED_TEST(VectorTests, TestVectorToAndFromDeviceVector)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::device_vector<T> h(3);
-  h[0] = 0;
-  h[1] = 1;
-  h[2] = 2;
+  thrust::device_vector<T> h{0, 1, 2};
 
   Vector v(h);
 
   ASSERT_EQ(v, h);
 
-  THRUST_DIAG_PUSH
-  THRUST_DIAG_SUPPRESS_CLANG("-Wself-assign")
   v = v;
-  THRUST_DIAG_POP
 
   ASSERT_EQ(v, h);
 
-  v[0] = 10;
-  v[1] = 11;
-  v[2] = 12;
+  v = {10, 11, 12};
+  Vector v_ref{10, 11, 12};
+  ASSERT_EQ(v, v_ref);
 
-  ASSERT_EQ(h[0], 0);
-  ASSERT_EQ(v[0], 10);
-  ASSERT_EQ(h[1], 1);
-  ASSERT_EQ(v[1], 11);
-  ASSERT_EQ(h[2], 2);
-  ASSERT_EQ(v[2], 12);
+  Vector h_ref{0, 1, 2};
+  ASSERT_EQ(h, h_ref);
 
   h = v;
 
@@ -400,6 +336,7 @@ TYPED_TEST(VectorTests, TestVectorToAndFromDeviceVector)
 
   ASSERT_EQ(v, h);
 }
+THRUST_DIAG_POP
 
 TYPED_TEST(VectorTests, TestVectorWithInitialValue)
 {
@@ -413,9 +350,8 @@ TYPED_TEST(VectorTests, TestVectorWithInitialValue)
   Vector v(3, init);
 
   ASSERT_EQ(v.size(), 3lu);
-  ASSERT_EQ(v[0], init);
-  ASSERT_EQ(v[1], init);
-  ASSERT_EQ(v[2], init);
+  Vector ref(3, init);
+  ASSERT_EQ(v, ref);
 }
 
 TYPED_TEST(VectorTests, TestVectorSwap)
@@ -424,24 +360,16 @@ TYPED_TEST(VectorTests, TestVectorSwap)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector v(3);
-  v[0] = 0;
-  v[1] = 1;
-  v[2] = 2;
-
-  Vector u(3);
-  u[0] = 10;
-  u[1] = 11;
-  u[2] = 12;
+  Vector v{0, 1, 2};
+  Vector u{10, 11, 12};
 
   v.swap(u);
 
-  ASSERT_EQ(v[0], 10);
-  ASSERT_EQ(u[0], 0);
-  ASSERT_EQ(v[1], 11);
-  ASSERT_EQ(u[1], 1);
-  ASSERT_EQ(v[2], 12);
-  ASSERT_EQ(u[2], 2);
+  Vector u_ref{0, 1, 2};
+  ASSERT_EQ(u, u_ref);
+
+  Vector v_ref{10, 11, 12};
+  ASSERT_EQ(v, v_ref);
 }
 
 TYPED_TEST(VectorTests, TestVectorErasePosition)
@@ -450,33 +378,25 @@ TYPED_TEST(VectorTests, TestVectorErasePosition)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector v(5);
-  v[0] = 0;
-  v[1] = 1;
-  v[2] = 2;
-  v[3] = 3;
-  v[4] = 4;
+  Vector v{0, 1, 2, 3, 4};
 
   v.erase(v.begin() + 2);
 
   ASSERT_EQ(v.size(), 4lu);
-  ASSERT_EQ(v[0], 0);
-  ASSERT_EQ(v[1], 1);
-  ASSERT_EQ(v[2], 3);
-  ASSERT_EQ(v[3], 4);
+  Vector ref{0, 1, 3, 4};
+  ASSERT_EQ(v, ref);
 
   v.erase(v.begin() + 0);
 
   ASSERT_EQ(v.size(), 3lu);
-  ASSERT_EQ(v[0], 1);
-  ASSERT_EQ(v[1], 3);
-  ASSERT_EQ(v[2], 4);
+  ref = {1, 3, 4};
+  ASSERT_EQ(v, ref);
 
   v.erase(v.begin() + 2);
 
   ASSERT_EQ(v.size(), 2lu);
-  ASSERT_EQ(v[0], 1);
-  ASSERT_EQ(v[1], 3);
+  ref = {1, 3};
+  ASSERT_EQ(v, ref);
 
   v.erase(v.begin() + 1);
 
@@ -494,27 +414,19 @@ TYPED_TEST(VectorTests, TestVectorEraseRange)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector v(6);
-  v[0] = 0;
-  v[1] = 1;
-  v[2] = 2;
-  v[3] = 3;
-  v[4] = 4;
-  v[5] = 5;
+  Vector v{0, 1, 2, 3, 4, 5};
 
   v.erase(v.begin() + 1, v.begin() + 3);
 
   ASSERT_EQ(v.size(), 4lu);
-  ASSERT_EQ(v[0], 0);
-  ASSERT_EQ(v[1], 3);
-  ASSERT_EQ(v[2], 4);
-  ASSERT_EQ(v[3], 5);
+  Vector ref{0, 3, 4, 5};
+  ASSERT_EQ(v, ref);
 
   v.erase(v.begin() + 2, v.end());
 
   ASSERT_EQ(v.size(), 2lu);
-  ASSERT_EQ(v[0], 0);
-  ASSERT_EQ(v[1], 3);
+  ref = {0, 3};
+  ASSERT_EQ(v, ref);
 
   v.erase(v.begin() + 0, v.begin() + 1);
 
@@ -533,41 +445,17 @@ TYPED_TEST(VectorTests, TestVectorEquality)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::host_vector<T> h_a(3);
-  thrust::host_vector<T> h_b(3);
+  thrust::host_vector<T> h_a{0, 1, 2};
+  thrust::host_vector<T> h_b{0, 1, 3};
   thrust::host_vector<T> h_c(3);
-  h_a[0] = 0;
-  h_a[1] = 1;
-  h_a[2] = 2;
-  h_b[0] = 0;
-  h_b[1] = 1;
-  h_b[2] = 3;
-  h_b[0] = 0;
-  h_b[1] = 1;
 
-  thrust::device_vector<T> d_a(3);
-  thrust::device_vector<T> d_b(3);
+  thrust::device_vector<T> d_a{0, 1, 2};
+  thrust::device_vector<T> d_b{0, 1, 3};
   thrust::device_vector<T> d_c(3);
-  d_a[0] = 0;
-  d_a[1] = 1;
-  d_a[2] = 2;
-  d_b[0] = 0;
-  d_b[1] = 1;
-  d_b[2] = 3;
-  d_b[0] = 0;
-  d_b[1] = 1;
 
-  std::vector<T> s_a(3);
-  std::vector<T> s_b(3);
+  std::vector<T> s_a{0, 1, 2};
+  std::vector<T> s_b{0, 1, 3};
   std::vector<T> s_c(3);
-  s_a[0] = 0;
-  s_a[1] = 1;
-  s_a[2] = 2;
-  s_b[0] = 0;
-  s_b[1] = 1;
-  s_b[2] = 3;
-  s_b[0] = 0;
-  s_b[1] = 1;
 
   ASSERT_EQ((h_a == h_a), true);
   ASSERT_EQ((h_a == d_a), true);
@@ -659,41 +547,17 @@ TYPED_TEST(VectorTests, TestVectorInequality)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::host_vector<T> h_a(3);
-  thrust::host_vector<T> h_b(3);
+  thrust::host_vector<T> h_a{0, 1, 2};
+  thrust::host_vector<T> h_b{0, 1, 3};
   thrust::host_vector<T> h_c(3);
-  h_a[0] = 0;
-  h_a[1] = 1;
-  h_a[2] = 2;
-  h_b[0] = 0;
-  h_b[1] = 1;
-  h_b[2] = 3;
-  h_b[0] = 0;
-  h_b[1] = 1;
 
-  thrust::device_vector<T> d_a(3);
-  thrust::device_vector<T> d_b(3);
+  thrust::device_vector<T> d_a{0, 1, 2};
+  thrust::device_vector<T> d_b{0, 1, 3};
   thrust::device_vector<T> d_c(3);
-  d_a[0] = 0;
-  d_a[1] = 1;
-  d_a[2] = 2;
-  d_b[0] = 0;
-  d_b[1] = 1;
-  d_b[2] = 3;
-  d_b[0] = 0;
-  d_b[1] = 1;
 
-  std::vector<T> s_a(3);
-  std::vector<T> s_b(3);
+  std::vector<T> s_a{0, 1, 2};
+  std::vector<T> s_b{0, 1, 3};
   std::vector<T> s_c(3);
-  s_a[0] = 0;
-  s_a[1] = 1;
-  s_a[2] = 2;
-  s_b[0] = 0;
-  s_b[1] = 1;
-  s_b[2] = 3;
-  s_b[0] = 0;
-  s_b[1] = 1;
 
   ASSERT_EQ((h_a != h_a), false);
   ASSERT_EQ((h_a != d_a), false);
@@ -790,17 +654,13 @@ TYPED_TEST(VectorTests, TestVectorResizing)
 
   ASSERT_EQ(v.size(), 3lu);
 
-  v[0] = 0;
-  v[1] = 1;
-  v[2] = 2;
-
+  v = {0, 1, 2};
   v.resize(5);
 
   ASSERT_EQ(v.size(), 5lu);
 
-  ASSERT_EQ(v[0], 0);
-  ASSERT_EQ(v[1], 1);
-  ASSERT_EQ(v[2], 2);
+  Vector ref{0, 1, 2, v[3], v[4]};
+  ASSERT_EQ(v, ref);
 
   v[3] = 3;
   v[4] = 4;
@@ -809,10 +669,8 @@ TYPED_TEST(VectorTests, TestVectorResizing)
 
   ASSERT_EQ(v.size(), 4lu);
 
-  ASSERT_EQ(v[0], 0);
-  ASSERT_EQ(v[1], 1);
-  ASSERT_EQ(v[2], 2);
-  ASSERT_EQ(v[3], 3);
+  ref = {0, 1, 2, 3};
+  ASSERT_EQ(v, ref);
 
   v.resize(0);
 
@@ -982,10 +840,7 @@ TYPED_TEST(VectorTests, TestVectorReversed)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector v(3);
-  v[0] = 0;
-  v[1] = 1;
-  v[2] = 2;
+  Vector v{0, 1, 2};
 
   ASSERT_EQ(3, v.rend() - v.rbegin());
   ASSERT_EQ(3, static_cast<const Vector&>(v).rend() - static_cast<const Vector&>(v).rbegin());
@@ -1009,10 +864,7 @@ TYPED_TEST(VectorTests, TestVectorMove)
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   // test move construction
-  Vector v1(3);
-  v1[0] = 0;
-  v1[1] = 1;
-  v1[2] = 2;
+  Vector v1{0, 1, 2};
 
   const auto ptr1  = v1.data();
   const auto size1 = v1.size();
@@ -1025,19 +877,15 @@ TYPED_TEST(VectorTests, TestVectorMove)
   ASSERT_EQ(true, v1.empty());
 
   // ensure v2 received the data from before
-  ASSERT_EQ(v2[0], 0);
-  ASSERT_EQ(v2[1], 1);
-  ASSERT_EQ(v2[2], 2);
+  Vector ref{0, 1, 2};
+  ASSERT_EQ(v2, ref);
   ASSERT_EQ(size1, size2);
 
   // ensure v2 received the pointer from before
   ASSERT_EQ(ptr1, ptr2);
 
   // test move assignment
-  Vector v3(3);
-  v3[0] = 3;
-  v3[1] = 4;
-  v3[2] = 5;
+  Vector v3{3, 4, 5};
 
   const auto ptr3  = v3.data();
   const auto size3 = v3.size();
@@ -1050,9 +898,8 @@ TYPED_TEST(VectorTests, TestVectorMove)
   ASSERT_EQ(true, v3.empty());
 
   // ensure v2 received the data from before
-  ASSERT_EQ(v2[0], 3);
-  ASSERT_EQ(v2[1], 4);
-  ASSERT_EQ(v2[2], 5);
+  ref = {3, 4, 5};
+  ASSERT_EQ(v2, ref);
   ASSERT_EQ(size3, size4);
 
   // ensure v2 received the pointer from before
