@@ -538,8 +538,10 @@ struct negate
    */
   using result_type = T;
 
+#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
   THRUST_DIAG_PUSH
   THRUST_DIAG_SUPPRESS_MSVC(4146) // unary minus operator applied to unsigned type, result still unsigned
+#endif // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
 
   /*! Function call operator. The return value is <tt>-x</tt>.
    */
@@ -549,7 +551,9 @@ struct negate
     return -x;
   }
 
+#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
   THRUST_DIAG_POP
+#endif // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
 
 }; // end negate
 
