@@ -33,8 +33,12 @@
 #include <thrust/detail/functional/actor.h>
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/functional>
 #  include <cuda/std/functional>
 #elif defined(__has_include)
+#  if __has_include(<cuda/functional>)
+#    include <cuda/functional>
+#  endif
 #  if __has_include(<cuda/std/functional>)
 #    include <cuda/std/functional>
 #  endif
@@ -43,6 +47,68 @@
 #endif
 
 #include <functional>
+
+/*! \cond
+ */
+namespace internal
+{
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+using ::cuda::maximum;
+using ::cuda::minimum;
+#else
+// cuda::maximum
+template <typename T = void>
+struct maximum
+{
+  THRUST_EXEC_CHECK_DISABLE
+  THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr T operator()(const T& lhs, const T& rhs) const
+    noexcept(noexcept((lhs < rhs) ? rhs : lhs))
+  {
+    return (lhs < rhs) ? rhs : lhs;
+  }
+};
+
+template <>
+struct maximum<void>
+{
+  THRUST_EXEC_CHECK_DISABLE
+  template <typename T1, typename T2>
+  THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr ::std::common_type_t<T1, T2>
+  operator()(const T1& lhs, const T2& rhs) const noexcept(noexcept((lhs < rhs) ? rhs : lhs))
+  {
+    return (lhs < rhs) ? rhs : lhs;
+  }
+};
+
+// cuda::minimum
+template <typename T = void>
+struct minimum
+{
+  THRUST_EXEC_CHECK_DISABLE
+  THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr T operator()(const T& lhs, const T& rhs) const
+    noexcept(noexcept((lhs < rhs) ? lhs : rhs))
+  {
+    return (lhs < rhs) ? lhs : rhs;
+  }
+};
+
+template <>
+struct minimum<void>
+{
+  THRUST_EXEC_CHECK_DISABLE
+  template <typename T1, typename T2>
+  THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr ::std::common_type_t<T1, T2>
+  operator()(const T1& lhs, const T2& rhs) const noexcept(noexcept((lhs < rhs) ? lhs : rhs))
+  {
+    return (lhs < rhs) ? lhs : rhs;
+  }
+};
+#endif
+
+} // namespace internal
+/*! \endcond
+ */
 
 THRUST_NAMESPACE_BEGIN
 
@@ -1251,7 +1317,7 @@ THRUST_UNARY_FUNCTOR_VOID_SPECIALIZATION(identity, THRUST_FWD(x));
  *  \see binary_function
  */
 template <typename T = void>
-struct maximum
+struct maximum : ::internal::maximum<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -1270,19 +1336,7 @@ struct maximum
    *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
-
-  /*! Function call operator. The return value is <tt>rhs < lhs ? lhs : rhs</tt>.
-   */
-  THRUST_EXEC_CHECK_DISABLE
-  THRUST_HOST_DEVICE constexpr T operator()(const T& lhs, const T& rhs) const
-  {
-    return lhs < rhs ? rhs : lhs;
-  }
 }; // end maximum
-
-/*! \brief Specialization of \p maximum for type void.
- */
-THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION(maximum, t1 < t2 ? THRUST_FWD(t2) : THRUST_FWD(t1));
 
 /*! \p minimum is a function object that takes two arguments and returns the lesser
  *  of the two. Specifically, it is an Adaptable Binary Function. If \c f is an
@@ -1310,7 +1364,7 @@ THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION(maximum, t1 < t2 ? THRUST_FWD(t2) : TH
  *  \see binary_function
  */
 template <typename T = void>
-struct minimum
+struct minimum : ::internal::minimum<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -1329,19 +1383,7 @@ struct minimum
    *  deprecated [Since 2.6]
    */
   using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
-
-  /*! Function call operator. The return value is <tt>lhs < rhs ? lhs : rhs</tt>.
-   */
-  THRUST_EXEC_CHECK_DISABLE
-  THRUST_HOST_DEVICE constexpr T operator()(const T& lhs, const T& rhs) const
-  {
-    return lhs < rhs ? lhs : rhs;
-  }
 }; // end minimum
-
-/*! \brief Specialization of \p minimum for type void.
- */
-THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION(minimum, t1 < t2 ? THRUST_FWD(t1) : THRUST_FWD(t2));
 
 /*! \p project1st is a function object that takes two arguments and returns
  *  its first argument; the second argument is unused. It is essentially a
