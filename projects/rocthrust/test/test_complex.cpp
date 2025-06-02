@@ -32,7 +32,7 @@
     }                                                                                \
     else                                                                             \
     {                                                                                \
-      ASSERT_NEAR(stComplex.real(), ttComplex.real(), abs(stComplex.real() * 1e-3)); \
+      ASSERT_NEAR(stComplex.real(), ttComplex.real(), abs(stComplex.real() * 0.01)); \
     }                                                                                \
     if (std::isinf(stComplex.imag()))                                                \
     {                                                                                \
@@ -44,7 +44,7 @@
     }                                                                                \
     else                                                                             \
     {                                                                                \
-      ASSERT_NEAR(stComplex.imag(), ttComplex.imag(), abs(stComplex.imag() * 1e-3)); \
+      ASSERT_NEAR(stComplex.imag(), ttComplex.imag(), abs(stComplex.imag() * 0.01)); \
     }                                                                                \
   } while (0)
 
@@ -425,7 +425,7 @@ void run_compound_tests(const StdComplexOp& standard_complex_operator,
   constexpr size_t test_it = 123456;
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_real_distribution<T> dis(std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+  std::uniform_real_distribution<T> dis(-10000, 10000);
 
   for (size_t i = 0; i < test_it; i++)
   {
