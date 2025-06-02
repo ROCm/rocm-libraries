@@ -20,13 +20,13 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/unique.h>
 
+#include <unittest/unittest.h>
+
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  include <cuda/std/array>
 #else
 #  include <array>
 #endif
-
-#include <unittest/unittest.h>
 
 template <typename ForwardIterator>
 ForwardIterator unique(my_system& system, ForwardIterator first, ForwardIterator)
@@ -144,41 +144,28 @@ struct is_equal_div_10_unique
 };
 
 template <typename Vector>
-void TestUniqueSimple(void)
+void TestUniqueSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector data(10);
-  data[0] = 11;
-  data[1] = 11;
-  data[2] = 12;
-  data[3] = 20;
-  data[4] = 29;
-  data[5] = 21;
-  data[6] = 21;
-  data[7] = 31;
-  data[8] = 31;
-  data[9] = 37;
+  Vector data{11, 11, 12, 20, 29, 21, 21, 31, 31, 37};
 
   typename Vector::iterator new_last;
 
   new_last = thrust::unique(data.begin(), data.end());
 
   ASSERT_EQUAL(new_last - data.begin(), 7);
-  ASSERT_EQUAL(data[0], 11);
-  ASSERT_EQUAL(data[1], 12);
-  ASSERT_EQUAL(data[2], 20);
-  ASSERT_EQUAL(data[3], 29);
-  ASSERT_EQUAL(data[4], 21);
-  ASSERT_EQUAL(data[5], 31);
-  ASSERT_EQUAL(data[6], 37);
+  data.resize(7);
+  Vector ref{11, 12, 20, 29, 21, 31, 37};
+  ASSERT_EQUAL(data, ref);
 
   new_last = thrust::unique(data.begin(), new_last, is_equal_div_10_unique<T>());
 
   ASSERT_EQUAL(new_last - data.begin(), 3);
-  ASSERT_EQUAL(data[0], 11);
-  ASSERT_EQUAL(data[1], 20);
-  ASSERT_EQUAL(data[2], 31);
+  ref.resize(3);
+  data.resize(3);
+  ref = {11, 20, 31};
+  ASSERT_EQUAL(data, ref);
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestUniqueSimple);
 
@@ -207,22 +194,11 @@ struct TestUnique
 VariableUnitTest<TestUnique, IntegralTypes> TestUniqueInstance;
 
 template <typename Vector>
-void TestUniqueCopySimple(void)
+void TestUniqueCopySimple()
 {
   using T = typename Vector::value_type;
 
-  Vector data(10);
-  data[0] = 11;
-  data[1] = 11;
-  data[2] = 12;
-  data[3] = 20;
-  data[4] = 29;
-  data[5] = 21;
-  data[6] = 21;
-  data[7] = 31;
-  data[8] = 31;
-  data[9] = 37;
-
+  Vector data{11, 11, 12, 20, 29, 21, 21, 31, 31, 37};
   Vector output(10, -1);
 
   typename Vector::iterator new_last;
@@ -230,20 +206,17 @@ void TestUniqueCopySimple(void)
   new_last = thrust::unique_copy(data.begin(), data.end(), output.begin());
 
   ASSERT_EQUAL(new_last - output.begin(), 7);
-  ASSERT_EQUAL(output[0], 11);
-  ASSERT_EQUAL(output[1], 12);
-  ASSERT_EQUAL(output[2], 20);
-  ASSERT_EQUAL(output[3], 29);
-  ASSERT_EQUAL(output[4], 21);
-  ASSERT_EQUAL(output[5], 31);
-  ASSERT_EQUAL(output[6], 37);
+  output.resize(7);
+  Vector ref{11, 12, 20, 29, 21, 31, 37};
+  ASSERT_EQUAL(output, ref);
 
   new_last = thrust::unique_copy(output.begin(), new_last, data.begin(), is_equal_div_10_unique<T>());
 
   ASSERT_EQUAL(new_last - data.begin(), 3);
-  ASSERT_EQUAL(data[0], 11);
-  ASSERT_EQUAL(data[1], 20);
-  ASSERT_EQUAL(data[2], 31);
+  ref.resize(3);
+  data.resize(3);
+  ref = {11, 20, 31};
+  ASSERT_EQUAL(data, ref);
 }
 DECLARE_INTEGRAL_VECTOR_UNITTEST(TestUniqueCopySimple);
 
@@ -303,21 +276,11 @@ struct TestUniqueCopyToDiscardIterator
 VariableUnitTest<TestUniqueCopyToDiscardIterator, IntegralTypes> TestUniqueCopyToDiscardIteratorInstance;
 
 template <typename Vector>
-void TestUniqueCountSimple(void)
+void TestUniqueCountSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector data(10);
-  data[0] = 11;
-  data[1] = 11;
-  data[2] = 12;
-  data[3] = 20;
-  data[4] = 29;
-  data[5] = 21;
-  data[6] = 21;
-  data[7] = 31;
-  data[8] = 31;
-  data[9] = 37;
+  Vector data{11, 11, 12, 20, 29, 21, 21, 31, 31, 37};
 
   int count = thrust::unique_count(data.begin(), data.end());
 
@@ -381,5 +344,4 @@ struct TestUniqueMemoryAccess
     thrust::unique(v.begin(), v.end());
   }
 };
-
 SimpleUnitTest<TestUniqueMemoryAccess, unittest::type_list<int>> TestUniqueMemoryAccessInstance;
