@@ -140,3 +140,14 @@
 #else
 #  define THRUST_DEVICE_COMPILER_IS_OMP_CAPABLE THRUST_FALSE
 #endif // _OPENMP
+
+// Convert parameter to string
+#define THRUST_TO_STRING2(_STR) #_STR
+#define THRUST_TO_STRING(_STR)  THRUST_TO_STRING2(_STR)
+
+// Define the pragma for the host compiler
+#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
+#  define THRUST_PRAGMA(x) __pragma(x)
+#else
+#  define THRUST_PRAGMA(x) _Pragma(THRUST_TO_STRING(x))
+#endif // defined(_CCCL_COMPILER_MSVC)
