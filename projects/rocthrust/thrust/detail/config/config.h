@@ -43,3 +43,4 @@
 #include <thrust/detail/config/global_workarounds.h>
 #include <thrust/detail/config/libcxx.h>
 #include <thrust/detail/config/namespace.h>
+#include <thrust/detail/config/rtti.h>
