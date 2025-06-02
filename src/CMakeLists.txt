@@ -387,6 +387,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         ${COMPOSABLE_KERNEL_DYNAMIC_ASM_INCLUDE}
         ${GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_INCLUDE}
         kernels/vector_types.hpp
+        kernels/static_unroll.hpp
         kernels/activation_functions.hpp
         kernels/batchnorm_functions.hpp
         kernels/bnorm_spatial_activation_functions.hpp

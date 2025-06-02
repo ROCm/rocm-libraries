@@ -32,6 +32,7 @@
 #include "bnorm_spatial_activation_functions.hpp"
 #include "activation_functions.hpp"
 #include "reduction_functions.hpp"
+#include "static_unroll.hpp"
 
 // Load the configs to this file
 namespace /*anonymous*/ {
@@ -86,8 +87,7 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                                                          FpPrecType& variance,
                                                          FpPrecType& invVariance,
                                                          FpPrecType alpha,
-                                                         FpPrecType beta,
-                                                         FpPrecType gamma)
+                                                         FpPrecType beta)
     {
         FpPrecType pvscale, pvbias;
 
@@ -124,34 +124,18 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         {
             using fp_type4 = typename mapped_vector_type<FpType, 4>::type;
             fp_type4 read4;
-            unsigned int k = 0;
-#pragma clang loop unroll_count(2)
-            for(; k < less4; k += grprd)
-            {
+
+            static_unroll_count<unsigned int, 0, less4, grprd, 2>{[&](unsigned int k) {
                 if((k + (lid << 2)) < less4)
                 {
                     nidx  = (k + (lid << 2)) / mio_bn_config::hw;
                     hwidx = (k + (lid << 2)) - (nidx * mio_bn_config::hw);
                     index = nidx * mio_bn_config::chw + chwid + hwidx;
                     read4 = *(reinterpret_cast<const fp_type4*>(in + index));
-                    mean += fp_to_fpprec<FpPrecType>(read4.x);
-                    mean += fp_to_fpprec<FpPrecType>(read4.y);
-                    mean += fp_to_fpprec<FpPrecType>(read4.z);
-                    mean += fp_to_fpprec<FpPrecType>(read4.w);
-                    variance = fma(fp_to_fpprec<FpPrecType>(read4.x),
-                                   fp_to_fpprec<FpPrecType>(read4.x),
-                                   variance);
-                    variance = fma(fp_to_fpprec<FpPrecType>(read4.y),
-                                   fp_to_fpprec<FpPrecType>(read4.y),
-                                   variance);
-                    variance = fma(fp_to_fpprec<FpPrecType>(read4.z),
-                                   fp_to_fpprec<FpPrecType>(read4.z),
-                                   variance);
-                    variance = fma(fp_to_fpprec<FpPrecType>(read4.w),
-                                   fp_to_fpprec<FpPrecType>(read4.w),
-                                   variance);
+                    miopen::batchnorm::_accumulate4(mean, read4);
+                    miopen::batchnorm::_accumulate_mad4(variance, read4, read4, variance);
                 }
-            }
+            }};
 
             if constexpr(rem4 > 0u)
             {
@@ -167,48 +151,32 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                 if(index < (mio_bn_config::nchw - 3))
                 {
                     read4 = *(reinterpret_cast<const fp_type4*>(in + index));
-                    mean += fp_to_fpprec<FpPrecType>(read4.x);
-                    mean += fp_to_fpprec<FpPrecType>(read4.y);
-                    mean += fp_to_fpprec<FpPrecType>(read4.z);
-                    mean += fp_to_fpprec<FpPrecType>(read4.w);
-                    variance = fma(fp_to_fpprec<FpPrecType>(read4.x),
-                                   fp_to_fpprec<FpPrecType>(read4.x),
-                                   variance);
-                    variance = fma(fp_to_fpprec<FpPrecType>(read4.y),
-                                   fp_to_fpprec<FpPrecType>(read4.y),
-                                   variance);
-                    variance = fma(fp_to_fpprec<FpPrecType>(read4.z),
-                                   fp_to_fpprec<FpPrecType>(read4.z),
-                                   variance);
-                    variance = fma(fp_to_fpprec<FpPrecType>(read4.w),
-                                   fp_to_fpprec<FpPrecType>(read4.w),
-                                   variance);
+                    miopen::batchnorm::_accumulate4(mean, read4);
+                    miopen::batchnorm::_accumulate_mad4(variance, read4, read4, variance);
                 }
             }
         }
         else
         {
-            unsigned int k = 0;
-#pragma clang loop unroll_count(4)
-            for(; k < less; k += mio_bn_config::launch_dim.grp0)
-            {
-                if(k + lid < less)
-                {
-                    nidx  = (k + lid) / mio_bn_config::hw;
-                    hwidx = (k + lid) - (nidx * mio_bn_config::hw);
-                    if constexpr(mio_config::layout_nhwc)
+            static_unroll_count<unsigned int, 0, less, mio_bn_config::launch_dim.grp0, 4>{
+                [&](unsigned int k) {
+                    if(k + lid < less)
                     {
-                        index = nidx * mio_bn_config::chw + hwidx * mio_bn_config::c + grpid;
+                        nidx  = (k + lid) / mio_bn_config::hw;
+                        hwidx = (k + lid) - (nidx * mio_bn_config::hw);
+                        if constexpr(mio_config::layout_nhwc)
+                        {
+                            index = nidx * mio_bn_config::chw + hwidx * mio_bn_config::c + grpid;
+                        }
+                        else
+                        {
+                            index = nidx * mio_bn_config::chw + chwid + hwidx;
+                        }
+                        const auto xin = cast<FpPrecType>(in[index]);
+                        mean += xin;
+                        variance = fma(xin, xin, variance);
                     }
-                    else
-                    {
-                        index = nidx * mio_bn_config::chw + chwid + hwidx;
-                    }
-                    const auto xin = fp_to_fpprec<FpPrecType>(in[index]);
-                    mean += xin;
-                    variance = fma(xin, xin, variance);
-                }
-            }
+                }};
 
             if constexpr(rem > 0u)
             {
@@ -229,9 +197,8 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                         index = nidx * mio_bn_config::chw + chwid + hwidx;
                     }
 
-                    const auto xin = index < mio_bn_config::nchw
-                                         ? fp_to_fpprec<FpPrecType>(in[index])
-                                         : FpPrecType{0};
+                    const auto xin =
+                        index < mio_bn_config::nchw ? cast<FpPrecType>(in[index]) : FpPrecType{0};
                     mean += xin;
                     variance = fma(xin, xin, variance);
                 }
@@ -279,67 +246,60 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         if constexpr(mio_config::layout_nhwc || rem == 0)
         {
             constexpr unsigned int k_limit = mio_config::layout_nhwc ? mio_bn_config::nhw : less;
-            unsigned int k                 = 0;
-#pragma clang loop unroll_count(2)
-            for(; k < k_limit; k += mio_bn_config::launch_dim.grp0)
-            {
-                if(k + lid < k_limit)
-                {
-                    nidx  = (k + lid) / mio_bn_config::hw;
-                    hwidx = (k + lid) - (nidx * mio_bn_config::hw);
-                    if constexpr(mio_config::layout_nhwc)
-                    {
-                        index = nidx * mio_bn_config::chw + hwidx * mio_bn_config::c + grpid;
-                    }
-                    else
-                    {
-                        index = nidx * mio_bn_config::chw + chwid + hwidx;
-                    }
 
-                    out[index] = fpprec_to_fp<FpType>(miopen::batchnorm::activation_op(
-                        fma(pvscale,
-                            (fp_to_fpprec<FpPrecType>(in[index]) - mean) * invVariance,
-                            pvbias),
-                        alpha,
-                        beta,
-                        gamma));
-                }
-            }
+            static_unroll_count<unsigned int, 0, k_limit, mio_bn_config::launch_dim.grp0, 2>{
+                [&](unsigned int k) {
+                    if(k + lid < k_limit)
+                    {
+                        nidx  = (k + lid) / mio_bn_config::hw;
+                        hwidx = (k + lid) - (nidx * mio_bn_config::hw);
+                        if constexpr(mio_config::layout_nhwc)
+                        {
+                            index = nidx * mio_bn_config::chw + hwidx * mio_bn_config::c + grpid;
+                        }
+                        else
+                        {
+                            index = nidx * mio_bn_config::chw + chwid + hwidx;
+                        }
+
+                        out[index] = cast<FpType>(miopen::batchnorm::activation_op(
+                            fma(pvscale,
+                                (cast<FpPrecType>(in[index]) - mean) * invVariance,
+                                pvbias),
+                            alpha,
+                            beta));
+                    }
+                }};
         }
         else
         {
             FpPrecType xhat[max_read];
-            auto do_calculation = [&](unsigned int k) {
 
-                for(unsigned int j = 0; j < max_read; ++j)
-                {
-                    const unsigned int l = k + j;
-                    nidx                 = l / mio_bn_config::hw;
-                    hwidx                = l - (nidx * mio_bn_config::hw);
-                    index                = nidx * mio_bn_config::chw + chwid + hwidx;
-                    xhat[j] = (fp_to_fpprec<FpPrecType>(in[index]) - mean) * invVariance;
-                }
-
-                __syncthreads();
-
-                for(unsigned int j = 0; j < max_read; ++j) // This part takes 0.405
-                {
-                    const unsigned int l = k + j;
-                    nidx                 = l / mio_bn_config::hw;
-                    hwidx                = l - (nidx * mio_bn_config::hw);
-                    index                = nidx * mio_bn_config::chw + chwid + hwidx;
-                    out[index]           = fpprec_to_fp<FpType>(miopen::batchnorm::activation_op(
-                        fma(pvscale, xhat[j], pvbias), alpha, beta, gamma));
-                } // target 0.501
-            };
-
-            unsigned int k = 0;
-#pragma clang loop unroll_count(2)
-            for(; k < lessout; k += chunk)
-            {
+            static_unroll_count<unsigned int, 0, lessout, chunk, 2>{[&](unsigned int k) {
                 if(k + (max_read * lid) < lessout)
-                    do_calculation(k + (max_read * lid));
-            }
+                {
+                    for(unsigned int j = 0; j < max_read; ++j)
+                    {
+                        const unsigned int l = k + (max_read * lid) + j;
+                        nidx                 = l / mio_bn_config::hw;
+                        hwidx                = l - (nidx * mio_bn_config::hw);
+                        index                = nidx * mio_bn_config::chw + chwid + hwidx;
+                        xhat[j]              = (cast<FpPrecType>(in[index]) - mean) * invVariance;
+                    }
+
+                    __syncthreads();
+
+                    for(unsigned int j = 0; j < max_read; ++j) // This part takes 0.405
+                    {
+                        const unsigned int l = k + (max_read * lid) + j;
+                        nidx                 = l / mio_bn_config::hw;
+                        hwidx                = l - (nidx * mio_bn_config::hw);
+                        index                = nidx * mio_bn_config::chw + chwid + hwidx;
+                        out[index]           = cast<FpType>(miopen::batchnorm::activation_op(
+                            fma(pvscale, xhat[j], pvbias), alpha, beta));
+                    }
+                }
+            }};
 
             if constexpr(remout > 0u)
             {
@@ -351,11 +311,9 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
                     hwidx          = l - (nidx * mio_bn_config::hw);
                     index          = nidx * mio_bn_config::chw + chwid + hwidx;
                     // TODO: comparing different types
-                    const auto xin = (index < mio_bn_config::nchw)
-                                         ? fp_to_fpprec<FpPrecType>(in[index])
-                                         : FpPrecType{0};
-                    xhat[j]        = (xin - fp_to_fpprec<FpPrecType>(mean)) *
-                              fp_to_fpprec<FpPrecType>(invVariance);
+                    const auto xin =
+                        (index < mio_bn_config::nchw) ? cast<FpPrecType>(in[index]) : FpPrecType{0};
+                    xhat[j] = (xin - cast<FpPrecType>(mean)) * cast<FpPrecType>(invVariance);
                 }
 
                 __syncthreads();
@@ -368,8 +326,8 @@ struct MIOpenBatchNormFwdTrainSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 
                     if(index < mio_bn_config::nchw)
                     {
-                        out[index] = fpprec_to_fp<FpType>(miopen::batchnorm::activation_op(
-                            fma(pvscale, xhat[j], pvbias), alpha, beta, gamma));
+                        out[index] = cast<FpType>(miopen::batchnorm::activation_op(
+                            fma(pvscale, xhat[j], pvbias), alpha, beta));
                     }
                 }
             }
@@ -411,8 +369,7 @@ extern "C" __global__ void __launch_bounds__(
 #endif
         ,
         typename mio_bn_config::fp_prec_type alpha,
-        typename mio_bn_config::fp_prec_type beta,
-        typename mio_bn_config::fp_prec_type gamma)
+        typename mio_bn_config::fp_prec_type beta)
 {
     using fp_type          = typename mio_bn_config::fp_type;
     using fp_prec_type     = typename mio_bn_config::fp_prec_type;
@@ -429,7 +386,7 @@ extern "C" __global__ void __launch_bounds__(
     const unsigned int grpid = blockIdx.x;
 
     forward_train_spatial_impl{}(
-        in, out, scale, bias, INHW, epsilon, mean, variance, invVariance, alpha, beta, gamma);
+        in, out, scale, bias, INHW, epsilon, mean, variance, invVariance, alpha, beta);
 
     if(lid == 0)
     {

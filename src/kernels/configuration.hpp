@@ -49,16 +49,10 @@ enum class type_strategy : int
 enum class neuron_op_type : int
 {
     pasthru      = 0, // x
-    logistic     = 1, // 1 / (1 + e^-x)  //Sigmoid
-    tanh         = 2, // beta * tanh(alpha * x)
     relu         = 3, // max(0, x)
-    softrelu     = 4, // log(1 + e^x)   // bonomial normal log likelihood
-    abs          = 5, // abs(x)
-    power        = 6, // (alpha + beta * x )^gamma
     clipped_relu = 7, // min(alpha, max(0, x))
-    leaky_relu   = 8, // alpha * x | x <= 0; x | x > 0
-    elu          = 9, // alpha * (e^x - 1) | x <= 0; x | x > 0
-    total        = 10,
+    clamp        = 10,
+    total        = 11,
 };
 
 namespace detail {
@@ -151,7 +145,7 @@ struct launch_dimension
 };
 
 template <int Gfx103x, int Gfx110x, int Gfx120x>
-struct archtecture_switch
+struct architecture_switch
 {
     static_assert(Gfx103x == 0 || Gfx103x == 1, "Gfx103x must be 0 or 1");
     static_assert(Gfx110x == 0 || Gfx110x == 1, "Gfx110x must be 0 or 1");
@@ -280,7 +274,7 @@ using config = miopen::batchnorm::detail::proto_config<
     miopen::batchnorm::detail::half_max,
     miopen::batchnorm::detail::flt_max,
     miopen::batchnorm::detail::launch_dimension<MIO_BN_GRP0, MIO_BN_GRP1, MIO_BN_GRP2>,
-    miopen::batchnorm::detail::archtecture_switch<MIO_BN_GFX103X, MIO_BN_GFX110X, MIO_BN_GFX120X>,
+    miopen::batchnorm::detail::architecture_switch<MIO_BN_GFX103X, MIO_BN_GFX110X, MIO_BN_GFX120X>,
     MIO_BN_VARIANT,
     MIO_BN_NCHW,
     MIO_BN_MAXN,
