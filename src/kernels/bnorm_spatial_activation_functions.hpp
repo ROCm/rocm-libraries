@@ -37,101 +37,41 @@ namespace batchnorm {
 template <typename FpPrecType,
           miopen::neuron_op_type NrnOpType = miopen::config::neuron_op,
           typename std::enable_if<NrnOpType == neuron_op_type::pasthru>::type* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType
-activation_op(FpPrecType const& tmp, FpPrecType const&, FpPrecType const&, FpPrecType const&)
+__forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
+                                                             FpPrecType const&,
+                                                             FpPrecType const&)
 {
     return tmp;
 }
 
 template <typename FpPrecType,
           miopen::neuron_op_type NrnOpType = miopen::config::neuron_op,
-          typename std::enable_if<NrnOpType == neuron_op_type::logistic>::type* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType
-activation_op(FpPrecType const& tmp, FpPrecType const&, FpPrecType const&, FpPrecType const&)
-{
-    return static_cast<FpPrecType>(1.f) / (static_cast<FpPrecType>(1.f) + exp(-tmp));
-}
-
-template <typename FpPrecType,
-          miopen::neuron_op_type NrnOpType = miopen::config::neuron_op,
-          typename std::enable_if<NrnOpType == neuron_op_type::tanh>::type* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
-                                                             FpPrecType const& _alpha,
-                                                             FpPrecType const& _beta,
-                                                             FpPrecType const&)
-
-{
-    return _beta * tanh(_alpha * tmp);
-}
-
-template <typename FpPrecType,
-          miopen::neuron_op_type NrnOpType = miopen::config::neuron_op,
           typename std::enable_if<NrnOpType == neuron_op_type::relu>::type* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType
-activation_op(FpPrecType const& tmp, FpPrecType const&, FpPrecType const&, FpPrecType const&)
+__forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
+                                                             FpPrecType const&,
+                                                             FpPrecType const&)
 {
     return max(tmp, static_cast<FpPrecType>(0.));
 }
 
 template <typename FpPrecType,
           miopen::neuron_op_type NrnOpType = miopen::config::neuron_op,
-          typename std::enable_if<NrnOpType == neuron_op_type::softrelu>::type* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType
-activation_op(FpPrecType const& tmp, FpPrecType const&, FpPrecType const&, FpPrecType const&)
-{
-    return (tmp > 0) ? (tmp + log(static_cast<FpPrecType>(1.f) + exp(-tmp)))
-                     : log(static_cast<FpPrecType>(1.f) + exp(tmp));
-}
-
-template <typename FpPrecType,
-          miopen::neuron_op_type NrnOpType = miopen::config::neuron_op,
-          typename std::enable_if<NrnOpType == neuron_op_type::abs>::type* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType
-activation_op(FpPrecType const& tmp, FpPrecType const&, FpPrecType const&, FpPrecType const&)
-{
-    return fabs(tmp);
-}
-
-template <typename FpPrecType,
-          miopen::neuron_op_type NrnOpType = miopen::config::neuron_op,
-          typename std::enable_if<NrnOpType == neuron_op_type::power>::type* = nullptr>
+          typename std::enable_if<NrnOpType == neuron_op_type::clipped_relu>::type* = nullptr>
 __forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
                                                              FpPrecType const& _alpha,
-                                                             FpPrecType const& _beta,
-                                                             FpPrecType const& _gamma)
-{
-    const auto arg = _alpha + tmp * _beta;
-    return (arg <= static_cast<FpPrecType>(miopen::batchnorm::config::epsilon))
-               ? static_cast<FpPrecType>(0.)
-               : pow(arg, _gamma);
-}
-
-template <typename FpPrecType,
-          miopen::neuron_op_type NrnOpType = miopen::config::neuron_op,
-          typename std::enable_if<NrnOpType == neuron_op_type::clipped_relu>::type* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType
-activation_op(FpPrecType const& tmp, FpPrecType const& _alpha, FpPrecType const&, FpPrecType const&)
+                                                             FpPrecType const&)
 {
     return min(_alpha, max(tmp, static_cast<FpPrecType>(0.)));
 }
 
 template <typename FpPrecType,
           miopen::neuron_op_type NrnOpType = miopen::config::neuron_op,
-          typename std::enable_if<NrnOpType == neuron_op_type::leaky_relu>::type* = nullptr>
-
-__forceinline__ __host__ __device__ FpPrecType
-activation_op(FpPrecType const& tmp, FpPrecType const& _alpha, FpPrecType const&, FpPrecType const&)
+          typename std::enable_if<NrnOpType == neuron_op_type::clamp>::type* = nullptr>
+__forceinline__ __host__ __device__ FpPrecType activation_op(FpPrecType const& tmp,
+                                                             FpPrecType const& _alpha,
+                                                             FpPrecType const& _beta)
 {
-    return tmp * ((tmp > 0) ? static_cast<FpPrecType>(1.f) : _alpha);
-}
-
-template <typename FpPrecType,
-          miopen::neuron_op_type NrnOpType = miopen::config::neuron_op,
-          typename std::enable_if<NrnOpType == neuron_op_type::elu>::type* = nullptr>
-__forceinline__ __host__ __device__ FpPrecType
-activation_op(FpPrecType const& tmp, FpPrecType const& _alpha, FpPrecType const&, FpPrecType const&)
-{
-    return (tmp > 0) ? tmp : (_alpha * (exp(tmp) - static_cast<FpPrecType>(1.f)));
+    return max(static_cast<FpPrecType>(_alpha), min(static_cast<FpPrecType>(_beta), tmp));
 }
 
 } // namespace batchnorm

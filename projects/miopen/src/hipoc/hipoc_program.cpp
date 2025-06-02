@@ -70,6 +70,29 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_OPENCL_WAVE64_NOWGP)
 
 namespace miopen {
 
+// TODO: this is a test feature and should be removed
+namespace {
+class ScopeTimer
+{
+    std::string name;
+    std::chrono::time_point<std::chrono::steady_clock> st;
+
+public:
+    ScopeTimer(std::string const& timer_name)
+        : name(timer_name), st(std::chrono::steady_clock::now())
+    {
+    }
+    ~ScopeTimer()
+    {
+        std::cout << "ScopeTimer: " << name << " Elapsed: "
+                  << std::chrono::duration_cast<std::chrono::duration<float, std::milli>>(
+                         std::chrono::steady_clock::now() - st)
+                         .count()
+                  << " ms\n";
+    }
+};
+} // namespace
+
 #if !MIOPEN_USE_COMGR
 namespace {
 
@@ -265,6 +288,7 @@ void HIPOCProgramImpl::BuildCodeObjectInMemory(const std::string& params,
                                                const std::string_view src,
                                                const fs::path& filename)
 {
+    ScopeTimer(__FUNCTION__);
     if(filename.extension() == dynamic_library_postfix) // ".so" or ".dll"
     {
         binary.resize(src.size());
