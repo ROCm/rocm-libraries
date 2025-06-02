@@ -26,8 +26,17 @@
  ******************************************************************************/
 #pragma once
 
-#include <cub/config.cuh>
 #include <thrust/detail/config.h>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#include <cub/config.cuh>
 
 #include <cub/detail/device_synchronize.cuh>
 #include <cub/util_device.cuh>
@@ -153,7 +162,8 @@ THRUST_HOST_FUNCTION cudaError_t trivial_copy_to_device(Type* dst, Type const* s
 }
 
 template <class Policy, class Type>
-_CCCL_HOST_DEVICE cudaError_t trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t count)
+THRUST_RUNTIME_FUNCTION cudaError_t
+trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t count)
 {
   cudaError_t status = cudaSuccess;
   if (count == 0)
@@ -462,7 +472,8 @@ struct transform_pair_of_input_iterators_t
 
 }; // struct transform_pair_of_input_iterators_t
 
-struct identity
+// deprecated [Since 2.8]
+struct THRUST_DEPRECATED_BECAUSE("Use cuda::std::identity") identity
 {
   template <class T>
   _CCCL_HOST_DEVICE T const& operator()(T const& t) const
