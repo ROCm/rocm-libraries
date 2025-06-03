@@ -1,42 +1,49 @@
-// MIT License
-//
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+/******************************************************************************
+ * Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
+ * Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in the
+ *       documentation and/or other materials provided with the distribution.
+ *     * Neither the name of the NVIDIA CORPORATION nor the
+ *       names of its contributors may be used to endorse or promote products
+ *       derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ ******************************************************************************/
 
 // Benchmark utils
 #include "../../bench_utils/bench_utils.hpp"
 
 // rocThrust
+#include <thrust/copy.h>
+#include <thrust/count.h>
+#include <thrust/detail/functional/address_stability.h>
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
-#include <thrust/fill.h>
-#include <thrust/host_vector.h>
+#include <thrust/iterator/zip_iterator.h>
 #include <thrust/transform.h>
 #include <thrust/zip_function.h>
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
-#include <benchmark/bench_utils/common/types.hpp>
 
 // STL
-#include <cstdlib>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -76,197 +83,18 @@ struct basic
   template <typename T, typename Policy>
   float64_t run(thrust::device_vector<T>& input, thrust::device_vector<T>& output, Policy policy)
   {
+    fib_t<T, uint32_t> op{};
+    thrust::transform(policy, input.cbegin(), input.cend(), output.begin(), op);
+
     bench_utils::gpu_timer d_timer;
 
     d_timer.start(0);
-    thrust::transform(policy, input.cbegin(), input.cend(), output.begin(), fib_t<T, uint32_t>{});
+    thrust::transform(policy, input.cbegin(), input.cend(), output.begin(), op);
     d_timer.stop(0);
 
     return d_timer.get_duration();
   }
 };
-
-namespace babelstream
-{
-// This namespace contains benchmarks inspired by the BabelStream Thrust benchmarks.
-constexpr auto aFill = 1;
-constexpr auto bFill = 2;
-constexpr auto cFill = 3;
-constexpr auto sVal  = 4;
-
-struct mul
-{
-  static constexpr size_t reads_per_item  = 1;
-  static constexpr size_t writes_per_item = 1;
-
-  template <typename T>
-  struct op
-  {
-    const T scalar;
-    __device__ __host__ op(T scalar)
-        : scalar(scalar)
-    {}
-    __device__ __host__ T operator()(const T& a)
-    {
-      return a * scalar;
-    }
-  };
-
-  template <typename T>
-  static float64_t run(thrust::device_vector<T>, thrust::device_vector<T> b, thrust::device_vector<T> c)
-  {
-    bench_utils::gpu_timer d_timer;
-    d_timer.start(0);
-    thrust::transform(c.begin(), c.end(), b.begin(), op<T>{sVal});
-    d_timer.stop(0);
-    return d_timer.get_duration();
-  }
-};
-struct add
-{
-  static constexpr size_t reads_per_item  = 2;
-  static constexpr size_t writes_per_item = 1;
-
-  template <typename T>
-  struct op
-  {
-    __device__ __host__ T operator()(const T& a, const T& b)
-    {
-      return a + b;
-    }
-  };
-
-  template <typename T>
-  static float64_t run(thrust::device_vector<T> a, thrust::device_vector<T> b, thrust::device_vector<T> c)
-  {
-    bench_utils::gpu_timer d_timer;
-    d_timer.start(0);
-    thrust::transform(a.begin(), a.end(), b.begin(), c.begin(), op<T>{});
-    d_timer.stop(0);
-    return d_timer.get_duration();
-  }
-};
-
-struct triad
-{
-  static constexpr size_t reads_per_item  = 2;
-  static constexpr size_t writes_per_item = 1;
-
-  template <typename T>
-  struct op
-  {
-    const T scalar;
-    __device__ __host__ op(T scalar)
-        : scalar(scalar)
-    {}
-    __device__ __host__ T operator()(const T& a, const T& b)
-    {
-      return a + scalar * b;
-    }
-  };
-
-  template <typename T>
-  static float64_t run(thrust::device_vector<T> a, thrust::device_vector<T> b, thrust::device_vector<T> c)
-  {
-    bench_utils::gpu_timer d_timer;
-    d_timer.start(0);
-    thrust::transform(a.begin(), a.end(), b.begin(), c.begin(), op<T>{sVal});
-    d_timer.stop(0);
-    return d_timer.get_duration();
-  }
-};
-
-struct nstream
-{
-  static constexpr size_t reads_per_item  = 3;
-  static constexpr size_t writes_per_item = 1;
-
-  template <typename T>
-  struct op
-  {
-    const T scalar;
-    __device__ __host__ op(T scalar)
-        : scalar(scalar)
-    {}
-    __device__ __host__ T operator()(T& a, T& b, T& c)
-    {
-      return a + b + scalar * c;
-    }
-  };
-
-  template <typename T>
-  static float64_t run(thrust::device_vector<T> a, thrust::device_vector<T> b, thrust::device_vector<T> c)
-  {
-    bench_utils::gpu_timer d_timer;
-    d_timer.start(0);
-    thrust::transform(thrust::make_zip_iterator(a.begin(), b.begin(), c.begin()),
-                      thrust::make_zip_iterator(a.end(), b.end(), c.end()),
-                      a.begin(),
-                      thrust::make_zip_function(op<T>{sVal}));
-    d_timer.stop(0);
-    return d_timer.get_duration();
-  }
-};
-
-template <typename Benchmark, class T>
-void run_babelstream(benchmark::State& state, const std::size_t n)
-{
-  thrust::device_vector<T> a = thrust::device_vector<T>(n);
-  thrust::device_vector<T> b = thrust::device_vector<T>(n);
-  thrust::device_vector<T> c = thrust::device_vector<T>(n);
-
-  std::vector<double> gpu_times;
-  for (auto _ : state)
-  {
-    thrust::fill(a.begin(), a.end(), aFill);
-    thrust::fill(b.begin(), b.end(), bFill);
-    thrust::fill(c.begin(), c.end(), cFill);
-
-    auto duration = Benchmark::template run<T>(a, b, c);
-    state.SetIterationTime(duration);
-    gpu_times.push_back(duration);
-  }
-  size_t transfers_per_item = Benchmark::reads_per_item + Benchmark::writes_per_item;
-  state.SetBytesProcessed(state.iterations() * n * sizeof(T) * transfers_per_item);
-  state.SetItemsProcessed(state.iterations() * n);
-
-  const double gpu_cv         = bench_utils::StatisticsCV(gpu_times);
-  state.counters["gpu_noise"] = gpu_cv;
-}
-
-#define CREATE_BABELSTREAM_BENCHMARK(T, Elements, Benchmark)                                             \
-  benchmark::RegisterBenchmark(                                                                          \
-    bench_utils::bench_naming::format_name(                                                              \
-      "{algo:transform,subalgo:" + name + "." + #Benchmark + ",input_type:" #T + ",elements:" #Elements) \
-      .c_str(),                                                                                          \
-    run_babelstream<Benchmark, T>,                                                                       \
-    Elements)
-
-// clang-format off
-#define BENCHMARK_BABELSTREAM_TYPE(type)              \
-  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, mul),   \
-  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, add),   \
-  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, triad), \
-  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, nstream)
-// clang-format on
-
-void add_benchmarks(const std::string& name, std::vector<benchmark::internal::Benchmark*>& benchmarks)
-{
-  std::vector<benchmark::internal::Benchmark*> bs = {
-    BENCHMARK_BABELSTREAM_TYPE(int8_t),
-    BENCHMARK_BABELSTREAM_TYPE(int16_t),
-    BENCHMARK_BABELSTREAM_TYPE(float),
-    BENCHMARK_BABELSTREAM_TYPE(double),
-#if THRUST_BENCHMARKS_HAVE_INT128_SUPPORT
-    BENCHMARK_BABELSTREAM_TYPE(int128_t),
-#endif
-  };
-
-  benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
-}
-#undef CREATE_BABELSTREAM_BENCHMARK
-#undef BENCHMARK_BABELSTREAM_TYPE
-}; // namespace babelstream
 
 template <class Benchmark, class T>
 void run_benchmark(benchmark::State& state, const std::size_t elements, const std::string seed_type)
@@ -330,6 +158,192 @@ void add_benchmarks(
 
   benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
 }
+
+namespace babelstream
+{
+// The benchmarks in this namespace are inspired by the BabelStream thrust version:
+// https://github.com/UoB-HPC/BabelStream/blob/main/src/thrust/ThrustStream.cu
+
+// Modified from BabelStream to also work for integers
+constexpr auto startA      = 1;
+constexpr auto startB      = 2;
+constexpr auto startC      = 3;
+constexpr auto startScalar = 4;
+
+struct mul
+{
+  static constexpr size_t reads_per_item  = 1;
+  static constexpr size_t writes_per_item = 1;
+
+  template <typename T>
+  static float64_t run(thrust::device_vector<T>, thrust::device_vector<T> b, thrust::device_vector<T> c)
+  {
+    bench_utils::gpu_timer d_timer;
+    const T scalar = startScalar;
+    d_timer.start(0);
+    thrust::transform(
+      c.begin(), c.end(), b.begin(), ::thrust::detail::proclaim_copyable_arguments([=] __device__ __host__(const T& ci) {
+        return ci * scalar;
+      }));
+    d_timer.stop(0);
+    return d_timer.get_duration();
+  }
+};
+struct add
+{
+  static constexpr size_t reads_per_item  = 2;
+  static constexpr size_t writes_per_item = 1;
+
+  template <typename T>
+  static float64_t run(thrust::device_vector<T> a, thrust::device_vector<T> b, thrust::device_vector<T> c)
+  {
+    bench_utils::gpu_timer d_timer;
+    d_timer.start(0);
+    thrust::transform(
+      a.begin(),
+      a.end(),
+      b.begin(),
+      c.begin(),
+      ::thrust::detail::proclaim_copyable_arguments([] THRUST_DEVICE(const T& ai, const T& bi) -> T {
+        return ai + bi;
+      }));
+    d_timer.stop(0);
+    return d_timer.get_duration();
+  }
+};
+
+struct triad
+{
+  static constexpr size_t reads_per_item  = 2;
+  static constexpr size_t writes_per_item = 1;
+
+  template <typename T>
+  static float64_t run(thrust::device_vector<T> a, thrust::device_vector<T> b, thrust::device_vector<T> c)
+  {
+    bench_utils::gpu_timer d_timer;
+    const T scalar = startScalar;
+    d_timer.start(0);
+    thrust::transform(
+      b.begin(),
+      b.end(),
+      c.begin(),
+      a.begin(),
+      ::thrust::detail::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& bi, const T& ci) {
+        return bi + scalar * ci;
+      }));
+    d_timer.stop(0);
+    return d_timer.get_duration();
+  }
+};
+
+struct nstream
+{
+  static constexpr size_t reads_per_item  = 3;
+  static constexpr size_t writes_per_item = 1;
+
+  template <typename T>
+  static float64_t run(thrust::device_vector<T> a, thrust::device_vector<T> b, thrust::device_vector<T> c)
+  {
+    bench_utils::gpu_timer d_timer;
+    const T scalar = startScalar;
+    d_timer.start(0);
+    thrust::transform(
+      thrust::make_zip_iterator(a.begin(), b.begin(), c.begin()),
+      thrust::make_zip_iterator(a.end(), b.end(), c.end()),
+      a.begin(),
+      thrust::make_zip_function(
+        ::thrust::detail::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& ai, const T& bi, const T& ci) {
+          return ai + bi + scalar * ci;
+        })));
+    d_timer.stop(0);
+    return d_timer.get_duration();
+  }
+};
+
+struct nstream_stable
+{
+  static constexpr size_t reads_per_item  = 3;
+  static constexpr size_t writes_per_item = 1;
+
+  template <typename T>
+  static float64_t run(thrust::device_vector<T> a, thrust::device_vector<T> b, thrust::device_vector<T> c)
+  {
+    const T* a_start = thrust::raw_pointer_cast(a.data());
+    const T* b_start = thrust::raw_pointer_cast(b.data());
+    const T* c_start = thrust::raw_pointer_cast(c.data());
+    bench_utils::gpu_timer d_timer;
+    const T scalar = startScalar;
+    d_timer.start(0);
+    thrust::transform(a.begin(), a.end(), a.begin(), [=] THRUST_DEVICE(const T& ai) {
+      const auto i = &ai - a_start;
+      return ai + b_start[i] + scalar * c_start[i];
+    });
+    d_timer.stop(0);
+    return d_timer.get_duration();
+  }
+};
+
+template <typename Benchmark, class T>
+void run_babelstream(benchmark::State& state, const std::size_t n)
+{
+  thrust::device_vector<T> a = thrust::device_vector<T>(n);
+  thrust::device_vector<T> b = thrust::device_vector<T>(n);
+  thrust::device_vector<T> c = thrust::device_vector<T>(n);
+
+  std::vector<double> gpu_times;
+  for (auto _ : state)
+  {
+    thrust::fill(a.begin(), a.end(), startA);
+    thrust::fill(b.begin(), b.end(), startB);
+    thrust::fill(c.begin(), c.end(), startC);
+
+    auto duration = Benchmark::template run<T>(a, b, c);
+    state.SetIterationTime(duration);
+    gpu_times.push_back(duration);
+  }
+  size_t transfers_per_item = Benchmark::reads_per_item + Benchmark::writes_per_item;
+  state.SetBytesProcessed(state.iterations() * n * sizeof(T) * transfers_per_item);
+  state.SetItemsProcessed(state.iterations() * n);
+
+  const double gpu_cv         = bench_utils::StatisticsCV(gpu_times);
+  state.counters["gpu_noise"] = gpu_cv;
+}
+
+#define CREATE_BABELSTREAM_BENCHMARK(T, Elements, Benchmark)                                             \
+  benchmark::RegisterBenchmark(                                                                          \
+    bench_utils::bench_naming::format_name(                                                              \
+      "{algo:transform,subalgo:" + name + "." + #Benchmark + ",input_type:" #T + ",elements:" #Elements) \
+      .c_str(),                                                                                          \
+    run_babelstream<Benchmark, T>,                                                                       \
+    Elements)
+
+// clang-format off
+#define BENCHMARK_BABELSTREAM_TYPE(type)              \
+  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, mul),   \
+  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, add),   \
+  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, triad), \
+  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, nstream), \
+  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, nstream_stable)
+// clang-format on
+
+void add_benchmarks(const std::string& name, std::vector<benchmark::internal::Benchmark*>& benchmarks)
+{
+  std::vector<benchmark::internal::Benchmark*> bs = {
+    BENCHMARK_BABELSTREAM_TYPE(int8_t),
+    BENCHMARK_BABELSTREAM_TYPE(int16_t),
+    BENCHMARK_BABELSTREAM_TYPE(float),
+    BENCHMARK_BABELSTREAM_TYPE(double)
+#if THRUST_BENCHMARKS_HAVE_INT128_SUPPORT
+      ,
+    BENCHMARK_BABELSTREAM_TYPE(int128_t)
+#endif
+  };
+
+  benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
+}
+#undef CREATE_BABELSTREAM_BENCHMARK
+#undef BENCHMARK_BABELSTREAM_TYPE
+}; // namespace babelstream
 
 int main(int argc, char* argv[])
 {

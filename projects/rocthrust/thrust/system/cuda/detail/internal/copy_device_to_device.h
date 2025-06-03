@@ -1,4 +1,3 @@
-
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
  *
@@ -29,6 +28,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #ifdef _CCCL_CUDA_COMPILER
 #  include <thrust/system/cuda/config.h>
 
@@ -42,6 +49,10 @@
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub
 {
+// Need a forward declaration here to work around a cyclic include, since "cuda/detail/transform.h" includes this header
+template <class Derived, class InputIt, class OutputIt, class TransformOp>
+OutputIt THRUST_FUNCTION
+transform(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, TransformOp transform_op);
 
 namespace __copy
 {
