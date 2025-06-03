@@ -130,6 +130,7 @@ endfunction()
 
 # rocThrust tests
 if(BUILD_TEST)
+    add_rocthrust_test("address_stability")
     add_rocthrust_test("adjacent_difference")
     add_rocthrust_test("advance")
     add_rocthrust_test("alignment")
