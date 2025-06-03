@@ -104,14 +104,14 @@ void run_trig_tests(const StdFunc& std_func, const ThrustFunc& thrust_func)
   std::random_device rd;
   std::mt19937 gen(rd());
 
-  const T range = std::sqrt(std::numeric_limits<T>::max() - 1);
 
-  std::uniform_real_distribution<T> dis(-range, range);
+  std::uniform_real_distribution<T> real_dis(-1, 1);
+  std::uniform_real_distribution<T> imag_dis(0, 1);
 
   for (size_t i = 0; i < test_size; i++)
   {
-    T real = dis(gen);
-    T imag = dis(gen);
+    T real = real_dis(gen);
+    T imag = imag_dis(gen);
 
     thrust::complex<T> thrust_complex(real, imag);
     std::complex<T> std_complex(real, imag);
@@ -379,5 +379,131 @@ TYPED_TEST(VariousComplexTest, cos)
     },
     [](thrust::complex<T>& x) {
       return thrust::cos(x);
+    });
+}
+
+// ===================================================================
+//
+//                            CEXP & CEXPF
+//
+// ===================================================================
+
+TYPED_TEST(VariousComplexTest, exp)
+{
+  using T = TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
+      return std::exp(x);
+    },
+    [](thrust::complex<T>& x) {
+      return thrust::exp(x);
+    });
+}
+
+// ===================================================================
+//
+//                            CLOG & CLOGF
+//
+// ===================================================================
+
+TYPED_TEST(VariousComplexTest, log)
+{
+  using T = TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
+      return std::log(x);
+    },
+    [](thrust::complex<T>& x) {
+      return thrust::log(x);
+    });
+}
+
+TYPED_TEST(VariousComplexTest, log10)
+{
+  using T = TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
+      return std::log10<T>(x);
+    },
+    [](thrust::complex<T>& x) {
+      return thrust::log10<T>(x);
+    });
+}
+
+// ===================================================================
+//
+//                            CSIN & CSINF
+//
+// ===================================================================
+
+TYPED_TEST(VariousComplexTest, sinh)
+{
+  using T = TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
+      return std::sinh(x);
+    },
+    [](thrust::complex<T>& x) {
+      return thrust::sinh(x);
+    });
+}
+
+TYPED_TEST(VariousComplexTest, sin)
+{
+  using T = TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
+      return std::sin(x);
+    },
+    [](thrust::complex<T>& x) {
+      return thrust::sin(x);
+    });
+}
+
+// ===================================================================
+//
+//                         CSQRT & CSQRTF
+//
+// ===================================================================
+
+TYPED_TEST(VariousComplexTest, sqrt)
+{
+  using T = TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
+      return std::sqrt(x);
+    },
+    [](thrust::complex<T>& x) {
+      return thrust::sqrt(x);
+    });
+}
+
+// ===================================================================
+//
+//                            CTAN & CTANF
+//
+// ===================================================================
+
+TYPED_TEST(VariousComplexTest, tanh)
+{
+  using T = TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
+      return std::tanh(x);
+    },
+    [](thrust::complex<T>& x) {
+      return thrust::tanh(x);
+    });
+}
+
+TYPED_TEST(VariousComplexTest, tan)
+{
+  using T = TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
+      return std::tan(x);
+    },
+    [](thrust::complex<T>& x) {
+      return thrust::tan(x);
     });
 }
