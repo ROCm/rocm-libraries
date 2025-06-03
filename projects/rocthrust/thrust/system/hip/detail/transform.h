@@ -40,26 +40,28 @@
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #  include <thrust/distance.h>
+#  include <thrust/iterator/zip_iterator.h>
+#  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/parallel_for.h>
 #  include <thrust/system/hip/detail/util.h>
+#  include <thrust/zip_function.h>
+
+#  include <cstdint>
 
 THRUST_NAMESPACE_BEGIN
 
 namespace hip_rocprim
 {
-
 namespace __transform
 {
-
 struct no_stencil_tag
 {};
 
 struct always_true_predicate
 {
   template <class T>
-  bool THRUST_HIP_DEVICE_FUNCTION operator()(T const&) const
+  constexpr bool THRUST_HIP_DEVICE_FUNCTION operator()(T const&) const
   {
     return true;
   }
@@ -331,7 +333,6 @@ OutputIt THRUST_HIP_FUNCTION transform(
     transform_op,
     __transform::always_true_predicate());
 } // func transform
-
 } // namespace hip_rocprim
 
 THRUST_NAMESPACE_END
