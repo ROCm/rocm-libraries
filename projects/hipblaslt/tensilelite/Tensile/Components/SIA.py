@@ -21,7 +21,7 @@
 ################################################################################
 
 from rocisa import countInstruction, countGlobalRead, countLocalWrite, \
-                   countDSStoreB128, countVMovB32
+                   countDSStoreB192, countDSStoreB128, countVMovB32
 from rocisa.base import Item
 from rocisa.code import Module, TextBlock
 from rocisa.container import DSModifiers, HolderContainer, replaceHolder
@@ -760,7 +760,11 @@ def assignLWSchedIndexDefault(writer, kernel, numLocalWritesPerSched, localWrite
     return startIter
 
 def getReadsToWait(writer, kernel):
-    readsToWait = len(list(writer.codes.localWriteA.items())) + len(list(writer.codes.localWriteB.items()))
+    lwAcnt = len(list(writer.codes.localWriteA.items())) + \
+             countDSStoreB192(writer.codes.localWriteA)
+    lwBcnt = len(list(writer.codes.localWriteB.items())) + \
+             countDSStoreB192(writer.codes.localWriteB)
+    readsToWait = lwAcnt + lwBcnt
     readsToWaitNGLL = readsToWait
     return readsToWait, readsToWaitNGLL
 
@@ -904,7 +908,7 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                             itemGR = itemsGRToSchedLater[0]
                             readsInc = countGlobalRead(itemGR)
                             reads = reads + readsInc
-                            if reads > readCnt:
+                            if reads > readCnt * readsInc:
                                 break
                             if kernel["ExpertSchedulingMode"] > 0:
                                 imodList.append(SWaitAlu(vm_vsrc=0, comment="wait for local read to vgpr complete"))

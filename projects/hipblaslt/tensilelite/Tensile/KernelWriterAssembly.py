@@ -85,7 +85,7 @@ from Tensile.KernelWriter import KernelWriter, ABMatrixInfo
 from Tensile.SolutionStructs.Naming import getKernelFileBase
 from Tensile.Toolchain.Component import Assembler
 
-from math import ceil, log
+from math import ceil, floor, log
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -402,6 +402,10 @@ class KernelWriterAssembly(KernelWriter):
       valid = True
       if width < blockWidth:
         valid = False
+      
+      if ((width / blockWidth) != floor(width / blockWidth)):
+        valid = False
+
       if combine: # try to combine ops
         if numOffsets > 0: # if inst combines using offsets
           for stride in strides:
@@ -7179,6 +7183,10 @@ class KernelWriterAssembly(KernelWriter):
       elif (abbrev == 'bf8_fp8' and sourceSwap == False) or \
           (abbrev == 'fp8_bf8' and sourceSwap == True):
           return InstType.INST_BF8_F8
+      elif abbrev == 'fp6_fp6':
+        return InstType.INST_F6
+      elif abbrev == 'bf6_bf6':
+        return InstType.INST_BF6
       elif abbrev == 'fp4_fp4':
           return InstType.INST_F4
       else:
@@ -13386,6 +13394,21 @@ class KernelWriterAssembly(KernelWriter):
         elif bpl==16:
           rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
                                 soffset=soffset, mubuf=mubuf, comment=comment))
+          return rv
+        elif bpl==24:
+          # split into dwordx4 and dwordx2 loads. Second load offset is 16 bytes.
+          rv = Module("emulated _buffer_load_b192")
+          dst = None if lds else vgpr(destVgpr, 4)
+          rv.add(BufferLoadB128(dst=dst, vaddr=addr0, saddr=addr1, \
+                                soffset=soffset, mubuf=mubuf, comment=comment))
+          mubuf2 = MUBUFModifiers(offen=True, offset12=offset+16, glc=glc, slc=slc, nt=nt, lds=lds)
+          if isinstance(destVgpr, str):
+            dst2 = destVgpr + "+" + str(int(4))
+          elif isinstance(destVgpr, int):
+            dst2 = int(destVgpr + int(4))
+          dst = None if lds else vgpr(dst2, 2)
+          rv.add(BufferLoadB64(dst=dst, vaddr=addr0, saddr=addr1, \
+                                soffset=soffset, mubuf=mubuf2, comment=comment))
           return rv
         elif bpl==32:
           # split into two dwordx4 loads. Second load offset is +0.5 bpl

@@ -83,9 +83,19 @@ namespace rocisa
     }
 
     // Exact types
+    int countDSLoadB192(const std::shared_ptr<Item>& item)
+    {
+        return item->countExactType(typeid(DSLoadB192));
+    }
+
     int countDSStoreB128(const std::shared_ptr<Item>& item)
     {
         return item->countExactType(typeid(DSStoreB128));
+    }
+
+    int countDSStoreB192(const std::shared_ptr<Item>& item)
+    {
+        return item->countExactType(typeid(DSStoreB192));
     }
 
     int countDSStoreB256(const std::shared_ptr<Item>& item)
@@ -159,7 +169,9 @@ void init_count(nb::module_ m)
     m.def("countLocalRead", &rocisa::countLocalRead);
     m.def("countLocalWrite", &rocisa::countLocalWrite);
 
+    m.def("countDSLoadB192", &rocisa::countDSLoadB192);
     m.def("countDSStoreB128", &rocisa::countDSStoreB128);
+    m.def("countDSStoreB192", &rocisa::countDSStoreB192);
     m.def("countDSStoreB256", &rocisa::countDSStoreB256);
     m.def("countVMovB32", &rocisa::countVMovB32);
 

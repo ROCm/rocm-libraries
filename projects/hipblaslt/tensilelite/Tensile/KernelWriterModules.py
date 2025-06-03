@@ -79,8 +79,10 @@ def wait(states, kernel, tPA, tPB, skipGlobalRead, skipLocalWrite, \
               numM = tPM["nrp"]*tPM["nrc"]*max(tPM["nwcv"],tPM["nwpv"])//tPM["nwcvpi"]
             dscnt += skipLocalWrite * (numA + numB + numM)
         if skipLocalRead > -1:
-            numReadsPerIterA = 0 if kernel["DirectToVgprA"] else states.numReadsPerIterA
-            numReadsPerIterB = 0 if kernel["DirectToVgprB"] else states.numReadsPerIterB
+            numInstPerReadA  = 2 if (tPA["localReadInstruction"].blockWidth == 6) else 1
+            numInstPerReadB  = 2 if (tPB["localReadInstruction"].blockWidth == 6) else 1
+            numReadsPerIterA = 0 if kernel["DirectToVgprA"] else states.numReadsPerIterA * numInstPerReadA
+            numReadsPerIterB = 0 if kernel["DirectToVgprB"] else states.numReadsPerIterB * numInstPerReadB
             readsPerIter = numReadsPerIterA + numReadsPerIterB + states.numReadsPerIterMetadata
             dscnt += skipLocalRead * readsPerIter
 

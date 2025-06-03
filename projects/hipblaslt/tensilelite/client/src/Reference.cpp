@@ -367,6 +367,12 @@ namespace TensileLite
             case rocisa::DataType::BFloat8Float8:
             case rocisa::DataType::Float8BFloat8_fnuz:
             case rocisa::DataType::BFloat8Float8_fnuz:
+#ifdef TENSILE_USE_FP6
+            case rocisa::DataType::Float6:
+#endif // #ifdef TENSILE_USE_FP6
+#ifdef TENSILE_USE_BF6
+            case rocisa::DataType::BFloat6:
+#endif // #ifdef TENSILE_USE_BF6
 #ifdef TENSILE_USE_FP4
             case rocisa::DataType::Float4:
 #endif // #ifdef TENSILE_USE_FP4
@@ -481,6 +487,12 @@ namespace TensileLite
             case rocisa::DataType::BFloat8Float8:
             case rocisa::DataType::Float8BFloat8_fnuz:
             case rocisa::DataType::BFloat8Float8_fnuz:
+#ifdef TENSILE_USE_FP6
+            case rocisa::DataType::Float6:
+#endif // #ifdef TENSILE_USE_FP6
+#ifdef TENSILE_USE_BF6
+            case rocisa::DataType::BFloat6:
+#endif // #ifdef TENSILE_USE_BF6
 #ifdef TENSILE_USE_FP4
             case rocisa::DataType::Float4:
 #endif // #ifdef TENSILE_USE_FP4
@@ -532,6 +544,12 @@ namespace TensileLite
             case rocisa::DataType::BFloat8Float8:
             case rocisa::DataType::Float8BFloat8_fnuz:
             case rocisa::DataType::BFloat8Float8_fnuz:
+#ifdef TENSILE_USE_FP6
+            case rocisa::DataType::Float6:
+#endif // #ifdef TENSILE_USE_FP6
+#ifdef TENSILE_USE_BF6
+            case rocisa::DataType::BFloat6:
+#endif // #ifdef TENSILE_USE_BF6
 #ifdef TENSILE_USE_FP4
             case rocisa::DataType::Float4:
 #endif // #ifdef TENSILE_USE_FP4
@@ -1166,9 +1184,19 @@ namespace TensileLite
         }
 
         template<typename Inputs, typename Accumulator, typename MathOpAccum, typename AType, typename BType, typename ComputeInputType
+#if defined(TENSILE_USE_FP6) || defined(TENSILE_USE_BF6) || defined(TENSILE_USE_FP4)
+            , std::enable_if_t<true
+#ifdef TENSILE_USE_FP6
+                               && (!std::is_same<Float6x32, AType>::value && !std::is_same<Float6x32, BType>::value)
+#endif // #ifdef TENSILE_USE_FP6
+#ifdef TENSILE_USE_BF6
+                               && (!std::is_same<BFloat6x32, AType>::value && !std::is_same<BFloat6x32, BType>::value)
+#endif // #ifdef TENSILE_USE_BF6
 #ifdef TENSILE_USE_FP4
-            , std::enable_if_t<!std::is_same<Float4x2, AType>::value && !std::is_same<Float4x2, BType>::value, bool> = true
+                               && (!std::is_same<Float4x2, AType>::value && !std::is_same<Float4x2, BType>::value)
 #endif // #ifdef TENSILE_USE_FP4
+                               , bool> = true
+#endif // defined(TENSILE_USE_FP6) || defined(TENSILE_USE_BF6) || defined(TENSILE_USE_FP4)
         >
         Accumulator multiply(
             ContractionProblemGemm const& problem,
@@ -1289,9 +1317,19 @@ namespace TensileLite
             return value;
         }
 
-#ifdef TENSILE_USE_FP4
+#if defined(TENSILE_USE_FP6) || defined(TENSILE_USE_BF6) || defined(TENSILE_USE_FP4)
         template<typename Inputs, typename Accumulator, typename MathOpAccum, typename AType, typename BType, typename ComputeInputType,
-            std::enable_if_t<std::is_same<Float4x2, AType>::value && std::is_same<Float4x2, BType>::value, bool> = true>
+            std::enable_if_t<false
+#ifdef TENSILE_USE_FP6
+                             || (std::is_same<Float6x32, AType>::value && std::is_same<Float6x32, BType>::value)
+#endif // #ifdef TENSILE_USE_FP6
+#ifdef TENSILE_USE_BF6
+                             || (std::is_same<BFloat6x32, AType>::value && std::is_same<BFloat6x32, BType>::value)
+#endif // #ifdef TENSILE_USE_BF6
+#ifdef TENSILE_USE_FP4
+                             || (std::is_same<Float4x2, AType>::value && std::is_same<Float4x2, BType>::value)
+#endif // #ifdef TENSILE_USE_FP4
+                             , bool> = true>
         Accumulator multiply(
             ContractionProblemGemm const& problem,
             ContractionInputs const&      inputs,
@@ -1312,7 +1350,7 @@ namespace TensileLite
 
             return multiply<Accumulator, MathOpAccum>(aVal, bVal);
         }
-#endif // #ifdef TENSILE_USE_FP4
+#endif // #if defined(TENSILE_USE_FP6) || defined(TENSILE_USE_BF6) || defined(TENSILE_USE_FP4)
 
         template <typename Inputs, typename Accumulator, typename MathOpAccum>
         void ReferenceSolution<Inputs, Accumulator, MathOpAccum>::SolveCPU(
@@ -2275,6 +2313,20 @@ namespace TensileLite
 #endif // TENSILE_USE_HALF
 #endif // TENSILE_USE_FP8_BF8
 
+#ifdef TENSILE_USE_FP6
+            case TypedGemm_F6_S_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6_S_S>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+#endif //TENSILE_USE_FP6
+#ifdef TENSILE_USE_BF6
+            case TypedGemm_BF6_S_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_BF6_S_S>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+#endif //TENSILE_USE_BF6
 #ifdef TENSILE_USE_FP4
             case TypedGemm_F4_S_S::TypeId():
             {

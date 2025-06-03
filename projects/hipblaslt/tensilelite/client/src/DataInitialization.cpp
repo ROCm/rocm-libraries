@@ -1792,6 +1792,12 @@ namespace TensileLite
                     case rocisa::DataType::BFloat8_fnuz:
                         prop.value = getValue<BFloat8_fnuz>(prop.init, prop.freeValue);
                         break;
+#ifdef TENSILE_USE_FP6
+                    case rocisa::DataType::Float6:
+#endif // #ifdef TENSILE_USE_FP6
+#ifdef TENSILE_USE_BF6
+                    case rocisa::DataType::BFloat6:
+#endif // #ifdef TENSILE_USE_BF6
 #ifdef TENSILE_USE_FP4
                     case rocisa::DataType::Float4:
 #endif // #ifdef TENSILE_USE_FP4

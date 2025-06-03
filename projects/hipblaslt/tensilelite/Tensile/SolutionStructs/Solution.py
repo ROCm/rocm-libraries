@@ -1259,6 +1259,7 @@ class Solution(collections.abc.Mapping):
               or state["ProblemType"]["DataType"].isComplex() \
               or state["ProblemType"]["DataType"].is8bitFloat() \
               or state["ProblemType"]["DataType"].isInt8() \
+              or state["ProblemType"]["DataType"].is6bitFloat() \
               or state["ProblemType"]["DataType"].isFloat4()):
         reject(state, printRejectionReason, "didn't support Matrix Instruction with type %s" % str(state["ProblemType"]["DataType"]))
         return
@@ -1891,20 +1892,22 @@ class Solution(collections.abc.Mapping):
       return 2
 
     state["ExpertSchedulingMode"] = evaluateExpertSchedulingMode()
-    # Some restrictions for float4:
-    # TODO: remove this if edge and tail are supported for fp4
-    if isa[:2] == (12, 5) and state["KernelLanguage"] == "Assembly" and state["ProblemType"]["DataType"].isFloat4():
+    # Some restrictions for float4 and 6bitFloat:
+    # TODO: remove this if edge and tail are supported for fp4/fp6/bf6
+    if isa[:2] == (12, 5) and state["KernelLanguage"] == "Assembly" \
+      and (state["ProblemType"]["DataType"].isFloat4() or state["ProblemType"]["DataType"].is6bitFloat()):
       state["AssertFree0ElementMultiple"] = 16
       state["AssertFree1ElementMultiple"] = 16
       state["AssertSummationElementMultiple"] = state["DepthU"]
 
-      if not state["enableLDSTrA"] and not state["UnrollMajorLDSA"]:
-        reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSA == False")
-        return
+      if state["ProblemType"]["DataType"].isFloat4():
+        if not state["enableLDSTrA"] and not state["UnrollMajorLDSA"]:
+          reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSA == False")
+          return
 
-      if not state["enableLDSTrB"] and not state["UnrollMajorLDSB"]:
-        reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSB == False")
-        return
+        if not state["enableLDSTrB"] and not state["UnrollMajorLDSB"]:
+          reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSB == False")
+          return
 
     # We have the real "1LDSBuffer" value now, so we have to test the rejection condition here
     # TODO-
@@ -1997,8 +2000,8 @@ class Solution(collections.abc.Mapping):
           else:
             optPadA //= 2
             readRegsA //= 2
-        if (not isaInfoMap[isa].asmCaps['HasWMMA']) and (readRegsA > 4 or readRegsB > 4):
-          reject(state, "LocalReadVectorWidth results in attemping to read LDS larger than b128, reject")
+        if (not isaInfoMap[isa].asmCaps['HasWMMA']) and (readRegsA > 6 or readRegsB > 6):
+          reject(state, "LocalReadVectorWidth results in attemping to read LDS larger than b192, reject")
           return ldsPadA, ldsPadB, ldsPadM
         if state["EnableMatrixInstruction"]:
           # for readRegs = 1 or 4, we need to double pad for MI16x16xNx1 to avoid bank conflict.
@@ -2222,6 +2225,9 @@ class Solution(collections.abc.Mapping):
       if state["EnableMatrixInstruction"]:
         autoLRVW = False
         maxLRVW = int(Solution.MAX_NUM_DS_LOAD_BYTES // state["ProblemType"]["DataType"].numBytes())
+        # Set maxLRVW to 32 for 6 bits float: use two load instructions b128(4 vgpr) and b64(2 vgpr) to mimic b192
+        if isaInfoMap[isa].asmCaps["HasWMMA_f8f6f4"] and state["ProblemType"]["DataType"].numBytes() == 0.75:
+          maxLRVW = 32
         if state["LocalReadVectorWidth"] == -1:
           autoLRVW = True
           maxLRVW = int(Solution.MAX_NUM_DS_LOAD_BYTES // state["ProblemType"]["DataType"].numBytes())
@@ -2409,10 +2415,10 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "VWB * DataType.numBytes() > 16")
 
       # reject - GRVW too big
-      if (state["GlobalReadVectorWidthA"] * state["ProblemType"]["DataTypeA"].numBytes()) > 16:
-        reject(state, printRejectionReason, "GRVWA * DataTypeA.numBytes() > 16")
-      if (state["GlobalReadVectorWidthB"] * state["ProblemType"]["DataTypeB"].numBytes()) > 16:
-        reject(state, printRejectionReason, "GRVWB * DataTypeB.numBytes() > 16")
+      if (state["GlobalReadVectorWidthA"] * state["ProblemType"]["DataTypeA"].numBytes()) > 24 and not state["UseF32XEmulation"]:
+        reject(state, printRejectionReason, "GRVWA * DataTypeA.numBytes() > 24")
+      if (state["GlobalReadVectorWidthB"] * state["ProblemType"]["DataTypeB"].numBytes()) > 24 and not state["UseF32XEmulation"]:
+        reject(state, printRejectionReason, "GRVWB * DataTypeB.numBytes() > 24")
 
       disableGNLC = False # Set to true to disable GNLC if needed
       if state["UseSgprForGRO"] == 1:
@@ -2900,7 +2906,7 @@ class Solution(collections.abc.Mapping):
     if state["AssertSummationElementMultiple"] % state["DepthU"] == 0:
       state["NoTailLoop"] = True
     # TODO: enable TailLoop
-    if state["ProblemType"]["DataType"].numBytes() == 0.5:
+    if state["ProblemType"]["DataType"].numBytes() == 0.5 or state["ProblemType"]["DataType"].numBytes() == 0.75:
       state["NoTailLoop"] = True
 
     # TailloopInNll optimization check

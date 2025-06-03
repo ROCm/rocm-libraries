@@ -61,6 +61,8 @@ void init_enum(nb::module_ m)
         .value("BFloat8", rocisa::DataType::BFloat8)
         .value("Float8BFloat8", rocisa::DataType::Float8BFloat8)
         .value("BFloat8Float8", rocisa::DataType::BFloat8Float8)
+        .value("Float6", rocisa::DataType::Float6)
+        .value("BFloat6", rocisa::DataType::BFloat6)
         .value("Float4", rocisa::DataType::Float4)
         .export_values();
 
@@ -71,6 +73,8 @@ void init_enum(nb::module_ m)
 
     nb::enum_<rocisa::InstType>(m_enum, "InstType")
         .value("INST_F4", rocisa::InstType::INST_F4)
+        .value("INST_F6", rocisa::InstType::INST_F6)
+        .value("INST_BF6", rocisa::InstType::INST_BF6)
         .value("INST_F8", rocisa::InstType::INST_F8)
         .value("INST_F16", rocisa::InstType::INST_F16)
         .value("INST_F32", rocisa::InstType::INST_F32)

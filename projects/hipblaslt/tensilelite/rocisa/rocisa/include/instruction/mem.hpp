@@ -999,6 +999,29 @@ namespace rocisa
         }
     };
 
+    struct BufferLoadB192 : public MUBUFReadInstruction
+    {
+        BufferLoadB192(const std::shared_ptr<RegisterContainer>& dst,
+                       const std::shared_ptr<RegisterContainer>& vaddr,
+                       const std::shared_ptr<RegisterContainer>& saddr,
+                       const InstructionInput&                   soffset,
+                       std::optional<MUBUFModifiers>             mubuf   = std::nullopt,
+                       const std::string&                        comment = "")
+            : MUBUFReadInstruction(InstType::INST_B192, dst, vaddr, saddr, soffset, mubuf, comment)
+        {
+        }
+
+        BufferLoadB192(const BufferLoadB192& other)
+            : MUBUFReadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<BufferLoadB192>(*this);
+        }
+    };
+
     struct FlatLoadD16HIU8 : public FLATReadInstruction
     {
         FlatLoadD16HIU8(const std::shared_ptr<RegisterContainer>& dst,
@@ -1187,6 +1210,27 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<GlobalLoadTR16B128>(*this);
+        }
+    };
+
+    struct FlatLoadB192 : public FLATReadInstruction
+    {
+        FlatLoadB192(const std::shared_ptr<RegisterContainer>& dst,
+                     const std::shared_ptr<RegisterContainer>& vaddr,
+                     std::optional<FLATModifiers>              flat    = std::nullopt,
+                     const std::string&                        comment = "")
+            : FLATReadInstruction(InstType::INST_B192, dst, vaddr, flat, comment)
+        {
+        }
+
+        FlatLoadB192(const FlatLoadB192& other)
+            : FLATReadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<FlatLoadB192>(*this);
         }
     };
 
@@ -1943,6 +1987,87 @@ namespace rocisa
         }
     };
 
+    struct DSLoadB192 : public DSLoadInstruction
+    {
+        DSLoadB192(const std::shared_ptr<RegisterContainer>& dst,
+                   const std::shared_ptr<RegisterContainer>& src,
+                   std::optional<DSModifiers>                ds      = std::nullopt,
+                   const std::string&                        comment = "")
+            : DSLoadInstruction(InstType::INST_B192, dst, src, ds, comment)
+        {
+            if(ds)
+                ds->na = 1;
+            setInst("ds_load_b192");
+        }
+
+        DSLoadB192(const DSLoadB192& other)
+            : DSLoadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<DSLoadB192>(*this);
+        }
+
+        static int issueLatency()
+        {
+            return 3;
+        }
+
+        std::string getArgStr2(bool upper = false) const
+        {
+            auto dstCopy = RegisterContainer(*dynamic_cast<RegisterContainer*>(dst.get()));
+            int  regNum  = 4;
+            if(upper)
+            {
+                int idx                       = dstCopy.regName->offsets.size() - 1;
+                dstCopy.regName->offsets[idx] = dstCopy.regName->offsets[idx] + regNum;
+                dstCopy.regNum = 2;
+            } else {
+                dstCopy.regNum = 4;
+            }
+            return dstCopy.toString() + ", " + srcs->toString();
+        }
+
+        std::string toString() const override
+        {
+            std::string instStr = "ds_load_b128";
+            if(kernel().isaVersion[0] < 11)
+            {
+                instStr = "ds_read_b128";
+            }
+            std::string kStr = instStr + " " + getArgStr2();
+            if(ds)
+                kStr += ds->toString();
+
+            instStr = "ds_load_b64";
+            if(kernel().isaVersion[0] < 11)
+            {
+                instStr = "ds_read_b64";
+            }
+            std::string kStr2 = instStr + " " + getArgStr2(true);
+            auto dsCopy = ds ? std::make_shared<DSModifiers>(*ds) : std::make_shared<DSModifiers>();
+            dsCopy->offset += 16;
+            kStr2 += dsCopy->toString();
+            kStr = formatWithComment(kStr);
+            kStr2 = formatWithComment(kStr2);
+            // TODO: refactor this
+            auto dstCopy = RegisterContainer(*dynamic_cast<RegisterContainer*>(dst.get()));
+            auto dstCopyPtr = std::make_shared<RegisterContainer>(dstCopy);
+            int regNum = 4;
+            dstCopyPtr->regNum = regNum;
+            dstCopyPtr->toString();
+            setMsb(kStr, {srcs}, dstCopyPtr);
+            int idx                       = dstCopyPtr->regName->offsets.size() - 1;
+            dstCopyPtr->regName->offsets[idx] = dstCopyPtr->regName->offsets[idx] + regNum;
+            dstCopyPtr->regNum = 2;
+            dstCopyPtr->toString();
+            setMsb(kStr2, {srcs}, dstCopyPtr);
+            return kStr + kStr2;
+        }
+    };
+
     struct DSLoad2B32 : public DSLoadInstruction
     {
         DSLoad2B32(const std::shared_ptr<RegisterContainer>& dst,
@@ -2220,6 +2345,87 @@ namespace rocisa
         int getIssueLatency() const override
         {
             return issueLatency();
+        }
+    };
+
+    struct DSStoreB192 : public DSStoreInstruction
+    {
+        DSStoreB192(const std::shared_ptr<RegisterContainer>& dstAddr,
+                    const std::shared_ptr<RegisterContainer>& src,
+                    std::optional<DSModifiers>                ds      = std::nullopt,
+                    const std::string&                        comment = "")
+            : DSStoreInstruction(InstType::INST_B192, dstAddr, src, nullptr, ds, comment)
+        {
+            if(ds)
+                ds->na = 1;
+            setInst("ds_store_b192");
+        }
+
+        DSStoreB192(const DSStoreB192& other)
+            : DSStoreInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<DSStoreB192>(*this);
+        }
+
+        static int issueLatency()
+        {
+            return 8;
+        }
+
+        std::string getArgStr2(bool upper = false) const
+        {
+            auto srcCopy = RegisterContainer(*dynamic_cast<RegisterContainer*>(src0.get()));
+            int  regNum  = 4;
+            if(upper)
+            {
+                int idx                       = srcCopy.regName->offsets.size() - 1;
+                srcCopy.regName->offsets[idx] = srcCopy.regName->offsets[idx] + regNum;
+                srcCopy.regNum = 2;
+            } else {
+                srcCopy.regNum = 4;
+            }
+            return dstAddr->toString() + ", " + srcCopy.toString();
+        }
+
+        std::string toString() const override
+        {
+            std::string instStr = "ds_store_b128";
+            if(kernel().isaVersion[0] < 11)
+            {
+                instStr = "ds_write_b128";
+            }
+            std::string kStr = instStr + " " + getArgStr2();
+            if(ds)
+                kStr += ds->toString();
+
+            instStr = "ds_store_b64";
+            if(kernel().isaVersion[0] < 11)
+            {
+                instStr = "ds_write_b64";
+            }
+            std::string kStr2 = instStr + " " + getArgStr2(true);
+            auto dsCopy = ds ? std::make_shared<DSModifiers>(*ds) : std::make_shared<DSModifiers>();
+            dsCopy->offset += 16;
+            kStr2 += dsCopy->toString();
+            kStr = formatWithComment(kStr);
+            kStr2 = formatWithComment(kStr2);
+            // TODO: refactor this
+            auto srcCopy = RegisterContainer(*dynamic_cast<RegisterContainer*>(src0.get()));
+            auto srcCopyPtr = std::make_shared<RegisterContainer>(srcCopy);
+            int regNum = 4;
+            srcCopyPtr->regNum = regNum;
+            srcCopyPtr->toString();
+            setMsb(kStr, {dstAddr, srcCopyPtr}, nullptr);
+            int idx                       = srcCopyPtr->regName->offsets.size() - 1;
+            srcCopyPtr->regName->offsets[idx] = srcCopyPtr->regName->offsets[idx] + regNum;
+            srcCopyPtr->regNum = 2;
+            srcCopyPtr->toString();
+            setMsb(kStr2, {dstAddr, srcCopyPtr}, nullptr);
+            return kStr + kStr2;
         }
     };
 

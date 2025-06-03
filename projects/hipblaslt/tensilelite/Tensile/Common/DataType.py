@@ -220,6 +220,24 @@ class DataType:
             'isComplex': False,
         },
         {
+            'enum': DataTypeEnum.Float6,
+            'char': 'F6',
+            'nameAbbrev': 'fp6_fp6',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.1875,
+            'hip': 'tensile_float6x32',
+            'isComplex': False
+        },
+        {
+            'enum': DataTypeEnum.BFloat6,
+            'char': 'B6',
+            'nameAbbrev': 'bf6_bf6',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.1875,
+            'hip': 'tensile_bfloat6x32',
+            'isComplex': False
+        },
+        {
             'enum': DataTypeEnum.Float4,
             'char': 'F4',
             'nameAbbrev': 'fp4_fp4',
@@ -388,6 +406,13 @@ class DataType:
                 or self.value == DataTypeEnum.Float8BFloat8.value \
                 or self.value == DataTypeEnum.BFloat8_fnuz.value \
                 or self.value == DataTypeEnum.Float8BFloat8_fnuz.value)
+    def is6bitFloat(self):
+        return (self.value == DataTypeEnum.Float6.value \
+                or self.value == DataTypeEnum.BFloat6.value)
+    def isFloat6(self):
+        return self.value == DataTypeEnum.Float6.value
+    def isBFloat6(self):
+        return self.value == DataTypeEnum.BFloat6.value
     def isFloat4(self):
         return self.value == DataTypeEnum.Float4.value
     def isNone(self):

@@ -161,6 +161,10 @@ namespace rocisa
                 return is_wmma_v3 ? "fp8_bf8" : (variant[2] > 32 ? "f8f6f4" : "fp8_bf8");
             case InstType::INST_BF8_F8:
                 return is_wmma_v3 ? "bf8_fp8" : (variant[2] > 32 ? "f8f6f4" : "bf8_fp8");
+            case InstType::INST_F6:
+                return "f8f6f4";
+            case InstType::INST_BF6:
+                return "f8f6f4";
             case InstType::INST_F4:
                 return "f8f6f4";
             default:
@@ -235,6 +239,12 @@ namespace rocisa
                 {
                 case InstType::INST_F8:
                     inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP8" : "";
+                    break;
+                case InstType::INST_F6:
+                    inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP6 matrix_b_fmt:MATRIX_FMT_FP6" : "";
+                    break;
+                case InstType::INST_BF6:
+                    inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_BF6 matrix_b_fmt:MATRIX_FMT_BF6" : "";
                     break;
                 case InstType::INST_F4:
                     inputPermuteStr = variant[2] > 64 ? " matrix_a_fmt:MATRIX_FMT_FP4 matrix_b_fmt:MATRIX_FMT_FP4" : "";
