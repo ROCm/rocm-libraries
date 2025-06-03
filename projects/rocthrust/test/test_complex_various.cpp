@@ -22,33 +22,41 @@
 
 #include "test_header.hpp"
 
-#define CHECK_CORRECT(std_complex, thrust_complex, real_eps, imag_eps)  \
-  do                                                                    \
-  {                                                                     \
-    if (std::isinf(std_complex.real()))                                 \
-    {                                                                   \
-      ASSERT_TRUE(std::isinf(thrust_complex.real()));                   \
-    }                                                                   \
-    else if (std::isnan(std_complex.real()))                            \
-    {                                                                   \
-      ASSERT_TRUE(std::isnan(thrust_complex.real()));                   \
-    }                                                                   \
-    else                                                                \
-    {                                                                   \
-      ASSERT_NEAR(std_complex.real(), thrust_complex.real(), real_eps); \
-    }                                                                   \
-    if (std::isinf(std_complex.imag()))                                 \
-    {                                                                   \
-      ASSERT_TRUE(std::isinf(thrust_complex.imag()));                   \
-    }                                                                   \
-    else if (std::isnan(std_complex.imag()))                            \
-    {                                                                   \
-      ASSERT_TRUE(std::isnan(thrust_complex.imag()));                   \
-    }                                                                   \
-    else                                                                \
-    {                                                                   \
-      ASSERT_NEAR(std_complex.imag(), thrust_complex.imag(), imag_eps); \
-    }                                                                   \
+#define CHECK_CORRECT(std_complex, thrust_complex, real_eps, imag_eps, real_val, imag_val)                   \
+  do                                                                                                         \
+  {                                                                                                          \
+    SCOPED_TRACE(                                                                                            \
+      testing::Message()                                                                                     \
+      << std::endl                                                                                           \
+      << "Input Real Value: " << real_val << " Input Imaginary Value: " << imag_val << std::endl             \
+      << "Std Output Real Value: " << std_complex.real() << " Std Output Imag Value: " << std_complex.imag() \
+      << std::endl                                                                                           \
+      << "Thrust Output Real Value: " << thrust_complex.real()                                               \
+      << " Thrust Output Imag Value: " << thrust_complex.imag() << std::endl);                               \
+    if (std::isinf(std_complex.real()))                                                                      \
+    {                                                                                                        \
+      ASSERT_TRUE(std::isinf(thrust_complex.real()));                                                        \
+    }                                                                                                        \
+    else if (std::isnan(std_complex.real()))                                                                 \
+    {                                                                                                        \
+      ASSERT_TRUE(std::isnan(thrust_complex.real()));                                                        \
+    }                                                                                                        \
+    else                                                                                                     \
+    {                                                                                                        \
+      ASSERT_NEAR(std_complex.real(), thrust_complex.real(), real_eps);                                      \
+    }                                                                                                        \
+    if (std::isinf(std_complex.imag()))                                                                      \
+    {                                                                                                        \
+      ASSERT_TRUE(std::isinf(thrust_complex.imag()));                                                        \
+    }                                                                                                        \
+    else if (std::isnan(std_complex.imag()))                                                                 \
+    {                                                                                                        \
+      ASSERT_TRUE(std::isnan(thrust_complex.imag()));                                                        \
+    }                                                                                                        \
+    else                                                                                                     \
+    {                                                                                                        \
+      ASSERT_NEAR(std_complex.imag(), thrust_complex.imag(), imag_eps);                                      \
+    }                                                                                                        \
   } while (0)
 
 // This test suite aims to test vairous different implementations
@@ -57,7 +65,7 @@
 using FloatDouble = ::testing::Types<float, double>;
 
 template <class Type>
-class c99MathTest : public ::testing::Test
+class VariousComplexTest : public ::testing::Test
 {
 public:
   using T = Type;
@@ -89,29 +97,32 @@ void run_rng_test(const StdFunc& sf, const ThrustFunc& tf)
 }
 
 template <typename T, class StdFunc, class ThrustFunc>
-void run_trig_tests(const StdFunc& std_func, const ThrustFunc& thrust_func, const T mini = -1e5, T maxi = 1e5)
+void run_trig_tests(const StdFunc& std_func, const ThrustFunc& thrust_func)
 {
   constexpr size_t test_size = 100000;
 
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_real_distribution <T> dis(mini, maxi);
+
+  const T range = std::sqrt(std::numeric_limits<T>::max() - 1);
+
+  std::uniform_real_distribution<T> dis(-range, range);
 
   for (size_t i = 0; i < test_size; i++)
   {
     T real = dis(gen);
     T imag = dis(gen);
 
-    thrust::complex <T> thrust_complex(real, imag);
-    std::complex <T> std_complex(real, imag);
+    thrust::complex<T> thrust_complex(real, imag);
+    std::complex<T> std_complex(real, imag);
 
-    thrust::complex <T> thrust_out = thrust_func(thrust_complex);
-    std::complex <T> std_out       = std_func(std_complex);
+    thrust::complex<T> thrust_out = thrust_func(thrust_complex);
+    std::complex<T> std_out       = std_func(std_complex);
 
     T real_eps = (std::abs(std_out.real()) < 0.05) ? 1e-1 : std::abs(std_out.real() * 0.01);
     T imag_eps = (std::abs(std_out.imag()) < 0.05) ? 1e-1 : std::abs(std_out.imag() * 0.01);
 
-    CHECK_CORRECT(std_out, thrust_out, real_eps, imag_eps);
+    CHECK_CORRECT(std_out, thrust_out, real_eps, imag_eps, real, imag);
   }
 }
 
@@ -121,8 +132,8 @@ void run_trig_tests(const StdFunc& std_func, const ThrustFunc& thrust_func, cons
 //
 // ===================================================================
 
-TYPED_TEST_SUITE(c99MathTest, FloatDouble);
-TYPED_TEST(c99MathTest, getInf)
+TYPED_TEST_SUITE(VariousComplexTest, FloatDouble);
+TYPED_TEST(VariousComplexTest, getInf)
 {
   using T = TestFixture::T;
 
@@ -132,7 +143,7 @@ TYPED_TEST(c99MathTest, getInf)
 
 #if defined _MSC_VER
 
-TYPED_TEST(c99MathTest, isinf)
+TYPED_TEST(VariousComplexTest, isinf)
 {
   using T = TestFixture::T;
   T inf   = thrust::detail::complex::infinity<T>();
@@ -147,7 +158,7 @@ TYPED_TEST(c99MathTest, isinf)
     });
 }
 
-TYPED_TEST(c99MathTest, isnan)
+TYPED_TEST(VariousComplexTest, isnan)
 {
   using T = TestFixture::T;
   T nan   = std::numeric_limits<T>::quiet_NaN();
@@ -162,7 +173,7 @@ TYPED_TEST(c99MathTest, isnan)
     });
 }
 
-TYPED_TEST(c99MathTest, signbit)
+TYPED_TEST(VariousComplexTest, signbit)
 {
   using T = TestFixture::T;
   run_rng_test<T, true>(
@@ -174,7 +185,7 @@ TYPED_TEST(c99MathTest, signbit)
     });
 }
 
-TYPED_TEST(c99MathTest, isfinite)
+TYPED_TEST(VariousComplexTest, isfinite)
 {
   using T = TestFixture::T;
   run_rng_test<T, true>(
@@ -186,7 +197,7 @@ TYPED_TEST(c99MathTest, isfinite)
     });
 }
 
-TEST(c99MathTest, copysign)
+TEST(VariousComplexTest, copysign)
 {
   run_rng_test<double, false>(
     [](const double& x, const double& y) {
@@ -197,7 +208,7 @@ TEST(c99MathTest, copysign)
     });
 }
 
-TEST(c99MathTest, copysignf)
+TEST(VariousComplexTest, copysignf)
 {
   run_rng_test<float, false>(
     [](const float x, const float y) {
@@ -210,7 +221,7 @@ TEST(c99MathTest, copysignf)
 
 #  if !defined(__CUDACC__) && !defined(_NVHPC_CUDA)
 
-TYPED_TEST(c99MathTest, log1p)
+TYPED_TEST(VariousComplexTest, log1p)
 {
   using T = TestFixture::T;
   run_rng_test<T>(
@@ -222,7 +233,7 @@ TYPED_TEST(c99MathTest, log1p)
     });
 }
 
-TYPED_TEST(c99MathTest, log1pf)
+TYPED_TEST(VariousComplexTest, log1pf)
 {
   using T = TestFixture::T;
   run_rng_test<T>(
@@ -237,7 +248,7 @@ TYPED_TEST(c99MathTest, log1pf)
 
 #  if _MSC_VER <= 1500 && !defined(__clang__)
 
-TEST(c99MathTest, hypot)
+TEST(VariousComplexTest, hypot)
 {
   run_rng_test<double, false>(
     [](const double& x, const double& y) {
@@ -248,7 +259,7 @@ TEST(c99MathTest, hypot)
     });
 }
 
-TEST(c99MathTest, hypotf)
+TEST(VariousComplexTest, hypotf)
 {
   run_rng_test<float, false>(
     [](const float& x, const float& y) {
@@ -265,300 +276,108 @@ TEST(c99MathTest, hypotf)
 
 // ===================================================================
 //
-//                             CATRIG
+//                          CATRIG & CATRIGF
 //
 // ===================================================================
 
-TEST(catrigTest, asinh_small_range)
+TYPED_TEST(VariousComplexTest, asinh)
 {
-  run_trig_tests<double>(
-    [](std::complex<double>& x) {
+  using T = TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
       return std::asinh(x);
     },
-    [](thrust::complex<double>& x) {
+    [](thrust::complex<T>& x) {
       return thrust::asinh(x);
     });
 }
 
-TEST(catrigTest, asin_small_range)
+TYPED_TEST(VariousComplexTest, asin)
 {
-  run_trig_tests<double>(
-    [](std::complex<double>& x) {
+  using T = TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
       return std::asin(x);
     },
-    [](thrust::complex<double>& x) {
+    [](thrust::complex<T>& x) {
       return thrust::asin(x);
     });
 }
 
-TEST(catrigTest, acos_small_range)
+TYPED_TEST(VariousComplexTest, acosh)
 {
-  run_trig_tests<double>(
-    [](std::complex<double>& x) {
-      return std::acos(x);
-    },
-    [](thrust::complex<double>& x) {
-      return thrust::acos(x);
-    });
-}
-
-TEST(catrigTest, acosh_small_range)
-{
-  run_trig_tests<double>(
-    [](std::complex<double>& x) {
+  using T = TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
       return std::acosh(x);
     },
-    [](thrust::complex<double>& x) {
+    [](thrust::complex<T>& x) {
       return thrust::acosh(x);
     });
 }
 
-TEST(catrigTest, atan_small_range)
+TYPED_TEST(VariousComplexTest, acos)
 {
-  run_trig_tests<double>(
-    [](std::complex<double>& x) {
-      return std::atan(x);
-    },
-    [](thrust::complex<double>& x) {
-      return thrust::atan(x);
-    });
-}
-
-TEST(catrigTest, atanh_small_range)
-{
-  run_trig_tests<double>(
-    [](std::complex<double>& x) {
-      return std::atanh(x);
-    },
-    [](thrust::complex<double>& x) {
-      return thrust::atanh(x);
-    });
-}
-
-TEST(catrigTest, asinh_large_range)
-{
-  run_trig_tests<double>(
-    [](std::complex<double>& x) {
-      return std::asinh(x);
-    },
-    [](thrust::complex<double>& x) {
-      return thrust::asinh(x);
-    },
-    std::numeric_limits<double>::min(),
-    std::numeric_limits<double>::max());
-}
-
-TEST(catrigTest, asin_large_range)
-{
-  run_trig_tests<double>(
-    [](std::complex<double>& x) {
-      return std::asin(x);
-    },
-    [](thrust::complex<double>& x) {
-      return thrust::asin(x);
-    },
-    std::numeric_limits<double>::min(),
-    std::numeric_limits<double>::max());
-}
-
-TEST(catrigTest, acos_large_range)
-{
-  run_trig_tests<double>(
-    [](std::complex<double>& x) {
+  using T = TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
       return std::acos(x);
     },
-    [](thrust::complex<double>& x) {
+    [](thrust::complex<T>& x) {
       return thrust::acos(x);
-    },
-    std::numeric_limits<double>::min(),
-    std::numeric_limits<double>::max());
+    });
 }
 
-TEST(catrigTest, acosh_large_range)
+TYPED_TEST(VariousComplexTest, atanh)
 {
-  run_trig_tests<double>(
-    [](std::complex<double>& x) {
-      return std::acosh(x);
-    },
-    [](thrust::complex<double>& x) {
-      return thrust::acosh(x);
-    },
-    std::numeric_limits<double>::min(),
-    std::numeric_limits<double>::max());
-}
-
-TEST(catrigTest, atan_large_range)
-{
-  run_trig_tests<double>(
-    [](std::complex<double>& x) {
-      return std::atan(x);
-    },
-    [](thrust::complex<double>& x) {
-      return thrust::atan(x);
-    },
-    std::numeric_limits<double>::min(),
-    std::numeric_limits<double>::max());
-}
-
-TEST(catrigTest, atanh_large_range)
-{
-  run_trig_tests<double>(
-    [](std::complex<double>& x) {
+  using T = TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
       return std::atanh(x);
     },
-    [](thrust::complex<double>& x) {
+    [](thrust::complex<T>& x) {
       return thrust::atanh(x);
+    });
+}
+
+TYPED_TEST(VariousComplexTest, atan)
+{
+  using T = TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
+      return std::atan(x);
     },
-    std::numeric_limits<double>::min(),
-    std::numeric_limits<double>::max());
+    [](thrust::complex<T>& x) {
+      return thrust::atan(x);
+    });
 }
 
 // ===================================================================
 //
-//                            CATRIGF
+//                            CCOSH & CCOSHF
 //
 // ===================================================================
 
-TEST(catrigTest, asinhf_small_range)
+TYPED_TEST(VariousComplexTest, cosh)
 {
-  run_trig_tests<float>(
-    [](std::complex<float>& x) {
-      return std::asinh(x);
+  using T = TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
+      return std::cosh(x);
     },
-    [](thrust::complex<float>& x) {
-      return thrust::asinh(x);
+    [](thrust::complex<T>& x) {
+      return thrust::cosh(x);
     });
 }
 
-TEST(catrigTest, asinf_small_range)
+TYPED_TEST(VariousComplexTest, cos)
 {
-  run_trig_tests<float>(
-    [](std::complex<float>& x) {
-      return std::asin(x);
+  using T = TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
+      return std::cos(x);
     },
-    [](thrust::complex<float>& x) {
-      return thrust::asin(x);
+    [](thrust::complex<T>& x) {
+      return thrust::cos(x);
     });
-}
-
-TEST(catrigTest, acosf_small_range)
-{
-  run_trig_tests<float>(
-    [](std::complex<float>& x) {
-      return std::acos(x);
-    },
-    [](thrust::complex<float>& x) {
-      return thrust::acos(x);
-    });
-}
-
-TEST(catrigTest, acoshf_small_range)
-{
-  run_trig_tests<float>(
-    [](std::complex<float>& x) {
-      return std::acosh(x);
-    },
-    [](thrust::complex<float>& x) {
-      return thrust::acosh(x);
-    });
-}
-
-TEST(catrigTest, atanf_small_range)
-{
-  run_trig_tests<float>(
-    [](std::complex<float>& x) {
-      return std::atan(x);
-    },
-    [](thrust::complex<float>& x) {
-      return thrust::atan(x);
-    });
-}
-
-TEST(catrigTest, atanhf_small_range)
-{
-  run_trig_tests<float>(
-    [](std::complex<float>& x) {
-      return std::atanh(x);
-    },
-    [](thrust::complex<float>& x) {
-      return thrust::atanh(x);
-    });
-}
-
-TEST(catrigTest, asinhf_large_range)
-{
-  run_trig_tests<float>(
-    [](std::complex<float>& x) {
-      return std::asinh(x);
-    },
-    [](thrust::complex<float>& x) {
-      return thrust::asinh(x);
-    },
-    std::numeric_limits<float>::min(),
-    std::numeric_limits<float>::max());
-}
-
-TEST(catrigTest, asinf_large_range)
-{
-  run_trig_tests<float>(
-    [](std::complex<float>& x) {
-      return std::asin(x);
-    },
-    [](thrust::complex<float>& x) {
-      return thrust::asin(x);
-    },
-    std::numeric_limits<float>::min(),
-    std::numeric_limits<float>::max());
-}
-
-TEST(catrigTest, acosf_large_range)
-{
-  run_trig_tests<float>(
-    [](std::complex<float>& x) {
-      return std::acos(x);
-    },
-    [](thrust::complex<float>& x) {
-      return thrust::acos(x);
-    },
-    std::numeric_limits<float>::min(),
-    std::numeric_limits<float>::max());
-}
-
-TEST(catrigTest, acoshf_large_range)
-{
-  run_trig_tests<float>(
-    [](std::complex<float>& x) {
-      return std::acosh(x);
-    },
-    [](thrust::complex<float>& x) {
-      return thrust::acosh(x);
-    },
-    std::numeric_limits<float>::min(),
-    std::numeric_limits<float>::max());
-}
-
-TEST(catrigTest, atanf_large_range)
-{
-  run_trig_tests<float>(
-    [](std::complex<float>& x) {
-      return std::atan(x);
-    },
-    [](thrust::complex<float>& x) {
-      return thrust::atan(x);
-    },
-    std::numeric_limits<float>::min(),
-    std::numeric_limits<float>::max());
-}
-
-TEST(catrigTest, atanhf_large_range)
-{
-  run_trig_tests<float>(
-    [](std::complex<float>& x) {
-      return std::atanh(x);
-    },
-    [](thrust::complex<float>& x) {
-      return thrust::atanh(x);
-    },
-    std::numeric_limits<float>::min(),
-    std::numeric_limits<float>::max());
 }
