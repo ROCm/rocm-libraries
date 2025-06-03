@@ -425,7 +425,7 @@ void run_compound_tests(const StdComplexOp& standard_complex_operator,
   constexpr size_t test_it = 123456;
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_real_distribution<T> dis(-10000, 10000);
+  std::uniform_real_distribution<T> dis(std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
 
   for (size_t i = 0; i < test_it; i++)
   {
