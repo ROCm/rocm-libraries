@@ -168,32 +168,33 @@ else( )
   target_link_libraries( hipblas-test PRIVATE ${CUDA_LIBRARIES} )
 endif( )
 
-if (WIN32)
-# for now adding in all .dll as dependency chain is not cmake based on win32
-  file( GLOB third_party_dlls
-    LIST_DIRECTORIES OFF
-    CONFIGURE_DEPENDS
-    ${LAPACK_DIR}/bin/*.dll
-    ${BLIS_DIR}/lib/*.dll
-    ${OPENBLAS_DIR}/bin/*.dll
-    ${HIP_DIR}/bin/amd*.dll
-    ${HIP_DIR}/bin/hiprt*.dll
-    ${HIP_DIR}/bin/hipinfo.exe
-    ${ROCBLAS_PATH}/bin/rocblas*.dll
-    ${ROCSOLVER_PATH}/bin/rocsolver*.dll
-    ${CMAKE_SOURCE_DIR}/rtest.*
-    C:/Windows/System32/libomp140*.dll
-  )
-  foreach( file_i ${third_party_dlls})
-    add_custom_command( TARGET hipblas-test POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy ${file_i} ${PROJECT_BINARY_DIR}/staging/ )
-  endforeach( file_i )
+# TODO(https://github.com/ROCm/TheRock/issues/513): general solution for DLL handling
+# if (WIN32)
+# # for now adding in all .dll as dependency chain is not cmake based on win32
+#   file( GLOB third_party_dlls
+#     LIST_DIRECTORIES OFF
+#     CONFIGURE_DEPENDS
+#     ${LAPACK_DIR}/bin/*.dll
+#     ${BLIS_DIR}/lib/*.dll
+#     ${OPENBLAS_DIR}/bin/*.dll
+#     ${HIP_DIR}/bin/amd*.dll
+#     ${HIP_DIR}/bin/hiprt*.dll
+#     ${HIP_DIR}/bin/hipinfo.exe
+#     ${ROCBLAS_PATH}/bin/rocblas*.dll
+#     ${ROCSOLVER_PATH}/bin/rocsolver*.dll
+#     ${CMAKE_SOURCE_DIR}/rtest.*
+#     C:/Windows/System32/libomp140*.dll
+#   )
+#   foreach( file_i ${third_party_dlls})
+#     add_custom_command( TARGET hipblas-test POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy ${file_i} ${PROJECT_BINARY_DIR}/staging/ )
+#   endforeach( file_i )
 
-  if(DEFINED ROCBLAS_PATH)
-    add_custom_command( TARGET hipblas-test POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_directory ${ROCBLAS_PATH}/bin/rocblas/library/ ${PROJECT_BINARY_DIR}/staging/library/)
-  else()
-    message(WARNING "ROCBLAS_PATH not set. rocBLAS Tensile runtime kernels will not be copied to client staging directory (insitu testing affected).")
-  endif()
-endif()
+#   if(DEFINED ROCBLAS_PATH)
+#     add_custom_command( TARGET hipblas-test POST_BUILD COMMAND ${CMAKE_COMMAND} ARGS -E copy_directory ${ROCBLAS_PATH}/bin/rocblas/library/ ${PROJECT_BINARY_DIR}/staging/library/)
+#   else()
+#     message(WARNING "ROCBLAS_PATH not set. rocBLAS Tensile runtime kernels will not be copied to client staging directory (insitu testing affected).")
+#   endif()
+# endif()
 
 set_target_properties( hipblas-test PROPERTIES
     CXX_STANDARD 17
