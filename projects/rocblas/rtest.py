@@ -370,8 +370,6 @@ def run_tests():
 
 def test_xml_reduce():
     ## open test_detail.xml and strip out the larger extraneous attibutes
-    if os.name != "nt":
-        return
 
     test_detail = os.path.join( os.getcwd(), 'test_detail.xml')
     test_detail_reduced = os.path.join( os.getcwd(), 'test_detail_reduced.xml')
@@ -386,17 +384,17 @@ def test_xml_reduce():
         root = tree.getroot()
 
         # Remove specific attributes
-        attributes_to_remove = {"value_param", "timestamp"}
+        attributes_to_remove = {"value_param", "timestamp", "file", "line"}
         for elem in root.iter():
-            for attr in attributes_to_remove:
-                if attr in elem.attrib:
-                    del elem.attrib[attr]
+            for elem in root.iter():
+                for attr in attributes_to_remove:
+                    if attr in elem.attrib:
+                        del elem.attrib[attr]
 
         # Save the modified XML
         tree.write(test_detail_reduced)
         # copy the test_detail_reduced.xml to test_detail.xml
-        os.remove(test_detail)
-        os.rename(test_detail_reduced, test_detail)
+        os.replace(test_detail_reduced, test_detail)
     except ET.ParseError as e:
         print(f"Error parsing XML file {test_detail}: {e}")
 
