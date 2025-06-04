@@ -545,16 +545,20 @@ struct transform_pair_of_input_iterators_t
 
 }; // struct transform_pair_of_input_iterators_t
 
-// cuda::std::identity
-struct identity
+// deprecated [Since 2.8]
+struct THRUST_DEPRECATED_BECAUSE("Use cuda::std::identity") identity
 {
   template <class T>
-  THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr T&& operator()(T&& t) const noexcept
+  THRUST_HOST_DEVICE T const& operator()(T const& t) const
   {
-    return ::std::forward<T>(t);
+    return t;
   }
 
-  using is_transparent = void;
+  template <class T>
+  THRUST_HOST_DEVICE T& operator()(T& t) const
+  {
+    return t;
+  }
 };
 
 template <class T>

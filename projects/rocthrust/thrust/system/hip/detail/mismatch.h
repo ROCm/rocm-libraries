@@ -41,6 +41,7 @@
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/distance.h>
+#  include <thrust/functional.h>
 #  include <thrust/pair.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
 
@@ -73,7 +74,7 @@ mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, Inp
   transform_t transform_first = transform_t(first1, first2, binary_pred);
 
   transform_t result = hip_rocprim::find_if_not(
-    policy, transform_first, transform_first + thrust::distance(first1, last1), ::thrust::hip_rocprim::identity{});
+    policy, transform_first, transform_first + thrust::distance(first1, last1), ::internal::identity{});
 
   return thrust::make_pair(first1 + thrust::distance(transform_first, result),
                            first2 + thrust::distance(transform_first, result));
