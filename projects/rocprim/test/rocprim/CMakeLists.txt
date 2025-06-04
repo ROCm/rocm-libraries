@@ -313,6 +313,7 @@ add_rocprim_test("rocprim.lookback_reproducibility" test_lookback_reproducibilit
 add_rocprim_test("rocprim.radix_key_codec" test_radix_key_codec.cpp)
 add_rocprim_test("rocprim.predicate_iterator" test_predicate_iterator.cpp)
 add_rocprim_test("rocprim.reverse_iterator" test_reverse_iterator.cpp)
+add_rocprim_test("rocprim.rocprim_types" test_rocprim_types.cpp)
 add_rocprim_test("rocprim.texture_cache_iterator" test_texture_cache_iterator.cpp)
 add_rocprim_test("rocprim.thread" test_thread.cpp)
 add_rocprim_test("rocprim.thread_algos" test_thread_algos.cpp)
