@@ -94,7 +94,9 @@ using RocprimDeviceTransformTestsParams
                        DeviceTransformParams<custom_short2, custom_int2, true>,
                        DeviceTransformParams<int, float>,
                        DeviceTransformParams<uint64_t, uint64_t>,
+#if ROCPRIM_HAS_INT128_SUPPORT
                        DeviceTransformParams<rocprim::uint128_t, rocprim::uint128_t>,
+#endif
                        DeviceTransformParams<custom_double2, custom_double2>,
                        DeviceTransformParams<custom_int64_array, custom_int64_array>,
                        DeviceTransformParams<int, int, false, 512>,
