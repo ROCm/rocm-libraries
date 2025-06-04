@@ -381,21 +381,24 @@ def test_xml_reduce():
     import xml.etree.ElementTree as ET
 
     # Load the XML file
-    tree = ET.parse(test_detail)
-    root = tree.getroot()
+    try:
+        tree = ET.parse(test_detail)
+        root = tree.getroot()
 
-    # Remove specific attributes
-    attributes_to_remove = {"value_param", "timestamp"}
-    for elem in root.iter():
-        for attr in attributes_to_remove:
-            if attr in elem.attrib:
-                del elem.attrib[attr]
+        # Remove specific attributes
+        attributes_to_remove = {"value_param", "timestamp"}
+        for elem in root.iter():
+            for attr in attributes_to_remove:
+                if attr in elem.attrib:
+                    del elem.attrib[attr]
 
-    # Save the modified XML
-    tree.write(test_detail_reduced)
-    # copy the test_detail_reduced.xml to test_detail.xml
-    os.remove(test_detail)
-    os.rename(test_detail_reduced, test_detail)
+        # Save the modified XML
+        tree.write(test_detail_reduced)
+        # copy the test_detail_reduced.xml to test_detail.xml
+        os.remove(test_detail)
+        os.rename(test_detail_reduced, test_detail)
+    except ET.ParseError as e:
+        print(f"Error parsing XML file {test_detail}: {e}")
 
 
 def main():
