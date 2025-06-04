@@ -22,29 +22,30 @@
 
 #include "../common_test_header.hpp"
 
-using Params = ::testing::Types<
-    char,
-    unsigned char,
-    int8_t,
-    uint8_t,
-    short,
-    unsigned short,
-    int16_t,
-    uint16_t,
-    rocprim::half,
-    rocprim::bfloat16,
-    int,
-    unsigned int,
-    int32_t,
-    uint32_t,
-    float,
-    long long,
-    unsigned long long,
-    int64_t,
-    uint64_t,
-    double,
-    rocprim::int128_t,
-    rocprim::uint128_t>;
+#include "test_utils.hpp"
+
+using Params = ::testing::Types<char,
+                                unsigned char,
+                                int8_t,
+                                uint8_t,
+                                short,
+                                unsigned short,
+                                int16_t,
+                                uint16_t,
+                                rocprim::half,
+                                rocprim::bfloat16,
+                                int,
+                                unsigned int,
+                                int32_t,
+                                uint32_t,
+                                float,
+                                long long,
+                                unsigned long long,
+                                int64_t,
+                                uint64_t,
+                                double,
+                                rocprim::int128_t,
+                                rocprim::uint128_t>;
 
 template <typename T>
 class DoubleBufferTest : public ::testing::Test
@@ -52,6 +53,7 @@ class DoubleBufferTest : public ::testing::Test
 protected:
     T value1{};
     T value2{};
+
     rocprim::double_buffer<T> db{&value1, &value2};
 };
 
@@ -72,4 +74,41 @@ TYPED_TEST(DoubleBufferTest, SwapBuffers)
     this->db.swap();
     EXPECT_EQ(this->db.current(), &this->value2);
     EXPECT_EQ(this->db.alternate(), &this->value1);
+}
+
+template <typename T>
+class FutureValueTest : public ::testing::Test
+{
+protected:
+    using ValueType = T;
+
+    ValueType value{};
+    
+    rocprim::future_value<ValueType> fv{&value};
+};
+
+TYPED_TEST_SUITE(FutureValueTest, Params);
+
+TYPED_TEST(FutureValueTest, ValueAccess)
+{
+    using T = typename TestFixture::ValueType;
+
+    this->value = test_utils::get_random_value<T>(0, 100, rand());
+    EXPECT_EQ(static_cast<TypeParam>(this->fv), this->value);
+}
+
+TYPED_TEST(FutureValueTest, GetInputValuePlain)
+{
+    using T = typename TestFixture::ValueType;
+    
+    T val = test_utils::get_random_value<T>(0, 100, rand());
+    EXPECT_EQ(rocprim::detail::get_input_value(val), val);
+}
+
+TYPED_TEST(FutureValueTest, GetInputValueFuture)
+{
+    using T = typename TestFixture::ValueType;
+    
+    this->value = test_utils::get_random_value<T>(0, 100, rand());
+    EXPECT_EQ(rocprim::detail::get_input_value(this->fv), this->value);
 }
