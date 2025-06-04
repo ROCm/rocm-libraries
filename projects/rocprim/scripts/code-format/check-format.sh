@@ -3,7 +3,7 @@
 SOURCE_COMMIT="$1"
 if [ "$#" -gt 0 ]; then
     shift
-fi 
+fi
 
 # If no source commit is given target the default branch
 if [ "x$SOURCE_COMMIT" = "x" ]; then
