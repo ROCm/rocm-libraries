@@ -115,6 +115,8 @@ SUPPORTED_ARCH_DEVICE_IDS = {
 
 SUPPORTED_ARCH_CU_COUNTS = {
     "cu=20": "gfx942",
+    "cu=38": "gfx942",
+    "cu=64": "gfx942",
     "cu=80": "gfx942",
     "cu=96": "gfx942",
     "cu=228": "gfx942",
@@ -134,6 +136,8 @@ ARCH_DEVICE_ID_FALLBACKS = {
 # Here, `None` refers to an unspecified CU count.
 ARCH_CU_COUNT_FALLBACKS = {
     "cu=20": None,
+    "cu=38": None,
+    "cu=64": None,
     "cu=80": None,
     "cu=96": None,
     "cu=228": None,
