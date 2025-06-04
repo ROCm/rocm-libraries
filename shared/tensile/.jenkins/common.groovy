@@ -86,9 +86,9 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean c
 def runCodecovTestCommand(platform, project, jobName)
 {
     def command = "cd ${project.paths.project_build_prefix} && make coverage"
-    platform.runCommand(stageContext, command)
+    platform.runCommand(this, command)
 
-    stageContext.publishHTML([allowMissing: false,
+    this.publishHTML([allowMissing: false,
         alwaysLinkToLastBuild: false,
         keepAll: false,
         reportDir: "${project.paths.project_build_prefix}/coverage-report",
