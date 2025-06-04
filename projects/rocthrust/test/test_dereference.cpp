@@ -110,6 +110,34 @@ TEST(DereferenceTests, TestDeviceDereferenceTransformIterator)
   }
 }
 
+TEST(DereferenceTests, TestDeviceDereferenceTransformIteratorInputConversion)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> input = unittest::random_integers<int>(100);
+  thrust::device_vector<double> output(input.size(), 0);
+
+  simple_copy(thrust::make_transform_iterator(input.begin(), thrust::identity<double>()),
+              thrust::make_transform_iterator(input.end(), thrust::identity<double>()),
+              output.begin());
+
+  ASSERT_EQ(input == output, true);
+}
+
+TEST(DereferenceTests, TestDeviceDereferenceTransformIteratorOutputConversion)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  thrust::device_vector<int> input = unittest::random_integers<int>(100);
+  thrust::device_vector<double> output(input.size(), 0);
+
+  simple_copy(thrust::make_transform_iterator(input.begin(), thrust::identity<int>()),
+              thrust::make_transform_iterator(input.end(), thrust::identity<int>()),
+              output.begin());
+
+  ASSERT_EQ(input == output, true);
+}
+
 TEST(DereferenceTests, TestDeviceDereferenceCountingIterator)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -121,11 +149,8 @@ TEST(DereferenceTests, TestDeviceDereferenceCountingIterator)
 
   simple_copy(first, last, output.begin());
 
-  ASSERT_EQ(output[0], 1);
-  ASSERT_EQ(output[1], 2);
-  ASSERT_EQ(output[2], 3);
-  ASSERT_EQ(output[3], 4);
-  ASSERT_EQ(output[4], 5);
+  thrust::device_vector<int> ref{1, 2, 3, 4, 5};
+  ASSERT_EQ(output, ref);
 }
 
 TEST(DereferenceTests, TestDeviceDereferenceTransformedCountingIterator)
@@ -141,11 +166,8 @@ TEST(DereferenceTests, TestDeviceDereferenceTransformedCountingIterator)
               thrust::make_transform_iterator(last, thrust::negate<int>()),
               output.begin());
 
-  ASSERT_EQ(output[0], -1);
-  ASSERT_EQ(output[1], -2);
-  ASSERT_EQ(output[2], -3);
-  ASSERT_EQ(output[3], -4);
-  ASSERT_EQ(output[4], -5);
+  thrust::device_vector<int> ref{-1, -2, -3, -4, -5};
+  ASSERT_EQ(output, ref);
 }
 
 THRUST_DIAG_POP

@@ -18,7 +18,18 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits.h>
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/__type_traits/void_t.h>
+#endif
 
 #include <type_traits>
 
@@ -44,12 +55,19 @@ public:
   using type = typename impl<Signature>::type;
 };
 
+// TODO(bgruber): remove this specialization eventually
 // specialization for invocations which define result_type
+THRUST_SUPPRESS_DEPRECATED_PUSH
 template <typename Functor, typename... ArgTypes>
-struct result_of_adaptable_function<Functor(ArgTypes...), std::void_t<typename Functor::result_type>>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct result_of_adaptable_function<Functor(ArgTypes...), ::cuda::std::void_t<typename Functor::result_type>>
+#else
+struct result_of_adaptable_function<Functor(ArgTypes...), ::std::void_t<typename Functor::result_type>>
+#endif
 {
   using type = typename Functor::result_type;
 };
+THRUST_SUPPRESS_DEPRECATED_POP
 
 } // namespace detail
 THRUST_NAMESPACE_END

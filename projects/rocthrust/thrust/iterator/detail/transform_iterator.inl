@@ -17,17 +17,23 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/detail/type_traits.h>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/iterator/transform_iterator.h>
 #include <thrust/type_traits/remove_cvref.h>
 
 THRUST_NAMESPACE_BEGIN
 
 template <class UnaryFunction, class Iterator, class Reference, class Value>
-  class transform_iterator;
+class transform_iterator;
 
 namespace detail
 {
@@ -37,10 +43,9 @@ template <class UnaryFunc, class Iterator, class Reference, class Value>
 struct make_transform_iterator_base
 {
 private:
-  // By default, dereferencing the iterator yields the same as the function.
   // FIXME(bgruber): the next line should be correct, but thrust::identity<T> lies and advertises a ::return_type of T,
   // while its operator() returns const T& (which __invoke_of correctly detects), which causes transform_iterator to
-  // crash during dereferencing.
+  // crash (or cause UB) during dereferencing. Check the test `thrust.test.dereference` for the OMP and TBB backends.
   // using wrapped_func_ret_t = ::cuda::std::__invoke_of<UnaryFunc, iterator_value_t<Iterator>>;
   using wrapped_func_ret_t = result_of_adaptable_function<UnaryFunc(iterator_value_t<Iterator>)>;
 
@@ -58,6 +63,5 @@ public:
                      reference>;
 };
 
-} // end detail
+} // namespace detail
 THRUST_NAMESPACE_END
-
