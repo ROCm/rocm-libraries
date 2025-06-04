@@ -81,9 +81,7 @@ jobs:
       - name: Determine projects to run
         id: projects
         env:
-          # temporary for testing
-          SUBTREES: "projects/rocprim\nprojects/hipcub"
-          # SUBTREES: ${{ steps.detect.outputs.subtrees }}
+          SUBTREES: ${{ steps.detect.outputs.subtrees }}
         run: |
           python rocm-libraries/.github/scripts/therock_configure_ci.py
 
