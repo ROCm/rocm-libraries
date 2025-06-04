@@ -38,6 +38,7 @@
 #endif // no system header
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  include <thrust/functional.h>
 #  include <thrust/iterator/permutation_iterator.h>
 #  include <thrust/system/hip/detail/transform.h>
 
@@ -49,8 +50,7 @@ template <class Derived, class ItemsIt, class MapIt, class ResultIt>
 void THRUST_HOST_DEVICE
 scatter(execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, MapIt map, ResultIt result)
 {
-  hip_rocprim::transform(
-    policy, first, last, thrust::make_permutation_iterator(result, map), ::thrust::hip_rocprim::identity{});
+  hip_rocprim::transform(policy, first, last, thrust::make_permutation_iterator(result, map), ::internal::identity{});
 }
 
 template <class Derived, class ItemsIt, class MapIt, class StencilIt, class ResultIt, class Predicate>
@@ -64,20 +64,14 @@ void THRUST_HOST_DEVICE scatter_if(
   Predicate predicate)
 {
   hip_rocprim::transform_if(
-    policy,
-    first,
-    last,
-    stencil,
-    thrust::make_permutation_iterator(result, map),
-    ::thrust::hip_rocprim::identity{},
-    predicate);
+    policy, first, last, stencil, thrust::make_permutation_iterator(result, map), ::internal::identity{}, predicate);
 }
 
 template <class Derived, class ItemsIt, class MapIt, class StencilIt, class ResultIt, class Predicate>
 void THRUST_HOST_DEVICE scatter_if(
   execution_policy<Derived>& policy, ItemsIt first, ItemsIt last, MapIt map, StencilIt stencil, ResultIt result)
 {
-  hip_rocprim::scatter_if(policy, first, last, map, stencil, result, ::thrust::hip_rocprim::identity{});
+  hip_rocprim::scatter_if(policy, first, last, map, stencil, result, ::internal::identity{});
 }
 
 } // namespace hip_rocprim
