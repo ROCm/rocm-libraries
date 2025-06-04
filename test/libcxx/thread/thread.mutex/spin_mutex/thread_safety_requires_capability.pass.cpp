@@ -15,23 +15,27 @@
 
 // <mutex>
 
-// ADDITIONAL_COMPILE_FLAGS: -D_LIBCPP_ENABLE_THREAD_SAFETY_ANNOTATIONS
+// ADDITIONAL_COMPILE_FLAGS: -D_LIBGPU_ENABLE_THREAD_SAFETY_ANNOTATIONS
 
-#include <mutex>
+#include <gpu/mutex>
 
 #include "test_macros.h"
 
-gpu::spin_mutex m;
-int foo __attribute__((guarded_by(m)));
+#include "force_include_hip.h"
 
-void increment() __attribute__((requires_capability(m))) {
+__device__ gpu::spin_mutex m;
+__device__ int foo __attribute__((guarded_by(m)));
+
+__device__ void increment() __attribute__((requires_capability(m))) {
   foo++;
 }
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   m.lock();
   increment();
   m.unlock();
+#endif
 
   return 0;
 }

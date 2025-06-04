@@ -22,7 +22,7 @@
 
 
 #include <condition_variable>
-#include <mutex>
+#include <gpu/mutex>
 #include <gpu/thread>
 #include <hip/std/chrono>
 #include <cassert>
