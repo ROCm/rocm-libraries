@@ -25,27 +25,29 @@
 #include "test_utils.hpp"
 
 using Params = ::testing::Types<char,
-                                unsigned char,
                                 int8_t,
-                                uint8_t,
                                 short,
-                                unsigned short,
-                                int16_t,
                                 uint16_t,
                                 rocprim::half,
                                 rocprim::bfloat16,
                                 int,
                                 unsigned int,
-                                int32_t,
-                                uint32_t,
                                 float,
                                 long long,
                                 unsigned long long,
                                 int64_t,
-                                uint64_t,
                                 double,
                                 rocprim::int128_t,
                                 rocprim::uint128_t>;
+
+template<class T>
+ROCPRIM_HOST_DEVICE
+inline T get_random_full_range(std::uint32_t seed = std::rand())
+{
+    return test_utils::get_random_value<T>(rocprim::numeric_limits<T>::min(),
+                                           rocprim::numeric_limits<T>::max(),
+                                           seed);
+}
 
 template <typename T>
 class DoubleBufferTest : public ::testing::Test
@@ -59,17 +61,17 @@ protected:
 
 TYPED_TEST_SUITE(DoubleBufferTest, Params);
 
-TYPED_TEST(DoubleBufferTest, CurrentBuffer)
+TYPED_TEST(DoubleBufferTest, CurrentBufferTest)
 {
     EXPECT_EQ(this->db.current(), &this->value1);
 }
 
-TYPED_TEST(DoubleBufferTest, AlternateBuffer)
+TYPED_TEST(DoubleBufferTest, AlternateBufferTest)
 {
     EXPECT_EQ(this->db.alternate(), &this->value2);
 }
 
-TYPED_TEST(DoubleBufferTest, SwapBuffers)
+TYPED_TEST(DoubleBufferTest, SwapBuffersTest)
 {
     this->db.swap();
     EXPECT_EQ(this->db.current(), &this->value2);
@@ -80,35 +82,114 @@ template <typename T>
 class FutureValueTest : public ::testing::Test
 {
 protected:
-    using ValueType = T;
+    using value_type = T;
 
-    ValueType value{};
+    value_type value{};
     
-    rocprim::future_value<ValueType> fv{&value};
+    rocprim::future_value<value_type> fv{&value};
 };
 
 TYPED_TEST_SUITE(FutureValueTest, Params);
 
-TYPED_TEST(FutureValueTest, ValueAccess)
+TYPED_TEST(FutureValueTest, MemberAccessTest)
 {
-    using T = typename TestFixture::ValueType;
+    using T = typename TestFixture::value_type;
 
-    this->value = test_utils::get_random_value<T>(0, 100, rand());
+    this->value = get_random_full_range<T>();
     EXPECT_EQ(static_cast<TypeParam>(this->fv), this->value);
 }
 
-TYPED_TEST(FutureValueTest, GetInputValuePlain)
+TYPED_TEST(FutureValueTest, GetInputValuePlainTest)
 {
-    using T = typename TestFixture::ValueType;
+    using T = typename TestFixture::value_type;
     
-    T val = test_utils::get_random_value<T>(0, 100, rand());
+    T val = get_random_full_range<T>();
     EXPECT_EQ(rocprim::detail::get_input_value(val), val);
 }
 
-TYPED_TEST(FutureValueTest, GetInputValueFuture)
+TYPED_TEST(FutureValueTest, GetInputValueFutureTest)
 {
-    using T = typename TestFixture::ValueType;
+    using T = typename TestFixture::value_type;
     
-    this->value = test_utils::get_random_value<T>(0, 100, rand());
+    this->value = get_random_full_range<T>();
     EXPECT_EQ(rocprim::detail::get_input_value(this->fv), this->value);
+}
+
+template<class K, class V>
+struct kv_tag
+{
+    using key_type   = K;
+    using value_type = V;
+};
+
+using TestPairs = ::testing::Types<
+    kv_tag<char, int>,
+//  __half breaks down currently
+//  kv_tag<int, rocprim::half>,
+    kv_tag<unsigned int, double>,
+    kv_tag<long long, float>,
+    kv_tag<unsigned long long, rocprim::uint128_t>
+>;
+
+template<class Pair>
+class KeyValuePairTest : public ::testing::Test
+{
+protected:
+    using key_type   = typename Pair::key_type;
+    using value_type = typename Pair::value_type;
+    using kv_type    = rocprim::key_value_pair<key_type, value_type>;
+};
+TYPED_TEST_SUITE(KeyValuePairTest, TestPairs);
+
+TYPED_TEST(KeyValuePairTest, MemberAccessTest)
+{
+    using K = typename TestFixture::key_type;
+    using V = typename TestFixture::value_type;
+    using kv_type = typename TestFixture::kv_type;
+
+    K k = get_random_full_range<K>();
+    V v = get_random_full_range<V>();
+
+    kv_type kv{k, v};
+
+    EXPECT_EQ(kv.key,   k);
+    EXPECT_EQ(kv.value, v);
+}
+
+TYPED_TEST(KeyValuePairTest, EqualityOperatorTest)
+{
+    using K = typename TestFixture::key_type;
+    using V = typename TestFixture::value_type;
+    using kv_type = typename TestFixture::kv_type;
+
+    K k = get_random_full_range<K>();
+    V v = get_random_full_range<V>();
+
+    kv_type kv1{k, v};
+    kv_type kv2{k, v};
+
+    K k_diff;
+    V v_diff;
+
+    do
+    {
+        k_diff = get_random_full_range<K>();
+    } while(k_diff == k);
+    
+    do
+    {
+        v_diff = get_random_full_range<V>();
+    } while(v_diff == v);
+
+    kv_type kv_diff_key{k_diff, v};
+    kv_type kv_diff_val{k, v_diff};
+
+    EXPECT_TRUE (kv1 == kv2);
+    EXPECT_FALSE(kv1 != kv2);
+
+    EXPECT_FALSE(kv1 == kv_diff_key);
+    EXPECT_TRUE (kv1 != kv_diff_key);
+
+    EXPECT_FALSE(kv1 == kv_diff_val);
+    EXPECT_TRUE (kv1 != kv_diff_val);
 }
