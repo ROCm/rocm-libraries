@@ -44,6 +44,7 @@
 #  endif
 #else
 #  include <type_traits>
+#  include <utility>
 #endif
 
 #include <functional>
@@ -56,6 +57,7 @@ namespace internal
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 using ::cuda::maximum;
 using ::cuda::minimum;
+using identity = ::cuda::std::__identity;
 #else
 // cuda::maximum
 template <typename T = void>
@@ -103,6 +105,18 @@ struct minimum<void>
   {
     return (lhs < rhs) ? lhs : rhs;
   }
+};
+
+// cuda::std::__identity
+struct identity
+{
+  template <typename T>
+  THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr T&& operator()(T&& t) const noexcept
+  {
+    return ::std::forward<T>(t);
+  }
+
+  using is_transparent = void;
 };
 #endif
 
@@ -227,21 +241,6 @@ struct THRUST_DEPRECATED binary_function
  *  \{
  */
 
-#define THRUST_UNARY_FUNCTOR_VOID_SPECIALIZATION(func, impl)                                             \
-  template <>                                                                                            \
-  struct func<void>                                                                                      \
-  {                                                                                                      \
-    /*! This functor is transparent. */                                                                  \
-    using is_transparent = void;                                                                         \
-    /*! Function call operator. */                                                                       \
-    THRUST_EXEC_CHECK_DISABLE                                                                            \
-    template <typename T>                                                                                \
-    THRUST_HOST_DEVICE constexpr auto operator()(T&& x) const noexcept(noexcept(impl)) -> decltype(impl) \
-    {                                                                                                    \
-      return impl;                                                                                       \
-    }                                                                                                    \
-  }
-
 #define THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION(func, impl)                                                       \
   template <>                                                                                                       \
   struct func<void>                                                                                                 \
@@ -256,9 +255,6 @@ struct THRUST_DEPRECATED binary_function
       return impl;                                                                                                  \
     }                                                                                                               \
   }
-
-#define THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP(func, op) \
-  THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION(func, THRUST_FWD(t1) op THRUST_FWD(t2))
 
 /*! \p plus is a function object. Specifically, it is an Adaptable Binary Function.
  *  If \c f is an object of class <tt>plus<T></tt>, and \c x and \c y are objects
@@ -592,40 +588,22 @@ struct modulus : public ::std::modulus<T>
  *  \see unary_function
  */
 template <typename T = void>
-struct negate
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct negate : ::cuda::std::negate<T>
+#else
+struct negate : ::std::negate<T>
+#endif
 {
   /*! \typedef argument_type
    *  \brief The type of the function object's argument.
    */
-  using argument_type = T;
+  using argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    */
-  using result_type = T;
-
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
-  THRUST_DIAG_PUSH
-  THRUST_DIAG_SUPPRESS_MSVC(4146) // unary minus operator applied to unsigned type, result still unsigned
-#endif // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
-
-  /*! Function call operator. The return value is <tt>-x</tt>.
-   */
-  THRUST_EXEC_CHECK_DISABLE
-  THRUST_HOST_DEVICE constexpr T operator()(const T& x) const
-  {
-    return -x;
-  }
-
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
-  THRUST_DIAG_POP
-#endif // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
-
+  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 }; // end negate
-
-/*! \brief Specialization of \p negate for type void.
- */
-THRUST_UNARY_FUNCTOR_VOID_SPECIALIZATION(negate, -THRUST_FWD(x));
 
 /*! \p square is a function object. Specifically, it is an Adaptable Unary Function.
  *  If \c f is an object of class <tt>square<T></tt>, and \c x is an object
@@ -663,12 +641,12 @@ struct square
   /*! \typedef argument_type
    *  \brief The type of the function object's argument.
    */
-  using argument_type = T;
+  using argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    */
-  using result_type = T;
+  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! Function call operator. The return value is <tt>x*x</tt>.
    */
@@ -681,7 +659,20 @@ struct square
 
 /*! \brief Specialization of \p square for type void.
  */
-THRUST_UNARY_FUNCTOR_VOID_SPECIALIZATION(square, x* x);
+template <>
+struct square<void>
+{
+  /*! This functor is transparent. */
+  using is_transparent = void;
+
+  /*! Function call operator - returns the square of its argument*/
+  THRUST_EXEC_CHECK_DISABLE
+  template <typename T>
+  THRUST_HOST_DEVICE constexpr T operator()(const T& x) const noexcept(noexcept(x * x))
+  {
+    return x * x;
+  }
+};
 
 /*! \}
  */
@@ -1271,13 +1262,14 @@ struct identity
   /*! \typedef argument_type
    *  \brief The type of the function object's first argument.
    */
-  using argument_type = T;
+  using argument_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
   /*! \typedef result_type
    *  \brief The type of the function object's result;
    */
-  using result_type = T;
+  using result_type THRUST_ALIAS_ATTRIBUTE(THRUST_DEPRECATED) = T;
 
+  // FIXME(bgruber): this should take T&& and forward, to not add const to a mutable reference or dangle a temporary arg
   /*! Function call operator. The return value is <tt>x</tt>.
    */
   THRUST_EXEC_CHECK_DISABLE
@@ -1287,9 +1279,9 @@ struct identity
   }
 }; // end identity
 
-/*! \brief Specialization of \p identity for type void.
- */
-THRUST_UNARY_FUNCTOR_VOID_SPECIALIZATION(identity, THRUST_FWD(x));
+template <>
+struct identity<void> : ::internal::identity
+{};
 
 /*! \p maximum is a function object that takes two arguments and returns the greater
  *  of the two. Specifically, it is an Adaptable Binary Function. If \c f is an
@@ -1806,9 +1798,7 @@ THRUST_INLINE_CONSTANT thrust::detail::functional::placeholder<9>::type _10;
 /*! \} // placeholder_objects
  */
 
-#undef THRUST_UNARY_FUNCTOR_VOID_SPECIALIZATION
 #undef THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION
-#undef THRUST_BINARY_FUNCTOR_VOID_SPECIALIZATION_OP
 
 THRUST_NAMESPACE_END
 
