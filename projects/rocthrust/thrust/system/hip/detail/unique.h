@@ -41,8 +41,9 @@
 
 #  include <thrust/system/hip/config.h>
 
+#  include <thrust/advance.h>
+#  include <thrust/count.h>
 #  include <thrust/detail/minmax.h>
-#  include <thrust/detail/mpl/math.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
@@ -125,7 +126,7 @@ THRUST_RUNTIME_FUNCTION ItemsOutputIt unique(
       debug_sync),
     "unique failed on 1st step");
 
-  size_t storage_size;
+  size_t storage_size = 0;
   void* ptr       = nullptr;
   void* temp_stor = nullptr;
   size_type* d_num_selected_out;
@@ -169,12 +170,12 @@ unique_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, Outp
     THRUST_HOST static OutputIt
     par(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, BinaryPred binary_pred)
     {
-      return __unique::unique(policy, first, last, result, binary_pred);
+      return result = __unique::unique(policy, first, last, result, binary_pred);
     }
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, BinaryPred binary_pred)
     {
-      return thrust::unique_copy(cvt_to_seq(derived_cast(policy)), first, last, result, binary_pred);
+      return result = thrust::unique_copy(cvt_to_seq(derived_cast(policy)), first, last, result, binary_pred);
     }
   };
 #  if __THRUST_HAS_HIPRT__
