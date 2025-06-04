@@ -12,6 +12,7 @@ import os
 
 SUBTREES = os.getenv("SUBTREES", "")
 
+
 def set_github_output(d: Mapping[str, str]):
     """Sets GITHUB_OUTPUT values.
     See https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/passing-information-between-jobs
@@ -23,6 +24,7 @@ def set_github_output(d: Mapping[str, str]):
         return
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
+
 
 def run():
     subtrees = SUBTREES.split("\n")
