@@ -40,6 +40,11 @@ option(TENSILE_DISABLE_CTEST "Disable CTest integration." ON)
 option(TENSILE_ENABLE_COVERAGE "Enable code coverage for TensileHost library." OFF)
 option(BUILD_CODE_COVERAGE "Enable code coverage for TensileHost library." OFF)
 
+if(TENSILE_ENABLE_COVERAGE OR BUILD_CODE_COVERAGE)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type." FORCE)
+    message(STATUS "Setting build type to Debug for coverage build.")
+endif()
+
 if(TENSILE_USE_HIP)
     set(TENSILE_COMPONENTS HIP)
     if(TENSILE_USE_LLVM)
@@ -202,11 +207,11 @@ endif()
 if(TENSILE_ENABLE_COVERAGE OR BUILD_CODE_COVERAGE)
     message(STATUS "Code coverage for TensileHost is ENABLED.")
 
-    target_compile_options(TensileHost PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+    target_compile_options(TensileHost PRIVATE -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(TensileHost PRIVATE -fprofile-instr-generate)
     message(STATUS "Applied coverage flags to TensileHost.")
 
-    target_compile_options(TensileTests PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+    target_compile_options(TensileTests PRIVATE -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(TensileTests PRIVATE -fprofile-instr-generate)
     message(STATUS "Applied coverage flags to TensileTests.")
 
