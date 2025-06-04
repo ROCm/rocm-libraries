@@ -23,10 +23,9 @@ macro(pythonize_bool var)
   endif()
 endmacro()
 
+if (LIBCUDACXX_ENABLE_CUDA)
 #find_package(CUDAToolkit REQUIRED)
 #get_target_property(CUDA_INCLUDE_DIR CUDA::cudart INTERFACE_INCLUDE_DIRECTORIES)
-  
-if (LIBCUDACXX_ENABLE_CUDA)
 set(LIBCUDACXX_HIGHEST_COMPUTE_ARCH 90)
 
 foreach (COMPUTE_ARCH ${LIBCUDACXX_COMPUTE_ARCHS})
