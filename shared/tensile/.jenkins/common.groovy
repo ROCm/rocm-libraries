@@ -83,6 +83,20 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean c
     platform.runCommand(this, command)
 }
 
+def runCodecovTestCommand(platform, project, jobName)
+{
+    def command = "cd ${project.paths.project_build_prefix} && make coverage"
+    platform.runCommand(stageContext, command)
+
+    stageContext.publishHTML([allowMissing: false,
+        alwaysLinkToLastBuild: false,
+        keepAll: false,
+        reportDir: "${project.paths.project_build_prefix}/coverage-report",
+        reportFiles: "index.html",
+        reportName: "Code coverage report",
+        reportTitles: "Code coverage report"
+    ])
+}
 
 def runTestCommand(platform, project, jobName, testMark, boolean runHostTest=true, boolean runUnitTest=true, boolean runToxTest=true)
 {
