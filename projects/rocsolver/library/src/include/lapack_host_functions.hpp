@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -352,7 +352,7 @@ static void call_lartg(T& f, T& g, S& cs, T& sn, T& r)
 }
 
 template <typename T, typename S, typename I>
-static void call_scal(I& n, S& a, T& x_in, I& incx)
+static void call_scal(I n, S a, T& x_in, I incx)
 {
     bool const is_zero = (a == 0);
     T* const x = &x_in;
@@ -364,7 +364,7 @@ static void call_scal(I& n, S& a, T& x_in, I& incx)
 }
 
 template <typename T, typename S, typename I>
-static void call_rot(I& n, T& x_in, I& incx, T& y_in, I& incy, S& c, S& s)
+static void call_rot(I n, T& x_in, I incx, T& y_in, I incy, S c, S s)
 {
     T* const x = &(x_in);
     T* const y = &(y_in);
@@ -595,6 +595,105 @@ static void call_lasv2(T& f, T& g, T& h, T& ssmin, T& ssmax, T& snr, T& csr, T& 
     }
     ssmax = sign(ssmax, tsign);
     ssmin = sign(ssmin, tsign * sign(one, f) * sign(one, h));
+}
+
+template <typename T, typename I, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
+static void call_larfg(I n, T& alpha, T* x, I incx, T& tau)
+{
+    T norm2 = alpha * alpha;
+    for(I i = 0; i < n - 1; i++)
+        norm2 += x[i * incx] * x[i * incx];
+
+    if(norm2 > 0)
+    {
+        T norm = alpha >= 0 ? -std::sqrt(norm2) : std::sqrt(norm2);
+
+        T s = (T)(1.0 / (alpha - norm));
+        tau = (norm - alpha) / norm;
+        alpha = norm;
+
+        call_scal(n - 1, s, x[0], incx);
+    }
+    else
+    {
+        tau = 0;
+    }
+}
+
+template <typename T, typename I, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
+static void call_larfg(I n, T& alpha, T* x, I incx, T& tau)
+{
+    using S = decltype(std::real(T{}));
+
+    T norm2 = alpha * alpha;
+    for(I i = 0; i < n - 1; i++)
+        norm2 += x[i * incx] * x[i * incx];
+
+    S ar = alpha.real();
+    S ai = alpha.imag();
+
+    if(norm2.real() > 0 || ai > 0)
+    {
+        S norm = ar >= 0 ? -std::sqrt(norm2.real()) : std::sqrt(norm2.real());
+
+        // scaling factor
+        S r = (ar - norm) * (ar - norm) + ai * ai;
+        S rr = (ar - norm) / r;
+        S ri = -ai / r;
+        T s = rocblas_complex_num<S>(rr, ri);
+
+        // tau
+        rr = (norm - ar) / norm;
+        ri = -ai / norm;
+        tau = rocblas_complex_num<S>(rr, ri);
+
+        // alpha
+        alpha = norm;
+
+        call_scal(n - 1, s, x[0], incx);
+    }
+    else
+    {
+        tau = 0;
+    }
+}
+
+template <typename T, typename I>
+static void call_larf(rocblas_side side, I m, I n, T* v, I incv, T tau, T* C, I ldc, T* work)
+{
+    if(tau == 0)
+        return;
+
+    if(side == rocblas_side_left)
+    {
+        // gemv
+        for(rocblas_int i = 0; i < n; i++)
+        {
+            work[i] = 0;
+            for(rocblas_int j = 0; j < m; j++)
+                work[i] += C[j + i * ldc] * v[j * incv];
+        }
+
+        // ger
+        for(rocblas_int i = 0; i < m; i++)
+            for(rocblas_int j = 0; j < n; j++)
+                C[i + j * ldc] -= tau * v[i * incv] * work[j];
+    }
+    else
+    {
+        // gemv
+        for(rocblas_int i = 0; i < m; i++)
+        {
+            work[i] = 0;
+            for(rocblas_int j = 0; j < n; j++)
+                work[i] += C[i + j * ldc] * v[j * incv];
+        }
+
+        // ger
+        for(rocblas_int i = 0; i < m; i++)
+            for(rocblas_int j = 0; j < n; j++)
+                C[i + j * ldc] -= tau * v[j * incv] * work[i];
+    }
 }
 
 ROCSOLVER_END_NAMESPACE
