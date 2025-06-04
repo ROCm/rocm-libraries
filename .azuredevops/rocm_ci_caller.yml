@@ -15,9 +15,10 @@ variables:
   GH_PAT: '$(svc_acc_org_secret)'  
 jobs:  
 - job: Trigger_Pipeline 
-  displayName: 'Trigger Pipeline'  
+  displayName: 'Trigger Pipeline'
   pool: rocm-ci-caller
   steps:
+  - checkout: none
   - script: |
           git clone $(gh_repo)
     displayName: Checkout Code
