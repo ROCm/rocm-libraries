@@ -26,7 +26,7 @@
 // If you are interested in running your own Jenkins,
 // please raise a github issue for assistance.
 
-def runCompileCommand(platform, project, jobName, boolean debug=false)
+def runCompileCommand(platform, project, jobName, boolean debug=false, boolean codecov=false)
 {
     project.paths.construct_build_prefix()
 
@@ -51,6 +51,8 @@ def runCompileCommand(platform, project, jobName, boolean debug=false)
         sclCommand = "source scl_source enable gcc-toolset-12"
     }
 
+    String codeCovString = codecov ? "-DBUILD_CODE_COVERAGE=ON" : ""
+
     def command = """#!/usr/bin/env bash
             set -ex
             hostname
@@ -69,7 +71,9 @@ def runCompileCommand(platform, project, jobName, boolean debug=false)
                 -DCMAKE_CXX_COMPILER=${compiler} \
                 -DCMAKE_CXX_FLAGS="-D__HIP_HCC_COMPAT_MODE__=1" \
                 -DTensile_CPU_THREADS=${buildThreads} \
-                -DTensile_ROOT=`pwd`/../Tensile
+                -DTensile_ROOT=`pwd`/../Tensile \
+                ${codeCovString}
+
             
             make -j\$((`nproc`<16 ? `nproc` : 16))
 
