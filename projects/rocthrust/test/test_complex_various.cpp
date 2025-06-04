@@ -18,6 +18,7 @@
 #include <thrust/complex.h>
 
 #include <cmath>
+#include <complex>
 #include <random>
 
 #include "test_header.hpp"
@@ -97,32 +98,31 @@ void run_rng_test(const StdFunc& sf, const ThrustFunc& tf)
 }
 
 template <typename T, class StdFunc, class ThrustFunc>
-void run_trig_tests(const StdFunc& std_func, const ThrustFunc& thrust_func)
+void run_trig_tests(
+  const StdFunc& std_func, const ThrustFunc& thrust_func, double rmini, double rmaxi, double imini, double imaxi)
 {
-  constexpr size_t test_size = 100000;
+  // To run N tests but with N^2 algorithim, we must sqrt(N)
+  // so that total tests is still N
+  const double test_size = std::sqrt(100000);
 
-  std::random_device rd;
-  std::mt19937 gen(rd());
+  const T real_inc = (rmaxi - rmini) / test_size;
+  const T imag_inc = (imaxi - imini) / test_size;
 
-
-  std::uniform_real_distribution<T> real_dis(-1, 1);
-  std::uniform_real_distribution<T> imag_dis(0, 1);
-
-  for (size_t i = 0; i < test_size; i++)
+  for (double real = rmini; real <= rmaxi; real += real_inc)
   {
-    T real = real_dis(gen);
-    T imag = imag_dis(gen);
+    for (double imag = imini; imag <= imaxi; imag += imag_inc)
+    {
+      thrust::complex<T> thrust_complex(real, imag);
+      std::complex<T> std_complex(real, imag);
 
-    thrust::complex<T> thrust_complex(real, imag);
-    std::complex<T> std_complex(real, imag);
+      thrust::complex<T> thrust_out = thrust_func(thrust_complex);
+      std::complex<T> std_out       = std_func(std_complex);
 
-    thrust::complex<T> thrust_out = thrust_func(thrust_complex);
-    std::complex<T> std_out       = std_func(std_complex);
+      T real_eps = (std::abs(std_out.real()) < 0.05) ? 1e-1 : std::abs(std_out.real() * 0.01);
+      T imag_eps = (std::abs(std_out.imag()) < 0.05) ? 1e-1 : std::abs(std_out.imag() * 0.01);
 
-    T real_eps = (std::abs(std_out.real()) < 0.05) ? 1e-1 : std::abs(std_out.real() * 0.01);
-    T imag_eps = (std::abs(std_out.imag()) < 0.05) ? 1e-1 : std::abs(std_out.imag() * 0.01);
-
-    CHECK_CORRECT(std_out, thrust_out, real_eps, imag_eps, real, imag);
+      CHECK_CORRECT(std_out, thrust_out, real_eps, imag_eps, real, imag);
+    }
   }
 }
 
@@ -274,12 +274,21 @@ TEST(VariousComplexTest, hypotf)
 
 #endif
 
+/**
+ * Due to hipcc compiler issue, std trig functions for
+ * complex number is not working properly. To get
+ * around this we will have to calculate the real and
+ * imaginary parts separately manually.
+ */
+
+
 // ===================================================================
 //
 //                          CATRIG & CATRIGF
 //
 // ===================================================================
 
+//TODO: CALCULATE ARC FUNCTIONS MANUALLY
 TYPED_TEST(VariousComplexTest, asinh)
 {
   using T = TestFixture::T;
@@ -289,7 +298,11 @@ TYPED_TEST(VariousComplexTest, asinh)
     },
     [](thrust::complex<T>& x) {
       return thrust::asinh(x);
-    });
+    },
+    -1,
+    1,
+    0,
+    1);
 }
 
 TYPED_TEST(VariousComplexTest, asin)
@@ -301,7 +314,11 @@ TYPED_TEST(VariousComplexTest, asin)
     },
     [](thrust::complex<T>& x) {
       return thrust::asin(x);
-    });
+    },
+    -1,
+    1,
+    0,
+    1);
 }
 
 TYPED_TEST(VariousComplexTest, acosh)
@@ -313,7 +330,11 @@ TYPED_TEST(VariousComplexTest, acosh)
     },
     [](thrust::complex<T>& x) {
       return thrust::acosh(x);
-    });
+    },
+    -1,
+    1,
+    0,
+    1);
 }
 
 TYPED_TEST(VariousComplexTest, acos)
@@ -325,7 +346,11 @@ TYPED_TEST(VariousComplexTest, acos)
     },
     [](thrust::complex<T>& x) {
       return thrust::acos(x);
-    });
+    },
+    -1,
+    1,
+    0,
+    1);
 }
 
 TYPED_TEST(VariousComplexTest, atanh)
@@ -337,7 +362,11 @@ TYPED_TEST(VariousComplexTest, atanh)
     },
     [](thrust::complex<T>& x) {
       return thrust::atanh(x);
-    });
+    },
+    -1,
+    1,
+    0,
+    1);
 }
 
 TYPED_TEST(VariousComplexTest, atan)
@@ -349,7 +378,11 @@ TYPED_TEST(VariousComplexTest, atan)
     },
     [](thrust::complex<T>& x) {
       return thrust::atan(x);
-    });
+    },
+    -1,
+    1,
+    0,
+    1);
 }
 
 // ===================================================================
@@ -363,11 +396,21 @@ TYPED_TEST(VariousComplexTest, cosh)
   using T = TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
-      return std::cosh(x);
+      // cos(a + bi) = cosh(a) * cos(b) + isinh(a) * sin(b)
+      double real = std::cosh((double) x.real()) * std::cos((double) x.imag());
+      double imag = std::sinh((double) x.real()) * std::sin((double) x.imag());
+
+      return std::complex<T>((T) real, (T) imag);
     },
     [](thrust::complex<T>& x) {
       return thrust::cosh(x);
-    });
+    },
+    -710,
+    710,
+    std::numeric_limits<T>::min(),
+    std::numeric_limits<T>::max());
+  //-710 and 710 since cosh and sinh is quadratic and anything above 710 will result
+  // in out of bounds even for double!
 }
 
 TYPED_TEST(VariousComplexTest, cos)
@@ -375,11 +418,23 @@ TYPED_TEST(VariousComplexTest, cos)
   using T = TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
-      return std::cos(x);
+      // cos(a + bi) = cos(a) * cosh(b) − isin(a) * sinh(b)
+      double real = std::cos((double) x.real()) * std::cosh((double) x.imag());
+      double imag = std::sin((double) x.real()) * std::sinh((double) x.imag());
+
+      SCOPED_TRACE(testing::Message() << real << " " << imag << std::endl);
+
+      return std::complex<T>((T) real, (T) -imag);
     },
     [](thrust::complex<T>& x) {
       return thrust::cos(x);
-    });
+    },
+    std::numeric_limits<T>::min(),
+    std::numeric_limits<T>::max(),
+    -710,
+    710);
+  //-710 and 710 since cosh and sinh is quadratic and anything above 710 will result
+  // in out of bounds even for double!
 }
 
 // ===================================================================
@@ -397,55 +452,104 @@ TYPED_TEST(VariousComplexTest, exp)
     },
     [](thrust::complex<T>& x) {
       return thrust::exp(x);
-    });
+    },
+    std::numeric_limits<T>::min(),
+    std::numeric_limits<T>::max(),
+    std::numeric_limits<T>::min(),
+    std::numeric_limits<T>::max());
 }
 
-// ===================================================================
-//
-//                            CLOG & CLOGF
-//
-// ===================================================================
+// // ===================================================================
+// //
+// //                            CLOG & CLOGF
+// //
+// // ===================================================================
 
 TYPED_TEST(VariousComplexTest, log)
 {
-  using T = TestFixture::T;
+  using T     = TestFixture::T;
+  T max_range = std::sqrt(std::numeric_limits<T>::max() / 5);
   run_trig_tests<T>(
     [](std::complex<T>& x) {
-      return std::log(x);
+      double t_real = x.real();
+      double t_imag = x.imag();
+
+      double r     = std::sqrt(std::pow(t_real, 2) + std::pow(t_imag, 2));
+      double theta = std::atan2(t_imag, t_real);
+
+      double real = std::log(r);
+      double imag = theta;
+
+      return std::complex<T>((T) real, (T) imag);
     },
     [](thrust::complex<T>& x) {
       return thrust::log(x);
-    });
+    },
+    -max_range,
+    max_range,
+    -max_range,
+    max_range);
 }
 
 TYPED_TEST(VariousComplexTest, log10)
 {
-  using T = TestFixture::T;
+  using T     = TestFixture::T;
+  T max_range = std::sqrt(std::numeric_limits<T>::max() / 5);
   run_trig_tests<T>(
     [](std::complex<T>& x) {
-      return std::log10<T>(x);
+      double t_real = x.real();
+      double t_imag = x.imag();
+
+      double r     = std::sqrt(std::pow(t_real, 2) + std::pow(t_imag, 2));
+      double theta = std::atan2(t_imag, t_real);
+
+      double real = std::log10(r);
+      double imag = std::log10(std::exp(1.0)) * theta;
+
+      return std::complex<T>((T) real, (T) imag);
     },
     [](thrust::complex<T>& x) {
-      return thrust::log10<T>(x);
-    });
+      return thrust::log10(x);
+    },
+    -max_range,
+    max_range,
+    -max_range,
+    max_range);
 }
 
-// ===================================================================
-//
-//                            CSIN & CSINF
-//
-// ===================================================================
+// // ===================================================================
+// //
+// //                            CSIN & CSINF
+// //
+// // ===================================================================
 
 TYPED_TEST(VariousComplexTest, sinh)
 {
   using T = TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
-      return std::sinh(x);
+      /**
+       * Due to hipcc compiler issue, std::sinh(complex)
+       * is not working properly. Instead we
+       * will have to calculate this manually
+       */
+
+      // sinh(a + bi) = sinh(a) * cos(b) + icosh(a) * sin(b)
+
+      double real = std::sinh((double) x.real()) * std::cos((double) x.imag());
+      double imag = std::cosh((double) x.real()) * std::sin((double) x.imag());
+
+      return std::complex<T>((T) real, (T) imag);
     },
     [](thrust::complex<T>& x) {
       return thrust::sinh(x);
-    });
+    },
+    std::numeric_limits<T>::min(),
+    std::numeric_limits<T>::max(),
+    -710,
+    710);
+  //-710 and 710 since cosh and sinh is quadratic and anything above 710 will result
+  // in out of bounds even for double!
 }
 
 TYPED_TEST(VariousComplexTest, sin)
@@ -453,47 +557,89 @@ TYPED_TEST(VariousComplexTest, sin)
   using T = TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
-      return std::sin(x);
+      // sin(a + bi) = sin(a) * cosh(b) + icos(a) * sinh(b)
+
+      double real = std::sin((double) x.real()) * std::cosh((double) x.imag());
+      double imag = std::cos((double) x.real()) * std::sinh((double) x.imag());
+
+      return std::complex<T>((T) real, (T) imag);
     },
     [](thrust::complex<T>& x) {
       return thrust::sin(x);
-    });
+    },
+    std::numeric_limits<T>::min(),
+    std::numeric_limits<T>::max(),
+    -710,
+    710);
+  //-710 and 710 since cosh and sinh is quadratic and anything above 710 will result
+  // in out of bounds even for double!
 }
 
-// ===================================================================
-//
-//                         CSQRT & CSQRTF
-//
-// ===================================================================
+// // ===================================================================
+// //
+// //                         CSQRT & CSQRTF
+// //
+// // ===================================================================
 
 TYPED_TEST(VariousComplexTest, sqrt)
 {
   using T = TestFixture::T;
+
+  T max_range = std::sqrt(std::numeric_limits<T>::max() / 5);
+
   run_trig_tests<T>(
     [](std::complex<T>& x) {
-      return std::sqrt(x);
+      // sqrt(a + bi) = sqrt(a + sqrt(a^2 + b^2)/2) + i * ((b / |b|) * sqrt((-a + sqrt(a^2 + b^2))/2))
+
+      double t_real = (double) x.real();
+      double t_imag = (double) x.imag();
+
+      double sqrt_portion = std::sqrt(std::pow(t_real, 2) + std::pow(t_imag, 2));
+
+      double real = std::sqrt((t_real + sqrt_portion) / 2);
+      double imag = (t_imag < 0 ? -1 : 1) * std::sqrt((-t_real + sqrt_portion) / 2);
+
+      return std::complex<T>((T) real, (T) imag);
     },
     [](thrust::complex<T>& x) {
       return thrust::sqrt(x);
-    });
+    },
+    -max_range,
+    max_range,
+    -max_range,
+    max_range);
 }
 
-// ===================================================================
-//
-//                            CTAN & CTANF
-//
-// ===================================================================
+// // ===================================================================
+// //
+// //                            CTAN & CTANF
+// //
+// // ===================================================================
 
 TYPED_TEST(VariousComplexTest, tanh)
 {
   using T = TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
-      return std::tanh(x);
+      // tanh(a + bi) = sinh(2a) / (cosh(b) + cos(2a) + isin(2b) / (cosh(b) + cos(2a)
+
+      double t_real = (double) x.real();
+      double t_imag = (double) x.imag();
+
+      double denom = std::cosh(2.0 * t_real) + std::cos(2 * t_imag);
+
+      T real = std::sinh(2.0 * t_real) / denom;
+      T imag = std::sin(2.0 * t_imag) / denom;
+
+      return std::complex<T>((T) real, (T) imag);
     },
     [](thrust::complex<T>& x) {
       return thrust::tanh(x);
-    });
+    },
+    -710 / 2,
+    710 / 2,
+    std::numeric_limits<T>::min() / 2,
+    std::numeric_limits<T>::max() / 2);
 }
 
 TYPED_TEST(VariousComplexTest, tan)
@@ -501,9 +647,25 @@ TYPED_TEST(VariousComplexTest, tan)
   using T = TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
-      return std::tan(x);
+      // tan(a + bi) = sin(2a) / (cos(b) + cosh(2a) + isinh(2b) / (cos(b) + cosh(2a)
+
+      double t_real = (double) x.real();
+      double t_imag = (double) x.imag();
+
+      double denom = std::cos(2.0 * t_real) + std::cosh(2 * t_imag);
+
+      T real = std::sin(2.0 * t_real) / denom;
+      T imag = std::sinh(2.0 * t_imag) / denom;
+
+      return std::complex<T>((T) real, (T) imag);
     },
     [](thrust::complex<T>& x) {
       return thrust::tan(x);
-    });
+    },
+    std::numeric_limits<T>::min() / 2,
+    std::numeric_limits<T>::max() / 2,
+    -710 / 2,
+    710 / 2);
+  //-710 / 2 and 710 / 2 since cosh and sinh is quadratic and anything above 710 will result
+  // in out of bounds even for double! We also have to acount the 2 multiplier);
 }
