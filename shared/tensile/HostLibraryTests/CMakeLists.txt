@@ -37,6 +37,8 @@ option(TENSILE_USE_MSGPACK   "Use msgpack for parsing config files." ON)
 option(TENSILE_USE_OPENMP    "Enable OpenMP multithreading." ON)
 option(TENSILE_STATIC_ONLY   "Disable exposing Tensile symbols in a shared library." ON)
 option(TENSILE_DISABLE_CTEST "Disable CTest integration." ON)
+option(TENSILE_ENABLE_COVERAGE "Enable code coverage for TensileHost library." OFF)
+option(BUILD_CODE_COVERAGE "Enable code coverage for TensileHost library." OFF)
 
 if(TENSILE_USE_HIP)
     set(TENSILE_COMPONENTS HIP)
@@ -197,7 +199,7 @@ if(TENSILE_USE_OPENMP)
     target_link_libraries(TensileTests PRIVATE custom_openmp_cxx)
 endif()
 
-if(TENSILE_ENABLE_COVERAGE)
+if(TENSILE_ENABLE_COVERAGE OR BUILD_CODE_COVERAGE)
     message(STATUS "Code coverage for TensileHost is ENABLED.")
 
     target_compile_options(TensileHost PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
@@ -223,14 +225,14 @@ if(TENSILE_ENABLE_COVERAGE)
     find_program(
         LLVM_PROFDATA
         llvm-profdata
-        HINTS llvm/bin
+        PATH_SUFFIXES llvm/bin
         REQUIRED
     )
     find_program(
         LLVM_COV
         llvm-cov
         REQUIRED
-        HINTS llvm/bin
+        PATH_SUFFIXES llvm/bin
     )
 
     add_custom_target(
