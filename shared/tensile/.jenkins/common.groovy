@@ -85,7 +85,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean c
 
 def runCodecovTestCommand(platform, project, jobName)
 {
-    def command = "cd ${project.paths.project_build_prefix} && make coverage"
+    def command = "cd ${project.paths.project_build_prefix}/build && make coverage"
     platform.runCommand(this, command)
 
     this.publishHTML([allowMissing: false,
