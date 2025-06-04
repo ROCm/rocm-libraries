@@ -51,7 +51,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean c
         sclCommand = "source scl_source enable gcc-toolset-12"
     }
 
-    String codeCovString = codecov ? "-DBUILD_CODE_COVERAGE=ON" : ""
+    String codeCovString = codecov ? "-DTENSILE_ENABLE_COVERAGE=ON" : ""
 
     def command = """#!/usr/bin/env bash
             set -ex
