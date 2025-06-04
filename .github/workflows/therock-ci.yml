@@ -40,7 +40,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: a742718b33993332131863885a621fceef6f9b48
+          ref: 1b9fe8ac8be2de43fd4a119d78a12327b2a5ff07
 
       - name: Generate a token
         id: generate-token
@@ -91,7 +91,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@a742718b33993332131863885a621fceef6f9b48
+    uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@1b9fe8ac8be2de43fd4a119d78a12327b2a5ff07
     with:
       amdgpu_families: "gfx94X-dcgpu"
       expect_failure: false
@@ -100,7 +100,7 @@ jobs:
   therock-test-linux:
     name: "rocPRIM math-lib test"
     needs: therock-build-linux
-    uses: ROCm/TheRock/.github/workflows/test_rocprim.yml@a742718b33993332131863885a621fceef6f9b48
+    uses: ROCm/TheRock/.github/workflows/test_rocprim.yml@1b9fe8ac8be2de43fd4a119d78a12327b2a5ff07
     with:
       artifact_run_id: "${{ github.run_id }}"
       amdgpu_families: "gfx94X-dcgpu"
