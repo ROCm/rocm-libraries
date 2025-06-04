@@ -15,16 +15,20 @@
 // should compile without any warnings or errors even though this pattern is not
 // understood by the thread safety annotations.
 
-#include <mutex>
+#include <gpu/mutex>
 
 #include "test_macros.h"
 
+#include "force_include_hip.h"
+
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   gpu::spin_mutex m;
   m.lock();
   {
     gpu::unique_lock<gpu::spin_mutex> g(m, std::adopt_lock);
   }
+#endif
 
   return 0;
 }

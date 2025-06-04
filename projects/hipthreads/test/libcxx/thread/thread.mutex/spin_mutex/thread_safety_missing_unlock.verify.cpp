@@ -15,12 +15,12 @@
 
 // <mutex>
 
-// ADDITIONAL_COMPILE_FLAGS: -D_LIBCPP_ENABLE_THREAD_SAFETY_ANNOTATIONS
+// ADDITIONAL_COMPILE_FLAGS: -D_LIBGPU_ENABLE_THREAD_SAFETY_ANNOTATIONS
 
-#include <mutex>
+#include <gpu/mutex>
 
-gpu::spin_mutex m;
+__device__ gpu::spin_mutex m;
 
-void f() {
+__device__ void f() {
   m.lock();
 } // expected-error {{mutex 'm' is still held at the end of function}}

@@ -10,21 +10,26 @@
 // the processing goes awry preventing the definition of the types.
 // XFAIL: msvc
 
+// gpulib doesn't provide an equivalent to std::scoped_lock yet
+// XFAIL: *
+
 // UNSUPPORTED: no-threads
 // REQUIRES: thread-safety
 
 // <mutex>
 
-// ADDITIONAL_COMPILE_FLAGS: -D_LIBCPP_ENABLE_THREAD_SAFETY_ANNOTATIONS
+// ADDITIONAL_COMPILE_FLAGS: -D_LIBGPU_ENABLE_THREAD_SAFETY_ANNOTATIONS
 
-#include <mutex>
+#include <gpu/pseudo_mutex>
 
 #include "test_macros.h"
 
-gpu::pseudo_mutex m;
-int foo __attribute__((guarded_by(m)));
+#include "force_include_hip.h"
 
-static void scoped() {
+__device__ gpu::pseudo_mutex m;
+__device__ int foo __attribute__((guarded_by(m)));
+
+__device__ static void scoped() {
 #if TEST_STD_VER >= 17
   gpu::scoped_lock<gpu::pseudo_mutex> lock(m);
   foo++;
@@ -32,9 +37,11 @@ static void scoped() {
 }
 
 int main(int, char**) {
+#ifdef __HIP_DEVICE_COMPILE__
   scoped();
   gpu::lock_guard<gpu::pseudo_mutex> lock(m);
   foo++;
+#endif
 
   return 0;
 }
