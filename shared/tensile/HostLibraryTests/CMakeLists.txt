@@ -196,3 +196,51 @@ endif()
 if(TENSILE_USE_OPENMP)
     target_link_libraries(TensileTests PRIVATE custom_openmp_cxx)
 endif()
+
+if(TENSILE_ENABLE_COVERAGE)
+    message(STATUS "Code coverage for TensileHost is ENABLED.")
+
+    target_compile_options(TensileHost PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(TensileHost PRIVATE -fprofile-instr-generate)
+    message(STATUS "Applied coverage flags to TensileHost.")
+
+    target_compile_options(TensileTests PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(TensileTests PRIVATE -fprofile-instr-generate)
+    message(STATUS "Applied coverage flags to TensileTests.")
+
+    set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
+
+    add_custom_target(
+        code_cov_tests
+        DEPENDS TensileTests
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${coverage_dir}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${coverage_dir}/profraw"
+        COMMAND ${CMAKE_COMMAND} -E env "LLVM_PROFILE_FILE=${coverage_dir}/profraw/tensile-host-coverage_%p.profraw"
+                                        GTEST_LISTENER=NO_PASS_LINE_IN_LOG 
+                                        $<TARGET_FILE:TensileTests>
+      )
+
+    find_program(
+        LLVM_PROFDATA
+        llvm-profdata
+        HINTS llvm/bin
+        REQUIRED
+    )
+    find_program(
+        LLVM_COV
+        llvm-cov
+        REQUIRED
+        HINTS llvm/bin
+    )
+
+    add_custom_target(
+        coverage
+        DEPENDS code_cov_tests
+        COMMAND ${LLVM_PROFDATA} merge -sparse "${coverage_dir}/profraw/tensile-host-coverage_*.profraw" -o "${coverage_dir}/tensile-host.profdata"
+        COMMAND ${LLVM_COV} report -object $<TARGET_FILE:TensileHost> -instr-profile="${coverage_dir}/tensile-host.profdata"
+        COMMAND ${LLVM_COV} show -object $<TARGET_FILE:TensileHost> -instr-profile="${coverage_dir}/tensile-host.profdata" -format=html -output-dir="${coverage_dir}"
+        
+        COMMENT "Generating TensileHost coverage report... HTML report in ${coverage_dir}/index.html"
+    )
+
+endif()
