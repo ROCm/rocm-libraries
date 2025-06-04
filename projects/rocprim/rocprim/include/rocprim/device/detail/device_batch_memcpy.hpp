@@ -323,6 +323,25 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void
 
 } // namespace batch_memcpy
 
+// This is a helper struct that defines the type used for the batch memcpy operation.
+// Use template specialization on IsMemCpy is done in order to avoid using std::conditional.
+// Using std::conditional can result in build errors because the compiler evaluates both sides
+// of the conditional.
+template <bool IsMemCpy, typename InputBufferItType>
+struct AliasType { };
+
+template<typename InputBufferItType>
+struct AliasType<false, InputBufferItType>
+{
+    using type = typename std::iterator_traits<typename std::iterator_traits<InputBufferItType>::value_type>::value_type;
+};
+
+template<typename InputBufferItType>
+struct AliasType<true, InputBufferItType>
+{
+    using type = unsigned char;
+};
+
 template<bool IsMemCpy, class InputBufferItType, class OutputBufferItType, class BufferSizeItType>
 struct batch_memcpy_impl
 {
@@ -330,13 +349,8 @@ struct batch_memcpy_impl
     using output_buffer_type = typename std::iterator_traits<OutputBufferItType>::value_type;
     using buffer_size_type   = typename std::iterator_traits<BufferSizeItType>::value_type;
 
-    using input_type = typename std::iterator_traits<input_buffer_type>::value_type;
-
-    using Alias =
-        typename std::conditional<IsMemCpy,
-                                  unsigned char,
-                                  typename std::iterator_traits<typename std::iterator_traits<
-                                      InputBufferItType>::value_type>::value_type>::type;
+    // This type is either unsigned char (if IsMemCpy is true) or the InputBufferItType's value type.
+    using Alias = typename AliasType<IsMemCpy, InputBufferItType>::type;
 
     // Offset over buffers.
     using buffer_offset_type = uint32_t;
