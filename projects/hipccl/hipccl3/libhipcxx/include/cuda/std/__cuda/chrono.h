@@ -28,7 +28,9 @@
 #ifndef _LIBCUDACXX___CUDA_CHRONO_H
 #define _LIBCUDACXX___CUDA_CHRONO_H
 
+#if defined(__HIP_PLATFORM_AMD__)
 #include <hip/hip_runtime.h>
+#endif
 
 #include <cuda/std/detail/__config>
 

@@ -27,7 +27,9 @@
 #ifndef _LIBCUDACXX_THREADING_SUPPORT
 #define _LIBCUDACXX_THREADING_SUPPORT
 
+#if defined(__HIP_PLATFORM_AMD__)
 #include <hip/hip_runtime.h>
+#endif
 
 #include <cuda/std/detail/__config>
 
