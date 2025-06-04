@@ -79,6 +79,13 @@ function(add_rocprim_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
       $<$<COMPILE_LANGUAGE:HIP>:$<$<HIP_COMPILER_ID:MSVC>:/bigobj>>
   )
 
+  function(add_rocprim_test_disable_dpp TEST_NAME TEST_SOURCES)
+    get_rocprim_test_target(${TEST_SOURCES} TEST_TARGET)
+    set(TEST_TARGET "${TEST_TARGET}_disable_dpp")
+    add_rocprim_test_internal("${TEST_NAME}_disable_dpp" "${TEST_SOURCES}" ${TEST_TARGET})
+    target_compile_definitions(${TEST_TARGET} PRIVATE ROCPRIM_DISABLE_DPP=1)
+  endfunction()
+
   if(WIN32)
     # Usage of 128-bit integral types (__int128_t and __uint128_t, whose alignment is 16 bytes)
     # requires an extended alignment support. Otherwise, a static assert will be triggered in
@@ -323,6 +330,7 @@ add_rocprim_test("rocprim.warp_exchange" test_warp_exchange.cpp)
 add_rocprim_test("rocprim.warp_load" test_warp_load.cpp)
 add_rocprim_test("rocprim.warp_reduce" test_warp_reduce.cpp)
 add_rocprim_test("rocprim.warp_scan" test_warp_scan.cpp)
+add_rocprim_test_disable_dpp("rocprim.warp_scan_disable_dpp" test_warp_scan.cpp)
 add_rocprim_test("rocprim.warp_sort" test_warp_sort.cpp)
 add_rocprim_test("rocprim.warp_store" test_warp_store.cpp)
 add_rocprim_test("rocprim.zip_iterator" test_zip_iterator.cpp)
