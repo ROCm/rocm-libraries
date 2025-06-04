@@ -35,12 +35,9 @@
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
 
-template <bool CPU,
-          bool GPU,
-          typename T,
-          typename Ud,
-          typename Uh>
+template <bool CPU, bool GPU, typename T, typename Ud, typename Uh>
 void sb2st_hb2st_initData(const rocblas_handle handle,
+                          const rocblas_fill uplo,
                           const rocblas_int n,
                           const rocblas_int nb,
                           Ud& dA,
@@ -53,6 +50,7 @@ void sb2st_hb2st_initData(const rocblas_handle handle,
         rocblas_init<T>(hA, true);
 
         // scale A to avoid singularities
+        // transform A to a banded matrix
         for(rocblas_int b = 0; b < bc; ++b)
         {
             for(rocblas_int i = 0; i < n; i++)
@@ -61,6 +59,10 @@ void sb2st_hb2st_initData(const rocblas_handle handle,
                 {
                     if(i == j)
                         hA[b][i + j * lda] = std::real(hA[b][i + j * lda]) + 400;
+                    else if(uplo == rocblas_fill_upper && j > i + nb)
+                        hA[b][i + j * lda] = 0;
+                    else if(uplo == rocblas_fill_lower && i > j + nb)
+                        hA[b][i + j * lda] = 0;
                     else
                         hA[b][i + j * lda] -= 4;
                 }
@@ -77,22 +79,23 @@ void sb2st_hb2st_initData(const rocblas_handle handle,
 
 template <typename T, typename Ud, typename Td, typename Uh, typename Th>
 void sb2st_hb2st_getError(const rocblas_handle handle,
-                    const rocblas_int n,
-                    const rocblas_int nb,
-                    Ud& dA,
-                    const rocblas_int lda,
-                    Td& dD,
-                    Td& dE,
-                    Uh& hA,
-                    Uh& hARes,
-                    Th& hD,
-                    Th& hDRes,
-                    Th& hE,
-                    Th& hERes,
-                    double* max_err)
+                          const rocblas_fill uplo,
+                          const rocblas_int n,
+                          const rocblas_int nb,
+                          Ud& dA,
+                          const rocblas_int lda,
+                          Td& dD,
+                          Td& dE,
+                          Uh& hA,
+                          Uh& hARes,
+                          Th& hD,
+                          Th& hDRes,
+                          Th& hE,
+                          Th& hERes,
+                          double* max_err)
 {
     // input data initialization
-    sb2st_hb2st_initData<true, true, T>(handle, n, nb, dA, lda, hA, 1);
+    sb2st_hb2st_initData<true, true, T>(handle, uplo, n, nb, dA, lda, hA, 1);
 
     // execute computations
     // GPU lapack
@@ -102,10 +105,17 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
     CHECK_HIP_ERROR(hERes.transfer_from(dE));
 
     // CPU lapack
-    // cpu_sb2st_hb2st();
+    std::vector<T> hW(32 * n);
+    std::vector<T> hTau(n - 1);
+    cpu_sytrd_hetrd(uplo, n, hA.data(), lda, hD.data(), hE.data(), hTau.data(), hW.data(), 32 * n);
 
     double err;
     *max_err = 0;
+    // compare diagonal and off diagonal
+    err = norm_error('F', 1, n, 1, hD[0], hDRes[0]);
+    *max_err = err > *max_err ? err : *max_err;
+    err = norm_error('F', 1, n - 1, 1, hE[0], hERes[0]);
+    *max_err = err > *max_err ? err : *max_err;
 }
 
 template <typename T>
@@ -115,10 +125,12 @@ void testing_sb2st_hb2st(Arguments& argus)
 
     // get arguments
     rocblas_local_handle handle;
+    char uploC = argus.get<char>("uplo");
     rocblas_int n = argus.get<rocblas_int>("n");
     rocblas_int nb = argus.get<rocblas_int>("nb");
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
 
+    rocblas_fill uplo = char2rocblas_fill(uploC);
     rocblas_int hot_calls = argus.iters;
 
     // determine sizes
@@ -135,8 +147,9 @@ void testing_sb2st_hb2st(Arguments& argus)
     bool invalid_size = (n < 0 || nb < 0 || lda < n);
     if(invalid_size)
     {
-        EXPECT_ROCBLAS_STATUS(rocsolver_sb2st_hb2st(handle, n, nb, (T*)nullptr, lda, (S*)nullptr, (S*)nullptr),
-                              rocblas_status_invalid_size);
+        EXPECT_ROCBLAS_STATUS(
+            rocsolver_sb2st_hb2st(handle, n, nb, (T*)nullptr, lda, (S*)nullptr, (S*)nullptr),
+            rocblas_status_invalid_size);
 
         if(argus.timing)
             rocsolver_bench_inform(inform_invalid_size);
@@ -148,7 +161,8 @@ void testing_sb2st_hb2st(Arguments& argus)
     if(argus.mem_query)
     {
         CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));
-        CHECK_ALLOC_QUERY(rocsolver_sb2st_hb2st(handle, n, nb, (T*)nullptr, lda, (S*)nullptr, (S*)nullptr));
+        CHECK_ALLOC_QUERY(
+            rocsolver_sb2st_hb2st(handle, n, nb, (T*)nullptr, lda, (S*)nullptr, (S*)nullptr));
 
         size_t size;
         CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &size));
@@ -177,8 +191,9 @@ void testing_sb2st_hb2st(Arguments& argus)
     // check quick return
     if(nb == 0 || n == 0)
     {
-        EXPECT_ROCBLAS_STATUS(rocsolver_sb2st_hb2st(handle, n, nb, dA.data(), lda, dD.data(), dE.data()),
-                              rocblas_status_success);
+        EXPECT_ROCBLAS_STATUS(
+            rocsolver_sb2st_hb2st(handle, n, nb, dA.data(), lda, dD.data(), dE.data()),
+            rocblas_status_success);
         if(argus.timing)
             rocsolver_bench_inform(inform_quick_return);
 
@@ -187,8 +202,8 @@ void testing_sb2st_hb2st(Arguments& argus)
 
     // check computations
     if(argus.unit_check || argus.norm_check)
-        sb2st_hb2st_getError<T>(handle, n, nb, dA, lda, dD, dE, hA, hARes, hD, hDRes, hE,
-                          hERes, &max_error);
+        sb2st_hb2st_getError<T>(handle, uplo, n, nb, dA, lda, dD, dE, hA, hARes, hD, hDRes, hE,
+                                hERes, &max_error);
 
     // // collect performance data
     // if(argus.timing && hot_calls > 0)
@@ -233,6 +248,7 @@ void testing_sb2st_hb2st(Arguments& argus)
     argus.validate_consumed();
 }
 
-#define EXTERN_TESTING_SB2ST_HB2ST(...) extern template void testing_sb2st_hb2st<__VA_ARGS__>(Arguments&);
+#define EXTERN_TESTING_SB2ST_HB2ST(...) \
+    extern template void testing_sb2st_hb2st<__VA_ARGS__>(Arguments&);
 
 INSTANTIATE(EXTERN_TESTING_SB2ST_HB2ST, FOREACH_SCALAR_TYPE, APPLY_STAMP)

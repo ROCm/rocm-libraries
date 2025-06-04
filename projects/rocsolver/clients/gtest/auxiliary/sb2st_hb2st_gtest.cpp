@@ -25,101 +25,105 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
- #include "common/auxiliary/testing_sb2st_hb2st.hpp"
+#include "common/auxiliary/testing_sb2st_hb2st.hpp"
 
- using ::testing::Combine;
- using ::testing::TestWithParam;
- using ::testing::Values;
- using ::testing::ValuesIn;
- using namespace std;
+using ::testing::Combine;
+using ::testing::TestWithParam;
+using ::testing::Values;
+using ::testing::ValuesIn;
+using namespace std;
 
- typedef std::tuple<vector<int>> sb2st_hb2st_tuple;
+typedef std::tuple<vector<int>, printable_char> sb2st_hb2st_tuple;
 
- // each matrix_size_range is a {n, lda, nb}
+// each matrix_size_range is a {n, lda, nb}
 
- // case when n = 0 and nb = 0 will also execute the bad arguments test
- // (null handle, null pointers and invalid values)
+// case when n = 0 and nb = 0 will also execute the bad arguments test
+// (null handle, null pointers and invalid values)
 
- // for checkin_lapack tests
- const vector<vector<int>> matrix_size_range = {
-     // quick return
-     {0, 1, 1},
-     {1, 1, 0},
-     // invalid
-     {-1, 1, 1},
-     {1, 1, -1},
-     {20, 15, 5},
-     // normal (valid) samples
-     {10, 10, 2},
-     {20, 24, 18},
-     {128, 128, 32},
-    };
+const vector<printable_char> uplo_range = {'L', 'U'};
 
- // for daily_lapack tests
- const vector<vector<int>> large_matrix_size_range
-     = {{152, 152, 64}, {640, 720, 500}, {1000, 1024, 800}, {512, 512, 312}};
+// for checkin_lapack tests
+const vector<vector<int>> matrix_size_range = {
+    // quick return
+    {0, 1, 1},
+    {1, 1, 0},
+    // invalid
+    {-1, 1, 1},
+    {1, 1, -1},
+    {20, 15, 5},
+    // normal (valid) samples
+    {10, 10, 2},
+    {20, 24, 18},
+    {128, 128, 32},
+};
 
- Arguments sb2st_hb2st_setup_arguments(sb2st_hb2st_tuple tup)
- {
-     vector<int> matrix_size = std::get<0>(tup);
+// for daily_lapack tests
+const vector<vector<int>> large_matrix_size_range
+    = {{152, 152, 64}, {640, 720, 500}, {1000, 1024, 800}, {512, 512, 312}};
 
-     Arguments arg;
+Arguments sb2st_hb2st_setup_arguments(sb2st_hb2st_tuple tup)
+{
+    vector<int> matrix_size = std::get<0>(tup);
+    char uplo = std::get<1>(tup);
 
-     arg.set<rocblas_int>("n", matrix_size[0]);
-     arg.set<rocblas_int>("lda", matrix_size[1]);
-     arg.set<rocblas_int>("nb", matrix_size[2]);
+    Arguments arg;
 
-     arg.timing = 0;
+    arg.set<rocblas_int>("n", matrix_size[0]);
+    arg.set<rocblas_int>("lda", matrix_size[1]);
+    arg.set<rocblas_int>("nb", matrix_size[2]);
+    arg.set<char>("uplo", uplo);
 
-     return arg;
- }
+    arg.timing = 0;
 
- class SB2ST_HB2ST : public ::TestWithParam<sb2st_hb2st_tuple>
- {
- protected:
-     void TearDown() override
-     {
-         EXPECT_EQ(hipGetLastError(), hipSuccess);
-     }
+    return arg;
+}
 
-     template <typename T>
-     void run_tests()
-     {
-         Arguments arg = sb2st_hb2st_setup_arguments(GetParam());
+class SB2ST_HB2ST : public ::TestWithParam<sb2st_hb2st_tuple>
+{
+protected:
+    void TearDown() override
+    {
+        EXPECT_EQ(hipGetLastError(), hipSuccess);
+    }
+
+    template <typename T>
+    void run_tests()
+    {
+        Arguments arg = sb2st_hb2st_setup_arguments(GetParam());
 
         //  if(arg.peek<rocblas_int>("nb") == 0 && arg.peek<rocblas_int>("n") == 0)
         //      testing_sb2st_hb2st_bad_arg<T>();
 
-         testing_sb2st_hb2st<T>(arg);
-     }
- };
+        testing_sb2st_hb2st<T>(arg);
+    }
+};
 
- // non-batch tests
+// non-batch tests
 
- TEST_P(SB2ST_HB2ST, __float)
- {
-     run_tests<float>();
- }
+TEST_P(SB2ST_HB2ST, __float)
+{
+    run_tests<float>();
+}
 
- TEST_P(SB2ST_HB2ST, __double)
- {
-     run_tests<double>();
- }
+TEST_P(SB2ST_HB2ST, __double)
+{
+    run_tests<double>();
+}
 
- TEST_P(SB2ST_HB2ST, __float_complex)
- {
-     run_tests<rocblas_float_complex>();
- }
+TEST_P(SB2ST_HB2ST, __float_complex)
+{
+    run_tests<rocblas_float_complex>();
+}
 
- TEST_P(SB2ST_HB2ST, __double_complex)
- {
-     run_tests<rocblas_double_complex>();
- }
+TEST_P(SB2ST_HB2ST, __double_complex)
+{
+    run_tests<rocblas_double_complex>();
+}
 
- INSTANTIATE_TEST_SUITE_P(daily_lapack,
-                          SB2ST_HB2ST,
-                          Combine(ValuesIn(large_matrix_size_range)));
+INSTANTIATE_TEST_SUITE_P(daily_lapack,
+                         SB2ST_HB2ST,
+                         Combine(ValuesIn(large_matrix_size_range), ValuesIn(uplo_range)));
 
- INSTANTIATE_TEST_SUITE_P(checkin_lapack,
-                          SB2ST_HB2ST,
-                          Combine(ValuesIn(matrix_size_range)));
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         SB2ST_HB2ST,
+                         Combine(ValuesIn(matrix_size_range), ValuesIn(uplo_range)));
