@@ -9,6 +9,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #ifndef _LIBCUDACXX___MEMORY_ASSUME_ALIGNED_H
 #define _LIBCUDACXX___MEMORY_ASSUME_ALIGNED_H
 
@@ -33,16 +50,16 @@ template <size_t _Align, class _Tp>
 _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 _Tp* assume_aligned(_Tp* __ptr) noexcept
 {
   static_assert(_CUDA_VSTD::has_single_bit(_Align), "std::assume_aligned requires the alignment to be a power of 2!");
-#if defined(_CCCL_BUILTIN_IS_CONSTANT_EVALUATED) && defined(_CCCL_BUILTIN_ASSUME_ALIGNED)
+#if defined(_CCCL_BUILTIN_IS_CONSTANT_EVALUATED) && __has_builtin(__builtin_assume_aligned)
   if (!_CCCL_BUILTIN_IS_CONSTANT_EVALUATED())
   {
 #  if !defined(_CCCL_COMPILER_MSVC) // MSVC checks within the builtin
     _CCCL_ASSERT(reinterpret_cast<uintptr_t>(__ptr) % _Align == 0, "Alignment assumption is violated");
 #  endif // !_CCCL_COMPILER_MSVC
-    return static_cast<_Tp*>(_CCCL_BUILTIN_ASSUME_ALIGNED(__ptr, _Align));
+    return static_cast<_Tp*>(__builtin_assume_aligned(__ptr, _Align));
   }
   else
-#endif // _CCCL_BUILTIN_IS_CONSTANT_EVALUATED && _CCCL_BUILTIN_ASSUME_ALIGNED
+#endif // _CCCL_BUILTIN_IS_CONSTANT_EVALUATED && __has_builtin(__builtin_assume_aligned)
   {
     return __ptr;
   }
