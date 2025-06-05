@@ -55,16 +55,22 @@ void sb2st_hb2st_initData(const rocblas_handle handle,
         {
             for(rocblas_int i = 0; i < n; i++)
             {
-                for(rocblas_int j = 0; j < n; j++)
+                for(rocblas_int j = i; j < n; j++)
                 {
                     if(i == j)
+                    {
                         hA[b][i + j * lda] = std::real(hA[b][i + j * lda]) + 400;
-                    else if(uplo == rocblas_fill_upper && j > i + nb)
+                    }
+                    else if(j > i + nb)
+                    {
                         hA[b][i + j * lda] = 0;
-                    else if(uplo == rocblas_fill_lower && i > j + nb)
-                        hA[b][i + j * lda] = 0;
+                    }
                     else
+                    {
                         hA[b][i + j * lda] -= 4;
+                    }
+
+                    hA[b][j + i * lda] = hA[b][i + j * lda];
                 }
             }
         }
