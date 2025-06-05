@@ -3,7 +3,7 @@ name: TheRock CI
 on:
   workflow_call:
     inputs:
-      flag:
+      cmake_options:
         type: string
       project_to_test:
         type: string
@@ -21,7 +21,7 @@ jobs:
     with:
       amdgpu_families: "gfx94X-dcgpu"
       expect_failure: false
-      extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ inputs.flag }}"
+      extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ inputs.cmake_options }}"
 
   therock-test-linux:
     name: "Test"

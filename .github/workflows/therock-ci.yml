@@ -98,5 +98,5 @@ jobs:
         projects: ${{ fromJSON(needs.setup.outputs.projects) }}
     uses: ./.github/workflows/therock-ci-linux.yml
     with:
-      flag: ${{ matrix.projects.flag }}
-      project_to_test: ${{ matrix.projects.test }}
+      cmake_options: ${{ matrix.projects.cmake_options }}
+      project_to_test: ${{ matrix.projects.project_to_test }}

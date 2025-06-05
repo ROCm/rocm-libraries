@@ -3,7 +3,7 @@ This dictionary is used to map specific file directory changes to the correspond
 """
 monorepo_map = {
     "projects/rocprim": {
-        "flag": "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "test": "test_rocprim",
+        "cmake_options": "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "project_to_test": "test_rocprim",
     }
 }
