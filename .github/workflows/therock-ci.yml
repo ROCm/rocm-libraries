@@ -1,9 +1,6 @@
 name: TheRock CI
 
 on:
-  push:
-    branches:
-      - users/geomin12/fix-monorepo-fork
   pull_request_target:
     types:
       - opened
