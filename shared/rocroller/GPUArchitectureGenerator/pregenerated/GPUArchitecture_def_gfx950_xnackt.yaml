@@ -3,6 +3,7 @@ Architectures:
     Capabilities:
       ArchAccUnifiedRegs: 0
       CMPXWritesSGPR: 0
+      DSReadTransposeB6PaddingBytes: 4
       DefaultRemapXCCValue: 8
       DefaultScaleBlockSize: 32
       DefaultWavefrontSize: 64
@@ -50,6 +51,10 @@ Architectures:
       SupportedISA: 0
       SupportedSource: 0
       Waitcnt0Disabled: 0
+      ds_read_b64_tr_b16: 0
+      ds_read_b64_tr_b4: 0
+      ds_read_b64_tr_b8: 0
+      ds_read_b96_tr_b6: 0
       s_barrier: 0
       v_add3_u32: 0
       v_dot2_f32_f16: 0

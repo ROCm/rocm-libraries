@@ -115,7 +115,6 @@ set(
     unit/SupportedInstructionObserverTest.cpp
     unit/TileTransposeAdd.cpp
     unit/TimerTest.cpp
-    unit/TransposeLoadsTest.cpp
     unit/UtilsTest.cpp
     unit/VariantTest.cpp
     unit/VectorAddBenchmark.cpp
@@ -195,6 +194,7 @@ set(
     catch/SubDwordExpressionTest.cpp
     catch/TernaryExpressionTest.cpp
     catch/TestContextTest.cpp
+    catch/TransposeLoadsTest.cpp
     catch/UnrollLoopsTest.cpp
     catch/UtilsTest.cpp
     catch/WMMAHazardObserverTest.cpp

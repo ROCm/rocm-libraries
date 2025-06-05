@@ -970,7 +970,41 @@ namespace rocRoller
 
                 auto rC = std::get<Register::ValuePtr>(*expr.matC);
 
-                co_yield smm->mul(dest, rA, rB, rC, rScaleA, rScaleB, M, N, K);
+                auto getScaleBlockSize = [&](auto&& aScale, auto&& bScale) {
+                    auto idx                   = 1;
+                    auto computeScaleBlockSize = rocRoller::overloaded{
+                        [&](WaveTilePtr const& tile) -> std::optional<uint> {
+                            return K / tile->sizes[idx];
+                        },
+                        [&](Register::ValuePtr const& reg) -> std::optional<uint> {
+                            return std::nullopt;
+                        },
+                        [&](auto const& other) -> std::optional<uint> {
+                            Throw<FatalError>("Invalid scale expression type: ",
+                                              typeName<decltype(other)>());
+                        }};
+                    auto maybeScaleBlockSize = std::visit(computeScaleBlockSize, aScale);
+                    if(!maybeScaleBlockSize)
+                    {
+                        idx                 = 0;
+                        maybeScaleBlockSize = std::visit(computeScaleBlockSize, bScale);
+                    }
+                    return maybeScaleBlockSize;
+                };
+
+                auto const maybeScaleBlockSize = getScaleBlockSize(*expr.scaleA, *expr.scaleB);
+
+                if(maybeScaleBlockSize)
+                {
+                    auto        scaleBlockSize = maybeScaleBlockSize.value();
+                    auto const& arch           = m_context->targetArchitecture();
+                    AssertFatal(arch.isSupportedScaleBlockSize(scaleBlockSize),
+                                fmt::format("Scale block size {} not supported on {}",
+                                            scaleBlockSize,
+                                            arch.target().toString()));
+                }
+
+                co_yield smm->mul(dest, rA, rB, rC, rScaleA, rScaleB, M, N, K, maybeScaleBlockSize);
             }
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, WaveTilePtr const& expr)

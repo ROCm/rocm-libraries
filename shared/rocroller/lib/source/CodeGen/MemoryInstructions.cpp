@@ -77,47 +77,128 @@ namespace rocRoller
         return stream << toString(k);
     }
 
-    uint bitsPerTransposeLoad(uint elementBits)
+    uint bitsPerTransposeLoad(GPUArchitecture const& arch, uint elementBits)
     {
-        AssertFatal((elementBits == 16 || elementBits == 8 || elementBits == 6 || elementBits == 4),
-                    "Transpose load from LDS only available for 16, 8, 6, and 4-bit datatypes.",
-                    ShowValue(elementBits));
+        switch(elementBits)
+        {
+        case 16:
+            if(arch.HasCapability(GPUCapability::ds_read_b64_tr_b16))
+            {
+                return 64;
+            }
+            else
+            {
+                Throw<FatalError>(
+                    "No 16-bit transpose load from LDS instruction is not supported on ",
+                    arch.target().toString());
+            }
+        case 8:
+            if(arch.HasCapability(GPUCapability::ds_read_b64_tr_b8))
+            {
+                return 64;
+            }
+            else
+            {
+                Throw<FatalError>(
+                    "No 8-bit transpose load from LDS instruction is not supported on ",
+                    arch.target().toString());
+            }
+        case 6:
+            if(arch.HasCapability(GPUCapability::ds_read_b96_tr_b6))
+            {
+                return 96;
+            }
+            else
+            {
+                Throw<FatalError>(
+                    "No 6-bit transpose load from LDS instruction is not supported on ",
+                    arch.target().toString());
+            }
+        case 4:
+            if(arch.HasCapability(GPUCapability::ds_read_b64_tr_b4))
+            {
+                return 64;
+            }
+            else
+            {
+                Throw<FatalError>(
+                    "No 4-bit transpose load from LDS instruction is not supported on ",
+                    arch.target().toString());
+            }
+        default:
+            Throw<FatalError>(
+                "Transpose load from LDS only available for 16, 8, 6, and 4-bit datatypes.");
+        }
 
-        if(elementBits == 6)
-        {
-            // DS_READ_B96_TR_B6 loads 96 bits.
-            return 96;
-        }
-        else if(elementBits == 16 || elementBits == 8 || elementBits == 4)
-        {
-            // DS_READ_B64_TR_B{16,8,4} all load 64 bits.
-            return 64;
-        }
         // unsupported number of bits
+        Throw<FatalError>("unreachable");
         return 0;
     }
 
-    uint extraLDSBytesPerElementBlock(uint elementBits)
+    uint extraLDSBytesPerElementBlock(GPUArchitecture const& arch, uint elementBits)
     {
-        // 6-bit transposes are special as they require 128b alignment even though they only load 96 bits.
-        return elementBits == 6 ? (128 - 96) / 8 : 0;
+        if(arch.HasCapability(GPUCapability::DSReadTransposeB6PaddingBytes) && elementBits == 6)
+        {
+            return arch.GetCapability(GPUCapability::DSReadTransposeB6PaddingBytes);
+        }
+        return 0;
     }
 
-    std::string transposeLoadMnemonic(uint elementBits)
+    std::string transposeLoadMnemonic(GPUArchitecture const& arch, uint elementBits)
     {
-        AssertFatal((elementBits == 16 || elementBits == 8 || elementBits == 6 || elementBits == 4),
-                    "Transpose load from LDS only available for 16, 8, 6, and 4-bit datatypes.");
-
-        if(elementBits == 16 || elementBits == 8 || elementBits == 4)
+        switch(elementBits)
         {
-            return "ds_read_b64_tr_b" + std::to_string(elementBits);
-        }
-        else if(elementBits == 6)
-        {
-            return "ds_read_b96_tr_b6";
+        case 16:
+            if(arch.HasCapability(GPUCapability::ds_read_b64_tr_b16))
+            {
+                return "ds_read_b64_tr_b16";
+            }
+            else
+            {
+                Throw<FatalError>(
+                    "No 16-bit transpose load from LDS instruction is not supported on ",
+                    arch.target().toString());
+            }
+        case 8:
+            if(arch.HasCapability(GPUCapability::ds_read_b64_tr_b8))
+            {
+                return "ds_read_b64_tr_b8";
+            }
+            else
+            {
+                Throw<FatalError>(
+                    "No 8-bit transpose load from LDS instruction is not supported on ",
+                    arch.target().toString());
+            }
+        case 6:
+            if(arch.HasCapability(GPUCapability::ds_read_b96_tr_b6))
+            {
+                return "ds_read_b96_tr_b6";
+            }
+            else
+            {
+                Throw<FatalError>(
+                    "No 6-bit transpose load from LDS instruction is not supported on ",
+                    arch.target().toString());
+            }
+        case 4:
+            if(arch.HasCapability(GPUCapability::ds_read_b64_tr_b4))
+            {
+                return "ds_read_b64_tr_b4";
+            }
+            else
+            {
+                Throw<FatalError>(
+                    "No 4-bit transpose load from LDS instruction is not supported on ",
+                    arch.target().toString());
+            }
+        default:
+            Throw<FatalError>(
+                "Transpose load from LDS only available for 16, 8, 6, and 4-bit datatypes.");
         }
 
         // unsupported number of bits
+        Throw<FatalError>("unreachable");
         return "";
     }
 
@@ -131,17 +212,18 @@ namespace rocRoller
         AssertFatal(dest != nullptr);
         AssertFatal(addr != nullptr);
 
+        auto const& arch = m_context.lock()->targetArchitecture();
+
         AssertFatal((elementBits == 16 || elementBits == 8 || elementBits == 6 || elementBits == 4),
                     "Transpose load from LDS only available for 16, 8, 6, and 4-bit datatypes.",
                     ShowValue(elementBits));
 
         AssertFatal(numBytes > 0 && (numBytes < m_wordSize || numBytes % m_wordSize == 0),
                     "Invalid number of bytes");
-
         // 6-bit transposes are special as they require 128b alignment even though they only load 96 bits.
-        const uint        extraLDSBytes  = extraLDSBytesPerElementBlock(elementBits);
-        const uint        bytesPerTrLoad = bitsPerTransposeLoad(elementBits) / 8 + extraLDSBytes;
-        const std::string dsReadTrMnemonic{transposeLoadMnemonic(elementBits)};
+        const uint extraLDSBytes  = extraLDSBytesPerElementBlock(arch, elementBits);
+        const uint bytesPerTrLoad = bitsPerTransposeLoad(arch, elementBits) / 8 + extraLDSBytes;
+        const std::string dsReadTrMnemonic{transposeLoadMnemonic(arch, elementBits)};
 
         AssertFatal(
             numBytes % bytesPerTrLoad == 0,

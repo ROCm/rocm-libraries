@@ -156,6 +156,13 @@ namespace rocRoller
             HasDSReadTransposeB6,
             HasDSReadTransposeB4,
 
+            ds_read_b64_tr_b16,
+            ds_read_b64_tr_b8,
+            ds_read_b96_tr_b6,
+            ds_read_b64_tr_b4,
+
+            DSReadTransposeB6PaddingBytes,
+
             HasPRNG,
 
             HasPermLanes16,

@@ -380,7 +380,7 @@ namespace rocRoller
         AssertFatal(dest != nullptr);
         AssertFatal(base != nullptr);
 
-        AssertFatal(contains({4, 8, 16, 32, 64}, numBytes),
+        AssertFatal(contains({1, 4, 8, 16, 32, 64}, numBytes),
                     "Unsupported number of bytes for load.: " + std::to_string(numBytes));
 
         auto offsetLiteral = Register::Value::Literal(offset);

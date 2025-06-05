@@ -42,17 +42,17 @@ namespace rocRoller
             return macTile.layoutType == LayoutType::MATRIX_B;
         }
 
-        CoordinateGraph::MacroTile paddedMacroTile(CoordinateGraph::MacroTile& macroTile)
+        CoordinateGraph::MacroTile paddedMacroTile(CoordinateGraph::MacroTile& macroTile,
+                                                   uint                        paddingBytes)
         {
-            uint const elementBits     = 6;
-            uint const packing         = 16;
-            auto       padElementBytes = extraLDSBytesPerElementBlock(elementBits);
+            uint const elementBits = 6;
+            uint const packing     = 16;
 
             auto fastMovingDim = isMatrixA(macroTile) ? 0 : 1;
             auto padElements   = macroTile.sizes[fastMovingDim] / packing;
 
-            std::vector<uint> padBytesA = {padElements * padElementBytes, 0};
-            std::vector<uint> padBytesB = {0, padElements * padElementBytes};
+            std::vector<uint> padBytesA = {padElements * paddingBytes, 0};
+            std::vector<uint> padBytesB = {0, padElements * paddingBytes};
 
             return CoordinateGraph::MacroTile(macroTile,
                                               isMatrixA(macroTile) ? padBytesA : padBytesB);
@@ -80,13 +80,19 @@ namespace rocRoller
         {
             TIMER(t, "KernelGraph::AddF6LDSPadding");
 
+            auto const& arch = m_context->targetArchitecture();
+
             auto candidates = findCandidates(graph);
 
-            // Return unchanged graph if no LoadLDSTile of transposed tile found.
-            if(std::ranges::empty(candidates))
+            // Return unchanged graph if padding is not needed or if no LoadLDSTile of transposed tile found.
+            if(!arch.HasCapability(GPUCapability::DSReadTransposeB6PaddingBytes)
+               || std::ranges::empty(candidates))
             {
                 return graph;
             }
+
+            const auto paddingBytes
+                = arch.GetCapability(GPUCapability::DSReadTransposeB6PaddingBytes);
 
             auto kgraph{graph};
 
@@ -102,25 +108,10 @@ namespace rocRoller
                         continue;
                     visitedCoordinates.insert(coordTag);
 
-                    auto maybeUser = graph.coordinates.get<CoordinateGraph::User>(coordTag);
-                    if(maybeUser)
-                    {
-                        auto newUser = *maybeUser;
-
-                        Log::debug("Setting User.needsPadding for coordinate {}", coordTag);
-                        newUser.needsPadding = true;
-                        kgraph.coordinates.setElement(coordTag, newUser);
-                    }
-
                     auto maybeLDS = graph.coordinates.get<CoordinateGraph::LDS>(coordTag);
                     if(maybeLDS)
                     {
                         auto ldsTag = coordTag;
-                        auto newLDS = *maybeLDS;
-
-                        Log::debug("Setting LDS.holdsTransposeTile for coordinate {}", coordTag);
-                        newLDS.holdsTransposedTile = true;
-                        kgraph.coordinates.setElement(ldsTag, newLDS);
 
                         for(auto conn : graph.mapper.getCoordinateConnections(ldsTag))
                         {
@@ -137,8 +128,8 @@ namespace rocRoller
                                         storeLDSTileTag);
 
                                 Log::debug("Padding Tile {}", macroTileTag);
-                                kgraph.coordinates.setElement(macroTileTag,
-                                                              paddedMacroTile(macroTile));
+                                kgraph.coordinates.setElement(
+                                    macroTileTag, paddedMacroTile(macroTile, paddingBytes));
 
                                 for(auto conn : graph.mapper.getConnections(storeLDSTileTag))
                                 {
@@ -150,7 +141,8 @@ namespace rocRoller
                                         Log::debug("Padding Tile {}", conn.coordinate);
 
                                         kgraph.coordinates.setElement(
-                                            conn.coordinate, paddedMacroTile(*maybeMacroTile));
+                                            conn.coordinate,
+                                            paddedMacroTile(*maybeMacroTile, paddingBytes));
                                     }
                                 }
                             }

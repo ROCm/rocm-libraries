@@ -55,6 +55,8 @@ namespace rocRoller
 
     F8Mode getDefaultF8ModeForCurrentHipDevice();
 
+    bool getDefaultValueForKernelGraphDOTSerialization();
+
     const char* getDefaultArchitectureFilePath();
 
     class Settings;

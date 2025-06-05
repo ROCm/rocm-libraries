@@ -35,6 +35,7 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CodeGen/Utils.hpp>
 #include <rocRoller/Context.hpp>
+#include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
@@ -113,6 +114,142 @@ namespace rocRoller
             auto bufferTag = m_graph->mapper.get<Buffer>(tag);
             auto bufferSrd = m_context->registerTagManager()->getRegister(bufferTag);
             return std::make_shared<BufferDescriptor>(bufferSrd, m_context);
+        }
+
+        static std::pair<uint, uint>
+            getElementBlockValues(KernelGraph const& graph, int target, const bool isTransposed)
+        {
+            uint elementBlockNumber = 0;
+            uint elementBlockIndex  = 0;
+
+            std::unordered_set<int> tileTags;
+            using OpsAndTilesType
+                = std::tuple<std::pair<int, Operation>, std::pair<int, MacroTile>, DataType>;
+            std::vector<OpsAndTilesType> targetOpsAndTiles;
+
+            for(auto conn : graph.mapper.getCoordinateConnections(target))
+            {
+                auto     opTag = conn.control;
+                auto     op    = std::get<Operation>(graph.control.getElement(opTag));
+                DataType dataType;
+                if(std::visit(rocRoller::overloaded{[&](LoadTiled& load) {
+                                                        dataType = load.varType.dataType;
+                                                        return true;
+                                                    },
+                                                    [&](LoadLDSTile& load) {
+                                                        dataType = load.varType.dataType;
+                                                        return true;
+                                                    },
+                                                    [&](StoreTiled& store) {
+                                                        dataType = store.varType.dataType;
+                                                        return true;
+                                                    },
+                                                    [&](StoreLDSTile& store) {
+                                                        dataType = store.varType.dataType;
+                                                        return true;
+                                                    },
+                                                    [&](auto& other) { return false; }},
+                              op))
+                {
+                    auto [macTileTag, macTile] = graph.getDimension<MacroTile>(opTag);
+
+                    auto maybeParentTile = only(
+                        graph.coordinates.getOutputNodeIndices(macTileTag, CT::isEdge<Duplicate>));
+                    if(maybeParentTile)
+                    {
+                        macTileTag = *maybeParentTile;
+                        macTile    = *graph.coordinates.get<MacroTile>(macTileTag);
+                    }
+
+                    if(!tileTags.count(macTileTag))
+                    {
+                        targetOpsAndTiles.push_back({{opTag, op}, {macTileTag, macTile}, dataType});
+                    }
+                }
+            }
+
+            auto [tagAndOp, tagAndTile, dataType] = [](auto opsAndTiles) -> OpsAndTilesType {
+                for(OpsAndTilesType& elem : opsAndTiles)
+                {
+                    if(std::get<1>(elem).second.memoryType == MemoryType::WAVE)
+                    {
+                        return elem;
+                    }
+                }
+                return opsAndTiles[0];
+            }(targetOpsAndTiles);
+            auto [opTag, op]           = tagAndOp;
+            auto [macTileTag, macTile] = tagAndTile;
+
+            const auto M        = macTile.subTileSizes[0];
+            const auto N        = macTile.subTileSizes[1];
+            const auto K        = macTile.subTileSizes[2];
+            const auto isF8F6F4 = (isF8(dataType) || isF6(dataType) || isF4(dataType))
+                                  && (((M == 16) && (N == 16) && (K == 128))
+                                      || ((M == 32) && (N == 32) && (K == 64)));
+
+            if(macTile.memoryType == MemoryType::VGPR
+               || (macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
+                   && macTile.memoryType == MemoryType::WAVE_SPLIT))
+            {
+                auto [elementNumberXTag, elementNumberX]
+                    = graph.getDimension<ElementNumber>(opTag, 0);
+                AssertFatal(
+                    Expression::evaluationTimes(elementNumberX.size)[EvaluationTime::Translate],
+                    "Could not determine ElementNumberX size at translate-time.\n",
+                    ShowValue(elementNumberX));
+
+                auto [elementNumberYTag, elementNumberY]
+                    = graph.getDimension<ElementNumber>(opTag, 1);
+                AssertFatal(
+                    Expression::evaluationTimes(elementNumberY.size)[EvaluationTime::Translate],
+                    "Could not determine ElementNumber size at translate-time.\n",
+                    ShowValue(elementNumberY));
+
+                elementBlockNumber = getUnsignedInt(evaluate(elementNumberX.size));
+                elementBlockIndex  = getUnsignedInt(evaluate(elementNumberY.size));
+            }
+            else if(macTile.memoryType == MemoryType::WAVE)
+            {
+                auto [vgprBlockNumberTag, vgprBlockNumber]
+                    = graph.getDimension<VGPRBlockNumber>(opTag, 0);
+                AssertFatal(
+                    Expression::evaluationTimes(vgprBlockNumber.size)[EvaluationTime::Translate],
+                    "Could not determine VGPRBlockNumber size at translate-time.\n",
+                    ShowValue(vgprBlockNumber));
+
+                auto [vgprBlockIndexTag, vgprBlockIndex]
+                    = graph.getDimension<VGPRBlockIndex>(opTag, 0);
+                AssertFatal(
+                    Expression::evaluationTimes(vgprBlockIndex.size)[EvaluationTime::Translate],
+                    "Could not determine VGPRBlockIndex size at translate-time.\n",
+                    ShowValue(vgprBlockIndex));
+
+                elementBlockNumber = getUnsignedInt(evaluate(vgprBlockNumber.size));
+                elementBlockIndex  = getUnsignedInt(evaluate(vgprBlockIndex.size));
+
+                if((isF16(dataType) || !isF8F6F4) && !isTransposed)
+                {
+                    // When F8F6F4 instruction is used or when F16 is
+                    // transposed loaded from LDS, VGPRBlockIndex holds
+                    // number of elements per VGPRBlock instead of
+                    // number of VGPR per block.
+                    elementBlockIndex *= packingFactorForDataType(dataType);
+                }
+            }
+            else
+            {
+                Throw<FatalError>(
+                    "Could not find ElementNumber or VGPRBlockNumber/Index coordinates.\n",
+                    ShowValue(op),
+                    ShowValue(macTile));
+            }
+
+            AssertFatal(elementBlockNumber > 0 && elementBlockIndex > 0,
+                        "elemementBlockNumber & elementBlockIndex must be greater than zero. ",
+                        ShowValue(elementBlockNumber),
+                        ShowValue(elementBlockIndex));
+            return {elementBlockNumber, elementBlockIndex};
         }
 
         /**
@@ -360,15 +497,19 @@ namespace rocRoller
                 if(maybeParentLDS)
                     target = *maybeParentLDS;
             }
+            maybeLDS = m_graph->coordinates.get<LDS>(target);
 
-            bool needsPadding
-                = std::visit(rocRoller::overloaded{[&](User user) { return user.needsPadding; },
-                                                   [&](auto coord) { return false; }},
-                             std::get<Dimension>(m_graph->coordinates.getElement(target)));
-            bool ldsHoldsTransposedTile
-                = std::visit(rocRoller::overloaded{[&](LDS lds) { return lds.holdsTransposedTile; },
-                                                   [&](auto coord) { return false; }},
-                             std::get<Dimension>(m_graph->coordinates.getElement(target)));
+            auto isTransposed
+                = m_graph->coordinates
+                      .findNodes(target,
+                                 [&](int tag) -> bool {
+                                     auto maybeAdhoc = m_graph->coordinates.get<Adhoc>(tag);
+                                     return maybeAdhoc
+                                            && maybeAdhoc->name() == "Adhoc.transpose.simdsPerWave";
+                                 })
+                      .to<std::vector>()
+                      .size()
+                  == 1;
 
             auto scope = m_context->getScopeManager();
 
@@ -417,11 +558,16 @@ namespace rocRoller
                 auto const& typeInfo = DataTypeInfo::Get(ci.valueType);
                 auto        numBits  = DataTypeInfo::Get(typeInfo.segmentVariableType).elementBits;
 
+                auto const& arch = m_context->targetArchitecture();
+                const auto  needsPadding
+                    = numBits == 6 && isTransposed
+                      && arch.HasCapability(GPUCapability::DSReadTransposeB6PaddingBytes);
+
                 ExpressionPtr paddingBytes{L(0u)};
-                if(numBits == 6 && ldsHoldsTransposedTile)
+                if(needsPadding && maybeLDS)
                 {
-                    uint elementsPerTrLoad = bitsPerTransposeLoad(numBits) / numBits;
-                    auto extraLdsBytes     = extraLDSBytesPerElementBlock(numBits);
+                    uint elementsPerTrLoad = bitsPerTransposeLoad(arch, numBits) / numBits;
+                    auto extraLdsBytes     = extraLDSBytesPerElementBlock(arch, numBits);
                     paddingBytes           = indexExpr / L(elementsPerTrLoad) * L(extraLdsBytes);
                 }
 
@@ -461,46 +607,54 @@ namespace rocRoller
                 ExpressionPtr trLoadPairStridePaddingBytes{L(0u)};
                 ExpressionPtr indexExprPaddingBytes{L(0u)};
 
-                // For F16, F8, and F4 data types and either 16x16x(32|128) or
-                // 32x32x(16|64) MFMA instructions, each lane loads (MN * K)/64
-                // matrix elements via 2 VGPR blocks. These two sets of elements
-                // are not contiguous; and hence we need to break the loads into
-                // two, with a stride between them.
-                //
-                // Setting the elementBlockSize to 16 for other 8bit
-                // MFMA configurations is harmless; as the generated
-                // stride between sets will be contiguous (and the
-                // loads are dwordx4, so the same code will be
-                // generated).
-
                 auto const& typeInfo = DataTypeInfo::Get(ci.valueType);
                 auto        numBits  = DataTypeInfo::Get(typeInfo.segmentVariableType).elementBits;
 
                 if(numBits == 16 || numBits == 8 || numBits == 6 || numBits == 4)
                 {
-                    auto bitsPerTrLoad = bitsPerTransposeLoad(numBits);
-                    elementBlockSize   = /*number of loads*/ 2 * (bitsPerTrLoad / numBits);
+                    auto [elementBlockNumber, elementBlockIndex]
+                        = getElementBlockValues(*m_graph, target, isTransposed);
+
+                    elementBlockSize = elementBlockIndex;
+
+                    auto const& arch = m_context->targetArchitecture();
+                    if(isTransposed)
+                    {
+                        // See addLoadWaveTileCTF8F6F4 in LowerTile.cpp
+                        const auto wfs = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
+                        uint const numVBlocks
+                            = wfs == 64 ? (numBits == 8 ? 2 : 1) : (numBits == 8 ? 4 : 2);
+                        elementBlockSize = (elementBlockNumber / numVBlocks) * elementBlockSize;
+                    }
+                    AssertFatal(
+                        elementBlockSize > 0, "Invalid elementBlockSize: ", elementBlockSize);
+
+                    const auto needsPadding
+                        = numBits == 6 && isTransposed
+                          && arch.HasCapability(GPUCapability::DSReadTransposeB6PaddingBytes);
 
                     // Padding is added after every 16 elements, thus for F6 datatypes that will
                     // be transpose loaded from LDS elementBlockSize is set to 16 instead of 32.
-                    if(numBits == 6 && (needsPadding || ldsHoldsTransposedTile))
+                    if(needsPadding)
+                    {
                         elementBlockSize = 16;
+                    }
 
                     elementBlockStride
                         = ci.forward
                               ? coords.forwardStride(increment, L(elementBlockSize), {target})[0]
                               : coords.reverseStride(increment, L(elementBlockSize), {target})[0];
 
-                    uint elementsPerTrLoad = bitsPerTrLoad / numBits;
+                    uint elementsPerTrLoad = elementBlockIndex;
                     trLoadPairStride
                         = ci.forward
                               ? coords.forwardStride(increment, L(elementsPerTrLoad), {target})[0]
                               : coords.reverseStride(increment, L(elementsPerTrLoad), {target})[0];
 
-                    if(numBits == 6 && ldsHoldsTransposedTile)
+                    if(needsPadding && maybeLDS)
                     {
-                        uint elementsPerTrLoad = bitsPerTransposeLoad(numBits) / numBits;
-                        auto extraLdsBytes     = extraLDSBytesPerElementBlock(numBits);
+                        uint elementsPerTrLoad = bitsPerTransposeLoad(arch, numBits) / numBits;
+                        auto extraLdsBytes     = extraLDSBytesPerElementBlock(arch, numBits);
                         elementBlockStridePaddingBytes
                             = elementBlockStride / L(elementsPerTrLoad) * L(extraLdsBytes);
                         trLoadPairStridePaddingBytes
@@ -727,14 +881,15 @@ namespace rocRoller
 
                 auto individualBits = info.elementBits / info.packedAmount;
 
-                const auto bitsPerTrLoad     = bitsPerTransposeLoad(individualBits);
-                const auto extraLDSBytes     = extraLDSBytesPerElementBlock(individualBits);
-                const auto bytesPerTrLoad    = bitsPerTrLoad / 8;
-                const auto elementsPerTrLoad = bitsPerTrLoad / individualBits;
-                const auto numVGPRsPerLoad   = bitsPerTrLoad / Register::bitsPerRegister;
-                const auto numVGPRBlocks     = numVGPRsPerLoad / packedInfo.registerCount;
-                const auto numTrLoads        = (info.n * info.packedAmount) / elementsPerTrLoad;
-                const auto elementBlockStride
+                auto const& arch              = m_context->targetArchitecture();
+                const auto  bitsPerTrLoad     = bitsPerTransposeLoad(arch, individualBits);
+                const auto  extraLDSBytes     = extraLDSBytesPerElementBlock(arch, individualBits);
+                const auto  bytesPerTrLoad    = bitsPerTrLoad / 8;
+                const auto  elementsPerTrLoad = bitsPerTrLoad / individualBits;
+                const auto  numVGPRsPerLoad   = bitsPerTrLoad / Register::bitsPerRegister;
+                const auto  numVGPRBlocks     = numVGPRsPerLoad / packedInfo.registerCount;
+                const auto  numTrLoads        = (info.n * info.packedAmount) / elementsPerTrLoad;
+                const auto  elementBlockStride
                     = getUnsignedInt(evaluate(info.colStrideAttributes.elementBlockStride));
                 const auto trLoadPairStride
                     = getUnsignedInt(evaluate(info.colStrideAttributes.trLoadPairStride));
@@ -782,10 +937,12 @@ namespace rocRoller
                     {
                         auto start = (i * numTrLoads + (j + 0)) * numVGPRBlocks;
                         auto stop  = (i * numTrLoads + (j + 1)) * numVGPRBlocks;
+                        auto trLoadOffset
+                            = (j % 2) * trLoadPairStride + (j / 2) * elementBlockStride;
                         co_yield m_context->mem()->transposeLoadLocal(
                             info.data->element(Generated(iota(start, stop))),
                             info.rowOffsetReg,
-                            offsetValue + (j % 2) * trLoadPairStride + (j / 2) * elementBlockStride,
+                            offsetValue + trLoadOffset,
                             bytesPerTrLoad + extraLDSBytes,
                             individualBits);
                     }

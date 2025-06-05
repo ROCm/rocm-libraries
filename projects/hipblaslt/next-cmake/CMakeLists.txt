@@ -195,7 +195,7 @@ if(HIPBLASLT_ENABLE_DEVICE)
     endif()
 endif()
 
-if(HIPBLASLT_ENABLE_ROCROLLER)
+if(HIPBLASLT_ENABLE_ROCROLLER AND NOT TARGET roc::rocroller)
     find_package(rocroller REQUIRED)
     option(YAML_CPP_INSTALL "" ON)
     if(NOT rocroller_FOUND)

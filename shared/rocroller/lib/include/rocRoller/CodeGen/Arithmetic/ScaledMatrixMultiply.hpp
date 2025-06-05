@@ -49,21 +49,22 @@ namespace rocRoller
 
             /**
              * Performs matrix multiplication: dest = matA * matB + matC
-             * using MFMA instructions with scaleA and scaleB.
+             * using matrix instructions with scaleA and scaleB.
              *
              * matA and matB are stored in registers.  matC is the accumulator and can be the same as dest.
              *
              * matA is M x K with B batches.  matB is K x N with B batches.
              */
-            virtual Generator<Instruction> mul(Register::ValuePtr dest,
-                                               Register::ValuePtr matA,
-                                               Register::ValuePtr matB,
-                                               Register::ValuePtr matC,
-                                               Register::ValuePtr scaleA,
-                                               Register::ValuePtr scaleB,
-                                               int                M,
-                                               int                N,
-                                               int                K)
+            virtual Generator<Instruction> mul(Register::ValuePtr  dest,
+                                               Register::ValuePtr  matA,
+                                               Register::ValuePtr  matB,
+                                               Register::ValuePtr  matC,
+                                               Register::ValuePtr  scaleA,
+                                               Register::ValuePtr  scaleB,
+                                               int                 M,
+                                               int                 N,
+                                               int                 K,
+                                               std::optional<uint> maybeScaleBlockSize)
                 = 0;
         };
 
@@ -104,15 +105,16 @@ namespace rocRoller
                 return std::make_shared<ScaledMatrixMultiplyGenerator>(context);
             }
 
-            virtual Generator<Instruction> mul(Register::ValuePtr dest,
-                                               Register::ValuePtr matA,
-                                               Register::ValuePtr matB,
-                                               Register::ValuePtr matC,
-                                               Register::ValuePtr scaleA,
-                                               Register::ValuePtr scaleB,
-                                               int                M,
-                                               int                N,
-                                               int                K) override;
+            virtual Generator<Instruction> mul(Register::ValuePtr  dest,
+                                               Register::ValuePtr  matA,
+                                               Register::ValuePtr  matB,
+                                               Register::ValuePtr  matC,
+                                               Register::ValuePtr  scaleA,
+                                               Register::ValuePtr  scaleB,
+                                               int                 M,
+                                               int                 N,
+                                               int                 K,
+                                               std::optional<uint> maybeScaleBlockSize) override;
 
         protected:
             ContextPtr m_context;

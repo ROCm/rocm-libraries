@@ -37,19 +37,12 @@ namespace rocRoller
          * be transpose loaded.
          *
          * When transpose loading F6 datatypes from LDS addresses must be
-         * 128b aligned to 128b. This transform modifies KernelGraph in
-         * the following manner:
-         *   - MacroTile of F6 datatypes get padding in fast-moving dimension.
-         *     Padding information is kept in new MacroTile/WaveTile field --
-         *     padBytesOfDim keeps track of byte padding per dimension. Total
-         *     padding bytes can be queried by calling paddingBytes. Such padding
-         *     causes extra LDS to be allocated;
-         *   - LDS coordinates associated transpose load from LDS have their new
-         *     holdsTransposedTile field set to indicate to CodeGen that
-         *     padding is required when computing strides & offsets;
-         *   - User coordinates associate with stores to LDS for tensors that need
-         *     transpose loads have their new needsPadding field set to indicate
-         *     to CodeGen that padding is required.
+         * 128b aligned. This transform modifies KernelGraph in
+         * such that MacroTile dimensions of F6 datatypes get padding in
+         * fast-moving dimension. Padding information is kept in new
+         * MacroTile/WaveTile field -- padBytesOfDim keeps track of byte
+         * padding per dimension. Total padding bytes can be queried by
+         * calling paddingBytes. Such padding causes extra LDS to be allocated.
          */
         class AddF6LDSPadding : public GraphTransform
         {

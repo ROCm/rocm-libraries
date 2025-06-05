@@ -181,9 +181,10 @@ set(rocroller_src
     source/KernelGraph/Transformations/AddDirect2LDS.cpp
     source/KernelGraph/Transformations/AddF6LDSPadding.cpp
     source/KernelGraph/Transformations/AddLDS.cpp
-    source/KernelGraph/Transformations/AddPrefetch.cpp
     source/KernelGraph/Transformations/AddPRNG.cpp
+    source/KernelGraph/Transformations/AddPrefetch.cpp
     source/KernelGraph/Transformations/AddStreamK.cpp
+    source/KernelGraph/Transformations/AddTransposeLoadCT.cpp
     source/KernelGraph/Transformations/AliasDataFlowTags.cpp
     source/KernelGraph/Transformations/CleanArguments.cpp
     source/KernelGraph/Transformations/CleanLoops.cpp

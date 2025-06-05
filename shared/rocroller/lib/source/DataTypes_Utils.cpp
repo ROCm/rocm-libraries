@@ -370,4 +370,112 @@ namespace rocRoller
         return unpackFP4x8<float>(reinterpret_cast<uint32_t const*>(f4x8.data()), f4x8.size());
     }
 
+    bool isF16(DataType type)
+    {
+        switch(type)
+        {
+        case DataType::Half:
+        case DataType::Halfx2:
+        case DataType::BFloat16:
+        case DataType::BFloat16x2:
+            return true;
+        default:
+            return false;
+        };
+    }
+
+    bool isUnpackedF16(DataType type)
+    {
+        switch(type)
+        {
+        case DataType::Half:
+        case DataType::BFloat16:
+            return true;
+        default:
+            return false;
+        };
+    }
+
+    bool isF8(DataType type)
+    {
+        switch(type)
+        {
+        case DataType::FP8:
+        case DataType::FP8x4:
+        case DataType::BF8:
+        case DataType::BF8x4:
+            return true;
+        default:
+            return false;
+        };
+    }
+
+    bool isUnpackedF8(DataType type)
+    {
+        switch(type)
+        {
+        case DataType::FP8:
+        case DataType::BF8:
+            return true;
+        default:
+            return false;
+        };
+    }
+
+    bool isF6(DataType type)
+    {
+        switch(type)
+        {
+        case DataType::FP6:
+        case DataType::FP6x16:
+        case DataType::BF6:
+        case DataType::BF6x16:
+            return true;
+        default:
+            return false;
+        };
+    }
+
+    bool isUnpackedF6(DataType type)
+    {
+        switch(type)
+        {
+        case DataType::FP6:
+        case DataType::BF6:
+            return true;
+        default:
+            return false;
+        };
+    }
+
+    bool isF4(DataType type)
+    {
+        switch(type)
+        {
+        case DataType::FP4:
+        case DataType::FP4x8:
+            return true;
+        default:
+            return false;
+        };
+    }
+
+    bool isUnpackedF4(DataType type)
+    {
+        return type == DataType::FP4;
+    }
+
+    uint packingFactorForDataType(DataType type)
+    {
+        auto packing = DataTypeInfo::Get(type).packing;
+        if(packing == 1)
+        {
+            auto maybePackedType = DataTypeInfo::Get(type).packedVariableType();
+            if(maybePackedType)
+            {
+                return DataTypeInfo::Get(maybePackedType->dataType).packing;
+            }
+        }
+        return packing;
+    }
 };
