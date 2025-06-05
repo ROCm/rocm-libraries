@@ -79,18 +79,16 @@ template <typename T>
 class FutureValueTest : public ::testing::Test
 {
 protected:
-    using value_type = T;
-
-    value_type value{};
+    T value{};
     
-    rocprim::future_value<value_type> fv{&value};
+    rocprim::future_value<T> fv{&value};
 };
 
 TYPED_TEST_SUITE(FutureValueTest, Params);
 
 TYPED_TEST(FutureValueTest, TestFutureValue)
 {
-    using T = typename TestFixture::value_type;
+    using T = TypeParam;
 
     // Test value access
     this->value = get_random_full_range<T>();
@@ -171,4 +169,56 @@ TYPED_TEST(KeyValuePairTest, TestKeyValuePair)
 
     EXPECT_FALSE(kv1 == kv_diff_val);
     EXPECT_TRUE (kv1 != kv_diff_val);
+}
+
+template<class T>
+class UninitializedArrayTest : public ::testing::Test
+{
+protected:
+    static constexpr unsigned int Count = 10;
+    using ua_type = rocprim::uninitialized_array<T, Count>;
+
+    ua_type ua;
+};
+TYPED_TEST_SUITE(UninitializedArrayTest, Params);
+
+TYPED_TEST(UninitializedArrayTest, EmplaceConstructsCorrectValue)
+{
+    // Test class traits
+    using ua = typename TestFixture::ua_type;
+    static_assert(!std::is_copy_constructible<ua>::value, "Should not be copy-constructible");
+    static_assert(!std::is_copy_assignable<ua>::value, "Should not be copy-assignable");
+    static_assert(std::is_move_constructible<ua>::value, "Should be move-constructible");
+    static_assert(std::is_move_assignable<ua>::value, "Should be move-assignable");
+
+    // Test emplace construction
+    using V = TypeParam;
+    for(unsigned int i = 0; i < TestFixture::Count; ++i)
+    {
+        V val = get_random_full_range<V>();
+        V& ref = this->ua.emplace(i, val);              // Emplace construction
+        EXPECT_EQ(ref, val);                            // Same value by reference
+        EXPECT_EQ(this->ua.get_unsafe_array()[i], val); // Same value in array
+    }
+
+    // Test memory consistency
+    V v0 = get_random_full_range<V>();
+    this->ua.emplace(0, v0);
+
+    auto& arr = this->ua.get_unsafe_array();
+    EXPECT_EQ(&arr[0], &this->ua.get_unsafe_array()[0]); // Same address
+    EXPECT_EQ(arr[0],  v0);                              // Same content
+
+    for(unsigned int i = 0; i < TestFixture::Count; ++i)
+    {
+        this->ua.emplace(i, V(i + 1));
+    }
+
+    // Test move construction
+    typename TestFixture::ua_type moved{std::move(this->ua)};
+    auto& arr_moved = moved.get_unsafe_array();
+    for(unsigned int i = 0; i < TestFixture::Count; ++i)
+    {
+        EXPECT_EQ(arr_moved[i], V(i + 1));
+    }
 }
