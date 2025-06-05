@@ -110,5 +110,5 @@ jobs:
       project_to_test: ${{ matrix.projects.project_to_test }}
       subtree: ${{ matrix.projects.subtree }}
     secrets:
-      rocm_libraries_app_id: ${{ secrets.APP_ID }}
-      rocm_libraries_app_private_key: ${{ secrets.APP_PRIVATE_KEY }}
+      app_id: ${{ secrets.APP_ID }}
+      app_private_key: ${{ secrets.APP_PRIVATE_KEY }}
