@@ -20,7 +20,6 @@ jobs:
     uses: ROCm/TheRock/.github/workflows/build_windows_packages.yml@users/geomin12/adding-windows-monorepo
     with:
       amdgpu_families: "gfx94X-dcgpu"
-      expect_failure: false
       extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ inputs.cmake_options }}"
 
   therock-test-windows:
