@@ -106,5 +106,5 @@ jobs:
       cmake_options: ${{ matrix.projects.cmake_options }}
       project_to_test: ${{ matrix.projects.project_to_test }}
       subtree: ${{ matrix.projects.subtree }}
-    secrets: 
+    secrets:
       monorepo_token: ${{ needs.setup.outputs.monorepo_token }}
