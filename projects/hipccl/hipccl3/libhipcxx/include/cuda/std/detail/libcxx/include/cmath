@@ -887,7 +887,7 @@ _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14_COMPLEX _Tp __constexpr_logb(_Tp
     return _Tp(__exp);
   }
 #endif // defined(_LIBCUDACXX_IS_CONSTANT_EVALUATED)
-#ifdef _LIBCUDACXX_HIPCC
+#ifdef _CCCL_HIPCC
   return logb(__x);
 #else
   return __builtin_logb(__x);
@@ -895,7 +895,7 @@ _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14_COMPLEX _Tp __constexpr_logb(_Tp
 }
 #endif // !_MSVC
 
-#ifdef _LIBCUDACXX_HIPCC
+#ifdef _CCCL_HIPCC
 template <>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14_COMPLEX __half __constexpr_logb(__half __x)
 {
@@ -903,7 +903,7 @@ _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14_COMPLEX __half __constexpr_logb(
 }
 #endif
 
-#ifdef _LIBCUDACXX_HIPCC
+#ifdef _CCCL_HIPCC
 template <>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14_COMPLEX __hip_bfloat16 __constexpr_logb(__hip_bfloat16 __x)
 {
@@ -993,7 +993,7 @@ _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14_COMPLEX _Tp __constexpr_scalbn(_
     return __x;
   }
 #endif // defined(_LIBCUDACXX_IS_CONSTANT_EVALUATED)
-#ifdef _LIBCUDACXX_HIPCC
+#ifdef _CCCL_HIPCC
   return scalbn(__x, __exp);
 #else
   return __builtin_scalbn(__x, __exp);
@@ -1001,7 +1001,7 @@ _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14_COMPLEX _Tp __constexpr_scalbn(_
 }
 #endif // !_CCCL_COMPILER_MSVC
 
-#ifdef _LIBCUDACXX_HIPCC
+#ifdef _CCCL_HIPCC
 template <>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14_COMPLEX __half __constexpr_scalbn(__half __x, int __exp)
 {
