@@ -72,6 +72,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean c
                 -DCMAKE_CXX_FLAGS="-D__HIP_HCC_COMPAT_MODE__=1" \
                 -DTensile_CPU_THREADS=${buildThreads} \
                 -DTensile_ROOT=`pwd`/../Tensile \
+                -DCMAKE_FIND_DEBUG_MODE=ON \
                 ${codeCovString}
 
             
