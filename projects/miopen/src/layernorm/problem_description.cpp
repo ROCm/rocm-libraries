@@ -72,6 +72,12 @@ NetworkConfig ProblemDescription::MakeNetworkConfig() const
     if((mode == MIOPEN_WEIGHT_BIAS_T5) || (mode == MIOPEN_ELEMENTWISE_AFFINE_T5))
         ss << "t5layernorm";
 
+    auto layout = xDesc.GetLayoutEnum();
+    if(layout.has_value())
+    {
+        ss << "layout" << layout.value();
+    }
+
     return NetworkConfig{ss.str()};
 }
 

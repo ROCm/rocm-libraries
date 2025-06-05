@@ -52,6 +52,8 @@ bool LayernormBackward::IsApplicable(const ExecutionContext&,
         return false;
     if(!problem.IsRightNormDim())
         return false;
+    if(problem.GetDYDesc().GetLayoutEnum().has_value() && !(problem.GetDYDesc().GetLayoutEnum().value() == miopenTensorNCHW || problem.GetDYDesc().GetLayoutEnum().value() == miopenTensorNCDHW))
+        return false;
     if(!(sizeof_local_memory(problem) <= TargetProperties::GetMaxLocalMemorySize()))
         return false;
     return true;
