@@ -61,18 +61,15 @@ protected:
 
 TYPED_TEST_SUITE(DoubleBufferTest, Params);
 
-TYPED_TEST(DoubleBufferTest, CurrentBufferTest)
+TYPED_TEST(DoubleBufferTest, TestDoubleBuffer)
 {
+    // Test current buffer
     EXPECT_EQ(this->db.current(), &this->value1);
-}
 
-TYPED_TEST(DoubleBufferTest, AlternateBufferTest)
-{
+    // Test alternate buffer
     EXPECT_EQ(this->db.alternate(), &this->value2);
-}
 
-TYPED_TEST(DoubleBufferTest, SwapBuffersTest)
-{
+    // Test swap buffers
     this->db.swap();
     EXPECT_EQ(this->db.current(), &this->value2);
     EXPECT_EQ(this->db.alternate(), &this->value1);
@@ -91,27 +88,19 @@ protected:
 
 TYPED_TEST_SUITE(FutureValueTest, Params);
 
-TYPED_TEST(FutureValueTest, MemberAccessTest)
+TYPED_TEST(FutureValueTest, TestFutureValue)
 {
     using T = typename TestFixture::value_type;
 
+    // Test value access
     this->value = get_random_full_range<T>();
     EXPECT_EQ(static_cast<TypeParam>(this->fv), this->value);
-}
-
-TYPED_TEST(FutureValueTest, GetInputValuePlainTest)
-{
-    using T = typename TestFixture::value_type;
-    
+ 
+    // Test plain input value
     T val = get_random_full_range<T>();
     EXPECT_EQ(rocprim::detail::get_input_value(val), val);
-}
 
-TYPED_TEST(FutureValueTest, GetInputValueFutureTest)
-{
-    using T = typename TestFixture::value_type;
-    
-    this->value = get_random_full_range<T>();
+    // Test future input value
     EXPECT_EQ(rocprim::detail::get_input_value(this->fv), this->value);
 }
 
@@ -141,22 +130,7 @@ protected:
 };
 TYPED_TEST_SUITE(KeyValuePairTest, TestPairs);
 
-TYPED_TEST(KeyValuePairTest, MemberAccessTest)
-{
-    using K = typename TestFixture::key_type;
-    using V = typename TestFixture::value_type;
-    using kv_type = typename TestFixture::kv_type;
-
-    K k = get_random_full_range<K>();
-    V v = get_random_full_range<V>();
-
-    kv_type kv{k, v};
-
-    EXPECT_EQ(kv.key,   k);
-    EXPECT_EQ(kv.value, v);
-}
-
-TYPED_TEST(KeyValuePairTest, EqualityOperatorTest)
+TYPED_TEST(KeyValuePairTest, TestKeyValuePair)
 {
     using K = typename TestFixture::key_type;
     using V = typename TestFixture::value_type;
@@ -167,6 +141,10 @@ TYPED_TEST(KeyValuePairTest, EqualityOperatorTest)
 
     kv_type kv1{k, v};
     kv_type kv2{k, v};
+
+    // Test value access
+    EXPECT_EQ(kv1.key, k);
+    EXPECT_EQ(kv1.value, v);
 
     K k_diff;
     V v_diff;
@@ -184,6 +162,7 @@ TYPED_TEST(KeyValuePairTest, EqualityOperatorTest)
     kv_type kv_diff_key{k_diff, v};
     kv_type kv_diff_val{k, v_diff};
 
+    // Test operator == and !=
     EXPECT_TRUE (kv1 == kv2);
     EXPECT_FALSE(kv1 != kv2);
 
