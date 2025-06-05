@@ -7,7 +7,7 @@ on:
         type: string
       project_to_test:
         type: string
-      subtree:
+      subtree_checkout:
         type: string
     secrets:
       app_id:
@@ -30,7 +30,7 @@ jobs:
       amdgpu_families: "gfx94X-dcgpu"
       expect_failure: false
       extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ inputs.cmake_options }}"
-      subtree: ${{ inputs.subtree }}
+      subtree: ${{ inputs.subtree_checkout }}
     secrets:
       rocm_libraries_app_id: ${{ secrets.app_id }}
       rocm_libraries_app_private_key: ${{ secrets.app_private_key }}
