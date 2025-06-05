@@ -7260,7 +7260,7 @@ class KernelWriterAssembly(KernelWriter):
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), 0, ""))
               elif blocksPerTGroupSMFMAB == 2 and (group * vgprPerSet0Group) == (elementsPerBlockSMFMAB * numRegistersIn):
                 kIncB = blockOffsetSMFMAB + (numMIInput//numSet0GroupB) * max(group - 1, 0)
-                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncB, "add part of K"))
+                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncB, "add part of K %d"%kIncB))
               else:
                 kIncB = numMIInput//numSet0GroupB
                 if is_wmma_v3:
