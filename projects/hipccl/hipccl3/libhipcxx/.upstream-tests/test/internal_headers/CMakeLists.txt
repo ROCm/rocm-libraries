@@ -46,6 +46,7 @@ function(libcudacxx_create_internal_header_test header_name, headertest_src, fal
 
   set(headertest_${header_name} verify_${header_name})
   # cuda internal headers should not be tested against a host compiler
+  # NOTE(HIP/AMD): PTX tests are skipped for AMD devices.
   if(header_name MATCHES "__ptx.*")
     return()
     add_library(headertest_${header_name} SHARED "${headertest_src}.cu")

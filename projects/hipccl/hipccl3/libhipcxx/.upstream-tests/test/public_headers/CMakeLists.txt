@@ -57,6 +57,7 @@ function(libcudacxx_add_public_header_test header)
 
   # Create the default target for that file
   set(headertest_${header_name} verify_${header_name})
+  # NOTE(HIP/AMD): Barrier and PTX headers are skipped for AMD devices (no support as of June 2025).
   if(header_name MATCHES "ptx.*")
     return()
   endif()
