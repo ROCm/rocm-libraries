@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -42,7 +42,7 @@ using Params = ::testing::Types<char,
 
 template<class T>
 ROCPRIM_HOST_DEVICE
-inline T get_random_full_range(std::uint32_t seed = std::rand())
+inline T get_random_full_range(unsigned int seed = std::rand())
 {
     return test_utils::get_random_value<T>(rocprim::numeric_limits<T>::min(),
                                            rocprim::numeric_limits<T>::max(),
@@ -63,6 +63,11 @@ TYPED_TEST_SUITE(DoubleBufferTest, Params);
 
 TYPED_TEST(DoubleBufferTest, TestDoubleBuffer)
 {
+    // Test default construction
+    rocprim::double_buffer<int> db_default;
+    EXPECT_EQ(db_default.current(), nullptr);
+    EXPECT_EQ(db_default.alternate(), nullptr);
+
     // Test current buffer
     EXPECT_EQ(this->db.current(), &this->value1);
 
@@ -89,6 +94,10 @@ TYPED_TEST_SUITE(FutureValueTest, Params);
 TYPED_TEST(FutureValueTest, TestFutureValue)
 {
     using T = TypeParam;
+
+    // Test const future value
+    const auto cfv = this->fv;
+    EXPECT_EQ(static_cast<T>(cfv), this->value);
 
     // Test value access
     this->value = get_random_full_range<T>();
