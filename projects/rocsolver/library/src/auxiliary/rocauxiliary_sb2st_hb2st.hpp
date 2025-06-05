@@ -61,13 +61,13 @@ void run_sb2st_hb2st(rocblas_int n, rocblas_int nb, T* A, rocblas_int lda, S* D,
 
         // apply Householder reflector
         rocblas_int nn = su_e - sm_i;
-        call_larf(rocblas_side_left, mm, nn, A + sm_i + s * lda, incx, tau, A + sm_i + sm_i * lda,
-                  lda, work);
+        call_larf(rocblas_side_left, mm, nn, A + sm_i + s * lda, incx, conj(tau),
+                  A + sm_i + sm_i * lda, lda, work);
         call_larf(rocblas_side_right, mm, mm, A + sm_i + s * lda, incx, tau, A + sm_i + sm_i * lda,
                   lda, work);
         for(rocblas_int i = su_i; i < su_e; i++)
             for(rocblas_int j = sm_i; j < sm_e; j++)
-                A[i + j * lda] = A[j + i * lda];
+                A[i + j * lda] = conj(A[j + i * lda]);
 
         // save tau
         A[sm_i + s * lda] = tau;
@@ -97,16 +97,16 @@ void run_sb2st_hb2st(rocblas_int n, rocblas_int nb, T* A, rocblas_int lda, S* D,
 
             // apply Householder reflector
             nn = su_e - sd_i - 1;
-            call_larf(rocblas_side_left, mm, nn, A + sm_i + s * lda, incx, tau,
+            call_larf(rocblas_side_left, mm, nn, A + sm_i + s * lda, incx, conj(tau),
                       A + sm_i + (sd_i + 1) * lda, lda, work);
             call_larf(rocblas_side_right, mm, mm, A + sm_i + s * lda, incx, tau,
                       A + sm_i + sm_i * lda, lda, work);
             for(rocblas_int i = su_i; i < su_e; i++)
                 for(rocblas_int j = sm_i; j < sm_e; j++)
-                    A[i + j * lda] = A[j + i * lda];
+                    A[i + j * lda] = conj(A[j + i * lda]);
             for(rocblas_int i = sd_i; i < sd_e; i++)
                 for(rocblas_int j = sm_i; j < sm_e; j++)
-                    A[i + j * lda] = A[j + i * lda];
+                    A[i + j * lda] = conj(A[j + i * lda]);
 
             // save tau
             A[sm_i + s * lda] = tau;

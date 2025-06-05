@@ -70,7 +70,8 @@ void sb2st_hb2st_initData(const rocblas_handle handle,
                         hA[b][i + j * lda] -= 4;
                     }
 
-                    hA[b][j + i * lda] = hA[b][i + j * lda];
+                    if(i != j)
+                        hA[b][j + i * lda] = sconj(hA[b][i + j * lda]);
                 }
             }
         }
@@ -129,6 +130,9 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
     // compare diagonal and off diagonal
     err = norm_error('F', 1, n, 1, hW.data(), hDRes.data());
     *max_err = err > *max_err ? err : *max_err;
+
+    if(std::isnan(err) || std::isinf(err))
+        *max_err = NAN;
 }
 
 template <typename T>

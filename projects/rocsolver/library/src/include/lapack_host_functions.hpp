@@ -625,9 +625,9 @@ static void call_larfg(I n, T& alpha, T* x, I incx, T& tau)
 {
     using S = decltype(std::real(T{}));
 
-    T norm2 = alpha * alpha;
+    T norm2 = alpha * conj(alpha);
     for(I i = 0; i < n - 1; i++)
-        norm2 += x[i * incx] * x[i * incx];
+        norm2 += x[i * incx] * conj(x[i * incx]);
 
     S ar = alpha.real();
     S ai = alpha.imag();
@@ -671,13 +671,13 @@ static void call_larf(rocblas_side side, I m, I n, T* v, I incv, T tau, T* C, I 
         {
             work[i] = 0;
             for(rocblas_int j = 0; j < m; j++)
-                work[i] += C[j + i * ldc] * v[j * incv];
+                work[i] += conj(C[j + i * ldc]) * v[j * incv];
         }
 
         // ger
         for(rocblas_int i = 0; i < m; i++)
             for(rocblas_int j = 0; j < n; j++)
-                C[i + j * ldc] -= tau * v[i * incv] * work[j];
+                C[i + j * ldc] -= tau * v[i * incv] * conj(work[j]);
     }
     else
     {
@@ -692,7 +692,7 @@ static void call_larf(rocblas_side side, I m, I n, T* v, I incv, T tau, T* C, I 
         // ger
         for(rocblas_int i = 0; i < m; i++)
             for(rocblas_int j = 0; j < n; j++)
-                C[i + j * ldc] -= tau * v[j * incv] * work[i];
+                C[i + j * ldc] -= tau * conj(v[j * incv]) * work[i];
     }
 }
 
