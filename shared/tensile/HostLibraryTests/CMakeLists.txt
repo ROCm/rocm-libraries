@@ -230,16 +230,14 @@ if(TENSILE_ENABLE_COVERAGE OR BUILD_CODE_COVERAGE)
     find_program(
         LLVM_PROFDATA
         llvm-profdata
-        HINTS /opt/rocm/llvm/bin
-        PATHS /opt/rocm/llvm/bin
+        PATH_SUFFIXES llvm/bin
         REQUIRED
     )
     find_program(
         LLVM_COV
         llvm-cov
         REQUIRED
-        HINTS /opt/rocm/llvm/bin
-        PATHS /opt/rocm/llvm/bin
+        PATH_SUFFIXES llvm/bin
     )
 
     add_custom_target(
