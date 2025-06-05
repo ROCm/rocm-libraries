@@ -9,6 +9,12 @@ on:
         type: string
       subtree:
         type: string
+    secrets:
+      app_id:
+        required: false
+      app_private_key:
+        required: false
+
 
 permissions:
   contents: read
@@ -26,8 +32,8 @@ jobs:
       extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ inputs.cmake_options }}"
       subtree: ${{ inputs.subtree }}
     secrets:
-      rocm_libraries_app_id: ${{ secrets.APP_ID }}
-      rocm_libraries_app_private_key: ${{ secrets.APP_PRIVATE_KEY }}
+      rocm_libraries_app_id: ${{ secrets.app_id }}
+      rocm_libraries_app_private_key: ${{ secrets.app_private_key }}
 
   therock-test-linux:
     name: "Test"
