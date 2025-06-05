@@ -172,7 +172,7 @@ _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 __constexpr_fmax(__hip_bfloat16 __x, __
 {
 #ifndef __HIP_DEVICE_COMPILE__
   // NOTE(HIP/AMD): currently __hmax might return incorrect results if one of the variables is NaN
-  // for host calculations. Especially for the combination __hamx(nan,inf) it return nan instead of inf!
+  // for host calculations. Especially for the combination __hmax(nan,inf) it return nan instead of inf!
   if(__constexpr_isnan(__x)) return __y;
   if(__constexpr_isnan(__y)) return __x;
 #endif
