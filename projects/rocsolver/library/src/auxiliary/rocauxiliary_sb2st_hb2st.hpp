@@ -44,72 +44,72 @@ ROCSOLVER_BEGIN_NAMESPACE
 template <typename T, typename S>
 void run_sb2st_hb2st(rocblas_int n, rocblas_int nb, T* A, rocblas_int lda, S* D, S* E, T* work)
 {
-    for(rocblas_int s = 1; s <= n - 1; s++)
+    for(rocblas_int s = 0; s < n - 1; s++)
     {
         rocblas_int sm_i = s + 1;
-        rocblas_int sm_e = std::min(s + nb, n);
-        rocblas_int su_i = sm_e + 1;
+        rocblas_int sm_e = std::min(s + 1 + nb, n);
+        rocblas_int su_i = sm_e;
         rocblas_int su_e = std::min(sm_e + nb, n);
 
         // generate Householder reflector
-        rocblas_int mm = sm_e - sm_i + 1;
+        rocblas_int mm = sm_e - sm_i;
         rocblas_int incx = 1;
         T tau = 0;
-        call_larfg(mm, A[(sm_i - 1) + (s - 1) * lda], A + sm_i + (s - 1) * lda, incx, tau);
-        E[s - 1] = std::real(A[(sm_i - 1) + (s - 1) * lda]);
-        A[(sm_i - 1) + (s - 1) * lda] = 1;
+        call_larfg(mm, A[sm_i + s * lda], A + (sm_i + 1) + s * lda, incx, tau);
+        E[s] = std::real(A[sm_i + s * lda]);
+        A[sm_i + s * lda] = 1;
 
         // apply Householder reflector
-        rocblas_int nn = su_e - sm_i + 1;
-        call_larf(rocblas_side_left, mm, nn, A + (sm_i - 1) + (s - 1) * lda, incx, tau,
-                  A + (sm_i - 1) + (sm_i - 1) * lda, lda, work);
-        call_larf(rocblas_side_right, mm, mm, A + (sm_i - 1) + (s - 1) * lda, incx, tau,
-                  A + (sm_i - 1) + (sm_i - 1) * lda, lda, work);
-        for(rocblas_int i = su_i; i <= su_e; i++)
-            for(rocblas_int j = sm_i; j <= sm_e; j++)
-                A[(i - 1) + (j - 1) * lda] = A[(j - 1) + (i - 1) * lda];
+        rocblas_int nn = su_e - sm_i;
+        call_larf(rocblas_side_left, mm, nn, A + sm_i + s * lda, incx, tau, A + sm_i + sm_i * lda,
+                  lda, work);
+        call_larf(rocblas_side_right, mm, mm, A + sm_i + s * lda, incx, tau, A + sm_i + sm_i * lda,
+                  lda, work);
+        for(rocblas_int i = su_i; i < su_e; i++)
+            for(rocblas_int j = sm_i; j < sm_e; j++)
+                A[i + j * lda] = A[j + i * lda];
 
         // save tau
-        A[(sm_i - 1) + (s - 1) * lda] = tau;
+        A[sm_i + s * lda] = tau;
 
         sm_i = su_i;
         sm_e = su_e;
 
         // complete the sweep
-        while(sm_i <= n)
+        while(sm_i < n)
         {
-            su_i = sm_e + 1;
+            su_i = sm_e;
             su_e = std::min(sm_e + nb, n);
             rocblas_int sd_i = std::max(sm_i - nb, 1);
-            rocblas_int sd_e = sm_i - 1;
+            rocblas_int sd_e = sm_i;
 
             // generate Householder reflector
-            mm = sm_e - sm_i + 1;
-            call_larfg(mm, A[(sm_i - 1) + (sd_i - 1) * lda], A + sm_i + (sd_i - 1) * lda, incx, tau);
+            mm = sm_e - sm_i;
+            call_larfg(mm, A[sm_i + sd_i * lda], A + (sm_i + 1) + sd_i * lda, incx, tau);
 
             // copy Householder vector to column s
-            A[(sm_i - 1) + (s - 1) * lda] = 1;
-            for(rocblas_int i = sm_i + 1; i <= sm_e; i++)
+            A[sm_i + s * lda] = 1;
+            for(rocblas_int i = sm_i + 1; i < sm_e; i++)
             {
-                A[(i - 1) + (s - 1) * lda] = A[(i - 1) + (sd_i - 1) * lda];
-                A[(i - 1) + (sd_i - 1) * lda] = 0;
+                A[i + s * lda] = A[i + sd_i * lda];
+                A[i + sd_i * lda] = 0;
             }
 
             // apply Householder reflector
-            nn = su_e - (sd_i + 1) + 1;
-            call_larf(rocblas_side_left, mm, nn, A + (sm_i - 1) + (sd_i - 1) * lda, incx, tau,
-                      A + (sm_i - 1) + sd_i * lda, lda, work);
-            call_larf(rocblas_side_right, mm, mm, A + (sm_i - 1) + (sd_i - 1) * lda, incx, tau,
-                      A + (sm_i - 1) + (sm_i - 1) * lda, lda, work);
-            for(rocblas_int i = su_i; i <= su_e; i++)
-                for(rocblas_int j = sm_i; j <= sm_e; j++)
-                    A[(i - 1) + (j - 1) * lda] = A[(j - 1) + (i - 1) * lda];
-            for(rocblas_int i = sd_i; i <= sd_e; i++)
-                for(rocblas_int j = sm_i; j <= sm_e; j++)
-                    A[(i - 1) + (j - 1) * lda] = A[(j - 1) + (i - 1) * lda];
+            nn = su_e - sd_i - 1;
+            call_larf(rocblas_side_left, mm, nn, A + sm_i + sd_i * lda, incx, tau,
+                      A + sm_i + (sd_i + 1) * lda, lda, work);
+            call_larf(rocblas_side_right, mm, mm, A + sm_i + sd_i * lda, incx, tau,
+                      A + sm_i + sm_i * lda, lda, work);
+            for(rocblas_int i = su_i; i < su_e; i++)
+                for(rocblas_int j = sm_i; j < sm_e; j++)
+                    A[i + j * lda] = A[j + i * lda];
+            for(rocblas_int i = sd_i; i < sd_e; i++)
+                for(rocblas_int j = sm_i; j < sm_e; j++)
+                    A[i + j * lda] = A[j + i * lda];
 
             // save tau
-            A[(sm_i - 1) + (s - 1) * lda] = tau;
+            A[sm_i + s * lda] = tau;
 
             sm_i = su_i;
             sm_e = su_e;
