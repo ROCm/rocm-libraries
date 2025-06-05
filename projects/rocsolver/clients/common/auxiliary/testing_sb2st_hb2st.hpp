@@ -88,12 +88,13 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
                           Td& dE,
                           Uh& hA,
                           Uh& hARes,
-                          Th& hD,
                           Th& hDRes,
-                          Th& hE,
                           Th& hERes,
+                          Th& hW,
                           double* max_err)
 {
+    using S = decltype(std::real(T{}));
+
     // input data initialization
     sb2st_hb2st_initData<true, true, T>(handle, uplo, n, nb, dA, lda, hA, 1);
 
@@ -104,17 +105,23 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
     CHECK_HIP_ERROR(hDRes.transfer_from(dD));
     CHECK_HIP_ERROR(hERes.transfer_from(dE));
 
+    // Compute eigenvalues of tridiagonal matrix
+    cpu_sterf(n, hDRes.data(), hERes.data());
+
     // CPU lapack
-    std::vector<T> hW(32 * n);
-    std::vector<T> hTau(n - 1);
-    cpu_sytrd_hetrd(uplo, n, hA.data(), lda, hD.data(), hE.data(), hTau.data(), hW.data(), 32 * n);
+    // Compute eigenvalues of banded matrix
+    int info;
+    int worksize = n * n;
+    std::vector<T> work(worksize, T(0.));
+    int worksize_real = n * n;
+    std::vector<S> work_real(worksize_real, S(0.));
+    cpu_syev_heev(rocblas_evect_none, uplo, n, hA.data(), lda, hW.data(), work.data(), worksize,
+                  work_real.data(), worksize_real, &info);
 
     double err;
     *max_err = 0;
     // compare diagonal and off diagonal
-    err = norm_error('F', 1, n, 1, hD[0], hDRes[0]);
-    *max_err = err > *max_err ? err : *max_err;
-    err = norm_error('F', 1, n - 1, 1, hE[0], hERes[0]);
+    err = norm_error('F', 1, n, 1, hW.data(), hDRes.data());
     *max_err = err > *max_err ? err : *max_err;
 }
 
@@ -137,6 +144,7 @@ void testing_sb2st_hb2st(Arguments& argus)
     size_t size_A = lda * n;
     size_t size_D = n;
     size_t size_E = size_D;
+    size_t size_W = size_D;
     double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
 
     size_t size_Ares = (argus.unit_check || argus.norm_check) ? size_A : 0;
@@ -173,10 +181,9 @@ void testing_sb2st_hb2st(Arguments& argus)
 
     // memory allocations
     host_strided_batch_vector<T> hA(size_A, 1, size_A, 1);
+    host_strided_batch_vector<S> hW(size_W, 1, size_W, 1);
     host_strided_batch_vector<T> hARes(size_Ares, 1, size_Ares, 1);
-    host_strided_batch_vector<S> hD(size_D, 1, size_D, 1);
     host_strided_batch_vector<S> hDRes(size_Dres, 1, size_Dres, 1);
-    host_strided_batch_vector<S> hE(size_E, 1, size_E, 1);
     host_strided_batch_vector<S> hERes(size_Eres, 1, size_Eres, 1);
     device_strided_batch_vector<T> dA(size_A, 1, size_A, 1);
     device_strided_batch_vector<S> dD(size_D, 1, size_D, 1);
@@ -202,8 +209,8 @@ void testing_sb2st_hb2st(Arguments& argus)
 
     // check computations
     if(argus.unit_check || argus.norm_check)
-        sb2st_hb2st_getError<T>(handle, uplo, n, nb, dA, lda, dD, dE, hA, hARes, hD, hDRes, hE,
-                                hERes, &max_error);
+        sb2st_hb2st_getError<T>(handle, uplo, n, nb, dA, lda, dD, dE, hA, hARes, hDRes, hERes, hW,
+                                &max_error);
 
     // // collect performance data
     // if(argus.timing && hot_calls > 0)
