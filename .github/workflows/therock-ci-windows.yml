@@ -1,4 +1,4 @@
-name: TheRock CI Linux
+name: TheRock CI Windows
 
 on:
   workflow_call:
@@ -12,23 +12,23 @@ permissions:
   contents: read
 
 jobs:
-  therock-build-linux:
-    name: Build Linux Packages
+  therock-build-windows:
+    name: Build Windows Packages
     permissions:
       contents: read
       id-token: write
-    uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@866f163742246445138d7addff8a4010e86bddee
+    uses: ROCm/TheRock/.github/workflows/build_windows_packages.yml@users/geomin12/adding-windows-monorepo
     with:
       amdgpu_families: "gfx94X-dcgpu"
       expect_failure: false
       extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ inputs.cmake_options }}"
 
-  therock-test-linux:
+  therock-test-windows:
     name: "Test"
-    needs: [therock-build-linux]
+    needs: [therock-build-windows]
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       project_to_test: ${{ inputs.project_to_test }}
       amdgpu_families: "gfx94X-dcgpu"
-      test_runs_on: "linux-mi300-1gpu-ossci-rocm"
-      platform: "linux"
+      test_runs_on: ""
+      platform: "windows"
