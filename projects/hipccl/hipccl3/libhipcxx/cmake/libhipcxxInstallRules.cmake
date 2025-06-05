@@ -36,6 +36,16 @@ install(DIRECTORY "${libhipcxx_SOURCE_DIR}/include/nv"
   PATTERN CMakeLists.txt EXCLUDE
 )
 
+# Copy libhipcxx headers into hip folder additionally
+# for minimizing changes of existing dependee packages.
+# Note: we can't use symlinks here, as this would
+# break builds of packages like hipDF which
+# create a Python wheel with setuptools.
+install(DIRECTORY "${libhipcxx_SOURCE_DIR}/include/cuda/"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hip"
+  PATTERN CMakeLists.txt EXCLUDE
+)
+
 # Libcudacxx cmake package
 install(DIRECTORY "${libhipcxx_SOURCE_DIR}/lib/cmake/libhipcxx"
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake"

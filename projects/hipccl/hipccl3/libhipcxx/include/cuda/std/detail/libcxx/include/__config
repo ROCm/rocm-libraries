@@ -1008,21 +1008,27 @@ typedef __char32_t char32_t;
 
 // Standard namespaces with or without versioning
 #  define _LIBCUDACXX_BEGIN_NAMESPACE_STD_NOVERSION namespace cuda { namespace std {
-#  define _LIBCUDACXX_END_NAMESPACE_STD_NOVERSION } }
+#  define _LIBCUDACXX_END_NAMESPACE_STD_NOVERSION } } \
+    namespace hip = cuda;
 #  define _LIBCUDACXX_BEGIN_NAMESPACE_STD namespace cuda { namespace std { inline namespace _LIBCUDACXX_ABI_NAMESPACE {
 #  define _LIBCUDACXX_END_NAMESPACE_STD } } }
 
 // cuda specific namespaces
 #  define _LIBCUDACXX_BEGIN_NAMESPACE_CUDA namespace cuda { inline namespace _LIBCUDACXX_ABI_NAMESPACE {
-#  define _LIBCUDACXX_END_NAMESPACE_CUDA } }
+#  define _LIBCUDACXX_END_NAMESPACE_CUDA } } \
+    namespace hip = cuda;
 #  define _LIBCUDACXX_BEGIN_NAMESPACE_CUDA_MR namespace cuda { namespace mr { inline namespace _LIBCUDACXX_ABI_NAMESPACE {
-#  define _LIBCUDACXX_END_NAMESPACE_CUDA_MR } } }
+#  define _LIBCUDACXX_END_NAMESPACE_CUDA_MR } } } \
+    namespace hip = cuda;
 #  define _LIBCUDACXX_BEGIN_NAMESPACE_CUDA_DEVICE namespace cuda { namespace device { inline namespace _LIBCUDACXX_ABI_NAMESPACE {
-#  define _LIBCUDACXX_END_NAMESPACE_CUDA_DEVICE } } }
+#  define _LIBCUDACXX_END_NAMESPACE_CUDA_DEVICE } } } \
+    namespace hip = cuda;
 #  define _LIBCUDACXX_BEGIN_NAMESPACE_CUDA_PTX namespace cuda { namespace ptx { inline namespace _LIBCUDACXX_ABI_NAMESPACE {
-#  define _LIBCUDACXX_END_NAMESPACE_CUDA_PTX } } }
+#  define _LIBCUDACXX_END_NAMESPACE_CUDA_PTX } } } \
+    namespace hip = cuda;
 #  define _LIBCUDACXX_BEGIN_NAMESPACE_CUDA_DEVICE_EXPERIMENTAL namespace cuda { namespace device { namespace experimental { inline namespace _LIBCUDACXX_ABI_NAMESPACE {
-#  define _LIBCUDACXX_END_NAMESPACE_CUDA_DEVICE_EXPERIMENTAL } } } }
+#  define _LIBCUDACXX_END_NAMESPACE_CUDA_DEVICE_EXPERIMENTAL } } } } \
+    namespace hip = cuda;
 
 // Namespaces related to <ranges>
 #  define _LIBCUDACXX_BEGIN_NAMESPACE_RANGES namespace cuda { namespace std { namespace ranges { inline namespace _LIBCUDACXX_ABI_NAMESPACE {
