@@ -7,6 +7,11 @@ on:
         type: string
       project_to_test:
         type: string
+      subtree:
+        type: string
+    secrets:
+      monorepo_token:
+        required: true
 
 permissions:
   contents: read
@@ -17,11 +22,14 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@866f163742246445138d7addff8a4010e86bddee
+    uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@users/geomin12/fix-monorepo-fork
     with:
       amdgpu_families: "gfx94X-dcgpu"
       expect_failure: false
       extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ inputs.cmake_options }}"
+      subtree: ${{ inputs.subtree }}
+    secrets:
+      monorepo_token: ${{ secrets.monorepo_token }}
 
   therock-test-linux:
     name: "Test"
