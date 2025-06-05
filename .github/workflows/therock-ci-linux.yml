@@ -9,9 +9,6 @@ on:
         type: string
       subtree:
         type: string
-    secrets:
-      monorepo_token:
-        required: true
 
 permissions:
   contents: read
@@ -28,8 +25,6 @@ jobs:
       expect_failure: false
       extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ inputs.cmake_options }}"
       subtree: ${{ inputs.subtree }}
-    secrets:
-      monorepo_token: ${{ secrets.monorepo_token }}
 
   therock-test-linux:
     name: "Test"

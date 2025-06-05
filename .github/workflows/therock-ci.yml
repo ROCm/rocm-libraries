@@ -32,7 +32,6 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       projects: ${{ steps.projects.outputs.projects }}
-      monorepo_token: ${{ steps.generate-token.outputs.token }}
     steps:
       - name: Generate a token
         id: generate-token
@@ -110,5 +109,3 @@ jobs:
       cmake_options: ${{ matrix.projects.cmake_options }}
       project_to_test: ${{ matrix.projects.project_to_test }}
       subtree: ${{ matrix.projects.subtree }}
-    secrets:
-      monorepo_token: ${{ needs.setup.outputs.monorepo_token }}
