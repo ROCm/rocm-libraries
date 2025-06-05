@@ -513,7 +513,7 @@ _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 complex<_Tp> operator-(const _Tp
 template <class _Tp>
 _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14_COMPLEX complex<_Tp>
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC_RTC__)
-__host__ __device__
+_CCCL_HOST_DEVICE
 #endif
 operator*(const complex<_Tp>& __z, const complex<_Tp>& __w)
 {
