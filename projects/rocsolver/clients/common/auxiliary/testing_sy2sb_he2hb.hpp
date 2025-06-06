@@ -67,7 +67,7 @@ void sy2sb_he2hb_initData(const rocblas_handle handle,
         {
             for(rocblas_int j = i+1; j < n; j++)
                 hA[0][i + j * lda] = hA[0][j + i * lda];
-        }           
+        }
     }
 
     if(GPU)
@@ -111,7 +111,7 @@ void sy2sb_he2hb_initData(const rocblas_handle handle,
         {
             for(rocblas_int j = i+1; j < n; j++)
                 hA[0][i + j * lda] = std::conj(hA[0][j + i * lda]);
-        }           
+        }
     }
 
     if(GPU)
@@ -137,7 +137,7 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
                     const rocblas_int ldab,
                     double* max_err)
 {
-    size_t lwork = n * k + n * std::max(k, 128) + 2 * k * k;
+    size_t lwork = n * nb + n * std::max(nb, 128) + 2 * nb * nb;
     std::vector<T> hwork(lwork);
 
     // input data initialization
@@ -149,9 +149,6 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
 
     // CPU lapack
-
-//print_host_matrix(std::cout,"A in",n,n,hA[0],lda);
-
     cpu_sy2sb_he2hb(rocblas_fill_lower,
         n,
         nb,
@@ -162,29 +159,27 @@ void sy2sb_he2hb_getError(const rocblas_handle handle,
         hTau[0],
         hwork.data(),
         lwork);
-//print_host_matrix(std::cout,"AB",nb+1,n,hAB[0],ldab);
 
     // error is ||hARes - hAB|| / ||hAB||
     // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY
     // ISSUES. IT MIGHT BE REVISITED IN THE FUTURE) using frobenius norm
 
     // first copy AB into A
-    rocblas_int i;
+    rocblas_int ii;
     for(rocblas_int j = 0; j < n; ++j)
     {
-        for(rocblas_int ii = 0; ii <= nb; ++ii)
+        for(rocblas_int i = j; i <= min(n - 1, j + nb); ++i)
         {
-            i = ii + j; 
+            ii = i - j;
             hA[0][i + j * lda] = hAB[0][ii + j * ldab];
             hA[0][j + i * lda] = hAB[0][ii + j * ldab];
         }
-        for(rocblas_int ii = j + nb + 1; ii < n; ++ii)
+        for(rocblas_int i = j + nb + 1; i < n; ++i)
         {
-            hA[0][ii + j * lda] = 0;
-            hA[0][j + ii * lda] = 0;   
+            hA[0][i + j * lda] = 0;
+            hA[0][j + i * lda] = 0;
         }
-    } 
-//print_host_matrix(std::cout,"A out",n,n,hA[0],lda);
+    }
 
     double err = 0;
     *max_err = 0;
@@ -338,7 +333,7 @@ void testing_sy2sb_he2hb(Arguments& argus)
 
     // collect performance data
     if(argus.timing && hot_calls > 0)
-        sy2sb_he2hb_getPerfData<T>(handle, n, nb, k, dA, lda, dV, dW, hA, 
+        sy2sb_he2hb_getPerfData<T>(handle, n, nb, k, dA, lda, dV, dW, hA,
                              &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
                              argus.profile_kernels, argus.perf);
 
