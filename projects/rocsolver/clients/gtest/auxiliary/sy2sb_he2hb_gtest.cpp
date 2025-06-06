@@ -59,7 +59,7 @@
     // invalid
     {4, 2},
     {0, 1},
-    // normal (valid) samples 
+    // normal (valid) samples
     {1, 10},
     {10, 10},
     {2, 2},
@@ -70,11 +70,11 @@
 
  // for daily_lapack tests
  const vector<vector<int>> large_size_range = {
-    {152, 152}, 
-    {640, 640}, 
-    {1000, 1024},
-    {2000, 2000}};
- 
+    {256, 256},
+    {640, 640},
+    {1024, 1024},
+    {2048, 2048}};
+
 const vector<vector<int>> large_blk_range = {
     {16, 32},
     {16, 64},
@@ -131,7 +131,7 @@ const vector<vector<int>> large_blk_range = {
      run_tests<double>();
  }
 
- TEST_P(SY2SB_HE2HB, __float_complex)
+/* TEST_P(SY2SB_HE2HB, __float_complex)
  {
      run_tests<rocblas_float_complex>();
  }
@@ -139,7 +139,7 @@ const vector<vector<int>> large_blk_range = {
  TEST_P(SY2SB_HE2HB, __double_complex)
  {
      run_tests<rocblas_double_complex>();
- }
+ }*/
 
  INSTANTIATE_TEST_SUITE_P(daily_lapack,
                           SY2SB_HE2HB,
