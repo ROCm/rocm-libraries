@@ -79,7 +79,7 @@ void run_rng_test(const StdFunc& sf, const ThrustFunc& tf)
 
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_real_distribution<T> dis(std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+  std::uniform_real_distribution<T> dis(-std::numeric_limits<T>::max(), std::numeric_limits<T>::max());
 
   for (size_t i = 0; i < test_size; i++)
   {
@@ -792,7 +792,7 @@ TYPED_TEST(VariousComplexTest, cosh)
     },
     -710,
     710,
-    std::numeric_limits<T>::min(),
+    -std::numeric_limits<T>::max(),
     std::numeric_limits<T>::max());
   //-710 and 710 since cosh and sinh is quadratic and anything above 710 will result
   // in out of bounds even for double!
@@ -814,7 +814,7 @@ TYPED_TEST(VariousComplexTest, cos)
     [](thrust::complex<T>& x) {
       return thrust::cos(x);
     },
-    std::numeric_limits<T>::min(),
+    -std::numeric_limits<T>::max(),
     std::numeric_limits<T>::max(),
     -710,
     710);
@@ -838,9 +838,9 @@ TYPED_TEST(VariousComplexTest, exp)
     [](thrust::complex<T>& x) {
       return thrust::exp(x);
     },
-    std::numeric_limits<T>::min(),
+    -std::numeric_limits<T>::max(),
     std::numeric_limits<T>::max(),
-    std::numeric_limits<T>::min(),
+    -std::numeric_limits<T>::max(),
     std::numeric_limits<T>::max());
 }
 
@@ -929,7 +929,7 @@ TYPED_TEST(VariousComplexTest, sinh)
     [](thrust::complex<T>& x) {
       return thrust::sinh(x);
     },
-    std::numeric_limits<T>::min(),
+    -std::numeric_limits<T>::max(),
     std::numeric_limits<T>::max(),
     -710,
     710);
@@ -952,7 +952,7 @@ TYPED_TEST(VariousComplexTest, sin)
     [](thrust::complex<T>& x) {
       return thrust::sin(x);
     },
-    std::numeric_limits<T>::min(),
+    -std::numeric_limits<T>::max(),
     std::numeric_limits<T>::max(),
     -710,
     710);
@@ -1013,7 +1013,7 @@ TYPED_TEST(VariousComplexTest, tanh)
     },
     -710 / 2,
     710 / 2,
-    std::numeric_limits<T>::min() / 2,
+    -std::numeric_limits<T>::max() / 2,
     std::numeric_limits<T>::max() / 2);
 }
 
@@ -1037,7 +1037,7 @@ TYPED_TEST(VariousComplexTest, tan)
     [](thrust::complex<T>& x) {
       return thrust::tan(x);
     },
-    std::numeric_limits<T>::min() / 2,
+    -std::numeric_limits<T>::max() / 2,
     std::numeric_limits<T>::max() / 2,
     -710 / 2,
     710 / 2);
