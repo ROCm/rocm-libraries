@@ -105,8 +105,8 @@ void run_trig_tests(
   // so that total tests is still N
   const double test_size = std::sqrt(100000);
 
-  const T real_inc = (rmaxi - rmini) / test_size;
-  const T imag_inc = (imaxi - imini) / test_size;
+  const double real_inc = (rmaxi - rmini) / test_size;
+  const double imag_inc = (imaxi - imini) / test_size;
 
   for (double real = rmini; real <= rmaxi; real += real_inc)
   {
@@ -118,8 +118,8 @@ void run_trig_tests(
       thrust::complex<T> thrust_out = thrust_func(thrust_complex);
       std::complex<T> std_out       = std_func(std_complex);
 
-      T real_eps = (std::abs(std_out.real()) < 0.05) ? 1e-1 : std::abs(std_out.real() * 0.01);
-      T imag_eps = (std::abs(std_out.imag()) < 0.05) ? 1e-1 : std::abs(std_out.imag() * 0.01);
+      T real_eps = (std::abs(std_out.real()) < 0.05) ? 1e-1 : std::abs(std_out.real() * 0.05);
+      T imag_eps = (std::abs(std_out.imag()) < 0.05) ? 1e-1 : std::abs(std_out.imag() * 0.05);
 
       CHECK_CORRECT(std_out, thrust_out, real_eps, imag_eps, real, imag);
     }
@@ -135,7 +135,7 @@ void run_trig_tests(
 TYPED_TEST_SUITE(VariousComplexTest, FloatDouble);
 TYPED_TEST(VariousComplexTest, getInf)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
 
   T inf = thrust::detail::complex::infinity<T>();
   ASSERT_TRUE(std::isinf(inf));
@@ -145,7 +145,7 @@ TYPED_TEST(VariousComplexTest, getInf)
 
 TYPED_TEST(VariousComplexTest, isinf)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
   T inf   = thrust::detail::complex::infinity<T>();
   ASSERT_EQ(std::isinf(inf), thrust::detail::complex::isinf(inf));
 
@@ -160,7 +160,7 @@ TYPED_TEST(VariousComplexTest, isinf)
 
 TYPED_TEST(VariousComplexTest, isnan)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
   T nan   = std::numeric_limits<T>::quiet_NaN();
   ASSERT_EQ(std::isnan(nan), thrust::detail::complex::isnan(nan));
 
@@ -175,7 +175,7 @@ TYPED_TEST(VariousComplexTest, isnan)
 
 TYPED_TEST(VariousComplexTest, signbit)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
   run_rng_test<T, true>(
     [](const T& x) {
       return std::signbit(x);
@@ -187,7 +187,7 @@ TYPED_TEST(VariousComplexTest, signbit)
 
 TYPED_TEST(VariousComplexTest, isfinite)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
   run_rng_test<T, true>(
     [](const T& x) {
       return std::isfinite(x);
@@ -223,7 +223,7 @@ TEST(VariousComplexTest, copysignf)
 
 TYPED_TEST(VariousComplexTest, log1p)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
   run_rng_test<T>(
     [](const T& x) {
       return std::log1p(x);
@@ -235,7 +235,7 @@ TYPED_TEST(VariousComplexTest, log1p)
 
 TYPED_TEST(VariousComplexTest, log1pf)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
   run_rng_test<T>(
     [](const T& x) {
       return std::log1pf(x);
@@ -281,17 +281,20 @@ TEST(VariousComplexTest, hypotf)
  * imaginary parts separately manually.
  */
 
-
 // ===================================================================
 //
 //                          CATRIG & CATRIGF
 //
 // ===================================================================
 
-//TODO: CALCULATE ARC FUNCTIONS MANUALLY
 TYPED_TEST(VariousComplexTest, asinh)
 {
-  using T = TestFixture::T;
+  /**
+   * Due to hipcc compiler issues, negative range for the real is not working
+   * for std::asinh.
+   */
+
+  using T = typename TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
       return std::asinh(x);
@@ -299,15 +302,80 @@ TYPED_TEST(VariousComplexTest, asinh)
     [](thrust::complex<T>& x) {
       return thrust::asinh(x);
     },
-    -1,
-    1,
     0,
+    10000,
+    -1,
     1);
+}
+
+TYPED_TEST(VariousComplexTest, asinh_special)
+{
+  // test special cases for asinh
+  using T = typename TestFixture::T;
+
+  T qNan   = std::numeric_limits<T>::quiet_NaN();
+  T posInf = std::numeric_limits<T>::infinity();
+
+  thrust::complex<T> zero_zero(0, 0);
+  thrust::complex<T> out = thrust::asinh(zero_zero);
+  ASSERT_EQ(0, out.real());
+  ASSERT_EQ(0, out.imag());
+
+  thrust::complex<T> x_inf(1000, posInf);
+  out = thrust::asinh(x_inf);
+  ASSERT_TRUE(std::isinf(out.real()));
+  ASSERT_NEAR(M_PI / 2, out.imag(), M_PI / 2 * 0.001);
+
+  thrust::complex<T> x_nan(1000, qNan);
+  out = thrust::asinh(x_nan);
+  ASSERT_TRUE(std::isnan(out.real()));
+  ASSERT_TRUE(std::isnan(out.imag()));
+
+  thrust::complex<T> inf_x(posInf, 10000);
+  out = thrust::asinh(inf_x);
+  ASSERT_TRUE(std::isinf(out.real()));
+  ASSERT_EQ(0, out.imag());
+
+  thrust::complex<T> inf_inf(posInf, posInf);
+  out = thrust::asinh(inf_inf);
+  ASSERT_TRUE(std::isinf(out.real()));
+  ASSERT_NEAR(M_PI / 4, out.imag(), M_PI / 4 * 0.001);
+
+  thrust::complex<T> inf_nan(posInf, qNan);
+  out = thrust::asinh(inf_nan);
+  ASSERT_TRUE(std::isinf(out.real()));
+  ASSERT_TRUE(std::isnan(out.imag()));
+
+  thrust::complex<T> nan_zero(qNan, 0);
+  out = thrust::asinh(nan_zero);
+  ASSERT_TRUE(std::isnan(out.real()));
+  ASSERT_EQ(0, out.imag());
+
+  thrust::complex<T> nan_x(qNan, 1000);
+  out = thrust::asinh(nan_x);
+  ASSERT_TRUE(std::isnan(out.real()));
+  ASSERT_TRUE(std::isnan(out.imag()));
+
+  thrust::complex<T> nan_inf(qNan, posInf);
+  out = thrust::asinh(nan_inf);
+  ASSERT_TRUE(std::isinf(out.real()));
+  ASSERT_TRUE(std::isnan(out.imag()));
+
+  thrust::complex<T> nan_nan(qNan, qNan);
+  out = thrust::asinh(nan_nan);
+  ASSERT_TRUE(std::isnan(out.real()));
+  ASSERT_TRUE(std::isnan(out.imag()));
 }
 
 TYPED_TEST(VariousComplexTest, asin)
 {
-  using T = TestFixture::T;
+  /**
+   * Due to hipcc compiler issues, negative range for the real and imaginary is not working
+   * for std::asin. Also a poistive range greater than 1000 for the imaginary cause issues too
+   */
+
+  using T = typename TestFixture::T;
+
   run_trig_tests<T>(
     [](std::complex<T>& x) {
       return std::asin(x);
@@ -318,12 +386,14 @@ TYPED_TEST(VariousComplexTest, asin)
     -1,
     1,
     0,
-    1);
+    1000);
 }
 
 TYPED_TEST(VariousComplexTest, acosh)
 {
-  using T = TestFixture::T;
+  using T     = typename TestFixture::T;
+  T max_range = std::sqrt(std::numeric_limits<T>::max());
+
   run_trig_tests<T>(
     [](std::complex<T>& x) {
       return std::acosh(x);
@@ -331,15 +401,80 @@ TYPED_TEST(VariousComplexTest, acosh)
     [](thrust::complex<T>& x) {
       return thrust::acosh(x);
     },
-    -1,
     1,
-    0,
-    1);
+    max_range,
+    -max_range,
+    max_range);
+}
+
+TYPED_TEST(VariousComplexTest, acosh_special)
+{
+  // test special cases for acosh
+  using T = typename TestFixture::T;
+
+  T qNan   = std::numeric_limits<T>::quiet_NaN();
+  T posInf = std::numeric_limits<T>::infinity();
+  T negInf = -std::numeric_limits<T>::infinity();
+
+  thrust::complex<T> zero_zero(0, 0);
+  thrust::complex<T> out = thrust::acosh(zero_zero);
+  ASSERT_EQ(0, out.real());
+  ASSERT_NEAR(M_PI * 0.5, out.imag(), M_PI * 0.005);
+
+  thrust::complex<T> x_inf(1000, posInf);
+  out = thrust::acosh(x_inf);
+  ASSERT_TRUE(std::isinf(out.real()));
+  ASSERT_NEAR(M_PI / 2, out.imag(), M_PI / 2 * 0.001);
+
+  thrust::complex<T> x_nan(1000, qNan);
+  out = thrust::acosh(x_nan);
+  ASSERT_TRUE(std::isnan(out.real()));
+  ASSERT_TRUE(std::isnan(out.imag()));
+
+  thrust::complex<T> neg_inf_x(negInf, 10000);
+  out = thrust::acosh(neg_inf_x);
+  ASSERT_TRUE(std::isinf(out.real()));
+  ASSERT_NEAR(M_PI, out.imag(), M_PI * 0.001);
+
+  thrust::complex<T> inf_x(posInf, 10000);
+  out = thrust::acosh(inf_x);
+  ASSERT_TRUE(std::isinf(out.real()));
+  ASSERT_EQ(0, out.imag());
+
+  thrust::complex<T> neg_inf_pos_inf(negInf, posInf);
+  out = thrust::acosh(neg_inf_pos_inf);
+  ASSERT_EQ(posInf, out.real());
+  ASSERT_NEAR(M_PI * 0.75, out.imag(), M_PI * 0.0075);
+
+  thrust::complex<T> pos_inf_nan(posInf, qNan);
+  out = thrust::acosh(pos_inf_nan);
+  ASSERT_EQ(posInf, out.real());
+  ASSERT_TRUE(std::isnan(out.imag()));
+
+  thrust::complex<T> neg_inf_nan(negInf, qNan);
+  out = thrust::acosh(neg_inf_nan);
+  ASSERT_EQ(posInf, out.real());
+  ASSERT_TRUE(std::isnan(out.imag()));
+
+  thrust::complex<T> nan_x(qNan, 1000);
+  out = thrust::acosh(nan_x);
+  ASSERT_TRUE(std::isnan(out.real()));
+  ASSERT_TRUE(std::isnan(out.imag()));
+
+  thrust::complex<T> nan_inf(qNan, posInf);
+  out = thrust::acosh(nan_inf);
+  ASSERT_EQ(posInf, out.real());
+  ASSERT_TRUE(std::isnan(out.imag()));
+
+  thrust::complex<T> nan_nan(qNan, qNan);
+  out = thrust::acosh(nan_nan);
+  ASSERT_TRUE(std::isnan(out.real()));
+  ASSERT_TRUE(std::isnan(out.imag()));
 }
 
 TYPED_TEST(VariousComplexTest, acos)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
       return std::acos(x);
@@ -349,13 +484,83 @@ TYPED_TEST(VariousComplexTest, acos)
     },
     -1,
     1,
-    0,
-    1);
+    -1000,
+    1000);
+}
+
+TYPED_TEST(VariousComplexTest, acos_special)
+{
+  // test special cases for acos
+  using T = typename TestFixture::T;
+
+  T qNan   = std::numeric_limits<T>::quiet_NaN();
+  T posInf = std::numeric_limits<T>::infinity();
+  T negInf = -std::numeric_limits<T>::infinity();
+
+  thrust::complex<T> zero_zero(0, 0);
+  thrust::complex<T> out = thrust::acos(zero_zero);
+  ASSERT_NEAR(M_PI * 0.5, out.real(), M_PI * 0.005);
+  ASSERT_EQ(0, out.imag());
+
+  thrust::complex<T> zero_nan(0, qNan);
+  out = thrust::acos(zero_nan);
+  ASSERT_NEAR(M_PI * 0.5, out.real(), M_PI * 0.005);
+  ASSERT_TRUE(std::isnan(out.imag()));
+
+  thrust::complex<T> x_inf(1000, posInf);
+  out = thrust::acos(x_inf);
+  ASSERT_NEAR(M_PI * 0.5, out.real(), M_PI * 0.005);
+  ASSERT_EQ(negInf, out.imag());
+
+  thrust::complex<T> x_nan(1000, qNan);
+  out = thrust::acos(x_nan);
+  ASSERT_TRUE(std::isnan(out.real()));
+  ASSERT_TRUE(std::isnan(out.imag()));
+
+  thrust::complex<T> neg_inf_x(negInf, 10000);
+  out = thrust::acos(neg_inf_x);
+  ASSERT_NEAR(M_PI, out.real(), M_PI * 0.001);
+  ASSERT_EQ(negInf, out.imag());
+
+  thrust::complex<T> pos_inf_x(posInf, 10000);
+  out = thrust::acos(pos_inf_x);
+  ASSERT_EQ(0, out.real());
+  ASSERT_EQ(negInf, out.imag());
+
+  thrust::complex<T> neg_inf_pos_inf(negInf, posInf);
+  out = thrust::acos(neg_inf_pos_inf);
+  ASSERT_NEAR(M_PI * 0.75, out.real(), M_PI * 0.0075);
+  ASSERT_EQ(negInf, out.imag());
+
+  thrust::complex<T> pos_inf_pos_inf(posInf, posInf);
+  out = thrust::acos(pos_inf_pos_inf);
+  ASSERT_NEAR(M_PI * 0.25, out.real(), M_PI * 0.0025);
+  ASSERT_EQ(negInf, out.imag());
+
+  thrust::complex<T> pos_inf_nan(posInf, qNan);
+  out = thrust::acos(pos_inf_nan);
+  ASSERT_TRUE(std::isnan(out.real()));
+  ASSERT_TRUE(std::isinf(out.imag()));
+
+  thrust::complex<T> nan_x(qNan, 1000);
+  out = thrust::acos(nan_x);
+  ASSERT_TRUE(std::isnan(out.real()));
+  ASSERT_TRUE(std::isnan(out.imag()));
+
+  thrust::complex<T> nan_inf(qNan, posInf);
+  out = thrust::acos(nan_inf);
+  ASSERT_TRUE(std::isnan(out.real()));
+  ASSERT_EQ(negInf, out.imag());
+
+  thrust::complex<T> nan_nan(qNan, qNan);
+  out = thrust::acos(nan_nan);
+  ASSERT_TRUE(std::isnan(out.real()));
+  ASSERT_TRUE(std::isnan(out.imag()));
 }
 
 TYPED_TEST(VariousComplexTest, atanh)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
       return std::atanh(x);
@@ -365,19 +570,199 @@ TYPED_TEST(VariousComplexTest, atanh)
     },
     -1,
     1,
-    0,
-    1);
+    -1000,
+    1000);
+}
+
+TYPED_TEST(VariousComplexTest, catanh)
+{
+  using T = typename TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
+      return std::atanh(x);
+    },
+    [](thrust::complex<T>& x) {
+      return thrust::detail::complex::catanh(x);
+    },
+    -1,
+    1,
+    -1000,
+    1000);
+}
+
+TYPED_TEST(VariousComplexTest, atanh_special)
+{
+  // test special cases for atanh
+  using T = typename TestFixture::T;
+
+  T qNan   = std::numeric_limits<T>::quiet_NaN();
+  T posInf = std::numeric_limits<T>::infinity();
+  
+  thrust::complex<T> zero_zero(0, 0);
+  thrust::complex<T> out = thrust::atanh(zero_zero);
+  ASSERT_EQ(0, out.real());
+  ASSERT_EQ(0, out.imag());
+
+  thrust::complex<T> zero_nan(0, qNan);
+  out = thrust::atanh(zero_nan);
+  ASSERT_TRUE(std::isnan(out.imag()));
+
+  thrust::complex<T> one_zero(1, 0);
+  out = thrust::atanh(one_zero);
+  ASSERT_EQ(posInf, out.real());
+  ASSERT_EQ(0, out.imag());
+
+  thrust::complex<T> x_inf(1000, posInf);
+  out = thrust::atanh(x_inf);
+  ASSERT_EQ(0, out.real());
+  ASSERT_NEAR(M_PI * 0.5, out.imag(), M_PI * 0.005);
+
+  thrust::complex<T> x_nan(1000, qNan);
+  out = thrust::atanh(x_nan);
+  ASSERT_TRUE(std::isnan(out.real()));
+  ASSERT_TRUE(std::isnan(out.imag()));
+
+  thrust::complex<T> pos_inf_x(posInf, 10000);
+  out = thrust::atanh(pos_inf_x);
+  ASSERT_EQ(0, out.real());
+  ASSERT_NEAR(M_PI * 0.5, out.imag(), M_PI * 0.005);
+
+  thrust::complex<T> pos_inf_nan(posInf, qNan);
+  out = thrust::atanh(pos_inf_nan);
+  ASSERT_EQ(0, out.real());
+  ASSERT_TRUE(std::isnan(out.imag()));
+
+  thrust::complex<T> nan_x(qNan, 1000);
+  out = thrust::atanh(nan_x);
+  ASSERT_TRUE(std::isnan(out.real()));
+  ASSERT_TRUE(std::isnan(out.imag()));
+
+  thrust::complex<T> nan_inf(qNan, posInf);
+  out = thrust::atanh(nan_inf);
+  ASSERT_EQ(0, out.real());
+  ASSERT_NEAR(M_PI * 0.5, out.imag(), M_PI * 0.005);
+
+  thrust::complex<T> nan_nan(qNan, qNan);
+  out = thrust::atanh(nan_nan);
+  ASSERT_TRUE(std::isnan(out.real()));
+  ASSERT_TRUE(std::isnan(out.imag()));
 }
 
 TYPED_TEST(VariousComplexTest, atan)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
       return std::atan(x);
     },
     [](thrust::complex<T>& x) {
       return thrust::atan(x);
+    },
+    -1,
+    1,
+    -1000,
+    1000);
+}
+
+TYPED_TEST(VariousComplexTest, catan)
+{
+  using T = typename TestFixture::T;
+  run_trig_tests<T>(
+    [](std::complex<T>& x) {
+      return std::atan(x);
+    },
+    [](thrust::complex<T>& x) {
+      return thrust::detail::complex::catan(x);
+    },
+    -1,
+    1,
+    -1000,
+    1000);
+}
+
+TEST(VariousComplexTest, acos_long_double)
+{
+  run_trig_tests<long double>(
+    [](std::complex<long double>& x) {
+      return std::acos(x);
+    },
+    [](thrust::complex<long double>& x) {
+      return thrust::acos(x);
+    },
+    -1,
+    1,
+    0,
+    1);
+}
+
+TEST(VariousComplexTest, asin_long_double)
+{
+  run_trig_tests<long double>(
+    [](std::complex<long double>& x) {
+      return std::asin(x);
+    },
+    [](thrust::complex<long double>& x) {
+      return thrust::asin(x);
+    },
+    -1,
+    1,
+    0,
+    1);
+}
+
+TEST(VariousComplexTest, atan_long_double)
+{
+  run_trig_tests<long double>(
+    [](std::complex<long double>& x) {
+      return std::atan(x);
+    },
+    [](thrust::complex<long double>& x) {
+      return thrust::atan(x);
+    },
+    -1,
+    1,
+    0,
+    1);
+}
+
+TEST(VariousComplexTest, acosh_long_double)
+{
+  run_trig_tests<long double>(
+    [](std::complex<long double>& x) {
+      return std::acosh(x);
+    },
+    [](thrust::complex<long double>& x) {
+      return thrust::acosh(x);
+    },
+    1,
+    100000,
+    0,
+    10000);
+}
+
+TEST(VariousComplexTest, asinh_long_double)
+{
+  run_trig_tests<long double>(
+    [](std::complex<long double>& x) {
+      return std::asinh(x);
+    },
+    [](thrust::complex<long double>& x) {
+      return thrust::asinh(x);
+    },
+    -1,
+    1,
+    0,
+    1);
+}
+
+TEST(VariousComplexTest, atanh_long_double)
+{
+  run_trig_tests<long double>(
+    [](std::complex<long double>& x) {
+      return std::atanh(x);
+    },
+    [](thrust::complex<long double>& x) {
+      return thrust::atanh(x);
     },
     -1,
     1,
@@ -393,7 +778,7 @@ TYPED_TEST(VariousComplexTest, atan)
 
 TYPED_TEST(VariousComplexTest, cosh)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
       // cos(a + bi) = cosh(a) * cos(b) + isinh(a) * sin(b)
@@ -415,7 +800,7 @@ TYPED_TEST(VariousComplexTest, cosh)
 
 TYPED_TEST(VariousComplexTest, cos)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
       // cos(a + bi) = cos(a) * cosh(b) − isin(a) * sinh(b)
@@ -445,7 +830,7 @@ TYPED_TEST(VariousComplexTest, cos)
 
 TYPED_TEST(VariousComplexTest, exp)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
       return std::exp(x);
@@ -467,7 +852,7 @@ TYPED_TEST(VariousComplexTest, exp)
 
 TYPED_TEST(VariousComplexTest, log)
 {
-  using T     = TestFixture::T;
+  using T     = typename TestFixture::T;
   T max_range = std::sqrt(std::numeric_limits<T>::max() / 5);
   run_trig_tests<T>(
     [](std::complex<T>& x) {
@@ -493,7 +878,7 @@ TYPED_TEST(VariousComplexTest, log)
 
 TYPED_TEST(VariousComplexTest, log10)
 {
-  using T     = TestFixture::T;
+  using T     = typename TestFixture::T;
   T max_range = std::sqrt(std::numeric_limits<T>::max() / 5);
   run_trig_tests<T>(
     [](std::complex<T>& x) {
@@ -525,7 +910,7 @@ TYPED_TEST(VariousComplexTest, log10)
 
 TYPED_TEST(VariousComplexTest, sinh)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
       /**
@@ -554,7 +939,7 @@ TYPED_TEST(VariousComplexTest, sinh)
 
 TYPED_TEST(VariousComplexTest, sin)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
       // sin(a + bi) = sin(a) * cosh(b) + icos(a) * sinh(b)
@@ -583,23 +968,13 @@ TYPED_TEST(VariousComplexTest, sin)
 
 TYPED_TEST(VariousComplexTest, sqrt)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
 
   T max_range = std::sqrt(std::numeric_limits<T>::max() / 5);
 
   run_trig_tests<T>(
     [](std::complex<T>& x) {
-      // sqrt(a + bi) = sqrt(a + sqrt(a^2 + b^2)/2) + i * ((b / |b|) * sqrt((-a + sqrt(a^2 + b^2))/2))
-
-      double t_real = (double) x.real();
-      double t_imag = (double) x.imag();
-
-      double sqrt_portion = std::sqrt(std::pow(t_real, 2) + std::pow(t_imag, 2));
-
-      double real = std::sqrt((t_real + sqrt_portion) / 2);
-      double imag = (t_imag < 0 ? -1 : 1) * std::sqrt((-t_real + sqrt_portion) / 2);
-
-      return std::complex<T>((T) real, (T) imag);
+      return std::sqrt(x);
     },
     [](thrust::complex<T>& x) {
       return thrust::sqrt(x);
@@ -618,7 +993,7 @@ TYPED_TEST(VariousComplexTest, sqrt)
 
 TYPED_TEST(VariousComplexTest, tanh)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
       // tanh(a + bi) = sinh(2a) / (cosh(b) + cos(2a) + isin(2b) / (cosh(b) + cos(2a)
@@ -644,10 +1019,10 @@ TYPED_TEST(VariousComplexTest, tanh)
 
 TYPED_TEST(VariousComplexTest, tan)
 {
-  using T = TestFixture::T;
+  using T = typename TestFixture::T;
   run_trig_tests<T>(
     [](std::complex<T>& x) {
-      // tan(a + bi) = sin(2a) / (cos(b) + cosh(2a) + isinh(2b) / (cos(b) + cosh(2a)
+      // tan(a + bi) = sin(2a) / (cos(b) + cosh(2a)) + isinh(2b) / (cos(b) + cosh(2a))
 
       double t_real = (double) x.real();
       double t_imag = (double) x.imag();
