@@ -44,29 +44,30 @@ ROCSOLVER_BEGIN_NAMESPACE
 #define SB2ST_HB2ST_MAX_THDS 128
 
 template <int MAX_THDS, typename T, typename S>
-__device__ void run_sb2st_hb2st(const rocblas_int tid,
-                                rocblas_int n,
-                                rocblas_int nb,
-                                T* A,
-                                rocblas_int lda,
-                                S* D,
-                                S* E,
-                                T* sval,
-                                T* work)
+__device__ void sb2st_hb2st_sweep_step(const rocblas_int tid,
+                                       rocblas_int n,
+                                       rocblas_int nb,
+                                       rocblas_int s,
+                                       rocblas_int sm_i,
+                                       T* A,
+                                       rocblas_int lda,
+                                       S* D,
+                                       S* E,
+                                       T* sval,
+                                       T* work)
 {
     __shared__ T tau;
 
-    for(rocblas_int s = 0; s < n - 1; s++)
+    // first step of the sweep
+    if(sm_i == s + 1)
     {
-        rocblas_int sm_i = s + 1;
-        rocblas_int sm_e = std::min(s + 1 + nb, n);
+        rocblas_int sm_e = std::min(sm_i + nb, n);
         rocblas_int su_i = sm_e;
-        rocblas_int su_e = std::min(sm_e + nb, n);
+        rocblas_int su_e = std::min(su_i + nb, n);
 
         // generate Householder reflector
         rocblas_int mm = sm_e - sm_i;
-        rocblas_int incx = 1;
-        larfg<MAX_THDS>(tid, mm, A[sm_i + s * lda], A + (sm_i + 1) + s * lda, incx, tau, sval);
+        larfg<MAX_THDS>(tid, mm, A[sm_i + s * lda], A + (sm_i + 1) + s * lda, 1, tau, sval);
         __syncthreads();
 
         if(tid == 0)
@@ -79,10 +80,10 @@ __device__ void run_sb2st_hb2st(const rocblas_int tid,
 
         // apply Householder reflector
         rocblas_int nn = su_e - sm_i;
-        larf(tid, MAX_THDS, rocblas_side_left, mm, nn, A + sm_i + s * lda, incx, conj(tau),
+        larf(tid, MAX_THDS, rocblas_side_left, mm, nn, A + sm_i + s * lda, 1, conj(tau),
              A + sm_i + sm_i * lda, lda, work);
         __syncthreads();
-        larf(tid, MAX_THDS, rocblas_side_right, mm, mm, A + sm_i + s * lda, incx, tau,
+        larf(tid, MAX_THDS, rocblas_side_right, mm, mm, A + sm_i + s * lda, 1, tau,
              A + sm_i + sm_i * lda, lda, work);
 
         // copy transpose blocks
@@ -97,71 +98,60 @@ __device__ void run_sb2st_hb2st(const rocblas_int tid,
         // save tau
         if(tid == 0)
             A[sm_i + s * lda] = tau;
-        __syncthreads();
-
-        sm_i = su_i;
-        sm_e = su_e;
-
-        // complete the sweep
-        while(sm_i < n)
-        {
-            su_i = sm_e;
-            su_e = std::min(sm_e + nb, n);
-            rocblas_int sd_i = std::max(sm_i - nb, 1);
-            rocblas_int sd_e = sm_i;
-
-            // generate Householder reflector
-            mm = sm_e - sm_i;
-            larfg<MAX_THDS>(tid, mm, A[sm_i + sd_i * lda], A + (sm_i + 1) + sd_i * lda, incx, tau,
-                            sval);
-            __syncthreads();
-
-            // copy Householder vector to column s
-            if(tid == 0)
-                A[sm_i + s * lda] = 1;
-            for(rocblas_int i = sm_i + 1 + tid; i < sm_e; i += MAX_THDS)
-            {
-                A[i + s * lda] = A[i + sd_i * lda];
-                A[i + sd_i * lda] = 0;
-            }
-            __syncthreads();
-
-            // apply Householder reflector
-            nn = su_e - sd_i - 1;
-            larf(tid, MAX_THDS, rocblas_side_left, mm, nn, A + sm_i + s * lda, incx, conj(tau),
-                 A + sm_i + (sd_i + 1) * lda, lda, work);
-            __syncthreads();
-            larf(tid, MAX_THDS, rocblas_side_right, mm, mm, A + sm_i + s * lda, incx, tau,
-                 A + sm_i + sm_i * lda, lda, work);
-
-            // copy transpose blocks
-            nn = su_e - su_i;
-            for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += MAX_THDS)
-            {
-                rocblas_int i = su_i + idx1d % nn;
-                rocblas_int j = sm_i + idx1d / nn;
-                A[i + j * lda] = conj(A[j + i * lda]);
-            }
-            nn = sd_e - sd_i;
-            for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += MAX_THDS)
-            {
-                rocblas_int i = sd_i + idx1d % nn;
-                rocblas_int j = sm_i + idx1d / nn;
-                A[i + j * lda] = conj(A[j + i * lda]);
-            }
-
-            // save tau
-            if(tid == 0)
-                A[sm_i + s * lda] = tau;
-            __syncthreads();
-
-            sm_i = su_i;
-            sm_e = su_e;
-        }
     }
 
-    for(rocblas_int i = tid; i < n; i += MAX_THDS)
-        D[i] = std::real(A[i + i * lda]);
+    // bulge chasing
+    else
+    {
+        rocblas_int sm_e = std::min(sm_i + nb, n);
+        rocblas_int su_i = sm_e;
+        rocblas_int su_e = std::min(su_i + nb, n);
+        rocblas_int sd_i = sm_i - nb;
+        rocblas_int sd_e = sm_i;
+
+        // generate Householder reflector
+        rocblas_int mm = sm_e - sm_i;
+        larfg<MAX_THDS>(tid, mm, A[sm_i + sd_i * lda], A + (sm_i + 1) + sd_i * lda, 1, tau, sval);
+        __syncthreads();
+
+        // copy Householder vector to column s
+        if(tid == 0)
+            A[sm_i + s * lda] = 1;
+        for(rocblas_int i = sm_i + 1 + tid; i < sm_e; i += MAX_THDS)
+        {
+            A[i + s * lda] = A[i + sd_i * lda];
+            A[i + sd_i * lda] = 0;
+        }
+        __syncthreads();
+
+        // apply Householder reflector
+        rocblas_int nn = su_e - sd_i - 1;
+        larf(tid, MAX_THDS, rocblas_side_left, mm, nn, A + sm_i + s * lda, 1, conj(tau),
+             A + sm_i + (sd_i + 1) * lda, lda, work);
+        __syncthreads();
+        larf(tid, MAX_THDS, rocblas_side_right, mm, mm, A + sm_i + s * lda, 1, tau,
+             A + sm_i + sm_i * lda, lda, work);
+
+        // copy transpose blocks
+        nn = su_e - su_i;
+        for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += MAX_THDS)
+        {
+            rocblas_int i = su_i + idx1d % nn;
+            rocblas_int j = sm_i + idx1d / nn;
+            A[i + j * lda] = conj(A[j + i * lda]);
+        }
+        nn = sd_e - sd_i;
+        for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += MAX_THDS)
+        {
+            rocblas_int i = sd_i + idx1d % nn;
+            rocblas_int j = sm_i + idx1d / nn;
+            A[i + j * lda] = conj(A[j + i * lda]);
+        }
+
+        // save tau
+        if(tid == 0)
+            A[sm_i + s * lda] = tau;
+    }
 }
 
 template <typename T, typename S>
@@ -200,7 +190,35 @@ ROCSOLVER_KERNEL void __launch_bounds__(SB2ST_HB2ST_MAX_THDS)
         work = reinterpret_cast<T*>(lmem);
 
     // execute sweeps
-    run_sb2st_hb2st<SB2ST_HB2ST_MAX_THDS, T, S>(tid, n, nb, A, lda, D, E, sval, work);
+    for(rocblas_int s = 0; s < n - 1; s++)
+    {
+        for(rocblas_int sm_i = s + 1; sm_i < n; sm_i += nb)
+        {
+            sb2st_hb2st_sweep_step<SB2ST_HB2ST_MAX_THDS, T, S>(tid, n, nb, s, sm_i, A, lda, D, E,
+                                                               sval, work);
+        }
+    }
+}
+
+template <typename T, typename S>
+ROCSOLVER_KERNEL void sb2st_hb2st_copy_diag(rocblas_int n,
+                                            T* AA,
+                                            rocblas_stride shiftA,
+                                            rocblas_int lda,
+                                            rocblas_stride strideA,
+                                            S* DD,
+                                            rocblas_stride strideD)
+{
+    const rocblas_int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    const rocblas_int bid = blockIdx.z;
+
+    // select batch instance
+    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    S* D = load_ptr_batch<S>(DD, bid, 0, strideD);
+
+    // copy diag
+    if(tid < n)
+        D[tid] = std::real(A[tid + tid * lda]);
 }
 
 template <bool BATCHED, typename T, typename S>
@@ -261,7 +279,7 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
                                               S* E,
                                               const rocblas_stride strideE,
                                               const rocblas_int batch_count,
-                                              T* work)
+                                              T* W)
 {
     ROCSOLVER_ENTER("sb2st_hb2st", "n:", n, "nb:", nb, "shiftA:", shiftA, "lda:", lda,
                     "bc:", batch_count);
@@ -294,23 +312,28 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
     hipDeviceProp_t props;
     HIP_CHECK(hipGetDeviceProperties(&props, device));
 
+    T* work = nullptr;
     rocblas_int strideW = 3 * nb;
+
     size_t lmemsize_larfg = sizeof(T) * SB2ST_HB2ST_MAX_THDS;
     size_t lmemsize_larf = sizeof(T) * strideW;
     size_t lmemsize = std::max(lmemsize_larfg, lmemsize_larf);
 
-    if(lmemsize <= props.sharedMemPerBlock)
+    if(lmemsize > props.sharedMemPerBlock)
     {
-        ROCSOLVER_LAUNCH_KERNEL(sb2st_hb2st_kernel<T>, dim3(1, 1, batch_count),
-                                dim3(SB2ST_HB2ST_MAX_THDS, 1, 1), lmemsize, stream, n, nb, A,
-                                shiftA, lda, strideA, D, strideD, E, strideE, (T*)nullptr, strideW);
+        lmemsize = lmemsize_larfg;
+        work = W;
     }
-    else
-    {
-        ROCSOLVER_LAUNCH_KERNEL(sb2st_hb2st_kernel<T>, dim3(1, 1, batch_count),
-                                dim3(SB2ST_HB2ST_MAX_THDS, 1, 1), lmemsize_larfg, stream, n, nb, A,
-                                shiftA, lda, strideA, D, strideD, E, strideE, work, strideW);
-    }
+
+    // execute sweeps
+    ROCSOLVER_LAUNCH_KERNEL(sb2st_hb2st_kernel<T>, dim3(1, 1, batch_count),
+                            dim3(SB2ST_HB2ST_MAX_THDS, 1, 1), lmemsize, stream, n, nb, A, shiftA,
+                            lda, strideA, D, strideD, E, strideE, work, strideW);
+
+    // copy diagonal
+    const rocblas_int copyblocks = (n - 1) / BS1 + 1;
+    ROCSOLVER_LAUNCH_KERNEL((sb2st_hb2st_copy_diag<T>), dim3(copyblocks, 1, batch_count), dim3(BS1),
+                            0, stream, n, A, shiftA, lda, strideA, D, strideD);
 
     // rocblas_set_pointer_mode(handle, old_mode);
 
