@@ -24,17 +24,42 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-#  include <rocprim/type_traits.hpp>
-#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  include <cuda/std/type_traits>
-#elif defined(__has_include)
-#  if __has_include(<cuda/std/type_traits>)
-#    include <cuda/std/type_traits>
-#  endif // __has_include
+#else
+#  include <rocprim/type_traits.hpp>
+
+#  include <type_traits>
 #endif // THRUST_DEVICE_SYSTEM
 
-#include <type_traits>
+namespace internal
+{
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+using ::cuda::std::_And;
+#else
+template <typename...>
+using expand_to_true = ::std::true_type;
+template <typename... Pred>
+THRUST_HOST_DEVICE expand_to_true<::std::enable_if_t<Pred::value>...> and_helper(int);
+template <typename...>
+THRUST_HOST_DEVICE ::std::false_type and_helper(...);
+template <typename... Pred>
+#  if defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG && defined(__has_attribute) \
+    && __has_attribute(__nodebug__)
+using _And __attribute__((__nodebug__)) = decltype(and_helper<Pred...>(0));
+#  else
+using _And = decltype(and_helper<Pred...>(0));
+#  endif
+#endif
+} // namespace internal
 
 THRUST_NAMESPACE_BEGIN
 
@@ -46,169 +71,65 @@ namespace detail
 {
 /// helper classes [4.3].
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-template <typename T, T v>
-using integral_constant = ::cuda::std::integral_constant<T, v>;
-using true_type         = ::cuda::std::true_type;
-using false_type        = ::cuda::std::false_type;
+using ::cuda::std::add_const;
+using ::cuda::std::add_cv;
+using ::cuda::std::add_volatile;
+using ::cuda::std::conditional;
+using ::cuda::std::enable_if;
+using ::cuda::std::false_type;
+using ::cuda::std::integral_constant;
+using ::cuda::std::is_arithmetic;
+using ::cuda::std::is_assignable;
+using ::cuda::std::is_base_of;
+using ::cuda::std::is_const;
+using ::cuda::std::is_convertible;
+using ::cuda::std::is_copy_assignable;
+using ::cuda::std::is_empty;
+using ::cuda::std::is_floating_point;
+using ::cuda::std::is_integral;
+using ::cuda::std::is_pointer;
+using ::cuda::std::is_reference;
+using ::cuda::std::is_same;
+using ::cuda::std::is_void;
+using ::cuda::std::is_volatile;
+using ::cuda::std::make_unsigned;
+using ::cuda::std::remove_const;
+using ::cuda::std::remove_cv;
+using ::cuda::std::remove_reference;
+using ::cuda::std::remove_volatile;
+using ::cuda::std::true_type;
 #else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-template <typename T, T v>
-struct integral_constant
-{
-  THRUST_INLINE_INTEGRAL_MEMBER_CONSTANT T value = v;
-
-  using value_type = T;
-  using type       = integral_constant<T, v>;
-
-  // We don't want to switch to std::integral_constant, because we want access
-  // to the C++14 operator(), but we'd like standard traits to interoperate
-  // with our version when tag dispatching.
-  integral_constant() = default;
-
-  integral_constant(integral_constant const&) = default;
-
-  integral_constant& operator=(integral_constant const&) = default;
-
-  constexpr THRUST_HOST_DEVICE integral_constant(std::integral_constant<T, v>) noexcept {}
-
-  constexpr THRUST_HOST_DEVICE operator value_type() const noexcept
-  {
-    return value;
-  }
-  constexpr THRUST_HOST_DEVICE value_type operator()() const noexcept
-  {
-    return value;
-  }
-};
-
-/// typedef for true_type
-using true_type = integral_constant<bool, true>;
-
-/// typedef for true_type
-using false_type = integral_constant<bool, false>;
+using ::std::add_const;
+using ::std::add_cv;
+using ::std::add_volatile;
+using ::std::conditional;
+using ::std::enable_if;
+using ::std::false_type;
+using ::std::integral_constant;
+using ::std::is_arithmetic;
+using ::std::is_assignable;
+using ::std::is_base_of;
+using ::std::is_const;
+using ::std::is_convertible;
+using ::std::is_copy_assignable;
+using ::std::is_empty;
+using ::std::is_floating_point;
+using ::std::is_integral;
+using ::std::is_pointer;
+using ::std::is_reference;
+using ::std::is_same;
+using ::std::is_void;
+using ::std::is_volatile;
+using ::std::make_unsigned;
+using ::std::remove_const;
+using ::std::remove_cv;
+using ::std::remove_reference;
+using ::std::remove_volatile;
+using ::std::true_type;
 #endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-
-// template<typename T> struct is_integral : public std::tr1::is_integral<T> {};
-template <typename T>
-struct is_integral : public false_type
-{};
-template <>
-struct is_integral<bool> : public true_type
-{};
-template <>
-struct is_integral<char> : public true_type
-{};
-template <>
-struct is_integral<signed char> : public true_type
-{};
-template <>
-struct is_integral<unsigned char> : public true_type
-{};
-template <>
-struct is_integral<short> : public true_type
-{};
-template <>
-struct is_integral<unsigned short> : public true_type
-{};
-template <>
-struct is_integral<int> : public true_type
-{};
-template <>
-struct is_integral<unsigned int> : public true_type
-{};
-template <>
-struct is_integral<long> : public true_type
-{};
-template <>
-struct is_integral<unsigned long> : public true_type
-{};
-template <>
-struct is_integral<long long> : public true_type
-{};
-template <>
-struct is_integral<unsigned long long> : public true_type
-{};
-template <>
-struct is_integral<const bool> : public true_type
-{};
-template <>
-struct is_integral<const char> : public true_type
-{};
-template <>
-struct is_integral<const unsigned char> : public true_type
-{};
-template <>
-struct is_integral<const short> : public true_type
-{};
-template <>
-struct is_integral<const unsigned short> : public true_type
-{};
-template <>
-struct is_integral<const int> : public true_type
-{};
-template <>
-struct is_integral<const unsigned int> : public true_type
-{};
-template <>
-struct is_integral<const long> : public true_type
-{};
-template <>
-struct is_integral<const unsigned long> : public true_type
-{};
-template <>
-struct is_integral<const long long> : public true_type
-{};
-template <>
-struct is_integral<const unsigned long long> : public true_type
-{};
-
-template <typename T>
-struct is_floating_point : public false_type
-{};
-template <>
-struct is_floating_point<float> : public true_type
-{};
-template <>
-struct is_floating_point<double> : public true_type
-{};
-template <>
-struct is_floating_point<long double> : public true_type
-{};
-
-template <typename T>
-struct is_arithmetic : public is_integral<T>
-{};
-template <>
-struct is_arithmetic<float> : public true_type
-{};
-template <>
-struct is_arithmetic<double> : public true_type
-{};
-template <>
-struct is_arithmetic<const float> : public true_type
-{};
-template <>
-struct is_arithmetic<const double> : public true_type
-{};
-
-template <typename T>
-struct is_pointer : public false_type
-{};
-template <typename T>
-struct is_pointer<T*> : public true_type
-{};
 
 template <typename T>
 struct is_device_ptr : public false_type
-{};
-
-template <typename T>
-struct is_void : public false_type
-{};
-template <>
-struct is_void<void> : public true_type
-{};
-template <>
-struct is_void<const void> : public true_type
 {};
 
 template <typename T>
@@ -252,10 +173,6 @@ template <typename T>
 struct has_trivial_copy_constructor
     : public integral_constant<bool, is_pod<T>::value || ::cuda::std::is_trivially_copyable<T>::value>
 {};
-
-template <typename T>
-struct has_trivial_destructor : public is_pod<T>
-{};
 #else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
 template <typename T>
 struct has_trivial_constructor
@@ -286,79 +203,10 @@ struct has_trivial_copy_constructor
 #  endif // THRUST_HOST_COMPILER
                                >
 {};
-
-template <typename T>
-struct has_trivial_destructor : public is_pod<T>
-{};
 #endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 template <typename T>
-struct is_const : public false_type
-{};
-template <typename T>
-struct is_const<const T> : public true_type
-{};
-
-template <typename T>
-struct is_volatile : public false_type
-{};
-template <typename T>
-struct is_volatile<volatile T> : public true_type
-{};
-
-template <typename T>
-struct add_const
-{
-  using type = T const;
-}; // end add_const
-
-template <typename T>
-struct remove_const
-{
-  using type = T;
-}; // end remove_const
-
-template <typename T>
-struct remove_const<const T>
-{
-  using type = T;
-}; // end remove_const
-
-template <typename T>
-struct add_volatile
-{
-  using type = volatile T;
-}; // end add_volatile
-
-template <typename T>
-struct remove_volatile
-{
-  using type = T;
-}; // end remove_volatile
-
-template <typename T>
-struct remove_volatile<volatile T>
-{
-  using type = T;
-}; // end remove_volatile
-
-template <typename T>
-struct add_cv
-{
-  using type = const volatile T;
-}; // end add_cv
-
-template <typename T>
-struct remove_cv
-{
-  using type = typename remove_const<typename remove_volatile<T>::type>::type;
-}; // end remove_cv
-
-template <typename T>
-struct is_reference : public false_type
-{};
-template <typename T>
-struct is_reference<T&> : public true_type
+struct has_trivial_destructor : public is_pod<T>
 {};
 
 template <typename T>
@@ -389,32 +237,6 @@ template <typename _Tp>
 struct add_reference : public __add_reference_helper<_Tp>
 {};
 
-template <typename T>
-struct remove_reference
-{
-  using type = T;
-}; // end remove_reference
-
-template <typename T>
-struct remove_reference<T&>
-{
-  using type = T;
-}; // end remove_reference
-
-template <typename T>
-struct remove_reference<T&&>
-{
-  using type = T;
-}; // end remove_reference
-
-template <typename T1, typename T2>
-struct is_same : public false_type
-{}; // end is_same
-
-template <typename T>
-struct is_same<T, T> : public true_type
-{}; // end is_same
-
 template <typename T1, typename T2>
 struct lazy_is_same : is_same<typename T1::type, typename T2::type>
 {}; // end lazy_is_same
@@ -430,13 +252,6 @@ struct is_different<T, T> : public false_type
 template <typename T1, typename T2>
 struct lazy_is_different : is_different<typename T1::type, typename T2::type>
 {}; // end lazy_is_different
-
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-template <class From, class To>
-using is_convertible = ::cuda::std::is_convertible<From, To>;
-#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-using std::is_convertible;
-#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 template <typename T1, typename T2>
 struct is_one_convertible_to_the_other
@@ -476,18 +291,6 @@ template <typename Boolean>
 struct not_ : public integral_constant<bool, !Boolean::value>
 {}; // end not_
 
-template <bool B, class T, class F>
-struct conditional
-{
-  using type = T;
-};
-
-template <class T, class F>
-struct conditional<false, T, F>
-{
-  using type = F;
-};
-
 template <bool, typename Then, typename Else>
 struct eval_if
 {}; // end eval_if
@@ -512,15 +315,6 @@ struct identity_
   using type = T;
 }; // end identity
 
-template <bool, typename T = void>
-struct enable_if
-{};
-template <typename T>
-struct enable_if<true, T>
-{
-  using type = T;
-};
-
 template <bool, typename T>
 struct lazy_enable_if
 {};
@@ -538,11 +332,15 @@ struct lazy_disable_if : lazy_enable_if<!condition, T>
 {};
 
 template <typename T1, typename T2, typename T = void>
-struct enable_if_convertible : enable_if<is_convertible<T1, T2>::value, T>
-{};
+using enable_if_convertible = enable_if<is_convertible<T1, T2>::value, T>;
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 template <typename T1, typename T2, typename T = void>
-using enable_if_convertible_t = typename enable_if_convertible<T1, T2, T>::type;
+using enable_if_convertible_t = ::cuda::std::enable_if_t<is_convertible<T1, T2>::value, T>;
+#else
+template <typename T1, typename T2, typename T = void>
+using enable_if_convertible_t = ::std::enable_if_t<is_convertible<T1, T2>::value, T>;
+#endif
 
 template <typename T1, typename T2, typename T = void>
 struct disable_if_convertible : disable_if<is_convertible<T1, T2>::value, T>
@@ -553,7 +351,7 @@ struct enable_if_different : enable_if<is_different<T1, T2>::value, Result>
 {};
 
 template <typename T>
-struct is_numeric : and_<is_convertible<int, T>, is_convertible<T, int>>
+struct is_numeric : ::internal::_And<is_convertible<int, T>, is_convertible<T, int>>
 {}; // end is_numeric
 
 template <typename>
@@ -561,101 +359,6 @@ struct is_reference_to_const : false_type
 {};
 template <typename T>
 struct is_reference_to_const<const T&> : true_type
-{};
-
-// make_unsigned follows
-
-namespace tt_detail
-{
-
-template <typename T>
-struct make_unsigned_simple;
-
-template <>
-struct make_unsigned_simple<char>
-{
-  using type = unsigned char;
-};
-template <>
-struct make_unsigned_simple<signed char>
-{
-  using type = unsigned char;
-};
-template <>
-struct make_unsigned_simple<unsigned char>
-{
-  using type = unsigned char;
-};
-template <>
-struct make_unsigned_simple<short>
-{
-  using type = unsigned short;
-};
-template <>
-struct make_unsigned_simple<unsigned short>
-{
-  using type = unsigned short;
-};
-template <>
-struct make_unsigned_simple<int>
-{
-  using type = unsigned int;
-};
-template <>
-struct make_unsigned_simple<unsigned int>
-{
-  using type = unsigned int;
-};
-template <>
-struct make_unsigned_simple<long int>
-{
-  using type = unsigned long int;
-};
-template <>
-struct make_unsigned_simple<unsigned long int>
-{
-  using type = unsigned long int;
-};
-template <>
-struct make_unsigned_simple<long long int>
-{
-  using type = unsigned long long int;
-};
-template <>
-struct make_unsigned_simple<unsigned long long int>
-{
-  using type = unsigned long long int;
-};
-
-template <typename T>
-struct make_unsigned_base
-{
-  // remove cv
-  using remove_cv_t = typename remove_cv<T>::type;
-
-  // get the simple unsigned type
-  using unsigned_remove_cv_t = typename make_unsigned_simple<remove_cv_t>::type;
-
-  // add back const, volatile, both, or neither to the simple result
-  using type = typename eval_if<
-    is_const<T>::value && is_volatile<T>::value,
-    // add cv back
-    add_cv<unsigned_remove_cv_t>,
-    // check const & volatile individually
-    eval_if<is_const<T>::value,
-            // add c back
-            add_const<unsigned_remove_cv_t>,
-            eval_if<is_volatile<T>::value,
-                    // add v back
-                    add_volatile<unsigned_remove_cv_t>,
-                    // original type was neither cv, return the simple unsigned result
-                    identity_<unsigned_remove_cv_t>>>>::type;
-};
-
-} // namespace tt_detail
-
-template <typename T>
-struct make_unsigned : tt_detail::make_unsigned_base<T>
 {};
 
 struct largest_available_float
@@ -669,57 +372,8 @@ struct larger_type
     : thrust::detail::eval_if<(sizeof(T2) > sizeof(T1)), thrust::detail::identity_<T2>, thrust::detail::identity_<T1>>
 {};
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-template <class Base, class Derived>
-using is_base_of = ::cuda::std::is_base_of<Base, Derived>;
-#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-using std::is_base_of;
-#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-
 template <typename Base, typename Derived, typename Result = void>
 struct enable_if_base_of : enable_if<is_base_of<Base, Derived>::value, Result>
-{};
-
-namespace is_assignable_ns
-{
-
-template <typename T1, typename T2>
-class is_assignable
-{
-  using yes_type = char;
-  using no_type  = struct
-  {
-    char array[2];
-  };
-
-  template <typename T>
-  static typename add_reference<T>::type declval();
-
-  template <size_t>
-  struct helper
-  {
-    using type = void*;
-  };
-
-  template <typename U1, typename U2>
-  static yes_type test(typename helper<sizeof(declval<U1>() = declval<U2>())>::type);
-
-  template <typename, typename>
-  static no_type test(...);
-
-public:
-  static const bool value = sizeof(test<T1, T2>(0)) == 1;
-}; // end is_assignable
-
-} // namespace is_assignable_ns
-
-template <typename T1, typename T2>
-struct is_assignable : integral_constant<bool, is_assignable_ns::is_assignable<T1, T2>::value>
-{};
-
-template <typename T>
-struct is_copy_assignable
-    : is_assignable<typename add_reference<T>::type, typename add_reference<typename add_const<T>::type>::type>
 {};
 
 template <typename T1, typename T2, typename Enable = void>
@@ -752,41 +406,15 @@ struct promoted_numerical_type<
   using type = T1;
 };
 
-template <typename T>
-struct is_empty_helper : public T
-{};
-
-struct is_empty_helper_base
-{};
-
-template <typename T>
-struct is_empty : integral_constant<bool, sizeof(is_empty_helper_base) == sizeof(is_empty_helper<T>)>
-{};
-
-template <typename Invokable, typename... Args>
-using invoke_result_t =
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-  typename ::rocprim::invoke_result<Invokable, Args...>::type;
-#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  if THRUST_CPP_DIALECT < 2017
-  typename ::cuda::std::result_of<Invokable(Args...)>::type;
-#  else // 2017+
-  ::cuda::std::invoke_result_t<Invokable, Args...>;
-#  endif
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+template <class F, class... Us>
+using invoke_result = ::cuda::std::__invoke_of<F, Us...>;
 #else
-#  if THRUST_CPP_DIALECT < 2017
-  std::result_of_t<Invokable(Args...)>;
-#  else // 2017+
-  std::invoke_result_t<Invokable, Args...>;
-#  endif
+using ::rocprim::invoke_result;
 #endif
 
 template <class F, class... Us>
-struct invoke_result
-{
-  using type = invoke_result_t<F, Us...>;
-};
-
+using invoke_result_t = typename invoke_result<F, Us...>::type;
 } // namespace detail
 
 using detail::false_type;

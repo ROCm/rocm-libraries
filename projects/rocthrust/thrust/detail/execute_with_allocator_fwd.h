@@ -18,8 +18,20 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/execute_with_dependencies.h>
 #include <thrust/detail/type_traits.h>
+
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -45,8 +57,12 @@ public:
       : alloc(alloc_)
   {}
 
-  typename remove_reference<Allocator>::type& get_allocator()
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  ::cuda::std::remove_reference_t<Allocator>& get_allocator(){
+#else
+  ::std::remove_reference_t<Allocator>& get_allocator()
   {
+#endif
     return alloc;
   }
 

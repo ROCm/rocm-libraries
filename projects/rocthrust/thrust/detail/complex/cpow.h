@@ -23,9 +23,6 @@
 #include <thrust/complex.h>
 #include <thrust/detail/type_traits.h>
 
-#include <cmath>
-#include <type_traits>
-
 THRUST_NAMESPACE_BEGIN
 
 template <typename T0, typename T1>
