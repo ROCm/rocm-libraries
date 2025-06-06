@@ -547,17 +547,21 @@ void validate_pp_grid_params(const StockhamPartialPassParams& params_1,
         if((params_1.current_dim == 0 && params_2.current_dim == 2)
            || (params_1.current_dim == 2 && params_2.current_dim == 0))
         {
-            // SBRR needs tpb to be at least max(pp_factors),
+            // SBRR needs tpb to be prod(pp_factors),
             // so that it has the required off-dim data in LDS
-            // to perform partial pass
+            // to perform partial passes
             auto tpb_sbrr = (params_1.current_dim == 0 && params_2.current_dim == 2)
                                 ? specs_1.workgroup_size / specs_1.threads_per_transform
                                 : specs_2.workgroup_size / specs_2.threads_per_transform;
-            if(tpb_sbrr < *std::max_element(params_1.factors_off_dim.begin(),
-                                            params_1.factors_off_dim.end()))
+
+            unsigned int prod_factors_off_dim = std::accumulate(params_1.factors_off_dim.begin(),
+                                                                params_1.factors_off_dim.end(),
+                                                                1,
+                                                                std::multiplies<unsigned int>());
+            if(tpb_sbrr != prod_factors_off_dim)
             {
                 throw std::runtime_error("CS_KERNEL_STOCKHAM_PP requires transform-per-block "
-                                         "to be at least max(pp_factors)");
+                                         "to be prod(pp_factors)");
             }
         }
         // SBCC_PP + SBCC_PP
@@ -704,10 +708,12 @@ int main()
             StockhamGeneratorSpecs specs1(factors1, {}, precisions, workgroup_size[0], scheme);
             specs1.direct_to_from_reg    = direct_to_from_reg[0];
             specs1.threads_per_transform = threads_per_transform[0];
+            specs1.wgs_is_derived        = true;
 
             StockhamGeneratorSpecs specs2(factors2, {}, precisions, workgroup_size[1], scheme);
             specs2.direct_to_from_reg    = direct_to_from_reg[1];
             specs2.threads_per_transform = threads_per_transform[1];
+            specs2.wgs_is_derived        = true;
 
             StockhamPartialPassParams pp_params_1(parent_length, dims[0], off_dim, pp_factors1);
             StockhamPartialPassParams pp_params_2(parent_length, dims[1], off_dim, pp_factors2);
