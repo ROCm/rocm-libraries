@@ -105,7 +105,7 @@ jobs:
       - name: Post a comment with diff for forked PRs 
         if: github.event.pull_request.head.repo.fork == true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.ROCM_SV_TOKEN }}
         run: |  
           var="${{ steps.changed-files.outputs.all_modified_files }}"  
           read -r -a files <<< "$var"  
