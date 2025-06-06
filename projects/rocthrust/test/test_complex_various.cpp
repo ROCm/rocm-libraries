@@ -597,7 +597,7 @@ TYPED_TEST(VariousComplexTest, atanh_special)
 
   T qNan   = std::numeric_limits<T>::quiet_NaN();
   T posInf = std::numeric_limits<T>::infinity();
-  
+
   thrust::complex<T> zero_zero(0, 0);
   thrust::complex<T> out = thrust::atanh(zero_zero);
   ASSERT_EQ(0, out.real());
@@ -678,6 +678,30 @@ TYPED_TEST(VariousComplexTest, catan)
     1,
     -1000,
     1000);
+}
+
+TYPED_TEST(VariousComplexTest, real_part_reciprocal)
+{
+  using T = typename TestFixture::T;
+
+  const T max_range = std::sqrt(std::numeric_limits<T>::max() / 10);
+
+  const T mini = -max_range;
+  const T maxi = max_range;
+
+  constexpr size_t tests = 10000;
+
+  T inc = (maxi - mini) / tests;
+
+  for (T x = mini; x <= maxi; x += inc)
+  {
+    for (T y = mini; y <= maxi; y += inc)
+    {
+      T ans = x / (x * x + y * y);
+
+      ASSERT_NEAR(ans, thrust::detail::complex::real_part_reciprocal(x, y), std::abs(ans) * 0.01);
+    }
+  }
 }
 
 TEST(VariousComplexTest, acos_long_double)
