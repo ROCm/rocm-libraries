@@ -99,7 +99,7 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_ctz(uint32_t __x) noexcept
   if (!__libcpp_default_is_constant_evaluated())
   {
     NV_IF_ELSE_TARGET(
-      NV_IS_DEVICE, (return (!__x) ? (sizeof(uint32_t) * 8) : (__ffs(__x) - 1);), (return __builtin_ctz(__x);))
+      NV_IS_DEVICE_LIBHIPCXX, (return (!__x) ? (sizeof(uint32_t) * 8) : (__ffs(__x) - 1);), (return __builtin_ctz(__x);))
   }
 #  endif
   return __constexpr_ctz(__x);
@@ -111,7 +111,7 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_ctz(uint64_t __x) noexcept
   if (!__libcpp_default_is_constant_evaluated())
   {
     NV_IF_ELSE_TARGET(
-      NV_IS_DEVICE, (return (!__x) ? (sizeof(uint64_t) * 8) : (libhipcxx::__FFS(__x) - 1);), (return __builtin_ctzll(__x);))
+      NV_IS_DEVICE_LIBHIPCXX, (return (!__x) ? (sizeof(uint64_t) * 8) : (libhipcxx::__FFS(__x) - 1);), (return __builtin_ctzll(__x);))
   }
 #  endif
   return __constexpr_ctz(__x);

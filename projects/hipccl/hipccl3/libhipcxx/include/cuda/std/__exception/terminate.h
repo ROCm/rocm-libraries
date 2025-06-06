@@ -53,7 +53,7 @@ _LIBCUDACXX_BEGIN_NAMESPACE_STD_NOVERSION // purposefully not using versioning n
 
 _CCCL_NORETURN _LIBCUDACXX_HIDE_FROM_ABI void __cccl_terminate() noexcept
 {
-  NV_IF_ELSE_TARGET(NV_IS_HOST, (::std::exit(-1);), (libhipcxx::__trap();))
+  NV_IF_ELSE_TARGET(NV_IS_HOST_LIBHIPCXX, (::std::exit(-1);), (libhipcxx::__trap();))
   _LIBCUDACXX_UNREACHABLE();
 }
 

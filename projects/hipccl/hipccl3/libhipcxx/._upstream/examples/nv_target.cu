@@ -1,3 +1,20 @@
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 // This file demonstrates how to use <nv/target> and how to avoid common
 // pitfalls regarding compiler/dialect compatibility.
 
@@ -11,7 +28,7 @@
 // are only to be used inside of function scopes
 
 /* Macros defined when including <nv/target> or virtually any libcu++ header
-  NV_IF_TARGET(query, true, ...)        | Queries compilation mode and emits code if true                |
+  NV_IF_TARGET_LIBHIPCXX(query, true, ...)        | Queries compilation mode and emits code if true                |
   NV_IF_ELSE_TARGET(query, true, false) | As above, but can also emit different code when false          |
   NV_DISPATCH_TARGET(...)               | Similar to a switch statement emitting code for multiple modes |
 */
@@ -50,12 +67,12 @@ Similar to above, but instead __CUDA_ARCH__ == SM_XX
   NV_IS_EXACTLY_SM_87
 
 Queries whether if host or device code is being compiled
-  NV_IS_HOST
-  NV_IS_DEVICE
+  NV_IS_HOST_LIBHIPCXX
+  NV_IS_DEVICE_LIBHIPCXX
 
 Static true/false values for fallbacks or user manipulation
-  NV_ANY_TARGET
-  NV_NO_TARGET
+  NV_ANY_TARGET_LIBHIPCXX
+  NV_NO_TARGET_LIBHIPCXX
 */
 
 //=======================================================================================================================
@@ -65,7 +82,7 @@ __host__ __device__ int my_popc(unsigned int v)
   // NV_IF_ELSE_TARGET accepts three arguments, a query and two statement.
   // Here we check if we're compiling for device code. This function acts as a backend for both CUDA and host CPU popc.
   NV_IF_ELSE_TARGET(
-    NV_IS_DEVICE,
+    NV_IS_DEVICE_LIBHIPCXX,
     return __popc(v); // Is false, use CUDA intrinsic
     , // Notice comma signifying end of block
     return __builtin_popc(v); // Is host, use GCC builtin
@@ -80,11 +97,11 @@ __host__ __device__ int my_popc(unsigned int v)
 */
 
 //=======================================================================================================================
-// NV_IF_TARGET(query, true statement) OR NV_IF_TARGET(q, t, ...)
+// NV_IF_TARGET_LIBHIPCXX(query, true statement) OR NV_IF_TARGET_LIBHIPCXX(q, t, ...)
 __host__ __device__ void some_algorithm()
 {
-  // NV_IF_TARGET accepts two arguments, a query and a statement. (and an optional false statement in >=C++11)
-  NV_IF_TARGET(NV_IS_DEVICE,
+  // NV_IF_TARGET_LIBHIPCXX accepts two arguments, a query and a statement. (and an optional false statement in >=C++11)
+  NV_IF_TARGET_LIBHIPCXX(NV_IS_DEVICE_LIBHIPCXX,
                do_device_specific_work(); // Code only emitted if compiling for device
   )
 }
@@ -101,7 +118,7 @@ __host__ __device__ void my_memset(void* p, uint8_t v, uint64_t c)
     if (v == 0) zero_fill(p, 0, c); // zero fill using cp.async available on SM_80
     else memset(p, v, c);
     , // Notice comma signifying end of block
-    NV_ANY_TARGET, // Uncoditionally use memset in other cases
+    NV_ANY_TARGET_LIBHIPCXX, // Uncoditionally use memset in other cases
     memset(p, v, c);)
 }
 
@@ -112,8 +129,8 @@ __host__ __device__ void my_memset(void* p, uint8_t v, uint64_t c)
 //=======================================================================================================================
 // Embedding preprocessor statements as an argument. Perform textual manipulation outside of the macro.
 /*
-NV_IF_TARGET(
-  NV_IS_DEVICE,
+NV_IF_TARGET_LIBHIPCXX(
+  NV_IS_DEVICE_LIBHIPCXX,
 // This will break immediately on most compilers
 #  if defined(ENABLE_SM_80_FEATURE)
     sm80_function();
@@ -129,8 +146,8 @@ NV_IF_TARGET(
 # define OPTIMAL_DEVICE_FUNCTION() device_function()
 #endif
 
-NV_IF_TARGET(
-  NV_IS_DEVICE,
+NV_IF_TARGET_LIBHIPCXX(
+  NV_IS_DEVICE_LIBHIPCXX,
   OPTIMAL_DEVICE_FUNCTION();
 )
 */
@@ -139,8 +156,8 @@ NV_IF_TARGET(
 // Some statements may have unguarded commas, e.g. lambdas or aggregate assignment
 // Supported with C++11 and up ONLY, as it requires variadic macro processing
 /*
-NV_IF_TARGET(
-  NV_IS_DEVICE,
+NV_IF_TARGET_LIBHIPCXX(
+  NV_IS_DEVICE_LIBHIPCXX,
     ( // You may wrap a statement or series of statements with a parenthesis to guard commas from any macro machinery
       int input[] = {x, y, z...};
       my_algorithm(input);

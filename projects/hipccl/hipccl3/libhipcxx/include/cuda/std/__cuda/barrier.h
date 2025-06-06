@@ -207,7 +207,7 @@ public:
                        "r"(static_cast<_CUDA_VSTD::uint32_t>(__expected))
                        : "memory");
         } else { new (&__b->__barrier) __barrier_base(__expected); }),
-      NV_ANY_TARGET,
+      NV_ANY_TARGET_LIBHIPCXX,
       (new (&__b->__barrier) __barrier_base(__expected);))
   }
 
@@ -234,7 +234,7 @@ public:
         // Need 2 instructions, can't finish barrier with arrive > 1
         if (__update > 1) { _CUDA_VPTX::mbarrier_arrive_no_complete(__bh, __update - 1); } __token =
           _CUDA_VPTX::mbarrier_arrive(__bh);),
-      NV_IS_DEVICE,
+      NV_IS_DEVICE_LIBHIPCXX,
       (
         if (!__isShared(&__barrier)) { return __barrier.arrive(__update); }
 
@@ -253,7 +253,7 @@ public:
         if (__leader == static_cast<int>(__laneid)) {
           __token = __barrier.arrive(__inc);
         } __token = __shfl_sync(__active, __token, __leader);),
-      NV_IS_HOST,
+      NV_IS_HOST_LIBHIPCXX,
       (__token = __barrier.arrive(__update);))
     return __token;
   }
@@ -300,7 +300,7 @@ private:
       (if (!__isShared(&__barrier)) {
         return _CUDA_VSTD::__call_try_wait(__barrier, _CUDA_VSTD::move(__token));
       } return __test_wait_sm_80(__token);),
-      NV_ANY_TARGET,
+      NV_ANY_TARGET_LIBHIPCXX,
       (return _CUDA_VSTD::__call_try_wait(__barrier, _CUDA_VSTD::move(__token));))
   }
 
@@ -354,7 +354,7 @@ private:
           __ready = __test_wait_sm_80(__token);
         } while (!__ready && __nanosec > (_CUDA_VSTD::chrono::high_resolution_clock::now() - __start));
         return __ready;),
-      NV_ANY_TARGET,
+      NV_ANY_TARGET_LIBHIPCXX,
       (return _CUDA_VSTD::__libcpp_thread_poll_with_backoff(
                 _CUDA_VSTD::__barrier_poll_tester_phase<barrier>(this, _CUDA_VSTD::move(__token)),
                 _CUDA_VSTD::chrono::nanoseconds(__nanosec));))
@@ -403,7 +403,7 @@ private:
       (if (!__isShared(&__barrier)) { return _CUDA_VSTD::__call_try_wait_parity(__barrier, __phase_parity); }
 
        return __test_wait_parity_sm_80(__phase_parity);),
-      NV_ANY_TARGET,
+      NV_ANY_TARGET_LIBHIPCXX,
       (return _CUDA_VSTD::__call_try_wait_parity(__barrier, __phase_parity);))
   }
 
@@ -458,7 +458,7 @@ private:
         } while (!__ready && __nanosec > (_CUDA_VSTD::chrono::high_resolution_clock::now() - __start));
 
         return __ready;),
-      NV_ANY_TARGET,
+      NV_ANY_TARGET_LIBHIPCXX,
       (return _CUDA_VSTD::__libcpp_thread_poll_with_backoff(
                 _CUDA_VSTD::__barrier_poll_tester_parity<barrier>(this, __phase_parity), __nanosec);))
   }
@@ -504,7 +504,7 @@ public:
         asm volatile("mbarrier.arrive_drop.shared.b64 _, [%0];" ::"r"(static_cast<_CUDA_VSTD::uint32_t>(
           __cvta_generic_to_shared(&__barrier)))
                      : "memory");),
-      NV_ANY_TARGET,
+      NV_ANY_TARGET_LIBHIPCXX,
       (
         // Fallback to slowpath on device
         __barrier.arrive_and_drop();))
@@ -735,7 +735,7 @@ template <thread_scope _Sco,
                            && _CUDA_VSTD::is_same<_CompF, _CUDA_VSTD::__empty_completion>::value>
 _LIBCUDACXX_HIDE_FROM_ABI bool __is_local_smem_barrier(barrier<_Sco, _CompF>& __barrier)
 {
-  NV_IF_ELSE_TARGET(NV_IS_DEVICE, (return _Is_mbarrier && __isShared(&__barrier);), (return false;));
+  NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX, (return _Is_mbarrier && __isShared(&__barrier);), (return false;));
 }
 
 // __try_get_barrier_handle returns barrier handle of block-scoped barriers and a nullptr otherwise.
@@ -752,7 +752,7 @@ __try_get_barrier_handle<::cuda::thread_scope_block, _CUDA_VSTD::__empty_complet
 {
   (void) __barrier;
   NV_DISPATCH_TARGET(
-    NV_IS_DEVICE, (return ::cuda::device::barrier_native_handle(__barrier);), NV_ANY_TARGET, (return nullptr;));
+    NV_IS_DEVICE_LIBHIPCXX, (return ::cuda::device::barrier_native_handle(__barrier);), NV_ANY_TARGET_LIBHIPCXX, (return nullptr;));
 }
 
 // This struct contains functions to defer the completion of a barrier phase
@@ -783,7 +783,7 @@ struct __memcpy_completion_impl
     {
       case __completion_mechanism::__async_group:
         // Pre-SM80, the async_group mechanism is not available.
-        NV_IF_TARGET(
+        NV_IF_TARGET_LIBHIPCXX(
           NV_PROVIDES_SM_80,
           (
             // Non-Blocking: unbalance barrier by 1, barrier will be
@@ -803,7 +803,7 @@ struct __memcpy_completion_impl
       case __completion_mechanism::__mbarrier_complete_tx:
 #  if __cccl_ptx_isa >= 800
         // Pre-sm90, the mbarrier_complete_tx completion mechanism is not available.
-        NV_IF_TARGET(NV_PROVIDES_SM_90,
+        NV_IF_TARGET_LIBHIPCXX(NV_PROVIDES_SM_90,
                      (
                        // Only perform the expect_tx operation with the leader thread
                        if (__group.thread_rank() == 0) { ::cuda::device::barrier_expect_tx(__barrier, __size); }));
@@ -836,7 +836,7 @@ struct __memcpy_completion_impl
     {
       case __completion_mechanism::__async_group:
         // Pre-SM80, the async_group mechanism is not available.
-        NV_IF_TARGET(NV_PROVIDES_SM_80,
+        NV_IF_TARGET_LIBHIPCXX(NV_PROVIDES_SM_80,
                      (
                        // Blocking: wait for all thread-local cp.async instructions to have
                        // completed writing to shared memory.
@@ -1118,7 +1118,7 @@ _CCCL_NODISCARD _CCCL_DEVICE inline __completion_mechanism __dispatch_memcpy_asy
   uint64_t* __bar_handle)
 {
 #  if __cccl_ptx_isa >= 800
-  NV_IF_TARGET(
+  NV_IF_TARGET_LIBHIPCXX(
     NV_PROVIDES_SM_90,
     (const bool __can_use_complete_tx = __allowed_completions & uint32_t(__completion_mechanism::__mbarrier_complete_tx);
      _LIBCUDACXX_UNUSED_VAR(__can_use_complete_tx);
@@ -1135,7 +1135,7 @@ _CCCL_NODISCARD _CCCL_DEVICE inline __completion_mechanism __dispatch_memcpy_asy
      ));
 #  endif // __cccl_ptx_isa >= 800
 
-  NV_IF_TARGET(
+  NV_IF_TARGET_LIBHIPCXX(
     NV_PROVIDES_SM_80,
     (_CCCL_IF_CONSTEXPR (_Align >= 4) {
       const bool __can_use_async_group = __allowed_completions & uint32_t(__completion_mechanism::__async_group);
@@ -1163,7 +1163,7 @@ _CCCL_NODISCARD _LIBCUDACXX_HIDE_FROM_ABI __completion_mechanism __dispatch_memc
   uint64_t* __bar_handle)
 {
   NV_IF_ELSE_TARGET(
-    NV_IS_DEVICE,
+    NV_IS_DEVICE_LIBHIPCXX,
     (
       // Dispatch based on direction of the copy: global to shared, shared to
       // global, etc.

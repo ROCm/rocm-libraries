@@ -81,7 +81,7 @@ public:
 
 _CCCL_NORETURN _LIBCUDACXX_HIDE_FROM_ABI void __throw_cuda_error(::hipError_t __status, const char* __msg)
 {
-  NV_IF_ELSE_TARGET(NV_IS_HOST,
+  NV_IF_ELSE_TARGET(NV_IS_HOST_LIBHIPCXX,
                     (throw ::cuda::cuda_error(__status, __msg);),
                     ((void) __status; (void) __msg; _CUDA_VSTD_NOVERSION::terminate();))
 }

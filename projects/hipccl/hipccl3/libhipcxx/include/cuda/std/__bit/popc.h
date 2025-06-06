@@ -8,6 +8,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #ifndef _LIBCUDACXX__BIT_POPC_H
 #define _LIBCUDACXX__BIT_POPC_H
 
@@ -81,7 +98,7 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_popc(uint32_t __x) noexcept
 #  if _CCCL_STD_VER >= 2014
   if (!__libcpp_default_is_constant_evaluated())
   {
-    NV_IF_ELSE_TARGET(NV_IS_DEVICE, (return __popc(__x);), (return __builtin_popcount(__x);))
+    NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX, (return __popc(__x);), (return __builtin_popcount(__x);))
   }
 #  endif
   return __constexpr_popcount(static_cast<uint64_t>(__x));
@@ -92,7 +109,7 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_popc(uint64_t __x) noexcept
 #  if _CCCL_STD_VER >= 2014
   if (!__libcpp_default_is_constant_evaluated())
   {
-    NV_IF_ELSE_TARGET(NV_IS_DEVICE, (return __popcll(__x);), (return __builtin_popcountll(__x);))
+    NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX, (return __popcll(__x);), (return __builtin_popcountll(__x);))
   }
 #  endif
   return __constexpr_popcount(static_cast<uint64_t>(__x));
@@ -104,7 +121,7 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_popc(uint32_t __x)
 {
   if (!__libcpp_default_is_constant_evaluated())
   {
-    NV_IF_TARGET(NV_IS_HOST, (return static_cast<int>(_LIBCUDACXX_MSVC_POPC(__x));))
+    NV_IF_TARGET_LIBHIPCXX(NV_IS_HOST_LIBHIPCXX, (return static_cast<int>(_LIBCUDACXX_MSVC_POPC(__x));))
   }
 
   return __fallback_popc64(static_cast<uint64_t>(__x));
@@ -114,7 +131,7 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr int __libcpp_popc(uint64_t __x)
 {
   if (!__libcpp_default_is_constant_evaluated())
   {
-    NV_IF_TARGET(NV_IS_HOST, (return static_cast<int>(_LIBCUDACXX_MSVC_POPC64(__x));))
+    NV_IF_TARGET_LIBHIPCXX(NV_IS_HOST_LIBHIPCXX, (return static_cast<int>(_LIBCUDACXX_MSVC_POPC64(__x));))
   }
 
   return __fallback_popc64(static_cast<uint64_t>(__x));

@@ -41,6 +41,23 @@
 //@HEADER
 */
 
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #ifndef _LIBCUDACXX___MDSPAN_LAYOUT_LEFT_HPP
 #define _LIBCUDACXX___MDSPAN_LAYOUT_LEFT_HPP
 
@@ -161,7 +178,7 @@ public:
      * TODO: check precondition
      * __other.required_span_size() is a representable value of type index_type
      */
-    NV_IF_TARGET(NV_IS_HOST, (size_t __stride = 1; for (rank_type __r = 0; __r < __extents.rank(); __r++) {
+    NV_IF_TARGET_LIBHIPCXX(NV_IS_HOST_LIBHIPCXX, (size_t __stride = 1; for (rank_type __r = 0; __r < __extents.rank(); __r++) {
                    _LIBCUDACXX_THROW_RUNTIME_ERROR(__stride == static_cast<size_t>(__other.stride(__r)),
                                                    "Assigning layout_stride to layout_left with invalid strides.");
                    __stride *= __extents.extent(__r);

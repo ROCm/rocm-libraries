@@ -101,7 +101,7 @@ _LIBCUDACXX_HIDE_FROM_ABI void __libcpp_thread_yield_processor(){
 #  else
 #    define __LIBCUDACXX_ASM_THREAD_YIELD (;)
 #  endif
-  NV_IF_TARGET(NV_IS_HOST, __LIBCUDACXX_ASM_THREAD_YIELD)}
+  NV_IF_TARGET_LIBHIPCXX(NV_IS_HOST_LIBHIPCXX, __LIBCUDACXX_ASM_THREAD_YIELD)}
 
 _LIBCUDACXX_THREAD_ABI_VISIBILITY void __libcpp_thread_yield();
 
@@ -309,8 +309,8 @@ void __libcpp_thread_sleep_for(chrono::nanoseconds __ns)
 // We will need to find a way to make this information available either at compile time or query it at runtime.
 // The default way to query hipDeviceAttributeWallClockRate does not work on NVIDIA devices (ROCm 5.4, tested on A100).
 // The default way to query hipDeviceAttributeWallClockRate() does not work on NVIDIA devices (ROCm 5.4, tested on A100).
-NV_IF_TARGET(
-  NV_IS_DEVICE, (
+NV_IF_TARGET_LIBHIPCXX(
+  NV_IS_DEVICE_LIBHIPCXX, (
       auto const __step = __ns.count();
       long long  __now, __start;
       __now = wall_clock64();
@@ -363,7 +363,7 @@ NV_IF_TARGET(
     )
   )
 #else
-  NV_IF_TARGET(NV_IS_DEVICE,
+  NV_IF_TARGET_LIBHIPCXX(NV_IS_DEVICE_LIBHIPCXX,
                (auto const __step = __ns.count(); assert(__step < numeric_limits<unsigned>::max());
                 asm volatile("nanosleep.u32 %0;" ::"r"((unsigned) __step)
                              :);))

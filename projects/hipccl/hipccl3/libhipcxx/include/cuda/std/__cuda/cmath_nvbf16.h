@@ -59,7 +59,7 @@ _LIBCUDACXX_BEGIN_NAMESPACE_STD
 // trigonometric functions
 _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 sin(__hip_bfloat16 __v)
 {
-  NV_IF_ELSE_TARGET(NV_IS_DEVICE, (return ::hsin(__v);), (return __float2bfloat16(::sinf(__bfloat162float(__v)));))
+  NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX, (return ::hsin(__v);), (return __float2bfloat16(::sinf(__bfloat162float(__v)));))
 }
 
 _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 sinh(__hip_bfloat16 __v)
@@ -69,7 +69,7 @@ _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 sinh(__hip_bfloat16 __v)
 
 _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 cos(__hip_bfloat16 __v)
 {
-  NV_IF_ELSE_TARGET(NV_IS_DEVICE, (return ::hcos(__v);), (return __float2bfloat16(::cosf(__bfloat162float(__v)));))
+  NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX, (return ::hcos(__v);), (return __float2bfloat16(::cosf(__bfloat162float(__v)));))
 }
 
 _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 cosh(__hip_bfloat16 __v)
@@ -79,7 +79,7 @@ _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 cosh(__hip_bfloat16 __v)
 
 _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 exp(__hip_bfloat16 __v)
 {
-  NV_IF_ELSE_TARGET(NV_IS_DEVICE, (return ::hexp(__v);), (return __float2bfloat16(::expf(__bfloat162float(__v)));))
+  NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX, (return ::hexp(__v);), (return __float2bfloat16(::expf(__bfloat162float(__v)));))
 }
 
 _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 hypot(__hip_bfloat16 __x, __hip_bfloat16 __y)
@@ -94,12 +94,12 @@ _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 atan2(__hip_bfloat16 __x, __hip_bfloat1
 
 _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 log(__hip_bfloat16 __x)
 {
-  NV_IF_ELSE_TARGET(NV_IS_DEVICE, (return ::hlog(__x);), (return __float2bfloat16(::logf(__bfloat162float(__x)));))
+  NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX, (return ::hlog(__x);), (return __float2bfloat16(::logf(__bfloat162float(__x)));))
 }
 
 _LIBCUDACXX_HIDE_FROM_ABI __hip_bfloat16 sqrt(__hip_bfloat16 __x)
 {
-  NV_IF_ELSE_TARGET(NV_IS_DEVICE, (return ::hsqrt(__x);), (return __float2bfloat16(::sqrtf(__bfloat162float(__x)));))
+  NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX, (return ::hsqrt(__x);), (return __float2bfloat16(::sqrtf(__bfloat162float(__x)));))
 }
 
 // floating point helper

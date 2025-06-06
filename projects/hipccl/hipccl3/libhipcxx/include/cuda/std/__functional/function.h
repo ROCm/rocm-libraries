@@ -8,6 +8,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #ifndef _LIBCUDACXX___FUNCTIONAL_FUNCTION_H
 #define _LIBCUDACXX___FUNCTIONAL_FUNCTION_H
 
@@ -60,7 +77,7 @@
 _CCCL_NORETURN _LIBCUDACXX_HIDE_FROM_ABI void __throw_bad_function_call()
 {
 #  ifndef _CCCL_NO_EXCEPTIONS
-  NV_IF_ELSE_TARGET(NV_IS_HOST, (throw ::std::bad_function_call();), (_CUDA_VSTD_NOVERSION::terminate();))
+  NV_IF_ELSE_TARGET(NV_IS_HOST_LIBHIPCXX, (throw ::std::bad_function_call();), (_CUDA_VSTD_NOVERSION::terminate();))
 #  else // ^^^ !_CCCL_NO_EXCEPTIONS ^^^ / vvv _CCCL_NO_EXCEPTIONS vvv
   _CUDA_VSTD_NOVERSION::terminate();
 #  endif // _CCCL_NO_EXCEPTIONS

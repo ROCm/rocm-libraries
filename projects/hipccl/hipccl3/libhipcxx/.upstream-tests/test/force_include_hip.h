@@ -27,6 +27,18 @@
 #define LIBCUDACXX_FORCE_INCLUDE_HIP
 
 #include "cuda_runtime.h"
+// TODO(HIP/AMD): this is a temporary WAR to create leass file modifications.
+// This should be only in the test_macros.h. Unfortunately many tests do not
+// include this header.
+#ifndef NV_IF_TARGET
+#define NV_IF_TARGET NV_IF_TARGET_LIBHIPCXX
+#endif
+#ifndef NV_IS_HOST
+#define NV_IS_HOST NV_IS_HOST_LIBHIPCXX
+#endif
+#ifndef NV_IS_DEVICE
+#define NV_IS_DEVICE NV_IS_DEVICE_LIBHIPCXX
+#endif
 
 // We use <stdio.h> instead of <iostream> to avoid relying on the host system's
 // C++ standard library.

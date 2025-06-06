@@ -185,7 +185,7 @@ _LIBCUDACXX_HIDE_FROM_ABI  __half log(__half __x)
 
 _LIBCUDACXX_HIDE_FROM_ABI __half sqrt(__half __x)
 {
-  NV_IF_ELSE_TARGET(NV_IS_DEVICE, (return hsqrt(__x);), (return __float2half(::sqrtf(__half2float(__x)));))
+  NV_IF_ELSE_TARGET(NV_IS_DEVICE_LIBHIPCXX, (return hsqrt(__x);), (return __float2half(::sqrtf(__half2float(__x)));))
 }
 
 // floating point helper

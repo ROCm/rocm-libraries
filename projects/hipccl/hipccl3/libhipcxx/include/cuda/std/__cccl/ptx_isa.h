@@ -8,6 +8,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #ifndef __CCCL_PTX_ISA_H_
 #define __CCCL_PTX_ISA_H_
 
@@ -109,7 +126,7 @@
 #  if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 900) && defined(__CUDA_ARCH_FEAT_SM90_ALL))
 #    define NV_HAS_FEATURE_SM_90a NV_PROVIDES_SM_90
 #  else // ^^^ SM90a ^^^ / vvv !SM90a vvv
-#    define NV_HAS_FEATURE_SM_90a NV_NO_TARGET
+#    define NV_HAS_FEATURE_SM_90a NV_NO_TARGET_LIBHIPCXX
 #  endif //
 #endif // _CCCL_COMPILER_NVRTC && !NV_HAS_FEATURE_SM_90a
 

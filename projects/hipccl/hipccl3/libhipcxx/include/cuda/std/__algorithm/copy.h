@@ -7,6 +7,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #ifndef _LIBCUDACXX___ALGORITHM_COPY_H
 #define _LIBCUDACXX___ALGORITHM_COPY_H
 
@@ -62,7 +79,7 @@ _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 bool __dispatch_memmove(_Up* __r
   {
     // For now, we only ever use memmove on host
     // clang-format off
-    NV_IF_ELSE_TARGET(NV_IS_HOST, (
+    NV_IF_ELSE_TARGET(NV_IS_HOST_LIBHIPCXX, (
       _CUDA_VSTD::memmove(__result, __first, __n * sizeof(_Up));
       return true;
     ),(
@@ -92,7 +109,7 @@ _LIBCUDACXX_HIDE_FROM_ABI _CCCL_CONSTEXPR_CXX14 bool __constexpr_tail_overlap(_T
 {
   _LIBCUDACXX_UNUSED_VAR(__last);
 #if __has_builtin(__builtin_constant_p) || defined(_CCCL_COMPILER_GCC)
-  NV_IF_ELSE_TARGET(NV_IS_HOST,
+  NV_IF_ELSE_TARGET(NV_IS_HOST_LIBHIPCXX,
                     (return __builtin_constant_p(__first < __needle) && __first < __needle;),
                     (return __constexpr_tail_overlap_fallback(__first, __needle, __last);))
 #else
