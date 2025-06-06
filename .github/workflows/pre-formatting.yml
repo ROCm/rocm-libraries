@@ -105,7 +105,7 @@ jobs:
       - name: Post a comment with diff for forked PRs using curl
         if: github.event.pull_request.head.repo.fork == true
         env:
-          GH_TOKEN: ${{ secrets.ROCM_SV_TOKEN }}
+          GH_TOKEN: ${{ secrets.TEST_AMMALLYA }}
         run: |
           var="${{ steps.changed-files.outputs.all_modified_files }}"
           read -r -a files <<< "$var"
