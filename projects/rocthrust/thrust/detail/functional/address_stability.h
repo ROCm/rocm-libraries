@@ -38,6 +38,15 @@ namespace detail
 
 using ::cuda::proclaim_copyable_arguments;
 using ::cuda::proclaims_copyable_arguments;
+#  define THRUST_MARK_CAN_COPY_ARGUMENTS(functor)                                              \
+    /*we know what plus<T> etc. does if T is not a type that could have a weird operatorX() */ \
+    template <typename T>                                                                      \
+    struct proclaims_copyable_arguments<functor<T>> : has_builtin_operators<T>                 \
+    {};                                                                                        \
+    /*we do not know what plus<void> etc. does, which depends on the types it is invoked on */ \
+    template <>                                                                                \
+    struct proclaims_copyable_arguments<functor<void>> : ::std::false_type                     \
+    {};
 
 #else
 
@@ -73,6 +82,43 @@ THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr auto proclaim_copyable_argu
 {
   return callable_permitting_copied_arguments<F>{::std::move(f)};
 }
+
+// Specializations for libcu++ function objects are provided here to not pull this include into `<cuda/std/...>` headers
+
+template <typename T>
+struct has_builtin_operators
+    : ::std::bool_constant<!::std::is_class_v<T> && !::std::is_enum_v<T> && !::std::is_void_v<T>>
+{};
+
+#  define THRUST_MARK_CAN_COPY_ARGUMENTS(functor)                                              \
+    /*we know what plus<T> etc. does if T is not a type that could have a weird operatorX() */ \
+    template <typename T>                                                                      \
+    struct proclaims_copyable_arguments<functor<T>> : has_builtin_operators<T>                 \
+    {};                                                                                        \
+    /*we do not know what plus<void> etc. does, which depends on the types it is invoked on */ \
+    template <>                                                                                \
+    struct proclaims_copyable_arguments<functor<void>> : ::std::false_type                     \
+    {};
+
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::plus);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::minus);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::multiplies);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::divides);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::modulus);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::negate);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::bit_and);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::bit_not);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::bit_or);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::bit_xor);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::equal_to);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::not_equal_to);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::less);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::less_equal);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::greater_equal);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::greater);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::logical_and);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::logical_not);
+THRUST_MARK_CAN_COPY_ARGUMENTS(::std::logical_or);
 
 #endif
 

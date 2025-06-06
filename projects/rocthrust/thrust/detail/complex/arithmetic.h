@@ -201,7 +201,7 @@ THRUST_HOST_DEVICE inline double abs(const complex<double>& z)
 template <typename T>
 THRUST_HOST_DEVICE T arg(const complex<T>& z)
 {
-// Find `atan2` by ADL.
+  // Find `atan2` by ADL.
 #ifdef __HIP_DEVICE_COMPILE__
   using ::atan2;
 #else
@@ -270,7 +270,7 @@ THRUST_HOST_DEVICE complex<typename detail::promoted_numerical_type<T0, T1>::typ
 {
   using T = typename detail::promoted_numerical_type<T0, T1>::type;
 
-// Find `cos` and `sin` by ADL.
+  // Find `cos` and `sin` by ADL.
 #ifdef __HIP_DEVICE_COMPILE__
   using ::cos;
   using ::sin;

@@ -22,6 +22,9 @@
 #include <thrust/random.h>
 
 #include <limits>
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <type_traits>
+#endif
 
 namespace unittest
 {
@@ -54,9 +57,11 @@ struct generate_random_integer<
 };
 
 template <typename T>
-struct generate_random_integer<
-  T,
-  typename THRUST_NS_QUALIFIER::detail::enable_if<THRUST_NS_QUALIFIER::detail::is_non_bool_integral<T>::value>::type>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct generate_random_integer<T, ::cuda::std::enable_if_t<THRUST_NS_QUALIFIER::detail::is_non_bool_integral<T>::value>>
+#else
+struct generate_random_integer<T, ::std::enable_if_t<THRUST_NS_QUALIFIER::detail::is_non_bool_integral<T>::value>>
+#endif
 {
   T operator()(unsigned int i) const
   {
@@ -68,9 +73,11 @@ struct generate_random_integer<
 };
 
 template <typename T>
-struct generate_random_integer<
-  T,
-  typename THRUST_NS_QUALIFIER::detail::enable_if<THRUST_NS_QUALIFIER::detail::is_floating_point<T>::value>::type>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct generate_random_integer<T, typename ::cuda::std::enable_if_t<::cuda::std::is_floating_point<T>::value>>
+#else
+struct generate_random_integer<T, typename ::std::enable_if_t<::std::is_floating_point<T>::value>>
+#endif
 {
   T operator()(unsigned int i) const
   {

@@ -33,9 +33,20 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/distance_from_result.h>
 #include <thrust/iterator/detail/iterator_facade_category.h>
+
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -207,14 +218,14 @@ class iterator_core_access
 
   // XXX TODO: Investigate whether we need both of these cases
   // template <class Facade1, class Facade2>
-  // THRUST_HOST_DEVICE
+  //__host__ __device__
   // static bool equal(Facade1 const& f1, Facade2 const& f2, mpl::true_)
   //{
   //  return f1.equal(f2);
   //}
 
   // template <class Facade1, class Facade2>
-  // THRUST_HOST_DEVICE
+  //__host__ __device__
   // static bool equal(Facade1 const& f1, Facade2 const& f2, mpl::false_)
   //{
   //   return f2.equal(f1);
@@ -250,7 +261,11 @@ class iterator_core_access
   {
     // dispatch the implementation of this method upon whether or not
     // Facade2 is convertible to Facade1
-    return distance_from(f1, f2, typename thrust::detail::is_convertible<Facade2, Facade1>::type());
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    return distance_from(f1, f2, typename ::cuda::std::is_convertible<Facade2, Facade1>::type());
+#else
+    return distance_from(f1, f2, typename ::std::is_convertible<Facade2, Facade1>::type());
+#endif
   }
 
   //
@@ -324,7 +339,11 @@ private:
 public:
   /*! The type of element pointed to by \p iterator_facade.
    */
-  using value_type = typename thrust::detail::remove_const<Value>::type;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using value_type = ::cuda::std::remove_const_t<Value>;
+#else
+  using value_type = ::std::remove_const_t<Value>;
+#endif
 
   /*! The return type of \p iterator_facade::operator*().
    */
@@ -604,7 +623,7 @@ inline THRUST_HOST_DEVICE
   operator-(iterator_facade<Derived1, Value1, System1, Traversal1, Reference1, Difference1> const& lhs,
             iterator_facade<Derived2, Value2, System2, Traversal2, Reference2, Difference2> const& rhs)
 {
-  return iterator_core_access ::distance_from(*static_cast<Derived1 const*>(&lhs), *static_cast<Derived2 const*>(&rhs));
+  return iterator_core_access ::distance_from(static_cast<Derived1 const&>(lhs), static_cast<Derived2 const&>(rhs));
 }
 
 // Iterator addition

@@ -138,7 +138,7 @@ THRUST_HOST_DEVICE OutputIterator copy_if(
   // create an unsigned version of n (we know n is positive from the comparison above)
   // to avoid a warning in the compare below
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  ::cuda::std::__make_unsigned_t<difference_type> unsigned_n(n);
+  ::cuda::std::make_unsigned_t<difference_type> unsigned_n(n);
 #else
   ::std::make_unsigned_t<difference_type> unsigned_n(n);
 #endif

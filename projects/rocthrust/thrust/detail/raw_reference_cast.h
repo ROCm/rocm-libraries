@@ -18,10 +18,21 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/detail/tuple_transform.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/has_nested_type.h>
+
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <type_traits>
+#endif
 
 // the order of declarations and definitions in this file is totally goofy
 // this header defines raw_reference_cast, which has a few overloads towards the bottom of the file
@@ -47,32 +58,53 @@ struct is_unwrappable : is_wrapped_reference<T>
 // specialize is_unwrappable
 // a tuple is_unwrappable if any of its elements is_unwrappable
 template <typename... Ts>
-struct is_unwrappable<thrust::tuple<Ts...>> : or_<is_unwrappable<Ts>...>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct is_unwrappable<thrust::tuple<Ts...>> : ::cuda::std::disjunction<is_unwrappable<Ts>...>
+#else
+struct is_unwrappable<thrust::tuple<Ts...>> : ::std::disjunction<is_unwrappable<Ts>...>
+#endif
 {};
 
 // specialize is_unwrappable
 // a tuple_of_iterator_references is_unwrappable if any of its elements is_unwrappable
 template <typename... Ts>
-struct is_unwrappable<thrust::detail::tuple_of_iterator_references<Ts...>> : or_<is_unwrappable<Ts>...>
+struct is_unwrappable<thrust::detail::tuple_of_iterator_references<Ts...>>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    : ::cuda::std::disjunction<is_unwrappable<Ts>...>
+#else
+    : ::std::disjunction<is_unwrappable<Ts>...>
+#endif
 {};
 
 template <typename T, typename Result = void>
-struct enable_if_unwrappable : enable_if<is_unwrappable<T>::value, Result>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct enable_if_unwrappable : ::cuda::std::enable_if<is_unwrappable<T>::value, Result>
+#else
+struct enable_if_unwrappable : ::std::enable_if<is_unwrappable<T>::value, Result>
+#endif
 {};
 
 namespace raw_reference_detail
 {
 
 template <typename T, typename Enable = void>
-struct raw_reference_impl : add_reference<T>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct raw_reference_impl : ::cuda::std::add_lvalue_reference<T>
+#else
+struct raw_reference_impl : ::std::add_lvalue_reference<T>
+#endif
 {};
 
 template <typename T>
-struct raw_reference_impl<
-  T,
-  typename thrust::detail::enable_if<is_wrapped_reference<typename remove_cv<T>::type>::value>::type>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct raw_reference_impl<T, ::cuda::std::enable_if_t<is_wrapped_reference<::cuda::std::remove_cv_t<T>>::value>>
 {
-  using type = typename add_reference<typename pointer_element<typename T::pointer>::type>::type;
+  using type = ::cuda::std::add_lvalue_reference_t<typename pointer_element<typename T::pointer>::type>;
+#else
+struct raw_reference_impl<T, ::std::enable_if_t<is_wrapped_reference<::std::remove_cv_t<T>>::value>>
+{
+  using type = ::std::add_lvalue_reference_t<typename pointer_element<typename T::pointer>::type>;
+#endif
 };
 
 } // namespace raw_reference_detail
@@ -99,7 +131,11 @@ namespace raw_reference_detail
 // wrapped references are unwrapped using raw_reference, otherwise, return T
 template <typename T>
 struct raw_reference_tuple_helper
-    : eval_if<is_unwrappable<typename remove_cv<T>::type>::value, raw_reference<T>, identity_<T>>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    : eval_if<is_unwrappable<::cuda::std::remove_cv_t<T>>::value, raw_reference<T>, identity_<T>>
+#else
+    : eval_if<is_unwrappable<::std::remove_cv_t<T>>::value, raw_reference<T>, identity_<T>>
+#endif
 {};
 
 // recurse on tuples
@@ -131,7 +167,11 @@ private:
 public:
   using type = typename eval_if<is_unwrappable<tuple_type>::value,
                                 raw_reference_detail::raw_reference_tuple_helper<tuple_type>,
-                                add_reference<tuple_type>>::type;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+                                ::cuda::std::add_lvalue_reference<tuple_type>>::type;
+#else
+                                ::std::add_lvalue_reference<tuple_type>>::type;
+#endif
 };
 
 template <typename... Ts>
@@ -179,7 +219,11 @@ struct raw_reference_caster
   template <typename... Ts>
   THRUST_HOST_DEVICE typename detail::raw_reference<thrust::detail::tuple_of_iterator_references<Ts...>>::type
   operator()(thrust::detail::tuple_of_iterator_references<Ts...> t,
-             typename enable_if<is_unwrappable<thrust::detail::tuple_of_iterator_references<Ts...>>::value>::type* = 0)
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+             ::cuda::std::enable_if_t<is_unwrappable<thrust::detail::tuple_of_iterator_references<Ts...>>::value>* = 0)
+#else
+             ::std::enable_if_t<is_unwrappable<thrust::detail::tuple_of_iterator_references<Ts...>>::value>* = 0)
+#endif
   {
     return thrust::raw_reference_cast(t);
   }
