@@ -19,23 +19,93 @@
 
 #include <unittest/unittest.h>
 
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <functional>
+#endif
+
+struct addable
+{
+  THRUST_HOST_DEVICE friend auto operator+(const addable&, const addable&) -> addable
+  {
+    return addable{};
+  }
+};
+
+void TestAddressStabilityLibcuxx()
+{
+  using ::thrust::detail::proclaim_copyable_arguments;
+  using ::thrust::detail::proclaims_copyable_arguments;
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using ::cuda::std::plus;
+#else
+  using ::std::plus;
+#endif
+
+  // libcu++ function objects with known types
+  static_assert(proclaims_copyable_arguments<plus<int>>::value, "");
+  static_assert(!proclaims_copyable_arguments<plus<>>::value, "");
+
+  // libcu++ function objects with unknown types
+  static_assert(!proclaims_copyable_arguments<plus<addable>>::value, "");
+  static_assert(!proclaims_copyable_arguments<plus<>>::value, "");
+
+  // libcu++ function objects with unknown types and opt-in
+  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(plus<addable>{}))>::value, "");
+  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(plus<>{}))>::value, "");
+}
+DECLARE_UNITTEST(TestAddressStabilityLibcuxx);
+
+void TestAddressStabilityThrust()
+{
+  using ::thrust::detail::proclaim_copyable_arguments;
+  using ::thrust::detail::proclaims_copyable_arguments;
+
+  // thrust function objects with known types
+  static_assert(proclaims_copyable_arguments<thrust::plus<int>>::value, "");
+  static_assert(!proclaims_copyable_arguments<thrust::plus<>>::value, "");
+
+  // thrust function objects with unknown types
+  static_assert(!proclaims_copyable_arguments<thrust::plus<addable>>::value, "");
+  static_assert(!proclaims_copyable_arguments<thrust::plus<>>::value, "");
+
+  // thrust function objects with unknown types and opt-in
+  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(thrust::plus<addable>{}))>::value,
+                "");
+  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(thrust::plus<>{}))>::value, "");
+}
+DECLARE_UNITTEST(TestAddressStabilityThrust);
+
+template <typename T>
 struct my_plus
 {
-  THRUST_HOST_DEVICE auto operator()(int a, int b) const -> int
+  THRUST_HOST_DEVICE auto operator()(T a, T b) const -> T
   {
     return a + b;
   }
 };
 
-void TestAddressStability()
+void TestAddressStabilityUserDefinedFunctionObject()
 {
   using ::thrust::detail::proclaim_copyable_arguments;
   using ::thrust::detail::proclaims_copyable_arguments;
 
-  static_assert(!proclaims_copyable_arguments<thrust::plus<int>>::value, "");
-  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(thrust::plus<int>{}))>::value, "");
+  // by-value overload
+  static_assert(!proclaims_copyable_arguments<my_plus<int>>::value, "");
 
-  static_assert(!proclaims_copyable_arguments<my_plus>::value, "");
-  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(my_plus{}))>::value, "");
+  // by-value overload with opt-in
+  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(my_plus<int>{}))>::value, "");
+
+  // by-reference overload
+  static_assert(!proclaims_copyable_arguments<my_plus<int&>>::value, "");
+  static_assert(!proclaims_copyable_arguments<my_plus<const int&>>::value, "");
+  static_assert(!proclaims_copyable_arguments<my_plus<int&&>>::value, "");
+  static_assert(!proclaims_copyable_arguments<my_plus<const int&&>>::value, "");
+
+  // by-reference overload with opt-in
+  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(my_plus<int&>{}))>::value, "");
+  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(my_plus<const int&>{}))>::value, "");
+  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(my_plus<int&&>{}))>::value, "");
+  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(my_plus<const int&&>{}))>::value, "");
 }
-DECLARE_UNITTEST(TestAddressStability);
+DECLARE_UNITTEST(TestAddressStabilityUserDefinedFunctionObject);

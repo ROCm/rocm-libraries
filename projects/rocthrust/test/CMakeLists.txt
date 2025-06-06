@@ -182,6 +182,7 @@ if(BUILD_TEST)
     add_rocthrust_test("generate")
     # add_rocthrust_test("generate_const_iterators") # not been added
     add_rocthrust_test("inner_product")
+    add_rocthrust_test("is_contiguous_iterator")
     add_rocthrust_test("is_operator_function_object")
     add_rocthrust_test("is_partitioned")
     add_rocthrust_test("is_sorted")

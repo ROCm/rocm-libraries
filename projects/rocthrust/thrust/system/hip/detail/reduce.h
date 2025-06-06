@@ -46,9 +46,9 @@
 #  include <thrust/detail/raw_reference_cast.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/detail/type_traits/iterator/is_output_iterator.h>
-#  include <thrust/device_vector.h>
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
+#  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/get_value.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
@@ -105,7 +105,7 @@ reduce(execution_policy<Derived>& policy, InputIt first, Size num_items, T init,
       debug_sync),
     "reduce failed on 1st step");
 
-  size_t storage_size;
+  size_t storage_size = 0;
   void* ptr       = nullptr;
   void* temp_stor = nullptr;
   T* d_result;
@@ -148,12 +148,12 @@ reduce_n(execution_policy<Derived>& policy, InputIt first, Size num_items, T ini
     THRUST_HOST static T
     par(execution_policy<Derived>& policy, InputIt first, Size num_items, T init, BinaryOp binary_op)
     {
-      return __reduce::reduce(policy, first, num_items, init, binary_op);
+      return init = __reduce::reduce(policy, first, num_items, init, binary_op);
     }
     THRUST_DEVICE static T
     seq(execution_policy<Derived>& policy, InputIt first, Size num_items, T init, BinaryOp binary_op)
     {
-      return thrust::reduce(cvt_to_seq(derived_cast(policy)), first, first + num_items, init, binary_op);
+      return init = thrust::reduce(cvt_to_seq(derived_cast(policy)), first, first + num_items, init, binary_op);
     }
   };
 

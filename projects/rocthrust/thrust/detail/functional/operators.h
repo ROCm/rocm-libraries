@@ -1,5 +1,5 @@
 /*
- *  Copyright 2008-2013 NVIDIA Corporation
+ *  Copyright 2024 NVIDIA Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -27,11 +27,22 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #include <thrust/functional.h>
 #include <thrust/tuple.h>
 
-#include <type_traits>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/type_traits>
+#else
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -206,12 +217,21 @@ struct bit_rshift
   }
 };
 
-#define MAKE_BINARY_COMPOSITE(op, functor)                                                               \
-  template <typename A, typename B, std::enable_if_t<is_actor<A>::value || is_actor<B>::value, int> = 0> \
-  THRUST_HOST_DEVICE auto operator op(const A& a, const B& b) -> decltype(compose(functor{}, a, b))      \
-  {                                                                                                      \
-    return compose(functor{}, a, b);                                                                     \
-  }
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  define MAKE_BINARY_COMPOSITE(op, functor)                                                                       \
+    template <typename A, typename B, ::cuda::std::enable_if_t<is_actor<A>::value || is_actor<B>::value, int> = 0> \
+    THRUST_HOST_DEVICE auto operator op(const A& a, const B& b) -> decltype(compose(functor{}, a, b))              \
+    {                                                                                                              \
+      return compose(functor{}, a, b);                                                                             \
+    }
+#else
+#  define MAKE_BINARY_COMPOSITE(op, functor)                                                                 \
+    template <typename A, typename B, ::std::enable_if_t<is_actor<A>::value || is_actor<B>::value, int> = 0> \
+    THRUST_HOST_DEVICE auto operator op(const A& a, const B& b) -> decltype(compose(functor{}, a, b))        \
+    {                                                                                                        \
+      return compose(functor{}, a, b);                                                                       \
+    }
+#endif
 
 MAKE_BINARY_COMPOSITE(==, thrust::equal_to<>)
 MAKE_BINARY_COMPOSITE(!=, thrust::not_equal_to<>)
@@ -333,12 +353,21 @@ struct bit_not
   }
 }; // end prefix_increment
 
-#define MAKE_UNARY_COMPOSITE(op, functor)                                            \
-  template <typename A, std::enable_if_t<is_actor<A>::value, int> = 0>               \
-  THRUST_HOST_DEVICE auto operator op(const A& a) -> decltype(compose(functor{}, a)) \
-  {                                                                                  \
-    return compose(functor{}, a);                                                    \
-  }
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  define MAKE_UNARY_COMPOSITE(op, functor)                                            \
+    template <typename A, ::cuda::std::enable_if_t<is_actor<A>::value, int> = 0>       \
+    THRUST_HOST_DEVICE auto operator op(const A& a) -> decltype(compose(functor{}, a)) \
+    {                                                                                  \
+      return compose(functor{}, a);                                                    \
+    }
+#else
+#  define MAKE_UNARY_COMPOSITE(op, functor)                                            \
+    template <typename A, ::std::enable_if_t<is_actor<A>::value, int> = 0>             \
+    THRUST_HOST_DEVICE auto operator op(const A& a) -> decltype(compose(functor{}, a)) \
+    {                                                                                  \
+      return compose(functor{}, a);                                                    \
+    }
+#endif
 
 MAKE_UNARY_COMPOSITE(+, unary_plus)
 MAKE_UNARY_COMPOSITE(-, thrust::negate<>)
@@ -349,12 +378,21 @@ MAKE_UNARY_COMPOSITE(~, bit_not)
 
 #undef MAKE_UNARY_COMPOSITE
 
-#define MAKE_UNARY_COMPOSITE_POSTFIX(op, functor)                                         \
-  template <typename A, std::enable_if_t<is_actor<A>::value, int> = 0>                    \
-  THRUST_HOST_DEVICE auto operator op(const A& a, int) -> decltype(compose(functor{}, a)) \
-  {                                                                                       \
-    return compose(functor{}, a);                                                         \
-  }
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  define MAKE_UNARY_COMPOSITE_POSTFIX(op, functor)                                         \
+    template <typename A, ::cuda::std::enable_if_t<is_actor<A>::value, int> = 0>            \
+    THRUST_HOST_DEVICE auto operator op(const A& a, int) -> decltype(compose(functor{}, a)) \
+    {                                                                                       \
+      return compose(functor{}, a);                                                         \
+    }
+#else
+#  define MAKE_UNARY_COMPOSITE_POSTFIX(op, functor)                                         \
+    template <typename A, ::std::enable_if_t<is_actor<A>::value, int> = 0>                  \
+    THRUST_HOST_DEVICE auto operator op(const A& a, int) -> decltype(compose(functor{}, a)) \
+    {                                                                                       \
+      return compose(functor{}, a);                                                         \
+    }
+#endif
 
 MAKE_UNARY_COMPOSITE_POSTFIX(++, postfix_increment)
 MAKE_UNARY_COMPOSITE_POSTFIX(--, postfix_decrement)

@@ -16,22 +16,53 @@
 
 #pragma once
 
+#include <thrust/detail/config.h>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/type_traits.h>
 
 #include <utility> // for std::declval
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <type_traits>
+#endif
 
-#define __THRUST_DEFINE_HAS_MEMBER_FUNCTION(trait_name, member_function_name)                                     \
-  template <typename T, typename Signature, typename = void>                                                      \
-  struct trait_name : thrust::false_type                                                                          \
-  {};                                                                                                             \
-                                                                                                                  \
-  template <typename T, typename ResultT, typename... Args>                                                       \
-  struct trait_name<T,                                                                                            \
-                    ResultT(Args...),                                                                             \
-                    typename thrust::detail::enable_if<                                                           \
-                      thrust::detail::is_same<ResultT, void>::value                                               \
-                      || thrust::detail::is_convertible<                                                          \
-                        ResultT,                                                                                  \
-                        decltype(std::declval<T>().member_function_name(std::declval<Args>()...))>::value>::type> \
-      : thrust::true_type                                                                                         \
-  {};
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  define __THRUST_DEFINE_HAS_MEMBER_FUNCTION(trait_name, member_function_name)                                       \
+    template <typename T, typename Signature, typename = void>                                                        \
+    struct trait_name : thrust::false_type                                                                            \
+    {};                                                                                                               \
+                                                                                                                      \
+    template <typename T, typename ResultT, typename... Args>                                                         \
+    struct trait_name<                                                                                                \
+      T,                                                                                                              \
+      ResultT(Args...),                                                                                               \
+      ::cuda::std::enable_if_t<                                                                                       \
+        ::cuda::std::is_same<ResultT, void>::value                                                                    \
+        || ::cuda::std::                                                                                              \
+          is_convertible<ResultT, decltype(std::declval<T>().member_function_name(std::declval<Args>()...))>::value>> \
+        : thrust::true_type                                                                                           \
+    {};
+#else
+#  define __THRUST_DEFINE_HAS_MEMBER_FUNCTION(trait_name, member_function_name)                                      \
+    template <typename T, typename Signature, typename = void>                                                       \
+    struct trait_name : thrust::false_type                                                                           \
+    {};                                                                                                              \
+                                                                                                                     \
+    template <typename T, typename ResultT, typename... Args>                                                        \
+    struct trait_name<                                                                                               \
+      T,                                                                                                             \
+      ResultT(Args...),                                                                                              \
+      ::std::enable_if_t<                                                                                            \
+        ::std::is_same<ResultT, void>::value                                                                         \
+        || ::std::is_convertible<ResultT,                                                                            \
+                                 decltype(std::declval<T>().member_function_name(std::declval<Args>()...))>::value>> \
+        : thrust::true_type                                                                                          \
+    {};
+#endif
