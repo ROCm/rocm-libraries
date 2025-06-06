@@ -1264,6 +1264,129 @@ __device__ void
     }
 }
 
+template <int MAX_THDS, typename T, typename I, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
+__device__ void larfg(const I tid, I n, T& alpha, T* x, I incx, T& tau, T* sval)
+{
+    // dot
+    dot<MAX_THDS, false, T>(tid, n - 1, x, incx, x, incx, sval);
+    __syncthreads();
+    T norm2 = sval[0] + alpha * alpha;
+
+    __shared__ T s;
+
+    if(norm2 > 0)
+    {
+        if(tid == 0)
+        {
+            T norm = alpha >= 0 ? -std::sqrt(norm2) : std::sqrt(norm2);
+
+            s = (T)(1.0 / (alpha - norm));
+            tau = (norm - alpha) / norm;
+            alpha = norm;
+        }
+        __syncthreads();
+
+        // scal
+        for(I i = tid; i < n - 1; i += MAX_THDS)
+            x[i * incx] *= s;
+    }
+    else
+    {
+        tau = 0;
+    }
+}
+
+template <int MAX_THDS, typename T, typename I, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
+__device__ void larfg(const I tid, I n, T& alpha, T* x, I incx, T& tau, T* sval)
+{
+    using S = decltype(std::real(T{}));
+
+    // dot
+    dot<MAX_THDS, true, T>(tid, n - 1, x, incx, x, incx, sval);
+    __syncthreads();
+    T norm2 = sval[0] + alpha * conj(alpha);
+
+    S ar = alpha.real();
+    S ai = alpha.imag();
+    __shared__ T s;
+
+    if(norm2.real() > 0 || ai > 0)
+    {
+        if(tid == 0)
+        {
+            S norm = ar >= 0 ? -std::sqrt(norm2.real()) : std::sqrt(norm2.real());
+
+            // scaling factor
+            S r = (ar - norm) * (ar - norm) + ai * ai;
+            S rr = (ar - norm) / r;
+            S ri = -ai / r;
+            s = rocblas_complex_num<S>(rr, ri);
+
+            // tau
+            rr = (norm - ar) / norm;
+            ri = -ai / norm;
+            tau = rocblas_complex_num<S>(rr, ri);
+
+            // alpha
+            alpha = norm;
+        }
+        __syncthreads();
+
+        // scal
+        for(I i = tid; i < n - 1; i += MAX_THDS)
+            x[i * incx] *= s;
+    }
+    else
+    {
+        tau = 0;
+    }
+}
+
+template <typename T, typename I>
+__device__ void
+    larf(const I tid, const I tid_inc, rocblas_side side, I m, I n, T* v, I incv, T tau, T* C, I ldc, T* work)
+{
+    if(tau == 0)
+        return;
+
+    if(side == rocblas_side_left)
+    {
+        // gemv
+        for(I i = tid; i < n; i += tid_inc)
+        {
+            work[i] = 0;
+            for(I j = 0; j < m; j++)
+                work[i] += conj(C[j + i * ldc]) * v[j * incv];
+        }
+
+        __syncthreads();
+
+        // ger
+        for(I i = tid; i < n; i += tid_inc)
+            for(I j = 0; j < m; j++)
+                C[j + i * ldc] -= tau * v[j * incv] * conj(work[i]);
+    }
+    else
+    {
+        // gemv
+        for(I i = tid; i < m; i += tid_inc)
+        {
+            work[i] = 0;
+            for(I j = 0; j < n; j++)
+                work[i] += C[i + j * ldc] * v[j * incv];
+        }
+
+        __syncthreads();
+
+        // ger
+        for(I i = tid; i < m; i += tid_inc)
+            for(I j = 0; j < n; j++)
+                C[i + j * ldc] -= tau * conj(v[j * incv]) * work[i];
+    }
+}
+
+//---------------------------------------------------------------------------------------------
+
 /** AXPY computes a constant times a vector plus a vector. **/
 template <typename T, typename U, typename V>
 ROCSOLVER_KERNEL void axpy_kernel(const rocblas_int n,

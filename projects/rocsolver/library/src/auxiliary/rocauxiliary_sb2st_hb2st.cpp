@@ -49,8 +49,7 @@ rocblas_status rocsolver_sb2st_hb2st_impl(rocblas_handle handle,
         return st;
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
-    rocblas_int shiftAB = 0;
+    rocblas_stride shiftA = 0;
 
     // normal (non-batched non-strided) execution
     rocblas_stride strideA = 0;
@@ -58,28 +57,26 @@ rocblas_status rocsolver_sb2st_hb2st_impl(rocblas_handle handle,
     rocblas_stride strideE = 0;
     rocblas_int batch_count = 1;
 
-    //  // memory workspace sizes:
-    //  // size for constants in rocblas calls
-    //  size_t size_scalars;
-    //  rocsolver_sb2st_hb2st_getMemorySize<false, T, S>(n, nb, batch_count, &size_scalars);
+    // memory workspace sizes:
+    // size of reusable workspace
+    size_t size_work;
+    rocsolver_sb2st_hb2st_getMemorySize<false, T, S>(n, nb, batch_count, &size_work);
 
-    //  if(rocblas_is_device_memory_size_query(handle))
-    //      return rocblas_set_optimal_device_memory_size(handle, size_scalars);
+    if(rocblas_is_device_memory_size_query(handle))
+        return rocblas_set_optimal_device_memory_size(handle, size_work);
 
-    //  // memory workspace allocation
-    //  void *scalars;
-    //  rocblas_device_malloc mem(handle, size_scalars);
+    // memory workspace allocation
+    void* work;
+    rocblas_device_malloc mem(handle, size_work);
 
-    //  if(!mem)
-    //      return rocblas_status_memory_error;
+    if(!mem)
+        return rocblas_status_memory_error;
 
-    //  scalars = mem[0];
-    //  if(size_scalars > 0)
-    //      init_scalars(handle, (T*)scalars);
+    work = mem[0];
 
     // execution
-    return rocsolver_sb2st_hb2st_template<false, false, T>(handle, n, nb, A, shiftA, lda, strideA,
-                                                           D, strideD, E, strideE, batch_count);
+    return rocsolver_sb2st_hb2st_template<false, false, T>(
+        handle, n, nb, A, shiftA, lda, strideA, D, strideD, E, strideE, batch_count, (T*)work);
 }
 
 ROCSOLVER_END_NAMESPACE

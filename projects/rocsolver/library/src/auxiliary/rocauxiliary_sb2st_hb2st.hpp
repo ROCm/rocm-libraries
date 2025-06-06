@@ -35,15 +35,27 @@
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 
-#include "lapack_host_functions.hpp"
+#include "lapack_device_functions.hpp"
 #include "lib_device_helpers.hpp"
 #include "rocsolver_hybrid_storage.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T, typename S>
-void run_sb2st_hb2st(rocblas_int n, rocblas_int nb, T* A, rocblas_int lda, S* D, S* E, T* work)
+#define SB2ST_HB2ST_MAX_THDS 128
+
+template <int MAX_THDS, typename T, typename S>
+__device__ void run_sb2st_hb2st(const rocblas_int tid,
+                                rocblas_int n,
+                                rocblas_int nb,
+                                T* A,
+                                rocblas_int lda,
+                                S* D,
+                                S* E,
+                                T* sval,
+                                T* work)
 {
+    __shared__ T tau;
+
     for(rocblas_int s = 0; s < n - 1; s++)
     {
         rocblas_int sm_i = s + 1;
@@ -54,23 +66,32 @@ void run_sb2st_hb2st(rocblas_int n, rocblas_int nb, T* A, rocblas_int lda, S* D,
         // generate Householder reflector
         rocblas_int mm = sm_e - sm_i;
         rocblas_int incx = 1;
-        T tau = 0;
-        call_larfg(mm, A[sm_i + s * lda], A + (sm_i + 1) + s * lda, incx, tau);
-        E[s] = std::real(A[sm_i + s * lda]);
-        A[sm_i + s * lda] = 1;
+        larfg<MAX_THDS>(tid, mm, A[sm_i + s * lda], A + (sm_i + 1) + s * lda, incx, tau, sval);
+        __syncthreads();
+
+        if(tid == 0)
+        {
+            E[s] = std::real(A[sm_i + s * lda]);
+            A[sm_i + s * lda] = 1;
+        }
+
+        __syncthreads();
 
         // apply Householder reflector
         rocblas_int nn = su_e - sm_i;
-        call_larf(rocblas_side_left, mm, nn, A + sm_i + s * lda, incx, conj(tau),
-                  A + sm_i + sm_i * lda, lda, work);
-        call_larf(rocblas_side_right, mm, mm, A + sm_i + s * lda, incx, tau, A + sm_i + sm_i * lda,
-                  lda, work);
-        for(rocblas_int i = su_i; i < su_e; i++)
+        larf(tid, MAX_THDS, rocblas_side_left, mm, nn, A + sm_i + s * lda, incx, conj(tau),
+             A + sm_i + sm_i * lda, lda, work);
+        __syncthreads();
+        larf(tid, MAX_THDS, rocblas_side_right, mm, mm, A + sm_i + s * lda, incx, tau,
+             A + sm_i + sm_i * lda, lda, work);
+        for(rocblas_int i = su_i + tid; i < su_e; i += MAX_THDS)
             for(rocblas_int j = sm_i; j < sm_e; j++)
                 A[i + j * lda] = conj(A[j + i * lda]);
 
         // save tau
-        A[sm_i + s * lda] = tau;
+        if(tid == 0)
+            A[sm_i + s * lda] = tau;
+        __syncthreads();
 
         sm_i = su_i;
         sm_e = su_e;
@@ -85,46 +106,100 @@ void run_sb2st_hb2st(rocblas_int n, rocblas_int nb, T* A, rocblas_int lda, S* D,
 
             // generate Householder reflector
             mm = sm_e - sm_i;
-            call_larfg(mm, A[sm_i + sd_i * lda], A + (sm_i + 1) + sd_i * lda, incx, tau);
+            larfg<MAX_THDS>(tid, mm, A[sm_i + sd_i * lda], A + (sm_i + 1) + sd_i * lda, incx, tau,
+                            sval);
+            __syncthreads();
 
             // copy Householder vector to column s
-            A[sm_i + s * lda] = 1;
-            for(rocblas_int i = sm_i + 1; i < sm_e; i++)
+            if(tid == 0)
+                A[sm_i + s * lda] = 1;
+            for(rocblas_int i = sm_i + 1 + tid; i < sm_e; i += MAX_THDS)
             {
                 A[i + s * lda] = A[i + sd_i * lda];
                 A[i + sd_i * lda] = 0;
             }
+            __syncthreads();
 
             // apply Householder reflector
             nn = su_e - sd_i - 1;
-            call_larf(rocblas_side_left, mm, nn, A + sm_i + s * lda, incx, conj(tau),
-                      A + sm_i + (sd_i + 1) * lda, lda, work);
-            call_larf(rocblas_side_right, mm, mm, A + sm_i + s * lda, incx, tau,
-                      A + sm_i + sm_i * lda, lda, work);
-            for(rocblas_int i = su_i; i < su_e; i++)
+            larf(tid, MAX_THDS, rocblas_side_left, mm, nn, A + sm_i + s * lda, incx, conj(tau),
+                 A + sm_i + (sd_i + 1) * lda, lda, work);
+            __syncthreads();
+            larf(tid, MAX_THDS, rocblas_side_right, mm, mm, A + sm_i + s * lda, incx, tau,
+                 A + sm_i + sm_i * lda, lda, work);
+            for(rocblas_int i = su_i + tid; i < su_e; i += MAX_THDS)
                 for(rocblas_int j = sm_i; j < sm_e; j++)
                     A[i + j * lda] = conj(A[j + i * lda]);
-            for(rocblas_int i = sd_i; i < sd_e; i++)
+            for(rocblas_int i = sd_i + tid; i < sd_e; i += MAX_THDS)
                 for(rocblas_int j = sm_i; j < sm_e; j++)
                     A[i + j * lda] = conj(A[j + i * lda]);
 
             // save tau
-            A[sm_i + s * lda] = tau;
+            if(tid == 0)
+                A[sm_i + s * lda] = tau;
+            __syncthreads();
 
             sm_i = su_i;
             sm_e = su_e;
         }
     }
 
-    for(rocblas_int i = 0; i < n; i++)
+    for(rocblas_int i = tid; i < n; i += MAX_THDS)
         D[i] = std::real(A[i + i * lda]);
+}
+
+template <typename T, typename S>
+ROCSOLVER_KERNEL void __launch_bounds__(SB2ST_HB2ST_MAX_THDS)
+    sb2st_hb2st_kernel(rocblas_int n,
+                       rocblas_int nb,
+                       T* AA,
+                       rocblas_stride shiftA,
+                       rocblas_int lda,
+                       rocblas_stride strideA,
+                       S* DD,
+                       rocblas_stride strideD,
+                       S* EE,
+                       rocblas_stride strideE,
+                       T* workA,
+                       rocblas_stride strideW)
+{
+    const rocblas_int tid = threadIdx.x;
+    const rocblas_int bid = blockIdx.z;
+
+    assert(blockDim.x == SB2ST_HB2ST_MAX_THDS);
+
+    // select batch instance
+    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    S* D = load_ptr_batch<S>(DD, bid, 0, strideD);
+    S* E = load_ptr_batch<S>(EE, bid, 0, strideE);
+    T* work;
+
+    // shared mem for temporary values
+    extern __shared__ double lmem[];
+    T* sval = reinterpret_cast<T*>(lmem);
+
+    if(workA)
+        work = workA + bid * strideW;
+    else
+        work = reinterpret_cast<T*>(lmem);
+
+    // execute sweeps
+    run_sb2st_hb2st<SB2ST_HB2ST_MAX_THDS, T, S>(tid, n, nb, A, lda, D, E, sval, work);
 }
 
 template <bool BATCHED, typename T, typename S>
 void rocsolver_sb2st_hb2st_getMemorySize(const rocblas_int n,
                                          const rocblas_int nb,
-                                         const rocblas_int batch_count)
+                                         const rocblas_int batch_count,
+                                         size_t* size_work)
 {
+    if(n <= 1)
+    {
+        *size_work = 0;
+        return;
+    }
+
+    *size_work = sizeof(T) * (3 * nb) * batch_count;
 }
 
 template <typename T, typename S>
@@ -162,14 +237,15 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
                                               const rocblas_int n,
                                               const rocblas_int nb,
                                               U A,
-                                              const rocblas_int shiftA,
+                                              const rocblas_stride shiftA,
                                               const rocblas_int lda,
                                               const rocblas_stride strideA,
                                               S* D,
                                               const rocblas_stride strideD,
                                               S* E,
                                               const rocblas_stride strideE,
-                                              const rocblas_int batch_count)
+                                              const rocblas_int batch_count,
+                                              T* work)
 {
     ROCSOLVER_ENTER("sb2st_hb2st", "n:", n, "nb:", nb, "shiftA:", shiftA, "lda:", lda,
                     "bc:", batch_count);
@@ -193,36 +269,38 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
         return rocblas_status_success;
     }
 
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+    // rocblas_pointer_mode old_mode;
+    // rocblas_get_pointer_mode(handle, &old_mode);
+    // rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
 
-    rocsolver_hybrid_storage<T, rocblas_int, U> hA;
-    rocsolver_hybrid_storage<S, rocblas_int, S*> hD;
-    rocsolver_hybrid_storage<S, rocblas_int, S*> hE;
+    int device;
+    HIP_CHECK(hipGetDevice(&device));
+    hipDeviceProp_t props;
+    HIP_CHECK(hipGetDeviceProperties(&props, device));
 
-    ROCBLAS_CHECK(hA.init_async(n * lda, A, shiftA, strideA, batch_count, stream));
-    ROCBLAS_CHECK(hD.init_async(n, D, 0, strideD, batch_count, stream));
-    ROCBLAS_CHECK(hE.init_async(n - 1, E, 0, strideE, batch_count, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    rocblas_int strideW = 3 * nb;
+    size_t lmemsize_larfg = sizeof(T) * SB2ST_HB2ST_MAX_THDS;
+    size_t lmemsize_larf = sizeof(T) * strideW;
+    size_t lmemsize = std::max(lmemsize_larfg, lmemsize_larf);
 
-    T* hwork = nullptr;
-    HIP_CHECK(hipHostMalloc(&hwork, sizeof(T) * (3 * nb)));
-
-    for(rocblas_int bid = 0; bid < batch_count; bid++)
+    if(lmemsize <= props.sharedMemPerBlock)
     {
-        run_sb2st_hb2st<T, S>(n, nb, hA[bid], lda, hD[bid], hE[bid], hwork);
+        ROCSOLVER_LAUNCH_KERNEL(sb2st_hb2st_kernel<T>, dim3(1, 1, batch_count),
+                                dim3(SB2ST_HB2ST_MAX_THDS, 1, 1), lmemsize, stream, n, nb, A,
+                                shiftA, lda, strideA, D, strideD, E, strideE, (T*)nullptr, strideW);
+    }
+    else
+    {
+        ROCSOLVER_LAUNCH_KERNEL(sb2st_hb2st_kernel<T>, dim3(1, 1, batch_count),
+                                dim3(SB2ST_HB2ST_MAX_THDS, 1, 1), lmemsize_larfg, stream, n, nb, A,
+                                shiftA, lda, strideA, D, strideD, E, strideE, work, strideW);
     }
 
-    ROCBLAS_CHECK(hA.write_to_device_async(stream));
-    ROCBLAS_CHECK(hD.write_to_device_async(stream));
-    ROCBLAS_CHECK(hE.write_to_device_async(stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    // rocblas_set_pointer_mode(handle, old_mode);
 
-    HIP_CHECK(hipHostFree(hwork));
-
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
+
+#undef SB2ST_HB2ST_MAX_THDS
 
 ROCSOLVER_END_NAMESPACE

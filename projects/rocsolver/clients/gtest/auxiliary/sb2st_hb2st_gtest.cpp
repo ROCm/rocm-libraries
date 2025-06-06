@@ -59,7 +59,7 @@ const vector<vector<int>> matrix_size_range = {
 
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_size_range
-    = {{152, 152, 64}, {640, 720, 500}, {1000, 1024, 800}, {512, 512, 312}};
+    = {{152, 152, 152}, {640, 720, 64}, {1000, 1024, 128}, {512, 512, 312}};
 
 Arguments sb2st_hb2st_setup_arguments(sb2st_hb2st_tuple tup)
 {

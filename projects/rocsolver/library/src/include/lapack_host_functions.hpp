@@ -667,31 +667,31 @@ static void call_larf(rocblas_side side, I m, I n, T* v, I incv, T tau, T* C, I 
     if(side == rocblas_side_left)
     {
         // gemv
-        for(rocblas_int i = 0; i < n; i++)
+        for(I i = 0; i < n; i++)
         {
             work[i] = 0;
-            for(rocblas_int j = 0; j < m; j++)
+            for(I j = 0; j < m; j++)
                 work[i] += conj(C[j + i * ldc]) * v[j * incv];
         }
 
         // ger
-        for(rocblas_int i = 0; i < m; i++)
-            for(rocblas_int j = 0; j < n; j++)
-                C[i + j * ldc] -= tau * v[i * incv] * conj(work[j]);
+        for(I i = 0; i < n; i++)
+            for(I j = 0; j < m; j++)
+                C[j + i * ldc] -= tau * v[j * incv] * conj(work[i]);
     }
     else
     {
         // gemv
-        for(rocblas_int i = 0; i < m; i++)
+        for(I i = 0; i < m; i++)
         {
             work[i] = 0;
-            for(rocblas_int j = 0; j < n; j++)
+            for(I j = 0; j < n; j++)
                 work[i] += C[i + j * ldc] * v[j * incv];
         }
 
         // ger
-        for(rocblas_int i = 0; i < m; i++)
-            for(rocblas_int j = 0; j < n; j++)
+        for(I i = 0; i < m; i++)
+            for(I j = 0; j < n; j++)
                 C[i + j * ldc] -= tau * conj(v[j * incv]) * work[i];
     }
 }
