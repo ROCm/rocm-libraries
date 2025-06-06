@@ -22,7 +22,7 @@
  * ************************************************************************ */
 
 #include "internal/generic/rocsparse_rot.h"
-#include "control.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_roti.hpp"
 
 namespace rocsparse

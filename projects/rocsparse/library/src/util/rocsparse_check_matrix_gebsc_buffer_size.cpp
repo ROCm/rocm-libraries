@@ -25,7 +25,7 @@
 
 #include "rocsparse_check_matrix_gebsc.hpp"
 #include "rocsparse_check_matrix_gebsr.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 template <typename T, typename I, typename J>
 rocsparse_status rocsparse::check_matrix_gebsc_buffer_size_core(rocsparse_handle      handle,

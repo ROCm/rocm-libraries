@@ -25861,6 +25861,9 @@ HIPBLAS_EXPORT const char* hipblasStatusToString(hipblasStatus_t status);
 #endif
 
 // Macros used before hipBLAS version 3.0
+#ifndef HIPBLAS_V2
+#define HIPBLAS_V2
+#endif
 #define HIPBLAS_R_16F HIP_R_16F
 #define HIPBLAS_R_32F HIP_R_32F
 #define HIPBLAS_R_64F HIP_R_64F

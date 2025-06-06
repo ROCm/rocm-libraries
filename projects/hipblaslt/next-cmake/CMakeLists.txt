@@ -24,8 +24,8 @@
 # Need a list of old compilation flags, definitions and link flags
 # to confirm if they are required and document what we dropped if not.
 
-cmake_minimum_required(VERSION 3.25.0)
-project(hipblaslt VERSION 0.15.0 LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.22.1)
+project(hipblaslt VERSION 1.0.0 LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../cmake)
@@ -39,7 +39,7 @@ include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
 
 rocm_setup_version(VERSION ${PROJECT_VERSION})
-set(hipblaslt_SOVERSION 0.15)
+set(hipblaslt_SOVERSION 1.0)
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     if(WIN32)
@@ -121,6 +121,8 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
     if(HIPBLASLT_ENABLE_MARKER)
         find_library(rocTracer roctx64 REQUIRED)
+    else()
+        set(rocTracer)
     endif()
 endif()
 if(HIPBLASLT_REQUIRE_ROCM_SMI)
@@ -193,12 +195,33 @@ if(HIPBLASLT_ENABLE_DEVICE)
     endif()
 endif()
 
+if(HIPBLASLT_ENABLE_ROCROLLER AND NOT TARGET roc::rocroller)
+    find_package(rocroller REQUIRED)
+    option(YAML_CPP_INSTALL "" ON)
+    if(NOT rocroller_FOUND)
+        set(ROCROLLER_ENABLE_FETCH ON)
+        set(ROCROLLER_BUILD_TESTING OFF)
+        set(ROCROLLER_ENABLE_CLIENT OFF)
+        FetchContent_Declare(
+            rocRoller
+            GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
+            GIT_TAG main
+            SOURCE_SUBDIR next-cmake
+        )
+        FetchContent_MakeAvailable(rocRoller)
+    endif()
+endif()
+
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_BUILD_SHARED_LIBS)
         add_library(hipblaslt SHARED)
     else()
         add_library(hipblaslt STATIC)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_STATIC_LIB)
+    endif()
+    if(HIPBLASLT_ENABLE_ROCROLLER)
+        target_link_libraries(hipblaslt PRIVATE roc::rocroller)
+        target_compile_definitions(hipblaslt PUBLIC HIPBLASLT_USE_ROCROLLER)
     endif()
     rocm_set_soversion(hipblaslt ${hipblaslt_SOVERSION})
     add_library(roc::hipblaslt ALIAS hipblaslt)
@@ -210,6 +233,7 @@ if(HIPBLASLT_ENABLE_HOST)
             hip::device
             rocisa::rocisa-cpp
             ${CMAKE_DL_LIBS}
+            ${rocTracer}
     )
 
     if(HIPBLASLT_ENABLE_ASAN)
@@ -276,6 +300,7 @@ endif()
 if(HIPBLASLT_ENABLE_DEVICE)
     add_subdirectory(device-library)
 endif()
+
 if(HIPBLASLT_ENABLE_CLIENT)
     add_subdirectory(clients)
 endif()
@@ -379,7 +404,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
         COMPONENT benchmarks
     )
     rocm_install(
-        FILES 
+        FILES
             "${HIPBLASLT_CLIENTS_DIR}/include/hipblaslt_common.yaml"
             "${HIPBLASLT_CLIENTS_DIR}/include/hipblaslt_template.yaml"
         DESTINATION "${CMAKE_INSTALL_BINDIR}"
@@ -440,7 +465,6 @@ if(HIPBLASLT_ENABLE_SAMPLES)
         TARGETS
             sample_hipblaslt_gemm
             sample_hipblaslt_gemm_ext
-            sample_hipblaslt_gemm_ext_deprecated
             sample_hipblaslt_gemm_batched
             sample_hipblaslt_gemm_batched_ext
             sample_hipblaslt_gemm_tuning_splitk_ext
@@ -473,7 +497,6 @@ if(HIPBLASLT_ENABLE_SAMPLES)
             sample_hipblaslt_gemm_attr_tciA_tciB
             sample_hipblaslt_ext_op_layernorm
             sample_hipblaslt_ext_op_amax
-            sample_hipblaslt_ext_op_amax_with_scale
             sample_hipblaslt_gemm_with_TF32
             sample_hipblaslt_gemm_swizzle_a
             sample_hipblaslt_gemm_bias_swizzle_a_ext
@@ -485,7 +508,7 @@ if(HIPBLASLT_ENABLE_SAMPLES)
     )
     rocm_package_setup_client_component(samples)
 endif()
-# rocm_create_package makes decisions on what type of package to produce 
+# rocm_create_package makes decisions on what type of package to produce
 # based on BUILD_SHARED_LIBS. If we don't set this here we will only get
 # a dev package.
 set(BUILD_SHARED_LIBS ${HIPBLASLT_BUILD_SHARED_LIBS})
@@ -517,9 +540,9 @@ if(HIPBLASLT_ENABLE_COVERAGE)
         DEPENDS hipblaslt-test
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${coverage_dir}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${coverage_dir}/profraw"
-        COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="${coverage_dir}/profraw/hipblaslt-coverage_%p.profraw" 
-                                        GTEST_LISTENER=NO_PASS_LINE_IN_LOG 
-                                        $<TARGET_FILE:hipblaslt-test> 
+        COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="${coverage_dir}/profraw/hipblaslt-coverage_%p.profraw"
+                                        GTEST_LISTENER=NO_PASS_LINE_IN_LOG
+                                        $<TARGET_FILE:hipblaslt-test>
                                         --precompile=hipblaslt-test-precompile.db
       )
       find_program(

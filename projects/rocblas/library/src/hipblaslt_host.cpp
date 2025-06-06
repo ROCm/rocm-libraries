@@ -121,22 +121,22 @@ namespace
                                  hipblaslt_compute_type<Tc>);
 
         hipblaslt_ext::GemmProblemType problemType;
-        problemType.op_a         = (hipblasOperation_t)prob.trans_a;
-        problemType.op_b         = (hipblasOperation_t)prob.trans_b;
-        problemType.type_a       = hipblaslt_datatype<Ti>;
-        problemType.type_b       = hipblaslt_datatype<Ti>;
-        problemType.type_c       = hipblaslt_datatype<To>;
-        problemType.type_d       = hipblaslt_datatype<To>;
-        problemType.type_compute = hipblaslt_compute_type<Tc>;
+        problemType.setOpA((hipblasOperation_t)prob.trans_a);
+        problemType.setOpB((hipblasOperation_t)prob.trans_b);
+        problemType.setTypeA(hipblaslt_datatype<Ti>);
+        problemType.setTypeB(hipblaslt_datatype<Ti>);
+        problemType.setTypeC(hipblaslt_datatype<To>);
+        problemType.setTypeD(hipblaslt_datatype<To>);
+        problemType.setTypeCompute(hipblaslt_compute_type<Tc>);
 
         hipblaslt_ext::GemmEpilogue epilogue;
         hipblaslt_ext::GemmInputs   inputs;
-        inputs.a     = (void*)(prob.A + prob.buffer_offset_a);
-        inputs.b     = (void*)(prob.B + prob.buffer_offset_b);
-        inputs.c     = (void*)(prob.C + prob.buffer_offset_c);
-        inputs.d     = (void*)(prob.D + prob.buffer_offset_d);
-        inputs.alpha = (void*)prob.alpha;
-        inputs.beta  = (void*)prob.beta;
+        inputs.setA((void*)(prob.A + prob.buffer_offset_a));
+        inputs.setB((void*)(prob.B + prob.buffer_offset_b));
+        inputs.setC((void*)(prob.C + prob.buffer_offset_c));
+        inputs.setD((void*)(prob.D + prob.buffer_offset_d));
+        inputs.setAlpha((void*)prob.alpha);
+        inputs.setBeta((void*)prob.beta);
 
         gemm.setProblem(prob.m,
                         prob.n,
@@ -176,13 +176,13 @@ namespace
         try
         {
             hipblaslt_ext::GemmProblemType problemType;
-            problemType.op_a         = (hipblasOperation_t)prob.trans_a;
-            problemType.op_b         = (hipblasOperation_t)prob.trans_b;
-            problemType.type_a       = hipblaslt_datatype<Ti>;
-            problemType.type_b       = hipblaslt_datatype<Ti>;
-            problemType.type_c       = hipblaslt_datatype<To>;
-            problemType.type_d       = hipblaslt_datatype<To>;
-            problemType.type_compute = hipblaslt_compute_type<Tc>;
+            problemType.setOpA((hipblasOperation_t)prob.trans_a);
+            problemType.setOpB((hipblasOperation_t)prob.trans_b);
+            problemType.setTypeA(hipblaslt_datatype<Ti>);
+            problemType.setTypeB(hipblaslt_datatype<Ti>);
+            problemType.setTypeC(hipblaslt_datatype<To>);
+            problemType.setTypeD(hipblaslt_datatype<To>);
+            problemType.setTypeCompute(hipblaslt_compute_type<Tc>);
 
             std::vector<int64_t>                     Ms(prob.batch_count);
             std::vector<int64_t>                     Ns(prob.batch_count);
@@ -248,12 +248,12 @@ namespace
                 stridecs[batch]     = prob.batch_stride_c;
                 strideds[batch]     = prob.batch_stride_d;
                 batch_counts[batch] = 1;
-                inputs[batch].a     = (void*)(A[batch] + prob.buffer_offset_a);
-                inputs[batch].b     = (void*)(B[batch] + prob.buffer_offset_b);
-                inputs[batch].c     = (void*)(C[batch] + prob.buffer_offset_c);
-                inputs[batch].d     = (void*)(D[batch] + prob.buffer_offset_d);
-                inputs[batch].alpha = (void*)prob.alpha;
-                inputs[batch].beta  = (void*)prob.beta;
+                inputs[batch].setA((void*)(A[batch] + prob.buffer_offset_a));
+                inputs[batch].setB((void*)(B[batch] + prob.buffer_offset_b));
+                inputs[batch].setC((void*)(C[batch] + prob.buffer_offset_c));
+                inputs[batch].setD((void*)(D[batch] + prob.buffer_offset_d));
+                inputs[batch].setAlpha((void*)prob.alpha);
+                inputs[batch].setBeta((void*)prob.beta);
             }
 
             gemm.setProblem(Ms,

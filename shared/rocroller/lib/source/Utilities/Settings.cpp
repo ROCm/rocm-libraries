@@ -34,4 +34,9 @@ namespace rocRoller
         auto const& arch = GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch();
         return arch.HasCapability(GPUCapability::HasNaNoo) ? F8Mode::NaNoo : F8Mode::OCP;
     }
+
+    bool getDefaultValueForKernelGraphDOTSerialization()
+    {
+        return Settings::getInstance()->get(Settings::SaveAssembly);
+    }
 }

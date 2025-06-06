@@ -25,15 +25,15 @@
 #include "rocsparse_bsrgemm_multadd.hpp"
 #include "../conversion/rocsparse_identity.hpp"
 #include "bsrgemm_device.h"
-#include "control.h"
 #include "csrgemm_device.h"
 #include "internal/extra/rocsparse_bsrgemm.h"
 #include "rocsparse_bsrgemm.hpp"
 #include "rocsparse_bsrgemm_calc.hpp"
 #include "rocsparse_bsrgemm_mult.hpp"
 #include "rocsparse_bsrgemm_scal.hpp"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 rocsparse_status rocsparse::bsrgemm_multadd_quickreturn(rocsparse_handle          handle,
                                                         rocsparse_direction       dir,

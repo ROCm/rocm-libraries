@@ -4,7 +4,11 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * and
+ *     Joffrain, Low, Quintana-Orti, et al. (2006). Accumulating householder
+ *     transformations, revisited.
+ *     ACM Transactions on Mathematical Software 32(2), p. 169-179.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,8 +39,12 @@
 #include "rocauxiliary_lacgv.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
+#include "rocsolver_run_specialized_kernels.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
+
+/*************** Main kernels *********************************************************/
+/**************************************************************************************/
 
 template <typename T, typename U, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
 ROCSOLVER_KERNEL void set_triangular(const rocblas_int n,
@@ -51,7 +59,8 @@ ROCSOLVER_KERNEL void set_triangular(const rocblas_int n,
                                      const rocblas_int ldf,
                                      const rocblas_stride strideF,
                                      const rocblas_direct direct,
-                                     const rocblas_storev storev)
+                                     const rocblas_storev storev,
+                                     const bool add_fp)
 {
     const auto b = hipBlockIdx_z;
     const auto i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
@@ -65,30 +74,68 @@ ROCSOLVER_KERNEL void set_triangular(const rocblas_int n,
         Fp = F + b * strideF;
 
         if(j == i)
-            Fp[j + i * ldf] = tp[i];
+            Fp[idx2D(j, i, ldf)] = tp[i];
         else if(direct == rocblas_forward_direction)
         {
             if(j < i)
             {
                 if(storev == rocblas_column_wise)
-                    Fp[j + i * ldf] = -tp[i] * Vp[i + j * ldv];
+                {
+                    if(!add_fp)
+                    {
+                        Fp[idx2D(j, i, ldf)] = -tp[i] * Vp[idx2D(i, j, ldv)];
+                    }
+                    else
+                    {
+                        Fp[idx2D(j, i, ldf)] = -tp[i] * (Fp[idx2D(j, i, ldf)] + Vp[idx2D(i, j, ldv)]);
+                    }
+                }
                 else
-                    Fp[j + i * ldf] = -tp[i] * Vp[j + i * ldv];
+                {
+                    if(!add_fp)
+                    {
+                        Fp[idx2D(j, i, ldf)] = -tp[i] * Vp[idx2D(j, i, ldv)];
+                    }
+                    else
+                    {
+                        Fp[idx2D(j, i, ldf)] = -tp[i] * (Fp[idx2D(j, i, ldf)] + Vp[idx2D(j, i, ldv)]);
+                    }
+                }
             }
             else
-                Fp[j + i * ldf] = 0;
+                Fp[idx2D(j, i, ldf)] = 0;
         }
         else
         {
             if(j > i)
             {
                 if(storev == rocblas_column_wise)
-                    Fp[j + i * ldf] = -tp[i] * Vp[(n - k + i) + j * ldv];
+                {
+                    if(!add_fp)
+                    {
+                        Fp[idx2D(j, i, ldf)] = -tp[i] * Vp[idx2D((n - k + i), j, ldv)];
+                    }
+                    else
+                    {
+                        Fp[idx2D(j, i, ldf)]
+                            = -tp[i] * (Fp[idx2D(j, i, ldf)] + Vp[idx2D((n - k + i), j, ldv)]);
+                    }
+                }
                 else
-                    Fp[j + i * ldf] = -tp[i] * Vp[j + (n - k + i) * ldv];
+                {
+                    if(!add_fp)
+                    {
+                        Fp[idx2D(j, i, ldf)] = -tp[i] * Vp[idx2D(j, (n - k + i), ldv)];
+                    }
+                    else
+                    {
+                        Fp[idx2D(j, i, ldf)]
+                            = -tp[i] * (Fp[idx2D(j, i, ldf)] + Vp[idx2D(j, (n - k + i), ldv)]);
+                    }
+                }
             }
             else
-                Fp[j + i * ldf] = 0;
+                Fp[idx2D(j, i, ldf)] = 0;
         }
     }
 }
@@ -106,7 +153,8 @@ ROCSOLVER_KERNEL void set_triangular(const rocblas_int n,
                                      const rocblas_int ldf,
                                      const rocblas_stride strideF,
                                      const rocblas_direct direct,
-                                     const rocblas_storev storev)
+                                     const rocblas_storev storev,
+                                     const bool add_fp)
 {
     const auto b = hipBlockIdx_z;
     const auto i = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
@@ -120,30 +168,69 @@ ROCSOLVER_KERNEL void set_triangular(const rocblas_int n,
         Fp = F + b * strideF;
 
         if(j == i)
-            Fp[j + i * ldf] = tp[i];
+            Fp[idx2D(j, i, ldf)] = tp[i];
         else if(direct == rocblas_forward_direction)
         {
             if(j < i)
             {
                 if(storev == rocblas_column_wise)
-                    Fp[j + i * ldf] = -tp[i] * conj(Vp[i + j * ldv]);
+                {
+                    if(!add_fp)
+                    {
+                        Fp[idx2D(j, i, ldf)] = -tp[i] * conj(Vp[idx2D(i, j, ldv)]);
+                    }
+                    else
+                    {
+                        Fp[idx2D(j, i, ldf)]
+                            = -tp[i] * (Fp[idx2D(j, i, ldf)] + conj(Vp[idx2D(i, j, ldv)]));
+                    }
+                }
                 else
-                    Fp[j + i * ldf] = -tp[i] * Vp[j + i * ldv];
+                {
+                    if(!add_fp)
+                    {
+                        Fp[idx2D(j, i, ldf)] = -tp[i] * Vp[idx2D(j, i, ldv)];
+                    }
+                    else
+                    {
+                        Fp[idx2D(j, i, ldf)] = -tp[i] * (Fp[idx2D(j, i, ldf)] + Vp[idx2D(j, i, ldv)]);
+                    }
+                }
             }
             else
-                Fp[j + i * ldf] = 0;
+                Fp[idx2D(j, i, ldf)] = 0;
         }
         else
         {
             if(j > i)
             {
                 if(storev == rocblas_column_wise)
-                    Fp[j + i * ldf] = -tp[i] * conj(Vp[(n - k + i) + j * ldv]);
+                {
+                    if(!add_fp)
+                    {
+                        Fp[idx2D(j, i, ldf)] = -tp[i] * conj(Vp[idx2D((n - k + i), j, ldv)]);
+                    }
+                    else
+                    {
+                        Fp[idx2D(j, i, ldf)]
+                            = -tp[i] * (Fp[idx2D(j, i, ldf)] + conj(Vp[idx2D((n - k + i), j, ldv)]));
+                    }
+                }
                 else
-                    Fp[j + i * ldf] = -tp[i] * Vp[j + (n - k + i) * ldv];
+                {
+                    if(!add_fp)
+                    {
+                        Fp[idx2D(j, i, ldf)] = -tp[i] * Vp[idx2D(j, (n - k + i), ldv)];
+                    }
+                    else
+                    {
+                        Fp[idx2D(j, i, ldf)]
+                            = -tp[i] * (Fp[idx2D(j, i, ldf)] + Vp[idx2D(j, (n - k + i), ldv)]);
+                    }
+                }
             }
             else
-                Fp[j + i * ldf] = 0;
+                Fp[idx2D(j, i, ldf)] = 0;
         }
     }
 }
@@ -160,6 +247,198 @@ ROCSOLVER_KERNEL void set_tau(const rocblas_int k, T* tau, const rocblas_stride 
         tp[i] = -tp[i];
     }
 }
+
+template <typename T, typename U>
+ROCSOLVER_KERNEL void larft_kernel_forward(const rocblas_storev storev,
+                                           const rocblas_int n,
+                                           const rocblas_int k,
+                                           U VA,
+                                           const rocblas_int shiftV,
+                                           const rocblas_int ldv,
+                                           const rocblas_stride strideV,
+                                           T* tauA,
+                                           const rocblas_stride strideT,
+                                           T* FA,
+                                           const rocblas_int ldfA,
+                                           const rocblas_stride strideF)
+{
+    const rocblas_int bid = hipBlockIdx_y;
+    const rocblas_int tid = hipThreadIdx_x;
+    const rocblas_int tid_inc = hipBlockDim_x;
+
+    // select batch instance
+    T* V = load_ptr_batch<T>(VA, bid, shiftV, strideV);
+    T* tau = tauA + bid * strideT;
+    T* Ftemp = FA + bid * strideF;
+
+    // shared memory setup
+    extern __shared__ double lmem[];
+    T* work = reinterpret_cast<T*>(lmem);
+    T* F = work + k;
+    rocblas_int ldf = k;
+
+    // copy F to shared memory
+    for(rocblas_int i = tid; i < k; i += tid_inc)
+        for(rocblas_int j = i; j < k; j++)
+            F[i + j * ldf] = Ftemp[i + j * ldfA];
+    __syncthreads();
+
+    // --------- MAIN BODY ---------
+    for(rocblas_int kk = 1; kk < k; kk++)
+    {
+        const rocblas_int mm = kk;
+        const rocblas_int nn = n - 1 - kk;
+
+        T* Fx = F + kk * ldf;
+
+        // compute the matrix vector product, using the householder vectors
+        if(storev == rocblas_column_wise)
+        {
+            T* Vm = V + (kk + 1);
+            T* Vx = V + (kk + 1) + kk * ldv;
+
+            // gemv (conjugate transpose)
+            for(rocblas_int i = tid; i < mm; i += tid_inc)
+            {
+                T temp = 0;
+                for(rocblas_int j = 0; j < nn; j++)
+                    temp += conj(Vm[j + i * ldv]) * Vx[j];
+                work[i] = tau[kk] * temp + Fx[i];
+            }
+        }
+        else
+        {
+            T* Vm = V + (kk + 1) * ldv;
+            T* Vx = V + kk + (kk + 1) * ldv;
+
+            // gemv (no transpose)
+            for(rocblas_int i = tid; i < mm; i += tid_inc)
+            {
+                T temp = 0;
+                for(rocblas_int j = 0; j < nn; j++)
+                    temp += Vm[i + j * ldv] * conj(Vx[j * ldv]);
+                work[i] = tau[kk] * temp + Fx[i];
+            }
+        }
+
+        __syncthreads();
+
+        // multiply by previous triangular factor
+        // trmv (no transpose)
+        for(rocblas_int i = tid; i < mm; i += tid_inc)
+        {
+            T temp = 0;
+            for(rocblas_int j = i; j < mm; j++)
+                temp += F[i + j * ldf] * work[j];
+            Fx[i] = temp;
+        }
+
+        __syncthreads();
+    }
+
+    // copy shared memory back to F
+    for(rocblas_int i = tid; i < k; i += tid_inc)
+        for(rocblas_int j = i; j < k; j++)
+            Ftemp[i + j * ldfA] = F[i + j * ldf];
+}
+
+template <typename T, typename U>
+ROCSOLVER_KERNEL void larft_kernel_backward(const rocblas_storev storev,
+                                            const rocblas_int n,
+                                            const rocblas_int k,
+                                            U VA,
+                                            const rocblas_int shiftV,
+                                            const rocblas_int ldv,
+                                            const rocblas_stride strideV,
+                                            T* tauA,
+                                            const rocblas_stride strideT,
+                                            T* FA,
+                                            const rocblas_int ldfA,
+                                            const rocblas_stride strideF)
+{
+    const rocblas_int bid = hipBlockIdx_y;
+    const rocblas_int tid = hipThreadIdx_x;
+    const rocblas_int tid_inc = hipBlockDim_x;
+
+    // select batch instance
+    T* V = load_ptr_batch<T>(VA, bid, shiftV, strideV);
+    T* tau = tauA + bid * strideT;
+    T* Ftemp = FA + bid * strideF;
+
+    // shared memory setup
+    extern __shared__ double lmem[];
+    T* work = reinterpret_cast<T*>(lmem);
+    T* F = work + k;
+    rocblas_int ldf = k;
+
+    // copy F to shared memory
+    for(rocblas_int i = tid; i < k; i += tid_inc)
+        for(rocblas_int j = 0; j <= i; j++)
+            F[i + j * ldf] = Ftemp[i + j * ldfA];
+    __syncthreads();
+
+    // --------- MAIN BODY ---------
+    for(rocblas_int kk = k - 2; kk >= 0; kk--)
+    {
+        const rocblas_int mm = k - kk - 1;
+        const rocblas_int nn = n - k + kk;
+
+        T* Fm = F + (kk + 1) + (kk + 1) * ldf;
+        T* Fx = F + (kk + 1) + kk * ldf;
+
+        // compute the matrix vector product, using the householder vectors
+        if(storev == rocblas_column_wise)
+        {
+            T* Vm = V + (kk + 1) * ldv;
+            T* Vx = V + kk * ldv;
+
+            // gemv (conjugate transpose)
+            for(rocblas_int i = tid; i < mm; i += tid_inc)
+            {
+                T temp = 0;
+                for(rocblas_int j = 0; j < nn; j++)
+                    temp += conj(Vm[j + i * ldv]) * Vx[j];
+                work[i] = tau[kk] * temp + Fx[i];
+            }
+        }
+        else
+        {
+            T* Vm = V + (kk + 1);
+            T* Vx = V + kk;
+
+            // gemv (no transpose)
+            for(rocblas_int i = tid; i < mm; i += tid_inc)
+            {
+                T temp = 0;
+                for(rocblas_int j = 0; j < nn; j++)
+                    temp += Vm[i + j * ldv] * conj(Vx[j * ldv]);
+                work[i] = tau[kk] * temp + Fx[i];
+            }
+        }
+
+        __syncthreads();
+
+        // multiply by previous triangular factor
+        // trmv (no transpose)
+        for(rocblas_int i = tid; i < mm; i += tid_inc)
+        {
+            T temp = 0;
+            for(rocblas_int j = 0; j <= i; j++)
+                temp += Fm[i + j * ldf] * work[j];
+            Fx[i] = temp;
+        }
+
+        __syncthreads();
+    }
+
+    // copy shared memory back to F
+    for(rocblas_int i = tid; i < k; i += tid_inc)
+        for(rocblas_int j = 0; j <= i; j++)
+            Ftemp[i + j * ldfA] = F[i + j * ldf];
+}
+
+/******************* Host functions *********************************************/
+/*******************************************************************************/
 
 template <bool BATCHED, typename T>
 void rocsolver_larft_getMemorySize(const rocblas_int n,
@@ -269,15 +548,60 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
     rocblas_fill uplo;
     rocblas_operation trans;
 
+    const bool use_gemm = n > k;
+
+    const rocblas_int u1_n = use_gemm ? k : n;
+    const rocblas_int u2_n = use_gemm ? n - k : 0;
+
+    // Compute T=V2'*V2 or V2*V2' (V'=[V1' V2'] where V1 is triangular and V is trapezoidal)
+    // SYRK/HERK can be used alternatively, but GEMM is currently more performant.
+    if(use_gemm)
+    {
+        if(direct == rocblas_forward_direction && storev == rocblas_column_wise)
+        {
+            rocsolver_gemm(handle, rocblas_operation_conjugate_transpose, rocblas_operation_none, k,
+                           k, u2_n, scalars + 2, V, shiftV + idx2D(u1_n, 0, ldv), ldv, strideV, V,
+                           shiftV + idx2D(u1_n, 0, ldv), ldv, strideV, scalars + 1, F,
+                           idx2D(0, 0, ldf), ldf, strideF, batch_count, workArr);
+        }
+        else if(direct == rocblas_backward_direction && storev == rocblas_column_wise)
+        {
+            rocsolver_gemm(handle, rocblas_operation_conjugate_transpose, rocblas_operation_none, k,
+                           k, u2_n, scalars + 2, V, shiftV + idx2D(0, 0, ldv), ldv, strideV, V,
+                           shiftV + idx2D(0, 0, ldv), ldv, strideV, scalars + 1, F,
+                           idx2D(0, 0, ldf), ldf, strideF, batch_count, workArr);
+        }
+        else if(direct == rocblas_forward_direction && storev == rocblas_row_wise)
+        {
+            rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_conjugate_transpose, k,
+                           k, u2_n, scalars + 2, V, shiftV + idx2D(0, u1_n, ldv), ldv, strideV, V,
+                           shiftV + idx2D(0, u1_n, ldv), ldv, strideV, scalars + 1, F,
+                           idx2D(0, 0, ldf), ldf, strideF, batch_count, workArr);
+        }
+        else if(direct == rocblas_backward_direction && storev == rocblas_row_wise)
+        {
+            rocsolver_gemm(handle, rocblas_operation_none, rocblas_operation_conjugate_transpose, k,
+                           k, u2_n, scalars + 2, V, shiftV + idx2D(0, 0, ldv), ldv, strideV, V,
+                           shiftV + idx2D(0, 0, ldv), ldv, strideV, scalars + 1, F,
+                           idx2D(0, 0, ldf), ldf, strideF, batch_count, workArr);
+        }
+    }
+
     // Fix diagonal of T, make zero the not used triangular part,
     // setup tau (changing signs) and account for the non-stored 1's on the
     // householder vectors
     rocblas_int blocks = (k - 1) / 32 + 1;
     ROCSOLVER_LAUNCH_KERNEL(set_triangular, dim3(blocks, blocks, batch_count), dim3(32, 32), 0,
                             stream, n, k, V, shiftV, ldv, strideV, tau, strideT, F, ldf, strideF,
-                            direct, storev);
+                            direct, storev, use_gemm);
     ROCSOLVER_LAUNCH_KERNEL(set_tau, dim3(blocks, batch_count), dim3(32, 1), 0, stream, k, tau,
                             strideT);
+
+    int device;
+    HIP_CHECK(hipGetDevice(&device));
+    hipDeviceProp_t props;
+    HIP_CHECK(hipGetDeviceProperties(&props, device));
+    size_t lmemsize = sizeof(T) * (k + 1) * k;
 
     if(direct == rocblas_forward_direction)
     {
@@ -288,38 +612,49 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
         //      IT WILL WORK ON THE ENTIRE MATRIX/VECTOR REGARDLESS OF
         //      ZERO ENTRIES ****
 
-        for(rocblas_int i = 1; i < k; ++i)
+        if(k <= LARFT_SWITCHSIZE && lmemsize <= props.sharedMemPerBlock)
         {
-            // compute the matrix vector product, using the householder vectors
-            if(storev == rocblas_column_wise)
+            ROCSOLVER_LAUNCH_KERNEL(larft_kernel_forward, dim3(1, batch_count), dim3(BS1, 1),
+                                    lmemsize, stream, storev, u1_n, k, V, shiftV, ldv, strideV, tau,
+                                    strideT, F, ldf, strideF);
+        }
+        else
+        {
+            for(rocblas_int i = 1; i < k; ++i)
             {
-                trans = rocblas_operation_conjugate_transpose;
-                rocblasCall_gemv<T>(handle, trans, n - 1 - i, i, tau + i, strideT, V,
-                                    shiftV + idx2D(i + 1, 0, ldv), ldv, strideV, V,
-                                    shiftV + idx2D(i + 1, i, ldv), 1, strideV, scalars + 2, 0, F,
-                                    idx2D(0, i, ldf), 1, strideF, batch_count, workArr);
-            }
-            else
-            {
-                if(COMPLEX)
-                    rocsolver_lacgv_template<T>(handle, n - i - 1, V, shiftV + idx2D(i, i + 1, ldv),
-                                                ldv, strideV, batch_count);
+                // compute the matrix vector product, using the householder vectors
+                if(storev == rocblas_column_wise)
+                {
+                    trans = rocblas_operation_conjugate_transpose;
+                    rocblasCall_gemv<T>(handle, trans, u1_n - 1 - i, i, tau + i, strideT, V,
+                                        shiftV + idx2D(i + 1, 0, ldv), ldv, strideV, V,
+                                        shiftV + idx2D(i + 1, i, ldv), 1, strideV, scalars + 2, 0,
+                                        F, idx2D(0, i, ldf), 1, strideF, batch_count, workArr);
+                }
+                else
+                {
+                    if(COMPLEX)
+                        rocsolver_lacgv_template<T>(handle, n - i - 1, V,
+                                                    shiftV + idx2D(i, i + 1, ldv), ldv, strideV,
+                                                    batch_count);
 
+                    trans = rocblas_operation_none;
+                    rocblasCall_gemv<T>(handle, trans, i, u1_n - 1 - i, tau + i, strideT, V,
+                                        shiftV + idx2D(0, i + 1, ldv), ldv, strideV, V,
+                                        shiftV + idx2D(i, i + 1, ldv), ldv, strideV, scalars + 2, 0,
+                                        F, idx2D(0, i, ldf), 1, strideF, batch_count, workArr);
+
+                    if(COMPLEX)
+                        rocsolver_lacgv_template<T>(handle, n - i - 1, V,
+                                                    shiftV + idx2D(i, i + 1, ldv), ldv, strideV,
+                                                    batch_count);
+                }
+
+                // multiply by the previous triangular factor
                 trans = rocblas_operation_none;
-                rocblasCall_gemv<T>(handle, trans, i, n - 1 - i, tau + i, strideT, V,
-                                    shiftV + idx2D(0, i + 1, ldv), ldv, strideV, V,
-                                    shiftV + idx2D(i, i + 1, ldv), ldv, strideV, scalars + 2, 0, F,
-                                    idx2D(0, i, ldf), 1, strideF, batch_count, workArr);
-
-                if(COMPLEX)
-                    rocsolver_lacgv_template<T>(handle, n - i - 1, V, shiftV + idx2D(i, i + 1, ldv),
-                                                ldv, strideV, batch_count);
+                rocblasCall_trmv<T>(handle, uplo, trans, diag, i, F, 0, ldf, strideF, F,
+                                    idx2D(0, i, ldf), 1, strideF, work, stridew, batch_count);
             }
-
-            // multiply by the previous triangular factor
-            trans = rocblas_operation_none;
-            rocblasCall_trmv<T>(handle, uplo, trans, diag, i, F, 0, ldf, strideF, F,
-                                idx2D(0, i, ldf), 1, strideF, work, stridew, batch_count);
         }
     }
     else
@@ -331,39 +666,50 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
         //      IT WILL WORK ON THE ENTIRE MATRIX/VECTOR REGARDLESS OF
         //      ZERO ENTRIES ****
 
-        for(rocblas_int i = k - 2; i >= 0; --i)
+        if(k <= LARFT_SWITCHSIZE && lmemsize <= props.sharedMemPerBlock)
         {
-            // compute the matrix vector product, using the householder vectors
-            if(storev == rocblas_column_wise)
+            auto shiftU2 = shiftV
+                + ((storev == rocblas_column_wise) ? idx2D(u2_n, 0, ldv) : idx2D(0, u2_n, ldv));
+            ROCSOLVER_LAUNCH_KERNEL(larft_kernel_backward, dim3(1, batch_count), dim3(BS1, 1),
+                                    lmemsize, stream, storev, u1_n, k, V, shiftU2, ldv, strideV,
+                                    tau, strideT, F, ldf, strideF);
+        }
+        else
+        {
+            for(rocblas_int i = k - 2; i >= 0; --i)
             {
-                trans = rocblas_operation_conjugate_transpose;
-                rocblasCall_gemv<T>(handle, trans, n - k + i, k - i - 1, tau + i, strideT, V,
-                                    shiftV + idx2D(0, i + 1, ldv), ldv, strideV, V,
-                                    shiftV + idx2D(0, i, ldv), 1, strideV, scalars + 2, 0, F,
-                                    idx2D(i + 1, i, ldf), 1, strideF, batch_count, workArr);
-            }
-            else
-            {
-                if(COMPLEX)
-                    rocsolver_lacgv_template<T>(handle, n - k + i, V, shiftV + idx2D(i, 0, ldv),
-                                                ldv, strideV, batch_count);
+                // compute the matrix vector product, using the householder vectors
+                if(storev == rocblas_column_wise)
+                {
+                    trans = rocblas_operation_conjugate_transpose;
+                    rocblasCall_gemv<T>(handle, trans, u1_n - k + i, k - i - 1, tau + i, strideT, V,
+                                        shiftV + idx2D(u2_n, i + 1, ldv), ldv, strideV, V,
+                                        shiftV + idx2D(u2_n, i, ldv), 1, strideV, scalars + 2, 0, F,
+                                        idx2D(i + 1, i, ldf), 1, strideF, batch_count, workArr);
+                }
+                else
+                {
+                    if(COMPLEX)
+                        rocsolver_lacgv_template<T>(handle, n - k + i, V, shiftV + idx2D(i, 0, ldv),
+                                                    ldv, strideV, batch_count);
 
+                    trans = rocblas_operation_none;
+                    rocblasCall_gemv<T>(handle, trans, k - i - 1, u1_n - k + i, tau + i, strideT, V,
+                                        shiftV + idx2D(i + 1, u2_n, ldv), ldv, strideV, V,
+                                        shiftV + idx2D(i, u2_n, ldv), ldv, strideV, scalars + 2, 0,
+                                        F, idx2D(i + 1, i, ldf), 1, strideF, batch_count, workArr);
+
+                    if(COMPLEX)
+                        rocsolver_lacgv_template<T>(handle, n - k + i, V, shiftV + idx2D(i, 0, ldv),
+                                                    ldv, strideV, batch_count);
+                }
+
+                // multiply by the previous triangular factor
                 trans = rocblas_operation_none;
-                rocblasCall_gemv<T>(handle, trans, k - i - 1, n - k + i, tau + i, strideT, V,
-                                    shiftV + idx2D(i + 1, 0, ldv), ldv, strideV, V,
-                                    shiftV + idx2D(i, 0, ldv), ldv, strideV, scalars + 2, 0, F,
-                                    idx2D(i + 1, i, ldf), 1, strideF, batch_count, workArr);
-
-                if(COMPLEX)
-                    rocsolver_lacgv_template<T>(handle, n - k + i, V, shiftV + idx2D(i, 0, ldv),
-                                                ldv, strideV, batch_count);
+                rocblasCall_trmv<T>(handle, uplo, trans, diag, k - i - 1, F,
+                                    idx2D(i + 1, i + 1, ldf), ldf, strideF, F, idx2D(i + 1, i, ldf),
+                                    1, strideF, work, stridew, batch_count);
             }
-
-            // multiply by the previous triangular factor
-            trans = rocblas_operation_none;
-            rocblasCall_trmv<T>(handle, uplo, trans, diag, k - i - 1, F, idx2D(i + 1, i + 1, ldf),
-                                ldf, strideF, F, idx2D(i + 1, i, ldf), 1, strideF, work, stridew,
-                                batch_count);
         }
     }
 

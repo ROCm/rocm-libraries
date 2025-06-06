@@ -22,9 +22,9 @@
  * ************************************************************************ */
 
 #include "internal/generic/rocsparse_v2_spmv.h"
-#include "control.h"
-#include "handle.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_handle.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "../conversion/rocsparse_convert_scalar.hpp"
 #include "rocsparse_bsrmv.hpp"
@@ -36,7 +36,27 @@
 #include "rocsparse_spmv.hpp"
 
 template <>
-inline bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_input value_)
+bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_alg value_)
+{
+    switch(value_)
+    {
+    case rocsparse_spmv_alg_default:
+    case rocsparse_spmv_alg_coo:
+    case rocsparse_spmv_alg_csr_adaptive:
+    case rocsparse_spmv_alg_csr_rowsplit:
+    case rocsparse_spmv_alg_ell:
+    case rocsparse_spmv_alg_coo_atomic:
+    case rocsparse_spmv_alg_bsr:
+    case rocsparse_spmv_alg_csr_lrb:
+    {
+        return false;
+    }
+    }
+    return true;
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_input value_)
 {
     switch(value_)
     {
@@ -52,7 +72,7 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_input value_)
 };
 
 template <>
-inline bool rocsparse::enum_utils::is_invalid(rocsparse_v2_spmv_stage value_)
+bool rocsparse::enum_utils::is_invalid(rocsparse_v2_spmv_stage value_)
 {
     switch(value_)
     {
@@ -226,7 +246,8 @@ extern "C" rocsparse_status rocsparse_spmv_set_input(rocsparse_handle     handle
                                                      rocsparse_spmv_descr descr,
                                                      rocsparse_spmv_input input,
                                                      const void*          in,
-                                                     size_t               size_in_bytes)
+                                                     size_t               size_in_bytes,
+                                                     rocsparse_error*     p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -749,7 +770,8 @@ extern "C" rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle      
                                                           rocsparse_const_dnvec_descr x, //3
                                                           rocsparse_const_dnvec_descr y, //4
                                                           rocsparse_v2_spmv_stage     stage, // 5
-                                                          size_t* buffer_size_in_bytes) // 6
+                                                          size_t* buffer_size_in_bytes, // 6
+                                                          rocsparse_error* p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -826,7 +848,8 @@ extern "C" rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle
                                               rocsparse_dnvec_descr       y, //6
                                               rocsparse_v2_spmv_stage     stage, // 7
                                               size_t                      buffer_size_in_bytes, // 8
-                                              void*                       buffer) //9
+                                              void*                       buffer, // 9
+                                              rocsparse_error*            p_error)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -851,7 +874,6 @@ try
     //
     // Validate spmv_inputs.
     //
-
     ROCSPARSE_CHECKARG(1,
                        descr,
                        rocsparse::enum_utils::is_invalid(descr->get_alg()),

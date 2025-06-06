@@ -22,7 +22,67 @@
  * ************************************************************************ */
 
 #include "rocsparse_sparse_to_sparse.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_sparse_to_sparse_alg value)
+{
+#define CASE(C) \
+    case C:     \
+        return #C
+    switch(value)
+    {
+        CASE(rocsparse_sparse_to_sparse_alg_default);
+#undef CASE
+    }
+    // LCOV_EXCL_START
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
+}
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_sparse_to_sparse_stage value)
+{
+#define CASE(C) \
+    case C:     \
+        return #C
+    switch(value)
+    {
+        CASE(rocsparse_sparse_to_sparse_stage_analysis);
+        CASE(rocsparse_sparse_to_sparse_stage_compute);
+#undef CASE
+    }
+    // LCOV_EXCL_START
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_sparse_to_sparse_stage value)
+{
+    switch(value)
+    {
+    case rocsparse_sparse_to_sparse_stage_analysis:
+    case rocsparse_sparse_to_sparse_stage_compute:
+    {
+        return false;
+    }
+    }
+    return true;
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_sparse_to_sparse_alg value)
+{
+    switch(value)
+    {
+    case rocsparse_sparse_to_sparse_alg_default:
+    {
+        return false;
+    }
+    }
+    return true;
+}
 
 extern "C" rocsparse_status
     rocsparse_create_sparse_to_sparse_descr(rocsparse_sparse_to_sparse_descr* descr,

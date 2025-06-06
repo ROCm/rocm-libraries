@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -77,8 +77,8 @@ public:
     float alpha;
     float beta;
 
-    hipblaslt_ext::GemmProblemTypeV2 problem;
-    hipblaslt_ext::GemmEpilogueV2    epilogue;
+    hipblaslt_ext::GemmProblemType problem;
+    hipblaslt_ext::GemmEpilogue    epilogue;
 
     // Internal switch
     bool is_using_bias = false;
@@ -100,20 +100,20 @@ public:
     int algo_index = -1;
     int block_count;
 
-    void setData(int                           m,
-                 int                           n,
-                 int                           k,
-                 int                           batch,
-                 float                         alpha,
-                 float                         beta,
-                 hipblasOperation_t            op_a,
-                 hipblasOperation_t            op_b,
-                 hipDataType                   type_a,
-                 hipDataType                   type_b,
-                 hipDataType                   type_c,
-                 hipDataType                   type_d,
-                 hipblasComputeType_t          type_compute,
-                 hipblaslt_ext::GemmEpilogueV2 epilogue)
+    void setData(int                         m,
+                 int                         n,
+                 int                         k,
+                 int                         batch,
+                 float                       alpha,
+                 float                       beta,
+                 hipblasOperation_t          op_a,
+                 hipblasOperation_t          op_b,
+                 hipDataType                 type_a,
+                 hipDataType                 type_b,
+                 hipDataType                 type_c,
+                 hipDataType                 type_d,
+                 hipblasComputeType_t        type_compute,
+                 hipblaslt_ext::GemmEpilogue epilogue)
     {
         this->m        = m;
         this->n        = n;
@@ -187,10 +187,8 @@ int32_t type2Size(hipDataType type)
     {
     case hipDataType::HIP_R_8F_E4M3_FNUZ:
     case hipDataType::HIP_R_8F_E5M2_FNUZ:
-#ifdef ROCM_USE_FLOAT8
     case hipDataType::HIP_R_8F_E4M3:
     case hipDataType::HIP_R_8F_E5M2:
-#endif
         return sizeof(float) / 4;
     case hipDataType::HIP_R_32F:
         return sizeof(float);
@@ -212,13 +210,11 @@ void initData(hipDataType type, void* data, int m, int n, int lda, int stride, i
             (hipblaslt_f8_fnuz*)data, m, n, lda, stride, batch_count);
     }
     break;
-#ifdef ROCM_USE_FLOAT8
     case hipDataType::HIP_R_8F_E4M3:
     {
         hipblaslt_init_cos<hipblaslt_f8>((hipblaslt_f8*)data, m, n, lda, stride, batch_count);
     }
     break;
-#endif
     case hipDataType::HIP_R_16F:
     {
         hipblaslt_init_cos<hipblasLtHalf>((hipblasLtHalf*)data, m, n, lda, stride, batch_count);
@@ -431,7 +427,7 @@ int main(int argc, char** argv)
     CHECK_HIP_ERROR(hipStreamCreate(&stream));
     CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&handle));
 
-    hipblaslt_ext::GemmPreferenceV2 gemmPref;
+    hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
     std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;
     for(size_t i = 0; i < layer.size(); i++)
@@ -468,7 +464,7 @@ int main(int argc, char** argv)
                                                    l.problem.getTypeD(),
                                                    l.problem.getTypeCompute()));
 
-            hipblaslt_ext::GemmInputsV2 inputs;
+            hipblaslt_ext::GemmInputs inputs;
             inputs.setA(l.d_a[b]);
             inputs.setB(l.d_b[b]);
             inputs.setC(l.d_c[b]);

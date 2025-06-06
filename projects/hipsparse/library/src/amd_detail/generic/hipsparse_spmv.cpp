@@ -128,7 +128,8 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
                                                        spmv_descr,
                                                        rocsparse_spmv_input_alg,
                                                        &spmv_alg,
-                                                       sizeof(spmv_alg)));
+                                                       sizeof(spmv_alg),
+                                                       nullptr));
 
     //
     // Set operation.
@@ -137,7 +138,8 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
                                                        spmv_descr,
                                                        rocsparse_spmv_input_operation,
                                                        &operation,
-                                                       sizeof(operation)));
+                                                       sizeof(operation),
+                                                       nullptr));
 
     //
     // Set datatypes.
@@ -146,13 +148,15 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
                                                        spmv_descr,
                                                        rocsparse_spmv_input_scalar_datatype,
                                                        &datatype,
-                                                       sizeof(datatype)));
+                                                       sizeof(datatype),
+                                                       nullptr));
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_spmv_set_input((rocsparse_handle)handle,
                                                        spmv_descr,
                                                        rocsparse_spmv_input_compute_datatype,
                                                        &datatype,
-                                                       sizeof(datatype)));
+                                                       sizeof(datatype),
+                                                       nullptr));
 
     //
     // Buffer size for the analysis phase.
@@ -163,7 +167,8 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
                                                             (rocsparse_const_dnvec_descr)vecX,
                                                             (rocsparse_dnvec_descr)vecY,
                                                             rocsparse_v2_spmv_stage_analysis,
-                                                            pBufferSizeInBytes));
+                                                            pBufferSizeInBytes,
+                                                            nullptr));
 
     hip_spmv_descr->set_buffer_size_stage_analysis(pBufferSizeInBytes[0]);
     hip_spmv_descr->buffer_size_called();
@@ -256,7 +261,8 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
                                                            spmv_descr,
                                                            rocsparse_spmv_input_alg,
                                                            &spmv_alg,
-                                                           sizeof(spmv_alg)));
+                                                           sizeof(spmv_alg),
+                                                           nullptr));
         //
         // Set operation.
         //
@@ -264,7 +270,8 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
                                                            spmv_descr,
                                                            rocsparse_spmv_input_operation,
                                                            &operation,
-                                                           sizeof(operation)));
+                                                           sizeof(operation),
+                                                           nullptr));
 
         //
         // Set datatypes.
@@ -273,13 +280,15 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
                                                            spmv_descr,
                                                            rocsparse_spmv_input_scalar_datatype,
                                                            &datatype,
-                                                           sizeof(datatype)));
+                                                           sizeof(datatype),
+                                                           nullptr));
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_spmv_set_input((rocsparse_handle)handle,
                                                            spmv_descr,
                                                            rocsparse_spmv_input_compute_datatype,
                                                            &datatype,
-                                                           sizeof(datatype)));
+                                                           sizeof(datatype),
+                                                           nullptr));
     }
 
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_v2_spmv((rocsparse_handle)handle,
@@ -291,7 +300,8 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
                                                 (rocsparse_dnvec_descr)vecY,
                                                 rocsparse_v2_spmv_stage_analysis,
                                                 hip_spmv_descr->get_buffer_size_stage_analysis(),
-                                                externalBuffer));
+                                                externalBuffer,
+                                                nullptr));
     hip_spmv_descr->stage_analysis_called();
     return HIPSPARSE_STATUS_SUCCESS;
 }
@@ -383,7 +393,8 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
                                                            spmv_descr,
                                                            rocsparse_spmv_input_alg,
                                                            &spmv_alg,
-                                                           sizeof(spmv_alg)));
+                                                           sizeof(spmv_alg),
+                                                           nullptr));
 
         //
         // Set operation.
@@ -392,7 +403,8 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
                                                            spmv_descr,
                                                            rocsparse_spmv_input_operation,
                                                            &operation,
-                                                           sizeof(operation)));
+                                                           sizeof(operation),
+                                                           nullptr));
 
         //
         // Set datatypes.
@@ -401,13 +413,15 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
                                                            spmv_descr,
                                                            rocsparse_spmv_input_scalar_datatype,
                                                            &datatype,
-                                                           sizeof(datatype)));
+                                                           sizeof(datatype),
+                                                           nullptr));
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_spmv_set_input((rocsparse_handle)handle,
                                                            spmv_descr,
                                                            rocsparse_spmv_input_compute_datatype,
                                                            &datatype,
-                                                           sizeof(datatype)));
+                                                           sizeof(datatype),
+                                                           nullptr));
     }
 
     if(hip_spmv_descr->is_stage_analysis_called() == false)
@@ -428,7 +442,8 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
                                                   (rocsparse_const_dnvec_descr)vecX,
                                                   (rocsparse_dnvec_descr)vecY,
                                                   rocsparse_v2_spmv_stage_analysis,
-                                                  &buffer_size_in_bytes));
+                                                  &buffer_size_in_bytes,
+                                                  nullptr));
 
                 hipStream_t stream{};
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_get_stream((rocsparse_handle)handle, &stream));
@@ -445,7 +460,8 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
                                                             (const rocsparse_dnvec_descr)vecY,
                                                             rocsparse_v2_spmv_stage_analysis,
                                                             buffer_size_in_bytes,
-                                                            hip_spmv_descr->get_buffer()));
+                                                            hip_spmv_descr->get_buffer(),
+                                                            nullptr));
 
                 RETURN_IF_HIP_ERROR(hipFreeAsync(hip_spmv_descr->get_buffer(), stream));
                 hip_spmv_descr->set_buffer(nullptr);
@@ -466,7 +482,8 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
                                       (const rocsparse_dnvec_descr)vecY,
                                       rocsparse_v2_spmv_stage_analysis,
                                       hip_spmv_descr->get_buffer_size_stage_analysis(),
-                                      externalBuffer));
+                                      externalBuffer,
+                                      nullptr));
             }
 
             hip_spmv_descr->implicit_stage_analysis_called();
@@ -491,7 +508,8 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
                                           (rocsparse_const_dnvec_descr)vecX,
                                           (rocsparse_dnvec_descr)vecY,
                                           rocsparse_v2_spmv_stage_compute,
-                                          &buffer_size_in_bytes));
+                                          &buffer_size_in_bytes,
+                                          nullptr));
 
         hip_spmv_descr->set_buffer_size_stage_compute(buffer_size_in_bytes);
 
@@ -514,7 +532,8 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
                                                 (rocsparse_dnvec_descr)vecY,
                                                 rocsparse_v2_spmv_stage_compute,
                                                 hip_spmv_descr->get_buffer_size_stage_compute(),
-                                                hip_spmv_descr->get_buffer()));
+                                                hip_spmv_descr->get_buffer(),
+                                                nullptr));
 
     return HIPSPARSE_STATUS_SUCCESS;
 }

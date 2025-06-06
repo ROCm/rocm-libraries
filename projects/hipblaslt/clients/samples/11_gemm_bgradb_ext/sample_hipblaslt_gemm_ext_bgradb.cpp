@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -103,7 +103,7 @@ void simpleGemmEpilogueBiasVecExt(hipblasLtHandle_t   handle,
                                   int64_t             max_workspace_size,
                                   hipStream_t         stream)
 {
-    hipblaslt_ext::GemmPreferenceV2 gemmPref;
+    hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
     hipblaslt_ext::Gemm gemm(handle,
                              trans_a,
@@ -114,11 +114,11 @@ void simpleGemmEpilogueBiasVecExt(hipblasLtHandle_t   handle,
                              HIP_R_16BF,
                              HIPBLAS_COMPUTE_32F);
 
-    hipblaslt_ext::GemmEpilogueV2 gemmEpilogue;
+    hipblaslt_ext::GemmEpilogue gemmEpilogue;
     gemmEpilogue.setMode(epilogue);
     gemmEpilogue.setBiasDataType(HIP_R_16BF);
 
-    hipblaslt_ext::GemmInputsV2 inputs;
+    hipblaslt_ext::GemmInputs inputs;
     inputs.setA(d_a);
     inputs.setB(d_b);
     inputs.setC(d_c);

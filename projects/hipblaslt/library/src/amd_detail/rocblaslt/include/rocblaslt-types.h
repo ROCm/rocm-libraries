@@ -147,7 +147,6 @@ typedef struct
     uint8_t data;
 } rocblaslt_bf8_fnuz;
 
-#ifdef ROCM_USE_FLOAT8
 typedef struct
 {
     uint8_t data;
@@ -157,7 +156,6 @@ typedef struct
 {
     uint8_t data;
 } rocblaslt_bf8;
-#endif
 
 typedef int8_t  rocblasltInt8;
 typedef int32_t rocblasltInt32;
@@ -449,174 +447,6 @@ typedef struct _rocblaslt_matrix_transform_desc
 }
 #endif
 
-namespace rocblaslt
-{
-
-    enum class RocGemmType
-    {
-        ROCBLASLT_GEMM             = 1,
-        ROCBLASLT_GROUPED_GEMM     = 2,
-        ROCBLASLT_GEMMTYPE_UNKNOWN = 3
-    };
-
-    struct RocGemmProblemType
-    {
-        hipblasOperation_t     op_a;
-        hipblasOperation_t     op_b;
-        hipDataType            type_a;
-        hipDataType            type_b;
-        hipDataType            type_c;
-        hipDataType            type_d;
-        rocblaslt_compute_type type_compute;
-    };
-
-    class RocGemmProblemTypeV2
-    {
-    public:
-        hipblasOperation_t     op_a;
-        hipblasOperation_t     op_b;
-        hipDataType            type_a;
-        hipDataType            type_b;
-        hipDataType            type_c;
-        hipDataType            type_d;
-        rocblaslt_compute_type type_compute;
-    };
-
-    struct RocGemmEpilogue
-    {
-        rocblaslt_epilogue mode           = ROCBLASLT_EPILOGUE_DEFAULT;
-        hipDataType        bias_data_type = HIPBLASLT_DATATYPE_INVALID;
-        hipDataType        aux_data_type  = HIPBLASLT_DATATYPE_INVALID;
-        int                aux_ld         = 0;
-        int                aux_stride     = 0;
-    };
-
-    static_assert(sizeof(RocGemmEpilogue) == sizeof(hipblaslt_ext::GemmEpilogue),
-                  "RocGemmEpilogue struct does not match size of hipblaslt_ext::GemmEpilogue");
-
-    class RocGemmEpilogueV2
-    {
-    public:
-        rocblaslt_epilogue mode           = ROCBLASLT_EPILOGUE_DEFAULT;
-        hipDataType        bias_data_type = HIPBLASLT_DATATYPE_INVALID;
-        hipDataType        aux_data_type  = HIPBLASLT_DATATYPE_INVALID;
-        int                aux_ld         = 0;
-        int                aux_stride     = 0;
-        int                scaling_a_type = 0;
-        int                scaling_b_type = 0;
-    };
-
-    struct RocTuning
-    {
-        uint8_t gsu = 0;
-        uint8_t wgm = 0;
-    };
-
-    class RocTuningV2
-    {
-    public:
-        uint16_t gsu = 0;
-        int16_t  wgm = 0;
-    };
-
-    struct RocGemmInputs
-    {
-        void* a     = nullptr;
-        void* b     = nullptr;
-        void* c     = nullptr;
-        void* d     = nullptr;
-        void* alpha = nullptr;
-        void* beta  = nullptr;
-        // Epilogue inputs
-        void* bias          = nullptr;
-        void* scaleA        = nullptr;
-        void* scaleB        = nullptr;
-        void* scaleC        = nullptr;
-        void* scaleD        = nullptr;
-        void* scaleE        = nullptr;
-        void* scaleAlphaVec = nullptr;
-        void* aux           = nullptr;
-    };
-
-    static_assert(sizeof(RocGemmInputs) == sizeof(hipblaslt_ext::GemmInputs),
-                  "RocGemmInputs struct does not match size of hipblaslt_ext::GemmInputs");
-
-    struct RocGemmInputsV2
-    {
-        void* a     = nullptr;
-        void* b     = nullptr;
-        void* c     = nullptr;
-        void* d     = nullptr;
-        void* alpha = nullptr;
-        void* beta  = nullptr;
-        // Epilogue inputs
-        void* bias          = nullptr;
-        void* scaleA        = nullptr;
-        void* scaleB        = nullptr;
-        void* scaleC        = nullptr;
-        void* scaleD        = nullptr;
-        void* scaleE        = nullptr;
-        void* scaleAlphaVec = nullptr;
-        void* aux           = nullptr;
-        void* amaxD         = nullptr;
-    };
-
-    class RocGemm
-    {
-    public:
-        RocGemmType getGemmType()
-        {
-            return m_gemm_type;
-        }
-        size_t getGemmCount()
-        {
-            return m_gemm_count;
-        }
-        rocblaslt_handle getHandle()
-        {
-            return m_handle;
-        }
-        std::shared_ptr<void> getData()
-        {
-            return m_data;
-        }
-
-        void setGemmType(RocGemmType type)
-        {
-            m_gemm_type = type;
-        }
-        void setGemmCount(size_t gemm_count)
-        {
-            m_gemm_count = gemm_count;
-        }
-        void setHandle(rocblaslt_handle handle)
-        {
-            m_handle = handle;
-        }
-        void setData(std::shared_ptr<void> data)
-        {
-            m_data = data;
-        }
-        std::vector<RocGemmProblemType> getProblemTypes()
-        {
-            return m_problem_types;
-        }
-        void setProblemTypes(std::vector<RocGemmProblemType>& problem_types)
-        {
-            m_problem_types = problem_types;
-        }
-
-    private:
-        RocGemmType m_gemm_type  = RocGemmType::ROCBLASLT_GEMMTYPE_UNKNOWN;
-        size_t      m_gemm_count = 0;
-
-        std::vector<RocGemmProblemType> m_problem_types;
-
-        rocblaslt_handle      m_handle;
-        std::shared_ptr<void> m_data;
-    };
-} // End of namespace rocblaslt
-
 /********************************************************************
  * RocblasltContractionProblem captures the arguments for a GEMM-like *
  * contraction problem, to be passed to runContractionProblem.      *
@@ -777,5 +607,69 @@ struct RocblasltContractionProblem
                                 bool                   swizzleA,
                                 bool                   swizzleB);
 };
+
+namespace rocblaslt
+{
+
+    enum class RocGemmType
+    {
+        ROCBLASLT_GEMM             = 1,
+        ROCBLASLT_GROUPED_GEMM     = 2,
+        ROCBLASLT_GEMMTYPE_UNKNOWN = 3
+    };
+
+    class RocGemmProblemTypeV2
+    {
+    public:
+        hipblasOperation_t     op_a;
+        hipblasOperation_t     op_b;
+        hipDataType            type_a;
+        hipDataType            type_b;
+        hipDataType            type_c;
+        hipDataType            type_d;
+        rocblaslt_compute_type type_compute;
+    };
+
+    class RocGemmEpilogueV2
+    {
+    public:
+        rocblaslt_epilogue                         mode           = ROCBLASLT_EPILOGUE_DEFAULT;
+        hipDataType                                bias_data_type = HIPBLASLT_DATATYPE_INVALID;
+        hipDataType                                aux_data_type  = HIPBLASLT_DATATYPE_INVALID;
+        int                                        aux_ld         = 0;
+        int                                        aux_stride     = 0;
+        RocblasltContractionProblem::ScalingFormat scaling_a_type
+            = RocblasltContractionProblem::ScalingFormat::None;
+        RocblasltContractionProblem::ScalingFormat scaling_b_type
+            = RocblasltContractionProblem::ScalingFormat::None;
+    };
+
+    class RocTuningV2
+    {
+    public:
+        uint16_t gsu = 0;
+        int16_t  wgm = 0;
+    };
+
+    struct RocGemmInputsV2
+    {
+        void* a     = nullptr;
+        void* b     = nullptr;
+        void* c     = nullptr;
+        void* d     = nullptr;
+        void* alpha = nullptr;
+        void* beta  = nullptr;
+        // Epilogue inputs
+        void* bias          = nullptr;
+        void* scaleA        = nullptr;
+        void* scaleB        = nullptr;
+        void* scaleC        = nullptr;
+        void* scaleD        = nullptr;
+        void* scaleE        = nullptr;
+        void* scaleAlphaVec = nullptr;
+        void* aux           = nullptr;
+        void* amaxD         = nullptr;
+    };
+} // End of namespace rocblaslt
 
 #endif /* _ROCBLASLT_TYPES_H_ */

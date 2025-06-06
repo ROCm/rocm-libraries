@@ -328,6 +328,12 @@ namespace GPUArchitectureGenerator
             else
                 AddCapability(isaVersion, rocRoller::GPUCapability::MaxLdsSize, 1 << 16);
 
+            if(isaVersion.toString().starts_with("gfx95"))
+            {
+                AddCapability(
+                    isaVersion, rocRoller::GPUCapability::DSReadTransposeB6PaddingBytes, 4);
+            }
+
             for(auto const& info : InstructionInfos)
             {
                 if(std::find(std::get<0>(info).begin(), std::get<0>(info).end(), isaVersion)

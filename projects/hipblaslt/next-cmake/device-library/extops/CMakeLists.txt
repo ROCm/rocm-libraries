@@ -78,51 +78,6 @@ foreach(arch IN LISTS archs)
         COMMENT "Creating Layer Norm, Softmax and Amax Assembly for ${arch}"
         DEPENDS ${HIPBLASLT_PYTHON_DEPS}
     )
-    if(arch STREQUAL "gfx942")
-        add_custom_command(
-            OUTPUT
-                "${CMAKE_CURRENT_BINARY_DIR}/A_S_S_F8N_256_4_${arch}.s"
-                "${CMAKE_CURRENT_BINARY_DIR}/A_S_S_B8N_256_4_${arch}.s"
-                "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_F8N_256_4_${arch}.s"
-                "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_B8N_256_4_${arch}.s"
-            COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/AMaxGenerator.py" --is-scale -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_S_F8N_256_4_${arch}.s" -t S -d S -s F8N -w 256 -c 4 --arch ${arch}
-            COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/AMaxGenerator.py" --is-scale -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_S_B8N_256_4_${arch}.s" -t S -d S -s B8N -w 256 -c 4 --arch ${arch}
-            COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/AMaxGenerator.py" --is-scale -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_F8N_256_4_${arch}.s" -t S -d H -s F8N -w 256 -c 4 --arch ${arch}
-            COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/AMaxGenerator.py" --is-scale -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_B8N_256_4_${arch}.s" -t S -d H -s B8N -w 256 -c 4 --arch ${arch}
-            COMMENT "Creating Extra Amax Assembly for gfx942"
-            DEPENDS ${HIPBLASLT_PYTHON_DEPS}
-        )
-        target_sources(extop-obj-${arch}
-            PRIVATE
-                "${CMAKE_CURRENT_BINARY_DIR}/A_S_S_F8N_256_4_${arch}.s"
-                "${CMAKE_CURRENT_BINARY_DIR}/A_S_S_B8N_256_4_${arch}.s"
-                "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_F8N_256_4_${arch}.s"
-                "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_B8N_256_4_${arch}.s"
-        )
-    endif()
-    if(arch STREQUAL "gfx950")
-        add_custom_command(
-            OUTPUT
-                "${CMAKE_CURRENT_BINARY_DIR}/A_S_S_F8_256_4_${arch}.s"
-                "${CMAKE_CURRENT_BINARY_DIR}/A_S_S_B8_256_4_${arch}.s"
-                "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_F8_256_4_${arch}.s"
-                "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_B8_256_4_${arch}.s"
-            COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/AMaxGenerator.py" --is-scale -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_S_F8_256_4_${arch}.s" -t S -d S -s F8 -w 256 -c 4 --arch ${arch}
-            COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/AMaxGenerator.py" --is-scale -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_S_B8_256_4_${arch}.s" -t S -d S -s B8 -w 256 -c 4 --arch ${arch}
-            COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/AMaxGenerator.py" --is-scale -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_F8_256_4_${arch}.s" -t S -d H -s F8 -w 256 -c 4 --arch ${arch}
-            COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/AMaxGenerator.py" --is-scale -o "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_B8_256_4_${arch}.s" -t S -d H -s B8 -w 256 -c 4 --arch ${arch}
-            COMMENT "Creating Extra Amax Assembly for gfx950"
-            WORKING_DIRECTORY ${ops_dir}
-            DEPENDS ${HIPBLASLT_PYTHON_DEPS}
-        )
-        target_sources(extop-obj-${arch}
-            PRIVATE
-                "${CMAKE_CURRENT_BINARY_DIR}/A_S_S_F8_256_4_${arch}.s"
-                "${CMAKE_CURRENT_BINARY_DIR}/A_S_S_B8_256_4_${arch}.s"
-                "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_F8_256_4_${arch}.s"
-                "${CMAKE_CURRENT_BINARY_DIR}/A_S_H_B8_256_4_${arch}.s"
-        )
-    endif()
 
     set(output_code_object_file "${CMAKE_CURRENT_BINARY_DIR}/extop_${arch}.co")
     add_custom_command(

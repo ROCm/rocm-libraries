@@ -1235,13 +1235,15 @@ namespace MatrixMultiplyTest
 
         uint const elementBits = DataTypeInfo::Get(typeAB).elementBits;
 
+        auto const& arch = m_context->targetArchitecture();
+
         std::string const mfmaMnemonic{
             fmt::format("v_mfma_f32_{}x{}x{}_{}", waveM, waveN, waveK, typeStr)};
-        std::string const trLoadMnemonic{transposeLoadMnemonic(elementBits)};
+        std::string const trLoadMnemonic{transposeLoadMnemonic(arch, elementBits)};
 
         uint const numMFMAs            = 4;
         uint const elementsPerWavetile = waveM * waveK / 64;
-        uint const elementsPerTrLoad   = bitsPerTransposeLoad(elementBits) / elementBits;
+        uint const elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
         uint const trLoadsPerMFMA      = elementsPerWavetile / elementsPerTrLoad;
         uint       expectedTrLoads     = 0;
         if(transA == "N")
@@ -1394,8 +1396,10 @@ namespace MatrixMultiplyTest
 
         auto const [transA, transB] = transOp;
 
+        auto const& arch = m_context->targetArchitecture();
+
         uint const        elementBits = DataTypeInfo::Get(typeAB).elementBits;
-        std::string const trLoadMnemonic{transposeLoadMnemonic(elementBits)};
+        std::string const trLoadMnemonic{transposeLoadMnemonic(arch, elementBits)};
 
         std::string modifiers{"cbsz:0b000 blgp:0b000"};
 
@@ -1428,7 +1432,7 @@ namespace MatrixMultiplyTest
 
         uint const numMFMAs            = 2;
         uint const elementsPerWavetile = waveM * waveK / 64;
-        uint const elementsPerTrLoad   = bitsPerTransposeLoad(elementBits) / elementBits;
+        uint const elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
         uint const trLoadsPerMFMA      = elementsPerWavetile / elementsPerTrLoad;
         uint       expectedTrLoads     = 0;
         if(transA == "N")
@@ -1459,8 +1463,10 @@ namespace MatrixMultiplyTest
 
         auto const [transA, transB] = transOp;
 
+        auto const& arch = m_context->targetArchitecture();
+
         uint        elementBits = DataTypeInfo::Get(typeAB).elementBits;
-        std::string trLoadMnemonic{transposeLoadMnemonic(elementBits)};
+        std::string trLoadMnemonic{transposeLoadMnemonic(arch, elementBits)};
 
         // TODO: enable non-TN 16x16x128 tests
         if((transA != "T" || transB != "N") && MFMAK == 128)
@@ -1504,7 +1510,7 @@ namespace MatrixMultiplyTest
 
         uint const numMFMAs            = 2;
         uint const elementsPerWavetile = waveM * waveK / 64;
-        uint const elementsPerTrLoad   = bitsPerTransposeLoad(elementBits) / elementBits;
+        uint const elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
         uint const trLoadsPerMFMA      = elementsPerWavetile / elementsPerTrLoad;
         uint       expectedTrLoads     = 0;
         if(transA == "N")
@@ -1575,8 +1581,10 @@ namespace MatrixMultiplyTest
         auto const transA = transOp.first == "T";
         auto const transB = transOp.second == "T";
 
+        auto const& arch = m_context->targetArchitecture();
+
         uint const        elementBits = DataTypeInfo::Get(typeAB).elementBits;
-        std::string const trLoadMnemonic{transposeLoadMnemonic(elementBits)};
+        std::string const trLoadMnemonic{transposeLoadMnemonic(arch, elementBits)};
 
         std::string modifiers{"cbsz:0b000 blgp:0b000"};
 
@@ -1609,7 +1617,7 @@ namespace MatrixMultiplyTest
 
         uint const numMFMAs            = 2;
         uint const elementsPerWavetile = waveM * waveK / 64;
-        uint const elementsPerTrLoad   = bitsPerTransposeLoad(elementBits) / elementBits;
+        uint const elementsPerTrLoad   = bitsPerTransposeLoad(arch, elementBits) / elementBits;
         uint const trLoadsPerMFMA      = elementsPerWavetile / elementsPerTrLoad;
         uint       expectedTrLoads     = 0;
         if(!transA)

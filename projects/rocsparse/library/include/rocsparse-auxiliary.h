@@ -72,6 +72,37 @@ ROCSPARSE_EXPORT
 rocsparse_status rocsparse_destroy_handle(rocsparse_handle handle);
 
 /*! \ingroup aux_module
+ *  \brief Destroy a rocsparse error descriptor.
+ *
+ *  \details
+ *  \p rocsparse_destroy_error destroys the rocSPARSE error descriptor.
+ *
+ *  @param[in]
+ *  error  the pointer to the rocSPARSE error descriptor, it can be a null pointer.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_internal_error an internal error occurred.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_destroy_error(rocsparse_error error);
+
+/*! \ingroup aux_module
+ *  \brief Eerror message from a rocsparse error descriptor.
+ *
+ *  \details
+ *  \p rocsparse_error_message returns a C-style string that provides detail for the error.
+ *
+ *  @param[in]
+ *  error  the error to the rocSPARSE error descriptor.
+ *
+ *  @return an error message from a rocsparse error descriptor.
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_internal_error an internal error occurred.
+ */
+ROCSPARSE_EXPORT
+const char* rocsparse_error_get_message(rocsparse_error error);
+
+/*! \ingroup aux_module
  *  \brief Return the string representation of a rocSPARSE status code enum name
  *
  *  \details
@@ -1348,6 +1379,8 @@ rocsparse_status rocsparse_destroy_spgeam_descr(rocsparse_spgeam_descr descr);
  *  data        input data
  *  @param[in]
  *  data_size_in_bytes   input data size.
+ *  @param[out]
+ *  error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
@@ -1359,7 +1392,8 @@ rocsparse_status rocsparse_spgeam_set_input(rocsparse_handle       handle,
                                             rocsparse_spgeam_descr descr,
                                             rocsparse_spgeam_input input,
                                             const void*            data,
-                                            size_t                 data_size_in_bytes);
+                                            size_t                 data_size_in_bytes,
+                                            rocsparse_error*       error);
 
 /*! \ingroup aux_module
  *  \brief Get the requested \ref rocsparse_spgeam_output data from the SpGEAM descriptor
@@ -1374,6 +1408,8 @@ rocsparse_status rocsparse_spgeam_set_input(rocsparse_handle       handle,
  *  data        output data
  *  @param[in]
  *  data_size_in_bytes   output data size.
+ *  @param[out]
+ *  error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
@@ -1385,7 +1421,8 @@ rocsparse_status rocsparse_spgeam_get_output(rocsparse_handle        handle,
                                              rocsparse_spgeam_descr  descr,
                                              rocsparse_spgeam_output output,
                                              void*                   data,
-                                             size_t                  data_size_in_bytes);
+                                             size_t                  data_size_in_bytes,
+                                             rocsparse_error*        error);
 
 /*! \ingroup aux_module
    *  \brief Sparse matrix spmv.
@@ -1430,6 +1467,8 @@ rocsparse_status rocsparse_destroy_spmv_descr(rocsparse_spmv_descr descr);
    *  in          input value
    *  @param[in]
    *  size_in_bytes input value size in bytes.
+   *  @param[out]
+   *  error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
    *
    *  \retval rocsparse_status_success the operation completed successfully.
    *  \retval rocsparse_status_invalid_pointer if \p descr or \p in is invalid.
@@ -1441,7 +1480,8 @@ rocsparse_status rocsparse_spmv_set_input(rocsparse_handle     handle,
                                           rocsparse_spmv_descr descr,
                                           rocsparse_spmv_input input,
                                           const void*          in,
-                                          size_t               size_in_bytes);
+                                          size_t               size_in_bytes,
+                                          rocsparse_error*     error);
 
 /*! \ingroup aux_module
  *  \brief Get the fields of the sparse COO matrix descriptor

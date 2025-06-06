@@ -70,6 +70,16 @@ typedef struct ihipStream_t* hipStream_t;
 typedef struct _rocsparse_handle* rocsparse_handle;
 
 /*! \ingroup types_module
+ *  \brief Descriptor of the error.
+ *
+ *  \details
+ *  The rocSPARSE error descriptor is a structure holding the information related to an error
+ *  that occured during the execution of a rocSPARSE routine.
+ *  It should be destroyed using rocsparse_destroy_error().
+ */
+typedef struct _rocsparse_error* rocsparse_error;
+
+/*! \ingroup types_module
  *  \brief Descriptor of the matrix.
  *
  *  \details

@@ -24,8 +24,8 @@
 
 #include "rocsparse_cscmm.hpp"
 
-#include "control.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 template <typename T, typename I, typename J, typename A>
 rocsparse_status rocsparse::cscmm_buffer_size_template(rocsparse_handle          handle,

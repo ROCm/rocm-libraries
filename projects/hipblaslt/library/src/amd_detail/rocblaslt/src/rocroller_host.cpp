@@ -29,21 +29,24 @@
  *********************************************************/
 
 #include "rocroller_host.hpp"
+#include "Debug.hpp"
 #include "handle.h"
 #include "utility.hpp"
 
 #include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 
 using namespace rocRoller;
 
-const int MAX_BITS_WORKGROUPTILE_M = 8;
-const int MAX_BITS_WORKGROUPTILE_N = 8;
-const int MAX_BITS_WORKGROUPTILE_K = 7;
-const int REQUIRED_MULTIPLE_M_N    = 16;
-const int REQUIRED_MULTIPLE_K      = 32;
+const int MAX_BITS_WORKGROUPTILE_M    = 8;
+const int MAX_BITS_WORKGROUPTILE_N    = 8;
+const int MAX_BITS_WORKGROUPTILE_K    = 7;
+const int MAX_BITS_PREFETCH_IN_FLIGHT = 4;
+const int REQUIRED_MULTIPLE_M_N       = 16;
+const int REQUIRED_MULTIPLE_K         = 32;
 
 /**
  * @brief KernelType
@@ -112,6 +115,7 @@ struct MachineInstructionSize
 struct SolutionIndexParameters
 {
     WorkGroupTileSize workgroupTile;
+    int               prefetchInFlight;
 };
 
 /**
@@ -137,13 +141,16 @@ struct SolutionParameters
     int  workgroupSizeY = 2;
 
     // Other options
-    bool loadLDSA  = true;
-    bool loadLDSB  = true;
-    bool storeLDSD = true;
+    bool loadLDSA    = true;
+    bool loadLDSB    = true;
+    bool storeLDSD   = false;
+    bool direct2LDSA = true;
+    bool direct2LDSB = true;
 
     bool prefetch          = true;
     int  prefetchInFlight  = 2;
-    int  prefetchLDSFactor = 2;
+    int  prefetchLDSFactor = 1;
+    bool prefetchMixMemOps = true;
     bool betaInFma         = true;
 
     // Unroll Options
@@ -155,8 +162,13 @@ struct SolutionParameters
     bool streamK        = false;
     bool streamKTwoTile = false;
 
+    // Scale options
     bool loadLDSScaleA = false;
     bool loadLDSScaleB = false;
+    bool swizzleScale  = true;
+    bool prefetchScale = true;
+
+    std::string toString() const;
 };
 
 /**
@@ -238,6 +250,8 @@ namespace std
             result |= ((params.workgroupTile.n / REQUIRED_MULTIPLE_M_N) << pos);
             pos += MAX_BITS_WORKGROUPTILE_N;
             result |= ((params.workgroupTile.m / REQUIRED_MULTIPLE_M_N) << pos);
+            pos += MAX_BITS_WORKGROUPTILE_M;
+            result |= (params.prefetchInFlight << pos);
 
             AssertFatal(result < INT_MAX, "Solution Index is too large");
             // Set top bit indicating it is a rocRoller index
@@ -268,21 +282,22 @@ SolutionIndexParameters indexToParameters(int index)
     pos += MAX_BITS_WORKGROUPTILE_N;
     result.workgroupTile.m
         = ((index >> pos) & mask(MAX_BITS_WORKGROUPTILE_M)) * REQUIRED_MULTIPLE_M_N;
+    pos += MAX_BITS_WORKGROUPTILE_M;
+    result.prefetchInFlight = (index >> pos) & mask(MAX_BITS_PREFETCH_IN_FLIGHT);
 
     return result;
 }
 
-inline std::string scaleModeOption(std::string                                arg,
-                                   RocblasltContractionProblem::ScalingFormat scale)
+inline std::string scaleModeOption(RocblasltContractionProblem::ScalingFormat scale)
 {
     switch(scale)
     {
     case RocblasltContractionProblem::ScalingFormat::Scalar:
-        return arg + " 1";
+        return "1";
     case RocblasltContractionProblem::ScalingFormat::Vector:
-        return arg + " 2";
+        return "2";
     case RocblasltContractionProblem::ScalingFormat::Block:
-        return arg + " 3";
+        return "3";
     default:
         return "";
     }
@@ -295,64 +310,228 @@ inline void logBench(const RocblasltContractionProblem& prob,
                      const int32_t&                     coldIterations,
                      const int32_t&                     hotIterations)
 {
-    log_bench(__func__,
-              "--api_method",
-              "c",
-              "-m",
-              prob.m,
-              "-n",
-              prob.n,
-              "-k",
-              prob.k,
-              "--lda",
-              prob.col_stride_a,
-              "--ldb",
-              prob.col_stride_b,
-              "--ldc",
-              prob.col_stride_c,
-              "--ldd",
-              prob.col_stride_d,
-              "--stride_a",
-              prob.batch_stride_a,
-              "--stride_b",
-              prob.batch_stride_b,
-              "--stride_c",
-              prob.batch_stride_c,
-              "--stride_d",
-              prob.batch_stride_d,
-              "--alpha",
-              *((float*)prob.alpha),
-              "--beta",
-              *((float*)prob.beta),
-              "--transA",
-              prob.trans_a == HIPBLAS_OP_T ? "T" : "N",
-              "--transB",
-              prob.trans_b == HIPBLAS_OP_T ? "T" : "N",
-              "--batch_count",
-              prob.batch_count,
-              scaleModeOption("--scaleA", prob.scaleAType),
-              scaleModeOption("--scaleB", prob.scaleBType),
-              "--a_type",
-              hipDataType_to_bench_string(prob.a_type),
-              "--b_type",
-              hipDataType_to_bench_string(prob.b_type),
-              "--c_type",
-              hipDataType_to_bench_string(prob.c_type),
-              "--d_type",
-              hipDataType_to_bench_string(prob.d_type),
-              "--compute_type",
-              "f32_r",
-              "--algo_method",
-              "index",
-              "--solution_index",
-              solutionIndex,
-              flush ? "--flush" : "",
-              "--rotating",
-              rotatingBufferSize,
-              "--cold_iters",
-              coldIterations,
-              "--iters",
-              hotIterations);
+    auto s = log_str(__func__,
+                     "--api_method",
+                     "c",
+                     "-m",
+                     prob.m,
+                     "-n",
+                     prob.n,
+                     "-k",
+                     prob.k,
+                     "--lda",
+                     prob.col_stride_a,
+                     "--ldb",
+                     prob.col_stride_b,
+                     "--ldc",
+                     prob.col_stride_c,
+                     "--ldd",
+                     prob.col_stride_d,
+                     "--stride_a",
+                     prob.batch_stride_a,
+                     "--stride_b",
+                     prob.batch_stride_b,
+                     "--stride_c",
+                     prob.batch_stride_c,
+                     "--stride_d",
+                     prob.batch_stride_d,
+                     "--alpha",
+                     *((float*)prob.alpha),
+                     "--beta",
+                     *((float*)prob.beta),
+                     "--transA",
+                     prob.trans_a == HIPBLAS_OP_T ? "T" : "N",
+                     "--transB",
+                     prob.trans_b == HIPBLAS_OP_T ? "T" : "N",
+                     "--batch_count",
+                     prob.batch_count,
+                     "--scaleA",
+                     scaleModeOption(prob.scaleAType),
+                     "--scaleB",
+                     scaleModeOption(prob.scaleBType),
+                     "--a_type",
+                     hipDataType_to_bench_string(prob.a_type),
+                     "--b_type",
+                     hipDataType_to_bench_string(prob.b_type),
+                     "--c_type",
+                     hipDataType_to_bench_string(prob.c_type),
+                     "--d_type",
+                     hipDataType_to_bench_string(prob.d_type),
+                     "--compute_type",
+                     "f32_r",
+                     "--algo_method",
+                     "index",
+                     "--solution_index",
+                     solutionIndex,
+                     flush ? "--flush" : "",
+                     "--rotating",
+                     rotatingBufferSize,
+                     "--cold_iters",
+                     coldIterations,
+                     "--iters",
+                     hotIterations);
+
+    if(get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
+        log_bench_from_str(s);
+    if(rocblaslt::Debug::Instance().printLogAsMarker())
+    {
+        rocblaslt::Debug::Instance().logMarkerStart(s.c_str());
+        rocblaslt::Debug::Instance().logMarkerStop();
+    }
+}
+
+inline void logProfile(const RocblasltContractionProblem& prob,
+                       bool                               flush,
+                       const int32_t&                     rotatingBufferSize,
+                       const int32_t&                     coldIterations,
+                       const int32_t&                     hotIterations)
+{
+    log_profile("matmul",
+                "M",
+                prob.m,
+                "N",
+                prob.n,
+                "K",
+                prob.k,
+                "lda",
+                prob.col_stride_a,
+                "ldb",
+                prob.col_stride_b,
+                "ldc",
+                prob.col_stride_c,
+                "ldd",
+                prob.col_stride_d,
+                "stride_a",
+                prob.batch_stride_a,
+                "stride_b",
+                prob.batch_stride_b,
+                "stride_c",
+                prob.batch_stride_c,
+                "stride_d",
+                prob.batch_stride_e,
+                "alpha",
+                *((float*)prob.alpha),
+                "beta",
+                *((float*)prob.beta),
+                "transA",
+                prob.trans_a == HIPBLAS_OP_T ? "T" : "N",
+                "transB",
+                prob.trans_b == HIPBLAS_OP_T ? "T" : "N",
+                "batch_count",
+                prob.batch_count,
+                "scaleA",
+                scaleModeOption(prob.scaleAType),
+                "scaleB",
+                scaleModeOption(prob.scaleBType),
+                "a_type",
+                hipDataType_to_bench_string(prob.a_type),
+                "b_type",
+                hipDataType_to_bench_string(prob.b_type),
+                "c_type",
+                hipDataType_to_bench_string(prob.c_type),
+                "d_type",
+                hipDataType_to_bench_string(prob.d_type),
+                "compute_type",
+                "f32_r",
+                "flush",
+                flush ? "true" : "false",
+                "rotating",
+                rotatingBufferSize,
+                "cold_iters",
+                coldIterations,
+                "iters",
+                hotIterations);
+}
+
+inline void logExtendedProfile(const RocblasltContractionProblem& prob,
+                               const int&                         solutionIndex,
+                               const std::string&                 kernelName,
+                               bool                               flush,
+                               const int32_t&                     rotatingBufferSize,
+                               const int32_t&                     coldIterations,
+                               const int32_t&                     hotIterations)
+{
+    log_profile("matmul",
+                "M",
+                prob.m,
+                "N",
+                prob.n,
+                "K",
+                prob.k,
+                "lda",
+                prob.col_stride_a,
+                "ldb",
+                prob.col_stride_b,
+                "ldc",
+                prob.col_stride_c,
+                "ldd",
+                prob.col_stride_d,
+                "stride_a",
+                prob.batch_stride_a,
+                "stride_b",
+                prob.batch_stride_b,
+                "stride_c",
+                prob.batch_stride_c,
+                "stride_d",
+                prob.batch_stride_e,
+                "alpha",
+                *((float*)prob.alpha),
+                "beta",
+                *((float*)prob.beta),
+                "transA",
+                prob.trans_a == HIPBLAS_OP_T ? "T" : "N",
+                "transB",
+                prob.trans_b == HIPBLAS_OP_T ? "T" : "N",
+                "batch_count",
+                prob.batch_count,
+                "scaleA",
+                scaleModeOption(prob.scaleAType),
+                "scaleB",
+                scaleModeOption(prob.scaleBType),
+                "a_type",
+                hipDataType_to_bench_string(prob.a_type),
+                "b_type",
+                hipDataType_to_bench_string(prob.b_type),
+                "c_type",
+                hipDataType_to_bench_string(prob.c_type),
+                "d_type",
+                hipDataType_to_bench_string(prob.d_type),
+                "compute_type",
+                "f32_r",
+                "flush",
+                flush ? "true" : "false",
+                "rotating",
+                rotatingBufferSize,
+                "cold_iters",
+                coldIterations,
+                "iters",
+                hotIterations,
+                "solution_index",
+                solutionIndex,
+                "kernel_name",
+                kernelName);
+}
+
+std::string SolutionParameters::toString() const
+{
+    std::stringstream result;
+
+    result << "WorkGroupTile:" << workgroupTile.m << "x" << workgroupTile.n << "x"
+           << workgroupTile.k << std::endl;
+    result << "MachineInstruction:" << machineInstruction.m << "x" << machineInstruction.n << "x"
+           << machineInstruction.k << std::endl;
+    result << "WorkgroupSize:" << workgroupSizeX << "x" << workgroupSizeY << std::endl;
+    result << "LDS Usage";
+    result << " A:" << (direct2LDSA ? "DirectToLDS" : (loadLDSA ? "On" : "Off"));
+    result << " B:" << (direct2LDSB ? "DirectToLDS" : (loadLDSB ? "On" : "Off"));
+    result << " D:" << (storeLDSD ? "On" : "Off") << std::endl;
+    result << "Prefetch:" << prefetch << " InFlight:" << prefetchInFlight
+           << " LDSFactor:" << prefetchLDSFactor << " MixMemOps:" << prefetchMixMemOps << std::endl;
+    result << "Block Scale Options:" << " Swizzle Scale:" << swizzleScale
+           << " Prefetch Scale:" << prefetchScale << " loadLDS A:" << loadLDSScaleA
+           << " loadLDS B:" << loadLDSScaleB << std::endl;
+
+    return result.str();
 }
 
 /**
@@ -465,11 +644,12 @@ KernelType genKernelType(const RocblasltContractionProblem& prob)
     return kernelType;
 }
 
-const std::vector<WorkGroupTileSize> possibleTileSizes = {
-    {256, 256, 64}, {256, 128, 64}, {128, 256, 64}, {256, 64, 64}, {64, 256, 64},  {128, 128, 64},
-    {256, 32, 64},  {32, 256, 64},  {128, 64, 64},  {64, 128, 64}, {256, 16, 128}, {16, 256, 128},
-    {128, 32, 64},  {32, 128, 64},  {64, 64, 64},   {64, 32, 64},  {32, 64, 64},   {64, 16, 128},
-    {16, 64, 128},  {32, 32, 64},   {32, 16, 128},  {16, 32, 128}, {16, 16, 128}};
+const std::vector<WorkGroupTileSize> possibleTileSizes
+    = {{256, 256, 128}, {256, 128, 128}, {128, 256, 128}, {256, 64, 128}, {64, 256, 128},
+       {128, 128, 128}, {256, 32, 128},  {32, 256, 128},  {128, 64, 128}, {64, 128, 128},
+       {256, 16, 128},  {16, 256, 128},  {128, 32, 128},  {32, 128, 128}, {64, 64, 128},
+       {64, 32, 128},   {32, 64, 128},   {64, 16, 128},   {16, 64, 128},  {32, 32, 64},
+       {32, 16, 128},   {16, 32, 128},   {16, 16, 128}};
 
 /**
  * @brief Choose the SolutionIndexParameters to use for a given problem
@@ -491,15 +671,41 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     for(auto const& wgt : possibleTileSizes)
     {
         if((requestedAlgoCount == -1)
-           || (prob.m % wgt.m == 0 && prob.n % wgt.n == 0 && prob.k % (wgt.k * 2) == 0))
+           || (prob.m % wgt.m == 0 && prob.n % wgt.n == 0 && prob.k % wgt.k == 0))
         {
-            params.emplace_back(wgt);
+            // FP8 kernels run out of registers with larger tile sizes
+            if((kernelType.typeA == rocRoller::DataType::FP8
+                || kernelType.typeA == rocRoller::DataType::BF8
+                || kernelType.typeB == rocRoller::DataType::FP8
+                || kernelType.typeB == rocRoller::DataType::BF8)
+               && wgt.m + wgt.n > 256)
+                continue;
+
+            params.push_back({wgt, 1});
 
             if(kernelType.typeA == rocRoller::DataType::Half
                || kernelType.typeA == rocRoller::DataType::BFloat16
                || kernelType.typeA == rocRoller::DataType::Float)
             {
                 params.back().workgroupTile.k = 32;
+            }
+
+            // Other datatypes run out of registers when prefetchInFlight is too
+            // large.
+            // There is an error with smaller tile sizes and larger prefetchInFlight.
+            if(kernelType.typeA == rocRoller::DataType::FP4
+               && kernelType.typeB == rocRoller::DataType::FP4 && wgt.m > 32 && wgt.n > 32
+               && (prob.k % (wgt.k * 4) == 0))
+            {
+                params.back().prefetchInFlight = 4;
+            }
+            else if(prob.k % (wgt.k * 2) == 0)
+            {
+                params.back().prefetchInFlight = 2;
+            }
+            else
+            {
+                params.back().prefetchInFlight = 1;
             }
         }
     }
@@ -539,16 +745,70 @@ std::shared_ptr<SolutionParameters>
     }
     else
     {
-        if(gemm->workgroupTile.m % 32 == 0 && gemm->workgroupTile.n % 32 == 0)
+        // F6 with 16X16X256 MI gives higher rnorms than expected with
+        // certain tile sizes
+        if((gemm->kernelType.typeA == rocRoller::DataType::FP6
+            || gemm->kernelType.typeA == rocRoller::DataType::BF6
+            || gemm->kernelType.typeB == rocRoller::DataType::FP6
+            || gemm->kernelType.typeB == rocRoller::DataType::BF6)
+           && ((gemm->workgroupTile.m == 256 && gemm->workgroupTile.n == 64)
+               || (gemm->workgroupTile.m == 64 && gemm->workgroupTile.n == 256)))
             gemm->machineInstruction = {32, 32, 64, 1};
-        else
+        else if(gemm->workgroupTile.k % 128 == 0)
             gemm->machineInstruction = {16, 16, 128, 1};
+        else
+            gemm->machineInstruction = {32, 32, 64, 1};
     }
 
     if(gemm->workgroupTile.m / gemm->machineInstruction.m == 1)
         gemm->workgroupSizeX = gemm->wavefrontSize;
     if(gemm->workgroupTile.n / gemm->machineInstruction.n == 1)
         gemm->workgroupSizeY = 1;
+
+    if(solutionIndexParameters.prefetchInFlight == 1)
+    {
+        gemm->prefetch = false;
+    }
+    else
+    {
+        gemm->prefetchInFlight = solutionIndexParameters.prefetchInFlight;
+    }
+
+    // Direct To LDS only supported in certain situations
+    if(kernelType.typeA == rocRoller::DataType::FP6 || kernelType.typeA == rocRoller::DataType::BF6)
+        gemm->direct2LDSA = false;
+    if(kernelType.typeB == rocRoller::DataType::FP6 || kernelType.typeB == rocRoller::DataType::BF6)
+        gemm->direct2LDSB = false;
+    if((kernelType.typeA == rocRoller::DataType::FP4
+        || kernelType.typeB == rocRoller::DataType::FP4)
+       && (solutionIndexParameters.workgroupTile.m <= 64
+           || solutionIndexParameters.workgroupTile.n <= 64))
+    {
+        gemm->direct2LDSA = false;
+        gemm->direct2LDSB = false;
+    }
+
+    if(gemm->direct2LDSA == false || gemm->direct2LDSB == false)
+    {
+        gemm->prefetchLDSFactor = 2;
+    }
+
+    // Swizzle Scale only support in certain situations
+    // Swizzle Scale also runs out of registers with FP8
+    if(solutionIndexParameters.workgroupTile.m >= 128
+       && solutionIndexParameters.workgroupTile.n >= 128)
+    {
+        gemm->swizzleScale  = true;
+        gemm->loadLDSScaleA = false;
+        gemm->loadLDSScaleB = false;
+    }
+    else
+    {
+        gemm->swizzleScale  = false;
+        gemm->prefetchScale = false;
+        gemm->loadLDSScaleA = true;
+        gemm->loadLDSScaleB = true;
+    }
 
     // LDS can only be used for scaling data with certain workgroup tile sizes
     auto workgroupSize = gemm->workgroupSizeX * gemm->workgroupSizeY;
@@ -561,9 +821,15 @@ std::shared_ptr<SolutionParameters>
           * (gemm->workgroupTile.k
              / (gemm->kernelType.scaleBBlockRowSize * gemm->kernelType.scaleBBlockColSize));
     if(numScaleElementsA % workgroupSize != 0)
-        gemm->loadLDSScaleA = false;
+    {
+        gemm->loadLDSScaleA     = false;
+        gemm->prefetchMixMemOps = false;
+    }
     if(numScaleElementsB % workgroupSize != 0)
-        gemm->loadLDSScaleB = false;
+    {
+        gemm->loadLDSScaleB     = false;
+        gemm->prefetchMixMemOps = false;
+    }
 
     return gemm;
 }
@@ -664,6 +930,8 @@ std::string genKernelName(std::shared_ptr<SolutionParameters> gemm)
     rv << "WGT_";
     rocRoller::streamJoin(
         rv, std::vector{gemm->workgroupTile.m, gemm->workgroupTile.n, gemm->workgroupTile.k}, "x");
+
+    rv << "_UR_" << gemm->prefetchInFlight;
 
     return rv.str();
 }
@@ -843,6 +1111,12 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
     {
+        auto memoryTypeA = MemoryType::WAVE;
+        if(gemm->direct2LDSA)
+            memoryTypeA = MemoryType::WAVE_Direct2LDS;
+        else if(gemm->loadLDSA)
+            memoryTypeA = MemoryType::LDS;
+
         auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
             {gemm->workgroupTile.m, gemm->workgroupTile.k},
             LayoutType::MATRIX_A,
@@ -850,7 +1124,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
              gemm->machineInstruction.n,
              gemm->machineInstruction.k,
              gemm->machineInstruction.b},
-            gemm->loadLDSA ? MemoryType::LDS : MemoryType::WAVE);
+            memoryTypeA);
         params->setDimensionInfo(tagLoadA, macTileA);
     }
 
@@ -871,6 +1145,12 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     }
 
     {
+        auto memoryTypeB = MemoryType::WAVE;
+        if(gemm->direct2LDSB)
+            memoryTypeB = MemoryType::WAVE_Direct2LDS;
+        else if(gemm->loadLDSB)
+            memoryTypeB = MemoryType::LDS;
+
         auto macTileB = KernelGraph::CoordinateGraph::MacroTile(
             {gemm->workgroupTile.k, gemm->workgroupTile.n},
             LayoutType::MATRIX_B,
@@ -878,7 +1158,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
              gemm->machineInstruction.n,
              gemm->machineInstruction.k,
              gemm->machineInstruction.b},
-            gemm->loadLDSB ? MemoryType::LDS : MemoryType::WAVE);
+            memoryTypeB);
         params->setDimensionInfo(tagLoadB, macTileB);
     }
 
@@ -921,8 +1201,10 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         params->setDimensionInfo(tagStoreD, macTileD);
     }
 
-    params->unrollX = gemm->unrollX;
-    params->unrollY = gemm->unrollY;
+    params->unrollX       = gemm->unrollX;
+    params->unrollY       = gemm->unrollY;
+    params->swizzleScale  = gemm->swizzleScale;
+    params->prefetchScale = gemm->prefetchScale;
 
     if(gemm->prefetch)
     {
@@ -930,20 +1212,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         params->unrollK           = gemm->prefetchInFlight;
         params->prefetchInFlight  = gemm->prefetchInFlight;
         params->prefetchLDSFactor = gemm->prefetchLDSFactor;
-
-        params->prefetchMixMemOps = false;
-
-        if(gemm->prefetchLDSFactor != 0)
-        {
-            params->prefetchMixMemOps = true;
-        }
-
-        if((gemm->kernelType.scaleAMode == Operations::ScaleMode::Separate && !gemm->loadLDSScaleA)
-           || (gemm->kernelType.scaleBMode == Operations::ScaleMode::Separate
-               && !gemm->loadLDSScaleB))
-        {
-            params->prefetchMixMemOps = false;
-        }
+        params->prefetchMixMemOps = gemm->prefetchMixMemOps;
     }
     else
     {
@@ -1141,8 +1410,11 @@ rocblaslt_status
                              size_t                                          maxWorkSpaceBytes)
 {
     heuristicResults.resize(possibleTileSizes.size());
-    int returnAlgoCount;
-    return getRocRollerBestSolutions(handle, prob, -1, heuristicResults.data(), &returnAlgoCount);
+    int  returnAlgoCount;
+    auto result
+        = getRocRollerBestSolutions(handle, prob, -1, heuristicResults.data(), &returnAlgoCount);
+    heuristicResults.resize(returnAlgoCount);
+    return result;
 }
 
 /**
@@ -1364,19 +1636,42 @@ rocblaslt_status runRocRollerContractionProblem(rocblaslt_handle                
         algo = &heuristicResult.algo;
     }
 
+    // Get the values of static member variables flush and rotating size from UserClientArguments
+    UserClientArguments ClientArguments;
+    bool                flush              = ClientArguments.GetFlushValue();
+    int32_t             rotatingBufferSize = ClientArguments.GetRotatingBufferSizeValue();
+    int32_t             hotIterations      = ClientArguments.GetHotIterationsValue();
+    int32_t             coldIterations     = ClientArguments.GetColdIterationsValue();
+
     int* solutionIndex = (int*)algo->data;
 
-    if(get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
+    if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
+       || rocblaslt::Debug::Instance().printLogAsMarker())
     {
-        // TODO: Fill in other parameters after merge with
-        //       mainline.
-        logBench(prob, *solutionIndex, false, 0, 0, 0);
+        logBench(prob, *solutionIndex, flush, rotatingBufferSize, coldIterations, hotIterations);
+    }
+
+    if(get_logger_layer_mode() & rocblaslt_layer_mode_log_profile)
+    {
+        logProfile(prob, flush, rotatingBufferSize, coldIterations, hotIterations);
     }
 
     std::shared_ptr<GemmKernel> kernel;
     auto                        status = getKernelFromAlgo(handle, prob, algo, kernel);
     if(status != rocblaslt_status_success)
         return status;
+
+    if(get_logger_layer_mode() & rocblaslt_layer_mode_log_extended_profile)
+    {
+        auto kernelName = genKernelName(kernel->params);
+        logExtendedProfile(prob,
+                           *solutionIndex,
+                           kernelName,
+                           flush,
+                           rotatingBufferSize,
+                           coldIterations,
+                           hotIterations);
+    }
 
     return runGemmKernel(kernel, prob);
 }

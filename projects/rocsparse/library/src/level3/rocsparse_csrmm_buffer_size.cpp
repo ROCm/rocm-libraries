@@ -27,8 +27,8 @@
 #include "../conversion/rocsparse_csr2coo.hpp"
 #include "rocsparse_csrmm.hpp"
 
-#include "control.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_csrmm_alg value_)

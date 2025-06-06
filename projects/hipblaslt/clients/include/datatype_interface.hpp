@@ -52,12 +52,10 @@ constexpr auto hipblaslt_type2datatype()
         return HIP_R_8F_E4M3_FNUZ;
     if(std::is_same<T, hipblaslt_bf8_fnuz>{})
         return HIP_R_8F_E5M2_FNUZ;
-#ifdef ROCM_USE_FLOAT8
     if(std::is_same<T, hipblaslt_f8>{})
         return HIP_R_8F_E4M3;
     if(std::is_same<T, hipblaslt_bf8>{})
         return HIP_R_8F_E5M2;
-#endif
     if(std::is_same<T, int32_t>{})
         return HIP_R_32I;
     if(std::is_same<T, hipblasLtInt8>{})
@@ -111,10 +109,8 @@ inline std::size_t realDataTypeSize(hipDataType dtype)
         {HIP_R_64U, 8},
         {HIP_R_8F_E4M3_FNUZ, 1},
         {HIP_R_8F_E5M2_FNUZ, 1},
-#ifdef ROCM_USE_FLOAT8
         {HIP_R_8F_E4M3, 1},
         {HIP_R_8F_E5M2, 1},
-#endif
     };
 
     return dtypeMap.at(dtype);

@@ -28,6 +28,7 @@
 
 #include <Tensile/AMDGPU.hpp>
 #include <Tensile/Tensile.hpp>
+#include <Tensile/analytical/Utils.hpp>
 
 #include <hip/hip_runtime.h>
 
@@ -41,6 +42,8 @@ namespace TensileLite
             HipAMDGPU(hipDeviceProp_t const& prop);
 
             hipDeviceProp_t properties;
+
+            std::shared_ptr<analytical::Hardware> analyticalHardware;
 
             virtual std::string archName() const override;
         };

@@ -97,11 +97,12 @@ Tests:
   algo_method: 0
   api_method: 2
   rotating: 512
-  gpu_arch: '94?'
 
-- name: matmul_fp8n_bf16
+# change to f8 for gfx950, otherwise we'll get "no solution found"
+# This also works for gfx942 since client automatically converts f8 to f8n on gfx942
+- name: matmul_fp8_bf16
   function:
-    matmul: *f8_fnuz_precision_dst_bf16
+    matmul: *f8_precision_dst_bf16
   matrix_size:
     - { M:   896,    N:    16,    K:  5120  }
     - { M:   896,    N:    64,    K:  5120  }
@@ -185,5 +186,4 @@ Tests:
   algo_method: 0
   api_method: 2
   rotating: 512
-  gpu_arch: '94?'
 ...

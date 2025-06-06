@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -113,7 +113,7 @@ void simpleGroupedGemmFixedMKExt(hipblasLtHandle_t     handle,
                                  int64_t               max_workspace_size,
                                  hipStream_t           stream)
 {
-    hipblaslt_ext::GemmPreferenceV2 gemmPref;
+    hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
     hipblaslt_ext::GroupedGemm groupedgemm(handle,
                                            trans_a,
@@ -124,10 +124,10 @@ void simpleGroupedGemmFixedMKExt(hipblasLtHandle_t     handle,
                                            HIP_R_16F,
                                            HIPBLAS_COMPUTE_32F_FAST_16F);
 
-    std::vector<hipblaslt_ext::GemmEpilogueV2> epilogue{
+    std::vector<hipblaslt_ext::GemmEpilogue> epilogue{
         hipblaslt_ext::
-            GemmEpilogueV2()}; // No action needed, default is HIPBLASLT_EPILOGUE_DEFAULT. (Gemm only)
-    std::vector<hipblaslt_ext::GemmInputsV2> inputs(m.size());
+            GemmEpilogue()}; // No action needed, default is HIPBLASLT_EPILOGUE_DEFAULT. (Gemm only)
+    std::vector<hipblaslt_ext::GemmInputs> inputs(m.size());
     for(int i = 0; i < m.size(); i++)
     {
         inputs[i].setA(d_a[i]);
@@ -155,7 +155,7 @@ void simpleGroupedGemmFixedMKExt(hipblasLtHandle_t     handle,
     CHECK_HIP_ERROR(hipMalloc(&d_n, m.size() * sizeof(int64_t)));
     CHECK_HIP_ERROR(hipMemcpy(d_n, n.data(), m.size() * sizeof(int64_t), hipMemcpyHostToDevice));
 
-    // hipblaslt_ext::GemmEpilogueV2 supports broadcasting
+    // hipblaslt_ext::GemmEpilogue supports broadcasting
     groupedgemm.setProblem(m, sum_of_n_vec, k, batch_count, epilogue, inputs);
 
     // Get the default hipblaslt_ext::UserArguments aafter setProblem

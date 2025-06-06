@@ -118,10 +118,10 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   # RocRoller integration
   include(FetchContent)
   include(../cmake/Utilities.cmake)
-  if(USE_ROCROLLER)
+  if(HIPBLASLT_USE_ROCROLLER)
       _save_var(BUILD_TESTING)
       set(BUILD_TESTING OFF)
-      add_definitions(-DUSE_ROCROLLER)
+      add_definitions(-DHIPBLASLT_USE_ROCROLLER)
 
       FetchContent_Declare(
         mxDataGenerator

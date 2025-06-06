@@ -24,7 +24,7 @@
 
 #pragma once
 
-#include "handle.h"
+#include "rocsparse_handle.hpp"
 
 #include "rocsparse_csrmv.hpp"
 

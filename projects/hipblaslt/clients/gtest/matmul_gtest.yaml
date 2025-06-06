@@ -2016,7 +2016,7 @@ Tests:
   unit_check: 0
   norm_check: 1
   algo_method: [2]
-  solution_index: -2146957310  # Workgroup tile size = 256x256x64
+  solution_index: -2138568700  # Workgroup tile size = 256x256x128
   gpu_arch: '950'
 
 # Workgroup tile size = 128x128x64
@@ -2038,7 +2038,7 @@ Tests:
   unit_check: 0
   norm_check: 1
   algo_method: [2]
-  solution_index: -2147220478  # Workgroup tile size = 128x128x64
+  solution_index: -2138831868  # Workgroup tile size = 128x128x128
   gpu_arch: '950'
 
 - name: matmul_mx_multiple_kernels

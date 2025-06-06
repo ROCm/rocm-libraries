@@ -30,7 +30,6 @@
 #if __cplusplus < 201103L || (!defined(__HCC__) && !defined(__HIPCC__))
 /*! \brief Struct to represent a 8 bit floating-point number. */
 
-#if !HIPBLASLT_USE_F8_FNUZ_BC
 typedef struct
 {
     uint8_t __x;
@@ -41,9 +40,6 @@ typedef struct
     uint8_t __x;
 } hipblaslt_bf8_fnuz;
 
-#endif
-
-#if !HIPBLASLT_USE_F8_OCP_BC
 typedef struct
 {
     uint8_t __x;
@@ -53,7 +49,6 @@ typedef struct
 {
     uint8_t __x;
 } hipblaslt_bf8;
-#endif
 
 #else // __cplusplus < 201103L || (!defined(__HCC__) && !defined(__HIPCC__))
 
@@ -61,7 +56,6 @@ typedef struct
 #define HIP_HOST __host__
 #define HIP_DEVICE __device__
 
-#if !HIPBLASLT_USE_F8_FNUZ_BC
 // NANOO E4M3
 struct HIPBLASLT_EXPORT hipblaslt_f8_fnuz: public __hip_fp8_e4m3_fnuz
 {
@@ -109,9 +103,7 @@ struct HIPBLASLT_EXPORT hipblaslt_f8_fnuz: public __hip_fp8_e4m3_fnuz
         return *this;
     }
 };
-#endif // #if !HIPBLASLT_USE_F8_FNUZ_BC
 
-#if !HIPBLASLT_USE_F8_OCP_BC
 // OCPFP8 E4M3
 struct HIPBLASLT_EXPORT hipblaslt_f8: public __hip_fp8_e4m3
 {
@@ -163,9 +155,7 @@ struct HIPBLASLT_EXPORT hipblaslt_f8: public __hip_fp8_e4m3
         return *this;
     }
 };
-#endif // #if !HIPBLASLT_USE_F8_OCP_BC
 
-#if !HIPBLASLT_USE_F8_FNUZ_BC
 // NANOO E5M2
 struct HIPBLASLT_EXPORT hipblaslt_bf8_fnuz: public __hip_fp8_e5m2_fnuz
 {
@@ -214,10 +204,8 @@ struct HIPBLASLT_EXPORT hipblaslt_bf8_fnuz: public __hip_fp8_e5m2_fnuz
         return *this;
     }
 };
-#endif // #if !HIPBLASLT_USE_F8_FNUZ_BC
 
 
-#if !HIPBLASLT_USE_F8_OCP_BC
 // OCPFP8 E5M2
 struct HIPBLASLT_EXPORT hipblaslt_bf8: public __hip_fp8_e5m2
 {
@@ -271,8 +259,6 @@ struct HIPBLASLT_EXPORT hipblaslt_bf8: public __hip_fp8_e5m2
         return *this;
     }
 };
-#endif // #if !HIPBLASLT_USE_F8_OCP_BC
-
 
 namespace std
 {

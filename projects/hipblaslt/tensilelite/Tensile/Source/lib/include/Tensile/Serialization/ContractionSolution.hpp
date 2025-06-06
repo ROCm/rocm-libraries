@@ -125,6 +125,7 @@ namespace TensileLite
                 iot::mapRequired(io, "CUOccupancy", s.CUOccupancy);
                 iot::mapRequired(io, "PrefetchGlobalRead", s.PrefetchGlobalRead);
                 iot::mapRequired(io, "MathClocksUnrolledLoop", s.MathClocksUnrolledLoop);
+                iot::mapRequired(io, "synchronizerSizePerWG", s.synchronizerSizePerWG);
             }
 
             const static bool flow = false;

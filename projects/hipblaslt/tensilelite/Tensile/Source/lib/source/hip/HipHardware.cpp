@@ -38,6 +38,10 @@ namespace TensileLite
                      std::string(prop.name))
             , properties(prop)
         {
+            if(analytical::Hardware::isHardwareSupported(prop))
+            {
+                analyticalHardware = std::make_shared<analytical::Hardware>(prop);
+            }
         }
 
         std::string HipAMDGPU::archName() const

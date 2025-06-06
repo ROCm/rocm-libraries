@@ -38,8 +38,13 @@ namespace rocRoller::KernelGraph
                                             int                         coordinate,
                                             Connections::ConnectionSpec conn)
     {
-        auto key = key_type{control, conn};
-        m_map.insert_or_assign(key, coordinate);
+        auto iter = m_map.find(control);
+        if(iter == m_map.end())
+            m_map[control].emplace(conn, coordinate);
+        else
+            iter->second.insert_or_assign(conn, coordinate);
+
+        m_coordToControl[coordinate].insert(control);
     }
 
     void ControlToCoordinateMapper::connect(int control, int coordinate, NaryArgument arg)
@@ -51,21 +56,29 @@ namespace rocRoller::KernelGraph
                                                int                         coordinate,
                                                Connections::ConnectionSpec conn)
     {
-        auto key = key_type{control, conn};
-        m_map.erase(key);
+        auto iter = m_map.find(control);
+        if(iter != m_map.end())
+        {
+            auto coord = iter->second.at(conn);
+            iter->second.erase(conn);
+
+            m_coordToControl.at(coord).erase(control);
+        }
     }
 
     std::vector<ControlToCoordinateMapper::Connection>
         ControlToCoordinateMapper::getConnections(int control) const
     {
         std::vector<Connection> rv;
-        for(auto const& kv : m_map)
+        auto                    iter = m_map.find(control);
+        if(iter != m_map.end())
         {
-            if(std::get<0>(kv.first) == control)
+            for(auto const& [conn, coord] : iter->second)
             {
-                rv.push_back({std::get<0>(kv.first), kv.second, std::get<1>(kv.first)});
+                rv.push_back({control, coord, conn});
             }
         }
+
         return rv;
     }
 
@@ -75,58 +88,69 @@ namespace rocRoller::KernelGraph
         std::vector<Connection> rv;
         rv.reserve(m_map.size());
 
-        for(auto const& kv : m_map)
-        {
-            //cppcheck-suppress useStlAlgorithm
-            rv.push_back({std::get<0>(kv.first), kv.second, std::get<1>(kv.first)});
-        }
+        for(auto const& [control, conn_coord] : m_map)
+            for(auto const& [conn, coord] : conn_coord)
+                rv.push_back({control, coord, conn});
 
         return rv;
     }
 
     std::vector<ControlToCoordinateMapper::Connection>
-        ControlToCoordinateMapper::getCoordinateConnections(int coordinate) const
+        ControlToCoordinateMapper::getCoordinateConnections(int requested_coordinate) const
     {
         std::vector<Connection> rv;
-        for(auto const& kv : m_map)
+        auto                    iter = m_coordToControl.find(requested_coordinate);
+        if(iter != m_coordToControl.end())
         {
-            if(kv.second == coordinate)
+            for(auto const& control : iter->second)
             {
-                rv.push_back({std::get<0>(kv.first), kv.second, std::get<1>(kv.first)});
+                // TODO: consider making m_coordToControl store {control, conn} to
+                //       speed up search
+                for(auto const& [conn, coord] : m_map.at(control))
+                {
+                    if(coord == requested_coordinate)
+                    {
+                        rv.push_back({control, requested_coordinate, conn});
+                        break;
+                    }
+                }
             }
         }
+
         return rv;
     }
 
     void ControlToCoordinateMapper::purge(int control)
     {
-        std::vector<ControlToCoordinateMapper::key_type> purge;
-        for(auto const& kv : m_map)
+        auto iter = m_map.find(control);
+        if(iter != m_map.end())
         {
-            if(std::get<0>(kv.first) == control)
+            for(auto const& [conn, coord] : m_map.at(control))
             {
-                purge.push_back(kv.first);
+                m_coordToControl.at(coord).erase(control);
             }
-        }
-        for(auto const& k : purge)
-        {
-            m_map.erase(k);
+            m_map.erase(iter);
         }
     }
 
-    void ControlToCoordinateMapper::purgeMappingsTo(int coordinate)
+    void ControlToCoordinateMapper::purgeMappingsTo(int requested_coordinate)
     {
-        std::vector<ControlToCoordinateMapper::key_type> toPurge;
-        for(auto const& kv : m_map)
+        auto iter = m_coordToControl.find(requested_coordinate);
+        if(iter != m_coordToControl.end())
         {
-            if(kv.second == coordinate)
+            for(auto const& control : iter->second)
             {
-                toPurge.push_back(kv.first);
+                for(auto const& [conn, coord] : m_map.at(control))
+                {
+                    if(coord == requested_coordinate)
+                    {
+                        m_map.at(control).erase(conn);
+                        break;
+                    }
+                }
             }
-        }
-        for(auto const& k : toPurge)
-        {
-            m_map.erase(k);
+
+            m_coordToControl.erase(iter);
         }
     }
 
@@ -136,28 +160,27 @@ namespace rocRoller::KernelGraph
     {
         std::stringstream ss;
 
-        // Sort the map keys so that dot output is consistent.
-        // Currently only sorting based on the control index (first value of key tuple) and
-        // coordinate index (the value in the map). If we ever output additional information
-        // we'll need to take it into account when sorting as well.
-        std::vector<key_type> keys;
-        for(auto kv : m_map)
+        // Sort the map keys so that dot output is consistent.  Currently only
+        // sorting based on the control index (first value of key tuple) and
+        // coordinate index. If we ever output additional information we'll
+        // need to take it into account when sorting as well.
+        std::vector<std::pair<key_type, int>> key_coords;
+        key_coords.reserve(m_map.size()); // just a rough estimate
+        for(auto const& [control, conn_coord] : m_map)
         {
-            keys.insert(std::upper_bound(keys.begin(),
-                                         keys.end(),
-                                         kv.first,
-                                         [&](key_type a, key_type b) {
-                                             return (std::get<0>(a) < std::get<0>(b))
-                                                    || (std::get<0>(a) == std::get<0>(b)
-                                                        && m_map.at(a) < m_map.at(b));
-                                         }),
-                        kv.first);
+            for(auto const& [conn, coordinate] : conn_coord)
+            {
+                key_coords.emplace_back(std::make_tuple(control, conn), coordinate);
+            }
         }
+        std::sort(key_coords.begin(), key_coords.end(), [](auto const& a, auto const& b) {
+            return (std::get<0>(a.first) < std::get<0>(b.first))
+                   || (std::get<0>(a.first) == std::get<0>(b.first) && a.second < b.second);
+        });
 
-        for(auto key : keys)
+        for(auto const& [key, coordNode] : key_coords)
         {
             auto const& [ctrlNode, spec] = key;
-            auto coordNode               = m_map.at(key);
 
             auto coordKey = concatenate(coord, coordNode);
             auto ctrlKey  = concatenate(cntrl, ctrlNode);
@@ -181,7 +204,7 @@ namespace rocRoller::KernelGraph
         std::set<int> retval;
         for(auto it = m_map.begin(); it != m_map.end(); ++it)
         {
-            retval.insert(std::get<0>(it->first));
+            retval.insert(it->first);
         }
         return std::vector<int>(retval.begin(), retval.end());
     }

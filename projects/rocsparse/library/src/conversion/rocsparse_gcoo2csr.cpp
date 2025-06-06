@@ -23,7 +23,7 @@
 #include "rocsparse_gcoo2csr.hpp"
 #include "rocsparse_convert_array.hpp"
 #include "rocsparse_coo2csr.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 rocsparse_status rocsparse::gcoo2csr(rocsparse_handle     handle_,
                                      rocsparse_indextype  source_row_type_,

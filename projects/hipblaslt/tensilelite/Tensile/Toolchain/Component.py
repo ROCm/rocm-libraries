@@ -24,13 +24,14 @@
 ################################################################################
 from os import name as os_name
 from os import environ
+from os import sysconf
 from pathlib import Path
 from re import search, IGNORECASE
 from shlex import split
 from subprocess import check_output, STDOUT, CalledProcessError, PIPE, run
 from typing import List
 
-from Tensile.Common import SemanticVersion
+from Tensile.Common import SemanticVersion, print2
 from .Validators import ToolchainDefaults, validateToolchain
 
 def _invoke(args: List[str], desc: str=""):
@@ -43,7 +44,7 @@ def _invoke(args: List[str], desc: str=""):
   Return:
       subprocess output
   """
-  #print1(f"{desc}: {' '.join(args)}")
+  print2(f"{desc}: {' '.join(args)}")
   try:
       out = check_output(args, stderr=STDOUT)
   except CalledProcessError as err:
@@ -139,7 +140,7 @@ class Assembler(Component):
     """
 
     def __init__(self, component_path: Path, co_version: str, debug: bool=False):
-        """Constructs instance of assmebler.
+        """Constructs an instance of an Assembler.
 
         Args:
             assembler_path: The path to the assember.
@@ -205,7 +206,7 @@ class Compiler(Component):
     """
 
     def __init__(self, compiler_path: Path, build_id_kind: str, asan_build: bool=False, save_temps: bool=False):
-        """Constructs and instance of a Compiler."""
+        """Constructs an instance of a Compiler."""
         super(Compiler, self).__init__(compiler_path)
 
         self.default_args = [
@@ -267,7 +268,7 @@ class Bundler(Component):
     """
 
     def __init__(self, bundler_path: Path):
-        """Constructs and instance of a Bunder."""
+        """Constructs an instance of a Bunder."""
         super(Bundler, self).__init__(bundler_path)
 
     def targets(self, objFile: str):
@@ -339,7 +340,7 @@ class Linker(Component):
     """
 
     def __init__(self, linker_path: Path, build_id_kind: str):
-        """Constructs and instance of a Linker."""
+        """Constructs an instance of a Linker."""
         super(Linker, self).__init__(linker_path)
         self.default_args = [
                 self._component_path,
@@ -347,9 +348,33 @@ class Linker(Component):
                 "-Xlinker", f"--build-id={build_id_kind}",
         ]
 
+    def _response_file_args(self, srcPaths: List[str], destPath: str) -> List[str]:
+        """
+        Create a response file and return the arguments to pass to the linker.
+
+        Since it is possible for the character limit of the operating system to be exceeded 
+        when invoking the linker, LLVM allows the provision of arguments via a "response file"
+        Reference: https://llvm.org/docs/CommandLine.html#response-files
+        """
+        with open(Path.cwd() / "clang_args.txt", "wt") as file:
+            file.write(" ".join(srcPaths).replace('\\', '\\\\') if os_name == "nt" else " ".join(srcPaths))
+        return [*(self.default_args), "-o", destPath, "@clang_args.txt"]
+
+    def _use_response_file(self, args: List[str]) -> bool:
+        """
+        Determine if a response file should be used for the linker arguments.
+
+        On Windows: always use response file due to 8191 char limit
+        On Unix: check against system argument length limit
+        """
+        if os_name == "nt":
+            return True  
+        line_length = sum(len(arg) for arg in args) + len(args) - 1
+        return line_length >= sysconf("SC_ARG_MAX")
 
     def __call__(self, srcPaths: List[str], destPath: str):
-        """Links object files into a code object file.
+        """
+        Links object files into a code object file.
 
         Args:
             srcPaths: A list of paths to object files.
@@ -357,13 +382,9 @@ class Linker(Component):
         Raises:
             RuntimeError: If linker invocation fails.
         """
-        if os_name == "nt":
-            # Use args file on Windows b/c the command may exceed the limit of 8191 characters
-            with open(Path.cwd() / "clang_args.txt", "wt") as file:
-                file.write(" ".join(srcPaths).replace('\\', '\\\\'))
-            args = [*(self.default_args), "-o", destPath, "@clang_args.txt"]
-        else:
-            args = [*(self.default_args), *srcPaths, "-o", destPath]
+        args = [*(self.default_args), *srcPaths, "-o", destPath]
+        if self._use_response_file(args):
+            args = self._response_file_args(srcPaths, destPath)
         return _invoke(args, "Linking assembly object files into code object (*.o -> .co)")
 
 

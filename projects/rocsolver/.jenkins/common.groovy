@@ -52,6 +52,7 @@ def runCompileCommand(platform, project, jobName, boolean sameOrg=false, boolean
     getDeps << auxiliary.getLibrary('rocPRIM', platform.jenkinsLabel, null, sameOrg)
     def command = """#!/usr/bin/env bash
                 set -x
+                export VERBOSE=1
                 cd ${project.paths.project_build_prefix}
                 ${getDeps.join('\\n')}
                 ${auxiliary.exitIfNotSuccess()}

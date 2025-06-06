@@ -130,26 +130,15 @@ namespace rocRoller
             }
         }
 
-        void insertPreLoopCopies(KernelGraph& graph, int forLoop, auto const& copies)
-        {
-            auto preNOP  = graph.control.addElement(NOP());
-            auto postNOP = graph.control.addElement(NOP());
-            for(auto copy : copies)
-            {
-                graph.control.addElement(Sequence(), {preNOP}, {copy});
-                graph.control.addElement(Sequence(), {copy}, {postNOP});
-            }
-            insertBefore(graph, forLoop, preNOP, postNOP);
-        }
-
         void insertInLoopCopies(KernelGraph& graph, auto const& copies)
         {
             for(auto copy : copies)
             {
-                for(auto exchange : copy.second)
-                {
-                    insertBefore(graph, exchange, copy.first, copy.first);
-                }
+                auto exchangeTags = copy.second;
+                std::sort(exchangeTags.begin(),
+                          exchangeTags.end(),
+                          topoComp(std::make_shared<KernelGraph>(graph)));
+                insertBefore(graph, exchangeTags[0], copy.first, copy.first);
             }
         }
 
@@ -243,7 +232,7 @@ namespace rocRoller
                         for(auto c : graph.mapper.getCoordinateConnections(exchangeTileTag.value()))
                         {
                             auto maybeExchange = graph.control.get<Exchange>(c.control);
-                            if(maybeExchange.has_value())
+                            if(maybeExchange)
                             {
                                 exchangeTag = c.control;
                                 break;

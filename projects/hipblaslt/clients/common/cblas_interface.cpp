@@ -123,14 +123,12 @@ void sat_cast_mul(void* dst, hipDataType typeD, customVector<TcCast>& src, Tc sc
         sat_cast_mul<hipblaslt_bf8_fnuz, TcCast, Tc>(
             static_cast<hipblaslt_bf8_fnuz*>(dst), src, scale, size);
         break;
-#ifdef ROCM_USE_FLOAT8
     case HIP_R_8F_E4M3:
         sat_cast_mul<hipblaslt_f8, TcCast, Tc>(static_cast<hipblaslt_f8*>(dst), src, scale, size);
         break;
     case HIP_R_8F_E5M2:
         sat_cast_mul<hipblaslt_bf8, TcCast, Tc>(static_cast<hipblaslt_bf8*>(dst), src, scale, size);
         break;
-#endif
     case HIP_R_32I:
         sat_cast_mul<int32_t, TcCast, Tc>(static_cast<int32_t*>(dst), src, scale, size);
         break;
@@ -150,11 +148,9 @@ void cast_mul(customVector<TcCast>& dst, const TiA* src, size_t size)
                  || (!std::is_same<TiA, hipblaslt_bf8_fnuz>::value
                      && !std::is_same<TiA, hipblaslt_f8_fnuz>::value))
     {
-#ifdef ROCM_USE_FLOAT8
         if constexpr(std::is_same<TcCast, float>::value
                      || !(std::is_same<TiA, hipblaslt_bf8>::value
                           || std::is_same<TiA, hipblaslt_f8>::value))
-#endif
             for(size_t i = 0; i < size; i++)
             {
                 dst[i] = static_cast<TcCast>(src[i]);
@@ -186,14 +182,12 @@ void cast_mul(customVector<TcCast>& dst, const void* src, hipDataType TiA, size_
         cast_mul<TcCast, hipblaslt_bf8_fnuz>(
             dst, static_cast<const hipblaslt_bf8_fnuz*>(src), size);
         break;
-#ifdef ROCM_USE_FLOAT8
     case HIP_R_8F_E4M3:
         cast_mul<TcCast, hipblaslt_f8>(dst, static_cast<const hipblaslt_f8*>(src), size);
         break;
     case HIP_R_8F_E5M2:
         cast_mul<TcCast, hipblaslt_bf8>(dst, static_cast<const hipblaslt_bf8*>(src), size);
         break;
-#endif
     case HIP_R_32I:
         cast_mul<TcCast, int32_t>(dst, static_cast<const int32_t*>(src), size);
         break;
@@ -222,12 +216,10 @@ void cast_mul(customVector<TcCast>& dst,
                  || (!std::is_same<TiA, hipblaslt_bf8_fnuz>::value
                      && !std::is_same<TiA, hipblaslt_f8_fnuz>::value))
     {
-#ifdef ROCM_USE_FLOAT8
         if constexpr(std::is_same<TcCast, float>::value
                      || !(std::is_same<TiA, hipblaslt_bf8>::value
                           || std::is_same<TiA, hipblaslt_f8>::value))
         {
-#endif
             if(AlphaVec != nullptr)
             {
                 if(transA)
@@ -298,9 +290,7 @@ void cast_mul(customVector<TcCast>& dst,
                     }
                 }
             }
-#ifdef ROCM_USE_FLOAT8
         }
-#endif
     }
 }
 
@@ -391,7 +381,6 @@ void cast_mul(customVector<TcCast>& dst,
                                                  size,
                                                  isMXFormat);
         break;
-#ifdef ROCM_USE_FLOAT8
     case HIP_R_8F_E4M3:
         cast_mul<TcCast, Tc, hipblaslt_f8>(dst,
                                            static_cast<const hipblaslt_f8*>(src),
@@ -416,7 +405,6 @@ void cast_mul(customVector<TcCast>& dst,
                                             size,
                                             isMXFormat);
         break;
-#endif
     case HIP_R_32I:
         cast_mul<TcCast, Tc, int32_t>(dst,
                                       static_cast<const int32_t*>(src),
@@ -462,14 +450,12 @@ void cast_mul_with_Tci(customVector<TcCast>& dst,
                         && (!std::is_same<TiA, hipblaslt_bf8_fnuz>::value
                             && !std::is_same<TiA, hipblaslt_f8_fnuz>::value))
     {
-#ifdef ROCM_USE_FLOAT8
         if constexpr(std::is_same<TcCast, float>::value
                      || (!std::is_same<TciACast, hipblaslt_bf8>::value
                          && !std::is_same<TciACast, hipblaslt_f8>::value)
                             && (!std::is_same<TiA, hipblaslt_bf8>::value
                                 && !std::is_same<TiA, hipblaslt_f8>::value))
         {
-#endif
             if(AlphaVec != nullptr)
             {
                 if(transA)
@@ -514,9 +500,7 @@ void cast_mul_with_Tci(customVector<TcCast>& dst,
                     }
                 }
             }
-#ifdef ROCM_USE_FLOAT8
         }
-#endif
     }
 }
 
@@ -603,7 +587,6 @@ void cast_mul_with_Tci(customVector<TcCast>& dst,
             k,
             size);
         break;
-#ifdef ROCM_USE_FLOAT8
     case HIP_R_8F_E4M3:
         cast_mul_with_Tci<TcCast, Tc, TciACast, hipblaslt_f8>(dst,
                                                               static_cast<const hipblaslt_f8*>(src),
@@ -627,7 +610,6 @@ void cast_mul_with_Tci(customVector<TcCast>& dst,
             k,
             size);
         break;
-#endif
     case HIP_R_32I:
         cast_mul_with_Tci<TcCast, Tc, TciACast, int32_t>(dst,
                                                          static_cast<const int32_t*>(src),
@@ -696,7 +678,6 @@ void cast_mul_with_Tci(customVector<TcCast>& dst,
         cast_mul_with_Tci<TcCast, Tc, hipblaslt_bf8_fnuz>(
             dst, src, TiA, isScaleAVec, scaleAVec, AlphaVec, transA, m, k, size);
         break;
-#ifdef ROCM_USE_FLOAT8
     case HIP_R_8F_E4M3:
         cast_mul_with_Tci<TcCast, Tc, hipblaslt_f8>(
             dst, src, TiA, isScaleAVec, scaleAVec, AlphaVec, transA, m, k, size);
@@ -705,7 +686,6 @@ void cast_mul_with_Tci(customVector<TcCast>& dst,
         cast_mul_with_Tci<TcCast, Tc, hipblaslt_bf8>(
             dst, src, TiA, isScaleAVec, scaleAVec, AlphaVec, transA, m, k, size);
         break;
-#endif
     case HIP_R_32I:
         cast_mul_with_Tci<TcCast, Tc, int32_t>(
             dst, src, TiA, isScaleAVec, scaleAVec, AlphaVec, transA, m, k, size);

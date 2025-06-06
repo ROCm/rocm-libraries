@@ -186,7 +186,7 @@ class StreamK(Component):
 
         tc = tP["tensorChar"]
         # StreamK partial tile - offset to tile start index
-        tmpOffset = writer.sgprPool.checkOut(2, "skStartOffset", preventOverflow=0)
+        tmpOffset = writer.sgprPool.checkOut(2, "skStartOffset", preventOverflow=False)
         module.add(SMulI32(dst=sgpr(tmpOffset), src0=sgpr("StreamKLocalStart"), src1="DepthU*%d" % (tP["bpe"]), comment="StreamK tile start offset"))
         strideL = writer.strideRef(tc, kernel["ProblemType"]["IndicesSummation"][0])
         module.add(writer.s_mul_u64_u32(sgpr(tmpOffset), sgpr(tmpOffset+1), sgpr(tmpOffset), strideL, "StreamK tile start offset"))
@@ -280,7 +280,7 @@ class StreamK(Component):
         skStoreLabel = Label(label=writer.labels.getNameInc("SK_Store"), comment="")
 
         # StreamK store branches
-        tmpSgpr = writer.sgprPool.checkOut(4, "globalWriteElements", preventOverflow=0)
+        tmpSgpr = writer.sgprPool.checkOut(4, "globalWriteElements", preventOverflow=False)
         # if we did not start the tile, store partials
         # branch to beta == 0 store path
         module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
@@ -295,10 +295,10 @@ class StreamK(Component):
 
             # if we started the tile but did not finish it, fix up step
             # run fixup code before regular store code
-            sCtaIdx = writer.sgprPool.checkOut(1, "CtaIdx", preventOverflow=0) # self.defineSgpr("CtaIdx", 1)
+            sCtaIdx = writer.sgprPool.checkOut(1, "CtaIdx", preventOverflow=False) # self.defineSgpr("CtaIdx", 1)
             module.add(SAddU32(dst=sgpr(sCtaIdx), src0=sgpr("StreamKIdx"), src1=1, comment="input partial tile index"))
 
-            sFixupEnd = writer.sgprPool.checkOut(1, "FixupEnd", preventOverflow=0) # self.defineSgpr("CtaEnd", 1)
+            sFixupEnd = writer.sgprPool.checkOut(1, "FixupEnd", preventOverflow=False) # self.defineSgpr("CtaEnd", 1)
             module.add(sMagicDiv2(sgpr(tmpSgpr), sgpr(tmpSgpr+1), sgpr("StreamKIterEnd"), sgpr("MagicNumberItersPerTile"), sgpr("MagicShiftItersPerTile"), sgpr(tmpSgpr+2)))
             module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=sgpr("ItersPerTile"), comment="start iteration of partial tile"))
             module.add(SSubU32(dst=sgpr(sFixupEnd), src0=sgpr("StreamKIterEnd"), src1=sgpr(tmpSgpr), comment="calc iterations completed by this WG"))
@@ -329,7 +329,7 @@ class StreamK(Component):
             module.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sCtaIdx))
 
             if kernel["StreamK"] >= 2:
-                sIterCount = writer.sgprPool.checkOut(1, "iterCount", preventOverflow=0)
+                sIterCount = writer.sgprPool.checkOut(1, "iterCount", preventOverflow=False)
                 module.add(SAddU32(dst=sgpr(sIterCount), src0=sgpr("SKItersPerWG"), src1=1, comment="Add extra iter"))
                 module.add(SCmpLtU32(src0=sgpr(sCtaIdx), src1=sgpr("skExtraIters"), comment="Check if next WG had an extra iteration"))
                 module.add(SCSelectB32(dst=sgpr(sIterCount), src0=sgpr(sIterCount), src1=sgpr("SKItersPerWG"), comment="Select correct number of iterations for next WG"))
@@ -391,7 +391,7 @@ class StreamK(Component):
 
         tmpLocal = None
         if tmpSgpr == None:
-            tmpLocal = writer.sgprPool.checkOut(1, "SKMappingTemp", preventOverflow=0)
+            tmpLocal = writer.sgprPool.checkOut(1, "SKMappingTemp", preventOverflow=False)
             tmpSgpr = tmpLocal
 
         assert kernel["BufferStore"]
@@ -1585,7 +1585,7 @@ class StreamKBasic(StreamK):
         module = Module("StreamK Basic graWorkGroup")
 
         # StreamK workgroup mapping
-        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=0)
+        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=False)
 
         module.add(self.skTileIndex(writer, kernel, sTmp, tPA, tPB))
 
@@ -1675,7 +1675,7 @@ class StreamKTwoTileOriginal(StreamK):
         module = Module("StreamK TwoTileOriginal graWorkGroup")
 
         # StreamK workgroup mapping
-        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=0)
+        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=False)
 
         module.add(self.skTileIndex(writer, kernel, sTmp, tPA, tPB))
 
@@ -1799,7 +1799,7 @@ class StreamKTwoTileDPFirst(StreamK):
         module = Module("StreamK TwoTileDPFirst graWorkGroup")
 
         # StreamK workgroup mapping
-        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=0)
+        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=False)
 
         module.add(self.skTileIndex(writer, kernel, sTmp, tPA, tPB))
 
@@ -1824,7 +1824,7 @@ class StreamKTwoTileDPFirst(StreamK):
         module.add(SAddU32(dst=sgpr("StreamKIterEnd"), src0=sgpr("StreamKIter"), src1=sgpr("SKItersPerWG"), comment="StreamK ending iteration (case: after extra iters)"))
         # iter count before all extra iters have been distributed
         # sTmp+1 = SKItersPerWG + 1 extra iteration
-        sIter = writer.sgprPool.checkOut(2, "SKIter", preventOverflow=0)
+        sIter = writer.sgprPool.checkOut(2, "SKIter", preventOverflow=False)
         module.add(SAddU32(dst=sgpr(sIter+1), src0=sgpr("SKItersPerWG"), src1=1, comment="Spread out extra iterations"))
         module.add(SMulI32(dst=sgpr(sIter), src0=sgpr("StreamKIdx"), src1=sgpr(sIter+1), comment="StreamK starting iteration (case: before extra iters)"))
         module.add(SAddU32(dst=sgpr(sIter+1), src0=sgpr(sIter), src1=sgpr(sIter+1), comment="StreamK ending iteration (case: before extra iters)"))

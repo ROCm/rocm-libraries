@@ -37,31 +37,12 @@
 #include <Tensile/Comparison.hpp>
 #include <Tensile/DataTypes_BFloat16.hpp>
 #include <rocisa/include/enum.hpp>
-#if(HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR == 2 && HIP_VERSION_PATCH > 42130) \
-    || (HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR >= 3) //tmp before gfx94 use hip f8 header
-
 // Using hip header for both NANOO and OCP data types
 #if defined(__HIPCC__)
 #include <hip/hip_fp8.h>
-#define TENSILELITE_FP8_TYPE_FNUZ HIP_FP8_TYPE_FNUZ
-#define TENSILELITE_FP8_TYPE_OCP HIP_FP8_TYPE_OCP
 #endif
 
 #include <Tensile/DataTypes_Float8_BFloat8.hpp>
-
-#else // HIP_VERSION check
-
-#if !defined(HIP_FP8_TYPE_FNUZ)
-#define TENSILELITE_FP8_TYPE_FNUZ 1
-#endif
-
-#if !defined(HIP_FP8_TYPE_OCP)
-#define TENSILELITE_FP8_TYPE_OCP 0
-#endif
-
-#include <Tensile/DataTypes_Float8_BFloat8_bc.hpp>
-#endif // HIP_VERSION check
-
 #include <Tensile/DataTypes_Half.hpp>
 #include <Tensile/DataTypes_Int8.hpp>
 #include <Tensile/DataTypes_Int8x4.hpp>

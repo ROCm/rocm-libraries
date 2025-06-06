@@ -78,6 +78,7 @@ namespace TensileLite
                      Base::template Pair<ProblemSelectionLibrary<MyProblem, MySolution>>(),
                      Base::template Pair<ProblemMapLibrary<MyProblem, MySolution>>(),
                      Base::template Pair<ProblemFreeSizeLibrary<MyProblem, MySolution>>(),
+                     Base::template Pair<ProblemPredictionLibrary<MyProblem, MySolution>>(),
                      Base::template Pair<ProblemMatchingLibrary<MyProblem, MySolution>>(),
                      Base::template Pair<GranularitySelectionLibrary<MyProblem, MySolution>>(),
                      Base::template Pair<PlaceholderLibrary<MyProblem, MySolution>>(),

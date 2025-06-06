@@ -242,7 +242,7 @@ void hipblaslt_init_device(ABC_dims                 abc,
         hipblaslt_init_device<hip_bfloat16>(
             abc, init, is_nan, static_cast<hip_bfloat16*>(A), M, N, lda, stride, batch_count);
         break;
-#if HIPBLASLT_FP8_TYPE_FNUZ
+#if HIP_FP8_TYPE_FNUZ
     case HIP_R_8F_E4M3_FNUZ:
         hipblaslt_init_device<hipblaslt_f8_fnuz>(
             abc, init, is_nan, static_cast<hipblaslt_f8_fnuz*>(A), M, N, lda, stride, batch_count);
@@ -252,7 +252,7 @@ void hipblaslt_init_device(ABC_dims                 abc,
             abc, init, is_nan, static_cast<hipblaslt_bf8_fnuz*>(A), M, N, lda, stride, batch_count);
         break;
 #endif
-#if HIPBLASLT_FP8_TYPE_OCP
+#if HIP_FP8_TYPE_OCP
     case HIP_R_8F_E4M3:
         hipblaslt_init_device<hipblaslt_f8>(
             abc, init, is_nan, static_cast<hipblaslt_f8*>(A), M, N, lda, stride, batch_count);

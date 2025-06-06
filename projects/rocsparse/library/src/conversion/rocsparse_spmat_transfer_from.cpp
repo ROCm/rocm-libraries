@@ -24,7 +24,7 @@
 #include "rocsparse_spmat_transfer_from.hpp"
 #include "rocsparse_convert_array.hpp"
 
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 rocsparse_status rocsparse::internal_spmat_transfer_from(rocsparse_handle            handle,
                                                          rocsparse_spmat_descr       target,

@@ -33,6 +33,13 @@ void init_enum(nb::module_ m)
 {
     auto m_enum = m.def_submodule("enum", "rocIsa enum submodule.");
 
+    nb::enum_<rocisa::RegisterType>(m_enum, "RegisterType")
+        .value("Vgpr", rocisa::RegisterType::Vgpr)
+        .value("Sgpr", rocisa::RegisterType::Sgpr)
+        .value("Accvgpr", rocisa::RegisterType::Accvgpr)
+        .value("mgpr", rocisa::RegisterType::mgpr)
+        .export_values();
+
     // For Python only, Python already has a class named DataType
     nb::enum_<rocisa::DataType>(m_enum, "DataTypeEnum")
         .value("Float", rocisa::DataType::Float)

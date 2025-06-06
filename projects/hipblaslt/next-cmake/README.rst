@@ -39,16 +39,13 @@ Full build of |project_name|
 
       cd |project_name|/next-cmake
       # configure
-      CC=/opt/rocm/bin/amdclang++          \
-      CXX=/opt/rocm/bin/amdclang++         \
-      cmake -B build                       \
-            -S .                           \
-            -D CMAKE_BUILD_TYPE=Release    \
-            -D CMAKE_PREFIX_PATH=/opt/rocm \
-            -D GPU_TARGETS=gfx950          \
-            -D HIPBLASLT_ENABLE_DEVICE=ON  \
-            -D HIPBLASLT_ENABLE_HOST=OFF   \
-            -D HIPBLASLT_ENABLE_CLIENT=OFF 
+      cmake -B build                                       \
+            -S .                                           \
+            -D CMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+            -D CMAKE_C_COMPILER=/opt/rocm/bin/amdclang     \
+            -D CMAKE_BUILD_TYPE=Release                    \
+            -D CMAKE_PREFIX_PATH=/opt/rocm                 \
+            -D GPU_TARGETS=gfx950
       # build
       cmake --build build --parallel 32
 
@@ -60,13 +57,13 @@ Building device libraries
 
       cd |project_name|/next-cmake
       # configure
-      CC=/opt/rocm/bin/amdclang++          \
-      CXX=/opt/rocm/bin/amdclang++         \
-      cmake -B build                       \
-            -S .                           \
-            -D CMAKE_BUILD_TYPE=Release    \
-            -D CMAKE_PREFIX_PATH=/opt/rocm \
-            -D GPU_TARGETS=gfx950          \
+      cmake -B build                                       \
+            -S .                                           \
+            -D CMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+            -D CMAKE_C_COMPILER=/opt/rocm/bin/amdclang     \
+            -D CMAKE_BUILD_TYPE=Release                    \
+            -D CMAKE_PREFIX_PATH=/opt/rocm                 \
+            -D GPU_TARGETS=gfx950
             -D HIPBLASLT_ENABLE_DEVICE=ON  \
             -D HIPBLASLT_ENABLE_HOST=OFF   \
             -D HIPBLASLT_ENABLE_CLIENT=OFF 

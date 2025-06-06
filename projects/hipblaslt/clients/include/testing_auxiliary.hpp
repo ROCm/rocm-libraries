@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -601,19 +601,19 @@ void testing_aux_get_sol_with_zero_alpha_null_a_b_ext(const Arguments& arg)
     CHECK_HIP_ERROR(hipMalloc(&d_c, m * n * batch_count * sizeof(OutType)));
     CHECK_HIP_ERROR(hipMalloc(&d_d, m * n * batch_count * sizeof(OutType)));
 
-    hipblaslt_ext::GemmPreferenceV2 gemmPref;
-    hipblaslt_ext::Gemm             gemm(
+    hipblaslt_ext::GemmPreference gemmPref;
+    hipblaslt_ext::Gemm           gemm(
         handle, trans_a, trans_b, arg.a_type, arg.a_type, arg.a_type, arg.a_type, arg.compute_type);
 
     hipblaslt_ext::GemmEpilogue
         epilogue; // No action needed, default is HIPBLASLT_EPILOGUE_DEFAULT. (Gemm only)
     hipblaslt_ext::GemmInputs inputs;
-    inputs.a     = d_a;
-    inputs.b     = d_b;
-    inputs.c     = d_c;
-    inputs.d     = d_d;
-    inputs.alpha = &alpha;
-    inputs.beta  = &beta;
+    inputs.setA(d_a);
+    inputs.setB(d_b);
+    inputs.setC(d_c);
+    inputs.setD(d_d);
+    inputs.setAlpha(&alpha);
+    inputs.setBeta(&beta);
     gemm.setProblem(m, n, k, batch_count, epilogue, inputs);
 
     const int                                     request_solutions = 1;

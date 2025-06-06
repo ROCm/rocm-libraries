@@ -34,6 +34,7 @@
 //
 
 #include "rocsparse/rocsparse.h"
+#include <chrono>
 #include <stdlib.h>
 #include <vector>
 

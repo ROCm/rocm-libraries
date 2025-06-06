@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -102,12 +102,12 @@ void simpleGemmGeluAuxBiasExt(hipblasLtHandle_t   handle,
                               int64_t             max_workspace_size,
                               hipStream_t         stream)
 {
-    hipblaslt_ext::GemmPreferenceV2 gemmPref;
+    hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
     hipblaslt_ext::Gemm gemm(
         handle, trans_a, trans_b, HIP_R_16F, HIP_R_16F, HIP_R_16F, HIP_R_16F, HIPBLAS_COMPUTE_32F);
 
-    hipblaslt_ext::GemmEpilogueV2 gemmEpilogue;
+    hipblaslt_ext::GemmEpilogue gemmEpilogue;
     gemmEpilogue.setMode(epilogue);
     gemmEpilogue.setBiasDataType(HIP_R_16F);
     gemmEpilogue.setAuxLeadingDimension(m);
@@ -117,7 +117,7 @@ void simpleGemmGeluAuxBiasExt(hipblasLtHandle_t   handle,
     void* d_aux_buffer;
     CHECK_HIP_ERROR(hipMalloc(&d_aux_buffer, m * n * sizeof(hipblasLtHalf)));
 
-    hipblaslt_ext::GemmInputsV2 inputs;
+    hipblaslt_ext::GemmInputs inputs;
     inputs.setA(d_a);
     inputs.setB(d_b);
     inputs.setC(d_c);

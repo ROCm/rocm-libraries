@@ -1,6 +1,6 @@
 .. meta::
-  :description: rocSPARSE documentation and API reference library
-  :keywords: rocSPARSE, ROCm, API, documentation
+  :description: rocSPARSE data types documentation
+  :keywords: rocSPARSE, ROCm, API, documentation, data types
 
 .. _rocsparse_types_:
 
@@ -12,6 +12,11 @@ rocsparse_handle
 ----------------
 
 .. doxygentypedef:: rocsparse_handle
+
+rocsparse_error
+---------------
+
+.. doxygentypedef:: rocsparse_error
 
 rocsparse_int
 -------------

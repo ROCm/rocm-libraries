@@ -19,7 +19,7 @@ def runCI =
         prj.paths.build_command = './install.sh --matrices-dir-install ${JENKINS_HOME_DIR}/rocsparse_matrices && ./install.sh -kc -a \$gfx_arch --no-rocblas --codecoverage --matrices-dir ${JENKINS_HOME_DIR}/rocsparse_matrices'
     }
     else {
-    prj.paths.build_command = './install.sh --matrices-dir-install ${JENKINS_HOME_DIR}/rocsparse_matrices && ./install.sh -kc --no-rocblas --codecoverage --matrices-dir ${JENKINS_HOME_DIR}/rocsparse_matrices'
+        prj.paths.build_command = './install.sh --matrices-dir-install ${JENKINS_HOME_DIR}/rocsparse_matrices && ./install.sh -kc --no-rocblas --codecoverage --matrices-dir ${JENKINS_HOME_DIR}/rocsparse_matrices'
     }
     prj.libraryDependencies = ['rocPRIM']
     prj.defaults.ccache = false
@@ -53,12 +53,10 @@ def runCI =
 ci: {
     String urlJobName = auxiliary.getTopJobName(env.BUILD_URL)
 
-    def propertyList = ["compute-rocm-dkms-no-npi":[pipelineTriggers([cron('0 1 * * 6')])],
-                        "compute-rocm-dkms-no-npi-hipclang":[pipelineTriggers([cron('0 1 * * 6')])] ]
+    def propertyList = []
     propertyList = auxiliary.appendPropertyList(propertyList)
 
-    def jobNameList = ["compute-rocm-dkms-no-npi":([ubuntu18:['gfx900']]),
-                       "compute-rocm-dkms-no-npi-hipclang":([ubuntu18:['gfx900']])]
+    def jobNameList = []
     jobNameList = auxiliary.appendJobNameList(jobNameList)
 
     propertyList.each
@@ -75,14 +73,5 @@ ci: {
             stage(jobName) {
                 runCI(nodeDetails, jobName)
             }
-    }
-
-    // For url job names that are not listed by the jobNameList i.e. compute-rocm-dkms-no-npi-1901
-    if(!jobNameList.keySet().contains(urlJobName))
-    {
-        properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 1 * * *')])]))
-        stage(urlJobName) {
-            runCI([ubuntu18:['gfx900']], urlJobName)
-        }
     }
 }

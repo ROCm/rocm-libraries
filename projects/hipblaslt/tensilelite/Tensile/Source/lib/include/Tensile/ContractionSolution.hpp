@@ -154,6 +154,8 @@ namespace TensileLite
         int CUOccupancy            = 0;
         int PrefetchGlobalRead     = 2;
         int MathClocksUnrolledLoop = 0;
+
+        size_t synchronizerSizePerWG = 0;
     };
 
     /**
@@ -287,6 +289,8 @@ namespace TensileLite
         size_t requiredHostSizeGroupedGemmSingle(Problem const&  problem,
                                                  Hardware const& hardware) const;
 
+        size_t requiredSynchronizerSize(Problem const& problem, Hardware const& hardware) const;                                         
+
         size_t getSKGrid(Problem const& problem, Hardware const& hardware, size_t tiles) const;
         size_t partialTileSize(size_t skGrid) const;
 
@@ -392,7 +396,8 @@ namespace TensileLite
                         KA&                                 args,
                         uint32_t                            numWorkGroups,
                         Hardware const*                     hardware,
-                        const ContractionProblemParameters& param) const;
+                        const ContractionProblemParameters& param,
+                        int32_t                             defaultWGM) const;
 
         template <typename KA>
         inline void calculateSingleCallWorkGroupItems(std::vector<Problem> const& problems,

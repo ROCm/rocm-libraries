@@ -34,6 +34,7 @@ from Tensile.Common.GlobalParameters import internalParameters
 from Tensile.SolutionStructs import Solution as OriginalSolution
 from Tensile.SolutionStructs.Problem import getBiasDataTypeListDefault
 from Tensile.Toolchain.Component import Assembler
+from math import ceil
 
 MIN_K_FOR_GSU = 32
 @state_key_ordering
@@ -468,7 +469,7 @@ class ProblemPredicate(Properties.Predicate):
                 valuepredicates.append(int((state["NumElementsPerThread"])/state["NumElementsPerBatchStore"]))
             else:
                 valuepredicates.append(1)
-            valuepredicates.append(state["NumThreads"])
+            valuepredicates.append(ceil(state["NumThreads"] / state["WavefrontSize"]))
             rv += [cls('SynchronizerSizeCheck', index=0, value=valuepredicates)]
 
         if state["InternalSupportParams"]["KernArgsVersion"] >= 1 and \
@@ -587,7 +588,8 @@ class SizeMapping:
                  'globalSplitUWorkGroupMappingRoundRobin',
                  'CUOccupancy',
                  'PrefetchGlobalRead',
-                 'MathClocksUnrolledLoop'
+                 'MathClocksUnrolledLoop',
+                 'synchronizerSizePerWG'
                  ]
 
     @classmethod
@@ -602,6 +604,10 @@ class SizeMapping:
         if d['_GlobalAccumulation'] == 'PartialsBuffer':
             globalAccum = 4
         pgr = int(d['PrefetchGlobalRead'])
+        synchronizerSizePerWG = ceil((d['MIWaveTile'][0]*d['MIWaveTile'][1] if d['EnableMatrixInstruction'] else d['ThreadTile0']*d['ThreadTile1']        \
+                                    * ceil((d['NumElementsPerThread'])/d['NumElementsPerBatchStore']) if d['NumElementsPerBatchStore'] != 0 else 1        \
+                                    * ceil(d["NumThreads"] / d["WavefrontSize"])))
+
         return cls(waveNum                  = d['NumThreads'] // d['WavefrontSize'],
                    workGroup                = d['WorkGroup'],
                    macroTile                = cls.ReadOriginalMacroTile(d),
@@ -634,9 +640,9 @@ class SizeMapping:
                    globalSplitUWorkGroupMappingRoundRobin = d['GlobalSplitUWorkGroupMappingRoundRobin'],
                    CUOccupancy              = d['CUOccupancy'],
                    PrefetchGlobalRead       = pgr,
-                   MathClocksUnrolledLoop   = d['MathClocksUnrolledLoop']
+                   MathClocksUnrolledLoop   = d['MathClocksUnrolledLoop'],
+                   synchronizerSizePerWG    = synchronizerSizePerWG
                    )
-
     @classmethod
     def ReadOriginalMacroTile(cls, d):
         rv = [1,1,1]

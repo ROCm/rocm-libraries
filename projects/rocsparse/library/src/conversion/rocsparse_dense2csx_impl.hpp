@@ -23,12 +23,12 @@
  * ************************************************************************ */
 #pragma once
 
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
-#include "control.h"
 #include "rocsparse_common.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_dense2csx.hpp"
-#include "rocsparse_primitives.h"
+#include "rocsparse_primitives.hpp"
 
 namespace rocsparse
 {

@@ -106,26 +106,33 @@ def runTestWithSanitizerCommand (platform, project, gfilter, String dirmode = "r
 
 def runCoverageCommand (platform, project, gfilter, String dirmode = "release")
 {
-    //Temporary workaround due to bug in container
-    String centos7Workaround = platform.jenkinsLabel.contains('centos7') ? 'export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib64/' : ''
+    String commitSha
+    String repoUrl
+    (commitSha, repoUrl) = util.getGitHubCommitInformation(project.paths.project_src_prefix)
 
-    def command = """#!/usr/bin/env bash
-                set -x
-                cd ${project.paths.project_build_prefix}/build/${dirmode}
-                export LD_LIBRARY_PATH=/opt/rocm/lib/
-                ${centos7Workaround}
-                GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
-            """
+    withCredentials([string(credentialsId: "mathlibs-codecov-token-rocsparse", variable: 'CODECOV_TOKEN')])
+    {
+        def command = """#!/usr/bin/env bash
+                    set -x
+                    cd ${project.paths.project_build_prefix}/build/${dirmode}
+                    export LD_LIBRARY_PATH=/opt/rocm/lib/
+                    GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
+                    curl -Os https://uploader.codecov.io/latest/linux/codecov
+                    chmod +x codecov
+                    ./codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file lcoverage/main_coverage.info --name rocSPARSE --sha ${commitSha}
+                """
 
-    platform.runCommand(this, command)
+        platform.runCommand(this, command)
 
-    publishHTML([allowMissing: false,
-                alwaysLinkToLastBuild: false,
-                keepAll: false,
-                reportDir: "${project.paths.project_build_prefix}/build/${dirmode}/lcoverage",
-                reportFiles: "index.html",
-                reportName: "Code coverage report",
-                reportTitles: "Code coverage report"])
+        publishHTML([allowMissing: false,
+                    alwaysLinkToLastBuild: false,
+                    keepAll: false,
+                    reportDir: "${project.paths.project_build_prefix}/build/${dirmode}/coverage-report",
+                    reportFiles: "index.html",
+                    reportName: "Code coverage report",
+                    reportTitles: "Code coverage report"])
+    }
+
 }
 
 def runPackageCommand(platform, project, String dirmode = "release")

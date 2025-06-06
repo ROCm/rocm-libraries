@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -80,7 +80,7 @@ void multipleGroupsGroupedGemmExt(hipblasLtHandle_t     handle,
                                    HIPBLAS_COMPUTE_32F,
                                    heuristicResult));
 
-    hipblaslt_ext::GemmPreferenceV2 gemmPref;
+    hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
     std::vector<hipblaslt_ext::GroupedGemm>                      groupedGemms;
     std::vector<HipArrayBufferPtr<hipblaslt_ext::UserArguments>> groupedGemmUserArgs;
@@ -98,10 +98,10 @@ void multipleGroupsGroupedGemmExt(hipblasLtHandle_t     handle,
                                                HIP_R_16F,
                                                HIPBLAS_COMPUTE_32F);
 
-        std::vector<hipblaslt_ext::GemmEpilogueV2> epilogue{
+        std::vector<hipblaslt_ext::GemmEpilogue> epilogue{
             hipblaslt_ext::
-                GemmEpilogueV2()}; // No action needed, default is HIPBLASLT_EPILOGUE_DEFAULT. (Gemm only)
-        std::vector<hipblaslt_ext::GemmInputsV2> inputs(ms.size());
+                GemmEpilogue()}; // No action needed, default is HIPBLASLT_EPILOGUE_DEFAULT. (Gemm only)
+        std::vector<hipblaslt_ext::GemmInputs> inputs(ms.size());
         for(int i = 0; i < ms.size(); i++)
         {
             inputs[i].setA(d_as[i]);
@@ -111,7 +111,7 @@ void multipleGroupsGroupedGemmExt(hipblasLtHandle_t     handle,
             inputs[i].setAlpha(&alphas[i]);
             inputs[i].setBeta(&betas[i]);
         }
-        // hipblaslt_ext::GemmEpilogueV2 supports broadcasting
+        // hipblaslt_ext::GemmEpilogue supports broadcasting
         groupedgemm.setProblem(ms, ns, ks, batch_count, epilogue, inputs);
 
         uint64_t            workspace_size = 0;
@@ -266,15 +266,15 @@ void simpleGroupedGemmExt(hipblasLtHandle_t     handle,
                                    HIPBLAS_COMPUTE_32F,
                                    heuristicResult));
 
-    hipblaslt_ext::GemmPreferenceV2 gemmPref;
+    hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
     hipblaslt_ext::GroupedGemm groupedgemm(
         handle, trans_a, trans_b, HIP_R_16F, HIP_R_16F, HIP_R_16F, HIP_R_16F, HIPBLAS_COMPUTE_32F);
 
-    std::vector<hipblaslt_ext::GemmEpilogueV2> epilogue{
+    std::vector<hipblaslt_ext::GemmEpilogue> epilogue{
         hipblaslt_ext::
-            GemmEpilogueV2()}; // No action needed, default is HIPBLASLT_EPILOGUE_DEFAULT. (Gemm only)
-    std::vector<hipblaslt_ext::GemmInputsV2> inputs(m.size());
+            GemmEpilogue()}; // No action needed, default is HIPBLASLT_EPILOGUE_DEFAULT. (Gemm only)
+    std::vector<hipblaslt_ext::GemmInputs> inputs(m.size());
     for(int i = 0; i < m.size(); i++)
     {
         inputs[i].setA(d_a[i]);
@@ -284,7 +284,7 @@ void simpleGroupedGemmExt(hipblasLtHandle_t     handle,
         inputs[i].setAlpha(&alpha[i]);
         inputs[i].setBeta(&beta[i]);
     }
-    // hipblaslt_ext::GemmEpilogueV2 supports broadcasting
+    // hipblaslt_ext::GemmEpilogue supports broadcasting
     groupedgemm.setProblem(m, n, k, batch_count, epilogue, inputs);
 
     uint64_t            workspace_size = 0;

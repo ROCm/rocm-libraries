@@ -54,6 +54,8 @@ extern "C" {
 *  stage        Version 2 SpMV stage for the SpMV computation.
 *  @param[out]
 *  buffer_size_in_bytes  number of bytes of the buffer.
+*  @param[out]
+*  error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
@@ -67,7 +69,8 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
                                                rocsparse_const_dnvec_descr x,
                                                rocsparse_const_dnvec_descr y,
                                                rocsparse_v2_spmv_stage     stage,
-                                               size_t*                     buffer_size_in_bytes);
+                                               size_t*                     buffer_size_in_bytes,
+                                               rocsparse_error*            error);
 
 /*! \ingroup generic_module
 *  \brief Sparse matrix vector multiplication
@@ -204,6 +207,8 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *  buffer_size_in_bytes  size in bytes of the buffer, must be greater or equal to the buffer size obtained from \ref rocsparse_v2_spmv_buffer_size.
 *  @param[in]
 *  buffer       temporary buffer allocated by the user.
+*  @param[out]
+*  error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \retval      rocsparse_status_invalid_handle the library context \p handle was not initialized.
@@ -253,6 +258,7 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *   hipMemcpy(dx, hx.data(), sizeof(float) * n, hipMemcpyHostToDevice);
 *
 *   rocsparse_handle     handle;
+*   rocsparse_error      p_error[1] = {};
 *   rocsparse_spmat_descr matA;
 *   rocsparse_dnvec_descr vecX;
 *   rocsparse_dnvec_descr vecY;
@@ -298,28 +304,32 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *                            spmv_descr,
 *                            rocsparse_spmv_input_alg,
 *                            &spmv_alg,
-*                            sizeof(spmv_alg));
+*                            sizeof(spmv_alg),
+*                            p_error);
 *
 *   const rocsparse_operation spmv_operation = rocsparse_operation_none;
 *   rocsparse_spmv_set_input(handle,
 *                            spmv_descr,
 *                            rocsparse_spmv_input_operation,
 *                            &spmv_operation,
-*                            sizeof(spmv_operation));
+*                            sizeof(spmv_operation),
+*                            p_error);
 *
 *   const rocsparse_datatype spmv_scalar_datatype = rocsparse_datatype_f32_r;
 *   rocsparse_spmv_set_input(handle,
 *                            spmv_descr,
 *                            rocsparse_spmv_input_scalar_datatype,
 *                            &spmv_scalar_datatype,
-*                            sizeof(spmv_scalar_datatype));
+*                            sizeof(spmv_scalar_datatype),
+*                            p_error);
 *
 *   const rocsparse_datatype spmv_compute_datatype = rocsparse_datatype_f64_r;
 *   rocsparse_spmv_set_input(handle,
 *                            spmv_descr,
 *                            rocsparse_spmv_input_compute_datatype,
 *                            &spmv_compute_datatype,
-*                            sizeof(spmv_compute_datatype));
+*                            sizeof(spmv_compute_datatype),
+*                            p_error);
 *
 *   // Call spmv to get buffer size
 *   size_t buffer_size;
@@ -329,7 +339,8 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *                                 vecX,
 *                                 vecY,
 *                                 rocsparse_v2_spmv_stage_analysis,
-*                                 &buffer_size);
+*                                 &buffer_size,
+*                                 p_error);
 *
 *   void* buffer;
 *   hipMalloc(&buffer, buffer_size);
@@ -344,7 +355,8 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *                     vecY,
 *                     rocsparse_v2_spmv_stage_analysis,
 *                     buffer_size,
-*                     buffer);
+*                     buffer,
+*                     p_error);
 *
 *   hipFree(buffer);
 *
@@ -354,7 +366,8 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *                                 vecX,
 *                                 vecY,
 *                                 rocsparse_v2_spmv_stage_compute,
-*                                 &buffer_size);
+*                                 &buffer_size,
+*                                 p_error);
 *
 *   hipMalloc(&buffer, buffer_size);
 *
@@ -368,10 +381,12 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *                     vecY,
 *                     rocsparse_v2_spmv_stage_compute,
 *                     buffer_size,
-*                     buffer);
+*                     buffer,
+*                     p_error);
 *
 *   hipFree(buffer);
-*
+
+*   rocsparse_destroy_error(p_error[0]);
 *   rocsparse_destroy_spmv_descr(spmv_descr);
 *
 *   // Copy result back to host
@@ -401,7 +416,8 @@ rocsparse_status rocsparse_v2_spmv(rocsparse_handle            handle,
                                    rocsparse_dnvec_descr       y,
                                    rocsparse_v2_spmv_stage     stage,
                                    size_t                      buffer_size_in_bytes,
-                                   void*                       buffer);
+                                   void*                       buffer,
+                                   rocsparse_error*            error);
 #ifdef __cplusplus
 }
 #endif

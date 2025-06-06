@@ -54,6 +54,8 @@ extern "C" {
 *  stage        SpGEAM stage for the SpGEAM computation.
 *  @param[out]
 *  buffer_size  number of bytes of the temporary storage buffer.
+*  @param[out]
+*  error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
@@ -66,7 +68,8 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
                                               rocsparse_const_spmat_descr mat_B,
                                               rocsparse_const_spmat_descr mat_C,
                                               rocsparse_spgeam_stage      stage,
-                                              size_t*                     buffer_size);
+                                              size_t*                     buffer_size,
+                                              rocsparse_error*            error);
 
 /*! \ingroup generic_module
 *  \brief Sparse matrix sparse matrix addition
@@ -185,6 +188,8 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *               determined by calling \ref rocsparse_spgeam_buffer_size.
 *  @param[in]
 *  temp_buffer  temporary storage buffer allocated by the user.
+*  @param[out]
+*  error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
@@ -246,8 +251,8 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *   hipMemcpy(dcsr_val_B, hcsr_val_B.data(), nnz_B * sizeof(float), hipMemcpyHostToDevice);
 *
 *   rocsparse_handle     handle;
+*   rocsparse_error      p_error[1] = {};
 *   rocsparse_spmat_descr matA, matB, matC;
-*
 *   rocsparse_index_base index_base = rocsparse_index_base_zero;
 *   rocsparse_indextype itype = rocsparse_indextype_i32;
 *   rocsparse_indextype jtype = rocsparse_indextype_i32;
@@ -276,36 +281,36 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *
 *   // Set the algorithm on the descriptor
 *   const rocsparse_spgeam_alg alg = rocsparse_spgeam_alg_default;
-*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_alg, &alg, sizeof(alg));
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_alg, &alg, sizeof(alg), p_error);
 *
 *   // Set the transpose operation for sparses matrix A and B on the descriptor
 *   const rocsparse_operation trans_A = rocsparse_operation_none;
 *   const rocsparse_operation trans_B = rocsparse_operation_none;
-*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_operation_A, &trans_A, sizeof(trans_A));
-*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_operation_B, &trans_B, sizeof(trans_B));
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_operation_A, &trans_A, sizeof(trans_A), p_error);
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_operation_B, &trans_B, sizeof(trans_B), p_error);
 *
 *   // Set the scalar type on the descriptor
 *   const rocsparse_datatype scalar_datatype = rocsparse_datatype_f32_r;
-*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_scalar_datatype, &scalar_datatype, sizeof(scalar_datatype));
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_scalar_datatype, &scalar_datatype, sizeof(scalar_datatype), p_error);
 *
 *   // Set the compute type on the descriptor
 *   const rocsparse_datatype compute_datatype = rocsparse_datatype_f32_r;
-*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_compute_datatype, &compute_datatype, sizeof(compute_datatype));
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_compute_datatype, &compute_datatype, sizeof(compute_datatype), p_error);
 *
 *   // Calculate NNZ phase
 *   size_t buffer_size_in_bytes;
 *   void * buffer;
-*   rocsparse_spgeam_buffer_size(handle, descr, matA, matB, nullptr, rocsparse_spgeam_stage_analysis, &buffer_size_in_bytes);
+*   rocsparse_spgeam_buffer_size(handle, descr, matA, matB, nullptr, rocsparse_spgeam_stage_analysis, &buffer_size_in_bytes, p_error);
 *
 *   hipMalloc(&buffer, buffer_size_in_bytes);
-*   rocsparse_spgeam(handle, descr, &alpha, matA, &beta, matB, nullptr, rocsparse_spgeam_stage_analysis, buffer_size_in_bytes, buffer);
+*   rocsparse_spgeam(handle, descr, &alpha, matA, &beta, matB, nullptr, rocsparse_spgeam_stage_analysis, buffer_size_in_bytes, buffer, p_error);
 *   hipFree(buffer);
 *
 *   // Ensure analysis stage is complete before grabbing C non-zero count
 *   hipStreamSynchronize(stream);
 *
 *   int64_t nnz_C;
-*   rocsparse_spgeam_get_output(handle, descr, rocsparse_spgeam_output_nnz, &nnz_C, sizeof(int64_t));
+*   rocsparse_spgeam_get_output(handle, descr, rocsparse_spgeam_output_nnz, &nnz_C, sizeof(int64_t), p_error);
 *
 *   // Compute column indices and values of C
 *   int* dcsr_row_ptr_C = nullptr;
@@ -322,10 +327,10 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *                       index_base, ttype);
 *
 *   // Compute phase
-*   rocsparse_spgeam_buffer_size(handle, descr, matA, matB, matC, rocsparse_spgeam_stage_compute, &buffer_size_in_bytes);
+*   rocsparse_spgeam_buffer_size(handle, descr, matA, matB, matC, rocsparse_spgeam_stage_compute, &buffer_size_in_bytes, p_error);
 *
 *   hipMalloc(&buffer, buffer_size_in_bytes);
-*   rocsparse_spgeam(handle, descr, &alpha, matA, &beta, matB, matC, rocsparse_spgeam_stage_compute, buffer_size_in_bytes, buffer);
+*   rocsparse_spgeam(handle, descr, &alpha, matA, &beta, matB, matC, rocsparse_spgeam_stage_compute, buffer_size_in_bytes, buffer, p_error);
 *   hipFree(buffer);
 *
 *   // Copy C matrix result back to host
@@ -342,6 +347,7 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *   rocsparse_destroy_spmat_descr(matB);
 *   rocsparse_destroy_spmat_descr(matC);
 *   rocsparse_destroy_handle(handle);
+*   rocsparse_destroy_error(p_error[0]);
 *
 *   // Free device arrays
 *   hipFree(dcsr_row_ptr_A);
@@ -367,7 +373,8 @@ rocsparse_status rocsparse_spgeam(rocsparse_handle            handle,
                                   rocsparse_spmat_descr       mat_C,
                                   rocsparse_spgeam_stage      stage,
                                   size_t                      buffer_size,
-                                  void*                       temp_buffer);
+                                  void*                       temp_buffer,
+                                  rocsparse_error*            error);
 
 #ifdef __cplusplus
 }

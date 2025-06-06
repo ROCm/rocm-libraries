@@ -1303,10 +1303,6 @@ class Solution(collections.abc.Mapping):
     if state["enableLDSTrB"]:
       state["VectorWidthB"] = 1
 
-    if state["LDSTrInst"] and state["1LDSBuffer"] == 0:
-      reject(state, "Current LDS Transpose implementation does not support two LDS buffers")
-      return
-
     # if state["EnableMatrixInstruction"] and not state["SourceSwap"] and (state["VectorWidthA"] > 1 or state["VectorWidthB"] > 1):
     #   reject(state, printRejectionReason, "not implement VectorWidth without SourceSwap")
 
@@ -3216,8 +3212,6 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "MultipleBufferSingleKernel not support BiasSrc not D yet")
       if state["ProblemType"]["DataType"].isDouble():
         reject(state, printRejectionReason, "MultipleBufferSingleKernel not support " + str(state["ProblemType"]["DataType"])  + " yet")
-      if state["ProblemType"]["Sparse"] != 0:
-        reject(state, printRejectionReason, "MultipleBufferSingleKernel not support sparse yet")
 
     #Need to force disabling PreloadKernArgs if compiler does not support
     #Can not just reject the solution since the user library may find any solutions

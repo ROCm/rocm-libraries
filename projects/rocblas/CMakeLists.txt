@@ -147,7 +147,7 @@ set( AMDGPU_TARGETS "${GPU_TARGETS}" CACHE STRING "List of GPUs (gfx targets) to
 
 option( BUILD_WITH_HIPBLASLT "Build with HipBLASLt" ON )
 set( hipblaslt_path "/opt/rocm" CACHE PATH "Use local HipBLASLt directory" )
-set( HIPBLASLT_VERSION 0.15 CACHE STRING "The version of HipBLASLt to be used" )
+set( HIPBLASLT_VERSION 1.0.0 CACHE STRING "The version of HipBLASLt to be used" )
 
 if( WIN32 OR NOT BUILD_WITH_TENSILE OR NOT BUILD_SHARED_LIBS )
   set( BUILD_WITH_HIPBLASLT OFF )

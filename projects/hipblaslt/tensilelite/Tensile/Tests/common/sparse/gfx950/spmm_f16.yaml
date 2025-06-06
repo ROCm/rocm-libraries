@@ -69,7 +69,7 @@ BenchmarkProblems:
         - LdsPadMetadata: [0,-1]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
-        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+
         - SourceSwap: [0]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
@@ -99,7 +99,7 @@ BenchmarkProblems:
         - ActivationArgs:
           - [Enum: none]
           - [Enum: relu]
-  
+
   #######################################
   # NT - standard
   #######################################
@@ -151,7 +151,7 @@ BenchmarkProblems:
         - LdsPadMetadata: [-1]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
-        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
         - SourceSwap: [0]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
@@ -232,7 +232,7 @@ BenchmarkProblems:
         - LdsPadMetadata: [-1]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
-        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
         - SourceSwap: [0]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
@@ -313,7 +313,7 @@ BenchmarkProblems:
         - LdsPadMetadata: [-1]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
-        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
         - SourceSwap: [0]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
@@ -391,7 +391,7 @@ BenchmarkProblems:
         - LdsPadMetadata: [-1]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
-        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
         - SourceSwap: [0]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
@@ -476,7 +476,7 @@ BenchmarkProblems:
         - LdsPadMetadata: [-1]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2]
-        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
         - SourceSwap: [0]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
@@ -560,7 +560,7 @@ BenchmarkProblems:
         - LdsPadMetadata: [-1]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2,3]
-        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
         - SourceSwap: [0]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]
@@ -650,7 +650,7 @@ BenchmarkProblems:
         - LdsPadMetadata: [-1]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1,2,3]
-        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        - GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
         - SourceSwap: [0]
         - StoreRemapVectorWidth: [-1]
         #- GlobalReadVectorWidthA: [4]

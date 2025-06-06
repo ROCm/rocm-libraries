@@ -131,10 +131,8 @@ void calculateKforSwizzling(
     case HIP_R_8I:
     case HIP_R_8F_E5M2_FNUZ:
     case HIP_R_8F_E4M3_FNUZ:
-#ifdef ROCM_USE_FLOAT8
     case HIP_R_8F_E4M3:
     case HIP_R_8F_E5M2:
-#endif
         MiK  = 32;
         MiKv = 8;
         break;
@@ -240,7 +238,6 @@ void swizzle_tensor_type(HipHostBuffer&       dst,
                                            ld,
                                            colMaj);
         return;
-#ifdef ROCM_USE_FLOAT8
     case HIP_R_8F_E4M3:
         swizzle_tensor<hipblaslt_f8>(
             dst.as<hipblaslt_f8>(), src.as<hipblaslt_f8>(), datatype, arg, b, m, k, ld, colMaj);
@@ -249,7 +246,6 @@ void swizzle_tensor_type(HipHostBuffer&       dst,
         swizzle_tensor<hipblaslt_bf8>(
             dst.as<hipblaslt_bf8>(), src.as<hipblaslt_bf8>(), datatype, arg, b, m, k, ld, colMaj);
         return;
-#endif
     default:
         hipblaslt_cerr << "Error type in swizzle_tensor_type()" << std::endl;
     }
@@ -305,14 +301,12 @@ Tout cast_from_type(void* in, hipDataType type, size_t index)
     case HIP_R_8F_E5M2_FNUZ:
         return static_cast<Tout>(
             static_cast<hipblasLtHalf>((static_cast<hipblaslt_bf8_fnuz*>(in))[index]));
-#ifdef ROCM_USE_FLOAT8
     case HIP_R_8F_E4M3:
         return static_cast<Tout>(
             static_cast<hipblasLtHalf>((static_cast<hipblaslt_f8*>(in))[index]));
     case HIP_R_8F_E5M2:
         return static_cast<Tout>(
             static_cast<hipblasLtHalf>((static_cast<hipblaslt_bf8*>(in))[index]));
-#endif
     case HIP_R_32I:
         return static_cast<Tout>((static_cast<int32_t*>(in))[index]);
     case HIP_R_8I:
@@ -355,14 +349,12 @@ void saturate_cast_to_type(void* dst, Tin src, hipDataType typeD, size_t indexD)
     case HIP_R_8F_E5M2_FNUZ:
         static_cast<hipblaslt_bf8_fnuz*>(dst)[indexD] = saturate_cast<hipblaslt_bf8_fnuz>(src);
         return;
-#ifdef ROCM_USE_FLOAT8
     case HIP_R_8F_E4M3:
         static_cast<hipblaslt_f8*>(dst)[indexD] = saturate_cast<hipblaslt_f8>(src);
         return;
     case HIP_R_8F_E5M2:
         static_cast<hipblaslt_bf8*>(dst)[indexD] = saturate_cast<hipblaslt_bf8>(src);
         return;
-#endif
     case HIP_R_32I:
         static_cast<int32_t*>(dst)[indexD] = saturate_cast<int32_t>(src);
         return;
@@ -413,7 +405,7 @@ void epilogue_func(int64_t     m,
     auto in_Tact = static_cast<Tact>(in[pos]) + bias_data;                                    \
     if(e && !gradient)                                                                        \
     {                                                                                         \
-        saturate_cast_to_type(e, in_Tact* scaleE, aux_type, pos);                             \
+        saturate_cast_to_type(e, in_Tact * scaleE, aux_type, pos);                            \
     }                                                                                         \
     Tact in_Tact_act = 0;                                                                     \
     if(gradient)                                                                              \
@@ -559,12 +551,12 @@ void epilogue_func(int64_t     m,
                    bool        gradient,
                    hipDataType To)
 {
-#define CALCULATE_EPILOGUE_BASIC                               \
-    auto pos  = j * ld + i;                                    \
-    Tc   temp = static_cast<Ti>(*(in + pos)) + bias_data;      \
-    if(e)                                                      \
-    {                                                          \
-        saturate_cast_to_type(e, temp* scaleE, aux_type, pos); \
+#define CALCULATE_EPILOGUE_BASIC                                \
+    auto pos  = j * ld + i;                                     \
+    Tc   temp = static_cast<Ti>(*(in + pos)) + bias_data;       \
+    if(e)                                                       \
+    {                                                           \
+        saturate_cast_to_type(e, temp * scaleE, aux_type, pos); \
     }
 
     for(int i = 0; i < m; i++)
@@ -1084,7 +1076,6 @@ hipDataType derive_unset_bias_type(const Arguments& arg)
             else //more default cases once support C != D
                 real_bias_type = HIP_R_16F;
         }
-#ifdef ROCM_USE_FLOAT8
         else if((arg.a_type == HIP_R_8F_E4M3 || arg.a_type == HIP_R_8F_E5M2)
                 && (arg.b_type == HIP_R_8F_E4M3 || arg.b_type == HIP_R_8F_E5M2))
         {
@@ -1095,7 +1086,6 @@ hipDataType derive_unset_bias_type(const Arguments& arg)
             else //more default cases once support C != D
                 real_bias_type = HIP_R_16F;
         }
-#endif
         else if((arg.a_type == HIP_R_6F_E2M3_EXT && arg.b_type == HIP_R_6F_E2M3_EXT)
                 || (arg.a_type == HIP_R_6F_E3M2_EXT && arg.b_type == HIP_R_6F_E3M2_EXT)
                 || (arg.a_type == HIP_R_4F_E2M1_EXT && arg.b_type == HIP_R_4F_E2M1_EXT))
@@ -1127,9 +1117,7 @@ hipDataType derive_unset_aux_type(const Arguments& arg)
         HIP_R_16F,
         HIP_R_16BF,
         HIP_R_8F_E4M3_FNUZ,
-#ifdef ROCM_USE_FLOAT8
         HIP_R_8F_E4M3,
-#endif
     };
 
     hipDataType real_aux_type = arg.aux_type;
@@ -1154,10 +1142,8 @@ std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Argum
         HIP_R_32F,
         HIP_R_16BF,
         HIP_R_16F,
-#ifdef ROCM_USE_FLOAT8
         HIP_R_8F_E4M3,
         HIP_R_8F_E5M2,
-#endif
         HIP_R_8F_E4M3_FNUZ,
         HIP_R_8F_E5M2_FNUZ,
     };
@@ -1777,7 +1763,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         hipblaslt_seedrand();
 
-#ifdef USE_ROCROLLER
+#ifdef HIPBLASLT_USE_ROCROLLER
         if(arg.scaleA == hipblaslt_scaling_format::Block)
         {
             if(arg.initialization != hipblaslt_initialization::hpl
@@ -1826,7 +1812,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   TiA,
                                   (arg.swizzle_a) ? A_row[i] * A_col[i] : stride_a[i],
                                   num_batches[i]);
-#ifdef USE_ROCROLLER
+#ifdef HIPBLASLT_USE_ROCROLLER
         }
         if(arg.scaleB == hipblaslt_scaling_format::Block)
         {
@@ -1876,7 +1862,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   TiB,
                                   stride_b[i],
                                   num_batches[i]);
-#ifdef USE_ROCROLLER
+#ifdef HIPBLASLT_USE_ROCROLLER
         }
 #endif
         hipblaslt_init_device(ABC_dims::C,
@@ -1930,7 +1916,8 @@ void testing_matmul_with_bias(const Arguments& arg,
            || arg.scaleA == hipblaslt_scaling_format::Vector)
         {
             if(arg.norm_check)
-                hipblaslt_init_small(hScaleA[i].buf(), size_scaleAVec[i], 1, size_scaleAVec[i], Talpha);
+                hipblaslt_init_small(
+                    hScaleA[i].buf(), size_scaleAVec[i], 1, size_scaleAVec[i], Talpha);
             else
                 hipblaslt_init(hScaleA[i].buf(), size_scaleAVec[i], 1, size_scaleAVec[i], Talpha);
         }
@@ -1939,7 +1926,8 @@ void testing_matmul_with_bias(const Arguments& arg,
            || arg.scaleB == hipblaslt_scaling_format::Vector)
         {
             if(arg.norm_check)
-                hipblaslt_init_small(hScaleB[i].buf(), size_scaleBVec[i], 1, size_scaleBVec[i], Talpha);
+                hipblaslt_init_small(
+                    hScaleB[i].buf(), size_scaleBVec[i], 1, size_scaleBVec[i], Talpha);
             else
                 hipblaslt_init(hScaleB[i].buf(), size_scaleBVec[i], 1, size_scaleBVec[i], Talpha);
         }
@@ -2097,75 +2085,74 @@ void testing_matmul_with_bias(const Arguments& arg,
                 HIPBLAS_STATUS_SUCCESS);
         }
 
-        if(arg.scaleA == hipblaslt_scaling_format::Scalar
-           || arg.scaleA == hipblaslt_scaling_format::Vector)
-        {
-            hipblasLtMatmulDescAttributes_t attr
-                = arg.scaleA == hipblaslt_scaling_format::Vector
-                      ? HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT
-                      : HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
-            void* scaleA_addr = (void*)(dScaleA[i].buf());
-            CHECK_HIPBLASLT_ERROR(
-                hipblasLtMatmulDescSetAttribute(matmul[0][i], attr, &scaleA_addr, sizeof(void*)));
-        }
-        else if(arg.scaleA == hipblaslt_scaling_format::Block)
+        if(arg.scaleA != hipblaslt_scaling_format::none)
         {
             hipblasLtMatmulDescAttributes_t attr = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
 
-            // Set up scale pointer
             void* scaleA_addr = (void*)(dScaleA[i].buf());
             CHECK_HIPBLASLT_ERROR(
                 hipblasLtMatmulDescSetAttribute(matmul[0][i], attr, &scaleA_addr, sizeof(void*)));
 
+            hipblasLtMatmulMatrixScale_t mode = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+            if(arg.scaleA == hipblaslt_scaling_format::Vector)
+            {
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
+            }
             // For MX format (SCALE_POINTER_BLOCK), set the scale mode
             // Set the row and col sizes of scale block for matrix A
-            if(arg.scaleABlockRowSize == 32 && arg.scaleABlockColSize == 1)
+            if(arg.scaleA == hipblaslt_scaling_format::Block)
+            {
+                if(arg.scaleABlockRowSize == 32 && arg.scaleABlockColSize == 1)
+                {
+                    mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+                }
+                else
+                {
+                    hipblaslt_cout << "Only a block size scaling of 32 is supported" << std::endl;
+                    return;
+                }
+            }
+
+            if(mode != HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F)
             {
                 auto attr = HIPBLASLT_MATMUL_DESC_A_SCALE_MODE;
-                auto mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
                 CHECK_HIPBLASLT_ERROR(
                     hipblasLtMatmulDescSetAttribute(matmul[0][i], attr, &mode, sizeof(uint32_t)));
             }
-            else
-            {
-                hipblaslt_cout << "Only a block size scaling of 32 is supported" << std::endl;
-                return;
-            }
         }
 
-        if(arg.scaleB == hipblaslt_scaling_format::Scalar
-           || arg.scaleB == hipblaslt_scaling_format::Vector)
-        {
-            hipblasLtMatmulDescAttributes_t attr
-                = arg.scaleB == hipblaslt_scaling_format::Vector
-                      ? HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT
-                      : HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER;
-            void* scaleB_addr = (void*)(dScaleB[i].buf());
-            CHECK_HIPBLASLT_ERROR(
-                hipblasLtMatmulDescSetAttribute(matmul[0][i], attr, &scaleB_addr, sizeof(void*)));
-        }
-        else if(arg.scaleB == hipblaslt_scaling_format::Block)
+        if(arg.scaleB != hipblaslt_scaling_format::none)
         {
             hipblasLtMatmulDescAttributes_t attr = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER;
 
-            // Set up scale pointer
             void* scaleB_addr = (void*)(dScaleB[i].buf());
             CHECK_HIPBLASLT_ERROR(
                 hipblasLtMatmulDescSetAttribute(matmul[0][i], attr, &scaleB_addr, sizeof(void*)));
 
+            hipblasLtMatmulMatrixScale_t mode = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+            if(arg.scaleB == hipblaslt_scaling_format::Vector)
+            {
+                mode = HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
+            }
             // For MX format (SCALE_POINTER_BLOCK), set the scale mode
             // Set the row and col sizes of scale block for matrix B
-            if(arg.scaleBBlockRowSize == 1 && arg.scaleBBlockColSize == 32)
+            if(arg.scaleB == hipblaslt_scaling_format::Block)
+            {
+                if(arg.scaleBBlockRowSize == 1 && arg.scaleBBlockColSize == 32)
+                {
+                    mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+                }
+                else
+                {
+                    hipblaslt_cout << "Only a block size scaling of 32 is supported" << std::endl;
+                    return;
+                }
+            }
+            if(mode != HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F)
             {
                 auto attr = HIPBLASLT_MATMUL_DESC_B_SCALE_MODE;
-                auto mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
                 CHECK_HIPBLASLT_ERROR(
                     hipblasLtMatmulDescSetAttribute(matmul[0][i], attr, &mode, sizeof(uint32_t)));
-            }
-            else
-            {
-                hipblaslt_cout << "Only a block size scaling of 32 is supported" << std::endl;
-                return;
             }
         }
 
@@ -2252,27 +2239,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                     &e_addr,
                                                     sizeof(void*)));
             }
-            if(arg.scaleA == hipblaslt_scaling_format::Scalar
-               || arg.scaleA == hipblaslt_scaling_format::Vector
-               || arg.scaleA == hipblaslt_scaling_format::Block)
+            if(arg.scaleA != hipblaslt_scaling_format::none)
             {
-                hipblasLtMatmulDescAttributes_t attr
-                    = arg.scaleA == hipblaslt_scaling_format::Vector
-                          ? HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT
-                          : HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
+                hipblasLtMatmulDescAttributes_t attr = HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER;
                 void* scaleA_addr = (void*)(dScaleA[i].as<char>() + b * size_scaleAVec[i]);
                 CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                     matmul[b][i], attr, &scaleA_addr, sizeof(void*)));
             }
 
-            if(arg.scaleB == hipblaslt_scaling_format::Scalar
-               || arg.scaleB == hipblaslt_scaling_format::Vector
-               || arg.scaleB == hipblaslt_scaling_format::Block)
+            if(arg.scaleB != hipblaslt_scaling_format::none)
             {
-                hipblasLtMatmulDescAttributes_t attr
-                    = arg.scaleB == hipblaslt_scaling_format::Vector
-                          ? HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT
-                          : HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER;
+                hipblasLtMatmulDescAttributes_t attr = HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER;
                 void* scaleB_addr = (void*)(dScaleB[i].as<char>() + b * size_scaleBVec[i]);
                 CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                     matmul[b][i], attr, &scaleB_addr, sizeof(void*)));
@@ -2306,11 +2283,11 @@ void testing_matmul_with_bias(const Arguments& arg,
     std::vector<size_t>                           heuristicTuningIndex;
 
     // Cpp API
-    hipblaslt_ext::GemmPreferenceV2 gemmPref;
+    hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
-    std::vector<hipblaslt_ext::Gemm>                      gemmVec;
-    std::vector<hipblaslt_ext::GroupedGemm>               groupedGemmVec;
-    std::vector<std::vector<hipblaslt_ext::GemmInputsV2>> extinputs;
+    std::vector<hipblaslt_ext::Gemm>                    gemmVec;
+    std::vector<hipblaslt_ext::GroupedGemm>             groupedGemmVec;
+    std::vector<std::vector<hipblaslt_ext::GemmInputs>> extinputs;
 
     // C to Cpp API for GG
     std::vector<std::vector<void*>> da(block_count, std::vector<void*>(gemm_count));
@@ -2340,11 +2317,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                 arg.compute_type));
     }
 
-    std::vector<hipblaslt_ext::GemmEpilogueV2> extepilogue;
-    hipblaslt_ext::GemmProblemTypeV2           extproblemtype;
+    std::vector<hipblaslt_ext::GemmEpilogue> extepilogue;
+    hipblaslt_ext::GemmProblemType           extproblemtype;
     if(arg.use_ext_setproblem)
     {
-        extinputs.resize(block_count, std::vector<hipblaslt_ext::GemmInputsV2>(gemm_count));
+        extinputs.resize(block_count, std::vector<hipblaslt_ext::GemmInputs>(gemm_count));
         extepilogue.resize(gemm_count);
 
         for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
@@ -2366,15 +2343,18 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 if(b == 0)
                 {
+                    hipblasLtMatmulMatrixScale_t sscale = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+                    hipblasLtMatmulMatrixScale_t svector
+                        = HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
                     extepilogue[gemmIdx].setMode(epilogue[gemmIdx]);
                     extepilogue[gemmIdx].setBiasDataType(bias_type);
                     extepilogue[gemmIdx].setAuxDataType(aux_type);
                     extepilogue[gemmIdx].setAuxLeadingDimension(lde[gemmIdx]);
                     extepilogue[gemmIdx].setAuxBatchStride(stride_e[gemmIdx]);
                     extepilogue[gemmIdx].setScalingAType(
-                        arg.scaleA == hipblaslt_scaling_format::Vector ? 1 : 0);
+                        arg.scaleA == hipblaslt_scaling_format::Vector ? svector : sscale);
                     extepilogue[gemmIdx].setScalingBType(
-                        arg.scaleB == hipblaslt_scaling_format::Vector ? 1 : 0);
+                        arg.scaleB == hipblaslt_scaling_format::Vector ? svector : sscale);
                 }
                 extinputs[b][gemmIdx].setA((void*)((dA[gemmIdx].as<char>())
                                                    + b * size_dA[gemmIdx] * realDataTypeSize(TiA)));
@@ -2468,8 +2448,8 @@ void testing_matmul_with_bias(const Arguments& arg,
             for(size_t gsu = 0; gsu < gsu_vector.size(); gsu++)
             {
                 hipblaslt_ext::GemmTuning tuning;
-                tuning.splitK = gsu_vector[gsu];
-                tuning.wgm    = wgm_vector[wgm];
+                tuning.setSplitK(gsu_vector[gsu]);
+                tuning.setWgm(wgm_vector[wgm]);
                 tuningVec.push_back(tuning);
             }
     }
@@ -3160,12 +3140,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                         (arg.scaleA == hipblaslt_scaling_format::Block),
                         (arg.scaleB == hipblaslt_scaling_format::Block));
 
-                    auto                        pos       = stride_d[gemmIdx] * batchIdx;
-                    std::vector<HipHostBuffer>* hEInst    = arg.gradient ? &hE : &hE_gold;
-                    void*                       ePos      = ((*hEInst).size() <= gemmIdx)
-                                                                ? nullptr
-                                                                : ((*hEInst)[gemmIdx].as<char>() + pos * realDataTypeSize(Taux));
-                    auto                        applyBias = arg.gradient ? false : arg.bias_vector;
+                    auto                        pos    = stride_d[gemmIdx] * batchIdx;
+                    std::vector<HipHostBuffer>* hEInst = arg.gradient ? &hE : &hE_gold;
+                    void*                       ePos
+                        = ((*hEInst).size() <= gemmIdx)
+                              ? nullptr
+                              : ((*hEInst)[gemmIdx].as<char>() + pos * realDataTypeSize(Taux));
+                    auto  applyBias = arg.gradient ? false : arg.bias_vector;
                     void* hBias_buf = ((hBias).size() <= gemmIdx) ? nullptr : hBias[gemmIdx].buf();
 
                     switch(arg.activation_type)
@@ -3932,8 +3913,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                     archName,
                     cuNum,
                     arg,
-                    (uint32_t)tuningVec[heuristicTuningIndex[sol]].splitK,
-                    (uint32_t)tuningVec[heuristicTuningIndex[sol]].wgm,
+                    (uint32_t)tuningVec[heuristicTuningIndex[sol]].getSplitK(),
+                    (uint32_t)tuningVec[heuristicTuningIndex[sol]].getWgm(),
                     gpu_time_used,
                     flush_time_used,
                     flops,
@@ -3990,8 +3971,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 archName,
                 cuNum,
                 arg,
-                (uint32_t)tuningVec[heuristicTuningIndex[best_sol]].splitK,
-                (uint32_t)tuningVec[heuristicTuningIndex[best_sol]].wgm,
+                (uint32_t)tuningVec[heuristicTuningIndex[best_sol]].getSplitK(),
+                (uint32_t)tuningVec[heuristicTuningIndex[best_sol]].getWgm(),
                 best_gpu_time,
                 flush_time_used,
                 best_flops,

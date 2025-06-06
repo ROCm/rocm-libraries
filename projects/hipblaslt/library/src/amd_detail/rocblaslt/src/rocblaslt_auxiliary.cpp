@@ -32,7 +32,9 @@
 // Remove defines that conflict locally.
 #undef CONST
 #else
-#define _GNU_SOURCE
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
 #include <dlfcn.h>
 #include <link.h>
 #include <unistd.h>
@@ -537,7 +539,7 @@ rocblaslt_status rocblaslt_destroy(const rocblaslt_handle handle)
     }
     log_api(__func__, "handle", handle);
 // Destruct
-#ifdef USE_ROCROLLER
+#ifdef HIPBLASLT_USE_ROCROLLER
     if(handle->rocroller_handle)
         rocroller_destroy_handle(handle->rocroller_handle);
 #endif
@@ -852,12 +854,10 @@ rocblaslt_status rocblaslt_matmul_desc_create(rocblaslt_matmul_desc* matmulDesc,
             case rocblaslt_compute_f32_fast_bf8_fnuz:
             case rocblaslt_compute_f32_fast_f8bf8_fnuz:
             case rocblaslt_compute_f32_fast_bf8f8_fnuz:
-#ifdef ROCM_USE_FLOAT8
             case rocblaslt_compute_f32_fast_f8:
             case rocblaslt_compute_f32_fast_bf8:
             case rocblaslt_compute_f32_fast_f8bf8:
             case rocblaslt_compute_f32_fast_bf8f8:
-#endif
                 break;
             default:
                 log_error(__func__, "invalid compute type", computeType);
@@ -955,7 +955,6 @@ rocblaslt_compute_type _matmul_desc_determine_compute_type(rocblaslt_matmul_desc
             return rocblaslt_compute_f32_fast_f8bf8_fnuz;
         else if(tciA == HIP_R_8F_E5M2_FNUZ && tciB == HIP_R_8F_E4M3_FNUZ)
             return rocblaslt_compute_f32_fast_bf8f8_fnuz;
-#ifdef ROCM_USE_FLOAT8
         else if(tciA == tciB && tciA == HIP_R_8F_E4M3)
             return rocblaslt_compute_f32_fast_f8;
         else if(tciA == tciB && tciA == HIP_R_8F_E5M2)
@@ -964,7 +963,6 @@ rocblaslt_compute_type _matmul_desc_determine_compute_type(rocblaslt_matmul_desc
             return rocblaslt_compute_f32_fast_f8bf8;
         else if(tciA == HIP_R_8F_E5M2 && tciB == HIP_R_8F_E4M3)
             return rocblaslt_compute_f32_fast_bf8f8;
-#endif
     }
     return matmulDesc->compute_type_original;
 }
@@ -1070,12 +1068,16 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                         matmulDesc->scaleABlockColSize = 1;
                         matmulDesc->scaleAType = RocblasltContractionProblem::ScalingFormat::Scalar;
                         break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F:
+                        matmulDesc->scaleABlockRowSize = 1;
+                        matmulDesc->scaleABlockColSize = 1;
+                        matmulDesc->scaleAType = RocblasltContractionProblem::ScalingFormat::Vector;
+                        break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3:
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F:
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F:
                     default:
-                        log_error(__func__,
-                                  "invalid A scale mode, currently only "
-                                  "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0 is supported",
-                                  mode);
+                        log_error(__func__, "invalid A scale mode: ", mode);
                         return rocblaslt_status_invalid_value;
                     }
                 }
@@ -1118,12 +1120,16 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                         matmulDesc->scaleBBlockColSize = 1;
                         matmulDesc->scaleBType = RocblasltContractionProblem::ScalingFormat::Scalar;
                         break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F:
+                        matmulDesc->scaleBBlockRowSize = 1;
+                        matmulDesc->scaleBBlockColSize = 1;
+                        matmulDesc->scaleBType = RocblasltContractionProblem::ScalingFormat::Vector;
+                        break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3:
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_32F:
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK128x128_32F:
                     default:
-                        log_error(__func__,
-                                  "invalid B scale mode, currently only "
-                                  "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0 is supported",
-                                  mode);
+                        log_error(__func__, "invalid B scale mode: ", mode);
                         return rocblaslt_status_invalid_value;
                     }
                 }
@@ -1365,7 +1371,7 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 }
                 else
                 {
-                    hipblasLtMatmulMatrixScale_t mode;
+                    hipblasLtMatmulMatrixScale_t mode = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
                     if(matmulDesc->scaleABlockRowSize == 32 && matmulDesc->scaleABlockColSize == 1
                        && matmulDesc->scaleAType
                               == RocblasltContractionProblem::ScalingFormat::Block)
@@ -1377,12 +1383,14 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                     {
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
                     }
+                    else if(matmulDesc->scaleAType
+                            == RocblasltContractionProblem::ScalingFormat::Vector)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
+                    }
                     else
                     {
-                        log_error(__func__,
-                                  "invalid A scale mode, currently only "
-                                  "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0 is supported",
-                                  mode);
+                        log_error(__func__, "invalid A scale mode", mode);
                         return rocblaslt_status_invalid_value;
                     }
                     memcpy(buf, &mode, sizeof(uint32_t));
@@ -1409,7 +1417,7 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 }
                 else
                 {
-                    hipblasLtMatmulMatrixScale_t mode;
+                    hipblasLtMatmulMatrixScale_t mode = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
                     if(matmulDesc->scaleBBlockRowSize == 1 && matmulDesc->scaleBBlockColSize == 32
                        && matmulDesc->scaleBType
                               == RocblasltContractionProblem::ScalingFormat::Block)
@@ -1421,12 +1429,14 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                     {
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
                     }
+                    else if(matmulDesc->scaleBType
+                            == RocblasltContractionProblem::ScalingFormat::Vector)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
+                    }
                     else
                     {
-                        log_error(__func__,
-                                  "invalid B scale mode, currently only "
-                                  "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0 is supported",
-                                  mode);
+                        log_error(__func__, "invalid B scale mode", mode);
                         return rocblaslt_status_invalid_value;
                     }
                     memcpy(buf, &mode, sizeof(uint32_t));
@@ -2014,16 +2024,6 @@ rocblaslt_status rocblaslt_matmul_get_algos_from_index_cpp(
         return status;
     }
     return rocblaslt_status_success;
-}
-
-rocblaslt_status rocblaslt_is_algo_supported_cpp(rocblaslt_handle            handle,
-                                                 rocblaslt::RocGemmType      gemmType,
-                                                 std::shared_ptr<void>       gemmData,
-                                                 rocblaslt_matmul_algo&      algo,
-                                                 const rocblaslt::RocTuning* tuning,
-                                                 size_t&                     workspaceSizeInBytes)
-{
-    return isSolutionSupported(handle, gemmType, gemmData, algo, tuning, workspaceSizeInBytes);
 }
 
 rocblaslt_status rocblaslt_is_algo_supported_cpp(rocblaslt_handle              handle,

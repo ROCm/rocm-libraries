@@ -470,14 +470,14 @@ void simpleGemmExt(hipblasLtHandle_t  handle,
                    int64_t            max_workspace_size,
                    hipStream_t        stream)
 {
-    hipblaslt_ext::GemmPreferenceV2 gemmPref;
+    hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
     hipblaslt_ext::Gemm gemm(
         handle, trans_a, trans_b, HIP_R_16F, HIP_R_16F, HIP_R_16F, HIP_R_16F, HIPBLAS_COMPUTE_32F);
 
-    hipblaslt_ext::GemmEpilogueV2
+    hipblaslt_ext::GemmEpilogue
         epilogue; // No action needed, default is HIPBLASLT_EPILOGUE_DEFAULT. (Gemm only)
-    hipblaslt_ext::GemmInputsV2 inputs;
+    hipblaslt_ext::GemmInputs inputs;
     inputs.setA(d_a);
     inputs.setB(d_b);
     inputs.setC(d_c);
@@ -590,13 +590,13 @@ void simpleGemmGetAllAlgosExt(hipblasLtHandle_t  handle,
                               int64_t            max_workspace_size,
                               hipStream_t        stream)
 {
-    hipblaslt_ext::GemmPreferenceV2 gemmPref;
+    hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
     hipblaslt_ext::Gemm gemm(
         handle, trans_a, trans_b, HIP_R_16F, HIP_R_16F, HIP_R_16F, HIP_R_16F, HIPBLAS_COMPUTE_32F);
 
-    hipblaslt_ext::GemmEpilogueV2 epilogue;
-    hipblaslt_ext::GemmInputsV2   inputs;
+    hipblaslt_ext::GemmEpilogue epilogue;
+    hipblaslt_ext::GemmInputs   inputs;
     inputs.setA(d_a);
     inputs.setB(d_b);
     inputs.setC(d_c);
@@ -753,14 +753,14 @@ void simpleGemmGetAlgoByIndexExt(hipblasLtHandle_t  handle,
                                  int64_t            max_workspace_size,
                                  hipStream_t        stream)
 {
-    hipblaslt_ext::GemmPreferenceV2 gemmPref;
+    hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
     hipblaslt_ext::Gemm gemm(
         handle, trans_a, trans_b, HIP_R_16F, HIP_R_16F, HIP_R_16F, HIP_R_16F, HIPBLAS_COMPUTE_32F);
 
-    hipblaslt_ext::GemmEpilogueV2
+    hipblaslt_ext::GemmEpilogue
         epilogue; // No action needed, default is HIPBLASLT_EPILOGUE_DEFAULT. (Gemm only)
-    hipblaslt_ext::GemmInputsV2 inputs;
+    hipblaslt_ext::GemmInputs inputs;
     inputs.setA(d_a);
     inputs.setB(d_b);
     inputs.setC(d_c);

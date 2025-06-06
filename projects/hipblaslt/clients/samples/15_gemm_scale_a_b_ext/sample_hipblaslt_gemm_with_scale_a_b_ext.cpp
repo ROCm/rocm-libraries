@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -102,7 +102,7 @@ void simpleGemmScaleABExt(hipblasLtHandle_t  handle,
                           float              h_scale_a,
                           float              h_scale_b)
 {
-    hipblaslt_ext::GemmPreferenceV2 gemmPref;
+    hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
     hipblaslt_ext::Gemm gemm(handle,
                              trans_a,
@@ -113,11 +113,11 @@ void simpleGemmScaleABExt(hipblasLtHandle_t  handle,
                              HIP_R_16F,
                              HIPBLAS_COMPUTE_32F);
 
-    hipblaslt_ext::GemmEpilogueV2
+    hipblaslt_ext::GemmEpilogue
         epilogue; // No action needed, default is HIPBLASLT_EPILOGUE_DEFAULT. (Gemm only)
-    hipblaslt_ext::GemmInputsV2 inputs;
-    float*                      d_scale_a;
-    float*                      d_scale_b;
+    hipblaslt_ext::GemmInputs inputs;
+    float*                    d_scale_a;
+    float*                    d_scale_b;
     CHECK_HIP_ERROR(hipMalloc(&d_scale_a, sizeof(float)));
     CHECK_HIP_ERROR(hipMalloc(&d_scale_b, sizeof(float)));
     CHECK_HIP_ERROR(

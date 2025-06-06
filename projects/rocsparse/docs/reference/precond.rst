@@ -1,6 +1,6 @@
 .. meta::
-  :description: rocSPARSE documentation and API reference library
-  :keywords: rocSPARSE, ROCm, API, documentation
+  :description: rocSPARSE preconditioner functions API documentation
+  :keywords: rocSPARSE, ROCm, API, documentation, preconditioner functions
 
 .. _rocsparse_precond_functions_:
 
@@ -8,7 +8,7 @@
 Sparse preconditioner functions
 ********************************************************************
 
-This module holds all sparse preconditioners.
+This module contains all sparse preconditioners.
 
 The sparse preconditioners describe manipulations on a matrix in sparse format to obtain a sparse preconditioner matrix.
 

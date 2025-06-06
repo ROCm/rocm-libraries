@@ -279,6 +279,9 @@ inline std::map<std::string, int>
 
     rv["HasNewBarrier"] = tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -1", isDebug);
 
+    rv["s_delay_alu"]
+        = tryAssembler(isaVersion, assemblerPath, "s_delay_alu instid0(VALU_DEP_1)", isDebug);
+
     if(tryAssembler(isaVersion, assemblerPath, "s_waitcnt vmcnt(63)", isDebug))
         rv["MaxVmcnt"] = 63;
     else if(tryAssembler(isaVersion, assemblerPath, "s_waitcnt vmcnt(15)", isDebug))

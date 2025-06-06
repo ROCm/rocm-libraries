@@ -103,6 +103,7 @@ function(TensileCreateLibraryFiles
        TENSILE_ROOT
        VAR_PREFIX
        CPU_THREADS
+       VERBOSE
        )
 
   # Multi value settings
@@ -182,6 +183,10 @@ function(TensileCreateLibraryFiles
 
   if(Tensile_CPU_THREADS)
     set(Options ${Options} "--jobs=${Tensile_CPU_THREADS}")
+  endif()
+
+  if(Tensile_VERBOSE)
+    set(Options ${Options} "--verbose=${Tensile_VERBOSE}")
   endif()
 
   if(Tensile_ASM_DEBUG)

@@ -428,6 +428,12 @@ def parseLibraryLogicList(data, srcFile="?"):
         rv["Library"]["indexOrder"] = None
         rv["Library"]["table"] = [0, len(data[5])]
         rv["Library"]["distance"] = None
+    elif libraryType == "Prediction":
+        rv["LibraryType"] = "Prediction"
+        rv["Library"] = {}
+        rv["Library"]["indexOrder"] = None
+        rv["Library"]["table"] = [0, len(data[5])]
+        rv["Library"]["distance"] = None
     else:
         rv["LibraryType"] = "Matching"
         rv["Library"] = {}

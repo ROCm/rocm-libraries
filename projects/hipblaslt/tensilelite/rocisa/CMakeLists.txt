@@ -65,7 +65,8 @@ set(ROCISAPASS_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/pass.cpp
                       ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/graph.cpp
                       ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/composite.cpp
                       ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/cycle.cpp
-                      ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/remove.cpp)
+                      ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/remove.cpp
+                      ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/pass/insert_delay_alu.cpp)
 
 nanobind_add_module(rocisa NOMINSIZE NB_SUPPRESS_WARNINGS
                         ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/main.cpp
@@ -77,6 +78,7 @@ nanobind_add_module(rocisa NOMINSIZE NB_SUPPRESS_WARNINGS
                         ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/helper.cpp
                         ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/label.cpp
                         ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/macro.cpp
+                        ${CMAKE_CURRENT_SOURCE_DIR}/rocisa/src/register.cpp
                         ${ROCISAINST_SOURCE}
                         ${ROCISAPASS_SOURCE}
                         ${ROCISAFUNC_SOURCE})

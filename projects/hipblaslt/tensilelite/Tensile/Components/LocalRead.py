@@ -217,6 +217,23 @@ class LocalReadMFMA(LocalRead):
 
         # split Metadata when localread width > mi input
         numSplitMetadata = max(ceil((blockWidth * 4) // tP["bpeDS"]) - 1, 0) if tP["isM"] else 0
+
+        # caculate SMFMA layout
+        blocksPerTGroupSMFMA = 1
+        elementsPerBlockSMFMA = 1
+        blockOffsetSMFMA = 1
+        if kernel["ProblemType"]["Sparse"] != 0:
+            if kernel["MIInputPerThread"] * kernel["ProblemType"]["DataTypeB"].numBytes() > 16: # double K
+                isSparseTrack = (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or (kernel["ProblemType"]["Sparse"] == 2 and  tP["isB"]) or tP["isM"]
+                # gfx950 sparse track only has one block for each thread group.
+                # TODO adjust this value for other arch.
+                blocksPerTGroupSMFMA = 1 if isSparseTrack else 2
+                if blocksPerTGroupSMFMA > 1:
+                    threadGroups = kernel["MatrixInstK"] // kernel["MIInputPerThread"]
+                    elementsPerBlockSMFMA = kernel["MIInputPerThread"] // blocksPerTGroupSMFMA  # need adjust if blocks > 1 and is sparse track.
+                    blockStride = elementsPerBlockSMFMA * threadGroups
+                    blockOffsetSMFMA = blockStride - elementsPerBlockSMFMA
+
         valufIdx = 0
         if enableLDSTr:
             numberMTilesPerWave = kernel["MIWaveTile"][tile01]
@@ -541,23 +558,14 @@ class LocalReadMFMA(LocalRead):
                         for oIdx in range(0, numOffsets):
                             offset_val = (eIdx + (vIdx * numOffsets+oIdx) * MIWaveGroupShape[tile01]) * tileStride
     
-                            strideK = 1
-                            # FIXME gfx950 sparse
                             if kernel["ProblemType"]["Sparse"] != 0:
-                                if kernel["MIInputPerThread"] * kernel["ProblemType"]["DataTypeB"].numBytes() > 16: # double K
-                                  is8bits = kernel["ProblemType"]["DataType"].numBytes() == 1
-                                  isSparseTrack = (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or (kernel["ProblemType"]["Sparse"] == 2 and  tP["isB"]) or tP["isM"]
-                                  if not isSparseTrack:
+                                if blocksPerTGroupSMFMA > 1:
+                                    blockId = (rIdx * numElementPerRead) // elementsPerBlockSMFMA  #block 0 or block 1
                                     if kernel["UnrollMajorLDS%s"%(tc)]:
-                                        divider = 64 if is8bits else 32
-                                        strideK = max(1, kernel["MatrixInstK"] // divider * numReadsPerUnroll)
+                                        offset_val = offset_val + (blockOffsetSMFMA * blockId)
                                     else:
-                                        divider = 32
-                                        elementsPerBlock = 16 // kernel["ProblemType"]["DataTypeB"].numBytes() # 16 bytes, 4 vgprs per block for gfx95x
-                                        blockId = rIdx // elementsPerBlock
-                                        offsetPerBlock = kernel["MatrixInstK"] // divider * 16 * blockId
-                                        offset_val = offset_val + (offsetPerBlock - blockId * elementsPerBlock) * kernel["MacroTile%s"%tc]
-                                offset_val = (strideK * rIdx * numElementPerRead * UnrollStride + offset_val + tP["localReadOffset"]) * tP["bpeDS"]
+                                        offset_val = offset_val + (blockOffsetSMFMA * blockId) * UnrollStride
+                                offset_val = (rIdx * numElementPerRead * UnrollStride + offset_val + tP["localReadOffset"]) * tP["bpeDS"]
                             elif kernel["ProblemType"]["DataType"].is8bitFloat() and kernel["MatrixInstK"] > 32:
                                 incOffset = 0
                                 midIdx = numReadsPerUnroll // 2

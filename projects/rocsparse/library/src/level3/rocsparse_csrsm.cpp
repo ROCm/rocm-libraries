@@ -24,9 +24,9 @@
 #include "internal/level3/rocsparse_csrsm.h"
 #include "rocsparse_csrsm.hpp"
 
-#include "common.h"
-#include "control.h"
-#include "utility.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "../level1/rocsparse_gthr.hpp"
 #include "../level2/rocsparse_csrsv.hpp"

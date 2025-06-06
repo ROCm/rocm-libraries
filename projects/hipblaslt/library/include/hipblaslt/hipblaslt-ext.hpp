@@ -54,48 +54,21 @@ namespace hipblaslt_ext
     };
 
     /*! \ingroup types_module
-     *  \brief hipblasLt extension preference for gemm problems. (deprecated)
+     *  \brief hipblasLt extension preference for gemm problems.
      *
      * \details Currently only supports setting max workspace size.
      */
     class GemmPreference
     {
     public:
-        /*! \ingroup library_module
-         *  \brief This function sets the max workspace size.
-         *
-         *  @param[in]
-         *  workspaceBytes  Set the max workspace size in bytes.
-         */
-        HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);
+        HIPBLASLT_EXPORT GemmPreference();
+        HIPBLASLT_EXPORT ~GemmPreference();
 
-        /*! \ingroup library_module
-         *  \brief This function returns the set max workspace size.
-         *
-         *  \retval size_t Returns the set max workspace size.
-         */
-        HIPBLASLT_EXPORT const size_t getMaxWorkspaceBytes() const;
+        HIPBLASLT_EXPORT                 GemmPreference(const GemmPreference& pref);
+        HIPBLASLT_EXPORT GemmPreference& operator=(const GemmPreference& pref);
 
-    private:
-        size_t m_workspace_bytes;
-    };
-
-    /*! \ingroup types_module
-     *  \brief hipblasLt extension preference for gemm problems.
-     *
-     * \details Currently only supports setting max workspace size.
-     */
-    class GemmPreferenceV2
-    {
-    public:
-        HIPBLASLT_EXPORT GemmPreferenceV2();
-        HIPBLASLT_EXPORT ~GemmPreferenceV2();
-
-        HIPBLASLT_EXPORT                   GemmPreferenceV2(const GemmPreferenceV2& pref);
-        HIPBLASLT_EXPORT GemmPreferenceV2& operator=(const GemmPreferenceV2& pref);
-
-        HIPBLASLT_EXPORT                   GemmPreferenceV2(GemmPreferenceV2&& pref);
-        HIPBLASLT_EXPORT GemmPreferenceV2& operator=(GemmPreferenceV2&& pref);
+        HIPBLASLT_EXPORT                 GemmPreference(GemmPreference&& pref);
+        HIPBLASLT_EXPORT GemmPreference& operator=(GemmPreference&& pref);
 
         /*! \ingroup library_module
          *  \brief This function sets the max workspace size.
@@ -119,44 +92,36 @@ namespace hipblaslt_ext
     };
 
     /*! \ingroup types_module
-     *  \brief hipblasLt extension ProblemType for gemm problems. (deprecated)
-     *
-     * \details This structure sets the problem type of a gemm problem.
-     */
-    struct GemmProblemType
-    {
-        hipblasOperation_t   op_a; //!< The A martix transpose
-        hipblasOperation_t   op_b; //!< The B matrix transpose
-        hipDataType          type_a; //!< The A matrix datatype.
-        hipDataType          type_b; //!< The B matrix datatype.
-        hipDataType          type_c; //!< The C matrix datatype.
-        hipDataType          type_d; //!< The D matrix datatype.
-        hipblasComputeType_t type_compute; //!< The compute datatype.
-    };
-
-    /*! \ingroup types_module
      *  \brief hipblasLt extension ProblemType for gemm problems.
      *
      * \details This structure sets the problem type of a gemm problem.
      */
-    class GemmProblemTypeV2
+    class GemmProblemType
     {
+    private:
+        friend Gemm;
+        friend GroupedGemm;
+        class GemmProblemTypeImpl;
+        std::unique_ptr<GemmProblemTypeImpl> pimpl;
+
     public:
-        HIPBLASLT_EXPORT GemmProblemTypeV2();
-        HIPBLASLT_EXPORT GemmProblemTypeV2(hipblasOperation_t   opA,
-                                           hipblasOperation_t   opB,
-                                           hipDataType          typeA,
-                                           hipDataType          typeB,
-                                           hipDataType          typeC,
-                                           hipDataType          typeD,
-                                           hipblasComputeType_t typeCompute);
-        HIPBLASLT_EXPORT ~GemmProblemTypeV2();
+        HIPBLASLT_EXPORT GemmProblemType();
+        HIPBLASLT_EXPORT GemmProblemType(hipblasOperation_t   opA,
+                                         hipblasOperation_t   opB,
+                                         hipDataType          typeA,
+                                         hipDataType          typeB,
+                                         hipDataType          typeC,
+                                         hipDataType          typeD,
+                                         hipblasComputeType_t typeCompute);
+        HIPBLASLT_EXPORT ~GemmProblemType();
 
-        HIPBLASLT_EXPORT                    GemmProblemTypeV2(const GemmProblemTypeV2& type);
-        HIPBLASLT_EXPORT GemmProblemTypeV2& operator=(const GemmProblemTypeV2& type);
+        HIPBLASLT_EXPORT                  GemmProblemType(const GemmProblemTypeImpl& impl);
+        HIPBLASLT_EXPORT GemmProblemType& operator=(const GemmProblemTypeImpl& impl);
+        HIPBLASLT_EXPORT                  GemmProblemType(const GemmProblemType& type);
+        HIPBLASLT_EXPORT GemmProblemType& operator=(const GemmProblemType& type);
 
-        HIPBLASLT_EXPORT                    GemmProblemTypeV2(GemmProblemTypeV2&& type);
-        HIPBLASLT_EXPORT GemmProblemTypeV2& operator=(GemmProblemTypeV2&& type);
+        HIPBLASLT_EXPORT                  GemmProblemType(GemmProblemType&& type);
+        HIPBLASLT_EXPORT GemmProblemType& operator=(GemmProblemType&& type);
 
         HIPBLASLT_EXPORT void setOpA(hipblasOperation_t op); //!< Set the A martix transpose.
         HIPBLASLT_EXPORT void setOpB(hipblasOperation_t op); //!< Set the B matrix transpose.
@@ -174,30 +139,6 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT hipDataType          getTypeC() const; //!< The C matrix datatype.
         HIPBLASLT_EXPORT hipDataType          getTypeD() const; //!< The D matrix datatype.
         HIPBLASLT_EXPORT hipblasComputeType_t getTypeCompute() const; //!< The compute datatype.
-    private:
-        friend Gemm;
-        friend GroupedGemm;
-        class GemmProblemTypeImpl;
-        std::unique_ptr<GemmProblemTypeImpl> pimpl;
-    };
-
-    /*! \ingroup types_module
-     *  \brief hipblasLt extension Epilogue for gemm problems. (Deprecated)
-     *
-     * \details This structure sets the epilogue of a gemm problem.
-     */
-    struct GemmEpilogue
-    {
-        hipblasLtEpilogue_t mode
-            = HIPBLASLT_EPILOGUE_DEFAULT; //!< The mode of epilogue. Default is gemm.
-        hipDataType bias_data_type
-            = HIPBLASLT_DATATYPE_INVALID; //!< The bias datatype. Only works if mode is set to bias related epilogues.
-        hipDataType aux_data_type
-            = HIPBLASLT_DATATYPE_INVALID; //!< The aux datatype. Only works if mode is set to aux related epilogues.
-        int aux_ld
-            = 0; //!< The aux leading dimension. Only works if mode is set to aux related epilogues.
-        int aux_stride
-            = 0; //!< The aux batch stride. Only works if mode is set to aux related epilogues.
     };
 
     /*! \ingroup types_module
@@ -205,17 +146,17 @@ namespace hipblaslt_ext
      *
      * \details This class sets the epilogue of a gemm problem.
      */
-    class GemmEpilogueV2
+    class GemmEpilogue
     {
     public:
-        HIPBLASLT_EXPORT GemmEpilogueV2();
-        HIPBLASLT_EXPORT ~GemmEpilogueV2();
+        HIPBLASLT_EXPORT GemmEpilogue();
+        HIPBLASLT_EXPORT ~GemmEpilogue();
 
-        HIPBLASLT_EXPORT                 GemmEpilogueV2(const GemmEpilogueV2& epilogue);
-        HIPBLASLT_EXPORT GemmEpilogueV2& operator=(const GemmEpilogueV2& epilogue);
+        HIPBLASLT_EXPORT               GemmEpilogue(const GemmEpilogue& epilogue);
+        HIPBLASLT_EXPORT GemmEpilogue& operator=(const GemmEpilogue& epilogue);
 
-        HIPBLASLT_EXPORT                 GemmEpilogueV2(GemmEpilogueV2&& epilogue);
-        HIPBLASLT_EXPORT GemmEpilogueV2& operator=(GemmEpilogueV2&& epilogue);
+        HIPBLASLT_EXPORT               GemmEpilogue(GemmEpilogue&& epilogue);
+        HIPBLASLT_EXPORT GemmEpilogue& operator=(GemmEpilogue&& epilogue);
 
         HIPBLASLT_EXPORT void
             setMode(hipblasLtEpilogue_t mode); //!< Set the mode of epilogue. Default is gemm.
@@ -229,10 +170,12 @@ namespace hipblaslt_ext
             int auxLeadingDimension); //!< Set the aux leading dimension. Only works if mode is set to aux related epilogues.
         HIPBLASLT_EXPORT void setAuxBatchStride(
             int auxBatchStride); //!< Set the aux batch stride. Only works if mode is set to aux related epilogues.
-        HIPBLASLT_EXPORT void setScalingAType(
-            int scalingAType); //!< 0 is scalar, 1 is vector. Only works if DataTypeA = DataTypeB = FP8.
-        HIPBLASLT_EXPORT void setScalingBType(
-            int scalingBType); //!< 0 is scalar, 1 is vector. Only works if DataTypeA = DataTypeB = FP8.
+        HIPBLASLT_EXPORT void
+            setScalingAType(hipblasLtMatmulMatrixScale_t
+                                scalingAType); //!< Only works if DataTypeA = DataTypeB = FP8.
+        HIPBLASLT_EXPORT void
+            setScalingBType(hipblasLtMatmulMatrixScale_t
+                                scalingBType); //!< Only works if DataTypeA = DataTypeB = FP8.
 
         HIPBLASLT_EXPORT hipblasLtEpilogue_t
                                      getMode() const; //!< The mode of epilogue. Default is gemm.
@@ -244,9 +187,9 @@ namespace hipblaslt_ext
             const; //!< The aux leading dimension. Only works if mode is set to aux related epilogues.
         HIPBLASLT_EXPORT int getAuxBatchStride()
             const; //!< The aux batch stride. Only works if mode is set to aux related epilogues.
-        HIPBLASLT_EXPORT int getScalingAType()
+        HIPBLASLT_EXPORT hipblasLtMatmulMatrixScale_t getScalingAType()
             const; //!< 0 is scalar, 1 is vector. Only works if DataTypeA = DataTypeB = FP8.
-        HIPBLASLT_EXPORT int getScalingBType()
+        HIPBLASLT_EXPORT hipblasLtMatmulMatrixScale_t getScalingBType()
             const; //!< 0 is scalar, 1 is vector. Only works if DataTypeA = DataTypeB = FP8.
     private:
         friend Gemm;
@@ -257,22 +200,15 @@ namespace hipblaslt_ext
 
     struct GemmTuning
     {
-        uint8_t splitK = 0; //!< Value of splitK, 0 is off (use the splitK inside the solution).
-        uint8_t wgm
-            = 0; //!< Value of workgroup mapping, 0 is off (use the workgroup mapping inside the solution).
-    };
-
-    struct GemmTuningV2
-    {
     public:
-        HIPBLASLT_EXPORT GemmTuningV2();
-        HIPBLASLT_EXPORT ~GemmTuningV2();
+        HIPBLASLT_EXPORT GemmTuning();
+        HIPBLASLT_EXPORT ~GemmTuning();
 
-        HIPBLASLT_EXPORT               GemmTuningV2(const GemmTuningV2& tuning);
-        HIPBLASLT_EXPORT GemmTuningV2& operator=(const GemmTuningV2& tuning);
+        HIPBLASLT_EXPORT             GemmTuning(const GemmTuning& tuning);
+        HIPBLASLT_EXPORT GemmTuning& operator=(const GemmTuning& tuning);
 
-        HIPBLASLT_EXPORT               GemmTuningV2(GemmTuningV2&& tuning);
-        HIPBLASLT_EXPORT GemmTuningV2& operator=(GemmTuningV2&& tuning);
+        HIPBLASLT_EXPORT             GemmTuning(GemmTuning&& tuning);
+        HIPBLASLT_EXPORT GemmTuning& operator=(GemmTuning&& tuning);
 
         HIPBLASLT_EXPORT void setSplitK(
             uint16_t
@@ -290,45 +226,21 @@ namespace hipblaslt_ext
     };
 
     /*! \ingroup types_module
-     *  \brief hipblasLt extension Inputs for gemm problems. (Deprecated)
-     *
-     * \details This structure sets the input pointers of a gemm problem.
-     */
-    struct GemmInputs
-    {
-        const void* a     = nullptr; //!< The a matrix input pointer.
-        const void* b     = nullptr; //!< The b matrix input pointer.
-        const void* c     = nullptr; //!< The c matrix input pointer.
-        const void* d     = nullptr; //!< The d matrix input pointer.
-        const void* alpha = nullptr; //!< The alpha value.
-        const void* beta  = nullptr; //!< The beta value.
-        // Epilogue inputs
-        const void* bias          = nullptr; //!< The bias input pointer.
-        const void* scaleA        = nullptr; //!< The Scale A input pointer.
-        const void* scaleB        = nullptr; //!< The Scale B input pointer.
-        const void* scaleC        = nullptr; //!< The Scale C input pointer.
-        const void* scaleD        = nullptr; //!< The Scale D input pointer.
-        const void* scaleAux      = nullptr; //!< The Scale AUX input pointer.
-        const void* scaleAlphaVec = nullptr; //!< The scaleAlpha vector input pointer.
-        const void* aux           = nullptr; //!< The aux input pointer.
-    };
-
-    /*! \ingroup types_module
      *  \brief hipblasLt extension Inputs for gemm problems.
      *
      * \details This class sets the input pointers of a gemm problem.
      */
-    class GemmInputsV2
+    class GemmInputs
     {
     public:
-        HIPBLASLT_EXPORT GemmInputsV2();
-        HIPBLASLT_EXPORT ~GemmInputsV2();
+        HIPBLASLT_EXPORT GemmInputs();
+        HIPBLASLT_EXPORT ~GemmInputs();
 
-        HIPBLASLT_EXPORT               GemmInputsV2(const GemmInputsV2& input);
-        HIPBLASLT_EXPORT GemmInputsV2& operator=(const GemmInputsV2& input);
+        HIPBLASLT_EXPORT             GemmInputs(const GemmInputs& input);
+        HIPBLASLT_EXPORT GemmInputs& operator=(const GemmInputs& input);
 
-        HIPBLASLT_EXPORT               GemmInputsV2(GemmInputsV2&& input);
-        HIPBLASLT_EXPORT GemmInputsV2& operator=(GemmInputsV2&& input);
+        HIPBLASLT_EXPORT             GemmInputs(GemmInputs&& input);
+        HIPBLASLT_EXPORT GemmInputs& operator=(GemmInputs&& input);
 
         HIPBLASLT_EXPORT void setA(const void* a); //!< Set the a matrix input pointer.
         HIPBLASLT_EXPORT void setB(const void* b); //!< Set the b matrix input pointer.
@@ -415,7 +327,7 @@ namespace hipblaslt_ext
             strideE2; //!< The aux batch stride. Only works if mode is set to aux related epilogues.
         float act0; //!< The activation value 1. Some activations might use it.
         float act1; //!< The activation value 2.
-        int activationType; //!< The activation type.  Only works if mode is set to activation related epilogues.
+        int   activationType; //!< The activation type.  Only works if mode is set to activation related epilogues.
     } __attribute__((packed));
 
     /*! \ingroup types_module
@@ -429,35 +341,6 @@ namespace hipblaslt_ext
         GemmInstance&                  operator=(const GemmInstance& rhs) = delete;
         HIPBLASLT_EXPORT               GemmInstance(GemmInstance&& rhs) noexcept;
         HIPBLASLT_EXPORT GemmInstance& operator=(GemmInstance&& rhs) noexcept;
-
-        /*! \ingroup library_module
-        *  \brief Retrieve the possible algorithms (deprecated)
-        *
-        *  \details
-        *  This function retrieves the possible algorithms for the matrix multiply
-        * operation hipblasLtMatmul() function with the given data and compute tpye.
-        * The output is placed in heuristicResult in the order of increasing
-        * estimated compute time. Note that the wall duration increases if the
-        * requestedAlgoCount increases.
-        *
-        *  @param[in]
-        *  requestedAlgoCount  number of requested algorithms.
-        *  @param[in]
-        *  pref hipblasLt extension preference for gemm problems.
-        *  @param[out]
-        *  heuristicResults    The algorithm heuristic vector.
-        *
-        *  \retval HIPBLAS_STATUS_SUCCESS           If query was successful. Inspect
-        * heuristicResults.size > 0, but may heuristicResults.size < requestedAlgoCount
-        * state for the status of the results. \retval HIPBLAS_STATUS_NOT_SUPPORTED
-        * If no heuristic function available for current configuration.
-        * \retval HIPBLAS_STATUS_INVALID_VALUE If no solution is found.
-        */
-        HIPBLASLT_EXPORT
-        hipblasStatus_t
-            algoGetHeuristic(const int                                      requestedAlgoCount,
-                             const GemmPreference&                          pref,
-                             std::vector<hipblasLtMatmulHeuristicResult_t>& heuristicResults);
 
         /*! \ingroup library_module
         *  \brief Retrieve the possible algorithms
@@ -484,7 +367,7 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT
         hipblasStatus_t
             algoGetHeuristic(const int                                      requestedAlgoCount,
-                             const GemmPreferenceV2&                        pref,
+                             const GemmPreference&                          pref,
                              std::vector<hipblasLtMatmulHeuristicResult_t>& heuristicResults);
 
         /*! \ingroup library_module
@@ -507,29 +390,6 @@ namespace hipblaslt_ext
         hipblasStatus_t isAlgoSupported(hipblasLtMatmulAlgo_t& algo, size_t& workspaceSizeInBytes);
 
         /*! \ingroup library_module
-        *  \brief Check if the algorithm supports the problem. (deprecated)
-        *
-        *  \details
-        *  This function updates the problem saved inside the algorithm if the problem is
-        * supported. The required workspaceSizeInBytes is also returned.
-        *
-        *  @param[in]
-        *  algo The algorithm heuristic.
-        *  @param[in]
-        *  tuning The tuning parameters.
-        *  @param[out]
-        *  workspaceSizeInBytes Return the required workspace size.
-        *
-        *  \retval HIPBLAS_STATUS_SUCCESS           If query was successful. The problem is
-        * supported by the algorithm.
-        * results. \retval HIPBLAS_STATUS_INVALID_VALUE     The problem is not supported.
-        */
-        HIPBLASLT_EXPORT
-        hipblasStatus_t isAlgoSupported(hipblasLtMatmulAlgo_t& algo,
-                                        GemmTuning&            tuning,
-                                        size_t&                workspaceSizeInBytes);
-
-        /*! \ingroup library_module
         *  \brief Check if the algorithm supports the problem. (For hipblaslt extension API)
         *
         *  \details
@@ -549,7 +409,7 @@ namespace hipblaslt_ext
         */
         HIPBLASLT_EXPORT
         hipblasStatus_t isAlgoSupported(hipblasLtMatmulAlgo_t& algo,
-                                        GemmTuningV2&          tuning,
+                                        GemmTuning&            tuning,
                                         size_t&                workspaceSizeInBytes);
 
         /*! \ingroup library_module
@@ -585,7 +445,7 @@ namespace hipblaslt_ext
                                    hipStream_t                  stream      = 0);
 
         /*! \ingroup library_module
-        *  \brief Create kernel arguments from a given hipblaslt_ext::GemmInstance. (deprecated)
+        *  \brief Create kernel arguments from a given hipblaslt_ext::GemmInstance.
         *
         *  \details
         *  This function creates kernel arguments from a given hipblaslt_ext::GemmInstance
@@ -617,43 +477,6 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT
         hipblasStatus_t initialize(const hipblasLtMatmulAlgo_t& algo,
                                    GemmTuning&                  tuning,
-                                   void*                        workspace,
-                                   bool                         useUserArgs = true,
-                                   hipStream_t                  stream      = 0);
-
-        /*! \ingroup library_module
-        *  \brief Create kernel arguments from a given hipblaslt_ext::GemmInstance.
-        *
-        *  \details
-        *  This function creates kernel arguments from a given hipblaslt_ext::GemmInstance
-        *  then saves the arguments inside the instance.
-        *
-        *  @param[in]
-        *  algo                    Handle for matrix multiplication algorithm to be
-        * used. See hipblaslt.h::hipblasLtMatmulAlgo_t . When NULL, an implicit heuristics query
-        * with default search preferences will be performed to determine actual
-        * algorithm to use.
-        *  @param[in]
-        *  tuning                  Structure with user tuning parameters. Note that not every algo
-        * supports user tuning parameters. Will return HIPBLAS_STATUS_INVALID_VALUE if not supported.
-        * be 0).
-        *  @param[in]
-        *  workspace               Pointer to the workspace buffer allocated in the GPU
-        * memory. Pointer must be 16B aligned (that is, lowest 4 bits of address must
-        * be 0).
-        *  @param[in]
-        *  useUserArgs                Use user args, this does not affect vanilla gemm.
-        * (May be deprecated in the future)
-        *  @param[in]
-        *  stream                  The HIP stream where all the GPU work will be
-        * submitted. (May be deprecated in the future)
-        *
-        *  \retval HIPBLAS_STATUS_SUCCESS           If the operation completed
-        * successfully. \retval HIPBLAS_STATUS_INVALID_VALUE If the gemm_count = 0.
-        */
-        HIPBLASLT_EXPORT
-        hipblasStatus_t initialize(const hipblasLtMatmulAlgo_t& algo,
-                                   GemmTuningV2&                tuning,
                                    void*                        workspace,
                                    bool                         useUserArgs = true,
                                    hipStream_t                  stream      = 0);
@@ -777,40 +600,6 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT Gemm& operator=(Gemm&&) noexcept;
 
         /*! \ingroup library_module
-        *  \brief Sets the problem for a gemm problem. (Deprecated)
-        *
-        *  \details
-        *  This function sets the problem with m, n, k, batch_count. It uses the problem type sets
-        *  from the constructor.
-        *
-        *  @param[in]
-        *  m,n,k                      The problem size.
-        *  @param[in]
-        *  batch_count                The batch count.
-        *  @param[in]
-        *  epilogue                   The structure that controls the epilogue.
-        *  @param[in]
-        *  inputs                     The inputs of the problem.
-        *
-        *  \retval HIPBLAS_STATUS_SUCCESS           If the operation completed
-        * successfully. \retval HIPBLAS_STATUS_EXECUTION_FAILED  If HIP reported an
-        * execution error from the device. \retval HIPBLAS_STATUS_ARCH_MISMATCH     If
-        * the configured operation cannot be run using the selected device. \retval
-        * HIPBLAS_STATUS_NOT_SUPPORTED     If the current implementation on the
-        * selected device doesn't support the configured operation. \retval
-        * HIPBLAS_STATUS_INVALID_VALUE     If the parameters are unexpectedly NULL, in
-        * conflict or in an impossible configuration.
-        *  \retval HIBLAS_STATUS_NOT_INITIALIZED    If hipBLASLt handle has not been
-        * initialized.
-        */
-        HIPBLASLT_EXPORT hipblasStatus_t setProblem(int64_t       m,
-                                                    int64_t       n,
-                                                    int64_t       k,
-                                                    int64_t       batch_count,
-                                                    GemmEpilogue& epilogue,
-                                                    GemmInputs&   inputs);
-
-        /*! \ingroup library_module
         *  \brief Sets the problem for a gemm problem.
         *
         *  \details
@@ -837,15 +626,15 @@ namespace hipblaslt_ext
         *  \retval HIBLAS_STATUS_NOT_INITIALIZED    If hipBLASLt handle has not been
         * initialized.
         */
-        HIPBLASLT_EXPORT hipblasStatus_t setProblem(int64_t         m,
-                                                    int64_t         n,
-                                                    int64_t         k,
-                                                    int64_t         batch_count,
-                                                    GemmEpilogueV2& epilogue,
-                                                    GemmInputsV2&   inputs);
+        HIPBLASLT_EXPORT hipblasStatus_t setProblem(int64_t       m,
+                                                    int64_t       n,
+                                                    int64_t       k,
+                                                    int64_t       batch_count,
+                                                    GemmEpilogue& epilogue,
+                                                    GemmInputs&   inputs);
 
         /*! \ingroup library_module
-        *  \brief Sets the problem for a gemm problem. (Deprecated)
+        *  \brief Sets the problem for a gemm problem.
         *
         *  \details
         *  This function sets the problem with m, n, k, batch_count. It uses the problem type sets
@@ -894,55 +683,6 @@ namespace hipblaslt_ext
                                                     GemmProblemType& problemtype);
 
         /*! \ingroup library_module
-        *  \brief Sets the problem for a gemm problem.
-        *
-        *  \details
-        *  This function sets the problem with m, n, k, batch_count. It uses the problem type sets
-        *  from the constructor.
-        *
-        *  @param[in]
-        *  m,n,k                            The problem size.
-        *  @param[in]
-        *  batch_count                      The batch count.
-        *  @param[in]
-        *  lda,ldb,ldc,ldd                  The leading dimensions of the matrix.
-        *  @param[in]
-        *  strideA,strideB,strideC,strideD  The batch stride of the matrix.
-        *  @param[in]
-        *  epilogue                         The structure that controls the epilogue.
-        *  @param[in]
-        *  inputs                           The inputs of the problem.
-        *  @param[in]
-        *  problemtype                      The structure that sets the problem type of a gemm problem.
-        *
-        *  \retval HIPBLAS_STATUS_SUCCESS           If the operation completed
-        * successfully. \retval HIPBLAS_STATUS_EXECUTION_FAILED  If HIP reported an
-        * execution error from the device. \retval HIPBLAS_STATUS_ARCH_MISMATCH     If
-        * the configured operation cannot be run using the selected device. \retval
-        * HIPBLAS_STATUS_NOT_SUPPORTED     If the current implementation on the
-        * selected device doesn't support the configured operation. \retval
-        * HIPBLAS_STATUS_INVALID_VALUE     If the parameters are unexpectedly NULL, in
-        * conflict or in an impossible configuration.
-        *  \retval HIBLAS_STATUS_NOT_INITIALIZED    If hipBLASLt handle has not been
-        * initialized.
-        */
-        HIPBLASLT_EXPORT hipblasStatus_t setProblem(int64_t            m,
-                                                    int64_t            n,
-                                                    int64_t            k,
-                                                    int64_t            batch_count,
-                                                    int64_t            lda,
-                                                    int64_t            ldb,
-                                                    int64_t            ldc,
-                                                    int64_t            ldd,
-                                                    int64_t            strideA,
-                                                    int64_t            strideB,
-                                                    int64_t            strideC,
-                                                    int64_t            strideD,
-                                                    GemmEpilogueV2&    epilogue,
-                                                    GemmInputsV2&      inputs,
-                                                    GemmProblemTypeV2& problemtype);
-
-        /*! \ingroup library_module
         *  \brief Sets the gemm problem from hipblasLt structures
         *
         *  \details
@@ -987,8 +727,7 @@ namespace hipblaslt_ext
                                                     void*                   D,
                                                     hipblasLtMatrixLayout_t matD);
 
-        HIPBLASLT_EXPORT GemmProblemType   getProblemTypes();
-        HIPBLASLT_EXPORT GemmProblemTypeV2 getProblemTypesV2();
+        HIPBLASLT_EXPORT GemmProblemType getProblemTypes();
     };
 
     /*! \ingroup types_module
@@ -1070,7 +809,7 @@ namespace hipblaslt_ext
                                               std::vector<hipblasLtMatrixLayout_t>& matD);
 
         /*! \ingroup library_module
-        *  \brief Sets the problem for a gemm problem. (Deprecated)
+        *  \brief Sets the problem for a gemm problem.
         *
         *  \details
         *  This function sets the problem with m, n, k, batch_count. It uses the problem type sets
@@ -1105,40 +844,6 @@ namespace hipblaslt_ext
 
         /*! \ingroup library_module
         *  \brief Sets the problem for a gemm problem.
-        *
-        *  \details
-        *  This function sets the problem with m, n, k, batch_count. It uses the problem type sets
-        *  from the constructor.
-        *
-        *  @param[in]
-        *  m,n,k                      The problem size in vector.
-        *  @param[in]
-        *  batch_count                The batch count in vector.
-        *  @param[in]
-        *  epilogue                   The structure in vector that controls the epilogue.
-        *  @param[in]
-        *  inputs                     The inputs in vector of the problem.
-        *
-        *  \retval HIPBLAS_STATUS_SUCCESS           If the operation completed
-        * successfully. \retval HIPBLAS_STATUS_EXECUTION_FAILED  If HIP reported an
-        * execution error from the device. \retval HIPBLAS_STATUS_ARCH_MISMATCH     If
-        * the configured operation cannot be run using the selected device. \retval
-        * HIPBLAS_STATUS_NOT_SUPPORTED     If the current implementation on the
-        * selected device doesn't support the configured operation. \retval
-        * HIPBLAS_STATUS_INVALID_VALUE     If the parameters are unexpectedly NULL, in
-        * conflict or in an impossible configuration.
-        *  \retval HIBLAS_STATUS_NOT_INITIALIZED    If hipBLASLt handle has not been
-        * initialized.
-        */
-        HIPBLASLT_EXPORT hipblasStatus_t setProblem(std::vector<int64_t>&        m,
-                                                    std::vector<int64_t>&        n,
-                                                    std::vector<int64_t>&        k,
-                                                    std::vector<int64_t>&        batch_count,
-                                                    std::vector<GemmEpilogueV2>& epilogue,
-                                                    std::vector<GemmInputsV2>&   inputs);
-
-        /*! \ingroup library_module
-        *  \brief Sets the problem for a gemm problem. (Deprecated)
         *
         *  \details
         *  This function sets the problem with m, n, k, batch_count. It uses the problem type sets
@@ -1188,56 +893,6 @@ namespace hipblaslt_ext
                                                     GemmProblemType&           problemtype);
 
         /*! \ingroup library_module
-        *  \brief Sets the problem for a gemm problem.
-        *
-        *  \details
-        *  This function sets the problem with m, n, k, batch_count. It uses the problem type sets
-        *  from the constructor.
-        *
-        *  @param[in]
-        *  m,n,k                            The problem size in vector.
-        *  @param[in]
-        *  batch_count                      The batch count in vector.
-        *  @param[in]
-        *  lda,ldb,ldc,ldd                  The leading dimensions in vector of the matrix.
-        *  @param[in]
-        *  strideA,strideB,strideC,strideD  The batch stride in vector of the matrix.
-        *  @param[in]
-        *  epilogue                         The structure in vector that controls the epilogue.
-        *  @param[in]
-        *  inputs                           The inputs in vector of the problem.
-        *  @param[in]
-        *  problemtype                      The structure that sets the problem type
-        * of a gemm problem.
-        *
-        *  \retval HIPBLAS_STATUS_SUCCESS           If the operation completed
-        * successfully. \retval HIPBLAS_STATUS_EXECUTION_FAILED  If HIP reported an
-        * execution error from the device. \retval HIPBLAS_STATUS_ARCH_MISMATCH     If
-        * the configured operation cannot be run using the selected device. \retval
-        * HIPBLAS_STATUS_NOT_SUPPORTED     If the current implementation on the
-        * selected device doesn't support the configured operation. \retval
-        * HIPBLAS_STATUS_INVALID_VALUE     If the parameters are unexpectedly NULL, in
-        * conflict or in an impossible configuration.
-        *  \retval HIBLAS_STATUS_NOT_INITIALIZED    If hipBLASLt handle has not been
-        * initialized.
-        */
-        HIPBLASLT_EXPORT hipblasStatus_t setProblem(std::vector<int64_t>&        m,
-                                                    std::vector<int64_t>&        n,
-                                                    std::vector<int64_t>&        k,
-                                                    std::vector<int64_t>&        batch_count,
-                                                    std::vector<int64_t>&        lda,
-                                                    std::vector<int64_t>&        ldb,
-                                                    std::vector<int64_t>&        ldc,
-                                                    std::vector<int64_t>&        ldd,
-                                                    std::vector<int64_t>&        strideA,
-                                                    std::vector<int64_t>&        strideB,
-                                                    std::vector<int64_t>&        strideC,
-                                                    std::vector<int64_t>&        strideD,
-                                                    std::vector<GemmEpilogueV2>& epilogue,
-                                                    std::vector<GemmInputsV2>&   inputs,
-                                                    GemmProblemTypeV2&           problemtype);
-
-        /*! \ingroup library_module
         *  \brief Sets the grouped gemm problem from hipblasLt structures
         *
         *  \details
@@ -1284,7 +939,6 @@ namespace hipblaslt_ext
                        std::vector<hipblasLtMatrixLayout_t>& matD);
 
         HIPBLASLT_EXPORT std::vector<GemmProblemType> getProblemTypes();
-        HIPBLASLT_EXPORT std::vector<GemmProblemTypeV2> getProblemTypesV2();
 
         /*! \ingroup library_module
         *  \brief A helper function to initialize DeviceUserArguments using the set problem(s)

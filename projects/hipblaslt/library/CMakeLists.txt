@@ -44,7 +44,6 @@ set(hipblaslt_headers_public
   include/hipblaslt/hipblaslt-ext.hpp
   include/hipblaslt/hipblaslt_xfloat32.h
   include/hipblaslt/hipblaslt_float8.h
-  include/hipblaslt/hipblaslt_float8_bc.h
   include/hipblaslt/hipblaslt-ext-op.h
   ${PROJECT_BINARY_DIR}/include/hipblaslt/hipblaslt-version.h
 )
@@ -67,7 +66,7 @@ add_library(roc::hipblaslt ALIAS hipblaslt)
 # Include sources
 add_subdirectory(src)
 
-if(USE_ROCROLLER)
+if(HIPBLASLT_USE_ROCROLLER)
     set_source_files_properties(
       "${CMAKE_CURRENT_SOURCE_DIR}/src/amd_detail/rocblaslt/src/rocroller_host.cpp"
         PROPERTIES
@@ -176,7 +175,7 @@ endif()
 
 # RocRoller integration
 include(FetchContent)
-if(USE_ROCROLLER)
+if(HIPBLASLT_USE_ROCROLLER)
   _save_var(BUILD_TESTING)
   _save_var(BUILD_CLIENTS)
   _save_var(CMAKE_SHARED_LINKER_FLAGS)
@@ -188,11 +187,11 @@ if(USE_ROCROLLER)
   FetchContent_Declare(
     rocRoller
     GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
-    GIT_TAG b6512d0f05a5bec4fd8ec89bd596f4c7d9e536b0
+    GIT_TAG a3b600568493aca019a6e7edfbe808d5845d0809
   )
   FetchContent_MakeAvailable(rocRoller)
   target_link_libraries(hipblaslt PRIVATE rocroller_interface)
-  add_definitions(-DUSE_ROCROLLER)
+  add_definitions(-DHIPBLASLT_USE_ROCROLLER)
 
   _restore_var(BUILD_TESTING)
   _restore_var(BUILD_CLIENTS)

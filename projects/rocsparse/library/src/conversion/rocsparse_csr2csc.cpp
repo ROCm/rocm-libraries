@@ -23,17 +23,17 @@
  * ************************************************************************ */
 
 #include "internal/conversion/rocsparse_csr2csc.h"
-#include "common.h"
-#include "control.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csr2csc.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include "csr2csc_device.h"
 #include "rocsparse_common.h"
 #include "rocsparse_coo2csr.hpp"
 #include "rocsparse_csr2coo.hpp"
 #include "rocsparse_identity.hpp"
-#include "rocsparse_primitives.h"
+#include "rocsparse_primitives.hpp"
 
 template <typename I, typename J, typename T>
 rocsparse_status rocsparse::csr2csc_core(rocsparse_handle     handle,

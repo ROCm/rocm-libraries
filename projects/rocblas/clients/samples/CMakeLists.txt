@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -87,6 +87,9 @@ foreach( exe ${sample_list_all} )
     set_target_properties( ${exe} PROPERTIES
     CXX_STANDARD 14
     )
+    # We widely use extensions and AMD Clang warnings are too noisy
+    target_compile_options( ${exe} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-c++17-extensions> )
+
     rocm_install(TARGETS ${exe} COMPONENT samples)
   else()
     set_target_properties( ${exe} PROPERTIES

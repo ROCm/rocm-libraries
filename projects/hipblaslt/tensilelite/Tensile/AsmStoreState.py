@@ -705,7 +705,7 @@ class StoreState:
                     int(ceil(self.cfg.numVgprsPerAddr)), "writeDBatch-addr for ei=%u"%(elementIdx), preventOverflow=not isOptNLL)
                 if kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
                     addrGSUSyncVgprs = kw.vgprPool.checkOutAligned(self.cfg.numVgprsPerAddr, \
-                        int(ceil(self.cfg.numVgprsPerAddr)), "writeDBatch-addr for ei=%u"%(elementIdx), preventOverflow=0)
+                        int(ceil(self.cfg.numVgprsPerAddr)), "writeDBatch-addr for ei=%u"%(elementIdx), preventOverflow=False)
                 else:
                     addrGSUSyncVgprs = None
                 if kernel["GroupLoadStore"] and kernel["ProblemType"]["UseBeta"]:
@@ -751,7 +751,7 @@ class StoreState:
             self.elementAddr.append(AddrCalculation(kw, self, addrCVgpr, addrDVgpr, addrGSUSyncVgprs, addrEVgpr, addrBiasVgpr, addrScaleAVecVgpr, addrScaleBVecVgpr, addrScaleAlphaVecVgpr, element, coordOffset0, \
               self.kernelWriter.vgprs.coord1, coordOffset1, coordOffset1 - self.lastCoordOffset1, newCoord1, self.vectorDataTypes))
             self.lastCoordOffset1 = coordOffset1
-            
+
         # reset flag
         self.isReset = False
 
@@ -999,7 +999,7 @@ class StoreState:
                     int(ceil(self.cfg.numVgprsPerAddr)), "writeDBatch-addr for ei=%u"%(elementIdx), preventOverflow=not isOptNLL)
                 if kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
                     addrGSUSyncVgprs = kw.vgprPool.checkOutAligned(self.cfg.numVgprsPerAddr, \
-                        int(ceil(self.cfg.numVgprsPerAddr)), "writeDBatch-addr for ei=%u"%(elementIdx), preventOverflow=0)
+                        int(ceil(self.cfg.numVgprsPerAddr)), "writeDBatch-addr for ei=%u"%(elementIdx), preventOverflow=False)
                 else:
                     addrGSUSyncVgprs = None
                 if kernel["GroupLoadStore"] and kernel["ProblemType"]["UseBeta"]:

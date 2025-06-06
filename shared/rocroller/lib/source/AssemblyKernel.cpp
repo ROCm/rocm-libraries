@@ -316,8 +316,6 @@ namespace rocRoller
                         ShowValue(arg.variableType),
                         ShowValue(arg));
 
-        auto const& typeInfo = DataTypeInfo::Get(arg.variableType);
-
         if(arg.expression && m_context.lock()->kernelOptions().deduplicateArguments)
         {
             ptrdiff_t idx;
@@ -329,6 +327,11 @@ namespace rocRoller
             }
         }
 
+        auto typeInfo = DataTypeInfo::Get(arg.variableType);
+        if(arg.variableType == DataType::E8M0)
+        {
+            typeInfo = DataTypeInfo::Get(DataType::E8M0x4);
+        }
         if(arg.offset == -1)
         {
             arg.offset = RoundUpToMultiple<int>(m_argumentSize, typeInfo.alignment);

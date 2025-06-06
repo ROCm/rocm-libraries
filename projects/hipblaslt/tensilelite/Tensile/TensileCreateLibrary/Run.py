@@ -417,7 +417,6 @@ def copyStaticFiles(outputPath):
         "TensileTypes.h",
         "tensile_bfloat16.h",
         "tensile_float8_bfloat8.h",
-        "tensile_float8_bfloat8_bc.h",
         "KernelHeader.h",
         "ReductionTemplate.h",
         "memory_gfx.h",
@@ -468,6 +467,8 @@ def generateKernelHelperObjects(solutions: List[Solution], cxxCompiler: str, isa
             buildMask = []
             names = callable(solution)
             if names:
+                sortByEnum = lambda x: ("Enum" in x, names.index(x))
+                names = sorted(names, key=sortByEnum, reverse=True)
                 for name in names:
                     if name not in visited:
                         visited.add(name)
@@ -618,7 +619,8 @@ def run():
         cxxCompiler,
         offloadBundler,
         arguments["CodeObjectVersion"],
-        arguments["BuildIdKind"]
+        arguments["BuildIdKind"],
+        arguments["AsmDebug"],
     )
     srcToolchain = makeSourceToolchain(
         cxxCompiler,

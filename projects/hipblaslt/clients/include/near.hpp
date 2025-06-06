@@ -194,7 +194,6 @@ inline void near_check_general(int64_t                   M,
     NEAR_CHECK(M, N, lda, 0, hCPU, hGPU, 1, abs_error, NEAR_ASSERT_FP8);
 }
 
-#ifdef ROCM_USE_FLOAT8
 template <>
 inline void near_check_general(int64_t                 M,
                                int64_t                 N,
@@ -216,7 +215,6 @@ inline void near_check_general(int64_t                  M,
 {
     NEAR_CHECK(M, N, lda, 0, hCPU, hGPU, 1, abs_error, NEAR_ASSERT_FP8);
 }
-#endif
 
 template <typename T, typename T_hpa = T>
 inline void near_check_general(int64_t                        M,
@@ -283,7 +281,6 @@ inline void near_check_general(int64_t                   M,
     NEAR_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, abs_error, NEAR_ASSERT_FP8);
 }
 
-#ifdef ROCM_USE_FLOAT8
 template <>
 inline void near_check_general(int64_t                 M,
                                int64_t                 N,
@@ -309,7 +306,6 @@ inline void near_check_general(int64_t                  M,
 {
     NEAR_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, abs_error, NEAR_ASSERT_FP8);
 }
-#endif
 
 template <typename T, typename T_hpa = T>
 void near_check_general(int64_t                                    M,
@@ -370,7 +366,6 @@ inline void near_check_general(int64_t                               M,
     NEAR_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, abs_error, NEAR_ASSERT_FP8);
 }
 
-#ifdef ROCM_USE_FLOAT8
 template <>
 inline void near_check_general(int64_t                             M,
                                int64_t                             N,
@@ -394,7 +389,6 @@ inline void near_check_general(int64_t                              M,
 {
     NEAR_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, abs_error, NEAR_ASSERT_FP8);
 }
-#endif
 
 template <typename T, typename T_hpa = T>
 inline void near_check_general(int64_t                              M,
@@ -456,7 +450,6 @@ inline void near_check_general(int64_t                         M,
     NEAR_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, abs_error, NEAR_ASSERT_FP8);
 }
 
-#ifdef ROCM_USE_FLOAT8
 template <>
 inline void near_check_general(int64_t                       M,
                                int64_t                       N,
@@ -480,7 +473,6 @@ inline void near_check_general(int64_t                        M,
 {
     NEAR_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, abs_error, NEAR_ASSERT_FP8);
 }
-#endif
 
 inline void near_check_general(int64_t     M,
                                int64_t     N,
@@ -554,7 +546,6 @@ inline void near_check_general(int64_t     M,
                            batch_count,
                            abs_error);
         break;
-#ifdef ROCM_USE_FLOAT8
     case HIP_R_8F_E4M3:
         near_check_general(M,
                            N,
@@ -575,7 +566,6 @@ inline void near_check_general(int64_t     M,
                            batch_count,
                            abs_error);
         break;
-#endif
     case HIP_R_32I:
         near_check_general(M,
                            N,

@@ -22,8 +22,10 @@
 
 from rocisa.code import Module, TextBlock, Label
 from rocisa.container import EXEC, VCC, MUBUFModifiers, vgpr, sgpr
+from rocisa.enum import RegisterType
 from rocisa.functions import vectorStaticDivideAndRemainder, vectorStaticMultiply, \
     vectorStaticDivide, vectorStaticRemainder
+from rocisa.register import RegisterPool
 import rocisa.instruction as ri
 from argparse import ArgumentParser
 from dataclasses import dataclass
@@ -40,7 +42,7 @@ from Tensile.Common.Utilities import _global_ti
 from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx, gfxToIsa
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import restoreDefaultGlobalParameters, assignGlobalParameters
-from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr
+from Tensile.Common.RegisterPool import allocTmpGpr
 from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 def record_num_calls(f):
@@ -96,8 +98,8 @@ class SoftmaxKernelGenerator:
         self.num_cols = num_cols
         self.num_rows = num_rows
         self.num_workitems = num_workitems
-        self.sgpr_pool = RegisterPool(18, 's', True)
-        self.vgpr_pool = RegisterPool(10, 'v', True)
+        self.sgpr_pool = RegisterPool(18, RegisterType.Sgpr, True)
+        self.vgpr_pool = RegisterPool(10, RegisterType.Vgpr, True)
         self.sgpr_pool.addRange(3, 17) #TODO: estimate this
         self.vgpr_pool.addRange(1, 9) #TODO: estimate this
         self.t_id_reg_idx = 0 #TODO: support config on this

@@ -148,7 +148,27 @@ set(rocsolver_test_source
   rocsolver_gtest_main.cpp
 )
 
+set(rocsolver_test_common_source
+  ${PROJECT_SOURCE_DIR}/common/src/common_host_helpers.cpp
+)
+
+if(USE_HIPCXX)
+  set_source_files_properties(
+    ${common_source_paths}
+    ${rocsolver_test_common_source}
+    ${roclapack_test_source}
+    ${rocauxiliary_test_source}
+    ${rocrefact_test_source}
+    ${others_test_source}
+    ${rocsolver_test_source}
+    PROPERTIES
+      LANGUAGE HIP
+  )
+endif()
+
 add_executable(rocsolver-test
+  ${common_source_paths}
+  ${rocsolver_test_common_source}
   ${roclapack_test_source}
   ${rocauxiliary_test_source}
   ${rocrefact_test_source}
@@ -174,19 +194,19 @@ if(WIN32)
     add_custom_command(TARGET rocsolver-test
       POST_BUILD
       COMMAND ${CMAKE_COMMAND}
-      ARGS -E copy ${file_i} ${PROJECT_BINARY_DIR}/staging/
+      ARGS -E copy ${file_i} $<TARGET_FILE_DIR:rocsolver-test>
     )
   endforeach()
   add_custom_command(TARGET rocsolver-test
     POST_BUILD
     COMMAND ${CMAKE_COMMAND}
-    ARGS -E copy_directory $ENV{rocblas_DIR}/bin/rocblas/library ${PROJECT_BINARY_DIR}/staging/library
+    ARGS -E copy_directory $ENV{rocblas_DIR}/bin/rocblas/library $<TARGET_FILE_DIR:rocsolver-test>/library
   )
 endif()
 
 target_link_libraries(rocsolver-test PRIVATE
   $<IF:$<TARGET_EXISTS:GTest::gtest>,GTest::gtest,GTest::GTest>
-  hip::device
+  hip::host
   rocsolver-common
   clients-common
   $<$<PLATFORM_ID:Linux>:stdc++fs>
@@ -194,6 +214,9 @@ target_link_libraries(rocsolver-test PRIVATE
   roc::rocsolver
   roc::rocblas
 )
+if(NOT USE_HIPCXX)
+  target_link_libraries(rocsolver-test PRIVATE hip::device)
+endif()
 
 target_compile_definitions(rocsolver-test PRIVATE
   ROCM_USE_FLOAT16

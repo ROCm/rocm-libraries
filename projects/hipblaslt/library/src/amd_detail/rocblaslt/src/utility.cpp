@@ -86,12 +86,10 @@ const char* hipDataType_to_string(hipDataType type)
         return "R_8F_E4M3_FNUZ";
     case HIP_R_8F_E5M2_FNUZ:
         return "R_8F_E5M2_FNUZ";
-#ifdef ROCM_USE_FLOAT8
     case HIP_R_8F_E4M3:
         return "R_8F_E4M3";
     case HIP_R_8F_E5M2:
         return "R_8F_E5M2";
-#endif
     case HIP_R_8I:
         return "R_8I";
     case static_cast<hipDataType>(HIP_R_6F_E2M3_EXT):
@@ -133,12 +131,10 @@ const char* hipDataType_to_bench_string(hipDataType type)
         return "f8_r";
     case HIP_R_8F_E5M2_FNUZ:
         return "bf8_r";
-#ifdef ROCM_USE_FLOAT8
     case HIP_R_8F_E4M3:
         return "f8_r";
     case HIP_R_8F_E5M2:
         return "bf8_r";
-#endif
     case static_cast<hipDataType>(HIP_R_6F_E2M3_EXT):
         return "f6_r";
     case static_cast<hipDataType>(HIP_R_6F_E3M2_EXT):

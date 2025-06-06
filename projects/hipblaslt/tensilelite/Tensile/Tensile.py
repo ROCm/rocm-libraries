@@ -429,6 +429,7 @@ def Tensile(userArgs):
     config["UseCache"] = useCache
     globalParameters["ConfigPath"] = configPaths
 
+    asm_debug = config["GlobalParameters"].get("AsmDebug", False)
     device_id = config["GlobalParameters"].get("Device", int(args.device))
     UseEffLike = config["GlobalParameters"].get("UseEffLike", globalParameters["UseEffLike"])
     UseEffLike = False if isRhel8() else UseEffLike
@@ -457,6 +458,7 @@ def Tensile(userArgs):
         cxxCompiler,
         offloadBundler,
         args.CodeObjectVersion,
+        debug=asm_debug,
     )
     srcToolchain = makeSourceToolchain(
         cxxCompiler,

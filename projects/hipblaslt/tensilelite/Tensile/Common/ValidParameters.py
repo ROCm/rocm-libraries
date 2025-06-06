@@ -635,6 +635,9 @@ validParameters = { # we need to make sure this matches develop
     #   2 = Also reduce CUs used for large sizes to improve data-parallel portion and reduce power.
     #   3 = Analytically predict the best grid-size by weighing the cost of the fix-up step and the cost of processing MACs (default).
     #       Note: dynamic grid coefficients currently apply to gfx942 variants
+    #   4 = StreamK algorithm will behave as data parallel (Launch WGs = #CUs)
+    #   5 = StreamK Algorithm will use Origami's "select_best_grid_size" function
+    # TENSILE_STREAMK_DYNAMIC_WGM Enables Origami's analytical model-based WGM selection
     # TENSILE_STREAMK_MAX_CUS allows the user to manually set maximum number of CUs used, which could free up some CUs for
     #   other operations to run in parallel with gemm.
     # TENSILE_STREAMK_GRID_MULTIPLIER lets you set how many workgroups are created per CU being used.

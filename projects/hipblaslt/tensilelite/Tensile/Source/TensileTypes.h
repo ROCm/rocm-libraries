@@ -28,29 +28,12 @@
 #define TENSILETYPES_H
 #include "tensile_bfloat16.h"
 
-#if (HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR == 2 && HIP_VERSION_PATCH > 42130) \
-	|| (HIP_VERSION_MAJOR == 6 && HIP_VERSION_MINOR >= 3)//tmp before gfx94 use hip f8 header
-
 // Using hip header for both NANOO and OCP data types
 #if defined(__HIPCC__)
 #include <hip/hip_fp8.h>
-#define TENSILELITE_FP8_TYPE_FNUZ HIP_FP8_TYPE_FNUZ
-#define TENSILELITE_FP8_TYPE_OCP HIP_FP8_TYPE_OCP
 #endif
 
 #include "tensile_float8_bfloat8.h"
-#else
-
-#if !defined(HIP_FP8_TYPE_FNUZ)
-#define TENSILELITE_FP8_TYPE_FNUZ 1
-#endif
-
-#if !defined(HIP_FP8_TYPE_OCP)
-#define TENSILELITE_FP8_TYPE_OCP 0
-#endif
-
-#include "tensile_float8_bfloat8_bc.h"
-#endif
 
 #include <algorithm>
 #include <iostream>

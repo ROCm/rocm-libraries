@@ -49,6 +49,8 @@ if(NOT BUILD_CUDA)
 list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm )
 endif()
 
+
+
 if( NOT DEFINED ENV{HIP_PATH})
     set( HIP_PATH "/opt/rocm/hip" )
 else( )
@@ -118,12 +120,7 @@ option(Tensile_NO_LAZY_LIBRARY_LOADING "Diasble loading kernels on demand?" OFF)
 include(CMakeDependentOption)
 cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Enable roctx marker in hipBLASLt" ON "BUILD_SHARED_LIBS" OFF)
 # For rocRoller
-option(USE_ROCROLLER "Build with the rocRoller library" ON)
-
-if(BUILD_CODE_COVERAGE)
-  add_compile_options(-fprofile-arcs -ftest-coverage)
-  add_link_options(--coverage -lgcov)
-endif()
+option(HIPBLASLT_USE_ROCROLLER "Build with the rocRoller library" ON)
 
 if(BUILD_ADDRESS_SANITIZER)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan")
@@ -269,7 +266,7 @@ cmake_host_system_information(RESULT OS_INFO QUERY DISTRIB_INFO)
 if( ${OS_PLATFORM} STREQUAL "rhel")
   if( ${OS_INFO_VERSION_ID} VERSION_LESS "9.5")
     message(WARNING "RHEL version ${OS_INFO_VERSION_ID} too old, not building RocRoller")
-    set(USE_ROCROLLER OFF)
+    set(HIPBLASLT_USE_ROCROLLER OFF)
   endif()
 endif()
 
@@ -289,9 +286,9 @@ if(HIPBLASLT_ENABLE_MARKER)
 endif()
 
 # Setup version
-set(VERSION_STRING "0.15.0")
+set(VERSION_STRING "1.0.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
-set(hipblaslt_SOVERSION 0.15)
+set(hipblaslt_SOVERSION 1.0)
 
 
 if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
@@ -408,61 +405,85 @@ rocm_create_package(
     LDCONFIG_DIR ${HIPBLASLT_CONFIG_DIR}
 )
 
-
-#
-# ADDITIONAL TARGETS FOR CODE COVERAGE
-#
 if(BUILD_CODE_COVERAGE)
-  #
-  # > make coverage_cleanup (clean coverage related files.)
-  # > make coverage GTEST_FILTER=<>
-  # will run:
-  #  > make coverage_analysis GTEST_FILTER=<> (analyze tests)
-  #  > make coverage_output (generate html documentation)
-  #
+  # Force CMake to use ROCm's LLVM
+  set(LLVM_BIN_DIR /opt/rocm/llvm/bin)
+  find_package(LLVM REQUIRED CONFIG)
+  message(STATUS "LLVM found: ${LLVM_BIN_DIR}")
 
-  #
-  # Run coverage analysis
-  #
-  set(coverage_test ./clients/staging/hipblaslt-test)
+  # Locate required LLVM tools (llvm-cov, llvm-profdata, etc.)
+  find_program(LLVM_PROFDATA_EXECUTABLE llvm-profdata HINTS ${LLVM_BIN_DIR} REQUIRED)
+  find_program(LLVM_COV_EXECUTABLE llvm-cov HINTS ${LLVM_BIN_DIR} REQUIRED)
 
-  add_custom_target(coverage_analysis
-    COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
-    COMMAND ./clients/staging/hipblaslt-test --gtest_filter=\"\${GTEST_FILTER}\"
+  # Use LLVM libraries and headers
+  find_package(LLVM REQUIRED CONFIG)
+
+  # Modern: Use target_* for compiler and linker flags
+  target_compile_options(hipblaslt PRIVATE
+    -fprofile-instr-generate
+    -fcoverage-mapping
+  )
+
+  target_link_options(hipblaslt PUBLIC
+    -fprofile-instr-generate
+  )
+
+  target_include_directories(hipblaslt PRIVATE
+    ${LLVM_INCLUDE_DIRS}
+  )
+
+  target_link_directories(hipblaslt PRIVATE
+    ${LLVM_LIBRARY_DIRS}
+  )
+
+  # Print status message
+  message(STATUS "LLVM found at: ${LLVM_BIN_DIR}")
+  message(STATUS "llvm-profdata: ${LLVM_PROFDATA_EXECUTABLE}")
+  message(STATUS "llvm-cov: ${LLVM_COV_EXECUTABLE}")
+
+  add_custom_target(coverage
+    COMMAND ${CMAKE_COMMAND} -E env
+            LLVM_PROFILE_VERBOSE=1
+            LLVM_PROFILE_FILE=./hipblaslt-test_%m.profraw
+            ./clients/staging/hipblaslt-test
+            --output-on-failure
+    COMMAND ${CMAKE_COMMAND} -E env
+            LLVM_PROFILE_VERBOSE=1
+            LLVM_PROFILE_FILE=./hipblaslt-coverage_%m.profraw
+            ./clients/staging/sample_hipblaslt_ext_op_amax
+            --output-on-failure
+    COMMAND ${CMAKE_COMMAND} -E env
+            LLVM_PROFILE_VERBOSE=1
+            LLVM_PROFILE_FILE=./hipblaslt-coverage_%m.profraw
+            ./clients/staging/sample_hipblaslt_ext_op_layernorm
+            --output-on-failure
+    COMMAND ${CMAKE_COMMAND} -E env
+            LLVM_PROFILE_VERBOSE=1
+            LLVM_PROFILE_FILE=./hipblaslt-coverage_%m.profraw
+            ./clients/staging/sample_hipblaslt_weight_swizzle_padding
+            --output-on-failure
+    COMMAND ${CMAKE_COMMAND} -E env /bin/sh -c "${LLVM_PROFDATA_EXECUTABLE} merge -sparse ${CMAKE_BINARY_DIR}/*.profraw -o ${CMAKE_BINARY_DIR}/coverage_test.profdata"
+
+    COMMAND ${LLVM_COV_EXECUTABLE}
+            report
+            -object ./library/libhipblaslt-d.so.0.15
+            -instr-profile=./coverage_test.profdata
+            --ignore-filename-regex=.*/build/debug/.*
+    COMMAND ${LLVM_COV_EXECUTABLE}
+            show
+            -object ./library/libhipblaslt-d.so.0.15
+            -instr-profile=./coverage_test.profdata
+            -format=html -output-dir=coverage-report
+            --ignore-filename-regex=.*/build/debug/.*
+
+    COMMAND tox -c ../../tensilelite -v --workdir /tmp/.tensile-tox -e py3 -- ../../tensilelite/Tensile/Tests -m common --cov=../../tensilelite --cov-report=html
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
 
-  add_dependencies(coverage_analysis hipblaslt)
+    VERBATIM
+  )
 
-  #
-  # Prepare coverage output
-  # This little script is generated because the option '--gcov-tool <program name>' of lcov cannot take arguments.
-  #
-  add_custom_target(coverage_output
-    DEPENDS coverage_analysis
-    COMMAND mkdir -p lcoverage
-    COMMAND echo "\\#!/bin/bash" > llvm-gcov.sh
-    COMMAND echo "\\# THIS FILE HAS BEEN GENERATED" >> llvm-gcov.sh
-    COMMAND printf "exec /opt/rocm/llvm/bin/llvm-cov gcov $$\\@" >> llvm-gcov.sh
-    COMMAND chmod +x llvm-gcov.sh
-    )
-
-  #
-  # Generate coverage output.
-  #
-  add_custom_command(TARGET coverage_output
-    COMMAND lcov --directory . --base-directory . --gcov-tool ${CMAKE_BINARY_DIR}/llvm-gcov.sh --capture -o lcoverage/raw_main_coverage.info
-    COMMAND lcov --remove lcoverage/raw_main_coverage.info "'/opt/*'" "'/usr/*'" -o lcoverage/main_coverage.info
-    COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
-    )
-
-  add_custom_target(coverage DEPENDS coverage_output)
-
-  #
-  # Coverage cleanup
-  #
-  add_custom_target(coverage_cleanup
-    COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
+  add_dependencies(coverage hipblaslt-test
+                            sample_hipblaslt_ext_op_amax
+                            sample_hipblaslt_ext_op_layernorm
+                            sample_hipblaslt_weight_swizzle_padding)
 endif()

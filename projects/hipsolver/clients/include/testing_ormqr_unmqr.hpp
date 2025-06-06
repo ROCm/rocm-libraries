@@ -186,7 +186,8 @@ void testing_ormqr_unmqr_bad_arg()
     int size_W;
     hipsolver_ormqr_unmqr_bufferSize(
         API, handle, side, trans, m, n, k, dA.data(), lda, dIpiv.data(), dC.data(), ldc, &size_W);
-    size_t                         bytes_W = sizeof(T) * size_W;
+    size_t bytes_W
+        = std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") != nullptr ? size_W : sizeof(T) * size_W;
     device_strided_batch_vector<T> dWork(bytes_W, 1, bytes_W, 1);
     if(size_W)
         CHECK_HIP_ERROR(dWork.memcheck());
@@ -529,7 +530,8 @@ void testing_ormqr_unmqr(Arguments& argus)
                                      (T*)nullptr,
                                      ldc,
                                      &size_W);
-    size_t bytes_W = sizeof(T) * size_W;
+    size_t bytes_W
+        = std::getenv("HIPSOLVER_BUFFERSIZE_RETURN_BYTES") != nullptr ? size_W : sizeof(T) * size_W;
 
     if(argus.mem_query)
     {

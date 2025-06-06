@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -66,20 +66,48 @@ namespace TensileLite
 
                 virtual bool operator()(Task const& task) const override
                 {
+                    int16_t gsu = task.problem.getParams().gsu() != 0
+                                      ? task.problem.getParams().gsu()
+                                      : task.solution.sizeMapping.globalSplitU;
+                    if(gsu == -1)
+                        return 1;
+
+                    int gsuMultiplier = gsu > 1 ? gsu : 0;
+
+                    if(task.problem.d().totalLogicalElements()
+                           * task.solution.sizeMapping.workspaceSizePerElemC * gsuMultiplier
+                       > MAX_GSU_WORKSPACE_SIZE)
+                        return 0;
+
                     if(task.problem.groupedGemm())
-                        return task.problem.workspaceSizeGroupedGemm() <= task.problem.workspaceSize();
+                        return task.problem.workspaceSizeGroupedGemm()
+                               <= task.problem.workspaceSize();
                     else
-                        return task.solution.requiredWorkspaceSize(task.problem, task.hardware) <= task.problem.workspaceSize();
+                        return task.solution.requiredWorkspaceSize(task.problem, task.hardware)
+                               <= task.problem.workspaceSize();
                 }
 
                 virtual bool debugEval(Task const& task, std::ostream& stream) const override
                 {
 
-                    size_t gsu           = task.problem.getParams().gsu() > 0 ? task.problem.getParams().gsu()
-                                                                        : task.solution.sizeMapping.globalSplitU;
+                    size_t gsu = task.problem.getParams().gsu() != 0
+                                     ? task.problem.getParams().gsu()
+                                     : task.solution.sizeMapping.globalSplitU;
+                    if(gsu == -1)
+                    {
+                        bool rv = (*this)(task);
+
+                        stream << *this << ": ("
+                               << "auto gsu will consider workspace size, so bypassed"
+                               << ") == " << rv;
+
+                        return rv;
+                    }
+
                     size_t gsuMultiplier = gsu > 1 ? gsu : 0;
 
-                    if(task.problem.d().totalLogicalElements() * gsuMultiplier > MAX_GSU_WORKSPACE_SIZE)
+                    if(task.problem.d().totalLogicalElements() * gsuMultiplier
+                       > MAX_GSU_WORKSPACE_SIZE)
                         return debugEvalCmp(task,
                                             stream,
                                             "prob",
@@ -97,14 +125,14 @@ namespace TensileLite
                                             "max",
                                             task.problem.workspaceSize());
 
-                    return debugEvalCmp(task,
-                                        stream,
-                                        "prob",
-                                        task.solution.requiredWorkspaceSize(task.problem, task.hardware),
-                                        "<=",
-                                        "max",
-                                        task.problem.workspaceSize());
-
+                    return debugEvalCmp(
+                        task,
+                        stream,
+                        "prob",
+                        task.solution.requiredWorkspaceSize(task.problem, task.hardware),
+                        "<=",
+                        "max",
+                        task.problem.workspaceSize());
                 }
             };
         } // namespace Contraction

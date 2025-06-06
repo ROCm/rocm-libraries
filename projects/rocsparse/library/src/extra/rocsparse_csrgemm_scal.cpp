@@ -24,11 +24,11 @@
 
 #include "rocsparse_csrgemm_scal.hpp"
 #include "../conversion/rocsparse_identity.hpp"
-#include "control.h"
 #include "csrgemm_device.h"
 #include "internal/extra/rocsparse_csrgemm.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 rocsparse_status rocsparse::csrgemm_scal_quickreturn(rocsparse_handle          handle,
                                                      int64_t                   m,

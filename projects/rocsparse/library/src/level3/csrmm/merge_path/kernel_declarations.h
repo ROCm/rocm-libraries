@@ -21,7 +21,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "utility.h"
+#include "rocsparse_scalar.hpp"
 
 namespace rocsparse
 {

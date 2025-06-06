@@ -47,6 +47,9 @@ set(tensile_sources  ${tensile_sources}
     source/TensorDescriptor.cpp
     source/Tensile.cpp
     source/Utils.cpp
+    source/analytical/AnalyticalGemm.cpp
+    source/analytical/Hardware.cpp
+    source/analytical/Utils.cpp
     source/MLPNet.cpp
     )
 

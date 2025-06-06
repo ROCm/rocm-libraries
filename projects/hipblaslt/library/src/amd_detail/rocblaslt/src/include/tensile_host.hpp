@@ -232,12 +232,10 @@ inline rocisa::DataType hipDataType_to_tensile_type(hipDataType type)
         return rocisa::DataType::Float8_fnuz;
     case HIP_R_8F_E5M2_FNUZ:
         return rocisa::DataType::BFloat8_fnuz;
-#ifdef ROCM_USE_FLOAT8
     case HIP_R_8F_E4M3:
         return rocisa::DataType::Float8;
     case HIP_R_8F_E5M2:
         return rocisa::DataType::BFloat8;
-#endif
     case HIP_R_8I:
         return rocisa::DataType::Int8;
     case HIP_R_32I:
@@ -264,12 +262,10 @@ inline rocisa::DataType rocComputeType_to_tensile_type(rocblaslt_compute_type ty
     case rocblaslt_compute_f32_fast_bf8_fnuz:
     case rocblaslt_compute_f32_fast_f8bf8_fnuz:
     case rocblaslt_compute_f32_fast_bf8f8_fnuz:
-#ifdef ROCM_USE_FLOAT8
     case rocblaslt_compute_f32_fast_f8:
     case rocblaslt_compute_f32_fast_bf8:
     case rocblaslt_compute_f32_fast_f8bf8:
     case rocblaslt_compute_f32_fast_bf8f8:
-#endif
         return rocisa::DataType::Float;
     case rocblaslt_compute_f64:
         return rocisa::DataType::Double;

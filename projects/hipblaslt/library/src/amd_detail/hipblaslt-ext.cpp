@@ -36,44 +36,44 @@
 
 namespace hipblaslt_ext
 {
-    class GemmPreferenceV2::GemmPreferenceImpl
+    class GemmPreference::GemmPreferenceImpl
     {
     public:
         size_t workspace_bytes;
     };
 
-    GemmPreferenceV2::GemmPreferenceV2()
+    GemmPreference::GemmPreference()
         : pimpl(std::make_unique<GemmPreferenceImpl>())
     {
     }
 
-    GemmPreferenceV2::~GemmPreferenceV2() = default;
+    GemmPreference::~GemmPreference() = default;
 
-    GemmPreferenceV2::GemmPreferenceV2(const GemmPreferenceV2& pref)
+    GemmPreference::GemmPreference(const GemmPreference& pref)
         : pimpl(std::make_unique<GemmPreferenceImpl>(*pref.pimpl))
     {
     }
 
-    GemmPreferenceV2& GemmPreferenceV2::operator=(const GemmPreferenceV2& pref)
+    GemmPreference& GemmPreference::operator=(const GemmPreference& pref)
     {
         *pimpl = *pref.pimpl;
         return *this;
     }
 
-    GemmPreferenceV2::GemmPreferenceV2(GemmPreferenceV2&& pref)            = default;
-    GemmPreferenceV2& GemmPreferenceV2::operator=(GemmPreferenceV2&& pref) = default;
+    GemmPreference::GemmPreference(GemmPreference&& pref)            = default;
+    GemmPreference& GemmPreference::operator=(GemmPreference&& pref) = default;
 
-    void GemmPreferenceV2::setMaxWorkspaceBytes(size_t workspaceBytes)
+    void GemmPreference::setMaxWorkspaceBytes(size_t workspaceBytes)
     {
         pimpl->workspace_bytes = workspaceBytes;
     }
 
-    const size_t GemmPreferenceV2::getMaxWorkspaceBytes() const
+    const size_t GemmPreference::getMaxWorkspaceBytes() const
     {
         return pimpl->workspace_bytes;
     }
 
-    class GemmProblemTypeV2::GemmProblemTypeImpl
+    class GemmProblemType::GemmProblemTypeImpl
     {
     public:
         hipblasOperation_t   op_a; //!< The A martix transpose
@@ -85,18 +85,18 @@ namespace hipblaslt_ext
         hipblasComputeType_t type_compute; //!< The compute datatype.
     };
 
-    GemmProblemTypeV2::GemmProblemTypeV2()
+    GemmProblemType::GemmProblemType()
         : pimpl(std::make_unique<GemmProblemTypeImpl>())
     {
     }
 
-    GemmProblemTypeV2::GemmProblemTypeV2(hipblasOperation_t   opA,
-                                         hipblasOperation_t   opB,
-                                         hipDataType          typeA,
-                                         hipDataType          typeB,
-                                         hipDataType          typeC,
-                                         hipDataType          typeD,
-                                         hipblasComputeType_t typeCompute)
+    GemmProblemType::GemmProblemType(hipblasOperation_t   opA,
+                                     hipblasOperation_t   opB,
+                                     hipDataType          typeA,
+                                     hipDataType          typeB,
+                                     hipDataType          typeC,
+                                     hipDataType          typeD,
+                                     hipblasComputeType_t typeCompute)
         : pimpl(std::make_unique<GemmProblemTypeImpl>())
     {
         pimpl->op_a         = opA;
@@ -108,244 +108,305 @@ namespace hipblaslt_ext
         pimpl->type_compute = typeCompute;
     }
 
-    GemmProblemTypeV2::~GemmProblemTypeV2() = default;
+    GemmProblemType::~GemmProblemType() = default;
 
-    GemmProblemTypeV2::GemmProblemTypeV2(const GemmProblemTypeV2& type)
+    GemmProblemType::GemmProblemType(const GemmProblemTypeImpl& impl)
+        : pimpl(std::make_unique<GemmProblemTypeImpl>(impl))
+    {
+    }
+
+    GemmProblemType& GemmProblemType::operator=(const GemmProblemTypeImpl& impl)
+    {
+        *this->pimpl = impl;
+        return *this;
+    }
+
+    GemmProblemType::GemmProblemType(const GemmProblemType& type)
         : pimpl(std::make_unique<GemmProblemTypeImpl>(*type.pimpl))
     {
     }
 
-    GemmProblemTypeV2& GemmProblemTypeV2::operator=(const GemmProblemTypeV2& type)
+    GemmProblemType& GemmProblemType::operator=(const GemmProblemType& type)
     {
         *pimpl = *type.pimpl;
         return *this;
     }
 
-    GemmProblemTypeV2::GemmProblemTypeV2(GemmProblemTypeV2&& type)            = default;
-    GemmProblemTypeV2& GemmProblemTypeV2::operator=(GemmProblemTypeV2&& type) = default;
+    GemmProblemType::GemmProblemType(GemmProblemType&& type)            = default;
+    GemmProblemType& GemmProblemType::operator=(GemmProblemType&& type) = default;
 
-    void GemmProblemTypeV2::setOpA(hipblasOperation_t op)
+    void GemmProblemType::setOpA(hipblasOperation_t op)
     {
         pimpl->op_a = op;
     }
 
-    void GemmProblemTypeV2::setOpB(hipblasOperation_t op)
+    void GemmProblemType::setOpB(hipblasOperation_t op)
     {
         pimpl->op_b = op;
     }
 
-    void GemmProblemTypeV2::setTypeA(hipDataType type)
+    void GemmProblemType::setTypeA(hipDataType type)
     {
         pimpl->type_a = type;
     }
 
-    void GemmProblemTypeV2::setTypeB(hipDataType type)
+    void GemmProblemType::setTypeB(hipDataType type)
     {
         pimpl->type_b = type;
     }
 
-    void GemmProblemTypeV2::setTypeC(hipDataType type)
+    void GemmProblemType::setTypeC(hipDataType type)
     {
         pimpl->type_c = type;
     }
 
-    void GemmProblemTypeV2::setTypeD(hipDataType type)
+    void GemmProblemType::setTypeD(hipDataType type)
     {
         pimpl->type_d = type;
     }
 
-    void GemmProblemTypeV2::setTypeCompute(hipblasComputeType_t type)
+    void GemmProblemType::setTypeCompute(hipblasComputeType_t type)
     {
         pimpl->type_compute = type;
     }
 
-    hipblasOperation_t GemmProblemTypeV2::getOpA() const
+    hipblasOperation_t GemmProblemType::getOpA() const
     {
         return pimpl->op_a;
     }
 
-    hipblasOperation_t GemmProblemTypeV2::getOpB() const
+    hipblasOperation_t GemmProblemType::getOpB() const
     {
         return pimpl->op_b;
     }
 
-    hipDataType GemmProblemTypeV2::getTypeA() const
+    hipDataType GemmProblemType::getTypeA() const
     {
         return pimpl->type_a;
     }
 
-    hipDataType GemmProblemTypeV2::getTypeB() const
+    hipDataType GemmProblemType::getTypeB() const
     {
         return pimpl->type_b;
     }
 
-    hipDataType GemmProblemTypeV2::getTypeC() const
+    hipDataType GemmProblemType::getTypeC() const
     {
         return pimpl->type_c;
     }
 
-    hipDataType GemmProblemTypeV2::getTypeD() const
+    hipDataType GemmProblemType::getTypeD() const
     {
         return pimpl->type_d;
     }
 
-    hipblasComputeType_t GemmProblemTypeV2::getTypeCompute() const
+    hipblasComputeType_t GemmProblemType::getTypeCompute() const
     {
         return pimpl->type_compute;
     }
 
-    class GemmEpilogueV2::GemmEpilogueImpl
+    class GemmEpilogue::GemmEpilogueImpl
     {
     public:
-        hipblasLtEpilogue_t mode           = HIPBLASLT_EPILOGUE_DEFAULT;
-        hipDataType         bias_data_type = HIPBLASLT_DATATYPE_INVALID;
-        hipDataType         aux_data_type  = HIPBLASLT_DATATYPE_INVALID;
-        int                 aux_ld         = 0;
-        int                 aux_stride     = 0;
-        int                 scaling_a_type = 0;
-        int                 scaling_b_type = 0;
+        hipblasLtEpilogue_t                        mode           = HIPBLASLT_EPILOGUE_DEFAULT;
+        hipDataType                                bias_data_type = HIPBLASLT_DATATYPE_INVALID;
+        hipDataType                                aux_data_type  = HIPBLASLT_DATATYPE_INVALID;
+        int                                        aux_ld         = 0;
+        int                                        aux_stride     = 0;
+        RocblasltContractionProblem::ScalingFormat scaling_a_type
+            = RocblasltContractionProblem::ScalingFormat::None;
+        RocblasltContractionProblem::ScalingFormat scaling_b_type
+            = RocblasltContractionProblem::ScalingFormat::None;
     };
 
-    GemmEpilogueV2::GemmEpilogueV2()
+    GemmEpilogue::GemmEpilogue()
         : pimpl(std::make_unique<GemmEpilogueImpl>())
     {
     }
 
-    GemmEpilogueV2::~GemmEpilogueV2() = default;
+    GemmEpilogue::~GemmEpilogue() = default;
 
-    GemmEpilogueV2::GemmEpilogueV2(const GemmEpilogueV2& epilogue)
+    GemmEpilogue::GemmEpilogue(const GemmEpilogue& epilogue)
         : pimpl(std::make_unique<GemmEpilogueImpl>(*epilogue.pimpl))
     {
     }
 
-    GemmEpilogueV2& GemmEpilogueV2::operator=(const GemmEpilogueV2& epilogue)
+    GemmEpilogue& GemmEpilogue::operator=(const GemmEpilogue& epilogue)
     {
         *pimpl = *epilogue.pimpl;
         return *this;
     }
 
-    GemmEpilogueV2::GemmEpilogueV2(GemmEpilogueV2&& epilogue)            = default;
-    GemmEpilogueV2& GemmEpilogueV2::operator=(GemmEpilogueV2&& epilogue) = default;
+    GemmEpilogue::GemmEpilogue(GemmEpilogue&& epilogue)            = default;
+    GemmEpilogue& GemmEpilogue::operator=(GemmEpilogue&& epilogue) = default;
 
-    void GemmEpilogueV2::setMode(hipblasLtEpilogue_t mode)
+    void GemmEpilogue::setMode(hipblasLtEpilogue_t mode)
     {
         pimpl->mode = mode;
     }
 
-    void GemmEpilogueV2::setBiasDataType(hipDataType bias_data_type)
+    void GemmEpilogue::setBiasDataType(hipDataType bias_data_type)
     {
         pimpl->bias_data_type = bias_data_type;
     }
 
-    void GemmEpilogueV2::setAuxDataType(hipDataType aux_data_type)
+    void GemmEpilogue::setAuxDataType(hipDataType aux_data_type)
     {
         pimpl->aux_data_type = aux_data_type;
     }
 
-    void GemmEpilogueV2::setAuxLeadingDimension(int aux_ld)
+    void GemmEpilogue::setAuxLeadingDimension(int aux_ld)
     {
         pimpl->aux_ld = aux_ld;
     }
 
-    void GemmEpilogueV2::setAuxBatchStride(int aux_stride)
+    void GemmEpilogue::setAuxBatchStride(int aux_stride)
     {
         pimpl->aux_stride = aux_stride;
     }
 
-    void GemmEpilogueV2::setScalingAType(int scaling_a_type)
+    void GemmEpilogue::setScalingAType(hipblasLtMatmulMatrixScale_t scaling_a_type)
     {
-        pimpl->scaling_a_type = scaling_a_type;
+        switch(scaling_a_type)
+        {
+        case HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F:
+            pimpl->scaling_a_type = RocblasltContractionProblem::ScalingFormat::Scalar;
+            break;
+        case HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F:
+            pimpl->scaling_a_type = RocblasltContractionProblem::ScalingFormat::Vector;
+            break;
+        case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3:
+        case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0:
+        default:
+            std::cerr << "Unsupported scaling type for A matrix: "
+                      << static_cast<int>(scaling_a_type) << std::endl;
+            throw std::invalid_argument("Unsupported scaling type for A matrix");
+        }
     }
 
-    void GemmEpilogueV2::setScalingBType(int scaling_b_type)
+    void GemmEpilogue::setScalingBType(hipblasLtMatmulMatrixScale_t scaling_b_type)
     {
-        pimpl->scaling_b_type = scaling_b_type;
+        switch(scaling_b_type)
+        {
+        case HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F:
+            pimpl->scaling_b_type = RocblasltContractionProblem::ScalingFormat::Scalar;
+            break;
+        case HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F:
+            pimpl->scaling_b_type = RocblasltContractionProblem::ScalingFormat::Vector;
+            break;
+        case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3:
+        case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0:
+        default:
+            std::cerr << "Unsupported scaling type for B matrix: "
+                      << static_cast<int>(scaling_b_type) << std::endl;
+            throw std::invalid_argument("Unsupported scaling type for B matrix");
+        }
     }
 
-    hipblasLtEpilogue_t GemmEpilogueV2::getMode() const
+    hipblasLtEpilogue_t GemmEpilogue::getMode() const
     {
         return pimpl->mode;
     }
 
-    hipDataType GemmEpilogueV2::getBiasDataType() const
+    hipDataType GemmEpilogue::getBiasDataType() const
     {
         return pimpl->bias_data_type;
     }
 
-    hipDataType GemmEpilogueV2::getAuxDataType() const
+    hipDataType GemmEpilogue::getAuxDataType() const
     {
         return pimpl->aux_data_type;
     }
 
-    int GemmEpilogueV2::getAuxLeadingDimension() const
+    int GemmEpilogue::getAuxLeadingDimension() const
     {
         return pimpl->aux_ld;
     }
 
-    int GemmEpilogueV2::getAuxBatchStride() const
+    int GemmEpilogue::getAuxBatchStride() const
     {
         return pimpl->aux_stride;
     }
 
-    int GemmEpilogueV2::getScalingAType() const
+    hipblasLtMatmulMatrixScale_t GemmEpilogue::getScalingAType() const
     {
-        return pimpl->scaling_a_type;
+        switch(pimpl->scaling_a_type)
+        {
+        case RocblasltContractionProblem::ScalingFormat::Scalar:
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+        case RocblasltContractionProblem::ScalingFormat::Vector:
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
+        default:
+            std::cerr << "Unsupported scaling type for A matrix: "
+                      << static_cast<int>(pimpl->scaling_a_type) << std::endl;
+            throw std::invalid_argument("Unsupported scaling type for A matrix");
+        }
     }
 
-    int GemmEpilogueV2::getScalingBType() const
+    hipblasLtMatmulMatrixScale_t GemmEpilogue::getScalingBType() const
     {
-        return pimpl->scaling_b_type;
+        switch(pimpl->scaling_b_type)
+        {
+        case RocblasltContractionProblem::ScalingFormat::Scalar:
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+        case RocblasltContractionProblem::ScalingFormat::Vector:
+            return HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
+        default:
+            std::cerr << "Unsupported scaling type for B matrix: "
+                      << static_cast<int>(pimpl->scaling_b_type) << std::endl;
+            throw std::invalid_argument("Unsupported scaling type for B matrix");
+        }
     }
 
-    class GemmTuningV2::GemmTuningImpl
+    class GemmTuning::GemmTuningImpl
     {
     public:
-        uint16_t  splitK = 0;
-        int16_t   wgm    = 0;
+        uint16_t splitK = 0;
+        int16_t  wgm    = 0;
     };
 
-    GemmTuningV2::GemmTuningV2()
+    GemmTuning::GemmTuning()
         : pimpl(std::make_unique<GemmTuningImpl>())
     {
     }
 
-    GemmTuningV2::~GemmTuningV2() = default;
+    GemmTuning::~GemmTuning() = default;
 
-    GemmTuningV2::GemmTuningV2(const GemmTuningV2& tuning)
+    GemmTuning::GemmTuning(const GemmTuning& tuning)
         : pimpl(std::make_unique<GemmTuningImpl>(*tuning.pimpl))
     {
     }
 
-    GemmTuningV2& GemmTuningV2::operator=(const GemmTuningV2& tuning)
+    GemmTuning& GemmTuning::operator=(const GemmTuning& tuning)
     {
         *pimpl = *tuning.pimpl;
         return *this;
     }
 
-    GemmTuningV2::GemmTuningV2(GemmTuningV2&& tuning)            = default;
-    GemmTuningV2& GemmTuningV2::operator=(GemmTuningV2&& tuning) = default;
+    GemmTuning::GemmTuning(GemmTuning&& tuning)            = default;
+    GemmTuning& GemmTuning::operator=(GemmTuning&& tuning) = default;
 
-    void GemmTuningV2::setSplitK(uint16_t splitK)
+    void GemmTuning::setSplitK(uint16_t splitK)
     {
         pimpl->splitK = splitK;
     }
 
-    void GemmTuningV2::setWgm(int16_t wgm)
+    void GemmTuning::setWgm(int16_t wgm)
     {
         pimpl->wgm = wgm;
     }
 
-    uint16_t GemmTuningV2::getSplitK() const
+    uint16_t GemmTuning::getSplitK() const
     {
         return pimpl->splitK;
     }
 
-    int16_t GemmTuningV2::getWgm() const
+    int16_t GemmTuning::getWgm() const
     {
         return pimpl->wgm;
     }
 
-    class GemmInputsV2::GemmInputsImpl
+    class GemmInputs::GemmInputsImpl
     {
     public:
         const void* a     = nullptr;
@@ -366,173 +427,173 @@ namespace hipblaslt_ext
         const void* amaxD         = nullptr;
     };
 
-    GemmInputsV2::GemmInputsV2()
+    GemmInputs::GemmInputs()
         : pimpl(std::make_unique<GemmInputsImpl>())
     {
     }
 
-    GemmInputsV2::~GemmInputsV2() = default;
+    GemmInputs::~GemmInputs() = default;
 
-    GemmInputsV2::GemmInputsV2(const GemmInputsV2& input)
+    GemmInputs::GemmInputs(const GemmInputs& input)
         : pimpl(std::make_unique<GemmInputsImpl>(*input.pimpl))
     {
     }
 
-    GemmInputsV2& GemmInputsV2::operator=(const GemmInputsV2& input)
+    GemmInputs& GemmInputs::operator=(const GemmInputs& input)
     {
         *pimpl = *input.pimpl;
         return *this;
     }
 
-    GemmInputsV2::GemmInputsV2(GemmInputsV2&& input)            = default;
-    GemmInputsV2& GemmInputsV2::operator=(GemmInputsV2&& input) = default;
+    GemmInputs::GemmInputs(GemmInputs&& input)            = default;
+    GemmInputs& GemmInputs::operator=(GemmInputs&& input) = default;
 
-    void GemmInputsV2::setA(const void* a)
+    void GemmInputs::setA(const void* a)
     {
         pimpl->a = a;
     }
 
-    void GemmInputsV2::setB(const void* b)
+    void GemmInputs::setB(const void* b)
     {
         pimpl->b = b;
     }
 
-    void GemmInputsV2::setC(const void* c)
+    void GemmInputs::setC(const void* c)
     {
         pimpl->c = c;
     }
 
-    void GemmInputsV2::setD(const void* d)
+    void GemmInputs::setD(const void* d)
     {
         pimpl->d = d;
     }
 
-    void GemmInputsV2::setAlpha(const void* alpha)
+    void GemmInputs::setAlpha(const void* alpha)
     {
         pimpl->alpha = alpha;
     }
 
-    void GemmInputsV2::setBeta(const void* beta)
+    void GemmInputs::setBeta(const void* beta)
     {
         pimpl->beta = beta;
     }
 
-    void GemmInputsV2::setBias(const void* bias)
+    void GemmInputs::setBias(const void* bias)
     {
         pimpl->bias = bias;
     }
 
-    void GemmInputsV2::setScaleA(const void* scaleA)
+    void GemmInputs::setScaleA(const void* scaleA)
     {
         pimpl->scaleA = scaleA;
     }
 
-    void GemmInputsV2::setScaleB(const void* scaleB)
+    void GemmInputs::setScaleB(const void* scaleB)
     {
         pimpl->scaleB = scaleB;
     }
 
-    void GemmInputsV2::setScaleC(const void* scaleC)
+    void GemmInputs::setScaleC(const void* scaleC)
     {
         pimpl->scaleC = scaleC;
     }
 
-    void GemmInputsV2::setScaleD(const void* scaleD)
+    void GemmInputs::setScaleD(const void* scaleD)
     {
         pimpl->scaleD = scaleD;
     }
 
-    void GemmInputsV2::setScaleAux(const void* scaleAux)
+    void GemmInputs::setScaleAux(const void* scaleAux)
     {
         pimpl->scaleAux = scaleAux;
     }
 
-    void GemmInputsV2::setScaleAlphaVec(const void* scaleAlphaVec)
+    void GemmInputs::setScaleAlphaVec(const void* scaleAlphaVec)
     {
         pimpl->scaleAlphaVec = scaleAlphaVec;
     }
 
-    void GemmInputsV2::setAux(const void* aux)
+    void GemmInputs::setAux(const void* aux)
     {
         pimpl->aux = aux;
     }
 
-    void GemmInputsV2::setAmaxD(const void* amaxD)
+    void GemmInputs::setAmaxD(const void* amaxD)
     {
         pimpl->amaxD = amaxD;
     }
 
-    const void* GemmInputsV2::getA() const
+    const void* GemmInputs::getA() const
     {
         return pimpl->a;
     }
 
-    const void* GemmInputsV2::getB() const
+    const void* GemmInputs::getB() const
     {
         return pimpl->b;
     }
 
-    const void* GemmInputsV2::getC() const
+    const void* GemmInputs::getC() const
     {
         return pimpl->c;
     }
 
-    const void* GemmInputsV2::getD() const
+    const void* GemmInputs::getD() const
     {
         return pimpl->d;
     }
 
-    const void* GemmInputsV2::getAlpha() const
+    const void* GemmInputs::getAlpha() const
     {
         return pimpl->alpha;
     }
 
-    const void* GemmInputsV2::getBeta() const
+    const void* GemmInputs::getBeta() const
     {
         return pimpl->beta;
     }
 
-    const void* GemmInputsV2::getBias() const
+    const void* GemmInputs::getBias() const
     {
         return pimpl->bias;
     }
 
-    const void* GemmInputsV2::getScaleA() const
+    const void* GemmInputs::getScaleA() const
     {
         return pimpl->scaleA;
     }
 
-    const void* GemmInputsV2::getScaleB() const
+    const void* GemmInputs::getScaleB() const
     {
         return pimpl->scaleB;
     }
 
-    const void* GemmInputsV2::getScaleC() const
+    const void* GemmInputs::getScaleC() const
     {
         return pimpl->scaleC;
     }
 
-    const void* GemmInputsV2::getScaleD() const
+    const void* GemmInputs::getScaleD() const
     {
         return pimpl->scaleD;
     }
 
-    const void* GemmInputsV2::getScaleAux() const
+    const void* GemmInputs::getScaleAux() const
     {
         return pimpl->scaleAux;
     }
 
-    const void* GemmInputsV2::getScaleAlphaVec() const
+    const void* GemmInputs::getScaleAlphaVec() const
     {
         return pimpl->scaleAlphaVec;
     }
 
-    const void* GemmInputsV2::getAux() const
+    const void* GemmInputs::getAux() const
     {
         return pimpl->aux;
     }
 
-    const void* GemmInputsV2::getAmaxD() const
+    const void* GemmInputs::getAmaxD() const
     {
         return pimpl->amaxD;
     }
@@ -597,16 +658,6 @@ namespace hipblaslt_ext
         return HipBufferPtr(ptr, &hipFree);
     }
 
-    void GemmPreference::setMaxWorkspaceBytes(size_t workspaceBytes)
-    {
-        m_workspace_bytes = workspaceBytes;
-    }
-
-    const size_t GemmPreference::getMaxWorkspaceBytes() const
-    {
-        return m_workspace_bytes;
-    }
-
     ////////////////////////////////////////////////////////////
     // Gemm Instance
     ////////////////////////////////////////////////////////////
@@ -633,32 +684,6 @@ namespace hipblaslt_ext
     hipblasStatus_t GemmInstance::algoGetHeuristic(
         const int                                      requestedAlgoCount,
         const GemmPreference&                          pref,
-        std::vector<hipblasLtMatmulHeuristicResult_t>& heuristicResults)
-    {
-        rocblaslt::Debug::Instance().markerStart("hipblasLtAlgoGetHeuristicCpp");
-        if(m_gemm_count == 0)
-        {
-            rocblaslt::Debug::Instance().markerStop();
-            return HIPBLAS_STATUS_INVALID_VALUE;
-        }
-        auto gemmType = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
-        auto results
-            = reinterpret_cast<std::vector<rocblaslt_matmul_heuristic_result>*>(&heuristicResults);
-        results->clear();
-        auto status = RocBlasLtStatusToHIPStatus(
-            rocblaslt_algo_get_heuristic_cpp((rocblaslt_handle)m_handle,
-                                             gemmType,
-                                             m_data,
-                                             pref.getMaxWorkspaceBytes(),
-                                             requestedAlgoCount,
-                                             *results));
-        rocblaslt::Debug::Instance().markerStop();
-        return status;
-    }
-
-    hipblasStatus_t GemmInstance::algoGetHeuristic(
-        const int                                      requestedAlgoCount,
-        const GemmPreferenceV2&                        pref,
         std::vector<hipblasLtMatmulHeuristicResult_t>& heuristicResults)
     {
         rocblaslt::Debug::Instance().markerStart("hipblasLtAlgoGetHeuristicV2Cpp");
@@ -705,34 +730,10 @@ namespace hipblaslt_ext
                                                   size_t&                workspaceSizeInBytes)
     try
     {
-        rocblaslt::Debug::Instance().markerStart("hipblasLtIsAlgoSupportedTuningCpp");
-        auto gemmType  = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
-        auto rocalgo   = reinterpret_cast<rocblaslt_matmul_algo*>(&algo);
-        auto roctuning = reinterpret_cast<rocblaslt::RocTuning*>(&tuning);
-        auto status
-            = RocBlasLtStatusToHIPStatus(rocblaslt_is_algo_supported_cpp((rocblaslt_handle)m_handle,
-                                                                         gemmType,
-                                                                         m_data,
-                                                                         *rocalgo,
-                                                                         roctuning,
-                                                                         workspaceSizeInBytes));
-        rocblaslt::Debug::Instance().markerStop();
-        return status;
-    }
-    catch(...)
-    {
-        return exception_to_hipblas_status();
-    }
-
-    hipblasStatus_t GemmInstance::isAlgoSupported(hipblasLtMatmulAlgo_t& algo,
-                                                  GemmTuningV2&          tuning,
-                                                  size_t&                workspaceSizeInBytes)
-    try
-    {
         rocblaslt::Debug::Instance().markerStart("hipblasLtIsAlgoSupportedTuningV2Cpp");
         auto gemmType  = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
         auto rocalgo   = reinterpret_cast<rocblaslt_matmul_algo*>(&algo);
-        auto roctuning = reinterpret_cast<rocblaslt::RocTuningV2*>(&tuning);
+        auto roctuning = reinterpret_cast<rocblaslt::RocTuningV2*>(tuning.pimpl.get());
         auto status
             = RocBlasLtStatusToHIPStatus(rocblaslt_is_algo_supported_cpp((rocblaslt_handle)m_handle,
                                                                          gemmType,
@@ -787,39 +788,6 @@ namespace hipblaslt_ext
                                              hipStream_t                  stream)
     try
     {
-        rocblaslt::Debug::Instance().markerStart("hipblasLtInitializeTuningCpp");
-        if(m_gemm_count == 0)
-        {
-            rocblaslt::Debug::Instance().markerStop();
-            return HIPBLAS_STATUS_INVALID_VALUE;
-        }
-        auto gemmType  = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
-        auto rocalgo   = reinterpret_cast<const rocblaslt_matmul_algo*>(&algo);
-        auto roctuning = reinterpret_cast<const rocblaslt::RocTuning*>(&tuning);
-        auto status
-            = RocBlasLtStatusToHIPStatus(rocblaslt_makeArgument_cpp((rocblaslt_handle)m_handle,
-                                                                    gemmType,
-                                                                    *rocalgo,
-                                                                    roctuning,
-                                                                    workspace,
-                                                                    useUserArgs,
-                                                                    stream,
-                                                                    m_data));
-        rocblaslt::Debug::Instance().markerStop();
-        return status;
-    }
-    catch(...)
-    {
-        return exception_to_hipblas_status();
-    }
-
-    hipblasStatus_t GemmInstance::initialize(const hipblasLtMatmulAlgo_t& algo,
-                                             GemmTuningV2&                tuning,
-                                             void*                        workspace,
-                                             bool                         useUserArgs,
-                                             hipStream_t                  stream)
-    try
-    {
         rocblaslt::Debug::Instance().markerStart("hipblasLtInitializeTuningV2Cpp");
         if(m_gemm_count == 0)
         {
@@ -828,7 +796,7 @@ namespace hipblaslt_ext
         }
         auto gemmType  = static_cast<rocblaslt::RocGemmType>(m_gemm_type);
         auto rocalgo   = reinterpret_cast<const rocblaslt_matmul_algo*>(&algo);
-        auto roctuning = reinterpret_cast<const rocblaslt::RocTuningV2*>(&tuning);
+        auto roctuning = reinterpret_cast<const rocblaslt::RocTuningV2*>(tuning.pimpl.get());
         auto status
             = RocBlasLtStatusToHIPStatus(rocblaslt_makeArgument_cpp((rocblaslt_handle)m_handle,
                                                                     gemmType,
@@ -940,15 +908,15 @@ namespace hipblaslt_ext
                                      GemmEpilogue& epilogue,
                                      GemmInputs&   inputs)
     {
-        rocblaslt::Debug::Instance().markerStart("hipblasLtGemmSetProblemCpp");
+        rocblaslt::Debug::Instance().markerStart("hipblasLtGemmSetProblemV2Cpp");
         if(n == 0 || m == 0)
         {
             rocblaslt::Debug::Instance().markerStop();
             return HIPBLAS_STATUS_INVALID_VALUE;
         }
 
-        int64_t lda     = m_problem_types[0].op_a == HIPBLAS_OP_N ? m : k;
-        int64_t ldb     = m_problem_types[0].op_b == HIPBLAS_OP_N ? k : n;
+        int64_t lda     = m_problem_types[0].getOpA() == HIPBLAS_OP_N ? m : k;
+        int64_t ldb     = m_problem_types[0].getOpB() == HIPBLAS_OP_N ? k : n;
         int64_t ldc     = m;
         int64_t strideA = m * k;
         int64_t strideB = n * k;
@@ -972,52 +940,6 @@ namespace hipblaslt_ext
         return status;
     }
 
-    hipblasStatus_t Gemm::setProblem(int64_t         m,
-                                     int64_t         n,
-                                     int64_t         k,
-                                     int64_t         batch_count,
-                                     GemmEpilogueV2& epilogue,
-                                     GemmInputsV2&   inputs)
-    {
-        rocblaslt::Debug::Instance().markerStart("hipblasLtGemmSetProblemV2Cpp");
-        if(n == 0 || m == 0)
-        {
-            rocblaslt::Debug::Instance().markerStop();
-            return HIPBLAS_STATUS_INVALID_VALUE;
-        }
-
-        int64_t           lda     = m_problem_types[0].op_a == HIPBLAS_OP_N ? m : k;
-        int64_t           ldb     = m_problem_types[0].op_b == HIPBLAS_OP_N ? k : n;
-        int64_t           ldc     = m;
-        int64_t           strideA = m * k;
-        int64_t           strideB = n * k;
-        int64_t           strideC = m * n;
-        GemmProblemTypeV2 prob(m_problem_types[0].op_a,
-                               m_problem_types[0].op_b,
-                               m_problem_types[0].type_a,
-                               m_problem_types[0].type_b,
-                               m_problem_types[0].type_c,
-                               m_problem_types[0].type_d,
-                               m_problem_types[0].type_compute);
-        auto              status = setProblem(m,
-                                 n,
-                                 k,
-                                 batch_count,
-                                 lda,
-                                 ldb,
-                                 ldc,
-                                 ldc,
-                                 strideA,
-                                 strideB,
-                                 strideC,
-                                 strideC,
-                                 epilogue,
-                                 inputs,
-                                 prob);
-        rocblaslt::Debug::Instance().markerStop();
-        return status;
-    }
-
     hipblasStatus_t Gemm::setProblem(int64_t          m,
                                      int64_t          n,
                                      int64_t          k,
@@ -1033,55 +955,6 @@ namespace hipblaslt_ext
                                      GemmEpilogue&    epilogue,
                                      GemmInputs&      inputs,
                                      GemmProblemType& problemtype)
-    {
-        rocblaslt::Debug::Instance().markerStart("hipblasLtGemmSetProblemFullCpp");
-        GemmInputs      gemmInputs      = inputs;
-        GemmProblemType gemmProblemType = problemtype;
-        auto            rocepilogue     = reinterpret_cast<rocblaslt::RocGemmEpilogue*>(&epilogue);
-        auto            rocepinputs     = reinterpret_cast<rocblaslt::RocGemmInputs*>(&gemmInputs);
-        auto rocproblemtype = reinterpret_cast<rocblaslt::RocGemmProblemType*>(&gemmProblemType);
-        auto status
-            = RocBlasLtStatusToHIPStatus(rocblaslt_gemm_create_cpp((rocblaslt_handle)m_handle,
-                                                                   m,
-                                                                   n,
-                                                                   batch_count,
-                                                                   k,
-                                                                   lda,
-                                                                   ldb,
-                                                                   ldc,
-                                                                   ldd,
-                                                                   strideA,
-                                                                   strideB,
-                                                                   strideC,
-                                                                   strideD,
-                                                                   *rocepilogue,
-                                                                   *rocepinputs,
-                                                                   *rocproblemtype,
-                                                                   m_data,
-                                                                   m_gemm_count));
-        if(status == HIPBLAS_STATUS_SUCCESS)
-        {
-            m_problem_types[0] = problemtype;
-        }
-        rocblaslt::Debug::Instance().markerStop();
-        return status;
-    }
-
-    hipblasStatus_t Gemm::setProblem(int64_t            m,
-                                     int64_t            n,
-                                     int64_t            k,
-                                     int64_t            batch_count,
-                                     int64_t            lda,
-                                     int64_t            ldb,
-                                     int64_t            ldc,
-                                     int64_t            ldd,
-                                     int64_t            strideA,
-                                     int64_t            strideB,
-                                     int64_t            strideC,
-                                     int64_t            strideD,
-                                     GemmEpilogueV2&    epilogue,
-                                     GemmInputsV2&      inputs,
-                                     GemmProblemTypeV2& problemtype)
     {
         rocblaslt::Debug::Instance().markerStart("hipblasLtGemmSetProblemFullV2Cpp");
         auto rocepilogue = reinterpret_cast<rocblaslt::RocGemmEpilogueV2*>(epilogue.pimpl.get());
@@ -1109,13 +982,7 @@ namespace hipblaslt_ext
                                                                    m_gemm_count));
         if(status == HIPBLAS_STATUS_SUCCESS)
         {
-            m_problem_types[0] = GemmProblemType{problemtype.getOpA(),
-                                                 problemtype.getOpB(),
-                                                 problemtype.getTypeA(),
-                                                 problemtype.getTypeB(),
-                                                 problemtype.getTypeC(),
-                                                 problemtype.getTypeD(),
-                                                 problemtype.getTypeCompute()};
+            m_problem_types[0] = problemtype;
         }
         rocblaslt::Debug::Instance().markerStop();
         return status;
@@ -1135,7 +1002,7 @@ namespace hipblaslt_ext
     {
         rocblaslt::Debug::Instance().markerStart("hipblasLtGemmSetProblemCAPICpp");
         auto rocproblemtypes
-            = reinterpret_cast<std::vector<rocblaslt::RocGemmProblemType>*>(&m_problem_types);
+            = reinterpret_cast<std::vector<rocblaslt::RocGemmProblemTypeV2>*>(&m_problem_types);
         auto status = RocBlasLtStatusToHIPStatus(
             rocblaslt_gemm_create_cpp((rocblaslt_handle)m_handle,
                                       (rocblaslt_matmul_desc)matmul_descr,
@@ -1159,18 +1026,6 @@ namespace hipblaslt_ext
     GemmProblemType Gemm::getProblemTypes()
     {
         return m_problem_types[0];
-    }
-
-    GemmProblemTypeV2 Gemm::getProblemTypesV2()
-    {
-        GemmProblemTypeV2 problemtype(m_problem_types[0].op_a,
-                                      m_problem_types[0].op_b,
-                                      m_problem_types[0].type_a,
-                                      m_problem_types[0].type_b,
-                                      m_problem_types[0].type_c,
-                                      m_problem_types[0].type_d,
-                                      m_problem_types[0].type_compute);
-        return problemtype;
     }
 
     HIPBLASLT_EXPORT GroupedGemm::GroupedGemm(hipblasLtHandle_t    handle,
@@ -1232,7 +1087,7 @@ namespace hipblaslt_ext
                                             std::vector<GemmEpilogue>& epilogue,
                                             std::vector<GemmInputs>&   inputs)
     {
-        rocblaslt::Debug::Instance().markerStart("hipblasLtGroupedGemmSetProblemCpp");
+        rocblaslt::Debug::Instance().markerStart("hipblasLtGroupedGemmSetProblemV2Cpp");
         std::vector<int64_t> lda;
         std::vector<int64_t> ldb;
         std::vector<int64_t> ldc;
@@ -1244,8 +1099,8 @@ namespace hipblaslt_ext
         for(size_t i = 0; i < m.size(); i++)
         {
             size_t iIdx = m_problem_types.size() == 1 ? 0 : i;
-            lda.push_back(m_problem_types[iIdx].op_a == HIPBLAS_OP_N ? m[i] : k[i]);
-            ldb.push_back(m_problem_types[iIdx].op_b == HIPBLAS_OP_N ? k[i] : n[i]);
+            lda.push_back(m_problem_types[iIdx].getOpA() == HIPBLAS_OP_N ? m[i] : k[i]);
+            ldb.push_back(m_problem_types[iIdx].getOpB() == HIPBLAS_OP_N ? k[i] : n[i]);
             ldc.push_back(m[i]);
             ldd.push_back(m[i]);
             strideA.push_back(m[i] * k[i]);
@@ -1272,60 +1127,6 @@ namespace hipblaslt_ext
         return status;
     }
 
-    hipblasStatus_t GroupedGemm::setProblem(std::vector<int64_t>&        m,
-                                            std::vector<int64_t>&        n,
-                                            std::vector<int64_t>&        k,
-                                            std::vector<int64_t>&        batch_count,
-                                            std::vector<GemmEpilogueV2>& epilogue,
-                                            std::vector<GemmInputsV2>&   inputs)
-    {
-        rocblaslt::Debug::Instance().markerStart("hipblasLtGroupedGemmSetProblemV2Cpp");
-        std::vector<int64_t> lda;
-        std::vector<int64_t> ldb;
-        std::vector<int64_t> ldc;
-        std::vector<int64_t> ldd;
-        std::vector<int64_t> strideA;
-        std::vector<int64_t> strideB;
-        std::vector<int64_t> strideC;
-        std::vector<int64_t> strideD;
-        for(size_t i = 0; i < m.size(); i++)
-        {
-            size_t iIdx = m_problem_types.size() == 1 ? 0 : i;
-            lda.push_back(m_problem_types[iIdx].op_a == HIPBLAS_OP_N ? m[i] : k[i]);
-            ldb.push_back(m_problem_types[iIdx].op_b == HIPBLAS_OP_N ? k[i] : n[i]);
-            ldc.push_back(m[i]);
-            ldd.push_back(m[i]);
-            strideA.push_back(m[i] * k[i]);
-            strideB.push_back(m[i] * k[i]);
-            strideC.push_back(m[i] * k[i]);
-            strideD.push_back(m[i] * k[i]);
-        }
-        GemmProblemTypeV2 prob(m_problem_types[0].op_a,
-                               m_problem_types[0].op_b,
-                               m_problem_types[0].type_a,
-                               m_problem_types[0].type_b,
-                               m_problem_types[0].type_c,
-                               m_problem_types[0].type_d,
-                               m_problem_types[0].type_compute);
-        auto              status = setProblem(m,
-                                 n,
-                                 k,
-                                 batch_count,
-                                 lda,
-                                 ldb,
-                                 ldc,
-                                 ldd,
-                                 strideA,
-                                 strideB,
-                                 strideC,
-                                 strideD,
-                                 epilogue,
-                                 inputs,
-                                 prob);
-        rocblaslt::Debug::Instance().markerStop();
-        return status;
-    }
-
     hipblasStatus_t GroupedGemm::setProblem(std::vector<int64_t>&      m,
                                             std::vector<int64_t>&      n,
                                             std::vector<int64_t>&      k,
@@ -1342,55 +1143,6 @@ namespace hipblaslt_ext
                                             std::vector<GemmInputs>&   inputs,
                                             GemmProblemType&           problemtype)
     {
-        rocblaslt::Debug::Instance().markerStart("hipblasLtGroupedGemmSetProblemFullCpp");
-        auto rocepilogue = reinterpret_cast<std::vector<rocblaslt::RocGemmEpilogue>*>(&epilogue);
-        auto rocinputs   = reinterpret_cast<std::vector<rocblaslt::RocGemmInputs>*>(&inputs);
-        std::vector<GemmProblemType> tmptype = {problemtype};
-        auto                         rocproblemtype
-            = reinterpret_cast<std::vector<rocblaslt::RocGemmProblemType>*>(&tmptype);
-        auto status = RocBlasLtStatusToHIPStatus(
-            rocblaslt_groupedgemm_create_cpp((rocblaslt_handle)m_handle,
-                                             m,
-                                             n,
-                                             batch_count,
-                                             k,
-                                             lda,
-                                             ldb,
-                                             ldc,
-                                             ldd,
-                                             strideA,
-                                             strideB,
-                                             strideC,
-                                             strideD,
-                                             *rocepilogue,
-                                             *rocinputs,
-                                             *rocproblemtype,
-                                             m_data,
-                                             m_gemm_count));
-        if(status == HIPBLAS_STATUS_SUCCESS)
-        {
-            m_problem_types = tmptype;
-        }
-        rocblaslt::Debug::Instance().markerStop();
-        return status;
-    }
-
-    hipblasStatus_t GroupedGemm::setProblem(std::vector<int64_t>&        m,
-                                            std::vector<int64_t>&        n,
-                                            std::vector<int64_t>&        k,
-                                            std::vector<int64_t>&        batch_count,
-                                            std::vector<int64_t>&        lda,
-                                            std::vector<int64_t>&        ldb,
-                                            std::vector<int64_t>&        ldc,
-                                            std::vector<int64_t>&        ldd,
-                                            std::vector<int64_t>&        strideA,
-                                            std::vector<int64_t>&        strideB,
-                                            std::vector<int64_t>&        strideC,
-                                            std::vector<int64_t>&        strideD,
-                                            std::vector<GemmEpilogueV2>& epilogue,
-                                            std::vector<GemmInputsV2>&   inputs,
-                                            GemmProblemTypeV2&           problemtype)
-    {
         rocblaslt::Debug::Instance().markerStart("hipblasLtGroupedGemmSetProblemFullV2Cpp");
         std::vector<rocblaslt::RocGemmEpilogueV2> rocepilogue;
         for(auto& e : epilogue)
@@ -1403,7 +1155,7 @@ namespace hipblaslt_ext
         {
             rocinputs.push_back(*reinterpret_cast<rocblaslt::RocGemmInputsV2*>(i.pimpl.get()));
         }
-        GemmProblemTypeV2                            tmp = problemtype;
+        GemmProblemType                              tmp = problemtype;
         std::vector<rocblaslt::RocGemmProblemTypeV2> rocproblemtype
             = {*reinterpret_cast<rocblaslt::RocGemmProblemTypeV2*>(tmp.pimpl.get())};
         auto status = RocBlasLtStatusToHIPStatus(
@@ -1427,13 +1179,7 @@ namespace hipblaslt_ext
                                              m_gemm_count));
         if(status == HIPBLAS_STATUS_SUCCESS)
         {
-            m_problem_types[0] = GemmProblemType{problemtype.getOpA(),
-                                                 problemtype.getOpB(),
-                                                 problemtype.getTypeA(),
-                                                 problemtype.getTypeB(),
-                                                 problemtype.getTypeC(),
-                                                 problemtype.getTypeD(),
-                                                 problemtype.getTypeCompute()};
+            m_problem_types[0] = problemtype;
         }
         rocblaslt::Debug::Instance().markerStop();
         return status;
@@ -1463,9 +1209,8 @@ namespace hipblaslt_ext
         auto C_groupedGemm     = reinterpret_cast<std::vector<const void*>*>(&C);
         auto alpha_groupedGemm = reinterpret_cast<std::vector<const void*>*>(&alpha);
         auto beta_groupedGemm  = reinterpret_cast<std::vector<const void*>*>(&beta);
-        auto rocproblemtypes
-            = reinterpret_cast<std::vector<rocblaslt::RocGemmProblemType>*>(&m_problem_types);
-        auto status = RocBlasLtStatusToHIPStatus(
+        std::vector<rocblaslt::RocGemmProblemTypeV2> rocproblemtypes;
+        auto                                         status = RocBlasLtStatusToHIPStatus(
             rocblaslt_groupedgemm_create_cpp((rocblaslt_handle)m_handle,
                                              *matmul_descr_groupedGemm,
                                              *alpha_groupedGemm,
@@ -1478,9 +1223,19 @@ namespace hipblaslt_ext
                                              *matC_groupedGemm,
                                              D,
                                              *matD_groupedGemm,
-                                             (*rocproblemtypes),
+                                             rocproblemtypes,
                                              m_data,
                                              m_gemm_count));
+        m_problem_types.clear();
+        if(status == HIPBLAS_STATUS_SUCCESS)
+        {
+            m_problem_types.clear();
+            for(auto& problemtype : rocproblemtypes)
+            {
+                m_problem_types.push_back(GemmProblemType(
+                    *reinterpret_cast<GemmProblemType::GemmProblemTypeImpl*>(&problemtype)));
+            }
+        }
         rocblaslt::Debug::Instance().markerStop();
         return status;
     }
@@ -1488,22 +1243,6 @@ namespace hipblaslt_ext
     std::vector<GemmProblemType> GroupedGemm::getProblemTypes()
     {
         return m_problem_types;
-    }
-
-    std::vector<GemmProblemTypeV2> GroupedGemm::getProblemTypesV2()
-    {
-        std::vector<GemmProblemTypeV2> problemtype(m_problem_types.size());
-        for(size_t i = 0; i < problemtype.size(); i++)
-        {
-            problemtype[i] = GemmProblemTypeV2(m_problem_types[i].op_a,
-                                               m_problem_types[i].op_b,
-                                               m_problem_types[i].type_a,
-                                               m_problem_types[i].type_b,
-                                               m_problem_types[i].type_c,
-                                               m_problem_types[i].type_d,
-                                               m_problem_types[i].type_compute);
-        }
-        return problemtype;
     }
 
     HIPBLASLT_EXPORT hipblasStatus_t

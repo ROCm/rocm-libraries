@@ -22,13 +22,42 @@
  * ************************************************************************ */
 
 #include "internal/generic/rocsparse_dense_to_sparse.h"
-#include "control.h"
-#include "handle.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_handle.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "rocsparse_dense2coo.hpp"
 #include "rocsparse_dense2csx_impl.hpp"
 #include "rocsparse_nnz_impl.hpp"
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_dense_to_sparse_alg value_)
+{
+#define CASE(C) \
+    case C:     \
+        return #C
+    switch(value_)
+    {
+        CASE(rocsparse_dense_to_sparse_alg_default);
+#undef CASE
+    }
+    // LCOV_EXCL_START
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_dense_to_sparse_alg value_)
+{
+    switch(value_)
+    {
+    case rocsparse_dense_to_sparse_alg_default:
+    {
+        return false;
+    }
+    }
+    return true;
+}
 
 namespace rocsparse
 {

@@ -139,8 +139,6 @@ namespace rocRoller
         {
             std::string argumentName;
 
-            bool needsPadding = false;
-
             using BaseDimension::BaseDimension;
 
             explicit User(std::string const& name);
@@ -267,11 +265,10 @@ namespace rocRoller
             static constexpr bool HasValue = false;
             using BaseDimension::BaseDimension;
 
-            bool isDirect2LDS        = false;
-            bool holdsTransposedTile = false;
+            bool isDirect2LDS = false;
 
             LDS();
-            explicit LDS(bool const isDirect2LDS, bool const holdsTransposedTile = false);
+            explicit LDS(bool const isDirect2LDS);
 
             std::string name() const override;
         };

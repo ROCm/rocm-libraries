@@ -1,6 +1,6 @@
 .. meta::
-  :description: rocSPARSE documentation and API reference library
-  :keywords: rocSPARSE, ROCm, API, documentation
+  :description: rocSPARSE generic functions API documentation
+  :keywords: rocSPARSE, ROCm, API, documentation, generic functions
 
 .. _rocsparse_generic_functions_:
 
@@ -8,12 +8,12 @@
 Sparse generic functions
 ********************************************************************
 
-This module holds all sparse generic routines.
+This module contains all sparse generic routines.
 
 The sparse generic routines describe some of the most common operations that manipulate sparse matrices and
-vectors. The generic API is more flexible than the other rocSPARSE APIs in that it is easy to set
-different index types, data types and compute types. For some generic routines, for example SpMV, the generic
-API also allows users to select different algorithms which have different performance characteristics depending
+vectors. The generic API is more flexible than the other rocSPARSE APIs because it is easy to set
+different index types, data types, and compute types. For some generic routines, for example, SpMV, the generic
+API also lets users select different algorithms which have different performance characteristics depending
 on the sparse matrix being operated on.
 
 rocsparse_axpby()

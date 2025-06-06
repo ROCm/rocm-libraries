@@ -31,10 +31,10 @@ find_package(Git REQUIRED)
 list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
 
 # ROCm cmake package
-find_package(ROCM 0.11.0 CONFIG QUIET PATHS "${ROCM_PATH}") # First version with Sphinx doc gen improvement
+find_package(ROCmCMakeBuildTools 0.11.0 CONFIG QUIET PATHS "${ROCM_PATH}") # First version with Sphinx doc gen improvement
 if(NOT ROCM_FOUND)
   set(PROJECT_EXTERN_DIR ${CMAKE_CURRENT_BINARY_DIR}/extern)
-  set(rocm_cmake_tag "master" CACHE STRING "rocm-cmake tag to download")
+  set(rocm_cmake_tag "rocm-6.4.1" CACHE STRING "rocm-cmake tag to download")
   file(DOWNLOAD https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip
        ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag}.zip STATUS status LOG log)
 
@@ -57,7 +57,7 @@ if(NOT ROCM_FOUND)
   execute_process(COMMAND ${CMAKE_COMMAND} --build rocm-cmake-${rocm_cmake_tag} --target install
                   WORKING_DIRECTORY ${PROJECT_EXTERN_DIR})
 
-  find_package( ROCM 0.6 REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake )
+  find_package( ROCmCMakeBuildTools 0.6 REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake )
 endif()
 
 include(ROCMSetupVersion)

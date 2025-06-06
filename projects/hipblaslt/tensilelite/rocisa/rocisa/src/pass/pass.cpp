@@ -49,6 +49,12 @@ namespace rocisa
                 removeDuplicateAssignment(graph);
             }
         }
+
+        if(option.insertDelayAlu)
+        {
+            insertDelayAlu(kernel->body);
+        }
+
         if(option.getCycles)
             result.cycles = getCycles(kernel->body, option.numWaves);
 
@@ -67,6 +73,7 @@ void init_pass(nb::module_ m)
 
     nb::class_<rocisa::rocIsaPassOption>(m_pass, "rocIsaPassOption")
         .def(nb::init<>())
+        .def_rw("insertDelayAlu", &rocisa::rocIsaPassOption::insertDelayAlu)
         .def_rw("removeDupFunc", &rocisa::rocIsaPassOption::removeDupFunc)
         .def_rw("removeDupAssign", &rocisa::rocIsaPassOption::removeDupAssign)
         .def_rw("getCycles", &rocisa::rocIsaPassOption::getCycles)

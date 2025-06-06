@@ -42,8 +42,8 @@ class AssemblyToolchain(NamedTuple):
    bundler: Bundler
 
 
-def makeAssemblyToolchain(assembler_path, bundler_path, co_version, build_id_kind="sha1"):
-   compiler = Assembler(assembler_path, co_version)
+def makeAssemblyToolchain(assembler_path, bundler_path, co_version, build_id_kind="sha1", debug=False):
+   compiler = Assembler(assembler_path, co_version, debug)
    linker = Linker(assembler_path, build_id_kind)
    bundler = Bundler(bundler_path)
    return AssemblyToolchain(compiler, linker, bundler)

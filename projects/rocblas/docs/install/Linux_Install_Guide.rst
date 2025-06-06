@@ -31,6 +31,7 @@ For Fedora, CentOS, or RHEL, use these commands:
 
 .. code-block:: shell
 
+   sudo dnf update
    sudo dnf install rocblas
 
 If you are compiling a program that will link against rocBLAS, instead install the ``rocblas-dev`` package.
@@ -46,6 +47,7 @@ For Fedora, CentOS, or RHEL, use these commands:
 
 .. code-block:: shell
 
+   sudo dnf update
    sudo dnf install rocblas-devel
 
 If you are using a different distribution, use the appropriate package manager to install the ``rocblas`` or ``rocblas-dev`` package.
@@ -82,7 +84,20 @@ Building and installing rocBLAS
 
 For most users, it isn't necessary to build rocBLAS from source. They can use
 the prebuilt packages as described above. However, if necessary, you can use the following instructions to build
-rocBLAS from source.
+rocBLAS from source.  You need to install ``rocm-dev`` instead of ``rocm`` (or in addition to ``rocm``), because ``rocm`` contains the runtime-only packages.
+For example, on Ubuntu or Debian, use these commands:
+
+.. code-block:: shell
+
+   sudo apt-get update
+   sudo apt-get install rocm-dev
+
+For Fedora, CentOS, or RHEL, use these commands:
+
+.. code-block:: shell
+
+   sudo dnf update
+   sudo dnf install rocm-dev
 
 Requirements
 ------------
@@ -149,12 +164,14 @@ For example, on Ubuntu or Debian, use:
 
 .. code-block:: shell
 
+   sudo apt-get update
    sudo apt-get install hipblaslt-dev
 
 For Fedora, CentOS, or RHEL, use:
 
 .. code-block:: shell
 
+   sudo dnf update
    sudo dnf install hipblaslt-devel
 
 For other distributions, use the appropriate package manager to install the ``hipblaslt-dev`` or ``hipblaslt-devel`` package.

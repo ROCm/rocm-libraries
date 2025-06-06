@@ -9,10 +9,15 @@ Definitions:
   #   - { transA: T, transB: N }
   #   - { transA: T, transB: T }
 
+# change to f8 for gfx950, otherwise we'll get "no solution found"
+# This also works for gfx942 since client automatically converts f8 to f8n on gfx942
+Real mix precisions: &fp8fp16_precision_dst_fp16
+  - { a_type: f8_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_fast_f16_r, scale_type: f32_r}
+
 Tests:
 - name: matmul_f8f16_f16
   function:
-    matmul: *fp8fp16_fnuz_precision_dst_fp16
+    matmul: *fp8fp16_precision_dst_fp16
   matrix_size:
     - { M:  16,    N:  16,    K:  1024  }
     - { M:  16,    N:  16,    K:  8192  }
@@ -57,5 +62,4 @@ Tests:
   algo_method: 0
   api_method: 2
   rotating: 512
-  gpu_arch: '94?'
 ...

@@ -25,13 +25,12 @@
 # SUCH DAMAGE.
 # ##########################################################################
 
-project(rocsolver-clients LANGUAGES C CXX)
 if(UNIX)
   enable_language(Fortran)
 endif()
 
 # Specify where to put the client binaries
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/staging")
 
 # The rocsolver target will exist if the library is being built along with the clients,
 # but if this is a clients-only build, we'll have to search for it.
@@ -174,12 +173,11 @@ if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   )
 
   prepend_path("${CMAKE_CURRENT_SOURCE_DIR}/" common_source_files common_source_paths)
-  target_sources(clients-common INTERFACE ${common_source_paths})
 
   # Copy and point to sparse test data
   file(COPY
     ${CMAKE_CURRENT_SOURCE_DIR}/sparsedata/
-    DESTINATION ${PROJECT_BINARY_DIR}/staging/sparsedata/
+    DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/staging/sparsedata/
   )
   install(DIRECTORY
     ${CMAKE_CURRENT_SOURCE_DIR}/sparsedata/

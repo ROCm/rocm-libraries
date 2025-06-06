@@ -61,6 +61,11 @@ namespace rocRoller::KernelGraph
         {
             std::string id;
             int         subdimension;
+
+            bool operator==(TypeAndSubDimension const& other) const
+            {
+                return this->id == other.id && this->subdimension == other.subdimension;
+            }
         };
 
         bool inline operator<(TypeAndSubDimension const& a, TypeAndSubDimension const& b)
@@ -74,6 +79,8 @@ namespace rocRoller::KernelGraph
         {
             std::string  id;
             NaryArgument argument;
+
+            auto operator<=>(TypeAndNaryArgument const&) const = default;
         };
 
         template <typename T>
@@ -108,6 +115,11 @@ namespace rocRoller::KernelGraph
         {
             ComputeIndexArgument argument;
             int                  index = 0;
+
+            bool operator==(ComputeIndex const& other) const
+            {
+                return this->index == other.index && this->argument == other.argument;
+            }
         };
 
         bool inline operator<(ComputeIndex const& a, ComputeIndex const& b)
@@ -267,7 +279,23 @@ namespace rocRoller::KernelGraph
             toDOT(std::string const& coord, std::string const& cntrl, bool addLabels = false) const;
 
     private:
-        std::map<key_type, int> m_map;
+        struct HashConnectionSpec
+        {
+            size_t operator()(const Connections::ConnectionSpec& conn) const
+            {
+                return conn.index();
+            }
+        };
+
+        std::unordered_map<int,
+                           std::unordered_map<Connections::ConnectionSpec, int, HashConnectionSpec>>
+            m_map;
+
+        //
+        // A reverse mapping of m_map. Whenever m_map gets changed (add/delete), this should
+        // also be updated.
+        //
+        std::unordered_map<int, std::unordered_set<int>> m_coordToControl;
     };
 
     std::string toString(ControlToCoordinateMapper::Connection const& conn);

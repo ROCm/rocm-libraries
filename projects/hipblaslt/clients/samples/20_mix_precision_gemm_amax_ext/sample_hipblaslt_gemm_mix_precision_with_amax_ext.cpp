@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -98,7 +98,7 @@ void simpleGemmMixPrecisionExt(hipblasLtHandle_t  handle,
                                int64_t            max_workspace_size,
                                hipStream_t        stream)
 {
-    hipblaslt_ext::GemmPreferenceV2 gemmPref;
+    hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
     hipblaslt_ext::Gemm gemm(handle,
                              trans_a,
@@ -114,8 +114,8 @@ void simpleGemmMixPrecisionExt(hipblasLtHandle_t  handle,
     CHECK_HIP_ERROR(hipMalloc(&d_scaleA, sizeof(float)));
     CHECK_HIPBLASLT_ERROR(hipblasltExtAMax(HIP_R_16F, HIP_R_32F, d_scaleA, d_a, m, k, stream));
 
-    hipblaslt_ext::GemmEpilogueV2 epilogue;
-    hipblaslt_ext::GemmInputsV2   inputs;
+    hipblaslt_ext::GemmEpilogue epilogue;
+    hipblaslt_ext::GemmInputs   inputs;
     inputs.setA(d_a);
     inputs.setB(d_b);
     inputs.setC(d_c);

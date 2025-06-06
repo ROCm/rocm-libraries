@@ -50,7 +50,7 @@ _rocblaslt_handle::_rocblaslt_handle()
     asic_rev = 0;
 #endif
 
-#ifdef USE_ROCROLLER
+#ifdef HIPBLASLT_USE_ROCROLLER
     rocroller_create_handle(&rocroller_handle);
     const char* rocRollerEnvVal = std::getenv("HIPBLASLT_USE_ROCROLLER");
     if(rocRollerEnvVal)

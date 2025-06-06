@@ -151,7 +151,7 @@ public:
         return random_nan_data<hip_bfloat16, uint16_t, 7, 8>();
     }
 
-#if HIPBLASLT_FP8_TYPE_FNUZ
+#if HIP_FP8_TYPE_FNUZ
     // Single NaN float8...
     explicit operator hipblaslt_f8_fnuz()
     {
@@ -177,7 +177,7 @@ public:
     }
 #endif
 
-#if HIPBLASLT_FP8_TYPE_OCP
+#if HIP_FP8_TYPE_OCP
     // Positive NaN float8...
     explicit operator hipblaslt_f8()
     {

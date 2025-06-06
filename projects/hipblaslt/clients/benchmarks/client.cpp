@@ -165,7 +165,6 @@ int run_bench_test(Arguments&         arg,
         }
     }
 
-#ifdef ROCM_USE_FLOAT8
     // Check for F8 OCP data types and convert to NANOO
     {
         std::string deviceFullString(props.gcnArchName);
@@ -199,7 +198,6 @@ int run_bench_test(Arguments&         arg,
             arg.aux_type = convertF8Type(arg.aux_type);
         }
     }
-#endif
 
     perf_matmul{}(arg);
     return 0;

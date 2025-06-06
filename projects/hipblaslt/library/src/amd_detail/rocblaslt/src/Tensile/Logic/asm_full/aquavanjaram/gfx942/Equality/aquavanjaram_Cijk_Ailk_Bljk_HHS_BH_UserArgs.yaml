@@ -21408,7 +21408,6 @@
     ThreadTileB: 11
     TransposeLDS: 1
     TransposeLDSMetadata: true
-    TunningSkip: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false
@@ -21668,7 +21667,6 @@
     ThreadTileB: 11
     TransposeLDS: 1
     TransposeLDSMetadata: true
-    TunningSkip: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: false

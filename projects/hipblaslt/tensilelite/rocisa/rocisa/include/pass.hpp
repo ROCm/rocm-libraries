@@ -28,6 +28,7 @@ namespace rocisa
     // External structures and functions
     struct rocIsaPassOption
     {
+        bool insertDelayAlu  = false;
         bool removeDupFunc   = true;
         bool removeDupAssign = true;
         bool getCycles       = true;
@@ -48,7 +49,7 @@ namespace rocisa
     std::string getActFuncBranchModuleName();
 
     rocIsaPassResult rocIsaPass(std::shared_ptr<KernelBody>& kernel,
-                                const rocIsaPassOption& option); // Return value is std::move()d
+                                const rocIsaPassOption&      option); // Return value is std::move()
 
     // Internal use only
     struct Graph
@@ -88,6 +89,7 @@ namespace rocisa
         std::shared_ptr<Item> _item;
     };
 
+    void insertDelayAlu(std::shared_ptr<Module> module);
     void removeDuplicatedFunction(std::shared_ptr<Module> module);
     void compositeToInstruction(std::shared_ptr<Module>& module);
     std::unordered_map<std::string, int>

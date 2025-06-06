@@ -56,10 +56,10 @@ class KernelWriterBetaOnly(KernelWriterBase):
     self.f8MacroGuardStart = "";
     self.f8MacroGuardEnd   = "";
     if (self.state["ProblemType"]["DestDataType"].isFloat8() or self.state["ProblemType"]["DestDataType"].isBFloat8()):
-      self.f8MacroGuardStart = "\n#if TENSILELITE_FP8_TYPE_OCP\n"
+      self.f8MacroGuardStart = "\n#if HIP_FP8_TYPE_OCP\n"
       self.f8MacroGuardEnd   = "\n#endif // F8 macro guard\n"
     if (self.state["ProblemType"]["DestDataType"].isFloat8_fnuz() or self.state["ProblemType"]["DestDataType"].isBFloat8_fnuz()):
-      self.f8MacroGuardStart = "\n#if TENSILELITE_FP8_TYPE_FNUZ\n"
+      self.f8MacroGuardStart = "\n#if HIP_FP8_TYPE_FNUZ\n"
       self.f8MacroGuardEnd   = "\n#endif // F8 macro guard\n"
 
 

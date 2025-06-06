@@ -53,11 +53,12 @@ namespace rocRoller::KernelGraph
 
     inline int ControlToCoordinateMapper::get(int control, Connections::ConnectionSpec conn) const
     {
-        auto key = key_type{control, conn};
-        auto it  = m_map.find(key);
-        if(it == m_map.end())
+        auto iter = m_map.find(control);
+
+        if(iter == m_map.end() or iter->second.find(conn) == iter->second.end())
             return -1;
-        return it->second;
+
+        return iter->second.at(conn);
     }
 
     inline int ControlToCoordinateMapper::get(int control, NaryArgument arg) const

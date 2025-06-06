@@ -27,7 +27,7 @@ from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SBranch, SCBranchSCC0
     SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpLgU32, SCmpLtU32, SCmpGtI32, \
     SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SSubU32, SCmpEQI32, \
     SCmpLeI32, VCmpGEI32, SSubI32, SCBranchSCC0, VMovB32, SLShiftLeftB32, SWaitCnt, SBarrier, \
-    SNop, SSleep, VAddF32, VReadfirstlaneB32, SMulHIU32, VAddPKF32, VCndMaskB32, SAtomicDec
+    SNop, SSleep, VAddF32, VAddI32, VReadfirstlaneB32, SMulHIU32, VAddPKF32, VCndMaskB32, SAtomicDec
 from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
 from ..Common import ceilDivide, log2, print2
@@ -129,7 +129,7 @@ class GSU(Component):
     @abc.abstractmethod
     def reductionBranches(self, writer, kernel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, vectorDataTypes, endLabel):
         pass
-    
+
 class GSUOff(GSU):
     kernel = {"GlobalSplitU": 0}
 
@@ -203,7 +203,7 @@ class GSUOff(GSU):
         module = Module("GSU Off setupNewTile")
         module.add(self.graIncrementsAB(writer, kernel, tensorParametersA, tensorParametersB, tPM))
         return module
-    
+
     def reductionBranches(self, writer, kernel, tPB, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel):
         module = Module("GSU Off reductionBranches")
         return module
@@ -231,7 +231,7 @@ class GSUOn(GSU):
 
     def __call__(self):
         assert(0)
-    
+
     def graWorkGroup(self, writer, kernel):
         module = Module("GSU On graWorkGroup")
 
@@ -867,14 +867,19 @@ class GSUOn(GSU):
                     vmcnt = SyncloadedData = SyncloadedData -1
                     module.add(SWaitCnt(lgkmcnt=lgkmcnt, vmcnt=vmcnt, vscnt=vscnt, comment="(wait for buffer ready)"))
 
-                    if ((gwvw % 2) == 1):
+                    if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
-                            module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
-                                       comment="buffer add"))
+                            module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
+                                    comment="buffer add"))
                     else:
-                        for j in range(0, int(gwvw/2)):
-                            module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
-                                       src1=vgpr(tmpVAdd+0+gwvw*i+j*2, 2), comment="buffer pk"))
+                        if ((gwvw % 2) == 1):
+                            for j in range(0, int(gwvw)):
+                                module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
+                                        comment="buffer add"))
+                        else:
+                            for j in range(0, int(gwvw/2)):
+                                module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
+                                        src1=vgpr(tmpVAdd+0+gwvw*i+j*2, 2), comment="buffer pk"))
 
                     module.add(SSubI32(dst=sgpr("GSUSync"), src0=sgpr("GSUSync"), src1=1, comment="%u" % i))
                     module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0-(GSUP1-1), comment=""))#GSUSync+GSUP1==GSU
@@ -926,15 +931,19 @@ class GSUOn(GSU):
                         module.addSpaceLine()
                         vmcnt = vmcnt -1 if vmcnt > 0 else 0
                         module.add(SWaitCnt(lgkmcnt=lgkmcnt, vmcnt=vmcnt, vscnt=vscnt, comment="(wait for buffer ready)"))
-
-                        if ((gwvw % 2) == 1):
+                        if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                             for j in range(0, int(gwvw)):
-                                module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
-                                           comment="buffer add"))
+                                module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
+                                        comment="buffer add"))
                         else:
-                            for j in range(0, int(gwvw/2)):
-                                module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
-                                           src1=vgpr(tmpVAdd+0+gwvw*i+j*2, 2), comment="buffer pk"))
+                            if ((gwvw % 2) == 1):
+                                for j in range(0, int(gwvw)):
+                                    module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
+                                            comment="buffer add"))
+                            else:
+                                for j in range(0, int(gwvw/2)):
+                                    module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
+                                            src1=vgpr(tmpVAdd+0+gwvw*i+j*2, 2), comment="buffer pk"))
 
                         if i == k-1:
                             module.add(SBranch(labelName=SynchronizerAddSkiplabel.getLabelName(), comment="SyncAddbranch"))
@@ -1049,14 +1058,19 @@ class GSUOn(GSU):
                 vmcnt       = vmcnt - 2 if vmcnt > 0 else 0
 
                 module.add(SWaitCnt(lgkmcnt=lgkmcnt, vmcnt=vmcnt, vscnt=vscnt, comment="(wait for buffer ready)"))
-                if ((gwvw % 2) == 1):
+                if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                     for j in range(0, int(gwvw)):
-                        module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
-                                   comment="buffer add"))
+                        module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
+                                comment="buffer add"))
                 else:
-                    for j in range(0, int(gwvw/2)):
-                        module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
-                                   src1=vgpr(data+j*2, 2), comment="buffer pk"))
+                    if ((gwvw % 2) == 1):
+                        for j in range(0, int(gwvw)):
+                            module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
+                                    comment="buffer add"))
+                    else:
+                        for j in range(0, int(gwvw/2)):
+                            module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
+                                    src1=vgpr(data+j*2, 2), comment="buffer pk"))
 
                 # prefetch
                 if ss.optSrdIncForRow and addrCalc.rowInc:
@@ -1086,14 +1100,19 @@ class GSUOn(GSU):
                     vmcnt       = vmcnt -1 if vmcnt > 0 else 0
 
                     module.add(SWaitCnt(lgkmcnt=lgkmcnt, vmcnt=vmcnt, vscnt=vscnt, comment="(wait for buffer ready)"))
-                    if ((gwvw % 2) == 1):
+                    if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
-                            module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
-                                               comment="buffer add"))
+                            module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
+                                    comment="buffer add"))
                     else:
-                        for j in range(0, int(gwvw/2)):
-                            module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
-                                                 src1=vgpr(data+j*2, 2), comment="buffer pk"))
+                        if ((gwvw % 2) == 1):
+                            for j in range(0, int(gwvw)):
+                                module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
+                                                comment="buffer add"))
+                        else:
+                            for j in range(0, int(gwvw/2)):
+                                module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
+                                                    src1=vgpr(data+j*2, 2), comment="buffer pk"))
 
                     # prefetch
                     if ss.optSrdIncForRow and addrCalc.rowInc:
@@ -1128,15 +1147,19 @@ class GSUOn(GSU):
                     data  = tmpVAdd[-1][elementIdx]
 
                     module.add(SWaitCnt(lgkmcnt=lgkmcnt, vmcnt=vmcnt, vscnt=vscnt, comment="(wait for buffer ready)"))
-
-                    if ((gwvw % 2) == 1):
+                    if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
-                            module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
-                                               comment="buffer add"))
+                            module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
+                                    comment="buffer add"))
                     else:
-                        for j in range(0, int(gwvw/2)):
-                            module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
-                                                 src1=vgpr(data+j*2, 2), comment="buffer pk"))
+                        if ((gwvw % 2) == 1):
+                            for j in range(0, int(gwvw)):
+                                module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
+                                                comment="buffer add"))
+                        else:
+                            for j in range(0, int(gwvw/2)):
+                                module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
+                                                    src1=vgpr(data+j*2, 2), comment="buffer pk"))
 
                 for i in range(1, k):
                     module.addSpaceLine()
@@ -1146,15 +1169,19 @@ class GSUOn(GSU):
                         data  = tmpVAdd[i-1][elementIdx]
 
                         module.add(SWaitCnt(lgkmcnt=lgkmcnt, vmcnt=vmcnt, vscnt=vscnt, comment="(wait for buffer ready)"))
-
-                        if ((gwvw % 2) == 1):
+                        if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                             for j in range(0, int(gwvw)):
-                                module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
-                                                   comment="buffer add"))
+                                module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
+                                        comment="buffer add"))
                         else:
-                            for j in range(0, int(gwvw/2)):
-                                module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
-                                                     src1=vgpr(data+j*2, 2), comment="buffer pk"))
+                            if ((gwvw % 2) == 1):
+                                for j in range(0, int(gwvw)):
+                                    module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
+                                                    comment="buffer add"))
+                            else:
+                                for j in range(0, int(gwvw/2)):
+                                    module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
+                                                        src1=vgpr(data+j*2, 2), comment="buffer pk"))
 
                 module.add(SBranch(labelName=accumulationEndlabel.getLabelName(), comment="Accumulation End"))
 
@@ -1257,7 +1284,7 @@ class GSUOn(GSU):
 
     def reductionBranches(self, writer, kernel, tPB, vectorWidths, elements, tmpVgpr, cvtVgprStruct, vectorDataTypes, factorDims, endLabel):
         module = Module("GSU On reductionBranches")
-        
+
         edges = [False] # no edge variant
         alphas = [False]
         betas = [False] # no beta variant
@@ -1266,18 +1293,18 @@ class GSUOn(GSU):
         beta = betas[0]
         gwvw = vectorWidths[edgeI]
         atomic = (kernel["GlobalSplitU"] > 1) and (kernel["_GlobalAccumulation"] != 'MultipleBuffer' and kernel["_GlobalAccumulation"] != 'MultipleBufferSingleKernel')
-        
+
         module.add(self.reductionProcedure(writer, kernel, tPB, vectorWidths, elements, alpha, beta, edges, atomic, gwvw, tmpVgpr, cvtVgprStruct, vectorDataTypes, endLabel))
-        
+
         return module
-    
+
     def reductionProcedure(self, writer, kernel, tPB, vectorWidths, elements, alpha, beta, edges, atomic, gwvw, tmpVgpr, cvtVgprStruct, vectorDataTypes, endLabel):
         module = Module("GSU Common reductionProcedure")
 
         reductionLabels = {}
         for edge in edges:
             reductionLabels[edge] = Label(writer.labels.getNameInc("Reduction_B%u_E%u" % (1 if beta else 0, 1 if edge else 0)), comment="")
-        
+
         for edge in edges:
             # write label for batch case
             module.add(reductionLabels[edge])
@@ -1304,7 +1331,7 @@ class GSUOn(GSU):
             ########################################
             writer.vgprPool.resetOccupancyLimit()
             writer.sgprPool.resetOccupancyLimit()
-            
+
             # Temporarily grow pool for sgpr
             sgprList = []
             if kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel':
@@ -1327,7 +1354,7 @@ class GSUOn(GSU):
                 tmpVgprDynamicAlign = 4
             if tmpVgprDynamicSize > 0:
                 tmpVgprDynamic = ContinuousRegister(idx=writer.vgprPool.checkOutAligned(tmpVgprDynamicSize, tmpVgprDynamicAlign), size=tmpVgprDynamicSize)
-        
+
             ss = StoreState(writer, kernel, gwvw, edge, True, atomic, elements[edgeI], vectorDataTypes, dim=0, isWorkspace=True)
 
             # how many vgprs are needed for zero elements
@@ -1357,7 +1384,7 @@ class GSUOn(GSU):
             # Before growing the pool, see if we can shrink the write vector width instead?
             # TODO: the vgprSerial is needed for-ever and if we grow here will split the
             # range of the tmps.    Maybe want to move vgprSerial to first vgpr?
-        
+
             # TODO: Minimum elems for StoreRemap
             # TODO: Which of DataType or DestDataType is in a better sense? 0114: Check Using DestDataType + HSS
             minElements = 1
@@ -1365,7 +1392,7 @@ class GSUOn(GSU):
                 minElements = 2
             elif kernel["ProblemType"]["DataType"].is8bitFloat():
                 minElements = 4
-                
+
             minNeeded = minElements * ss.numVgprsPerElement
 
             gsuDebug = 0
@@ -1413,7 +1440,7 @@ class GSUOn(GSU):
             if kernel["ISA"][0] != 12:
                 writer.vgprPool.setOccupancyLimit(writer.states.regCaps["MaxVgpr"], writer.states.regCaps["PhysicalMaxVgpr"] // occupancy)
                 writer.sgprPool.setOccupancyLimit(writer.states.regCaps["MaxSgpr"], writer.states.regCaps["PhysicalMaxSgpr"] // occupancy)
-            
+
             if ss.numVgprsPerElement:
                 numElementsPerBatch = numVgprAvailable // ss.numVgprsPerElement
             else:
@@ -1426,7 +1453,7 @@ class GSUOn(GSU):
             if gsuDebug:
                 print("NumElementsPerBatch=", numElementsPerBatch, "LimitedBySgprs=", ss.cfg.numElementsPerBatchLimitedBySgprs, \
                         "WARNING" if ss.cfg.numElementsPerBatchLimitedBySgprs < numElementsPerBatch else "okay")
-                
+
             if ss.cfg.numElementsPerBatchLimitedBySgprs < numElementsPerBatch:
                 numElementsPerBatch = ss.cfg.numElementsPerBatchLimitedBySgprs
 
@@ -1458,7 +1485,7 @@ class GSUOn(GSU):
             #  numElementsPerBatch = numVectorsPerBatch * kernel["GlobalWriteVectorWidth"]
             numBatches = max(1, ceilDivide(len(elements[edgeI]),numElementsPerBatch))
             totalNeededVgpr = ss.numVgprsPerElement * numElementsPerBatch
-            
+
             numSgprs = ss.cfg.numTempSgprPerBatch + ss.cfg.numMaskSgprPerBatch + ss.cfg.numMaskSgprPerElement * numElementsPerBatch
 
             if writer.db["PrintStoreRegisterDb"]:
@@ -1475,13 +1502,13 @@ class GSUOn(GSU):
 
                 codeAccVgprRead = deepcopy(writer.codes.accVgprRead) if writer.states.serializedStore else None
                 codeAccVgprWrite = deepcopy(writer.codes.accVgprWrite) if writer.states.serializedStore else None
-                
+
                 if kernel["MIArchVgpr"] and alpha and not kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel':
                     codeAccVgprRead = None
                     # Only apply when 2 wave optimization features are enabled
                     if (kernel["StorePriorityOpt"] or kernel["StoreSyncOpt"]) and beta:
                         self.alphaBeforeLoadC = True
-        
+
                 # calculate address in workspace
                 module.add(self.computeWorkspaceSrd(writer, kernel))
 
@@ -1517,7 +1544,7 @@ class GSUOn(GSU):
             # Free after final vgpr vcalculation
             if tmpVgprDynamic:
                 writer.vgprPool.checkIn(tmpVgprDynamic.idx)
-    
+
         return module
 
     def partialWriteBatch(self, writer, kernel, tPB, ss, batchIdx, alpha, beta, edge, atomic, gwvw, batchElements, addrD, addrC, \
@@ -1577,7 +1604,7 @@ class GSUOn(GSU):
         if beta and kernel["StoreSyncOpt"]:
             module.add(SSleep(kernel["StoreSyncOpt"] - 1, "optimization: sync and wait"))
             module.add(SBarrier())
-    
+
         ########################################
         # AccVgpr read
         module.addComment("accvgpr read")
@@ -1623,7 +1650,7 @@ class GSUOn(GSU):
                 addr0 = vgpr(addrCalc.addrDVgpr)
                 addr1 = sgpr("SrdD", 4)
                 globalOffset = 0
-        
+
                 if batchIdx == 0 and elementIdx == 0:
                     addrDVgpr = addrCalc.addrDVgpr
                     storeCodeGSUSK.add(vectorStaticMultiply(vgpr(addrDVgpr), vgpr("Serial"), storeWidth * writer.states.bpeCinternal, tmpS01Res))
@@ -1648,7 +1675,7 @@ class GSUOn(GSU):
                     # Column Block Shape has been written to LDS
                     # Now read back and write out to global memory
             module.add(storeCodeGSUSK)
-        
+
         # return registers to pool:
         lastDataD = -1
         for elementIdx in range(0, len(batchElements)):
@@ -1673,7 +1700,7 @@ class GSUOn(GSU):
         ss.checkInTempVgprC()
 
         return module
-    
+
     def reductionBatch(self, writer, kernel, tPB, ss, batchIdx, alpha, beta, edge, atomic, gwvw, batchElements, addrD, addrC, \
             tmpVgpr, tmpVgprDynamic, cvtVgprStruct, batchElementSgprs, tmpSgpr, codeAccVgprRead, codeAccVgprWrite, endLabel):
         module = Module("GSU Common reductionBatch")
@@ -1720,7 +1747,7 @@ class GSUOn(GSU):
             module.add(writer.getBomb()) # should not get here
         if edge and writer.db["AssertNoEdge"]:
             module.add(writer.getBomb()) # should not get here
- 
+
         if kernel["BufferStore"] and edge:
             bufferOOB = tmpVgpr.idx + tmpVgpr.size - 1
             module.add(VMovB32(dst=vgpr(bufferOOB), src="BufferOOB"))
@@ -1730,12 +1757,12 @@ class GSUOn(GSU):
         if beta and kernel["StoreSyncOpt"]:
             module.add(SSleep(kernel["StoreSyncOpt"] - 1, "optimization: sync and wait"))
             module.add(SBarrier())
-        
+
         # do we really need this?
         sumIdxGSUSYNC = ss.elementSumIdx[len(batchElements)-1]
         addrCalc = ss.elementAddr[len(batchElements)-1]
 
-        if (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel'):            
+        if (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel'):
             ########################################
             # Reduction
             module.addSpaceLine()
@@ -1746,7 +1773,7 @@ class GSUOn(GSU):
             module.add(self.GSUSynccodegenOpt(kernel, writer, ss, batchIdx, tmpVgpr, tmpVgprDynamic, gwvw, batchElements,\
                                         endLabel, sumIdxGSUSYNC, addrCalc.globalOffset, addrCalc.addrDVgpr, tmpS02))
 
-            module.addComment("synchronizer store end")        
+            module.addComment("synchronizer store end")
 
         ########################################
         # AccVgpr write
@@ -1764,7 +1791,7 @@ class GSUOn(GSU):
                     # loop over registers within one scalar
                     for rIdx in range(0, regsPerScalar):
                         module.add(replaceHolder(codeAccVgprWrite.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - writer.states.c.startVgprValu))
-            
+
             # TODO: really need wait states after accvgpr write?
             # if not kernel["MIArchVgpr"]:
             #     module.add(SNop(1, "2 wait states required before reading vgpr"))
@@ -1782,7 +1809,7 @@ class GSUOn(GSU):
             module.add(SBarrier("debug"))
             module.add(SWaitCnt(vmcnt=0, vscnt=0, comment="ConservativeWaitCnt"))
             module.add(SBarrier("debug"))
-        
+
         # return registers to pool:
         lastDataD = -1
         for elementIdx in range(0, len(batchElements)):
@@ -1807,11 +1834,11 @@ class GSUOn(GSU):
         ss.checkInTempVgprC()
 
         return module
-    
+
     def computeWorkspaceSrd(self, writer, kernel):
         module = Module("GSU Common computeWorkspaceSrd")
 
-        tmpSgpr = writer.sgprPool.checkOut(2, "GSUMappingTemp", preventOverflow=0)
+        tmpSgpr = writer.sgprPool.checkOut(2, "GSUMappingTemp", preventOverflow=False)
 
         # WS address calculation
         module.addComment("calculate the starting WG index of GSU WGs")
@@ -1824,7 +1851,7 @@ class GSUOn(GSU):
         module.add(SMulI32(dst=sgpr("GSUStartWGIdx"), src0=sgpr("GSUStartWGIdx"), src1=sgpr(tmpSgpr+1), comment="NumWgPerBatch"))
         module.add(SAddU32(dst=sgpr("GSUStartWGIdx"), src0=sgpr("GSUStartWGIdx"), src1=sgpr(tmpSgpr), comment="starting WG index of each GSU WGs"))
         module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr("GSUStartWGIdx"), src1=sgpr("GSUSumIdx"), comment="(NumWorkGroups0*wg1+wg0)*GSU+NumWgPerBatch+GSUSumIdx"))
-        
+
         assert kernel["BufferStore"]
         module.addComment("add offset to the base address of workspace buffer")
         reductionOffset = kernel["MacroTile0"]*kernel["MacroTile1"]*writer.states.bpeCinternal
@@ -1837,7 +1864,7 @@ class GSUOn(GSU):
         writer.sgprPool.checkIn(tmpSgpr)
 
         return module
-    
+
     def GSUSynccodegenOpt(self, kernel, writer, ss, batchIdx, tmpVgpr, tmpVgprDynamic, gwvw, batchElements, labelend, vgprstart, globalOffset, vgproffset, soffset):
         module = Module("GSUSYNC")
 
@@ -1851,7 +1878,7 @@ class GSUOn(GSU):
         tmpS04 = writer.sgprPool.checkOutAligned(2,2, preventOverflow=False) #
         tmpS05 = writer.sgprPool.checkOutAligned(2,2, preventOverflow=False) #
         tmpS06 = writer.sgprPool.checkOutAligned(4,4, preventOverflow=False) #overflow?
-        
+
         reductionOffset = kernel["MacroTile0"]*kernel["MacroTile1"]*writer.states.bpeCinternal
         #####################################synchronizer offset cal and set synchronizer#####################################
         #####################################WaveId+WgId*WaveNum+WgNum*WaveNum*Batch#####################################
@@ -1920,7 +1947,7 @@ class GSUOn(GSU):
         bps = kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw
         storeWidth = kernel["StoreVectorWidth"]
         increment = kernel["NumThreads"] * storeWidth * writer.states.bpeCinternal
-        
+
         if not kernel["MbskPrefetchOpt"]:
             for elementIdx in range(0, len(batchElements)):
                 mask     = ss.elementMask[elementIdx]
@@ -2003,15 +2030,19 @@ class GSUOn(GSU):
                 for i in range(0, GSUP1):
                     vmcnt = SyncloadedData = SyncloadedData -1
                     module.add(SWaitCnt(lgkmcnt=lgkmcnt, vmcnt=vmcnt, vscnt=vscnt, comment="(wait for buffer ready)"))
-
-                    if ((gwvw % 2) == 1):
+                    if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
-                            module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
+                            module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
                                     comment="buffer add"))
                     else:
-                        for j in range(0, int(gwvw/2)):
-                            module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
-                                        src1=vgpr(tmpVAdd+0+gwvw*i+j*2, 2), comment="buffer pk"))
+                        if ((gwvw % 2) == 1):
+                            for j in range(0, int(gwvw)):
+                                module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
+                                        comment="buffer add"))
+                        else:
+                            for j in range(0, int(gwvw/2)):
+                                module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
+                                            src1=vgpr(tmpVAdd+0+gwvw*i+j*2, 2), comment="buffer pk"))
 
                     module.add(SSubI32(dst=sgpr("GSUSync"), src0=sgpr("GSUSync"), src1=1, comment="%u" % i))
                     module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0-(GSUP1-1), comment=""))#GSUSync+GSUP1==GSU
@@ -2048,15 +2079,19 @@ class GSUOn(GSU):
                     for i in range(0, k):
                         vmcnt = vmcnt -1 if vmcnt > 0 else 0
                         module.add(SWaitCnt(lgkmcnt=lgkmcnt, vmcnt=vmcnt, vscnt=vscnt, comment="(wait for buffer ready)"))
-
-                        if ((gwvw % 2) == 1):
+                        if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                             for j in range(0, int(gwvw)):
-                                module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
-                                            comment="buffer add"))
+                                module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
+                                        comment="buffer add"))
                         else:
-                            for j in range(0, int(gwvw/2)):
-                                module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
-                                                src1=vgpr(tmpVAdd+0+gwvw*i+j*2, 2), comment="buffer pk"))
+                            if ((gwvw % 2) == 1):
+                                for j in range(0, int(gwvw)):
+                                    module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
+                                                comment="buffer add"))
+                            else:
+                                for j in range(0, int(gwvw/2)):
+                                    module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
+                                                    src1=vgpr(tmpVAdd+0+gwvw*i+j*2, 2), comment="buffer pk"))
 
                         if i == k-1:
                             module.add(SBranch(labelName=SynchronizerAddSkiplabel.getLabelName(), comment="SyncAddbranch"))
@@ -2089,7 +2124,7 @@ class GSUOn(GSU):
             module.add(SAddU32(dst=sgpr(tmpWSD), src0=sgpr("AddressD+0"), src1=sgpr(tmpWSD), comment="add lo to SRD"))
             module.add(SAddCU32(dst=sgpr(tmpWSD+1), src0=sgpr("AddressD+1"), src1=sgpr(tmpWSD+1), comment="add hi to SRD"))
             module.add(SMovB64(sgpr(tmpWSD+2, 2), sgpr("SrdD+2", 2), ""))
-            
+
             # set buffer load address for WG1
             module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpWSD+0), src1=sgpr(tmpS04+0), comment="" ))
             module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpWSD+1), src1=sgpr(tmpS04+1), comment="" ))
@@ -2175,14 +2210,19 @@ class GSUOn(GSU):
                 vmcnt       = vmcnt - 2 if vmcnt > 0 else 0
 
                 module.add(SWaitCnt(lgkmcnt=lgkmcnt, vmcnt=vmcnt, vscnt=vscnt, comment="(wait for buffer ready)"))
-                if ((gwvw % 2) == 1):
+                if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                     for j in range(0, int(gwvw)):
-                        module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
-                                    comment="buffer add"))
+                        module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
+                                comment="buffer add"))
                 else:
-                    for j in range(0, int(gwvw/2)):
-                        module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
-                                        src1=vgpr(data+j*2, 2), comment="buffer pk"))
+                    if ((gwvw % 2) == 1):
+                        for j in range(0, int(gwvw)):
+                            module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
+                                        comment="buffer add"))
+                    else:
+                        for j in range(0, int(gwvw/2)):
+                            module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
+                                            src1=vgpr(data+j*2, 2), comment="buffer pk"))
 
                 # prefetch
                 if elementIdx != 0:
@@ -2212,14 +2252,19 @@ class GSUOn(GSU):
                     vmcnt       = vmcnt -1 if vmcnt > 0 else 0
 
                     module.add(SWaitCnt(lgkmcnt=lgkmcnt, vmcnt=vmcnt, vscnt=vscnt, comment="(wait for buffer ready)"))
-                    if ((gwvw % 2) == 1):
+                    if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
-                            module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
-                                            comment="buffer add"))
+                            module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
+                                    comment="buffer add"))
                     else:
-                        for j in range(0, int(gwvw/2)):
-                            module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
-                                            src1=vgpr(data+j*2, 2), comment="buffer pk"))
+                        if ((gwvw % 2) == 1):
+                            for j in range(0, int(gwvw)):
+                                module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
+                                                comment="buffer add"))
+                        else:
+                            for j in range(0, int(gwvw/2)):
+                                module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
+                                                src1=vgpr(data+j*2, 2), comment="buffer pk"))
 
                     # prefetch
                     if elementIdx != 0:
@@ -2252,15 +2297,19 @@ class GSUOn(GSU):
                     data  = tmpVAdd[-1][elementIdx]
 
                     module.add(SWaitCnt(lgkmcnt=lgkmcnt, vmcnt=vmcnt, vscnt=vscnt, comment="(wait for buffer ready)"))
-
-                    if ((gwvw % 2) == 1):
+                    if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
-                            module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
-                                            comment="buffer add"))
+                            module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
+                                    comment="buffer add"))
                     else:
-                        for j in range(0, int(gwvw/2)):
-                            module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
-                                            src1=vgpr(data+j*2, 2), comment="buffer pk"))
+                        if ((gwvw % 2) == 1):
+                            for j in range(0, int(gwvw)):
+                                module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
+                                                comment="buffer add"))
+                        else:
+                            for j in range(0, int(gwvw/2)):
+                                module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
+                                                src1=vgpr(data+j*2, 2), comment="buffer pk"))
 
                 for i in range(1, k):
                     for elementIdx in range(0, len(batchElements)):
@@ -2269,15 +2318,19 @@ class GSUOn(GSU):
                         data  = tmpVAdd[i-1][elementIdx]
 
                         module.add(SWaitCnt(lgkmcnt=lgkmcnt, vmcnt=vmcnt, vscnt=vscnt, comment="(wait for buffer ready)"))
-
-                        if ((gwvw % 2) == 1):
+                        if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                             for j in range(0, int(gwvw)):
-                                module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
-                                            comment="buffer add"))
+                                module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
+                                        comment="buffer add"))
                         else:
-                            for j in range(0, int(gwvw/2)):
-                                module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
-                                            src1=vgpr(data+j*2, 2), comment="buffer pk"))
+                            if ((gwvw % 2) == 1):
+                                for j in range(0, int(gwvw)):
+                                    module.add(VAddF32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
+                                                comment="buffer add"))
+                            else:
+                                for j in range(0, int(gwvw/2)):
+                                    module.add(VAddPKF32(dst=vgpr(vgprstart+j*2, 2), src0=vgpr(vgprstart+j*2, 2), \
+                                                src1=vgpr(data+j*2, 2), comment="buffer pk"))
 
                 module.add(SBranch(labelName=accumulationEndlabel.getLabelName(), comment="Accumulation End"))
 

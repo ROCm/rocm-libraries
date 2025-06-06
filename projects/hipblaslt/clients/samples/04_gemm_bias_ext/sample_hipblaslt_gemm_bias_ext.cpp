@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -97,35 +97,29 @@ void simpleGemmEpilogueBiasVecExt(hipblasLtHandle_t   handle,
 {
     hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
-    hipblaslt_ext::Gemm gemm(handle,
-                             trans_a,
-                             trans_b,
-                             HIP_R_16F,
-                             HIP_R_16F,
-                             HIP_R_16F,
-                             HIP_R_16F,
-                             HIPBLAS_COMPUTE_32F);
+    hipblaslt_ext::Gemm gemm(
+        handle, trans_a, trans_b, HIP_R_16F, HIP_R_16F, HIP_R_16F, HIP_R_16F, HIPBLAS_COMPUTE_32F);
 
     hipblaslt_ext::GemmEpilogue gemmEpilogue;
-    gemmEpilogue.mode           = epilogue;
-    gemmEpilogue.bias_data_type = HIP_R_16F;
+    gemmEpilogue.setMode(epilogue);
+    gemmEpilogue.setBiasDataType(HIP_R_16F);
 
     std::vector<hipblasLtHalf> h_bias(m, 1.0f); // Example bias values, adjust as needed
-    void* d_bias;
+    void*                      d_bias;
     CHECK_HIP_ERROR(hipMalloc(&d_bias, m * sizeof(hipblasLtHalf))); // Allocate memory for bias
-    CHECK_HIP_ERROR(hipMemcpy(d_bias, h_bias.data(), m * sizeof(hipblasLtHalf), hipMemcpyHostToDevice)); // Copy bias to device
-
-    hipblaslt_ext::GemmInputsV2 inputs2;
-    inputs2.setBias(d_bias);
+    CHECK_HIP_ERROR(hipMemcpy(d_bias,
+                              h_bias.data(),
+                              m * sizeof(hipblasLtHalf),
+                              hipMemcpyHostToDevice)); // Copy bias to device
 
     hipblaslt_ext::GemmInputs inputs;
-    inputs.a     = d_a;
-    inputs.b     = d_b;
-    inputs.c     = d_c;
-    inputs.d     = d_d;
-    inputs.bias  = d_bias;
-    inputs.alpha = &alpha;
-    inputs.beta  = &beta;
+    inputs.setA(d_a);
+    inputs.setB(d_b);
+    inputs.setC(d_c);
+    inputs.setD(d_d);
+    inputs.setBias(d_bias);
+    inputs.setAlpha(&alpha);
+    inputs.setBeta(&beta);
     gemm.setProblem(m, n, k, batch_count, gemmEpilogue, inputs);
 
     const int                                     request_solutions = 1;

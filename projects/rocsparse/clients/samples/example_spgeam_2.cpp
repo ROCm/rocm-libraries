@@ -178,32 +178,34 @@ int main(int argc, char* argv[])
     ROCSPARSE_CHECK(rocsparse_create_spgeam_descr(&descr));
 
     const rocsparse_spgeam_alg alg = rocsparse_spgeam_alg_default;
-    ROCSPARSE_CHECK(
-        rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_alg, &alg, sizeof(alg)));
+    ROCSPARSE_CHECK(rocsparse_spgeam_set_input(
+        handle, descr, rocsparse_spgeam_input_alg, &alg, sizeof(alg), nullptr));
 
     const rocsparse_operation op = rocsparse_operation_none;
     ROCSPARSE_CHECK(rocsparse_spgeam_set_input(
-        handle, descr, rocsparse_spgeam_input_operation_A, &op, sizeof(op)));
+        handle, descr, rocsparse_spgeam_input_operation_A, &op, sizeof(op), nullptr));
     ROCSPARSE_CHECK(rocsparse_spgeam_set_input(
-        handle, descr, rocsparse_spgeam_input_operation_B, &op, sizeof(op)));
+        handle, descr, rocsparse_spgeam_input_operation_B, &op, sizeof(op), nullptr));
     const rocsparse_datatype scalar_datatype = rocsparse_datatype_f64_r;
     ROCSPARSE_CHECK(rocsparse_spgeam_set_input(handle,
                                                descr,
                                                rocsparse_spgeam_input_scalar_datatype,
                                                &scalar_datatype,
-                                               sizeof(scalar_datatype)));
+                                               sizeof(scalar_datatype),
+                                               nullptr));
     const rocsparse_datatype compute_datatype = rocsparse_datatype_f64_r;
     ROCSPARSE_CHECK(rocsparse_spgeam_set_input(handle,
                                                descr,
                                                rocsparse_spgeam_input_compute_datatype,
                                                &compute_datatype,
-                                               sizeof(compute_datatype)));
+                                               sizeof(compute_datatype),
+                                               nullptr));
 
     // Calculate NNZ phase
     size_t buffer_size_in_bytes;
     void*  buffer;
     ROCSPARSE_CHECK(rocsparse_spgeam_buffer_size(
-        handle, descr, A, B, C, rocsparse_spgeam_stage_analysis, &buffer_size_in_bytes));
+        handle, descr, A, B, C, rocsparse_spgeam_stage_analysis, &buffer_size_in_bytes, nullptr));
 
     HIP_CHECK(hipMalloc(&buffer, buffer_size_in_bytes));
     ROCSPARSE_CHECK(rocsparse_spgeam(handle,
@@ -215,7 +217,8 @@ int main(int argc, char* argv[])
                                      C,
                                      rocsparse_spgeam_stage_analysis,
                                      buffer_size_in_bytes,
-                                     buffer));
+                                     buffer,
+                                     nullptr));
     HIP_CHECK(hipFree(buffer));
 
     // Ensure analysis stage is complete before grabbing C non-zero count
@@ -238,7 +241,7 @@ int main(int argc, char* argv[])
 
     // Compute phase
     ROCSPARSE_CHECK(rocsparse_spgeam_buffer_size(
-        handle, descr, A, B, C, rocsparse_spgeam_stage_compute, &buffer_size_in_bytes));
+        handle, descr, A, B, C, rocsparse_spgeam_stage_compute, &buffer_size_in_bytes, nullptr));
 
     HIP_CHECK(hipMalloc(&buffer, buffer_size_in_bytes));
 
@@ -251,7 +254,8 @@ int main(int argc, char* argv[])
                                      C,
                                      rocsparse_spgeam_stage_compute,
                                      buffer_size_in_bytes,
-                                     buffer));
+                                     buffer,
+                                     nullptr));
     HIP_CHECK(hipFree(buffer));
 
     // Print result

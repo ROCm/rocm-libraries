@@ -221,6 +221,7 @@ namespace rocRoller
                                                            m_prefetchFromLDSChains;
             std::map<int, std::map<int, std::vector<int>>> m_loadFromLDSChains;
             std::map<int, std::unordered_set<int>>         m_prefetchDelete;
+            std::map<int, int>                             m_exchangeSegment;
 
             std::unordered_set<int> m_storeLDSTileOperations;
 
@@ -977,15 +978,69 @@ namespace rocRoller
                 auto exchanges
                     = graph.control.findNodes(bodies, isExchangePredicate).to<std::vector>();
 
-                auto prefetchGlobalU = (0 + numInFlight) % numUnroll;
-
-                std::unordered_set<int> orderBeforeTags;
-                for(auto info : loadsByUnroll[prefetchGlobalU])
-                    orderBeforeTags.insert(info.globalChain);
-
                 for(auto exchangeTag : exchanges)
+                {
+                    auto prefetchGlobalU
+                        = (m_exchangeSegment[exchangeTag] + numInFlight) % numUnroll;
+
+                    std::unordered_set<int> orderBeforeTags;
+                    for(auto info : loadsByUnroll[prefetchGlobalU])
+                        orderBeforeTags.insert(info.globalChain);
+
                     for(auto orderBeforeTag : orderBeforeTags)
                         graph.control.addElement(Sequence(), {exchangeTag}, {orderBeforeTag});
+                }
+            }
+        }
+
+        std::optional<int>
+            getExchangeForMultiply(KernelGraph const& graph, int multiplyTag, NaryArgument arg)
+        {
+            auto isIndexPredicate    = rocRoller::KernelGraph::CoordinateGraph::isEdge<Index>;
+            auto isExchangePredicate = [&](int operation) -> bool {
+                auto maybeExchange = graph.control.get<Exchange>(operation);
+                return maybeExchange.has_value();
+            };
+
+            int scale = graph.mapper.get(multiplyTag, Connections::typeArgument<MacroTile>(arg));
+            if(scale == -1)
+                return {};
+
+            auto tileTag = only(graph.coordinates.getOutputNodeIndices(scale, isIndexPredicate));
+            if(not tileTag)
+                return {};
+
+            auto connections = graph.mapper.getCoordinateConnections(tileTag.value());
+            for(auto connection : connections)
+                if(isExchangePredicate(connection.control))
+                    return connection.control;
+
+            return {};
+        }
+
+        void updateExchangeColouring(std::map<int, int>&    operationUnroll,
+                                     KernelGraph const&     graph,
+                                     UnrollColouring const& colouring,
+                                     int                    forLoop,
+                                     int                    unrollCoord)
+        {
+            auto isMultiplyPredicate = graph.control.isElemType<Multiply>();
+
+            auto bodies = graph.control.getOutputNodeIndices<Body>(forLoop).to<std::vector>();
+            auto multiplyTags
+                = graph.control.findNodes(bodies, isMultiplyPredicate).to<std::unordered_set>();
+
+            for(auto multiplyTag : multiplyTags)
+            {
+                auto lhsExchange
+                    = getExchangeForMultiply(graph, multiplyTag, NaryArgument::LHS_SCALE);
+                auto rhsExchange
+                    = getExchangeForMultiply(graph, multiplyTag, NaryArgument::RHS_SCALE);
+
+                if(lhsExchange)
+                    operationUnroll[*lhsExchange] = operationUnroll[multiplyTag];
+                if(rhsExchange)
+                    operationUnroll[*rhsExchange] = operationUnroll[multiplyTag];
             }
         }
 
@@ -1022,6 +1077,8 @@ namespace rocRoller
                     if(opColours.contains(unrollCoord))
                         operationUnroll[opTag] = opColours[unrollCoord];
                 }
+
+                updateExchangeColouring(operationUnroll, k, colouring, forLoop, unrollCoord);
             }
 
             auto alreadySeen = std::unordered_set<int>();
@@ -1301,6 +1358,17 @@ namespace rocRoller
                         m_prefetchDelete[forLoop].insert(outEdge);
                     }
                 }
+            }
+
+            // Mark exchanges
+            for(auto [forLoop, numUnroll] : m_prefetchLoops)
+            {
+                auto isExchangePredicate = k.control.isElemType<Exchange>();
+                auto bodies = k.control.getOutputNodeIndices<Body>(forLoop).to<std::vector>();
+                auto exchangeTags
+                    = k.control.findNodes(bodies, isExchangePredicate).to<std::unordered_set>();
+                for(auto exchangeTag : exchangeTags)
+                    m_exchangeSegment[exchangeTag] = operationUnroll[exchangeTag];
             }
 
             //

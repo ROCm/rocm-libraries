@@ -738,6 +738,23 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SWaitAlu& self, nb::dict&) { return new rocisa::SWaitAlu(self); });
 
+    nb::class_<rocisa::SDelayAlu, rocisa::Instruction>(m_common, "SDelayAlu")
+        .def(nb::init<rocisa::DelayALUType,
+                      int,
+                      std::optional<int>,
+                      std::optional<rocisa::DelayALUType>,
+                      std::optional<int>,
+                      const std::string&>(),
+             nb::arg("instid0type"),
+             nb::arg("instid0cnt"),
+             nb::arg("instskipCnt") = std::nullopt,
+             nb::arg("instid1type") = std::nullopt,
+             nb::arg("instid1cnt")  = std::nullopt,
+             nb::arg("comment")     = "")
+        .def("getParams", &rocisa::SDelayAlu::getParams)
+        .def("__deepcopy__",
+             [](const rocisa::SDelayAlu& self, nb::dict&) { return new rocisa::SDelayAlu(self); });
+
     nb::class_<rocisa::VAddF16, rocisa::CommonInstruction>(m_common, "VAddF16")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,

@@ -24,8 +24,8 @@
 #include "internal/util/rocsparse_check_matrix_coo.h"
 
 #include "rocsparse_check_matrix_coo.hpp"
-#include "to_string.hpp"
-#include "utility.h"
+#include "rocsparse_enum_utils.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "check_matrix_coo_device.h"
 
@@ -115,7 +115,7 @@ rocsparse_status
         {
             rocsparse::log_debug(handle,
                                  ("Matrix was specified to be "
-                                  + std::string(rocsparse::to_string(matrix_type))
+                                  + std::string(rocsparse::enum_utils::to_string(matrix_type))
                                   + " but m != n"));
         }
     }

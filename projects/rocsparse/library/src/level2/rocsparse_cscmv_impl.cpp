@@ -25,8 +25,8 @@
 #include "rocsparse_cscmv.hpp"
 #include "rocsparse_csrmv.hpp"
 
-#include "control.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 template <typename I, typename J, typename A>
 rocsparse_status rocsparse::cscmv_analysis_template(rocsparse_handle          handle,

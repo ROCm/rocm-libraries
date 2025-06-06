@@ -97,7 +97,7 @@ def analyzeProblemType(problemType, problemSizeGroups, inputParameters, libraryL
 
   ######################################
   # Remove least important solutions
-  if inputParameters["LibraryType"] == "FreeSize":
+  if inputParameters["LibraryType"] == "FreeSize" or inputParameters["LibraryType"] == "Prediction":
     logicAnalyzer.deReferenceSolutions()
   elif globalParameters["SolutionSelectionAlg"] == 0:
     logicAnalyzer.removeLeastImportantSolutions()
@@ -196,14 +196,14 @@ def analyzeProblemType(problemType, problemSizeGroups, inputParameters, libraryL
 
   ######################################
   # Range Logic
-  if inputParameters["LibraryType"] != "FreeSize":
+  if inputParameters["LibraryType"] != "FreeSize" and inputParameters["LibraryType"] != "Prediction":
     indexOrder = logicAnalyzer.indexOrder
   else:
     indexOrder = None
 
   ######################################
   # Range Logic
-  if inputParameters["LibraryType"] != "FreeSize":
+  if inputParameters["LibraryType"] != "FreeSize" and inputParameters["LibraryType"] != "Prediction":
     rangeLogic = logicAnalyzer.enRule(0, logicAnalyzer.globalIndexRange)
     print2("# Final Range Logic:")
     print2(rangeLogic)
@@ -219,7 +219,7 @@ def analyzeProblemType(problemType, problemSizeGroups, inputParameters, libraryL
 
   ######################################
   # Exact Logic
-  if inputParameters["LibraryType"] != "FreeSize":
+  if inputParameters["LibraryType"] != "FreeSize" and inputParameters["LibraryType"] != "Prediction":
     exactLogic = logicAnalyzer.exactWinners
     print1("# Exact Logic:\n")
     print1("%s"%exactLogic)

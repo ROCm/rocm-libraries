@@ -116,7 +116,6 @@ namespace TensileLite
                 return std::shared_ptr<MySolution>();
             }
             auto solution = solutions.at(index);
-
             if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
             {
                 auto problem
@@ -236,6 +235,7 @@ namespace TensileLite
                 auto   end    = std::chrono::steady_clock::now();
                 double time   = std::chrono::duration<double, std::micro>(end - start).count();
                 std::cout << "Solution selection time: " << time << " us" << std::endl;
+
                 return result;
             }
             else

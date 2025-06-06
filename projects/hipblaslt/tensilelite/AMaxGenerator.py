@@ -22,6 +22,8 @@
 
 from rocisa.code import Label, Module, RegSet, TextBlock, ValueSet
 from rocisa.container import EXEC, VCC, DSModifiers, MUBUFModifiers, vgpr, sgpr
+from rocisa.enum import RegisterType
+from rocisa.register import RegisterPool
 import rocisa.instruction as ri
 
 from argparse import ArgumentParser
@@ -37,7 +39,6 @@ from Tensile.Common.Utilities import _global_ti
 from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx, gfxToIsa
 from Tensile.Common.DataType import DataType
 from Tensile.Common.GlobalParameters import restoreDefaultGlobalParameters, assignGlobalParameters
-from Tensile.Common.RegisterPool import RegisterPool
 from Tensile.Toolchain.Validators import ToolchainDefaults, validateToolchain
 
 def kernel_header(name: str, gfx_arch: str, vgpr: int, sgpr: int, lds: int):
@@ -120,8 +121,8 @@ class AMaxKernelGenerator:
         self.num_workitems = num_workitems
         self.num_load_count = num_load_count
         self.num_load_size = num_load_size
-        self.sgpr_pool = RegisterPool(24, 's', True)
-        self.vgpr_pool = RegisterPool(40, 'v', True)
+        self.sgpr_pool = RegisterPool(24, RegisterType.Sgpr, True)
+        self.vgpr_pool = RegisterPool(40, RegisterType.Vgpr, True)
         self.sgpr_pool.add(0, 23) #TODO: estimate this
         self.vgpr_pool.add(0, 39) #TODO: estimate this
         self.debug_label = True
@@ -242,13 +243,13 @@ class AMaxKernelGenerator:
 
     def defineSgpr(self, name, numSgprs, align=1):
         if numSgprs == 0: return
-        sgprIdx = self.sgpr_pool.checkOutAligned(numSgprs, align, tag=name, preventOverflow=0)
+        sgprIdx = self.sgpr_pool.checkOutAligned(numSgprs, align, tag=name, preventOverflow=False)
         self.sgprs[name] = sgprIdx
         return sgprIdx
 
     def defineVgpr(self, name, numVgprs, align=1):
         if numVgprs == 0: return
-        vgprIdx = self.vgpr_pool.checkOutAligned(numVgprs, align, tag=name, preventOverflow=0)
+        vgprIdx = self.vgpr_pool.checkOutAligned(numVgprs, align, tag=name, preventOverflow=False)
         self.vgprs[name] = vgprIdx
         return vgprIdx
 

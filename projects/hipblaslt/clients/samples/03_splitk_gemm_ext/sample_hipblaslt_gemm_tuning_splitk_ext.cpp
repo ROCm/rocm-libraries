@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -109,14 +109,14 @@ void simpleGemmTuningSplitKExt(hipblasLtHandle_t  handle,
                                                      HIPBLAS_COMPUTE_32F,
                                                      heuristicResult));
 
-    hipblaslt_ext::GemmPreferenceV2 gemmPref;
+    hipblaslt_ext::GemmPreference gemmPref;
     gemmPref.setMaxWorkspaceBytes(max_workspace_size);
     hipblaslt_ext::Gemm gemm(
         handle, trans_a, trans_b, HIP_R_16F, HIP_R_16F, HIP_R_16F, HIP_R_16F, HIPBLAS_COMPUTE_32F);
 
-    hipblaslt_ext::GemmEpilogueV2
+    hipblaslt_ext::GemmEpilogue
         epilogue; // No action needed, default is HIPBLASLT_EPILOGUE_DEFAULT. (Gemm only)
-    hipblaslt_ext::GemmInputsV2 inputs;
+    hipblaslt_ext::GemmInputs inputs;
     inputs.setA(d_a);
     inputs.setB(d_b);
     inputs.setC(d_c);
@@ -127,7 +127,7 @@ void simpleGemmTuningSplitKExt(hipblasLtHandle_t  handle,
 
     std::vector<hipblaslt_ext::GemmTuning> tunings;
     tunings.resize(2);
-    tunings[1].splitK = 8;
+    tunings[1].setSplitK(8);
     // Not all the solutions supports GemmTuning, if you create a
     // hipblaslt_ext::GemmTuning without changing any default values,
     // the effect is same as calling API

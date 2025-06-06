@@ -24,11 +24,11 @@
 
 #include "rocsparse_csrgemm_symbolic.hpp"
 #include "../conversion/rocsparse_identity.hpp"
-#include "common.h"
-#include "control.h"
 #include "internal/extra/rocsparse_csrgemm.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include "rocsparse_csrgemm_symbolic_mult.hpp"
 #include "rocsparse_csrgemm_symbolic_multadd.hpp"
@@ -489,7 +489,7 @@ INSTANTIATE(int64_t, int64_t);
     }                                                                            \
     catch(...)                                                                   \
     {                                                                            \
-        return rocsparse::exception_to_rocsparse_status();                       \
+        RETURN_ROCSPARSE_EXCEPTION();                                            \
     }
 
 C_IMPL(rocsparse_csrgemm_symbolic);

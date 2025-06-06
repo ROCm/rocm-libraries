@@ -22,7 +22,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_extract.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 extern "C" rocsparse_status rocsparse_destroy_extract_descr(rocsparse_extract_descr descr)
 try

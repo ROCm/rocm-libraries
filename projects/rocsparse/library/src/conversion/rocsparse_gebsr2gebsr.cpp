@@ -23,20 +23,20 @@
  * ************************************************************************ */
 
 #include "internal/conversion/rocsparse_gebsr2gebsr.h"
-#include "control.h"
 #include "internal/conversion/rocsparse_coo2csr.h"
 #include "internal/conversion/rocsparse_csr2gebsr.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_gebsr2gebsr.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
-#include "common.h"
 #include "gebsr2csr_device.h"
 #include "gebsr2gebsr_device.h"
+#include "rocsparse_common.hpp"
 #include "rocsparse_csr2gebsr.hpp"
 #include "rocsparse_gebsr2csr.hpp"
 
 #include "rocsparse_common.h"
-#include "rocsparse_primitives.h"
+#include "rocsparse_primitives.hpp"
 
 #define launch_gebsr2gebsr_fast_kernel(T, direction, block_size, segment_size)     \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                            \

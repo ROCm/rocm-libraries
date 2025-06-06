@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -170,58 +170,6 @@ HIPBLASLT_EXPORT hipblasStatus_t hipblasltExtAMax(const hipDataType datatype,
                                                   uint32_t          m,
                                                   uint32_t          n,
                                                   hipStream_t       stream);
-
-/*! \ingroup library_module
- *  \brief Perform absmax and scaling on given 2-D tensor. Generate one absmax value and scaled 2-D tensor output.
- *
- *  \details
- *  This function computes amax and scaling on given 2D-tensor.
- *
- *  @param[in]
- *  datatype Datatype of input tensor, currently support HIP_R_32F only.
- *
- *  @param[in]
- *  outDatatype Datatype of output tensor, currently support HIP_R_32F and HIP_R_16F only.
- *
- *  @param[in]
- *  scaleDatatype Datatype of outputD tensor, currently support HIP_R_8F_E4M3_FNUZ and HIP_R_8F_E5M2_FNUZ only.
- *
- *  @param[out]
- *  output Amax tensor buffer. can't be nullptr.
- *
- *  @param[out]
- *  outputD scaled 2-D tensor buffer. can't be nullptr.
- *
- *  @param[in]
- *  input 2-D tensor buffer. can't be nullptr.
- *
- *  @param[in]
- *  inputScale 1-D tensor buffer. can't be nullptr. only support float.
- *
- *  @param[in]
- *  m The first dimension of input/output tensor.
- *
- *  @param[in]
- *  n The second dimension of input/output tensor.
- *
- *  @param[in]
- *  stream The HIP stream where all the GPU work will be submitted.
- *
- *
- *  \retval HIPBLAS_STATUS_SUCCESS If it runs successfully.
- *  \retval HIPBLAS_STATUS_INVALID_VALUE If \p m or n is 0, or input, inputScale, output, or outputD is nullptr.
- *  \retval HIPBLAS_STATUS_NOT_SUPPORTED If \p datatype is not HIP_R_32F, or scaleDatatype is not HIP_R_8F_E4M3_FNUZ or HIP_R_8F_E5M2_FNUZ.
- */
-HIPBLASLT_EXPORT hipblasStatus_t hipblasltExtAMaxWithScale(const hipDataType datatype,
-                                                           const hipDataType outDatatype,
-                                                           const hipDataType scaleDatatype,
-                                                           void*             output,
-                                                           void*             outputD,
-                                                           void*             input,
-                                                           void*             inputScale,
-                                                           uint32_t          m,
-                                                           uint32_t          n,
-                                                           hipStream_t       stream);
 
 // Exporting the setters of flush, rotating buffer size, cold iterations and hot iterations.
 HIPBLASLT_EXPORT void hipblasltSetFlushValue(bool newFlush);
