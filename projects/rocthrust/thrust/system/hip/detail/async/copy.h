@@ -329,7 +329,7 @@ auto async_copy(thrust::hip::execution_policy<FromPolicy>& from_exec,
                 ForwardIt first,
                 Sentinel last,
                 OutputIt output)
-  THRUST_RETURNS(thrust::system::hip::detail::async_copy_n(from_exec, to_exec, first, distance(first, last), output))
+  THRUST_RETURNS(thrust::system::hip::detail::async_copy_n(from_exec, to_exec, first, thrust::distance(first, last), output))
 
   // ADL entry point.
   template <typename FromPolicy, typename ToPolicy, typename ForwardIt, typename Sentinel, typename OutputIt>
@@ -338,7 +338,7 @@ auto async_copy(thrust::hip::execution_policy<FromPolicy>& from_exec,
                   ForwardIt first,
                   Sentinel last,
                   OutputIt output)
-    THRUST_RETURNS(thrust::system::hip::detail::async_copy_n(from_exec, to_exec, first, distance(first, last), output))
+    THRUST_RETURNS(thrust::system::hip::detail::async_copy_n(from_exec, to_exec, first, thrust::distance(first, last), output))
 
   // ADL entry point.
   template <typename FromPolicy, typename ToPolicy, typename ForwardIt, typename Sentinel, typename OutputIt>
@@ -347,7 +347,7 @@ auto async_copy(thrust::hip::execution_policy<FromPolicy>& from_exec,
                   ForwardIt first,
                   Sentinel last,
                   OutputIt output)
-    THRUST_RETURNS(thrust::system::hip::detail::async_copy_n(from_exec, to_exec, first, distance(first, last), output))
+    THRUST_RETURNS(thrust::system::hip::detail::async_copy_n(from_exec, to_exec, first, thrust::distance(first, last), output))
 
 } // namespace hip_rocprim
 
