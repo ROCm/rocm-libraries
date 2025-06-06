@@ -102,30 +102,34 @@ jobs:
             git commit -m "ci: apply pre-commit fixes"
             git push --force-with-lease origin HEAD:${{ github.head_ref }}
           fi
-      - name: Post a comment with diff for forked PRs 
+      - name: Post a comment with diff for forked PRs using curl
         if: github.event.pull_request.head.repo.fork == true
         env:
-         GH_TOKEN: ${{ secrets.ROCM_SV_TOKEN }}
-        run: |  
-          var="${{ steps.changed-files.outputs.all_modified_files }}"  
-          read -r -a files <<< "$var"  
-          if [ ${#files[@]} -eq 0 ]; then  
-            echo "No files changed, skipping pre-commit."  
-            exit 0  
-          fi  
-          echo "Running pre-commit on these files (dry run to capture diff):"  
-          printf "  %s\n" "${files[@]}"  
-          diff_output=$(pre-commit run --files "${files[@]}" --show-diff-on-failure 2>&1 || true)  
-          # Check if diff output shows that changes would be applied.  
-          if echo "$diff_output" | grep -q "Failed"; then  
-            echo "Pre-commit suggests the following changes:"  
-            echo "$diff_output"  
-            # Post a comment to the PR with the diff. This uses the GitHub CLI.  
-            gh pr comment "${{ github.event.pull_request.number }}" --body "Pre-commit found some formatting issues that should be fixed. Here is a diff of the suggested changes:  
-            \`\`\`  
-            $diff_output  
-            \`\`\`  
-            Please apply these fixes and push the changes to update the PR."  
-          else  
-            echo "No formatting issues detected."  
-          fi 
+          GH_TOKEN: ${{ secrets.ROCM_SV_TOKEN }}
+        run: |
+          var="${{ steps.changed-files.outputs.all_modified_files }}"
+          read -r -a files <<< "$var"
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No files changed, skipping pre-commit."
+            exit 0
+          fi
+          echo "Running pre-commit on these files (dry run to capture diff):"
+          printf "  %s\n" "${files[@]}"
+          diff_output=$(pre-commit run --files "${files[@]}" --show-diff-on-failure 2>&1 || true)
+          if echo "$diff_output" | grep -q "Failed"; then
+            echo "Pre-commit suggests the following changes:"
+            echo "$diff_output"
+            
+            # Construct the JSON payload for the comment
+            comment_body=$(printf '%s\n\n\`\`\`\n%s\n\`\`\`\n\nPlease apply these fixes and push the changes to update the PR.' "Pre-commit found formatting issues. Suggested changes are:" "$diff_output")
+            
+            # Use curl to post the PR comment via the GitHub API.
+            curl -s -X POST \
+              -H "Authorization: token ${GH_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg body "$comment_body" '{body: $body}')" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${{ github.event.pull_request.number }}/comments"
+          else
+            echo "No formatting issues detected."
+          fi
+
