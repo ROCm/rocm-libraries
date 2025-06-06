@@ -1362,9 +1362,12 @@ __device__ void
         __syncthreads();
 
         // ger
-        for(I i = tid; i < n; i += tid_inc)
-            for(I j = 0; j < m; j++)
-                C[j + i * ldc] -= tau * v[j * incv] * conj(work[i]);
+        for(rocblas_int idx1d = tid; idx1d < m * n; idx1d += tid_inc)
+        {
+            rocblas_int i = idx1d % m;
+            rocblas_int j = idx1d / m;
+            C[i + j * ldc] -= tau * v[i * incv] * conj(work[j]);
+        }
     }
     else
     {
@@ -1379,9 +1382,12 @@ __device__ void
         __syncthreads();
 
         // ger
-        for(I i = tid; i < m; i += tid_inc)
-            for(I j = 0; j < n; j++)
-                C[i + j * ldc] -= tau * conj(v[j * incv]) * work[i];
+        for(rocblas_int idx1d = tid; idx1d < m * n; idx1d += tid_inc)
+        {
+            rocblas_int i = idx1d % m;
+            rocblas_int j = idx1d / m;
+            C[i + j * ldc] -= tau * conj(v[j * incv]) * work[i];
+        }
     }
 }
 

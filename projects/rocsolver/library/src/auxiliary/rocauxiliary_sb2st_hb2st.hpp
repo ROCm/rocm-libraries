@@ -84,9 +84,15 @@ __device__ void run_sb2st_hb2st(const rocblas_int tid,
         __syncthreads();
         larf(tid, MAX_THDS, rocblas_side_right, mm, mm, A + sm_i + s * lda, incx, tau,
              A + sm_i + sm_i * lda, lda, work);
-        for(rocblas_int i = su_i + tid; i < su_e; i += MAX_THDS)
-            for(rocblas_int j = sm_i; j < sm_e; j++)
-                A[i + j * lda] = conj(A[j + i * lda]);
+
+        // copy transpose blocks
+        nn = su_e - su_i;
+        for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += MAX_THDS)
+        {
+            rocblas_int i = su_i + idx1d % nn;
+            rocblas_int j = sm_i + idx1d / nn;
+            A[i + j * lda] = conj(A[j + i * lda]);
+        }
 
         // save tau
         if(tid == 0)
@@ -127,12 +133,22 @@ __device__ void run_sb2st_hb2st(const rocblas_int tid,
             __syncthreads();
             larf(tid, MAX_THDS, rocblas_side_right, mm, mm, A + sm_i + s * lda, incx, tau,
                  A + sm_i + sm_i * lda, lda, work);
-            for(rocblas_int i = su_i + tid; i < su_e; i += MAX_THDS)
-                for(rocblas_int j = sm_i; j < sm_e; j++)
-                    A[i + j * lda] = conj(A[j + i * lda]);
-            for(rocblas_int i = sd_i + tid; i < sd_e; i += MAX_THDS)
-                for(rocblas_int j = sm_i; j < sm_e; j++)
-                    A[i + j * lda] = conj(A[j + i * lda]);
+
+            // copy transpose blocks
+            nn = su_e - su_i;
+            for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += MAX_THDS)
+            {
+                rocblas_int i = su_i + idx1d % nn;
+                rocblas_int j = sm_i + idx1d / nn;
+                A[i + j * lda] = conj(A[j + i * lda]);
+            }
+            nn = sd_e - sd_i;
+            for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += MAX_THDS)
+            {
+                rocblas_int i = sd_i + idx1d % nn;
+                rocblas_int j = sm_i + idx1d / nn;
+                A[i + j * lda] = conj(A[j + i * lda]);
+            }
 
             // save tau
             if(tid == 0)
