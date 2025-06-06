@@ -64,27 +64,27 @@ rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
     // size of arrays of pointers (for batched cases) and re-usable workspace
     size_t size_workArr;
     // extra requirements
-    size_t size_workT, size_workS1, size_workS2, size_workW;
-    rocsolver_sy2sb_he2hb_getMemorySize<false, T>(n, nb, k, batch_count, &size_scalars, &size_workT,
-                                        &size_workS1, &size_workS2, &size_workW, &size_workArr);
+    size_t size_work, size_workT, size_workZ, size_Acpy;
+    rocsolver_sy2sb_he2hb_getMemorySize<false, T>(n, nb, k, batch_count, &size_scalars, &size_Acpy,
+                                        &size_work, &size_workT, &size_workZ, &size_workArr);
 
     if(rocblas_is_device_memory_size_query(handle))
-        return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_workT,
-           size_workS1, size_workS2, size_workW, size_workArr);
+        return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_Acpy,
+           size_work, size_workT, size_workZ, size_workArr);
 
     // memory workspace allocation
-    void *scalars, *workT, *workS1, *workS2, *workW, *workArr;
-    rocblas_device_malloc mem(handle, size_scalars, size_workT,
-       size_workS1, size_workS2, size_workW, size_workArr);
+    void *scalars, *Acpy, *work, *workT, *workZ, *workArr;
+    rocblas_device_malloc mem(handle, size_scalars, size_Acpy,
+       size_work, size_workT, size_workZ, size_workArr);
 
     if(!mem)
         return rocblas_status_memory_error;
 
     scalars = mem[0];
-    workT = mem[1];
-    workS1 = mem[2];
-    workS2 = mem[3];
-    workW = mem[4];
+    Acpy = mem[1];
+    work = mem[2];
+    workT = mem[3];
+    workZ = mem[4];
     workArr = mem[5];
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
@@ -94,7 +94,7 @@ rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
     rocblas_int ldw = n - nb;
     return rocsolver_sy2sb_he2hb_template<false, false, T>(handle, n, nb, k, A, shiftA, lda, strideA, V, ldv,
                                              strideV, W, ldw, strideW, batch_count,
-                                             (T*)scalars, (T*)workT, (T*)workS1, (T*)workS2, (T*)workW, (T**)workArr);
+                                             (T*)scalars, (T*)Acpy, (T*)work, (T*)workT, (T*)workZ, (T**)workArr);
 }
 
 ROCSOLVER_END_NAMESPACE
@@ -156,4 +156,3 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhe2hb(rocblas_handle handle,
 }
 
 } // extern C
-
