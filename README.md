@@ -15,11 +15,11 @@ This table provides the current status of the migration of specific ROCm librari
 |---------------------|------------------|---------------------------------------|
 | `composablekernel`  | Pending     |  |
 | `hipblas`           | Pending     |  |
-| `hipblas-common`    | Pending     |  |
-| `hipblaslt`         | Pending     |  |
-| `hipcub`            | In Progress 🔥     | Initial migration steps completed. |
+| `hipblas-common`    | Pending     | Next in line. |
+| `hipblaslt`         | Pending     | 2nd in line. |
+| `hipcub`            | Completed   |    |
 | `hipfft`            | Pending     | Considered in next set to migrate. |
-| `hiprand`           | Pending     | Considered in next set to migrate. |
+| `hiprand`           | Completed   |    |
 | `hipsolver`         | Pending     |  |
 | `hipsparse`         | Pending     |  |
 | `hipsparselt`       | Pending     |  |
@@ -27,10 +27,10 @@ This table provides the current status of the migration of specific ROCm librari
 | `rocblas`           | Pending     |  |
 | `rocfft`            | Pending     | Considered in next set to migrate. |
 | `rocprim`           | Completed   |    |
-| `rocrand`           | In Progress 🔥     | Initial migration steps completed. |
+| `rocrand`           | Completed   |    |
 | `rocsolver`         | Pending     |  |
 | `rocsparse`         | Pending     |  |
-| `rocthrust`         | In Progress 🔥     | Initial migration steps completed. |
+| `rocthrust`         | Completed   |    |
 | `rocroller`         | Pending     |  |
 | `tensile`           | Pending     |  |
 
