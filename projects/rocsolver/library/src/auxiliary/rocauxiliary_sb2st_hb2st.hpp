@@ -154,6 +154,8 @@ __device__ void sb2st_hb2st_sweep_step(const rocblas_int tid,
     }
 }
 
+/* SB2ST_HB2ST_KERNEL runs all sweeps on a single thread block per batch instance. Run with
+   batch_count thread blocks in z. */
 template <typename T, typename S>
 ROCSOLVER_KERNEL void __launch_bounds__(SB2ST_HB2ST_MAX_THDS)
     sb2st_hb2st_kernel(rocblas_int n,
@@ -198,6 +200,71 @@ ROCSOLVER_KERNEL void __launch_bounds__(SB2ST_HB2ST_MAX_THDS)
                                                                sval, work);
         }
     }
+}
+
+/* SB2ST_HB2ST_STEP_KERNEL runs a single step from multiple sweeps in parallel. Run with
+   sweeps_in_parallel thread blocks in y and batch_count thread blocks in z.
+
+   Sweep i can begin execution when sweep i-1 has completed 3 steps. That is,
+   - Sweep 0 can start at step 0
+   - Sweep 1 can start at step 3
+   ...
+   - Sweep i can start at step 3*i
+   ...
+   - Sweep n-1 can start at step 3*(n-1)
+
+   Sweep n-1 is complete after 1 step, therefore the total number of steps is 3*(n-1)+1 */
+template <typename T, typename S>
+ROCSOLVER_KERNEL void __launch_bounds__(SB2ST_HB2ST_MAX_THDS)
+    sb2st_hb2st_step_kernel(rocblas_int n,
+                            rocblas_int nb,
+                            rocblas_int step,
+                            T* AA,
+                            rocblas_stride shiftA,
+                            rocblas_int lda,
+                            rocblas_stride strideA,
+                            S* DD,
+                            rocblas_stride strideD,
+                            S* EE,
+                            rocblas_stride strideE,
+                            T* workA,
+                            rocblas_stride strideW)
+{
+    const rocblas_int tid = threadIdx.x;
+    const rocblas_int sid = blockIdx.y;
+    const rocblas_int bid = blockIdx.z;
+
+    assert(blockDim.x == SB2ST_HB2ST_MAX_THDS);
+
+    // select batch instance
+    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    S* D = load_ptr_batch<S>(DD, bid, 0, strideD);
+    S* E = load_ptr_batch<S>(EE, bid, 0, strideE);
+    T* work;
+
+    // shared mem for temporary values
+    extern __shared__ double lmem[];
+    T* sval = reinterpret_cast<T*>(lmem);
+
+    if(workA)
+        work = workA + bid * strideW;
+    else
+        work = reinterpret_cast<T*>(lmem);
+
+    // get sweep parameters
+    rocblas_int last_started = step / 3;
+    rocblas_int s = last_started - sid;
+    rocblas_int step_in_sweep = step - (3 * s);
+    rocblas_int sm_i = s + 1 + step_in_sweep * nb;
+
+    if(s < 0 || sm_i >= n)
+        return;
+
+    // if(tid == 0)
+    //     printf("Global step %i, sweep %i, local step %i\n", step, s, step_in_sweep);
+
+    // execute sweep step
+    sb2st_hb2st_sweep_step<SB2ST_HB2ST_MAX_THDS, T, S>(tid, n, nb, s, sm_i, A, lda, D, E, sval, work);
 }
 
 template <typename T, typename S>
@@ -325,10 +392,27 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
         work = W;
     }
 
+    const rocblas_int steps_per_sweep = (n - 2) / nb + 1;
+    const rocblas_int sweeps_in_parallel = (steps_per_sweep - 1) / 3 + 1;
+    const rocblas_int num_steps = 3 * (n - 1) + 1;
+
     // execute sweeps
-    ROCSOLVER_LAUNCH_KERNEL(sb2st_hb2st_kernel<T>, dim3(1, 1, batch_count),
-                            dim3(SB2ST_HB2ST_MAX_THDS, 1, 1), lmemsize, stream, n, nb, A, shiftA,
-                            lda, strideA, D, strideD, E, strideE, work, strideW);
+    if(sweeps_in_parallel < 2)
+    {
+        ROCSOLVER_LAUNCH_KERNEL(sb2st_hb2st_kernel<T>, dim3(1, 1, batch_count),
+                                dim3(SB2ST_HB2ST_MAX_THDS, 1, 1), lmemsize, stream, n, nb, A,
+                                shiftA, lda, strideA, D, strideD, E, strideE, work, strideW);
+    }
+    else
+    {
+        for(rocblas_int step = 0; step < num_steps; step++)
+        {
+            ROCSOLVER_LAUNCH_KERNEL(sb2st_hb2st_step_kernel<T>,
+                                    dim3(1, sweeps_in_parallel, batch_count),
+                                    dim3(SB2ST_HB2ST_MAX_THDS, 1, 1), lmemsize, stream, n, nb, step,
+                                    A, shiftA, lda, strideA, D, strideD, E, strideE, work, strideW);
+        }
+    }
 
     // copy diagonal
     const rocblas_int copyblocks = (n - 1) / BS1 + 1;
