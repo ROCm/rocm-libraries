@@ -2,8 +2,7 @@ name: "Pre-commit Format & Lint"
 on:
   pull_request:
     branches:
-      - develop
-      - release-staging/rocm-rel-*
+      - testbranch
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
