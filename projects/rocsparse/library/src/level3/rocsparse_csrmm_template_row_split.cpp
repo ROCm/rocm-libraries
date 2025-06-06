@@ -21,7 +21,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include "csrmm/row_split/kernel_declarations.h"
 #include "csrmm_device_row_split.h"

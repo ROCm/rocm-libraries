@@ -1,6 +1,7 @@
 # Apply Patch to Subrepos After Merge
 # -----------------------------------
-# This GitHub Actions workflow runs after a pull request is merged into the monorepo.
+# This GitHub Actions workflow runs on push commits. If it detects the push is from
+# a pull request merged into the monorepo, then it continues to run the workflow.
 # It identifies which subtrees (defined in .github/repos-config.json) were affected,
 # generates a patch from the merge commit, and applies that patch to the corresponding
 # sub-repositories by cloning them and committing the patch directly.
@@ -22,30 +23,60 @@
 name: Merged PR to Patch Subrepos
 
 on:
-  pull_request:
-    types:
-      - closed
+  push:
     branches:
       - 'develop'
 
 concurrency:
-  group: pr-merge-sync-patch-${{ github.event.pull_request.number }}
+  group: pr-merge-sync-patch-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
   patch:
-    if: github.event.pull_request.merged == true
     runs-on: ubuntu-24.04
+    outputs:
+      pr_number: ${{ steps.pr-check.outputs.pr }}
     steps:
+      - name: Check if commit is a merged PR
+        id: pr-check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "🔍 Checking if commit is a merge commit from a PR..."
+          PARENTS=$(git rev-list --parents -n 1 ${{ github.sha }} | wc -w)
+          if [ "$PARENTS" -lt 3 ]; then
+            echo "❌ Not a merge commit. Skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PR_JSON=$(gh pr list --state merged --base develop --json number,mergeCommit,headRepository,headRefName | jq --arg sha "${{ github.sha }}" -c '[.[] | select(.mergeCommit.oid == $sha)][0]')
+          if [ -z "$PR_JSON" ] || [ "$PR_JSON" = "null" ]; then
+            echo "❌ No matching merged PR found for this commit. Skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
+          echo "✅ Found PR #$PR_NUMBER"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "pr=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Stop early if not a merged PR
+        if: steps.pr-check.outputs.skip == 'true'
+        run: echo "Skipping job."
+
       - name: Generate a token
         id: generate-token
+        if: steps.pr-check.outputs.skip != 'true'
         uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
-      - name: Checkout code
+      - name: Checkout config files only
+        if: steps.pr-check.outputs.skip != 'true'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           sparse-checkout: .github
@@ -53,28 +84,32 @@ jobs:
           token: ${{ steps.generate-token.outputs.token }}
 
       - name: Set up Python
+        if: steps.pr-check.outputs.skip != 'true'
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
 
       - name: Install python dependencies
+        if: steps.pr-check.outputs.skip != 'true'
         run: |
           python -m pip install --upgrade pip
           pip install pydantic requests
 
       - name: Set up Git user
+        if: steps.pr-check.outputs.skip != 'true'
         run: |
           git config user.name "assistant-librarian[bot]"
           git config user.email "assistant-librarian[bot]@users.noreply.github.com"
 
       - name: Detect changed subtrees from merged PR
         id: detect
+        if: steps.pr-check.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
           python .github/scripts/pr_detect_changed_subtrees.py \
             --repo "${{ github.repository }}" \
-            --pr "${{ github.event.pull_request.number }}" \
+            --pr "${{ steps.pr-check.outputs.pr }}" \
             --config ".github/repos-config.json" \
             --require-auto-push
 
@@ -95,6 +130,6 @@ jobs:
         run: |
           python .github/scripts/pr_merge_sync_patches.py \
             --repo "${{ github.repository }}" \
-            --pr "${{ github.event.pull_request.number }}" \
+            --pr "${{ steps.pr-check.outputs.pr }}" \
             --subtrees "${{ steps.detect.outputs.subtrees }}" \
             --config ".github/repos-config.json"

@@ -21,12 +21,12 @@
  *
  * ************************************************************************ */
 
-#include "common.h"
-#include "control.h"
-#include "handle.h"
 #include "rocsparse.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_control.hpp"
+#include "rocsparse_handle.hpp"
 #include "rocsparse_sddmm.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include "../conversion/rocsparse_ell2dense.hpp"
 

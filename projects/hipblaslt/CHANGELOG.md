@@ -12,6 +12,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 ### Deprecations
 
 * ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT`` and ``HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT`` are deprecated.
+* `hipblasltExtAMaxWithScale` API is deprecated.
 
 ## hipBLASLt 0.12.0 for ROCm 6.4.0
 

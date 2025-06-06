@@ -442,45 +442,40 @@ if(BUILD_CODE_COVERAGE)
   message(STATUS "llvm-cov: ${LLVM_COV_EXECUTABLE}")
 
   add_custom_target(coverage
-    COMMAND ${CMAKE_COMMAND} -E env 
-            LLVM_PROFILE_VERBOSE=1 
-            LLVM_PROFILE_FILE=./hipblaslt-test_%m.profraw 
+    COMMAND ${CMAKE_COMMAND} -E env
+            LLVM_PROFILE_VERBOSE=1
+            LLVM_PROFILE_FILE=./hipblaslt-test_%m.profraw
             ./clients/staging/hipblaslt-test
             --output-on-failure
-    COMMAND ${CMAKE_COMMAND} -E env 
-            LLVM_PROFILE_VERBOSE=1 
-            LLVM_PROFILE_FILE=./hipblaslt-coverage_%m.profraw 
-            ./clients/staging/sample_hipblaslt_ext_op_amax 
+    COMMAND ${CMAKE_COMMAND} -E env
+            LLVM_PROFILE_VERBOSE=1
+            LLVM_PROFILE_FILE=./hipblaslt-coverage_%m.profraw
+            ./clients/staging/sample_hipblaslt_ext_op_amax
             --output-on-failure
-    COMMAND ${CMAKE_COMMAND} -E env 
-            LLVM_PROFILE_VERBOSE=1 
-            LLVM_PROFILE_FILE=./hipblaslt-coverage_%m.profraw 
-            ./clients/staging/sample_hipblaslt_ext_op_amax_with_scale 
+    COMMAND ${CMAKE_COMMAND} -E env
+            LLVM_PROFILE_VERBOSE=1
+            LLVM_PROFILE_FILE=./hipblaslt-coverage_%m.profraw
+            ./clients/staging/sample_hipblaslt_ext_op_layernorm
             --output-on-failure
-    COMMAND ${CMAKE_COMMAND} -E env 
-            LLVM_PROFILE_VERBOSE=1 
-            LLVM_PROFILE_FILE=./hipblaslt-coverage_%m.profraw 
-            ./clients/staging/sample_hipblaslt_ext_op_layernorm 
-            --output-on-failure
-    COMMAND ${CMAKE_COMMAND} -E env 
-            LLVM_PROFILE_VERBOSE=1 
-            LLVM_PROFILE_FILE=./hipblaslt-coverage_%m.profraw 
-            ./clients/staging/sample_hipblaslt_weight_swizzle_padding 
+    COMMAND ${CMAKE_COMMAND} -E env
+            LLVM_PROFILE_VERBOSE=1
+            LLVM_PROFILE_FILE=./hipblaslt-coverage_%m.profraw
+            ./clients/staging/sample_hipblaslt_weight_swizzle_padding
             --output-on-failure
     COMMAND ${CMAKE_COMMAND} -E env /bin/sh -c "${LLVM_PROFDATA_EXECUTABLE} merge -sparse ${CMAKE_BINARY_DIR}/*.profraw -o ${CMAKE_BINARY_DIR}/coverage_test.profdata"
-    
-    COMMAND ${LLVM_COV_EXECUTABLE} 
-            report 
+
+    COMMAND ${LLVM_COV_EXECUTABLE}
+            report
             -object ./library/libhipblaslt-d.so.0.15
-            -instr-profile=./coverage_test.profdata 
+            -instr-profile=./coverage_test.profdata
             --ignore-filename-regex=.*/build/debug/.*
-    COMMAND ${LLVM_COV_EXECUTABLE} 
-            show 
+    COMMAND ${LLVM_COV_EXECUTABLE}
+            show
             -object ./library/libhipblaslt-d.so.0.15
-            -instr-profile=./coverage_test.profdata 
-            -format=html -output-dir=coverage-report 
+            -instr-profile=./coverage_test.profdata
+            -format=html -output-dir=coverage-report
             --ignore-filename-regex=.*/build/debug/.*
-    
+
     COMMAND tox -c ../../tensilelite -v --workdir /tmp/.tensile-tox -e py3 -- ../../tensilelite/Tensile/Tests -m common --cov=../../tensilelite --cov-report=html
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 
@@ -489,7 +484,6 @@ if(BUILD_CODE_COVERAGE)
 
   add_dependencies(coverage hipblaslt-test
                             sample_hipblaslt_ext_op_amax
-                            sample_hipblaslt_ext_op_amax_with_scale
                             sample_hipblaslt_ext_op_layernorm
                             sample_hipblaslt_weight_swizzle_padding)
 endif()

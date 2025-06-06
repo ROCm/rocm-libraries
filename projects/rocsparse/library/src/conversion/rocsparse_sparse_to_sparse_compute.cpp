@@ -21,7 +21,7 @@
  *
  * ************************************************************************ */
 
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include "rocsparse_gcoo2coo_aos.hpp"
 #include "rocsparse_gcoo_aos2coo.hpp"

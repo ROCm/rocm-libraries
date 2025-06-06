@@ -23,8 +23,8 @@
  * ************************************************************************ */
 
 #include "rocsparse_csritilu0_history.hpp"
-#include "common.h"
 #include "internal/precond/rocsparse_csritilu0.h"
+#include "rocsparse_common.hpp"
 #include "rocsparse_csritilu0_driver.hpp"
 
 namespace rocsparse

@@ -46,17 +46,6 @@ target_sources(hipblaslt
         "${_CMAKE_CURRENT_SOURCE_DIR}/Utils.cpp"
 )
 
-# Need a todo on this and some of the other tensile flags
-#include(CheckCXXCompilerFlag)
-#check_cxx_compiler_flag("-ffast-math" CXX_FAST_MATH_FLAG_SUPPORTED)
-#if(CXX_FAST_MATH_FLAG_SUPPORTED)
-#    set_source_files_properties(MLPNet.cpp PROPERTIES COMPILE_FLAGS "-ffast-math")
-#endif()
-
-#if(WIN32)
-#target_compile_options( TensileHost PUBLIC -Wno-deprecated-declarations -Wno-ignored-attributes -Wdll-attribute-on-redeclaration -fdelayed-template-parsing )
-#endif()
-
 if(HIPBLASLT_ENABLE_LLVM)
   add_subdirectory(llvm)
 endif()
@@ -68,3 +57,5 @@ endif()
 if(HIPBLASLT_ENABLE_HIP)
   add_subdirectory(hip)
 endif()
+
+add_subdirectory(analytical)

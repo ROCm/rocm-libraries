@@ -26,11 +26,11 @@
 #include "internal/extra/rocsparse_csrgemm.h"
 #include "rocsparse_csrgemm.hpp"
 
-#include "common.h"
-#include "control.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm_numeric_calc.hpp"
 #include "rocsparse_csrgemm_numeric_multadd.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 rocsparse_status rocsparse::csrgemm_numeric_multadd_quickreturn(rocsparse_handle    handle,
                                                                 rocsparse_operation trans_A,
@@ -125,7 +125,7 @@ inline rocsparse_status rocsparse::csrgemm_numeric_multadd_core(rocsparse_handle
     {
         if((k == 0 || nnz_A == 0 || nnz_B == 0) && (nnz_D == 0))
         {
-            ROCSPARSE_RETURN_STATUS(success);
+            return rocsparse_status_success;
         }
 
         if(descr_A->type != rocsparse_matrix_type_general)
@@ -172,22 +172,22 @@ inline rocsparse_status rocsparse::csrgemm_numeric_multadd_core(rocsparse_handle
 
         if(descr_D->type != rocsparse_matrix_type_general)
         {
-            ROCSPARSE_RETURN_STATUS(not_implemented);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
 
         if(((trans_A != rocsparse_operation_none) || (trans_B != rocsparse_operation_none)))
         {
-            ROCSPARSE_RETURN_STATUS(not_implemented);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
 
         if(descr_A->type != rocsparse_matrix_type_general)
         {
-            ROCSPARSE_RETURN_STATUS(not_implemented);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
 
         if(descr_B->type != rocsparse_matrix_type_general)
         {
-            ROCSPARSE_RETURN_STATUS(not_implemented);
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgemm_numeric_calc_template(handle,

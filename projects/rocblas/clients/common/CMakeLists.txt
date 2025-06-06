@@ -61,6 +61,9 @@ function( rocblas_client_library_settings lib_target_ )
     target_compile_definitions( ${lib_target_} PRIVATE CLIENTS_NO_FORTRAN )
   endif()
 
+  # We widely use extensions and AMD Clang warnings are too noisy
+  target_compile_options( ${lib_target_} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-c++17-extensions> )
+
   if(BUILD_ADDRESS_SANITIZER)
     target_compile_definitions( ${lib_target_} PRIVATE ASAN_BUILD )
   endif()

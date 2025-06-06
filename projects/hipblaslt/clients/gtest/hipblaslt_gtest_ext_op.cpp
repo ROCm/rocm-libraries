@@ -104,18 +104,6 @@ namespace
         out[0] = To(m);
     }
 
-    template <typename Ti, typename To, typename Ts>
-    void cpuAMaxWithScale(To* out, Ts* outD, Ti* in, float* in_scale, std::uint32_t length)
-    {
-        // calculate amax
-        Ti m = 0;
-        for(int j = 0; j < length; j++)
-        {
-            m       = max(m, abs(in[j]));
-            outD[j] = static_cast<Ts>(in[j] * in_scale[0]);
-        }
-        out[0] = To(m);
-    }
 }
 
 enum class amaxInitMethod
@@ -132,16 +120,6 @@ struct AMaxTestData
     hipDataType dtype;
     uint32_t    m;
     uint32_t    n;
-};
-
-struct AMaxWithScaleTestData
-{
-    hipDataType    type;
-    hipDataType    dtype;
-    hipDataType    scaleType;
-    amaxInitMethod initMethod;
-    uint32_t       m;
-    uint32_t       n;
 };
 
 class ExtOpSoftmaxTest : public testing::TestWithParam<uint32_t>
@@ -162,13 +140,6 @@ class ExtOpAMaxTest : public testing::TestWithParam<AMaxTestData>
 {
 };
 class ExtOpAMaxUnsupportedDatatypeTest : public testing::TestWithParam<hipDataType>
-{
-};
-
-class ExtOpAMaxWithScaleTest : public testing::TestWithParam<AMaxWithScaleTestData>
-{
-};
-class ExtOpAMaxWithScaleUnsupportedDatatypeTest : public testing::TestWithParam<hipDataType>
 {
 };
 
@@ -339,89 +310,6 @@ void AMaxTest(hipDataType type, hipDataType dtype, std::size_t m, std::size_t n)
     hipErr = hipFree(gpuInput);
 }
 
-template <typename Ti, typename To, typename Ts>
-void AMaxTestWithScale(hipDataType    type,
-                       hipDataType    dtype,
-                       hipDataType    scaleType,
-                       amaxInitMethod initMethod,
-                       std::size_t    m,
-                       std::size_t    n,
-                       const char archPattern[6])
-{
-    int             deviceId;
-    hipDeviceProp_t deviceProperties;
-    static_cast<void>(hipGetDevice(&deviceId));
-    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    if(!gpu_arch_match(deviceProperties.gcnArchName, archPattern))
-        return;
-
-    std::size_t numElements   = m * n;
-    std::size_t inNumBytes    = sizeof(Ti);
-    std::size_t outNumBytes   = sizeof(To);
-    std::size_t scaleNumBytes = sizeof(Ts);
-
-    To*    gpuOutput{nullptr};
-    Ti*    gpuInput{nullptr};
-    Ts*    gpuOutputD;
-    float* gpuInputScale;
-
-    auto hipErr = hipMalloc(&gpuOutput, outNumBytes);
-    hipErr      = hipMalloc(&gpuInput, m * n * inNumBytes);
-    hipErr      = hipMalloc(&gpuOutputD, m * n);
-    hipErr      = hipMalloc(&gpuInputScale, 1 * sizeof(float));
-
-    std::vector<To>    cpuOutput(1, 0.f);
-    std::vector<Ti>    cpuInput(m * n, 0.f);
-    std::vector<To>    refOutput(1, 0.f);
-    std::vector<Ts>    cpuOutputD(m * n);
-    std::vector<float> cpuInputScale(1);
-    std::vector<Ts>    refOutputD(m * n);
-
-    switch(initMethod)
-    {
-    case amaxInitMethod::hpl:
-        hipblaslt_init_hpl<Ti>(cpuInput, m * n, 1, m * n);
-        break;
-    case amaxInitMethod::nan:
-        std::fill(cpuInput.begin(), cpuInput.end(), std::numeric_limits<Ti>::infinity());
-        break;
-    case amaxInitMethod::max:
-        std::fill(cpuInput.begin(), cpuInput.end(), std::numeric_limits<Ti>::max());
-        break;
-    case amaxInitMethod::min:
-        std::fill(cpuInput.begin(), cpuInput.end(), -std::numeric_limits<Ti>::max());
-        break;
-    default:
-        break;
-    }
-    cpuInputScale[0] = (float)0.5;
-
-    hipErr = hipMemcpyHtoD(gpuInput, cpuInput.data(), m * n * inNumBytes);
-    hipErr = hipMemcpyHtoD(gpuInputScale, cpuInputScale.data(), 1 * sizeof(float));
-
-    hipStream_t stream{};
-    hipErr            = hipStreamCreate(&stream);
-    auto hipblasltErr = hipblasltExtAMaxWithScale(
-        type, dtype, scaleType, gpuOutput, gpuOutputD, gpuInput, gpuInputScale, m, n, stream);
-
-    hipErr = hipDeviceSynchronize();
-
-    hipErr = hipMemcpyDtoH(cpuOutput.data(), gpuOutput, outNumBytes);
-    hipErr = hipMemcpyDtoH(cpuOutputD.data(), gpuOutputD, m * n * scaleNumBytes);
-
-    cpuAMaxWithScale(
-        refOutput.data(), refOutputD.data(), cpuInput.data(), cpuInputScale.data(), m * n);
-
-    unit_check_general<To>(1, 1, 1, refOutput.data(), (const To*)cpuOutput.data());
-    unit_check_general<Ts>(m, n, 1, refOutputD.data(), (const Ts*)cpuOutputD.data());
-
-    hipErr = hipStreamDestroy(stream);
-    hipErr = hipFree(gpuOutput);
-    hipErr = hipFree(gpuInput);
-    hipErr = hipFree(gpuOutputD);
-    hipErr = hipFree(gpuInputScale);
-}
-
 TEST_P(ExtOpAMaxTest, amaxSuccess)
 {
     AMaxTestData    testdata = GetParam();
@@ -448,79 +336,6 @@ TEST_P(ExtOpAMaxTest, amaxSuccess)
     {
         AMaxTest<hipblasLtHalf, hipblasLtHalf>(
             testdata.type, testdata.dtype, testdata.m, testdata.n);
-    }
-}
-
-TEST_P(ExtOpAMaxWithScaleTest, amaxSuccess)
-{
-    AMaxWithScaleTestData testdata = GetParam();
-    if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_32F
-       && testdata.scaleType == HIP_R_8F_E4M3_FNUZ)
-    {
-        AMaxTestWithScale<float, float, hipblaslt_f8_fnuz>(testdata.type,
-                                                           testdata.dtype,
-                                                           testdata.scaleType,
-                                                           testdata.initMethod,
-                                                           testdata.m,
-                                                           testdata.n,
-                                                           "94\\d");
-    }
-    else if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_32F
-       && testdata.scaleType == HIP_R_8F_E4M3)
-    {
-        AMaxTestWithScale<float, float, hipblaslt_f8>(
-            testdata.type, testdata.dtype, testdata.scaleType, testdata.initMethod, testdata.m, testdata.n, "95?");
-    }
-    else if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_32F
-            && testdata.scaleType == HIP_R_8F_E5M2_FNUZ)
-    {
-        AMaxTestWithScale<float, float, hipblaslt_bf8_fnuz>(testdata.type,
-                                                            testdata.dtype,
-                                                            testdata.scaleType,
-                                                            testdata.initMethod,
-                                                            testdata.m,
-                                                            testdata.n,
-                                                            "94//d");
-    }
-    else if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_32F
-            && testdata.scaleType == HIP_R_8F_E5M2)
-    {
-        AMaxTestWithScale<float, float, hipblaslt_bf8>(
-            testdata.type, testdata.dtype, testdata.scaleType, testdata.initMethod, testdata.m, testdata.n, "95?");
-    }
-    else if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_16F
-            && testdata.scaleType == HIP_R_8F_E4M3_FNUZ)
-    {
-        AMaxTestWithScale<float, hipblasLtHalf, hipblaslt_f8_fnuz>(testdata.type,
-                                                                   testdata.dtype,
-                                                                   testdata.scaleType,
-                                                                   testdata.initMethod,
-                                                                   testdata.m,
-                                                                   testdata.n,
-                                                                   "94//d");
-    }
-    else if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_16F
-            && testdata.scaleType == HIP_R_8F_E4M3)
-    {
-        AMaxTestWithScale<float, hipblasLtHalf, hipblaslt_f8>(
-            testdata.type, testdata.dtype, testdata.scaleType, testdata.initMethod, testdata.m, testdata.n, "95?");
-    }
-    else if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_16F
-            && testdata.scaleType == HIP_R_8F_E5M2_FNUZ)
-    {
-        AMaxTestWithScale<float, hipblasLtHalf, hipblaslt_bf8_fnuz>(testdata.type,
-                                                                    testdata.dtype,
-                                                                    testdata.scaleType,
-                                                                    testdata.initMethod,
-                                                                    testdata.m,
-                                                                    testdata.n,
-                                                                    "94//d");
-    }
-    else if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_16F
-            && testdata.scaleType == HIP_R_8F_E5M2)
-    {
-        AMaxTestWithScale<float, hipblasLtHalf, hipblaslt_bf8>(
-            testdata.type, testdata.dtype, testdata.scaleType, testdata.initMethod, testdata.m, testdata.n, "95?");
     }
 }
 
@@ -564,28 +379,6 @@ TEST(ExtOpTest, amaxFailureInvalidValue)
     EXPECT_EQ(hipblasltErr, HIPBLAS_STATUS_INVALID_VALUE);
 }
 
-TEST_P(ExtOpAMaxWithScaleUnsupportedDatatypeTest, amaxWithScaleFailureUnsupportedDatatype)
-{
-    auto hipblasltErr = hipblasltExtAMaxWithScale(
-        GetParam(), GetParam(), GetParam(), nullptr, nullptr, nullptr, nullptr, 0, 0, nullptr);
-    EXPECT_EQ(hipblasltErr, HIPBLAS_STATUS_NOT_SUPPORTED);
-}
-
-TEST(ExtOpTest, amaxWithScaleFailureInvalidValue)
-{
-    auto hipblasltErr = hipblasltExtAMaxWithScale(HIP_R_32F,
-                                                  HIP_R_32F,
-                                                  HIP_R_8F_E4M3_FNUZ,
-                                                  nullptr,
-                                                  nullptr,
-                                                  nullptr,
-                                                  nullptr,
-                                                  0,
-                                                  0,
-                                                  nullptr);
-    EXPECT_EQ(hipblasltErr, HIPBLAS_STATUS_INVALID_VALUE);
-}
-
 INSTANTIATE_TEST_SUITE_P(ExtOpTest, ExtOpSoftmaxTest, testing::Values<uint32_t>(1, 16, 1335));
 INSTANTIATE_TEST_SUITE_P(ExtOpTest,
                          ExtOpSoftmaxUnsupportedDatatypeTest,
@@ -615,39 +408,4 @@ INSTANTIATE_TEST_SUITE_P(
                                   AMaxTestData{HIP_R_16F, HIP_R_16F, 1335, 666}));
 INSTANTIATE_TEST_SUITE_P(ExtOpTest,
                          ExtOpAMaxUnsupportedDatatypeTest,
-                         testing::Values<hipDataType>(HIP_R_16BF));
-
-INSTANTIATE_TEST_SUITE_P(
-    ExtOpTest,
-    ExtOpAMaxWithScaleTest,
-    testing::Values<AMaxWithScaleTestData>(
-        AMaxWithScaleTestData{HIP_R_32F, HIP_R_32F, HIP_R_8F_E4M3_FNUZ, amaxInitMethod::hpl, 1, 1},
-        AMaxWithScaleTestData{HIP_R_32F, HIP_R_32F, HIP_R_8F_E5M2_FNUZ, amaxInitMethod::hpl, 1, 1},
-        AMaxWithScaleTestData{
-            HIP_R_32F, HIP_R_32F, HIP_R_8F_E4M3_FNUZ, amaxInitMethod::hpl, 16, 16},
-        AMaxWithScaleTestData{
-            HIP_R_32F, HIP_R_32F, HIP_R_8F_E5M2_FNUZ, amaxInitMethod::hpl, 16, 16},
-        AMaxWithScaleTestData{
-            HIP_R_32F, HIP_R_32F, HIP_R_8F_E4M3_FNUZ, amaxInitMethod::hpl, 1335, 666},
-        AMaxWithScaleTestData{
-            HIP_R_32F, HIP_R_32F, HIP_R_8F_E5M2_FNUZ, amaxInitMethod::hpl, 1335, 666},
-        AMaxWithScaleTestData{HIP_R_32F, HIP_R_16F, HIP_R_8F_E4M3_FNUZ, amaxInitMethod::hpl, 1, 1},
-        AMaxWithScaleTestData{HIP_R_32F, HIP_R_16F, HIP_R_8F_E5M2_FNUZ, amaxInitMethod::hpl, 1, 1},
-        AMaxWithScaleTestData{
-            HIP_R_32F, HIP_R_16F, HIP_R_8F_E4M3_FNUZ, amaxInitMethod::hpl, 16, 16},
-        AMaxWithScaleTestData{
-            HIP_R_32F, HIP_R_16F, HIP_R_8F_E5M2_FNUZ, amaxInitMethod::hpl, 16, 16},
-        AMaxWithScaleTestData{
-            HIP_R_32F, HIP_R_16F, HIP_R_8F_E4M3_FNUZ, amaxInitMethod::hpl, 1335, 666},
-        AMaxWithScaleTestData{
-            HIP_R_32F, HIP_R_16F, HIP_R_8F_E5M2_FNUZ, amaxInitMethod::hpl, 1335, 666},
-        AMaxWithScaleTestData{HIP_R_32F, HIP_R_32F, HIP_R_8F_E4M3_FNUZ, amaxInitMethod::nan, 1, 1},
-        AMaxWithScaleTestData{HIP_R_32F, HIP_R_32F, HIP_R_8F_E5M2_FNUZ, amaxInitMethod::nan, 1, 1},
-        AMaxWithScaleTestData{HIP_R_32F, HIP_R_32F, HIP_R_8F_E4M3_FNUZ, amaxInitMethod::max, 1, 1},
-        AMaxWithScaleTestData{HIP_R_32F, HIP_R_32F, HIP_R_8F_E5M2_FNUZ, amaxInitMethod::max, 1, 1},
-        AMaxWithScaleTestData{HIP_R_32F, HIP_R_32F, HIP_R_8F_E4M3_FNUZ, amaxInitMethod::min, 1, 1},
-        AMaxWithScaleTestData{
-            HIP_R_32F, HIP_R_32F, HIP_R_8F_E5M2_FNUZ, amaxInitMethod::min, 1, 1}));
-INSTANTIATE_TEST_SUITE_P(ExtOpTest,
-                         ExtOpAMaxWithScaleUnsupportedDatatypeTest,
                          testing::Values<hipDataType>(HIP_R_16BF));

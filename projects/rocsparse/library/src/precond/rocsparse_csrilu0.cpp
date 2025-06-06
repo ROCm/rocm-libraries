@@ -1110,7 +1110,7 @@ try
 }
 catch(...)
 {
-    return rocsparse::exception_to_rocsparse_status();
+    RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
 
@@ -1134,7 +1134,7 @@ try
 }
 catch(...)
 {
-    return rocsparse::exception_to_rocsparse_status();
+    RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
 
@@ -1158,6 +1158,6 @@ try
 }
 catch(...)
 {
-    return rocsparse::exception_to_rocsparse_status();
+    RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP

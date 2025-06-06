@@ -220,6 +220,18 @@ namespace rocRoller
             getDefaultF8ModeForCurrentHipDevice,
             -1};
 
+        static inline const SettingsOption<bool> SerializeKernelGraph{
+            "ROCROLLER_SERIALIZE_KERNEL_GRAPH",
+            "Serialize kernel graph into assembly file",
+            false,
+            -1};
+
+        static inline const SettingsOption<bool, true> SerializeKernelGraphDOT{
+            "ROCROLLER_SERIALIZE_KERNEL_GRAPH_DOT",
+            "Serialize kernel graph DOT into assembly file",
+            getDefaultValueForKernelGraphDOTSerialization,
+            -1};
+
         /**
          * @brief Creates a help dialog for the environment variables with
          * their names, default values and bit-offset (if it has one).

@@ -65,13 +65,14 @@ namespace rocisa
             }
             else if(auto mfmaInst = std::dynamic_pointer_cast<MFMAInstruction>(item))
             {
-                if(cycles - hwMFMA >= 3)
+                auto mfmaLatency = mfmaInst->getIssueLatency();
+                if(cycles - hwMFMA >= (mfmaLatency - 1))
                 {
                     cycles += 1;
                 }
                 else
                 {
-                    cycles = hwMFMA + 4;
+                    cycles = hwMFMA + mfmaLatency;
                 }
                 hwMFMA = cycles;
             }

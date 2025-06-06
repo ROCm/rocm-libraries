@@ -142,6 +142,36 @@ namespace rocRoller
         return msg.str();
     }
 
+    template <>
+    inline void KernelArguments::writeValue(size_t offset, E8M0 value)
+    {
+        size_t argSize = sizeof(E8M0x4);
+        if(offset + argSize > m_data.size())
+        {
+            throw std::runtime_error("Value exceeds allocated bounds.");
+        }
+
+        std::memset(&m_data[offset], value.scale, argSize);
+    }
+
+    template <>
+    inline void KernelArguments::append(std::string const& argName, E8M0 value, bool bound)
+    {
+        alignTo(alignof(E8M0x4));
+
+        size_t offset  = m_data.size();
+        size_t argSize = sizeof(E8M0x4);
+
+        if(m_log)
+        {
+            std::string valueString = stringForValue(value, bound);
+            appendRecord(argName, Arg(offset, argSize, bound, valueString));
+        }
+
+        m_data.insert(m_data.end(), argSize, 0);
+        writeValue(offset, value);
+    }
+
     template <typename T>
     inline void KernelArguments::append(std::string const& argName, T value, bool bound)
     {
@@ -156,7 +186,7 @@ namespace rocRoller
             appendRecord(argName, Arg(offset, argSize, bound, valueString));
         }
 
-        m_data.insert(m_data.end(), sizeof(value), 0);
+        m_data.insert(m_data.end(), argSize, 0);
         writeValue(offset, value);
     }
 

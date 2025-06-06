@@ -47,7 +47,7 @@ Tests:
   precision: *single_double_precisions_complex_real
 
 - name: spgeam_csr_extra
-  category: nightly
+  category: pre_checkin
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -505,81 +505,6 @@ struct OptAMaxRunner
 
     void *in, *out; // host
     void *d_in, *d_out; // device
-
-    hipStream_t       stream;
-    hipblasLtHandle_t handle;
-};
-
-template <typename T, typename Ts>
-struct OptAMaxWithScaleRunner
-{
-    OptAMaxWithScaleRunner(int64_t m, int64_t n)
-        : m(m)
-        , n(n)
-    {
-        CHECK_HIP_ERROR(hipStreamCreate(&stream));
-        CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&handle));
-
-        CHECK_HIP_ERROR(hipMalloc(&d_out, sizeof(T)));
-        CHECK_HIP_ERROR(hipMalloc(&d_outD, m * n * sizeof(Ts)));
-        CHECK_HIP_ERROR(hipMalloc(&d_in, m * n * sizeof(T)));
-        CHECK_HIP_ERROR(hipMalloc(&d_in_scale, 1 * sizeof(float)));
-
-        CHECK_HIP_ERROR(hipHostMalloc(&out, sizeof(T)));
-        CHECK_HIP_ERROR(hipHostMalloc(&outD, m * n * sizeof(Ts)));
-        CHECK_HIP_ERROR(hipHostMalloc(&in, m * n * sizeof(T)));
-        CHECK_HIP_ERROR(hipHostMalloc(&in_scale, 1 * sizeof(float)));
-
-        for(int i = 0; i < m * n; i++)
-            ((T*)in)[i] = static_cast<T>((rand() % 7) - 3);
-        *(float*)in_scale = static_cast<float>(0.5);
-    }
-
-    ~OptAMaxWithScaleRunner()
-    {
-        CHECK_HIP_ERROR(hipFree(d_out));
-        CHECK_HIP_ERROR(hipFree(d_outD));
-        CHECK_HIP_ERROR(hipFree(d_in));
-        CHECK_HIP_ERROR(hipFree(d_in_scale));
-
-        CHECK_HIP_ERROR(hipFree(out));
-        CHECK_HIP_ERROR(hipFree(outD));
-        CHECK_HIP_ERROR(hipFree(in));
-        CHECK_HIP_ERROR(hipFree(in_scale));
-
-        CHECK_HIPBLASLT_ERROR(hipblasLtDestroy(handle));
-        CHECK_HIP_ERROR(hipStreamDestroy(stream));
-    }
-
-    void hostToDevice()
-    {
-        CHECK_HIP_ERROR(hipMemcpyAsync(d_in, in, m * n * sizeof(T), hipMemcpyHostToDevice, stream));
-        CHECK_HIP_ERROR(
-            hipMemcpyAsync(d_in_scale, in_scale, 1 * sizeof(float), hipMemcpyHostToDevice, stream));
-    }
-
-    void deviceToHost()
-    {
-        CHECK_HIP_ERROR(hipMemcpyAsync(out, d_out, sizeof(T), hipMemcpyDeviceToHost, stream));
-        CHECK_HIP_ERROR(
-            hipMemcpyAsync(outD, d_outD, m * n * sizeof(Ts), hipMemcpyDeviceToHost, stream));
-    }
-
-    void run(const std::function<void()>& func)
-    {
-        hostToDevice();
-
-        static_cast<void>(func());
-
-        deviceToHost();
-        static_cast<void>(hipStreamSynchronize(stream));
-    }
-
-    int64_t m;
-    int64_t n;
-
-    void *in, *in_scale, *out, *outD; // host
-    void *d_in, *d_in_scale, *d_out, *d_outD; // device
 
     hipStream_t       stream;
     hipblasLtHandle_t handle;

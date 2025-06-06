@@ -168,10 +168,9 @@ namespace rocRoller
 
         LDS::LDS() = default;
 
-        LDS::LDS(bool const isDirect2LDS, bool const holdsTransposedTile)
+        LDS::LDS(bool const isDirect2LDS)
             : BaseDimension()
             , isDirect2LDS(isDirect2LDS)
-            , holdsTransposedTile(holdsTransposedTile)
         {
         }
 

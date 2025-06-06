@@ -28,6 +28,8 @@
  * Timer for HIP events.
  */
 
+#include <thread>
+
 #include <rocRoller/Utilities/HIPTimer.hpp>
 #include <rocRoller/Utilities/HipUtils.hpp>
 #include <rocRoller/Utilities/Timer.hpp>

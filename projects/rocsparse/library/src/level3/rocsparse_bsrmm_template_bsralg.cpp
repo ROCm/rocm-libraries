@@ -24,7 +24,7 @@
 
 #include "../level2/rocsparse_bsrmv.hpp"
 #include "rocsparse_bsrmm.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {

@@ -172,6 +172,13 @@ namespace rocRoller
             {"HasDSReadTransposeB6", Value::HasDSReadTransposeB6},
             {"HasDSReadTransposeB4", Value::HasDSReadTransposeB4},
 
+            {"ds_read_b64_tr_b16", Value::ds_read_b64_tr_b16},
+            {"ds_read_b64_tr_b8", Value::ds_read_b64_tr_b8},
+            {"ds_read_b96_tr_b6", Value::ds_read_b96_tr_b6},
+            {"ds_read_b64_tr_b4", Value::ds_read_b64_tr_b4},
+
+            {"DSReadTransposeB6PaddingBytes", Value::DSReadTransposeB6PaddingBytes},
+
             {"HasPRNG", Value::HasPRNG},
 
             {"HasPermLanes16", Value::HasPermLanes16},

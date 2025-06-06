@@ -25,11 +25,11 @@
 #include "internal/extra/rocsparse_bsrgemm.h"
 #include "../conversion/rocsparse_identity.hpp"
 #include "bsrgemm_device.h"
-#include "control.h"
 #include "csrgemm_device.h"
 #include "rocsparse_bsrgemm.hpp"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include "rocsparse_bsrgemm_mult.hpp"
 #include "rocsparse_bsrgemm_multadd.hpp"

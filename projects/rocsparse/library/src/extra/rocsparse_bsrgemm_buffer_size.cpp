@@ -23,11 +23,11 @@
  * ************************************************************************ */
 
 #include "../conversion/rocsparse_identity.hpp"
-#include "control.h"
 #include "internal/extra/rocsparse_bsrgemm.h"
 #include "rocsparse_bsrgemm.hpp"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include "rocsparse_csrgemm_mult.hpp"
 #include "rocsparse_csrgemm_multadd.hpp"

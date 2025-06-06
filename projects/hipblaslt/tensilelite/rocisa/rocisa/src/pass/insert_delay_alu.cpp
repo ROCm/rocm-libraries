@@ -59,15 +59,15 @@ namespace rocisa
     static DelayALUType _getDelayAluType(const std::shared_ptr<Instruction>& inst)
     {
         auto preStr = inst->preStr();
-        if(preStr.starts_with("v_s_"))
+        if(!preStr.compare(0, 4, "v_s_"))
         {
             return DelayALUType::TRANS;
         }
-        else if(preStr.starts_with("v_"))
+        else if(!preStr.compare(0, 2, "v_"))
         {
             return DelayALUType::VALU;
         }
-        else if(preStr.starts_with("s_"))
+        else if(!preStr.compare(0, 2, "s_"))
         {
             return DelayALUType::SALU;
         }

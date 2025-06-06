@@ -126,9 +126,8 @@ namespace rocRoller
                     }
                     else if(solutionParams.scaleA == Operations::ScaleMode::SingleScale)
                     {
-                        // Using UInt32 now so that ArgumentLoader doesn't bail for sub-dword arguments
-                        m_tagTensorScaleA = command->addOperation(
-                            rocRoller::Operations::Scalar(DataType::UInt32));
+                        m_tagTensorScaleA
+                            = command->addOperation(rocRoller::Operations::Scalar(DataType::E8M0));
                         m_tagLoadScaleA = command->addOperation(
                             rocRoller::Operations::T_Load_Scalar(m_tagTensorScaleA.value()));
                         m_tagBlockScaleA = mulInputA = command->addOperation(
@@ -151,9 +150,8 @@ namespace rocRoller
                     }
                     else if(solutionParams.scaleB == Operations::ScaleMode::SingleScale)
                     {
-                        // Using UInt32 now so that ArgumentLoader doesn't bail for sub-dword arguments
-                        m_tagTensorScaleB = command->addOperation(
-                            rocRoller::Operations::Scalar(DataType::UInt32));
+                        m_tagTensorScaleB
+                            = command->addOperation(rocRoller::Operations::Scalar(DataType::E8M0));
                         m_tagLoadScaleB = command->addOperation(
                             rocRoller::Operations::T_Load_Scalar(m_tagTensorScaleB.value()));
                         m_tagBlockScaleB = mulInputB = command->addOperation(

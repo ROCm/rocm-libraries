@@ -56,12 +56,11 @@ add_executable( sample_hipblaslt_gemm_mix_precision_with_amax_ext 20_mix_precisi
 add_executable( sample_hipblaslt_gemm_attr_tciA_tciB 21_gemm_cvtA_cvtB/sample_hipblaslt_gemm_attr_tciA_tciB.cpp)
 add_executable( sample_hipblaslt_ext_op_layernorm 22_layernorm_ext/sample_hipblaslt_ext_op_layernorm.cpp)
 add_executable( sample_hipblaslt_ext_op_amax 23_amax_ext/sample_hipblaslt_ext_op_amax.cpp)
-add_executable( sample_hipblaslt_ext_op_amax_with_scale 24_amax_with_scale_ext/sample_hipblaslt_ext_op_amax_with_scale.cpp)
-add_executable( sample_hipblaslt_gemm_with_TF32 25_gemm_with_TF32/sample_hipblaslt_gemm_with_TF32.cpp)
-add_executable( sample_hipblaslt_gemm_swizzle_a 26_gemm_swizzle_a/sample_hipblaslt_gemm_swizzle_a.cpp)
-add_executable( sample_hipblaslt_gemm_bias_swizzle_a_ext 26_gemm_swizzle_a/sample_hipblaslt_gemm_bias_swizzle_a_ext.cpp)
-add_executable( sample_hipblaslt_weight_swizzle_padding 26_gemm_swizzle_a/sample_hipblaslt_weight_swizzle_padding.cpp)
-add_executable( sample_hipblaslt_gemm_swish_bias 27_gemm_swish_bias/sample_hipblaslt_gemm_swish_bias.cpp)
+add_executable( sample_hipblaslt_gemm_with_TF32 24_gemm_with_TF32/sample_hipblaslt_gemm_with_TF32.cpp)
+add_executable( sample_hipblaslt_gemm_swizzle_a 25_gemm_swizzle_a/sample_hipblaslt_gemm_swizzle_a.cpp)
+add_executable( sample_hipblaslt_gemm_bias_swizzle_a_ext 25_gemm_swizzle_a/sample_hipblaslt_gemm_bias_swizzle_a_ext.cpp)
+add_executable( sample_hipblaslt_weight_swizzle_padding 25_gemm_swizzle_a/sample_hipblaslt_weight_swizzle_padding.cpp)
+add_executable( sample_hipblaslt_gemm_swish_bias 26_gemm_swish_bias/sample_hipblaslt_gemm_swish_bias.cpp)
 
 
 set(samples sample_hipblaslt_gemm
@@ -98,7 +97,6 @@ set(samples sample_hipblaslt_gemm
             sample_hipblaslt_gemm_attr_tciA_tciB
             sample_hipblaslt_ext_op_layernorm
             sample_hipblaslt_ext_op_amax
-            sample_hipblaslt_ext_op_amax_with_scale
             sample_hipblaslt_gemm_with_TF32
             sample_hipblaslt_gemm_swizzle_a
             sample_hipblaslt_gemm_bias_swizzle_a_ext

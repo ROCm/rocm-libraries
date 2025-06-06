@@ -25,8 +25,8 @@
 #include "internal/level2/rocsparse_bsrsv.h"
 #include "rocsparse_bsrsv.hpp"
 #include "rocsparse_csrsv.hpp"
-#include "templates.h"
-#include "utility.h"
+#include "rocsparse_templates.hpp"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {

@@ -23,7 +23,7 @@
  * ************************************************************************ */
 #include "../../csrmm_device_merge.h"
 #include "../csrmm_common.h"
-#include "utility.h"
+#include "rocsparse_scalar.hpp"
 
 namespace rocsparse
 {

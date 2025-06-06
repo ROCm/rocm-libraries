@@ -51,6 +51,11 @@ namespace rocRollerTest
 {
     class KernelTest : public GenericContextFixture
     {
+        void SetUp() override
+        {
+            GenericContextFixture::SetUp();
+            Settings::getInstance()->set(Settings::SerializeKernelGraph, true);
+        }
     };
 
     class ARCH_KernelTest : public GPUContextFixture

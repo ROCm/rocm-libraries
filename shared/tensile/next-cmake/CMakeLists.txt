@@ -31,11 +31,8 @@ include(TensileSupportedArchitectures)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-option(TENSILE_BUILD_SHARED "Build shared library" OFF)
+option(TENSILE_BUILD_SHARED_LIBS "Build shared library" OFF)
 option(TENSILE_BUILD_TESTING "Build host library tests" ON)
-cmake_dependent_option(TENSILE_STATIC_ONLY
-    "Disable exposing Tensile symbols in a shared library"
-    ON "NOT TENSILE_BUILD_SHARED" OFF)
 option(TENSILE_ENABLE_HOST "Build  host library" ON)
 option(TENSILE_ENABLE_DEVICE "Build device libraries" ON)
 option(TENSILE_ENABLE_CLIENT "Build client app" ON)
@@ -60,7 +57,7 @@ find_package(OpenMP REQUIRED)
 
 if(TENSILE_ENABLE_HOST)
   find_package(hip REQUIRED)
-  if(TENSILE_BUILD_SHARED)
+  if(TENSILE_BUILD_SHARED_LIBS)
     add_library(tensile-host SHARED)
   else()
     add_library(tensile-host STATIC)
@@ -69,7 +66,7 @@ if(TENSILE_ENABLE_HOST)
   target_compile_features(tensile-host PUBLIC cxx_std_${TENSILE_CXX_STANDARD})
   set_target_properties(tensile-host PROPERTIES CXX_EXTENSIONS OFF)
   target_link_libraries(tensile-host PUBLIC hip::device)
-  if(NOT TENSILE_BUILD_SHARED)
+  if(NOT TENSILE_BUILD_SHARED_LIBS)
     set_target_properties(tensile-host PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
   endif()
 
@@ -116,7 +113,7 @@ if(TENSILE_ENABLE_HOST)
     target_compile_definitions(tensile-host PUBLIC TENSILE_DEFAULT_SERIALIZATION)
   endif()
 
-  if(TENSILE_STATIC_ONLY)
+  if(NOT TENSILE_BUILD_SHARED_LIBS)
     target_compile_definitions(tensile-host PUBLIC TENSILE_STATIC_ONLY)
   endif()
 
@@ -197,46 +194,3 @@ if(TENSILE_BUILD_TESTING)
   file(MAKE_DIRECTORY "${TEST_DATA_DIR}")
   add_subdirectory(tests)
 endif()
-
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/tensile-config.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/cmake/tensile-config.cmake"
-    @ONLY
-)
-write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/tensile-config-version.cmake"
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY ExactVersion
-  )
-install(
-    TARGETS tensile-host
-    EXPORT tensile-targets
-    COMPONENT hipBLAS-common_Development
-)
-install(
-    EXPORT tensile-targets
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/tensile"
-    NAMESPACE roc::
-    COMPONENT tensile_Development
-    FILE tensile-targets.cmake
-)
-install(FILES
-    "${CMAKE_CURRENT_BINARY_DIR}/tensile-config-version.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/cmake/tensile-config.cmake"
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/tensile)
-install(
-    FILES "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.md"
-    COMPONENT tensile_Documentation
-    DESTINATION "${CMAKE_INSTALL_DOCDIR}"
-)
-install(
-    DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/device-library/library"
-    COMPONENT tensile_Documentation
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/tensile"
-)
-install(
-    DIRECTORY "${TENSILE_SOURCE_TREE}/lib/include/Tensile"
-    COMPONENT tensile_Development
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-)
-export(EXPORT tensile-targets FILE tensile-config.cmake)

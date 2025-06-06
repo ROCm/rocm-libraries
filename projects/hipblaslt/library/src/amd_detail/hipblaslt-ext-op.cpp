@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -100,17 +100,6 @@ hipblasStatus_t hipblasltAMaxRun(const hipDataType datatype,
                                  uint32_t          n,
                                  hipStream_t       stream);
 
-hipblasStatus_t hipblasltAMaxWithScaleRun(const hipDataType datatype,
-                                          const hipDataType outDatatype,
-                                          const hipDataType scaleDatatype,
-                                          void*             output,
-                                          void*             outputD,
-                                          void*             input,
-                                          void*             inputScale,
-                                          uint32_t          m,
-                                          uint32_t          n,
-                                          hipStream_t       stream);
-
 hipblasStatus_t hipblasltExtAMax(const hipDataType datatype,
                                  const hipDataType outDatatype,
                                  void*             output,
@@ -120,21 +109,6 @@ hipblasStatus_t hipblasltExtAMax(const hipDataType datatype,
                                  hipStream_t       stream)
 {
     return hipblasltAMaxRun(datatype, outDatatype, output, input, m, n, stream);
-}
-
-hipblasStatus_t hipblasltExtAMaxWithScale(const hipDataType datatype,
-                                          const hipDataType outDatatype,
-                                          const hipDataType scaleDatatype,
-                                          void*             output,
-                                          void*             outputD,
-                                          void*             input,
-                                          void*             inputScale,
-                                          uint32_t          m,
-                                          uint32_t          n,
-                                          hipStream_t       stream)
-{
-    return hipblasltAMaxWithScaleRun(
-        datatype, outDatatype, scaleDatatype, output, outputD, input, inputScale, m, n, stream);
 }
 
 namespace
@@ -446,90 +420,6 @@ hipblasStatus_t hipblasltAMaxRun(const hipDataType datatype,
     invocation.args.reserve(20, 3);
     invocation.args.append("output", output);
     invocation.args.append("input", input);
-    invocation.args.append("length", len);
-
-    err = adapter->launchKernel(invocation, stream, nullptr, nullptr);
-
-    if(err)
-    {
-        return HIPBLAS_STATUS_INTERNAL_ERROR;
-    }
-
-    return HIPBLAS_STATUS_SUCCESS;
-}
-
-hipblasStatus_t hipblasltAMaxWithScaleRun(const hipDataType datatype,
-                                          const hipDataType outDatatype,
-                                          const hipDataType scaleDatatype,
-                                          void*             output,
-                                          void*             outputD,
-                                          void*             input,
-                                          void*             inputScale,
-                                          uint32_t          m,
-                                          uint32_t          n,
-                                          hipStream_t       stream)
-{
-    if(datatype != HIP_R_32F
-       || scaleDatatype != HIP_R_8F_E4M3_FNUZ && scaleDatatype != HIP_R_8F_E5M2_FNUZ
-              && scaleDatatype != HIP_R_8F_E4M3 && scaleDatatype != HIP_R_8F_E5M2
-    )
-    {
-        return HIPBLAS_STATUS_NOT_SUPPORTED;
-    }
-
-    if(!output || !outputD || !input || !inputScale || !m || !n)
-    {
-        return HIPBLAS_STATUS_INVALID_VALUE;
-    }
-
-    uint32_t    len = m * n;
-    int         currentDeviceId{};
-    auto        err       = hipGetDevice(&currentDeviceId);
-    auto&       adapter   = extOpLibraries().at(currentDeviceId);
-    auto        gpu       = TensileLite::hip::GetCurrentDevice();
-    const auto  archName  = trimArchName(gpu->archName());
-    auto&       masterLib = getExtOpMasterLibrary();
-    const auto& lib       = masterLib
-                          .getLibrary(archName,
-                                      hipblaslt_ext::AMaxSolutionLibrary::opName,
-                                      hipDataTypeo_char(datatype))
-                          ->as<hipblaslt_ext::AMaxSolutionLibrary>();
-    auto sol = lib.findBestSolution(
-        hipblaslt_ext::AMaxProblem(len,
-                                   hipDataType_to_tensile_type(datatype),
-                                   hipDataType_to_tensile_type(outDatatype),
-                                   hipDataType_to_tensile_type(scaleDatatype),
-                                   true),
-        *gpu);
-
-    if(!sol)
-    {
-        std::cerr << "AMaxWithScale: No valid solution found!" << std::endl;
-        return HIPBLAS_STATUS_SUCCESS;
-    }
-
-    const auto kernelName = sol->name();
-    err                   = adapter->initKernel(kernelName);
-
-    TensileLite::KernelInvocation invocation;
-    invocation.kernelName      = kernelName;
-    invocation.codeObjectFile  = sol->getCodeObjectPath();
-    invocation.workGroupSize.x = sol->getNumWorkitems();
-    invocation.workGroupSize.y = 1;
-    invocation.workGroupSize.z = 1;
-    invocation.numWorkGroups.x = 1;
-    invocation.numWorkGroups.y = 1;
-    invocation.numWorkGroups.z = 1;
-    invocation.numWorkItems.x  = sol->getNumWorkitems();
-    invocation.numWorkItems.y  = 1;
-    invocation.numWorkItems.z  = 1;
-    invocation.sharedMemBytes  = 32 * sizeof(float);
-    invocation.args            = TensileLite::KernelArguments(false);
-    invocation.args.reserve(20, 3);
-    invocation.args.append("output", output);
-    invocation.args.append("outputD", outputD);
-    invocation.args.append("input", input);
-    invocation.args.append("inputScae", inputScale);
     invocation.args.append("length", len);
 
     err = adapter->launchKernel(invocation, stream, nullptr, nullptr);

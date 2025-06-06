@@ -29,8 +29,8 @@
 #include "rocsparse_bsrmm.hpp"
 #include "rocsparse_common.h"
 
-#include "common.h"
-#include "utility.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {

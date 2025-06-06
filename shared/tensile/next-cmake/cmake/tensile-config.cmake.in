@@ -21,6 +21,8 @@
 #
 # ##############################################################################
 
+include(CMakeFindDependencyMacro)
+
 find_dependency(hip)
 find_dependency(OpenMP)
 find_dependency(@TENSILE_MSGPACK@)

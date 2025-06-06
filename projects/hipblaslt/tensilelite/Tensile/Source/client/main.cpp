@@ -743,6 +743,9 @@ int main(int argc, const char* argv[])
                     if(solution == nullptr)
                         throw std::runtime_error("Could not find a solution");
 
+                    // for a new problem, autoGSU should be re-calculated
+                    solution->autoGSU = 0;
+
                     listeners.preSolution(*solution);
                     if(solutionIterator->runCurrentSolution() && runKernels)
                     {

@@ -40,15 +40,17 @@ namespace rocRoller
 
         const std::string ScaledMatrixMultiply::Basename = "ScaledMatrixMultiply";
 
-        Generator<Instruction> ScaledMatrixMultiplyGenerator::mul(Register::ValuePtr dest,
-                                                                  Register::ValuePtr matA,
-                                                                  Register::ValuePtr matB,
-                                                                  Register::ValuePtr matC,
-                                                                  Register::ValuePtr scaleA,
-                                                                  Register::ValuePtr scaleB,
-                                                                  int                M,
-                                                                  int                N,
-                                                                  int                K)
+        Generator<Instruction>
+            ScaledMatrixMultiplyGenerator::mul(Register::ValuePtr  dest,
+                                               Register::ValuePtr  matA,
+                                               Register::ValuePtr  matB,
+                                               Register::ValuePtr  matC,
+                                               Register::ValuePtr  scaleA,
+                                               Register::ValuePtr  scaleB,
+                                               int                 M,
+                                               int                 N,
+                                               int                 K,
+                                               std::optional<uint> maybeScaleBlockSize)
         {
             AssertFatal(matA != nullptr);
             AssertFatal(matB != nullptr);
@@ -142,6 +144,16 @@ namespace rocRoller
                             N,
                             K,
                             arch.target().toString());
+
+                if(maybeScaleBlockSize)
+                {
+                    auto scaleBlockSize = maybeScaleBlockSize.value();
+                    AssertFatal(scaleBlockSize == 32,
+                                fmt::format("Scale block size expected: 32, got: {}, on: {}",
+                                            scaleBlockSize,
+                                            arch.target().toString()));
+                }
+
                 mi = concatenate("v_mfma_scale_f32_", M, "x", N, "x", K, "_f8f6f4");
 
                 modifiers += "cbsz:" + Arithmetic::getModifier(typeA);

@@ -22,10 +22,10 @@
  *
  * ************************************************************************ */
 
-#include "common.h"
-#include "control.h"
 #include "rocsparse_common.h"
-#include "utility.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "rocsparse_csrgeam_numeric.hpp"
 

@@ -25,7 +25,7 @@
 #include "internal/level1/rocsparse_gthr.h"
 #include "rocsparse_gthr.hpp"
 
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include "gthr_device.h"
 

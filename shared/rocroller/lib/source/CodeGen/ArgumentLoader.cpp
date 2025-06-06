@@ -119,7 +119,7 @@ namespace rocRoller
         // TODO: coalesce loads when possible
         for(auto const& arg : args)
         {
-            auto numRegisters = arg.size / (Register::bitsPerRegister / 8);
+            auto numRegisters = std::max(1u, arg.size / (Register::bitsPerRegister / 8));
             auto r            = Register::Value::Placeholder(m_context.lock(),
                                                   Register::Type::Scalar,
                                                   DataType::Raw32,

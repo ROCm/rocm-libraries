@@ -105,4 +105,15 @@ namespace rocRoller
     std::vector<float> unpackToFloat(std::vector<FP6x16> const&);
     std::vector<float> unpackToFloat(std::vector<BF6x16> const&);
     std::vector<float> unpackToFloat(std::vector<FP4x8> const&);
+
+    bool isF16(DataType type);
+    bool isUnpackedF16(DataType type);
+    bool isF8(DataType type);
+    bool isUnpackedF8(DataType type);
+    bool isF6(DataType type);
+    bool isUnpackedF6(DataType type);
+    bool isF4(DataType type);
+    bool isUnpackedF4(DataType type);
+
+    uint packingFactorForDataType(DataType type);
 }

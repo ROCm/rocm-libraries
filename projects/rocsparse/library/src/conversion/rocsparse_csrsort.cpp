@@ -22,12 +22,12 @@
  *
  * ************************************************************************ */
 #include "internal/conversion/rocsparse_csrsort.h"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
-#include "control.h"
 #include "csrsort_device.h"
+#include "rocsparse_control.hpp"
 
-#include "rocsparse_primitives.h"
+#include "rocsparse_primitives.hpp"
 
 extern "C" rocsparse_status rocsparse_csrsort_buffer_size(rocsparse_handle     handle,
                                                           rocsparse_int        m,

@@ -26,9 +26,9 @@
 #include "rocsparse_common.h"
 #include "rocsparse_ellmv.hpp"
 
-#include "control.h"
 #include "ellmv_device.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {

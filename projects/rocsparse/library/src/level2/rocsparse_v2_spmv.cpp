@@ -22,9 +22,9 @@
  * ************************************************************************ */
 
 #include "internal/generic/rocsparse_v2_spmv.h"
-#include "control.h"
-#include "handle.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_handle.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "../conversion/rocsparse_convert_scalar.hpp"
 #include "rocsparse_bsrmv.hpp"
@@ -36,7 +36,27 @@
 #include "rocsparse_spmv.hpp"
 
 template <>
-inline bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_input value_)
+bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_alg value_)
+{
+    switch(value_)
+    {
+    case rocsparse_spmv_alg_default:
+    case rocsparse_spmv_alg_coo:
+    case rocsparse_spmv_alg_csr_adaptive:
+    case rocsparse_spmv_alg_csr_rowsplit:
+    case rocsparse_spmv_alg_ell:
+    case rocsparse_spmv_alg_coo_atomic:
+    case rocsparse_spmv_alg_bsr:
+    case rocsparse_spmv_alg_csr_lrb:
+    {
+        return false;
+    }
+    }
+    return true;
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_input value_)
 {
     switch(value_)
     {
@@ -52,7 +72,7 @@ inline bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_input value_)
 };
 
 template <>
-inline bool rocsparse::enum_utils::is_invalid(rocsparse_v2_spmv_stage value_)
+bool rocsparse::enum_utils::is_invalid(rocsparse_v2_spmv_stage value_)
 {
     switch(value_)
     {
