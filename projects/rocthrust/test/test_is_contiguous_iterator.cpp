@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -33,12 +33,15 @@
 #include <unordered_set>
 #include <vector>
 
-#include <unittest/unittest.h>
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 #if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
 #  include <type_traits>
 #  include <utility>
 #endif
+
+TESTS_DEFINE(IsContiguousIteratorTests, FullTestsParams);
 
 THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<std::string::iterator>::value));
 
@@ -50,9 +53,13 @@ THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<std::wstring_view::iterator
 
 THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<std::vector<bool>::iterator>::value));
 
-template <typename T>
-THRUST_HOST void test_is_contiguous_iterator()
+TYPED_TEST(IsContiguousIteratorTests, test_is_contiguous_iterator)
 {
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
   THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<T*>::value));
 
   THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<T const*>::value));
@@ -89,14 +96,15 @@ THRUST_HOST void test_is_contiguous_iterator()
 
   THRUST_STATIC_ASSERT((!thrust::is_contiguous_iterator<std::ostream_iterator<T>>::value));
 }
-DECLARE_GENERIC_UNITTEST(test_is_contiguous_iterator);
 
-template <typename Vector>
-THRUST_HOST void test_is_contiguous_iterator_vectors()
+TYPED_TEST(IsContiguousIteratorTests, test_is_contiguous_iterator_vectors)
 {
+  using Vector = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
   THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<typename Vector::iterator>::value));
 }
-DECLARE_VECTOR_UNITTEST(test_is_contiguous_iterator_vectors);
 
 struct expect_pointer
 {};
@@ -119,9 +127,13 @@ struct check_unwrapped_iterator
       : std::is_same<unwrapped_t, IteratorT>::value;
 };
 
-template <typename T>
-void test_try_unwrap_contiguous_iterator()
+TYPED_TEST(IsContiguousIteratorTests, test_try_unwrap_contiguous_iterator)
 {
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
   // Raw pointers should pass whether expecting pointers or passthrough.
   THRUST_STATIC_ASSERT((check_unwrapped_iterator<T*, T*, expect_pointer>::value));
   THRUST_STATIC_ASSERT((check_unwrapped_iterator<T*, T*, expect_passthrough>::value));
@@ -157,4 +169,3 @@ void test_try_unwrap_contiguous_iterator()
   THRUST_STATIC_ASSERT((check_unwrapped_iterator<std::istream_iterator<T>, T*, expect_passthrough>::value));
   THRUST_STATIC_ASSERT((check_unwrapped_iterator<std::ostream_iterator<T>, void, expect_passthrough>::value));
 }
-DECLARE_GENERIC_UNITTEST(test_try_unwrap_contiguous_iterator);

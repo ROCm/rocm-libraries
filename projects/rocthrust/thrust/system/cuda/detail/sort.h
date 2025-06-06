@@ -28,6 +28,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #ifdef _CCCL_CUDA_COMPILER
 #  include <thrust/system/cuda/config.h>
 
@@ -269,7 +277,7 @@ THRUST_RUNTIME_FUNCTION void radix_sort(execution_policy<Derived>& policy, Key* 
     Key* temp_ptr = reinterpret_cast<Key*>(keys_buffer.d_buffers[1]);
     cuda_cub::copy_n(policy, temp_ptr, keys_count, keys);
   }
-  THRUST_IF_CONSTEXPR (SORT_ITEMS::value)
+  _CCCL_IF_CONSTEXPR (SORT_ITEMS::value)
   {
     if (items_buffer.selector != 0)
     {
@@ -287,6 +295,7 @@ THRUST_RUNTIME_FUNCTION void radix_sort(execution_policy<Derived>& policy, Key* 
 namespace __smart_sort
 {
 
+// TODO(bgruber): we can drop thrust::less etc. when they truly alias to the ::cuda::std ones
 template <class Key, class CompareOp>
 using can_use_primitive_sort = ::cuda::std::integral_constant<
   bool,
@@ -316,7 +325,7 @@ template <
   class KeysIt,
   class ItemsIt,
   class CompareOp,
-  ::cuda::std::__enable_if_t<!can_use_primitive_sort<typename iterator_value<KeysIt>::type, CompareOp>::value, int> = 0>
+  ::cuda::std::enable_if_t<!can_use_primitive_sort<typename iterator_value<KeysIt>::type, CompareOp>::value, int> = 0>
 THRUST_RUNTIME_FUNCTION void
 smart_sort(Policy& policy, KeysIt keys_first, KeysIt keys_last, ItemsIt items_first, CompareOp compare_op)
 {
@@ -325,12 +334,12 @@ smart_sort(Policy& policy, KeysIt keys_first, KeysIt keys_last, ItemsIt items_fi
 
 template <
   class SORT_ITEMS,
-  class /* STABLE */,
+  class /*STABLE*/,
   class Policy,
   class KeysIt,
   class ItemsIt,
   class CompareOp,
-  ::cuda::std::__enable_if_t<can_use_primitive_sort<typename iterator_value<KeysIt>::type, CompareOp>::value, int> = 0>
+  ::cuda::std::enable_if_t<can_use_primitive_sort<typename iterator_value<KeysIt>::type, CompareOp>::value, int> = 0>
 THRUST_RUNTIME_FUNCTION void smart_sort(
   execution_policy<Policy>& policy, KeysIt keys_first, KeysIt keys_last, ItemsIt items_first, CompareOp compare_op)
 {

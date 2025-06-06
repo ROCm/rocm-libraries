@@ -620,7 +620,7 @@ struct TestComplexPowerFunctions
       using T0       = T;
       using T1       = other_floating_point_type_t<T0>;
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      using promoted = ::cuda::std::__common_type_t<T0, T1>;
+      using promoted = ::cuda::std::common_type_t<T0, T1>;
 #else
       using promoted = ::std::common_type_t<T0, T1>;
 #endif

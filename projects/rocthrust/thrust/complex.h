@@ -42,22 +42,17 @@
 #  include <type_traits>
 #endif
 
-/*! \cond
- */
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-template <typename T>
-using remove_reference_t = ::cuda::std::__libcpp_remove_reference_t<T>;
+#  define THRUST_STD_COMPLEX_REAL(z) \
+    reinterpret_cast<const typename ::cuda::std::remove_reference_t<decltype(z)>::value_type(&)[2]>(z)[0]
+#  define THRUST_STD_COMPLEX_IMAG(z) \
+    reinterpret_cast<const typename ::cuda::std::remove_reference_t<decltype(z)>::value_type(&)[2]>(z)[1]
 #else
-template <typename T>
-using remove_reference_t = ::std::remove_reference_t<T>;
+#  define THRUST_STD_COMPLEX_REAL(z) \
+    reinterpret_cast<const typename ::std::remove_reference_t<decltype(z)>::value_type(&)[2]>(z)[0]
+#  define THRUST_STD_COMPLEX_IMAG(z) \
+    reinterpret_cast<const typename ::std::remove_reference_t<decltype(z)>::value_type(&)[2]>(z)[1]
 #endif
-/*! \endcond
- */
-
-#define THRUST_STD_COMPLEX_REAL(z) \
-  reinterpret_cast<const typename remove_reference_t<decltype(z)>::value_type(&)[2]>(z)[0]
-#define THRUST_STD_COMPLEX_IMAG(z) \
-  reinterpret_cast<const typename remove_reference_t<decltype(z)>::value_type(&)[2]>(z)[1]
 #define THRUST_STD_COMPLEX_DEVICE THRUST_DEVICE
 
 THRUST_NAMESPACE_BEGIN
