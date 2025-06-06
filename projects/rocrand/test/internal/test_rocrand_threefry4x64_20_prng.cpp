@@ -261,3 +261,97 @@ TEST(threefry_prng_state_tests, discard_sequence_test)
     EXPECT_EQ(state.counter.w, 6ULL);
     EXPECT_EQ(state.substate, 0U);
 }
+
+TEST(threefry_additional_tests, rocrand_init_test)
+{
+    // making sure the outputs are the same when initialized with same parameters
+    rocrand_state_threefry4x64_20 state1, state2;
+
+    using ull = unsigned long long;
+
+    ull seeds[] = {0, 123, 321, 123456, 654321};
+    ull subsequences[] = {0xf, 0xff, 0x1f, 0x1ff, 0x1f1};
+    ull offsets[] = {0, 1, 2, 3, 4};
+
+    for(int i = 0; i < 5; i++){
+        rocrand_init(seeds[i], subsequences[i], offsets[i], &state1);
+        rocrand_init(seeds[i], subsequences[i], offsets[i], &state2);
+
+        for(int j = 0; j < 5000; j++)
+            ASSERT_EQ(rocrand(&state1), rocrand(&state2));
+    }
+}
+
+TEST(threefry_additional_tests, rocrand_test)
+{
+    // making sure the outputs are uniformly distributed!
+    rocrand_state_threefry4x64_20 state;
+
+    rocrand_init(0, 0, 0, &state);
+    size_t testSize = 40000;
+
+    unsigned long long * output = new unsigned long long[testSize];
+
+    double mean = 0;
+    for(size_t i = 0; i < testSize; i++){
+        output[i] = rocrand(&state);
+        mean += static_cast<double>(output[i]);
+    }
+    mean /= testSize;
+
+    double std = 0.0;
+    for(size_t i = 0; i < testSize; i++)
+        std += std::pow(output[i] - mean, 2);
+
+    std = std::sqrt(std / testSize);
+
+    double maxi = (double) std::numeric_limits<unsigned long long>::max();
+    double eMean = 0.5 * (maxi); // 0.5(a + b)
+    double eStd = (maxi) / (2 * std::sqrt(3)); // (b - a) / (2*3^0.5)
+
+    ASSERT_NEAR(mean, eMean, eMean * 0.1);
+    ASSERT_NEAR(std, eStd, eStd * 0.1);
+
+    delete [] output;
+}
+
+TEST(threefry_additional_tests, rocrand4_test)
+{
+    // making sure the outputs are uniformly distributed!
+    rocrand_state_threefry4x64_20 state;
+
+    rocrand_init(0, 0, 0, &state);
+    size_t testSize = 40000;
+
+    unsigned long long * output = new unsigned long long[testSize];
+
+    double mean = 0;
+    for(size_t i = 0; i < testSize; i += 4){
+        ulonglong4 t = rocrand4(&state);
+        output[i] = t.w;
+        output[i + 1] = t.x;
+        output[i + 2] = t.y;
+        output[i + 3] = t.z;
+        mean += static_cast<double>(output[i]); 
+        mean += static_cast<double>(output[i + 1]);
+        mean += static_cast<double>(output[i + 2]);
+        mean += static_cast<double>(output[i + 3]);
+    }
+    mean /= testSize;
+
+    double std = 0.0;
+    for(size_t i = 0; i < testSize; i++)
+        std += std::pow(output[i] - mean, 2);
+
+    std = std::sqrt(std / testSize);
+
+    double maxi = (double) std::numeric_limits<unsigned long long>::max();
+    // min val is 0
+    double eMean = 0.5 * (maxi); // 0.5(a + b)
+    double eStd = (maxi) / (2 * std::sqrt(3)); // (b - a) / (2*3^0.5)
+
+    ASSERT_NEAR(mean, eMean, eMean * 0.1);
+    ASSERT_NEAR(std, eStd, eStd * 0.1);
+
+    delete [] output;
+}
