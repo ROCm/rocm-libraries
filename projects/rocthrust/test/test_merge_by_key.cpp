@@ -193,7 +193,7 @@ auto call_merge_by_key(Args&&... args) -> decltype(thrust::merge_by_key(std::for
   {
     // TODO(bgruber): remove next line in C++17 and pass CompareOp{} directly to stable_sort
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    using C = ::cuda::std::__conditional_t<::cuda::std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
+    using C = ::cuda::std::conditional_t<::cuda::std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
 #else
     using C = ::std::conditional_t<::std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
 #endif
@@ -250,7 +250,7 @@ TYPED_TEST(MergeByKeyTestsClass, TestMergeByKey)
           // TODO(bgruber): remove next line in C++17 and pass compare_function{} directly to stable_sort
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
           using C =
-            ::cuda::std::__conditional_t<::cuda::std::is_void<compare_function>::value, thrust::less<T>, compare_function>;
+            ::cuda::std::conditional_t<::cuda::std::is_void<compare_function>::value, thrust::less<T>, compare_function>;
 #else
           using C = ::std::conditional_t<::std::is_void<compare_function>::value, thrust::less<T>, compare_function>;
 #endif

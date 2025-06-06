@@ -45,10 +45,13 @@ namespace detail
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 template <typename T>
+using is_cpp17_input_iterator = ::cuda::std::__is_cpp17_input_iterator<T>;
+template <typename T>
 using is_cpp17_random_access_iterator = ::cuda::std::__is_cpp17_random_access_iterator<T>;
 
 #else
 
+using input_iterator_tag         = ::std::input_iterator_tag;
 using random_access_iterator_tag = ::std::random_access_iterator_tag;
 
 template <typename T>
@@ -71,6 +74,10 @@ struct has_iterator_category_convertible_to
 
 template <typename T, typename U>
 struct has_iterator_category_convertible_to<T, U, false> : ::std::false_type
+{};
+
+template <typename T>
+struct is_cpp17_input_iterator : public has_iterator_category_convertible_to<T, input_iterator_tag>
 {};
 
 template <typename T>
