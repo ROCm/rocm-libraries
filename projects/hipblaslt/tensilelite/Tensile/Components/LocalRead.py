@@ -1171,7 +1171,7 @@ class LocalReadMFMA(LocalRead):
                         if kernel["ConvertAfterDS"] and kernel["UnrollMajorLDS%s"%tc]:
                             valufIdx += blockWidth * (tP["bpe"] // tP["bpeDS"]) if (not tP["isM"]) else 1
                         else:
-                            valufIdx += blockWidth if (not tP["isM"]) else 1
+                            valufIdx += blockWidth if (not tP["isM"]) else (numVgpr if writer.states.asmCaps["HasSWMMAC_gfx1250"] else 1)
 
                         # load read instrution
                         paramList = []
