@@ -42,22 +42,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "🔍 Checking if commit is a merge commit from a PR..."
-          PARENTS=$(git rev-list --parents -n 1 ${{ github.sha }} | wc -w)
-          if [ "$PARENTS" -lt 3 ]; then
-            echo "❌ Not a merge commit. Skipping."
+          echo "🔍 Checking if commit is a merged PR..."
+          PR_NUMBER=$(gh api repos/${{ github.repository }}/commits/${{ github.sha }}/pulls --jq '.[0].number')
+          if [ -z "$PR_NUMBER" ]; then
+            echo "❌ No PR found for commit ${{ github.sha }}. Skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
-          PR_JSON=$(gh pr list --state merged --base develop --json number,mergeCommit,headRepository,headRefName | jq --arg sha "${{ github.sha }}" -c '[.[] | select(.mergeCommit.oid == $sha)][0]')
-          if [ -z "$PR_JSON" ] || [ "$PR_JSON" = "null" ]; then
-            echo "❌ No matching merged PR found for this commit. Skipping."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
           echo "✅ Found PR #$PR_NUMBER"
           echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "pr=$PR_NUMBER" >> "$GITHUB_OUTPUT"
