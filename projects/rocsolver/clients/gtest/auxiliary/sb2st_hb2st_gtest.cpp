@@ -54,8 +54,8 @@ const vector<vector<int>> matrix_size_range = {
     // normal (valid) samples
     {10, 10, 2},
     {20, 20, 20},
-    {20, 24, 18},
     {128, 128, 32},
+    {128, 140, 40},
 };
 
 // for daily_lapack tests

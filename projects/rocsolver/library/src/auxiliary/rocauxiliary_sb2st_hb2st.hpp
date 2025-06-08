@@ -41,10 +41,194 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-#define SB2ST_HB2ST_MAX_THDS 128
+// Number of threads in x and y
+// Reductions in larfg and larf must be updated if DIMX is changed
+#define DIMX 32
+#define DIMY 32
 
-template <int MAX_THDS, typename T, typename S>
-__device__ void sb2st_hb2st_sweep_step(const rocblas_int tid,
+template <typename T, typename I, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
+__device__ void sb2st_larfg(const I xid, I n, T& alpha, T* x, T& tau, T* reduct)
+{
+    // dot reduction
+    reduct[xid] = 0;
+    for(I i = xid; i < n - 1; i += DIMX)
+        reduct[xid] += x[i] * x[i];
+    __threadfence();
+    if(xid < 16)
+        reduct[xid] += reduct[xid + 16];
+    __threadfence();
+    if(xid < 8)
+        reduct[xid] += reduct[xid + 8];
+    __threadfence();
+    if(xid < 4)
+        reduct[xid] += reduct[xid + 4];
+    __threadfence();
+    if(xid < 2)
+        reduct[xid] += reduct[xid + 2];
+    __threadfence();
+    if(xid < 1)
+        reduct[xid] += reduct[xid + 1];
+    __threadfence();
+    T norm2 = reduct[0] + alpha * alpha;
+
+    __shared__ T s;
+
+    if(norm2 > 0)
+    {
+        if(xid == 0)
+        {
+            T norm = alpha >= 0 ? -std::sqrt(norm2) : std::sqrt(norm2);
+
+            s = (T)(1.0 / (alpha - norm));
+            tau = (norm - alpha) / norm;
+            alpha = norm;
+        }
+
+        // scal
+        for(I i = xid; i < n - 1; i += DIMX)
+            x[i] *= s;
+    }
+    else
+    {
+        tau = 0;
+    }
+}
+
+template <typename T, typename I, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
+__device__ void sb2st_larfg(const I xid, I n, T& alpha, T* x, T& tau, T* reduct)
+{
+    using S = decltype(std::real(T{}));
+
+    // dot reduction
+    reduct[xid] = 0;
+    for(I i = xid; i < n - 1; i += DIMX)
+        reduct[xid] += x[i] * conj(x[i]);
+    __threadfence();
+    if(xid < 16)
+        reduct[xid] += reduct[xid + 16];
+    __threadfence();
+    if(xid < 8)
+        reduct[xid] += reduct[xid + 8];
+    __threadfence();
+    if(xid < 4)
+        reduct[xid] += reduct[xid + 4];
+    __threadfence();
+    if(xid < 2)
+        reduct[xid] += reduct[xid + 2];
+    __threadfence();
+    if(xid < 1)
+        reduct[xid] += reduct[xid + 1];
+    __threadfence();
+    T norm2 = reduct[0] + alpha * conj(alpha);
+
+    S ar = alpha.real();
+    S ai = alpha.imag();
+    __shared__ T s;
+
+    if(norm2.real() > 0 || ai > 0)
+    {
+        if(xid == 0)
+        {
+            S norm = ar >= 0 ? -std::sqrt(norm2.real()) : std::sqrt(norm2.real());
+
+            // scaling factor
+            S r = (ar - norm) * (ar - norm) + ai * ai;
+            S rr = (ar - norm) / r;
+            S ri = -ai / r;
+            s = rocblas_complex_num<S>(rr, ri);
+
+            // tau
+            rr = (norm - ar) / norm;
+            ri = -ai / norm;
+            tau = rocblas_complex_num<S>(rr, ri);
+
+            // alpha
+            alpha = norm;
+        }
+
+        // scal
+        for(I i = xid; i < n - 1; i += DIMX)
+            x[i] *= s;
+    }
+    else
+    {
+        tau = 0;
+    }
+}
+
+template <typename T, typename I>
+__device__ void
+    sb2st_larf(const I xid, const I yid, rocblas_side side, I m, I n, T* v, T tau, T* C, I ldc, T* reduct)
+{
+    if(tau == 0)
+        return;
+
+    const I tid = xid + yid * DIMX;
+    if(side == rocblas_side_left)
+    {
+        for(I j = yid; j < n; j += DIMY)
+        {
+            // gemv reduction
+            reduct[tid] = 0;
+            for(I i = xid; i < m; i += DIMX)
+                reduct[tid] += conj(C[i + j * ldc]) * v[i];
+            __threadfence();
+            if(xid < 16)
+                reduct[tid] += reduct[tid + 16];
+            __threadfence();
+            if(xid < 8)
+                reduct[tid] += reduct[tid + 8];
+            __threadfence();
+            if(xid < 4)
+                reduct[tid] += reduct[tid + 4];
+            __threadfence();
+            if(xid < 2)
+                reduct[tid] += reduct[tid + 2];
+            __threadfence();
+            if(xid < 1)
+                reduct[tid] += reduct[tid + 1];
+            __threadfence();
+
+            // ger
+            for(I i = xid; i < m; i += DIMX)
+                C[i + j * ldc] -= tau * v[i] * conj(reduct[yid * DIMX]);
+        }
+    }
+    else
+    {
+        for(I i = yid; i < m; i += DIMY)
+        {
+            // gemv reduction
+            reduct[tid] = 0;
+            for(I j = xid; j < n; j += DIMX)
+                reduct[tid] += C[i + j * ldc] * v[j];
+            __threadfence();
+            if(xid < 16)
+                reduct[tid] += reduct[tid + 16];
+            __threadfence();
+            if(xid < 8)
+                reduct[tid] += reduct[tid + 8];
+            __threadfence();
+            if(xid < 4)
+                reduct[tid] += reduct[tid + 4];
+            __threadfence();
+            if(xid < 2)
+                reduct[tid] += reduct[tid + 2];
+            __threadfence();
+            if(xid < 1)
+                reduct[tid] += reduct[tid + 1];
+            __threadfence();
+
+            // ger
+            for(I j = xid; j < n; j += DIMX)
+                C[i + j * ldc] -= tau * conj(v[j]) * reduct[yid * DIMX];
+        }
+    }
+}
+
+template <typename T, typename S>
+__device__ void sb2st_hb2st_sweep_step(const rocblas_int xid,
+                                       const rocblas_int yid,
                                        rocblas_int n,
                                        rocblas_int nb,
                                        rocblas_int s,
@@ -54,9 +238,10 @@ __device__ void sb2st_hb2st_sweep_step(const rocblas_int tid,
                                        S* D,
                                        S* E,
                                        T* housev,
-                                       T* sval,
-                                       T* work)
+                                       T* reduct)
 {
+    const rocblas_int tid = xid + yid * DIMX;
+
     __shared__ T tau;
 
     // first step of the sweep
@@ -66,38 +251,39 @@ __device__ void sb2st_hb2st_sweep_step(const rocblas_int tid,
         rocblas_int su_i = sm_e;
         rocblas_int su_e = std::min(su_i + nb, n);
 
-        // copy column s to shared memory
         rocblas_int mm = sm_e - sm_i;
-        for(rocblas_int i = tid; i < mm; i += MAX_THDS)
-            housev[i] = A[(sm_i + i) + s * lda];
-        __syncthreads();
-
-        // generate Householder reflector
-        larfg<MAX_THDS>(tid, mm, housev[0], housev + 1, 1, tau, sval);
-        __syncthreads();
-
-        // copy Householder vector to column s of A
-        if(tid == 0)
+        if(yid == 0)
         {
-            A[sm_i + s * lda] = tau;
-            E[s] = std::real(housev[0]);
-            housev[0] = T(1);
+            // copy column s to shared memory
+            for(rocblas_int i = xid; i < mm; i += DIMX)
+                housev[i] = A[(sm_i + i) + s * lda];
+
+            // generate Householder reflector
+            sb2st_larfg(xid, mm, housev[0], housev + 1, tau, reduct);
+
+            // copy Householder vector to column s of A
+            if(xid == 0)
+            {
+                A[sm_i + s * lda] = tau;
+                E[s] = std::real(housev[0]);
+                housev[0] = T(1);
+            }
+            for(rocblas_int i = 1 + xid; i < mm; i += DIMX)
+                A[(sm_i + i) + s * lda] = housev[i];
         }
-        for(rocblas_int i = 1 + tid; i < mm; i += MAX_THDS)
-            A[(sm_i + i) + s * lda] = housev[i];
         __syncthreads();
 
         // apply Householder reflector
         rocblas_int nn = su_e - sm_i;
-        larf(tid, MAX_THDS, rocblas_side_left, mm, nn, housev, 1, conj(tau), A + sm_i + sm_i * lda,
-             lda, work);
+        sb2st_larf(xid, yid, rocblas_side_left, mm, nn, housev, conj(tau), A + sm_i + sm_i * lda,
+                   lda, reduct);
         __syncthreads();
-        larf(tid, MAX_THDS, rocblas_side_right, mm, mm, housev, 1, tau, A + sm_i + sm_i * lda, lda,
-             work);
+        sb2st_larf(xid, yid, rocblas_side_right, mm, mm, housev, tau, A + sm_i + sm_i * lda, lda,
+                   reduct);
 
         // copy transpose blocks
         nn = su_e - su_i;
-        for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += MAX_THDS)
+        for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += DIMX * DIMY)
         {
             rocblas_int i = su_i + idx1d % nn;
             rocblas_int j = sm_i + idx1d / nn;
@@ -114,48 +300,49 @@ __device__ void sb2st_hb2st_sweep_step(const rocblas_int tid,
         rocblas_int sd_i = sm_i - nb;
         rocblas_int sd_e = sm_i;
 
-        // copy column s to shared memory
         rocblas_int mm = sm_e - sm_i;
-        for(rocblas_int i = tid; i < mm; i += MAX_THDS)
-            housev[i] = A[(sm_i + i) + sd_i * lda];
-        __syncthreads();
-
-        // generate Householder reflector
-        larfg<MAX_THDS>(tid, mm, housev[0], housev + 1, 1, tau, sval);
-        __syncthreads();
-
-        // copy Householder vector to column s of A
-        if(tid == 0)
+        if(yid == 0)
         {
-            A[sm_i + s * lda] = tau;
-            A[sm_i + sd_i * lda] = housev[0];
-            housev[0] = T(1);
-        }
-        for(rocblas_int i = 1 + tid; i < mm; i += MAX_THDS)
-        {
-            A[(sm_i + i) + s * lda] = housev[i];
-            A[(sm_i + i) + sd_i * lda] = 0;
+            // copy column s to shared memory
+            for(rocblas_int i = xid; i < mm; i += DIMX)
+                housev[i] = A[(sm_i + i) + sd_i * lda];
+
+            // generate Householder reflector
+            sb2st_larfg(xid, mm, housev[0], housev + 1, tau, reduct);
+
+            // copy Householder vector to column s of A
+            if(xid == 0)
+            {
+                A[sm_i + s * lda] = tau;
+                A[sm_i + sd_i * lda] = housev[0];
+                housev[0] = T(1);
+            }
+            for(rocblas_int i = 1 + xid; i < mm; i += DIMX)
+            {
+                A[(sm_i + i) + s * lda] = housev[i];
+                A[(sm_i + i) + sd_i * lda] = 0;
+            }
         }
         __syncthreads();
 
         // apply Householder reflector
         rocblas_int nn = su_e - sd_i - 1;
-        larf(tid, MAX_THDS, rocblas_side_left, mm, nn, housev, 1, conj(tau),
-             A + sm_i + (sd_i + 1) * lda, lda, work);
+        sb2st_larf(xid, yid, rocblas_side_left, mm, nn, housev, conj(tau),
+                   A + sm_i + (sd_i + 1) * lda, lda, reduct);
         __syncthreads();
-        larf(tid, MAX_THDS, rocblas_side_right, mm, mm, housev, 1, tau, A + sm_i + sm_i * lda, lda,
-             work);
+        sb2st_larf(xid, yid, rocblas_side_right, mm, mm, housev, tau, A + sm_i + sm_i * lda, lda,
+                   reduct);
 
         // copy transpose blocks
         nn = su_e - su_i;
-        for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += MAX_THDS)
+        for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += DIMX * DIMY)
         {
             rocblas_int i = su_i + idx1d % nn;
             rocblas_int j = sm_i + idx1d / nn;
             A[i + j * lda] = conj(A[j + i * lda]);
         }
         nn = sd_e - sd_i;
-        for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += MAX_THDS)
+        for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += DIMX * DIMY)
         {
             rocblas_int i = sd_i + idx1d % nn;
             rocblas_int j = sm_i + idx1d / nn;
@@ -167,48 +354,38 @@ __device__ void sb2st_hb2st_sweep_step(const rocblas_int tid,
 /* SB2ST_HB2ST_KERNEL runs all sweeps on a single thread block per batch instance. Run with
    batch_count thread blocks in z. */
 template <typename T, typename S>
-ROCSOLVER_KERNEL void __launch_bounds__(SB2ST_HB2ST_MAX_THDS)
-    sb2st_hb2st_kernel(rocblas_int n,
-                       rocblas_int nb,
-                       T* AA,
-                       rocblas_stride shiftA,
-                       rocblas_int lda,
-                       rocblas_stride strideA,
-                       S* DD,
-                       rocblas_stride strideD,
-                       S* EE,
-                       rocblas_stride strideE,
-                       T* workA,
-                       rocblas_stride strideW)
+ROCSOLVER_KERNEL void sb2st_hb2st_kernel(rocblas_int n,
+                                         rocblas_int nb,
+                                         T* AA,
+                                         rocblas_stride shiftA,
+                                         rocblas_int lda,
+                                         rocblas_stride strideA,
+                                         S* DD,
+                                         rocblas_stride strideD,
+                                         S* EE,
+                                         rocblas_stride strideE)
 {
-    const rocblas_int tid = threadIdx.x;
+    const rocblas_int xid = threadIdx.x;
+    const rocblas_int yid = threadIdx.y;
     const rocblas_int bid = blockIdx.z;
-
-    assert(blockDim.x == SB2ST_HB2ST_MAX_THDS);
 
     // select batch instance
     T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
     S* D = load_ptr_batch<S>(DD, bid, 0, strideD);
     S* E = load_ptr_batch<S>(EE, bid, 0, strideE);
-    T* work;
 
     // shared memory setup
     extern __shared__ double lmem[];
     T* housev = reinterpret_cast<T*>(lmem);
-    T* sval = reinterpret_cast<T*>(housev + nb);
-
-    if(workA)
-        work = workA + bid * strideW;
-    else
-        work = reinterpret_cast<T*>(sval);
+    T* reduct = reinterpret_cast<T*>(housev + nb);
 
     // execute sweeps
     for(rocblas_int s = 0; s < n - 1; s++)
     {
         for(rocblas_int sm_i = s + 1; sm_i < n; sm_i += nb)
         {
-            sb2st_hb2st_sweep_step<SB2ST_HB2ST_MAX_THDS, T, S>(tid, n, nb, s, sm_i, A, lda, D, E,
-                                                               housev, sval, work);
+            sb2st_hb2st_sweep_step<T, S>(xid, yid, n, nb, s, sm_i, A, lda, D, E, housev, reduct);
+            __syncthreads();
         }
     }
 }
@@ -226,22 +403,20 @@ ROCSOLVER_KERNEL void __launch_bounds__(SB2ST_HB2ST_MAX_THDS)
 
    Sweep n-1 is complete after 1 step, therefore the total number of steps is 3*(n-1)+1 */
 template <typename T, typename S>
-ROCSOLVER_KERNEL void __launch_bounds__(SB2ST_HB2ST_MAX_THDS)
-    sb2st_hb2st_step_kernel(rocblas_int n,
-                            rocblas_int nb,
-                            rocblas_int step,
-                            T* AA,
-                            rocblas_stride shiftA,
-                            rocblas_int lda,
-                            rocblas_stride strideA,
-                            S* DD,
-                            rocblas_stride strideD,
-                            S* EE,
-                            rocblas_stride strideE,
-                            T* workA,
-                            rocblas_stride strideW)
+ROCSOLVER_KERNEL void sb2st_hb2st_step_kernel(rocblas_int n,
+                                              rocblas_int nb,
+                                              rocblas_int step,
+                                              T* AA,
+                                              rocblas_stride shiftA,
+                                              rocblas_int lda,
+                                              rocblas_stride strideA,
+                                              S* DD,
+                                              rocblas_stride strideD,
+                                              S* EE,
+                                              rocblas_stride strideE)
 {
-    const rocblas_int tid = threadIdx.x;
+    const rocblas_int xid = threadIdx.x;
+    const rocblas_int yid = threadIdx.y;
     const rocblas_int sid = blockIdx.y;
     const rocblas_int bid = blockIdx.z;
 
@@ -251,17 +426,11 @@ ROCSOLVER_KERNEL void __launch_bounds__(SB2ST_HB2ST_MAX_THDS)
     T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
     S* D = load_ptr_batch<S>(DD, bid, 0, strideD);
     S* E = load_ptr_batch<S>(EE, bid, 0, strideE);
-    T* work;
 
     // shared memory setup
     extern __shared__ double lmem[];
     T* housev = reinterpret_cast<T*>(lmem);
-    T* sval = reinterpret_cast<T*>(housev + nb);
-
-    if(workA)
-        work = workA + bid * strideW;
-    else
-        work = reinterpret_cast<T*>(sval);
+    T* reduct = reinterpret_cast<T*>(housev + nb);
 
     // get sweep parameters
     rocblas_int last_started = step / 3;
@@ -273,8 +442,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(SB2ST_HB2ST_MAX_THDS)
         return;
 
     // execute sweep step
-    sb2st_hb2st_sweep_step<SB2ST_HB2ST_MAX_THDS, T, S>(tid, n, nb, s, sm_i, A, lda, D, E, housev,
-                                                       sval, work);
+    sb2st_hb2st_sweep_step<T, S>(xid, yid, n, nb, s, sm_i, A, lda, D, E, housev, reduct);
 }
 
 template <typename T, typename S>
@@ -389,21 +557,13 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
     hipDeviceProp_t props;
     HIP_CHECK(hipGetDeviceProperties(&props, device));
 
-    T* work = nullptr;
-    rocblas_int strideW = 3 * nb;
-
     size_t lmemsize_housev = sizeof(T) * nb;
-    size_t lmemsize_larfg = sizeof(T) * SB2ST_HB2ST_MAX_THDS;
-    size_t lmemsize_larf = sizeof(T) * strideW;
-    size_t lmemsize = lmemsize_housev + std::max(lmemsize_larfg, lmemsize_larf);
+    size_t lmemsize_reduction = sizeof(T) * DIMX * DIMY;
+    size_t lmemsize = lmemsize_housev + lmemsize_reduction;
 
     if(lmemsize > props.sharedMemPerBlock)
     {
-        lmemsize = lmemsize_housev + lmemsize_larfg;
-        work = W;
-
-        if(lmemsize > props.sharedMemPerBlock)
-            return rocblas_status_internal_error;
+        return rocblas_status_internal_error;
     }
 
     const rocblas_int steps_per_sweep = (n - 2) / nb + 1;
@@ -411,20 +571,20 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
     const rocblas_int num_steps = 3 * (n - 1) + 1;
 
     // execute sweeps
-    if(sweeps_in_parallel < 2)
+    if(sweeps_in_parallel < 3)
     {
-        ROCSOLVER_LAUNCH_KERNEL(sb2st_hb2st_kernel<T>, dim3(1, 1, batch_count),
-                                dim3(SB2ST_HB2ST_MAX_THDS, 1, 1), lmemsize, stream, n, nb, A,
-                                shiftA, lda, strideA, D, strideD, E, strideE, work, strideW);
+        ROCSOLVER_LAUNCH_KERNEL(sb2st_hb2st_kernel<T>, dim3(1, 1, batch_count), dim3(DIMX, DIMY, 1),
+                                lmemsize, stream, n, nb, A, shiftA, lda, strideA, D, strideD, E,
+                                strideE);
     }
     else
     {
         for(rocblas_int step = 0; step < num_steps; step++)
         {
             ROCSOLVER_LAUNCH_KERNEL(sb2st_hb2st_step_kernel<T>,
-                                    dim3(1, sweeps_in_parallel, batch_count),
-                                    dim3(SB2ST_HB2ST_MAX_THDS, 1, 1), lmemsize, stream, n, nb, step,
-                                    A, shiftA, lda, strideA, D, strideD, E, strideE, work, strideW);
+                                    dim3(1, sweeps_in_parallel, batch_count), dim3(DIMX, DIMY, 1),
+                                    lmemsize, stream, n, nb, step, A, shiftA, lda, strideA, D,
+                                    strideD, E, strideE);
         }
     }
 
@@ -438,6 +598,7 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
     return rocblas_status_success;
 }
 
-#undef SB2ST_HB2ST_MAX_THDS
+#undef DIMX
+#undef DIMY
 
 ROCSOLVER_END_NAMESPACE
