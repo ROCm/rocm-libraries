@@ -59,6 +59,7 @@
 #include "common/auxiliary/testing_ormtr_unmtr.hpp"
 #include "common/auxiliary/testing_ormxl_unmxl.hpp"
 #include "common/auxiliary/testing_ormxr_unmxr.hpp"
+#include "common/auxiliary/testing_sb2st_hb2st.hpp"
 #include "common/auxiliary/testing_stebz.hpp"
 #include "common/auxiliary/testing_stedc.hpp"
 #include "common/auxiliary/testing_stedcj.hpp"
@@ -379,6 +380,7 @@ class rocsolver_dispatcher
         // Map for functions that support only single and double precisions
         static const func_map map_real = {
             // auxiliaries
+            {"sb2st", testing_sb2st_hb2st<T>},
             {"sterf", testing_sterf<T>},
             {"stebz", testing_stebz<T>},
             {"bdsvdx", testing_bdsvdx<T>},
@@ -490,6 +492,7 @@ class rocsolver_dispatcher
         // Map for functions that support only single-complex and double-complex precisions
         static const func_map map_complex = {
             // auxiliaries
+            {"hb2st", testing_sb2st_hb2st<T>},
             {"lacgv", testing_lacgv<T, rocblas_int>},
             {"lacgv_64", testing_lacgv<T, int64_t>},
             {"he2hb", testing_sy2sb_he2hb<T, rocblas_int>},

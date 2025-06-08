@@ -42,8 +42,7 @@ void sb2st_hb2st_initData(const rocblas_handle handle,
                           const rocblas_int nb,
                           Ud& dA,
                           const rocblas_int lda,
-                          Uh& hA,
-                          const rocblas_int bc)
+                          Uh& hA)
 {
     if(CPU)
     {
@@ -51,28 +50,25 @@ void sb2st_hb2st_initData(const rocblas_handle handle,
 
         // scale A to avoid singularities
         // transform A to a banded matrix
-        for(rocblas_int b = 0; b < bc; ++b)
+        for(rocblas_int i = 0; i < n; i++)
         {
-            for(rocblas_int i = 0; i < n; i++)
+            for(rocblas_int j = i; j < n; j++)
             {
-                for(rocblas_int j = i; j < n; j++)
+                if(i == j)
                 {
-                    if(i == j)
-                    {
-                        hA[b][i + j * lda] = std::real(hA[b][i + j * lda]) + 400;
-                    }
-                    else if(j > i + nb)
-                    {
-                        hA[b][i + j * lda] = 0;
-                    }
-                    else
-                    {
-                        hA[b][i + j * lda] -= 4;
-                    }
-
-                    if(i != j)
-                        hA[b][j + i * lda] = sconj(hA[b][i + j * lda]);
+                    hA[0][i + j * lda] = std::real(hA[0][i + j * lda]) + 400;
                 }
+                else if(j > i + nb)
+                {
+                    hA[0][i + j * lda] = 0;
+                }
+                else
+                {
+                    hA[0][i + j * lda] -= 4;
+                }
+
+                if(i != j)
+                    hA[0][j + i * lda] = sconj(hA[0][i + j * lda]);
             }
         }
     }
@@ -103,7 +99,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
     using S = decltype(std::real(T{}));
 
     // input data initialization
-    sb2st_hb2st_initData<true, true, T>(handle, uplo, n, nb, dA, lda, hA, 1);
+    sb2st_hb2st_initData<true, true, T>(handle, uplo, n, nb, dA, lda, hA);
 
     // execute computations
     // GPU lapack
@@ -133,6 +129,67 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
 
     if(std::isnan(err) || std::isinf(err))
         *max_err = NAN;
+}
+
+template <typename T, typename Td, typename Ud, typename Uh>
+void sb2st_hb2st_getPerfData(const rocblas_handle handle,
+                             const rocblas_fill uplo,
+                             const rocblas_int n,
+                             const rocblas_int nb,
+                             Ud& dA,
+                             const rocblas_int lda,
+                             Td& dD,
+                             Td& dE,
+                             Uh& hA,
+                             double* gpu_time_used,
+                             double* cpu_time_used,
+                             const rocblas_int hot_calls,
+                             const int profile,
+                             const bool profile_kernels,
+                             const bool perf)
+{
+    if(!perf)
+    {
+        // cpu-lapack performance (only if not in perf mode)
+        *cpu_time_used = nan("");
+    }
+
+    sb2st_hb2st_initData<true, false, T>(handle, uplo, n, nb, dA, lda, hA);
+
+    // cold calls
+    for(int iter = 0; iter < 2; iter++)
+    {
+        sb2st_hb2st_initData<false, true, T>(handle, uplo, n, nb, dA, lda, hA);
+
+        CHECK_ROCBLAS_ERROR(
+            rocsolver_sb2st_hb2st(handle, n, nb, dA.data(), lda, dD.data(), dE.data()));
+    }
+
+    // gpu-lapack performance
+    hipStream_t stream;
+    CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
+    double start;
+
+    if(profile > 0)
+    {
+        if(profile_kernels)
+            rocsolver_log_set_layer_mode(rocblas_layer_mode_log_profile
+                                         | rocblas_layer_mode_ex_log_kernel);
+        else
+            rocsolver_log_set_layer_mode(rocblas_layer_mode_log_profile);
+        rocsolver_log_set_max_levels(profile);
+    }
+
+    for(rocblas_int iter = 0; iter < hot_calls; iter++)
+    {
+        sb2st_hb2st_initData<false, true, T>(handle, uplo, n, nb, dA, lda, hA);
+
+        start = get_time_us_sync(stream);
+        CHECK_ROCBLAS_ERROR(
+            rocsolver_sb2st_hb2st(handle, n, nb, dA.data(), lda, dD.data(), dE.data()));
+        *gpu_time_used += get_time_us_sync(stream) - start;
+    }
+    *gpu_time_used /= hot_calls;
 }
 
 template <typename T>
@@ -222,10 +279,11 @@ void testing_sb2st_hb2st(Arguments& argus)
         sb2st_hb2st_getError<T>(handle, uplo, n, nb, dA, lda, dD, dE, hA, hARes, hDRes, hERes, hW,
                                 &max_error);
 
-    // // collect performance data
-    // if(argus.timing && hot_calls > 0)
-    //     sb2st_hb2st_getPerfData<T>(handle, &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
-    //                          argus.profile_kernels, argus.perf);
+    // collect performance data
+    if(argus.timing && hot_calls > 0)
+        sb2st_hb2st_getPerfData<T>(handle, uplo, n, nb, dA, lda, dE, dE, hA, &gpu_time_used,
+                                   &cpu_time_used, hot_calls, argus.profile, argus.profile_kernels,
+                                   argus.perf);
 
     // validate results for rocsolver-test
     if(argus.unit_check)
