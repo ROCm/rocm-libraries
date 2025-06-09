@@ -40,6 +40,7 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 ### Resolved issues
 * Fixed an issue where `Sort(keys, compare_op, valid_items, oob_default)` in `block_merge_sort.hpp` would not fill in elements that are out of range (items after `valid_items`) with `oob_default`.
+* Fixed an issue where `ScatterToStripedFlagged` in `block_exhange.hpp` was calling the wrong function.
 
 ### Known issues
 
