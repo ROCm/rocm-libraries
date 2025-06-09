@@ -163,9 +163,6 @@ template <typename T, typename I>
 __device__ void
     sb2st_larf(const I xid, const I yid, rocblas_side side, I m, I n, T* v, T tau, T* C, I ldc, T* reduct)
 {
-    if(tau == 0)
-        return;
-
     if(side == rocblas_side_left)
     {
         for(I j = yid; j < n; j += DIMY)
@@ -260,20 +257,23 @@ __device__ void sb2st_hb2st_sweep_step(const rocblas_int xid,
         __syncthreads();
 
         // apply Householder reflector
-        rocblas_int nn = su_e - sm_i;
-        sb2st_larf(xid, yid, rocblas_side_left, mm, nn, housev, conj(tau), A + sm_i + sm_i * lda,
-                   lda, reduct);
-        __syncthreads();
-        sb2st_larf(xid, yid, rocblas_side_right, mm, mm, housev, tau, A + sm_i + sm_i * lda, lda,
-                   reduct);
-
-        // copy transpose blocks
-        nn = su_e - su_i;
-        for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += DIMX * DIMY)
+        if(tau != 0)
         {
-            rocblas_int i = su_i + idx1d % nn;
-            rocblas_int j = sm_i + idx1d / nn;
-            A[i + j * lda] = conj(A[j + i * lda]);
+            rocblas_int nn = su_e - sm_i;
+            sb2st_larf(xid, yid, rocblas_side_left, mm, nn, housev, conj(tau),
+                       A + sm_i + sm_i * lda, lda, reduct);
+            __syncthreads();
+            sb2st_larf(xid, yid, rocblas_side_right, mm, mm, housev, tau, A + sm_i + sm_i * lda,
+                       lda, reduct);
+
+            // copy transpose blocks
+            nn = su_e - su_i;
+            for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += DIMX * DIMY)
+            {
+                rocblas_int i = su_i + idx1d % nn;
+                rocblas_int j = sm_i + idx1d / nn;
+                A[i + j * lda] = conj(A[j + i * lda]);
+            }
         }
     }
 
@@ -312,27 +312,30 @@ __device__ void sb2st_hb2st_sweep_step(const rocblas_int xid,
         __syncthreads();
 
         // apply Householder reflector
-        rocblas_int nn = su_e - sd_i - 1;
-        sb2st_larf(xid, yid, rocblas_side_left, mm, nn, housev, conj(tau),
-                   A + sm_i + (sd_i + 1) * lda, lda, reduct);
-        __syncthreads();
-        sb2st_larf(xid, yid, rocblas_side_right, mm, mm, housev, tau, A + sm_i + sm_i * lda, lda,
-                   reduct);
+        if(tau != 0)
+        {
+            rocblas_int nn = su_e - sd_i - 1;
+            sb2st_larf(xid, yid, rocblas_side_left, mm, nn, housev, conj(tau),
+                       A + sm_i + (sd_i + 1) * lda, lda, reduct);
+            __syncthreads();
+            sb2st_larf(xid, yid, rocblas_side_right, mm, mm, housev, tau, A + sm_i + sm_i * lda,
+                       lda, reduct);
 
-        // copy transpose blocks
-        nn = su_e - su_i;
-        for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += DIMX * DIMY)
-        {
-            rocblas_int i = su_i + idx1d % nn;
-            rocblas_int j = sm_i + idx1d / nn;
-            A[i + j * lda] = conj(A[j + i * lda]);
-        }
-        nn = sd_e - sd_i;
-        for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += DIMX * DIMY)
-        {
-            rocblas_int i = sd_i + idx1d % nn;
-            rocblas_int j = sm_i + idx1d / nn;
-            A[i + j * lda] = conj(A[j + i * lda]);
+            // copy transpose blocks
+            nn = su_e - su_i;
+            for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += DIMX * DIMY)
+            {
+                rocblas_int i = su_i + idx1d % nn;
+                rocblas_int j = sm_i + idx1d / nn;
+                A[i + j * lda] = conj(A[j + i * lda]);
+            }
+            nn = sd_e - sd_i;
+            for(rocblas_int idx1d = tid; idx1d < nn * mm; idx1d += DIMX * DIMY)
+            {
+                rocblas_int i = sd_i + idx1d % nn;
+                rocblas_int j = sm_i + idx1d / nn;
+                A[i + j * lda] = conj(A[j + i * lda]);
+            }
         }
     }
 }
