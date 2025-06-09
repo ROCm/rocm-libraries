@@ -33,8 +33,8 @@ trigger:
     - projects/hipcub/.gitlab
     - projects/hipcub/.jenkins
     - projects/hipcub/docs
-    - projects/hipcub/'.*.y*ml'
-    - projects/hipcub/'*.md'
+    - projects/hipcub/.*.y*ml
+    - projects/hipcub/*.md
     - projects/hipcub/LICENSE.txt
     - projects/hipcub/NOTICES.txt
 
@@ -53,8 +53,8 @@ pr:
     - projects/hipcub/.gitlab
     - projects/hipcub/.jenkins
     - projects/hipcub/docs
-    - projects/hipcub/'.*.y*ml'
-    - projects/hipcub/'*.md'
+    - projects/hipcub/.*.y*ml
+    - projects/hipcub/*.md
     - projects/hipcub/LICENSE.txt
     - projects/hipcub/NOTICES.txt
   drafts: false
