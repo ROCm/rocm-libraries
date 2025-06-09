@@ -11,6 +11,19 @@ Documentation for rocThrust available at
 * Drop `c++14` support for rocthrust.
 * Renamed `cpp14_required.h` to `cpp_version_check.h`
 
+### Added
+* Additional unit tests for:
+  * binary_search
+  * complex
+  * c99math
+  * catrig
+  * ccosh
+  * cexp
+  * clog
+  * csin
+  * csqrt
+  * ctan
+
 ### Removed
 
 * `device_malloc_allocator.h` has been removed. This header file was unused and should not impact users.

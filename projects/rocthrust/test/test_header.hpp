@@ -197,8 +197,7 @@ struct Params<thrust::device_vector<T>, ExecutionPolicy>
   TYPED_TEST_SUITE(x, y);
 
 // Set of test parameter types
-namespace test
-{
+
 class large_data
 {
 public:
@@ -241,7 +240,6 @@ bool __host__ __device__ operator==(T const& lhs, large_data const& rhs)
 {
   return static_cast<large_data>(lhs).data[0] == rhs.data[0];
 }
-} // namespace test
 
 // Host and device vectors of all type as a test parameter
 using FullTestsParams = ::testing::Types<
@@ -285,7 +283,7 @@ using FullWithLargeTypesTestsParams = ::testing::Types<
   Params<thrust::device_vector<float>, std::decay_t<decltype(thrust::hip::par_det)>>,
   Params<thrust::device_vector<float>, std::decay_t<decltype(thrust::hip::par_det_nosync)>>,
   Params<thrust::device_vector<double>>,
-  Params<thrust::device_vector<test::large_data>>>;
+  Params<thrust::device_vector<large_data>>>;
 
 // Host and device vectors of signed type
 using VectorSignedTestsParams =
@@ -436,3 +434,25 @@ using AllInOutTestsParams = ::testing::Types<
   ParamsInOut<int, long long>,
   ParamsInOut<unsigned int, unsigned long long>,
   ParamsInOut<float, double>>;
+
+// --------------------Pairs test parameters--------
+template <class T, class U>
+
+struct ParamsPairs
+{
+  using first_type  = T;
+  using second_type = U;
+};
+
+#define TESTS_PAIRS_DEFINE(x, y)                           \
+  template <class ParamsPairs>                             \
+  class x : public ::testing::Test                         \
+  {                                                        \
+  public:                                                  \
+    using first_type  = typename ParamsPairs::first_type;  \
+    using second_type = typename ParamsPairs::second_type; \
+  };                                                       \
+  TYPED_TEST_SUITE(x, y);
+
+using PairsTestsParams = ::testing::
+  Types<ParamsPairs<float, float>, ParamsPairs<double, double>, ParamsPairs<float, double>, ParamsPairs<double, float>>;
