@@ -46,30 +46,41 @@ ROCSOLVER_BEGIN_NAMESPACE
 #define DIMX 32
 #define DIMY 32
 
+template <typename T, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
+__device__ __inline__ T shift_left(T& value, int lane_delta)
+{
+    T r = value;
+    r = __shfl_down(r, lane_delta);
+    return r;
+}
+
+template <typename T, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
+__device__ __inline__ T shift_left(T& value, int lane_delta)
+{
+    using S = decltype(std::real(T{}));
+    S r = value.real();
+    S i = value.imag();
+    r = __shfl_down(r, lane_delta);
+    i = __shfl_down(i, lane_delta);
+    return rocblas_complex_num<S>(r, i);
+}
+
 template <typename T, typename I, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
 __device__ void sb2st_larfg(const I xid, I n, T& alpha, T* x, T& tau, T* reduct)
 {
     // dot reduction
-    reduct[xid] = 0;
+    T norm2 = 0;
     for(I i = xid; i < n - 1; i += DIMX)
-        reduct[xid] += x[i] * x[i];
+        norm2 += x[i] * x[i];
+    norm2 += shift_left(norm2, 16);
+    norm2 += shift_left(norm2, 8);
+    norm2 += shift_left(norm2, 4);
+    norm2 += shift_left(norm2, 2);
+    norm2 += shift_left(norm2, 1);
+    if(xid == 0)
+        reduct[0] = norm2;
     __threadfence();
-    if(xid < 16)
-        reduct[xid] += reduct[xid + 16];
-    __threadfence();
-    if(xid < 8)
-        reduct[xid] += reduct[xid + 8];
-    __threadfence();
-    if(xid < 4)
-        reduct[xid] += reduct[xid + 4];
-    __threadfence();
-    if(xid < 2)
-        reduct[xid] += reduct[xid + 2];
-    __threadfence();
-    if(xid < 1)
-        reduct[xid] += reduct[xid + 1];
-    __threadfence();
-    T norm2 = reduct[0] + alpha * alpha;
+    norm2 = reduct[0] + alpha * conj(alpha);
 
     __shared__ T s;
 
@@ -100,26 +111,18 @@ __device__ void sb2st_larfg(const I xid, I n, T& alpha, T* x, T& tau, T* reduct)
     using S = decltype(std::real(T{}));
 
     // dot reduction
-    reduct[xid] = 0;
+    T norm2 = 0;
     for(I i = xid; i < n - 1; i += DIMX)
-        reduct[xid] += x[i] * conj(x[i]);
+        norm2 += x[i] * conj(x[i]);
+    norm2 += shift_left(norm2, 16);
+    norm2 += shift_left(norm2, 8);
+    norm2 += shift_left(norm2, 4);
+    norm2 += shift_left(norm2, 2);
+    norm2 += shift_left(norm2, 1);
+    if(xid == 0)
+        reduct[0] = norm2;
     __threadfence();
-    if(xid < 16)
-        reduct[xid] += reduct[xid + 16];
-    __threadfence();
-    if(xid < 8)
-        reduct[xid] += reduct[xid + 8];
-    __threadfence();
-    if(xid < 4)
-        reduct[xid] += reduct[xid + 4];
-    __threadfence();
-    if(xid < 2)
-        reduct[xid] += reduct[xid + 2];
-    __threadfence();
-    if(xid < 1)
-        reduct[xid] += reduct[xid + 1];
-    __threadfence();
-    T norm2 = reduct[0] + alpha * conj(alpha);
+    norm2 = reduct[0] + alpha * conj(alpha);
 
     S ar = alpha.real();
     S ai = alpha.imag();
@@ -163,35 +166,26 @@ __device__ void
     if(tau == 0)
         return;
 
-    const I tid = xid + yid * DIMX;
     if(side == rocblas_side_left)
     {
         for(I j = yid; j < n; j += DIMY)
         {
             // gemv reduction
-            reduct[tid] = 0;
+            T value = 0;
             for(I i = xid; i < m; i += DIMX)
-                reduct[tid] += conj(C[i + j * ldc]) * v[i];
-            __threadfence();
-            if(xid < 16)
-                reduct[tid] += reduct[tid + 16];
-            __threadfence();
-            if(xid < 8)
-                reduct[tid] += reduct[tid + 8];
-            __threadfence();
-            if(xid < 4)
-                reduct[tid] += reduct[tid + 4];
-            __threadfence();
-            if(xid < 2)
-                reduct[tid] += reduct[tid + 2];
-            __threadfence();
-            if(xid < 1)
-                reduct[tid] += reduct[tid + 1];
+                value += conj(C[i + j * ldc]) * v[i];
+            value += shift_left(value, 16);
+            value += shift_left(value, 8);
+            value += shift_left(value, 4);
+            value += shift_left(value, 2);
+            value += shift_left(value, 1);
+            if(xid == 0)
+                reduct[yid] = value;
             __threadfence();
 
             // ger
             for(I i = xid; i < m; i += DIMX)
-                C[i + j * ldc] -= tau * v[i] * conj(reduct[yid * DIMX]);
+                C[i + j * ldc] -= tau * v[i] * conj(reduct[yid]);
         }
     }
     else
@@ -199,29 +193,21 @@ __device__ void
         for(I i = yid; i < m; i += DIMY)
         {
             // gemv reduction
-            reduct[tid] = 0;
+            T value = 0;
             for(I j = xid; j < n; j += DIMX)
-                reduct[tid] += C[i + j * ldc] * v[j];
-            __threadfence();
-            if(xid < 16)
-                reduct[tid] += reduct[tid + 16];
-            __threadfence();
-            if(xid < 8)
-                reduct[tid] += reduct[tid + 8];
-            __threadfence();
-            if(xid < 4)
-                reduct[tid] += reduct[tid + 4];
-            __threadfence();
-            if(xid < 2)
-                reduct[tid] += reduct[tid + 2];
-            __threadfence();
-            if(xid < 1)
-                reduct[tid] += reduct[tid + 1];
+                value += C[i + j * ldc] * v[j];
+            value += shift_left(value, 16);
+            value += shift_left(value, 8);
+            value += shift_left(value, 4);
+            value += shift_left(value, 2);
+            value += shift_left(value, 1);
+            if(xid == 0)
+                reduct[yid] = value;
             __threadfence();
 
             // ger
             for(I j = xid; j < n; j += DIMX)
-                C[i + j * ldc] -= tau * conj(v[j]) * reduct[yid * DIMX];
+                C[i + j * ldc] -= tau * conj(v[j]) * reduct[yid];
         }
     }
 }
@@ -558,7 +544,7 @@ rocblas_status rocsolver_sb2st_hb2st_template(rocblas_handle handle,
     HIP_CHECK(hipGetDeviceProperties(&props, device));
 
     size_t lmemsize_housev = sizeof(T) * nb;
-    size_t lmemsize_reduction = sizeof(T) * DIMX * DIMY;
+    size_t lmemsize_reduction = sizeof(T) * DIMY;
     size_t lmemsize = lmemsize_housev + lmemsize_reduction;
 
     if(lmemsize > props.sharedMemPerBlock)
