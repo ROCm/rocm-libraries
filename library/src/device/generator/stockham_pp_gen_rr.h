@@ -25,7 +25,6 @@
 //       - Revisit all usages of transform_per_block and max_factor_pp.
 //       - Test with factors_pp.size() > 1
 //       - Revisit lstride usage and input/output strides
-//       - Revisit factor 64 logic in calculate_offsets() with different input lengths
 
 // Variation of StockhamKernelRR that implements the partial pass
 // method. Similarities of StockhamPartialPassKernelRR with
@@ -53,11 +52,25 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
         max_factor_pp = *std::max_element(factors_pp.begin(), factors_pp.end());
 
+        length_off_dim = params.parent_length[params.off_dim];
+
         R.size = Expression{std::max(nregisters, max_factor_pp)};
+
+        // nregister must not be larger than max_factor_pp.
+        // If that were to be true,  work in the off-dimension
+        // in perform_partial_pass_step_1_2() would require to
+        // to be applied to (nregisters-max_factor_pp) elements
+        // in the off-dimension, but this data is not available
+        // in the LDS, and the number of additional elements
+        // would need to be at least a multiple of max_factor_pp.
+        if(nregisters > max_factor_pp)
+            throw std::runtime_error(
+                "StockhamPartialPassKernelRR: nregisters cannot be larger than max_factor_pp");
     }
 
     StockhamPartialPassParams params;
 
+    unsigned int              length_off_dim;
     unsigned int              max_factor_pp;
     std::vector<unsigned int> factors_pp;
     unsigned int              length_pp;
@@ -84,8 +97,10 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
                         block_id * transforms_per_block + thread_id / threads_per_transform};
         stmts += Assign{remaining, transform};
         stmts += Assign{remaining_pp,
-                        64 * Parens(transform / 64) + Parens(transform % 64) / transforms_per_block
-                            + Parens(transform * (64 / transforms_per_block)) % 64};
+                        length_off_dim * Parens(transform / length_off_dim)
+                            + Parens(transform % length_off_dim) / transforms_per_block
+                            + Parens(transform * (length_off_dim / transforms_per_block))
+                                  % length_off_dim};
 
         stmts += For{d,
                      1,
