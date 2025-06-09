@@ -28,6 +28,7 @@ on:
       - 'develop'
       - 'staging'
       - 'main'
+      - 'release-staging/rocm-rel-7.*'
     # Ignore changes to top-level files and directories
     # that are not part of the subtree structure
     paths-ignore:

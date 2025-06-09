@@ -27,7 +27,7 @@ jobs:
     name: "Setup"
     runs-on: ubuntu-24.04
     outputs:
-      jobs: ${{ steps.jobs.outputs.jobs }}
+      projects: ${{ steps.projects.outputs.projects }}
     steps:
       # Checkout the mono-repo which includes the PR.
       - name: Checkout rocm-libraries Repository
@@ -35,12 +35,13 @@ jobs:
         with:
           path: rocm-libraries
 
-      - name: Checkout TheRock Repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          repository: "ROCm/TheRock"
-          path: "TheRock"
-          ref: a742718b33993332131863885a621fceef6f9b48
+      # # will be needed for `patch_monorepo.py` but necessary now
+      # - name: Checkout TheRock Repository
+      #   uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      #   with:
+      #     repository: "ROCm/TheRock"
+      #     path: "TheRock"
+      #     ref: 0730cccf8b98e012d64750f26032bd760360fa45
 
       - name: Generate a token
         id: generate-token
@@ -77,33 +78,25 @@ jobs:
             --pr "${{ github.event.pull_request.number }}" \
             --config "rocm-libraries/.github/repos-config.json"
 
-      - name: Determine jobs to run
-        id: jobs
-        if: steps.detect.outputs.subtrees
+      - name: Determine projects to run
+        id: projects
         env:
           SUBTREES: ${{ steps.detect.outputs.subtrees }}
         run: |
-          python ./TheRock/build_tools/github_actions/monorepo_configure_ci.py
+          python rocm-libraries/.github/scripts/therock_configure_ci.py
 
-  therock-build-linux:
-    name: Build Linux Packages
-    needs: setup
-    if: ${{ needs.setup.outputs.jobs }}
+  therock-ci-linux:
+    name: TheRock CI Linux
     permissions:
       contents: read
       id-token: write
-    uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@a742718b33993332131863885a621fceef6f9b48
+    needs: setup
+    if: ${{ needs.setup.outputs.projects != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        projects: ${{ fromJSON(needs.setup.outputs.projects) }}
+    uses: ./.github/workflows/therock-ci-linux.yml
     with:
-      amdgpu_families: "gfx94X-dcgpu"
-      expect_failure: false
-      extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries -DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF"
-
-  therock-test-linux:
-    name: "rocPRIM math-lib test"
-    needs: therock-build-linux
-    uses: ROCm/TheRock/.github/workflows/test_rocprim.yml@a742718b33993332131863885a621fceef6f9b48
-    with:
-      artifact_run_id: "${{ github.run_id }}"
-      amdgpu_families: "gfx94X-dcgpu"
-      test_runs_on: "linux-mi300-1gpu-ossci-rocm"
-      platform: "linux"
+      cmake_options: ${{ matrix.projects.cmake_options }}
+      project_to_test: ${{ matrix.projects.project_to_test }}
