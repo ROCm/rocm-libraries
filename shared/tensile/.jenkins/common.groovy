@@ -92,7 +92,7 @@ def runCodecovTestCommand(platform, project, jobName)
     this.publishHTML([allowMissing: false,
         alwaysLinkToLastBuild: false,
         keepAll: false,
-        reportDir: "${project.paths.project_build_prefix}/coverage-report",
+        reportDir: "${project.paths.project_build_prefix}/build/coverage-report",
         reportFiles: "index.html",
         reportName: "Code coverage report",
         reportTitles: "Code coverage report"
