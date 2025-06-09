@@ -76,13 +76,6 @@ class ShiftVectorComponentsVALU(ShiftVectorComponents):
             tmpVgpr = writer.vgprPool.checkOut(1,"tmpVgpr")
             wgMT = writer.vgprPool.checkOut(1,"wgMT")
             tmpVgprRes = ContinuousRegister(tmpVgpr, 2)
-            # kStr += inst("v_mov_b32", vgpr(wgMT), sgpr(wg), "")
-            # kStr += inst("v_mul_i32_i24", vgpr(wgMT), hex(-kernel[tP["mt"]]), vgpr(wgMT), \
-            #         "wg*MT")
-            # kStr += inst("_v_add_co_u32", vgpr(wgMT), writer.vcc, sgpr("SizesFree+%u"%tP["idx"]), \
-            #         vgpr(wgMT), "wgMT = Size - wg*MT")
-            # kStr += inst("v_mov_b32", vgpr(tmpVgpr), hex(kernel[tP["mt"]]), "MT")
-            # kStr += inst("v_min_u32"    , vgpr(wgMT), vgpr(tmpVgpr), vgpr(wgMT), "wgMT = (wgMT < MT) ? wgMT : MT" )
             module.add(VMovB32(dst=vgpr(wgMT), src=sgpr(wg), comment=""))
             module.add(VMulI32I24(dst=vgpr(wgMT), src0=hex(-kernel[tP["mt"]]), src1=vgpr(wgMT), comment="wg*MT"))
             module.add(VAddCOU32(dst=vgpr(wgMT), dst1=VCC(), src0=sgpr("SizesFree+%u"%tP["idx"]), src1=vgpr(wgMT), comment="wgMT = Size - wg*MT"))
@@ -124,75 +117,45 @@ class ShiftVectorComponentsVALU(ShiftVectorComponents):
             if True:#tP["tensorIdx"] > kernel["VectorWidth"]:
                 mvReg = writer.vgprPool.checkOut(1,"mvReg")
                 divisor = kernel[tP["sg"]]*vectorWidth
-                # kStr += vectorStaticDivide(mvReg, wgMT, divisor, tmpSgpr)
                 module.add(vectorStaticDivide(mvReg, wgMT, divisor, tmpVgprRes))
                 if glvw < vectorWidth:
-                    # kStr += inst("v_lshlrev_b32", vgpr(mvReg), hex(log2(kernel["VectorWidth"]//vw)), vgpr(mvReg), "vId *= VW/glvw")
                     module.add(VLShiftRightB32(dst=vgpr(mvReg), shiftHex=hex(log2(vectorWidth//glvw)), src=vgpr(mvReg), comment="vId *= GLVW/glvw"))
-            #kStr += dump(vgpr(mvReg))
 
             vReg = writer.vgprPool.checkOut(1,"vReg")
             divisor = vectorWidth
-            # kStr += vectorStaticRemainder(vReg, wgMT, divisor, tmpSgpr)
-            module.add(vectorStaticRemainder(vReg, wgMT, divisor, tmpSgpr))
+            module.add(vectorStaticRemainder(dummy, vReg, wgMT, divisor, tmpVgprRes, tmpSgprInfo))
             vRegD = writer.vgprPool.checkOut(1,"vRegD")
-            # kStr += inst("v_mov_b32", vgpr(vRegD), vgpr(vReg), "duplicate")
             module.add(VMovB32(dst=vgpr(vRegD), src=vgpr(vReg), comment="duplicate"))
             divisor = glvw
-            # kStr += vectorStaticDivide(vReg, vRegD, divisor, tmpSgpr)
             module.add(vectorStaticDivide(vReg, vRegD, divisor, tmpVgprRes))
-            #kStr += dump(vgpr(vReg))
 
             if True:#tP["tensorIdx"] > kernel["VectorWidth"]:
-                # kStr += inst("_v_add_co_u32", vgpr(vReg), writer.vcc, vgpr(mvReg), vgpr(vReg), "vId = 2 components")
                 module.add(VAddCOU32(dst=vgpr(vReg), dst1=VCC(), src0=vgpr(mvReg), src1=vgpr(vReg), comment="vId = 2 components"))
                 writer.vgprPool.checkIn(mvReg)
                 writer.vgprPool.checkIn(vRegD)
 
             # for each remainder, jump
             for r in range(1, glvw):
-                # kStr += inst("v_cmp_eq_u32", writer.vcc, vgpr(rReg), \
-                #         hex(r), "wgMT%%VW == %u"%r )
-                # kStr += inst("s_cbranch_vccnz label_%04u"\
-                #         % svrLabels[(r-1)%vw], \
-                #         "shift d%u r=%u"%(tP["idx"], r))
                 module.add(VCmpEQU32(dst=VCC(), src0=vgpr(rReg), src1=hex(r), comment="wgMT%%GLVW == %u"%r ))
                 module.add(SCBranchVCCNZ(labelName=svrLabels[(r-1)%glvw].getLabelName(), comment="shift d%u r=%u"%(tP["idx"], r)))
-                #kStr += inst("s_mov_b32", sgpr(sgprLoc), hex(location), \
-                #        "location=%u"%location) location *= 2
-                #kStr += inst("v_or_b32", vgpr(vgprPath), sgpr(sgprLoc), \
-                #        vgpr(vgprPath), "path+=location")
-            # kStr += inst("s_branch label_%04u"%svrLabels[vw-1], \
-            #         "no shifting" )
             module.add(SBranch(labelName=svrLabels[glvw-1].getLabelName(), comment="no shifting" ))
 
             # code blocks for shifting
             for r in range(1, glvw):
-                # kStr += writer.comment3("shift d%u r=%u"%(tP["idx"], r))
-                # kStr += "label_%04u:%s" % (svrLabels[r-1], writer.endLine)
                 module.addComment2("shift d%u r=%u"%(tP["idx"], r))
                 module.add(svrLabels[r-1])
 
                 # for each vector index, jump
                 for vectorIdx in range(0, numVectors):
-                    # kStr += inst("v_cmp_eq_u32", writer.vcc, vgpr(vReg), \
-                    #         hex(vectorIdx), "wgMT/(SG*VW) == %u"%vectorIdx )
-                    # kStr += inst("s_cbranch_vccnz label_%04u"\
-                    #         % sviLabels[(r-1)%glvw][vectorIdx], \
-                    #         "shift d%u, r=%u, v=%u"%(tP["idx"], r, vectorIdx))
                     module.add(VCmpEQU32(dst=VCC(), src0=vgpr(vReg), src1=hex(vectorIdx), comment="wgMT/(SG*VW) == %u"%vectorIdx ))
                     module.add(SCBranchVCCNZ(labelName=sviLabels[(r-1)%glvw][vectorIdx].getLabelName(), comment="shift d%u, r=%u, v=%u"%(tP["idx"], r, vectorIdx)))
 
                 # code blocks for shifting vector
                 for vectorIdx in range(0, numVectors):
-                    # kStr += writer.comment("shift d%u r=%u v=%u"%(tP["idx"], r, vectorIdx))
-                    # kStr += "label_%04u:%s" % (sviLabels[r-1][vectorIdx], writer.endLine)
-                    module.addComment2("shift d%u r=%u v=%u"%(tP["idx"], r, vectorIdx))
+                    module.addComment1("shift d%u r=%u v=%u"%(tP["idx"], r, vectorIdx))
                     module.add(sviLabels[r-1][vectorIdx])
 
                     # mask if last thread in thread#-tile column
-                    # kStr += inst("_v_cmpx_eq_u32", sgpr(tmpSgpr,writer.laneSGPRCount), vgpr(thread), \
-                    #     vgpr(eReg), "serial % SG == (wgMT/VECTOR_WIDTH)%SG" )
                     module.add(VCmpXEqU32(dst=sgpr(tmpSgpr, writer.states.laneSGPRCount), src0=vgpr(thread), src1=vgpr(eReg), comment="serial % SG == (wgMT/VECTOR_WIDTH)%SG" ))
                     tto = kernel["ThreadTile%u"%((tP["idx"]+1)%2)] # thread tile orthogonal
                     for tt in range(0, tto):
@@ -203,43 +166,26 @@ class ShiftVectorComponentsVALU(ShiftVectorComponents):
                                     + vectorIdx * glvw + tt * kernel["ThreadTile0"]
                                 src = (s+glvw-r) \
                                     + vectorIdx * glvw + tt * kernel["ThreadTile0"]
-                                # comment = "rC[%u+%u*VW+%u*TT%s] = rC[%u+%u*VW+%u*TT%s]" \
-                                #     % (s, vectorIdx, tt, writer.tileChar0, \
-                                #     s+glvw-r, vectorIdx, tt, writer.tileChar0 )
                             else: # shift d1
                                 dst = (tt) \
                                     + vectorIdx*glvw*kernel["ThreadTile0"] + s * kernel["ThreadTile0"]
                                 src = (tt) \
                                     + vectorIdx * glvw*kernel["ThreadTile0"] + (s+glvw-r) * kernel["ThreadTile0"]
-                                # comment = "rC[%u+%u*TT%s*VW+%u*TT%s] = rC[%u+%u*TT%s*VW+%u*TT%s]" \
-                                #     % (tt, vectorIdx, writer.tileChar0, s, writer.tileChar0, \
-                                #     tt, vectorIdx, writer.tileChar0, \
-                                #     s+glvw-r, writer.tileChar0)
 
-                            # kStr += "// src=%u, dst=%u\n" % (src,dst)
-                            module.addComment2("src=%u, dst=%u" % (src,dst))
+                            module.addComment("src=%u, dst=%u" % (src,dst))
 
                             # f32, f16 isn't be supported
                             for i in range(0, writer.states.bpeCinternal//writer.states.bpr):
-                                # kStr += inst("v_mov_b32", vgpr(writer.startVgprValuC+dst*writer.bpeCinternal//writer.bpr+i), \
-                                #         vgpr(writer.startVgprValuC+src*writer.bpeCinternal//writer.bpr+i), comment)
                                 module.add(VMovB32(dst=vgpr(writer.states.c.startVgprValu+dst*writer.states.bpeCinternal//writer.states.bpr+i), \
-                                                   src=sgpr(writer.states.c.startVgprValu+src*writer.states.bpeCinternal//writer.states.bpr+i), \
+                                                   src=vgpr(writer.states.c.startVgprValu+src*writer.states.bpeCinternal//writer.states.bpr+i), \
                                                    comment=comment))
 
                     # end shift reset mask and jump out
                     all1mask = "0xFFFFFFFF" if (kernel["WavefrontSize"] == 32) else "0xFFFFFFFFFFFFFFFF"
-                    # kStr += inst("s_mov_b{}".format(kernel["WavefrontSize"]), sgpr(tmpSgpr,writer.laneSGPRCount), \
-                    #         all1mask, "to restore all threads active")
-                    # kStr += inst("s_or_saveexec_b{}".format(kernel["WavefrontSize"]), writer.vcc, sgpr(tmpSgpr,writer.laneSGPRCount), \
-                    #         "all threads active")
-                    # kStr += inst("s_branch label_%04u"%svrLabels[glvw-1], \
-                    #         "done shifting" )
                     SOrSaveExecBX = SOrSaveExecB64 if kernel["WavefrontSize"] == 64 else SOrSaveExecB32
                     module.add(SMovB32(sgpr(tmpSgpr, writer.states.laneSGPRCount), all1mask, "to restore all threads active"))
                     module.add(SOrSaveExecBX(dst=VCC(), src=sgpr(tmpSgpr, writer.states.laneSGPRCount), comment="all threads active"))
                     module.add(SBranch(labelName=svrLabels[glvw-1].getLabelName(), comment="done shifting" ))            
-            # kStr += "label_%04u: // end shift0%s" % (svrLabels[glvw-1], writer.endLine)
             module.add(svrLabels[glvw-1])
 
         # checkin scratch vgprs
