@@ -597,7 +597,7 @@ TYPED_TEST(VariousComplexTest, atanh_special)
 
   T qNan   = std::numeric_limits<T>::quiet_NaN();
   T posInf = std::numeric_limits<T>::infinity();
-  
+
   thrust::complex<T> zero_zero(0, 0);
   thrust::complex<T> out = thrust::atanh(zero_zero);
   ASSERT_EQ(0, out.real());
@@ -854,19 +854,22 @@ TYPED_TEST(VariousComplexTest, log)
 {
   using T     = typename TestFixture::T;
   T max_range = std::sqrt(std::numeric_limits<T>::max() / 5);
+
+  auto std_log = [](std::complex<T>& x) {
+    double t_real = x.real();
+    double t_imag = x.imag();
+
+    double r     = std::sqrt(std::pow(t_real, 2) + std::pow(t_imag, 2));
+    double theta = std::atan2(t_imag, t_real);
+
+    double real = std::log(r);
+    double imag = theta;
+
+    return std::complex<T>((T) real, (T) imag);
+  };
+
   run_trig_tests<T>(
-    [](std::complex<T>& x) {
-      double t_real = x.real();
-      double t_imag = x.imag();
-
-      double r     = std::sqrt(std::pow(t_real, 2) + std::pow(t_imag, 2));
-      double theta = std::atan2(t_imag, t_real);
-
-      double real = std::log(r);
-      double imag = theta;
-
-      return std::complex<T>((T) real, (T) imag);
-    },
+    std_log,
     [](thrust::complex<T>& x) {
       return thrust::log(x);
     },
@@ -874,25 +877,38 @@ TYPED_TEST(VariousComplexTest, log)
     max_range,
     -max_range,
     max_range);
+
+  run_trig_tests<T>(
+    std_log,
+    [](thrust::complex<T>& x) {
+      return thrust::log(x);
+    },
+    -5,
+    5,
+    -5,
+    5);
 }
 
 TYPED_TEST(VariousComplexTest, log10)
 {
   using T     = typename TestFixture::T;
   T max_range = std::sqrt(std::numeric_limits<T>::max() / 5);
+
+  auto std_log10 = [](std::complex<T>& x) {
+    double t_real = x.real();
+    double t_imag = x.imag();
+
+    double r     = std::sqrt(std::pow(t_real, 2) + std::pow(t_imag, 2));
+    double theta = std::atan2(t_imag, t_real);
+
+    double real = std::log10(r);
+    double imag = std::log10(std::exp(1.0)) * theta;
+
+    return std::complex<T>((T) real, (T) imag);
+  };
+
   run_trig_tests<T>(
-    [](std::complex<T>& x) {
-      double t_real = x.real();
-      double t_imag = x.imag();
-
-      double r     = std::sqrt(std::pow(t_real, 2) + std::pow(t_imag, 2));
-      double theta = std::atan2(t_imag, t_real);
-
-      double real = std::log10(r);
-      double imag = std::log10(std::exp(1.0)) * theta;
-
-      return std::complex<T>((T) real, (T) imag);
-    },
+    std_log10,
     [](thrust::complex<T>& x) {
       return thrust::log10(x);
     },
@@ -900,6 +916,16 @@ TYPED_TEST(VariousComplexTest, log10)
     max_range,
     -max_range,
     max_range);
+
+  run_trig_tests<T>(
+    std_log10,
+    [](thrust::complex<T>& x) {
+      return thrust::log10(x);
+    },
+    -5,
+    5,
+    -5,
+    5);
 }
 
 // // ===================================================================
