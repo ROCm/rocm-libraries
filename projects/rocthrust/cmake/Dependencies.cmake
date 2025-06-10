@@ -13,32 +13,135 @@
 include(cmake/DownloadProject.cmake)
 include(FetchContent)
 
-# rocPRIM (https://github.com/ROCmSoftwarePlatform/rocPRIM)
-if(NOT DOWNLOAD_ROCPRIM)
-  find_package(rocprim QUIET)
-endif()
-if(NOT rocprim_FOUND)
-  message(STATUS "Downloading and building rocprim.")
+# This function fetches repository "repo_name" using the method specified by "method".
+# The result is stored in the parent scope version of "repo_path".
+# It does not build the repo.
+function(fetch_dep method repo_name repo_path)
+  set(method_value ${${method}})
+
+  if(${method_value} STREQUAL "PACKAGE")
+    message(STATUS "Searching for ${repo_name} package")
+    find_package(${repo_name} QUIET)
+
+    if(NOT ${${repo_name}_FOUND})
+      message(STATUS "No existing ${repo_name} package was found. Falling back to downloading it.")
+      # update local and parent variable values
+      set(${method} "DOWNLOAD" PARENT_SCOPE)
+      set(method_value "DOWNLOAD")
+    else()
+      message(STATUS "Package found")
+    endif()
+
+  elseif(${method_value} STREQUAL "MONOREPO")
+    message(STATUS "Searching for ${repo_name} in the parent monorepo directory")
+    # Check if this looks like a monorepo checkout
+    find_path(found_path NAMES "." PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../../projects/${repo_name}/" NO_CACHE NO_DEFAULT_PATH)
+
+    if(${found_path} STREQUAL "found_path-NOTFOUND")
+      message(STATUS "Unable to locate ${repo_name} in parent monorepo (it's not at \"${CMAKE_CURRENT_SOURCE_DIR}/../../projects/${repo_name}/\"). Falling back to downloading it.")
+      # update local and parent variable values
+      set(${method} "DOWNLOAD" PARENT_SCOPE)
+      set(method_value "DOWNLOAD")
+    else()
+      message(STATUS "Found ${repo_name} at ${found_path}")
+      # Save the monorepo path in the parent scope
+      set(${repo_path} ${found_path} PARENT_SCOPE)
+    endif()
+  endif()
+
+  if(${method_value} STREQUAL "DOWNLOAD")
+    message(STATUS "Checking git version")
+
+    # Since the monorepo is large, we want to avoid downloading the whole thing if possible.
+    # We can do this if we have access to git's sparse-checkout functionality, which was added in git 2.25.
+    # On some Linux systems (eg. Ubuntu), the git in /usr/bin tends to be newer than the git in /usr/local/bin,
+    # and the latter is what gets picked up by find_package(Git), since it's what's in PATH.
+    # Check for a git binary in /usr/bin first, then if git < 2.25 is not found, use find_package(Git) to search
+    # other locations.
+    set(GIT_MIN_VERSION_FOR_SPARSE_CHECKOUT 2.25)
+    find_program(find_result git PATHS /usr/bin NO_DEFAULT_PATH)
+    if(NOT (${find_result} STREQUAL "find_result-NOTFOUND"))
+      set(GIT_PATH ${find_result})
+      execute_process(COMMAND ${GIT_PATH} "--version" OUTPUT_VARIABLE git_version_output)
+      string(REGEX MATCH "([0-9]+\.[0-9]+\.[0-9]+)" GIT_VERSION_STRING ${git_version_output})
+    endif()
+
+    if(NOT DEFINED GIT_PATH OR GIT_VERSION_STRING LESS ${GIT_MIN_VERSION_FOR_SPARSE_CHECKOUT})
+      find_package(Git)
+      if(NOT GIT_FOUND)
+        message(FATAL_ERROR "Git could not be found on the system. Git is required for downloading ${repo_name}.")
+      endif()
+      set(GIT_PATH ${GIT_EXECUTABLE})
+    endif()
+
+    message(STATUS "Downloading ${repo_name} from https://github.com/ROCm/rocm-libraries.git")
+    if(GIT_VERSION_STRING GREATER_EQUAL ${GIT_MIN_VERSION_FOR_SPARSE_CHECKOUT})
+      # In this case, we have access to git sparse-checkout.
+      # Check if the dependency has already been downloaded in the past:
+      find_path(found_path NAMES "." PATHS "${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src/" NO_CACHE NO_DEFAULT_PATH)
+      if(${found_path} STREQUAL "found_path-NOTFOUND")
+        # First, git clone with options "--no-checkout" and "--filter=tree:0" to prevent files from being pulled immediately.
+        # Use option "--depth=1" to avoid downloading past commit history.
+        execute_process(COMMAND ${GIT_PATH} clone --no-checkout --depth=1 --filter=tree:0 https://github.com/ROCm/rocm-libraries.git ${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src)
+
+        # Next, use git sparse-checkout to ensure we only pull the directory containing the desired repo.
+        execute_process(COMMAND ${GIT_PATH} sparse-checkout set --cone projects/${repo_name}
+                        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src)
+
+        # Finally, download the files using git checkout.
+        execute_process(COMMAND ${GIT_PATH} checkout develop
+                        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src)
+
+        message(STATUS "${repo_name} download complete")
+      else()
+        message("Found previously downloaded directory, skipping download step.")
+      endif()
+
+      # Save the downloaded path in the parent scope
+      set(${repo_path} "${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src/projects/${repo_name}" PARENT_SCOPE)
+    else()
+      # In this case, we do not have access to sparse-checkout, so we need to download the whole monorepo.
+      # Check if the monorepo has already been downloaded to satisfy a previous dependency
+      find_path(found_path NAMES "." PATHS "${CMAKE_CURRENT_BINARY_DIR}/monorepo-src/" NO_CACHE NO_DEFAULT_PATH)
+      if(${found_path} STREQUAL "found_path-NOTFOUND")
+        # Warn the user that this will take some time.
+        message(WARNING "The detected version of git (${GIT_VERSION_STRING}) is older than 2.25 and does not provide sparse-checkout functionality. Falling back to checking out the whole rocm-libraries repository (this may take a long time).")
+        # Avoid downloading anything related to branches other than develop (--single-branch), and avoid any past commit history information (--depth=1)
+        execute_process(COMMAND ${GIT_PATH} clone --single-branch --branch=develop --depth=1 https://github.com/ROCm/rocm-libraries.git ${CMAKE_CURRENT_BINARY_DIR}/monorepo-src)
+        message(STATUS "rocm-libraries download complete")
+      else()
+        message("Found previously downloaded directory, skipping download step.")
+      endif()
+
+      # Save the downloaded path in the parent scope
+      set(${repo_path} "${CMAKE_CURRENT_BINARY_DIR}/monorepo-src/projects/${repo_name}" PARENT_SCOPE)
+    endif()
+  endif()
+endfunction()
+
+fetch_dep(ROCPRIM_FETCH_METHOD rocprim ROCPRIM_PATH)
+
+# If rocPRIM was found in the monorepo tree or was downloaded, we need to build it.
+# Set up download_project to build from the existing rocprim directory at ${ROCPRIM_PATH}.
+# Note that since we don't set any download-related options, nothing is actually downloaded here - just built.
+if(${ROCPRIM_FETCH_METHOD} STREQUAL "MONOREPO" OR ${ROCPRIM_FETCH_METHOD} STREQUAL "DOWNLOAD")
   download_project(
     PROJ                rocprim
-    GIT_REPOSITORY      https://github.com/ROCmSoftwarePlatform/rocPRIM.git
-    GIT_TAG             develop
-    GIT_SHALLOW         TRUE
+    SOURCE_DIR          ${ROCPRIM_PATH}
     INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
     CMAKE_ARGS          -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
-    LOG_DOWNLOAD        TRUE
     LOG_CONFIGURE       TRUE
     LOG_BUILD           TRUE
     LOG_INSTALL         TRUE
     BUILD_PROJECT       TRUE
-    UPDATE_DISCONNECTED TRUE # Never update automatically from the remote repository
+    STATUS_MSG          "Building"
   )
   find_package(rocprim REQUIRED CONFIG PATHS ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim NO_DEFAULT_PATH)
 endif()
 
 # Test dependencies
 if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
-  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
+  if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
     # Google Test (https://github.com/google/googletest)
     find_package(GTest QUIET)
     find_package(TBB QUIET)
@@ -107,7 +210,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
       cmake_policy(SET CMP0135 NEW)
     endif()
 
-  message("Downloading SQLite.")
+  message(STATUS "Downloading SQLite")
   FetchContent_Declare(sqlite_local
     URL ${SQLITE_3_49_2_SRC_URL}
     URL_HASH SHA3_256=${SQLITE_SRC_3_43_2_SHA3_256}
@@ -136,7 +239,7 @@ endif()
 # Benchmark dependencies
 if(BUILD_BENCHMARKS)
   set(BENCHMARK_VERSION 1.9.0)
-  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
+  if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
     # Google Benchmark (https://github.com/google/benchmark.git)
     find_package(benchmark ${BENCHMARK_VERSION} QUIET)
   else()
@@ -175,12 +278,12 @@ if(BUILD_BENCHMARKS)
     find_package(benchmark REQUIRED CONFIG PATHS ${GOOGLEBENCHMARK_ROOT} NO_DEFAULT_PATH)
   endif()
 
-  # rocRAND (https://github.com/ROCmSoftwarePlatform/rocRAND)
-  if(NOT DOWNLOAD_ROCRAND)
-    find_package(rocrand QUIET)
-  endif()
-  if(NOT rocrand_FOUND)
-    message(STATUS "Downloading and building rocrand.")
+  # rocRAND (https://github.com/ROCm/rocm-libraries)
+  fetch_dep(ROCRAND_FETCH_METHOD rocrand ROCRAND_PATH)
+
+  # If we downloaded rocRAND or it are pulling it from the monorepo, we need to build it.
+  # The path to the repo will is stored in ${ROCRAND_PATH}.
+  if(${ROCRAND_FETCH_METHOD} STREQUAL "MONOREPO" OR ${ROCRAND_FETCH_METHOD} STREQUAL "DOWNLOAD")
     set(ROCRAND_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/rocrand CACHE PATH "")
 
     set(EXTRA_CMAKE_ARGS "-DGPU_TARGETS=${GPU_TARGETS}")
@@ -193,19 +296,16 @@ if(BUILD_BENCHMARKS)
     endif()
     download_project(
       PROJ                  rocrand
-      GIT_REPOSITORY        https://github.com/ROCmSoftwarePlatform/rocRAND.git
-      GIT_TAG               develop
-      GIT_SHALLOW           TRUE
+      SOURCE_DIR            ${ROCRAND_PATH}
       INSTALL_DIR           ${ROCRAND_ROOT}
       LIST_SEPARATOR        |
       CMAKE_ARGS            -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm ${EXTRA_CMAKE_ARGS}
-      LOG_DOWNLOAD          TRUE
       LOG_CONFIGURE         TRUE
       LOG_BUILD             TRUE
       LOG_INSTALL           TRUE
       LOG_OUTPUT_ON_FAILURE TRUE
       BUILD_PROJECT         TRUE
-      UPDATE_DISCONNECTED   TRUE
+      STATUS_MSG            "Building"
     )
     find_package(rocrand REQUIRED CONFIG PATHS ${ROCRAND_ROOT})
   endif()

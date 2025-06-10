@@ -45,13 +45,36 @@ option(BUILD_HIPSTDPAR_TEST "Build hipstdpar tests" OFF)
 option(BUILD_HIPSTDPAR_TEST_WITH_TBB "Build hipstdpar tests with TBB" OFF)
 option(BUILD_EXAMPLES "Build examples" OFF)
 option(BUILD_BENCHMARKS "Build benchmarks" OFF)
-option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
-cmake_dependent_option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF BUILD_BENCHMARKS OFF)
-option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON BUILD_TEST OFF)
 #Set the header wrapper OFF by default.
 option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
+option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Download instead of searching for non-ROCm dependencies (gbench, gtest)" OFF)
+
+# Set up options for obtaining dependencies rocPRIM and rocRAND.
+# PACKAGE: Search for an install package that contains the dependency.
+# MONOREPO: Assume this is a monorepo checkout and search for the dependency in the directory at ../../projects/.
+# DOWNLOAD: Download the dependency from the monorepo.
+set(FETCH_METHOD_OPTIONS "PACKAGE" "MONOREPO" "DOWNLOAD")
+
+set(ROCPRIM_FETCH_METHOD "PACKAGE" CACHE STRING "How to obtain the rocPRIM dependency")
+
+# This function checks to see if the fetch method variable it's passed is defined, and contains a valid value.
+# If either of the above are not true, it sets the variable to the default fetch method, "PACKAGE".
+function(check_fetch_method method)
+  if (DEFINED ${method} AND NOT ${${method}} IN_LIST FETCH_METHOD_OPTIONS)
+    message(FATAL_ERROR "Unrecognized ${method}: \"${${method}}\". Valid options are: ${FETCH_METHOD_OPTIONS}.")
+  endif()
+endfunction()
+
+check_fetch_method(ROCPRIM_FETCH_METHOD)
+
+if (BUILD_BENCHMARKS)
+  set(ROCRAND_FETCH_METHOD "PACKAGE" CACHE STRING "How to obtain the rocRAND dependency")
+  check_fetch_method(ROCRAND_FETCH_METHOD)
+elseif(DEFINED ROCRAND_FETCH_METHOD)
+  message(WARNING "Ignoring ROCRAND_FETCH_METHOD, since the benchmarks are not being built (rocRAND is not required).")
+endif()
 
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
