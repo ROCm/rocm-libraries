@@ -19,6 +19,12 @@
 #  pragma system_header
 #endif // no system header
 
+#ifdef __has_include
+#  define THRUST_HAS_INCLUDE(_X) __has_include(_X)
+#else
+#  define THRUST_HAS_INCLUDE(_X) 0
+#endif
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /// \def THRUST_PP_STRINGIZE(expr)
