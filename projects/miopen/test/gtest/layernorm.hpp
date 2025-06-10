@@ -44,13 +44,23 @@ void cpu_layernorm_forward(tensor<T> input,
                            int32_t dim,
                            miopenNormMode_t mode)
 {
+    auto layout   = input.desc.GetLayoutEnum();
+    size_t stride = 1;
+    if(dim > 1 && layout.has_value() && (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
+    {
+        stride = input.desc.GetLengths()[1]; // stride = C
+    }
+
     auto dims         = input.desc.GetLengths();
     size_t outer_size = 1;
     size_t inner_size = 1;
     size_t i          = 0;
     for(; i < dim; i++)
+    {
+        if(!(stride > 1 && i == 1))
         {
             outer_size *= dims[i];
+        }
     }
 
     for(; i < dims.size(); i++)
@@ -59,29 +69,31 @@ void cpu_layernorm_forward(tensor<T> input,
     }
 
     miopen::par_ford(outer_size)([&](int32_t o) {
-        float mean_v = 0;
-        float var_v  = 0;
+        miopen::ford(stride)([&](int32_t s) {
+            float mean_v = 0;
+            float var_v  = 0;
 
-        miopen::ford(inner_size)([&](int32_t i) {
-            float tmp = static_cast<float>(input[o * inner_size + i]);
+            miopen::ford(inner_size)([&](int32_t i) {
+                float tmp = static_cast<float>(input[o * inner_size * stride + i * stride + s]);
                 mean_v += tmp;
                 var_v += tmp * tmp;
-        });
+            });
 
-        mean_v       = mean_v / inner_size;
-        var_v        = var_v / inner_size - mean_v * mean_v;
-        float rstd_v = 1 / sqrt(var_v + eps);
+            mean_v       = mean_v / inner_size;
+            var_v        = var_v / inner_size - mean_v * mean_v;
+            float rstd_v = 1 / sqrt(var_v + eps);
 
-        ref_mean[o] = static_cast<T>(mean_v);
-        ref_rstd[o] = static_cast<T>(rstd_v);
+            ref_mean[o * stride + s] = static_cast<T>(mean_v);
+            ref_rstd[o * stride + s] = static_cast<T>(rstd_v);
 
-        miopen::ford(inner_size)([&](int32_t i) {
+            miopen::ford(inner_size)([&](int32_t i) {
                 float weight_v =
                     (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<float>(weight[i]);
                 float bias_v = (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 0 : static_cast<float>(bias[i]);
-            ref_output[o * inner_size + i] = static_cast<T>(
-                (static_cast<float>(input[o * inner_size + i]) - mean_v) * rstd_v * weight_v +
+                ref_output[o * inner_size * stride + i * stride + s] = static_cast<T>(
+                    (static_cast<float>(input[o * inner_size * stride + i * stride + s]) - mean_v) * rstd_v * weight_v +
                     bias_v);
+            });
         });
     });
 }
@@ -96,6 +108,13 @@ void cpu_layernorm_backward(tensor<T> dy,
                             int32_t dim,
                             miopenNormMode_t mode)
 {
+    auto layout   = dy.desc.GetLayoutEnum();
+    size_t stride = 1;
+    if(dim > 1 && (layout == miopenTensorNHWC || layout == miopenTensorNDHWC))
+    {
+        stride = dy.desc.GetLengths()[1]; // stride = C
+    }
+
     auto dims         = dy.desc.GetLengths();
     size_t outer_size = 1;
     size_t inner_size = 1;
@@ -103,7 +122,10 @@ void cpu_layernorm_backward(tensor<T> dy,
 
     for(; i < dim; i++)
     {
-        outer_size *= dims[i];
+        if(!(stride > 1 && i == 1))
+        {
+            outer_size *= dims[i];
+        }
     }
     for(; i < dims.size(); i++)
     {
@@ -111,29 +133,33 @@ void cpu_layernorm_backward(tensor<T> dy,
     }
 
     miopen::par_ford(outer_size)([&](int32_t o) {
-        float sum_dy_weight   = 0;
-        float sum_dy_weight_x = 0;
+        miopen::ford(stride)([&](int32_t s) {
+            float sum_dy_weight = 0;
+            float sum_dy_weight_x = 0;
 
-        miopen::ford(inner_size)([&](int32_t i) {
-            float pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<float>(weight[i]);
-            float pdy     = (dy.GetSize() != 0) ? static_cast<float>(dy[o * inner_size + i]) : 0;
-            float px      = static_cast<float>(x[o * inner_size + i]);
-            sum_dy_weight += pdy * pweight;
-            sum_dy_weight_x += pdy * px * pweight;
-        });
+            miopen::ford(inner_size)([&](int32_t i) {
+                float pweight =
+                    (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<float>(weight[i]);
+                float pdy     = (dy.GetSize() != 0) ? static_cast<float>(dy[o * inner_size * stride + i * stride + s]) : 0;
+                float px      = static_cast<float>(x[o * inner_size * stride + i * stride + s]);
+                sum_dy_weight += pdy * pweight;
+                sum_dy_weight_x += pdy * px * pweight;
+            });
 
-        float scale = 1.0f / static_cast<float>(inner_size);
-        float prstd = static_cast<float>(rstd[o]);
-        float pmean = static_cast<float>(mean[o]);
-        float a     = prstd * prstd * prstd * scale * (sum_dy_weight_x - sum_dy_weight * pmean);
-        float b     = prstd * sum_dy_weight * scale - a * pmean;
+            float scale = 1.0f / static_cast<float>(inner_size);
+            float prstd = static_cast<float>(rstd[o * stride + s]);
+            float pmean = static_cast<float>(mean[o * stride + s]);
+            float a     = prstd * prstd * prstd * scale * (sum_dy_weight_x - sum_dy_weight * pmean);
+            float b     = prstd * sum_dy_weight * scale - a * pmean;
 
-        miopen::ford(inner_size)([&](int32_t i) {
-            float pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<float>(weight[i]);
-            float pdy     = (dy.GetSize() != 0) ? static_cast<float>(dy[o * inner_size + i]) : 0;
+            miopen::ford(inner_size)([&](int32_t i) {
+                float pweight =
+                    (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<float>(weight[i]);
+                float pdy     = (dy.GetSize() != 0) ? static_cast<float>(dy[o * inner_size * stride + i * stride + s]) : 0;
 
-            float val = prstd * pdy * pweight - a * static_cast<float>(x[o * inner_size + i]) - b;
-            ref_dx[o * inner_size + i] = static_cast<T>(val);
+                float val = prstd * pdy * pweight - a * static_cast<float>(x[o * inner_size * stride + i * stride + s]) - b;
+                ref_dx[o * inner_size * stride + i * stride + s] = static_cast<T>(val);
+            });
         });
     });
 }
@@ -147,6 +173,13 @@ void cpu_layernorm_backward_weight_bias(tensor<T> dy,
                                         tensor<T>& ref_db,
                                         int32_t dim)
 {
+    auto layout   = dy.desc.GetLayoutEnum();
+    size_t stride = 1;
+    if(dim > 1 && (layout == miopenTensorNHWC || layout == miopenTensorNDHWC))
+    {
+        stride = dy.desc.GetLengths()[1]; // stride = C
+    }
+
     auto dims         = dy.desc.GetLengths();
     size_t outer_size = 1;
     size_t inner_size = 1;
@@ -154,7 +187,10 @@ void cpu_layernorm_backward_weight_bias(tensor<T> dy,
 
     for(; i < dim; i++)
     {
-        outer_size *= dims[i];
+        if(!(stride > 1 && i == 1))
+        {
+            outer_size *= dims[i];
+        }
     }
     for(; i < dims.size(); i++)
     {
@@ -165,14 +201,16 @@ void cpu_layernorm_backward_weight_bias(tensor<T> dy,
         float sum_dw = 0;
         float sum_db = 0;
 
-        miopen::ford(outer_size)([&](int32_t o) {
-            float prstd = static_cast<float>(rstd[o]);
-            float pmean = static_cast<float>(mean[o]);
-            float pdy   = (dy.GetSize() != 0) ? static_cast<float>(dy[o * inner_size + i]) : 0;
-            float px    = static_cast<float>(x[o * inner_size + i]);
+        miopen::ford(stride)([&](int32_t s) {
+            miopen::ford(outer_size)([&](int32_t o) {
+                float prstd = static_cast<float>(rstd[o * stride + s]);
+                float pmean = static_cast<float>(mean[o * stride + s]);
+                float pdy   = (dy.GetSize() != 0) ? static_cast<float>(dy[o * inner_size * stride + i * stride + s]) : 0;
+                float px    = static_cast<float>(x[o * inner_size * stride + i * stride + s]);
 
-            sum_dw += pdy * (px - pmean) * prstd;
-            sum_db += pdy;
+                sum_dw += pdy * (px - pmean) * prstd;
+                sum_db += pdy;
+            });
         });
 
         ref_dw[i] = sum_dw;
@@ -434,48 +472,24 @@ protected:
             input, weight, bias, ref_output, ref_mean, ref_rstd, eps, normalized_dim, ln_mode);
         miopenStatus_t status;
 
-        // N = 32 and (B)FP16 are the only NHWC tests going to the HIP kernel
-        if((layout == miopenTensorNHWC && (input.desc.GetLengths()[0] == 32 || !std::is_same_v<T, float>)) || layout == miopenTensorNDHWC)
-        {
-            EXPECT_THROW(miopen::LayerNormForward(handle,
-                                                  input.desc,
-                                                  input_dev.get(),
-                                                  weight.desc,
-                                                  weight_dev.get(),
-                                                  bias.desc,
-                                                  bias_dev.get(),
-                                                  output.desc,
-                                                  output_dev.get(),
-                                                  mean.desc,
-                                                  mean_dev.get(),
-                                                  rstd.desc,
-                                                  rstd_dev.get(),
-                                                  ln_mode,
-                                                  eps,
-                                                  normalized_dim),
-                         miopen::Exception);
-        }
-        else
-        {
-            status = miopen::LayerNormForward(handle,
-                                              input.desc,
-                                              input_dev.get(),
-                                              weight.desc,
-                                              weight_dev.get(),
-                                              bias.desc,
-                                              bias_dev.get(),
-                                              output.desc,
-                                              output_dev.get(),
-                                              mean.desc,
-                                              mean_dev.get(),
-                                              rstd.desc,
-                                              rstd_dev.get(),
-                                              ln_mode,
-                                              eps,
-                                              normalized_dim);
+        status = miopen::LayerNormForward(handle,
+                                          input.desc,
+                                          input_dev.get(),
+                                          weight.desc,
+                                          weight_dev.get(),
+                                          bias.desc,
+                                          bias_dev.get(),
+                                          output.desc,
+                                          output_dev.get(),
+                                          mean.desc,
+                                          mean_dev.get(),
+                                          rstd.desc,
+                                          rstd_dev.get(),
+                                          ln_mode,
+                                          eps,
+                                          normalized_dim);
 
-            EXPECT_EQ(status, miopenStatusSuccess);
-        }
+        EXPECT_EQ(status, miopenStatusSuccess);
 
         output.data = handle.Read<T>(output_dev, output.data.size());
         mean.data   = handle.Read<T>(mean_dev, mean.data.size());
@@ -484,26 +498,22 @@ protected:
 
     void Verify()
     {
-        if(!(layout == miopenTensorNHWC || layout == miopenTensorNDHWC))
-        {
-            auto threshold = std::is_same<T, float>::value ? 1.5e-5 : 4e-3;
+        auto threshold = std::is_same<T, float>::value ? 1.5e-5 : 4e-3;
 
-            auto error = miopen::rms_range(ref_output, output);
-            EXPECT_TRUE(miopen::range_distance(ref_output) == miopen::range_distance(output));
-            EXPECT_TRUE(error < threshold)
-                << "Error output beyond tolerance Error:" << error << ",  Threshold: " << threshold;
+        auto error = miopen::rms_range(ref_output, output);
+        EXPECT_TRUE(miopen::range_distance(ref_output) == miopen::range_distance(output));
+        EXPECT_TRUE(error < threshold)
+            << "Error output beyond tolerance Error:" << error << ",  Threshold: " << threshold;
 
-            error = miopen::rms_range(ref_mean, mean);
-            EXPECT_TRUE(miopen::range_distance(ref_mean) == miopen::range_distance(mean));
-            EXPECT_TRUE(error < threshold)
-                << "Error mean beyond tolerance Error:" << error << ",  Threshold: " << threshold;
+        error = miopen::rms_range(ref_mean, mean);
+        EXPECT_TRUE(miopen::range_distance(ref_mean) == miopen::range_distance(mean));
+        EXPECT_TRUE(error < threshold)
+            << "Error mean beyond tolerance Error:" << error << ",  Threshold: " << threshold;
 
-            error = miopen::rms_range(ref_rstd, rstd);
-            EXPECT_TRUE(miopen::range_distance(ref_rstd) == miopen::range_distance(rstd));
-            EXPECT_TRUE(error < threshold * 4)
-                << "Error rstd beyond tolerance Error:" << error << ",  Threshold x 4: " << threshold * 4;
-        }
-        
+        error = miopen::rms_range(ref_rstd, rstd);
+        EXPECT_TRUE(miopen::range_distance(ref_rstd) == miopen::range_distance(rstd));
+        EXPECT_TRUE(error < threshold * 4)
+            << "Error rstd beyond tolerance Error:" << error << ",  Threshold x 4: " << threshold * 4;
     }
     LayerNormTestCase layernorm_config;
 
@@ -633,57 +643,29 @@ protected:
 
         miopenStatus_t status;
 
-        if(layout == miopenTensorNHWC || layout == miopenTensorNDHWC)
-        {
-            EXPECT_THROW(miopen::LayerNormBackward(handle,
-                                                  workspace_dev.get(),
-                                                  ws_sizeInBytes,
-                                                  dy.desc,
-                                                  dy_dev.get(),
-                                                  x.desc,
-                                                  x_dev.get(),
-                                                  weight.desc,
-                                                  weight_dev.get(),
-                                                  mean.desc,
-                                                  mean_dev.get(),
-                                                  rstd.desc,
-                                                  rstd_dev.get(),
-                                                  dx.desc,
-                                                  dx_dev.get(),
-                                                  dw.desc,
-                                                  dw_dev.get(),
-                                                  db.desc,
-                                                  db_dev.get(),
-                                                  ln_mode,
-                                                  normalized_dim),
-                         miopen::Exception);
-        }
-        else
-        {
-            status = miopen::LayerNormBackward(handle,
-                                               workspace_dev.get(),
-                                               ws_sizeInBytes,
-                                               dy.desc,
-                                               dy_dev.get(),
-                                               x.desc,
-                                               x_dev.get(),
-                                               weight.desc,
-                                               weight_dev.get(),
-                                               mean.desc,
-                                               mean_dev.get(),
-                                               rstd.desc,
-                                               rstd_dev.get(),
-                                               dx.desc,
-                                               dx_dev.get(),
-                                               dw.desc,
-                                               dw_dev.get(),
-                                               db.desc,
-                                               db_dev.get(),
-                                               ln_mode,
-                                               normalized_dim);
+        status = miopen::LayerNormBackward(handle,
+                                           workspace_dev.get(),
+                                           ws_sizeInBytes,
+                                           dy.desc,
+                                           dy_dev.get(),
+                                           x.desc,
+                                           x_dev.get(),
+                                           weight.desc,
+                                           weight_dev.get(),
+                                           mean.desc,
+                                           mean_dev.get(),
+                                           rstd.desc,
+                                           rstd_dev.get(),
+                                           dx.desc,
+                                           dx_dev.get(),
+                                           dw.desc,
+                                           dw_dev.get(),
+                                           db.desc,
+                                           db_dev.get(),
+                                           ln_mode,
+                                           normalized_dim);
 
-            EXPECT_EQ(status, miopenStatusSuccess);
-        }
+        EXPECT_EQ(status, miopenStatusSuccess);
 
         dx.data = handle.Read<T>(dx_dev, dx.data.size());
         dw.data = handle.Read<T>(dw_dev, dw.data.size());
@@ -692,23 +674,20 @@ protected:
 
     void Verify()
     {
-        if(!(layout == miopenTensorNHWC || layout == miopenTensorNDHWC))
-        {
-            auto threshold = std::is_same<T, float>::value ? 1.5e-5 : 4e-3;
+        auto threshold = std::is_same<T, float>::value ? 1.5e-5 : 4e-3;
 
-            auto error = miopen::rms_range(ref_dx, dx);
-            EXPECT_TRUE(miopen::range_distance(ref_dx) == miopen::range_distance(dx));
-            EXPECT_TRUE(error < threshold)
-                << "Error dx beyond tolerance Error:" << error << ",  Threshold: " << threshold;
-            error = miopen::rms_range(ref_dw, dw);
-            EXPECT_TRUE(miopen::range_distance(ref_dw) == miopen::range_distance(dw));
-            EXPECT_TRUE(error < threshold * 2)
-                << "Error dw beyond tolerance Error:" << error << ",  Threshold x 2: " << threshold * 2;
-            error = miopen::rms_range(ref_db, db);
-            EXPECT_TRUE(miopen::range_distance(ref_db) == miopen::range_distance(db));
-            EXPECT_TRUE(error < threshold * 2)
-                << "Error db beyond tolerance Error:" << error << ",  Threshold x 2: " << threshold * 2;
-        }
+        auto error = miopen::rms_range(ref_dx, dx);
+        EXPECT_TRUE(miopen::range_distance(ref_dx) == miopen::range_distance(dx));
+        EXPECT_TRUE(error < threshold)
+            << "Error dx beyond tolerance Error:" << error << ",  Threshold: " << threshold;
+        error = miopen::rms_range(ref_dw, dw);
+        EXPECT_TRUE(miopen::range_distance(ref_dw) == miopen::range_distance(dw));
+        EXPECT_TRUE(error < threshold * 2)
+            << "Error dw beyond tolerance Error:" << error << ",  Threshold x 2: " << threshold * 2;
+        error = miopen::rms_range(ref_db, db);
+        EXPECT_TRUE(miopen::range_distance(ref_db) == miopen::range_distance(db));
+        EXPECT_TRUE(error < threshold * 2)
+            << "Error db beyond tolerance Error:" << error << ",  Threshold x 2: " << threshold * 2;
     }
 
     LayerNormTestCase layernorm_config;
