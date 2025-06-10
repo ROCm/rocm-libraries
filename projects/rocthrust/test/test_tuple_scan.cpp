@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -19,13 +19,24 @@
 #include <thrust/transform.h>
 #include <thrust/tuple.h>
 
-#include <unittest/unittest.h>
+#include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
+#include "test_utils.hpp"
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <unittest/cuda/testframework.h>
-#endif
+using IntegralTypes = ::testing::Types<
+  Params<char>,
+  Params<signed char>,
+  Params<unsigned char>,
+  Params<short>,
+  Params<unsigned short>,
+  Params<int>,
+  Params<unsigned int>,
+  Params<long>,
+  Params<unsigned long>,
+  Params<long long>,
+  Params<unsigned long long>>;
 
-using namespace unittest;
+TESTS_DEFINE(TupleScanTests, IntegralTypes);
 
 struct SumTupleFunctor
 {
@@ -47,37 +58,40 @@ struct MakeTupleFunctor
   }
 };
 
-template <typename T>
-struct TestTupleScan
+TYPED_TEST(TupleScanTests, TestTupleScan)
 {
-  void operator()(const size_t n)
-  {
-    using namespace thrust;
+  using T = typename TestFixture::input_type;
+  using namespace thrust;
 
-    host_vector<T> h_t1 = unittest::random_integers<T>(n);
-    host_vector<T> h_t2 = unittest::random_integers<T>(n);
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
+  {
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    host_vector<T> h_t1 = random_integers<T>(size);
+    host_vector<T> h_t2 = random_integers<T>(size);
 
     // initialize input
-    host_vector<tuple<T, T>> h_input(n);
+    host_vector<tuple<T, T>> h_input(size);
     transform(h_t1.begin(), h_t1.end(), h_t2.begin(), h_input.begin(), MakeTupleFunctor());
     device_vector<tuple<T, T>> d_input = h_input;
 
     // allocate output
     tuple<T, T> zero(0, 0);
-    host_vector<tuple<T, T>> h_output(n, zero);
-    device_vector<tuple<T, T>> d_output(n, zero);
+    host_vector<tuple<T, T>> h_output(size, zero);
+    device_vector<tuple<T, T>> d_output(size, zero);
 
     // inclusive_scan
     thrust::inclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), SumTupleFunctor());
     thrust::inclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), SumTupleFunctor());
-    ASSERT_EQUAL_QUIET(h_output, d_output);
+    ASSERT_EQ_QUIET(h_output, d_output);
 
     // exclusive_scan
     tuple<T, T> init(13, 17);
     thrust::exclusive_scan(h_input.begin(), h_input.end(), h_output.begin(), init, SumTupleFunctor());
     thrust::exclusive_scan(d_input.begin(), d_input.end(), d_output.begin(), init, SumTupleFunctor());
 
-    ASSERT_EQUAL_QUIET(h_output, d_output);
+    ASSERT_EQ_QUIET(h_output, d_output);
   }
-};
-VariableUnitTest<TestTupleScan, IntegralTypes> TestTupleScanInstance;
+}
