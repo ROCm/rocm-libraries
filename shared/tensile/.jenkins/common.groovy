@@ -33,7 +33,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean c
     String compiler = '/opt/rocm/bin/amdclang++'
     // Do release build of HostLibraryTests on CI until it is upgraded to rocm 5.3 to
     // avoid bug causing long build times of certain files.
-    String buildType = 'Release' // debug ? 'Debug' : 'RelWithDebInfo'
+    String buildType = 'Debug' // debug ? 'Debug' : 'RelWithDebInfo'
     
     int systemCPUs = sh(script: 'nproc', returnStdout: true ).trim().toInteger()
     long containerRAMbytes = sh(script: 'if [ -f /sys/fs/cgroup/memory.max ]; then cat /sys/fs/cgroup/memory.max; else cat /sys/fs/cgroup/memory/memory.limit_in_bytes; fi', returnStdout: true ).trim().toLong()
