@@ -66,6 +66,113 @@ endforeach()
 
 include(FetchContent)
 
+# This function fetches repository "repo_name" using the method specified by "method".
+# The result is stored in the parent scope version of "repo_path".
+# It does not build the repo.
+function(fetch_dep method repo_name repo_path)
+  set(method_value ${${method}})
+
+  if(${method_value} STREQUAL "PACKAGE")
+    message(STATUS "Searching for ${repo_name} package")
+    # Add default install location for WIN32 and non-WIN32 as hint
+    find_package(${repo_name} CONFIG QUIET PATHS "${ROCM_ROOT}/lib/cmake/rocprim")
+
+    if(NOT ${${repo_name}_FOUND})
+      message(STATUS "No existing ${repo_name} package was found. Falling back to downloading it.")
+      # update local and parent variable values
+      set(${method} "DOWNLOAD" PARENT_SCOPE)
+      set(method_value "DOWNLOAD")
+    else()
+      message(STATUS "Package found")
+    endif()
+
+  elseif(${method_value} STREQUAL "MONOREPO")
+    message(STATUS "Searching for ${repo_name} in the parent monorepo directory")
+    # Check if this looks like a monorepo checkout
+    find_path(found_path NAMES "." PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../../projects/${repo_name}/" NO_CACHE NO_DEFAULT_PATH)
+
+    if(${found_path} STREQUAL "found_path-NOTFOUND")
+      message(STATUS "Unable to locate ${repo_name} in parent monorepo (it's not at \"${CMAKE_CURRENT_SOURCE_DIR}/../../projects/${repo_name}/\"). Falling back to downloading it.")
+      # update local and parent variable values
+      set(${method} "DOWNLOAD" PARENT_SCOPE)
+      set(method_value "DOWNLOAD")
+    else()
+      message(STATUS "Found ${repo_name} at ${found_path}")
+      # Save the monorepo path in the parent scope
+      set(${repo_path} ${found_path} PARENT_SCOPE)
+    endif()
+  endif()
+
+  if(${method_value} STREQUAL "DOWNLOAD")
+    message(STATUS "Checking git version")
+
+    # Since the monorepo is large, we want to avoid downloading the whole thing if possible.
+    # We can do this if we have access to git's sparse-checkout functionality, which was added in git 2.25.
+    # On some Linux systems (eg. Ubuntu), the git in /usr/bin tends to be newer than the git in /usr/local/bin,
+    # and the latter is what gets picked up by find_package(Git), since it's what's in PATH.
+    # Check for a git binary in /usr/bin first, then if git < 2.25 is not found, use find_package(Git) to search
+    # other locations.
+    set(GIT_MIN_VERSION_FOR_SPARSE_CHECKOUT 2.25)
+    find_program(find_result git PATHS /usr/bin NO_DEFAULT_PATH)
+    if(NOT (${find_result} STREQUAL "find_result-NOTFOUND"))
+      set(GIT_PATH ${find_result})
+      execute_process(COMMAND ${GIT_PATH} "--version" OUTPUT_VARIABLE git_version_output)
+      string(REGEX MATCH "([0-9]+\.[0-9]+\.[0-9]+)" GIT_VERSION_STRING ${git_version_output})
+    endif()
+
+    if(NOT DEFINED GIT_PATH OR GIT_VERSION_STRING LESS ${GIT_MIN_VERSION_FOR_SPARSE_CHECKOUT})
+      find_package(Git)
+      if(NOT GIT_FOUND)
+        message(FATAL_ERROR "Git could not be found on the system. Git is required for downloading ${repo_name}.")
+      endif()
+      set(GIT_PATH ${GIT_EXECUTABLE})
+    endif()
+
+    message(STATUS "Downloading ${repo_name} from https://github.com/ROCm/rocm-libraries.git")
+    if(GIT_VERSION_STRING GREATER_EQUAL ${GIT_MIN_VERSION_FOR_SPARSE_CHECKOUT})
+      # In this case, we have access to git sparse-checkout.
+      # Check if the dependency has already been downloaded in the past:
+      find_path(found_path NAMES "." PATHS "${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src/" NO_CACHE NO_DEFAULT_PATH)
+      if(${found_path} STREQUAL "found_path-NOTFOUND")
+        # First, git clone with options "--no-checkout" and "--filter=tree:0" to prevent files from being pulled immediately.
+        # Use option "--depth=1" to avoid downloading past commit history.
+        execute_process(COMMAND ${GIT_PATH} clone --no-checkout --depth=1 --filter=tree:0 https://github.com/ROCm/rocm-libraries.git ${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src)
+
+        # Next, use git sparse-checkout to ensure we only pull the directory containing the desired repo.
+        execute_process(COMMAND ${GIT_PATH} sparse-checkout set --cone projects/${repo_name}
+                        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src)
+
+        # Finally, download the files using git checkout.
+        execute_process(COMMAND ${GIT_PATH} checkout develop
+                        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src)
+
+        message(STATUS "${repo_name} download complete")
+      else()
+        message("Found previously downloaded directory, skipping download step.")
+      endif()
+
+      # Save the downloaded path in the parent scope
+      set(${repo_path} "${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src/projects/${repo_name}" PARENT_SCOPE)
+    else()
+      # In this case, we do not have access to sparse-checkout, so we need to download the whole monorepo.
+      # Check if the monorepo has already been downloaded to satisfy a previous dependency
+      find_path(found_path NAMES "." PATHS "${CMAKE_CURRENT_BINARY_DIR}/monorepo-src/" NO_CACHE NO_DEFAULT_PATH)
+      if(${found_path} STREQUAL "found_path-NOTFOUND")
+        # Warn the user that this will take some time.
+        message(WARNING "The detected version of git (${GIT_VERSION_STRING}) is older than 2.25 and does not provide sparse-checkout functionality. Falling back to checking out the whole rocm-libraries repository (this may take a long time).")
+        # Avoid downloading anything related to branches other than develop (--single-branch), and avoid any past commit history information (--depth=1)
+        execute_process(COMMAND ${GIT_PATH} clone --single-branch --branch=develop --depth=1 https://github.com/ROCm/rocm-libraries.git ${CMAKE_CURRENT_BINARY_DIR}/monorepo-src)
+        message(STATUS "rocm-libraries download complete")
+      else()
+        message("Found previously downloaded directory, skipping download step.")
+      endif()
+
+      # Save the downloaded path in the parent scope
+      set(${repo_path} "${CMAKE_CURRENT_BINARY_DIR}/monorepo-src/projects/${repo_name}" PARENT_SCOPE)
+    endif()
+  endif()
+endfunction()
+
 # Test dependencies
 if(USER_BUILD_TEST)
   # NOTE1: Google Test has created a mess with legacy FindGTest.cmake and newer GTestConfig.cmake
@@ -83,14 +190,14 @@ if(USER_BUILD_TEST)
   #        mode targets. Otherwise if MODULE or CONFIG succeeded, then it prints the result to the
   #        console via a non-QUIET find_package call and if CONFIG succeeded, creates ALIAS targets
   #        with the MODULE IMPORTED names.
-  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
+  if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
     find_package(GTest QUIET)
   endif()
   if(NOT TARGET GTest::GTest AND NOT TARGET GTest::gtest)
     option(BUILD_GTEST "Builds the googletest subproject" ON)
     option(BUILD_GMOCK "Builds the googlemock subproject" OFF)
     option(INSTALL_GTEST "Enable installation of googletest." OFF)
-    if(EXISTS /usr/src/googletest AND NOT DEPENDENCIES_FORCE_DOWNLOAD)
+    if(EXISTS /usr/src/googletest AND NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
       FetchContent_Declare(
         googletest
         SOURCE_DIR /usr/src/googletest
@@ -116,7 +223,7 @@ if(USER_BUILD_TEST)
 endif(USER_BUILD_TEST)
 
 if(USER_BUILD_BENCHMARK)
-  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
+  if(NOT EXTERNAL_DEPS_FORCE_DOWNLOAD)
     find_package(benchmark CONFIG QUIET)
   endif()
   if(NOT TARGET benchmark::benchmark)
@@ -185,16 +292,19 @@ if(HIP_COMPILER STREQUAL "nvcc")
   endif()
 else()
   # rocPRIM (only for ROCm platform)
-  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-    # Add default install location for WIN32 and non-WIN32 as hint
-    find_package(rocprim CONFIG QUIET PATHS "${ROCM_ROOT}/lib/cmake/rocprim")
-  endif()
-  if(NOT TARGET roc::rocprim)
-    message(STATUS "rocPRIM not found. Fetching...")
+  fetch_dep(ROCPRIM_FETCH_METHOD rocprim ROCPRIM_PATH)
+
+  if(${ROCPRIM_FETCH_METHOD} STREQUAL "DOWNLOAD" OR ${ROCPRIM_FETCH_METHOD} STREQUAL "MONOREPO")
+    # The fetch_dep call above should have downloaded/located the source. We just need to make it available.
+    message(STATUS "Configuring rocPRIM")
     FetchContent_Declare(
-            prim
-            GIT_REPOSITORY https://github.com/ROCm/rocPRIM.git
-            GIT_TAG        develop
+      prim
+      SOURCE_DIR    ${ROCPRIM_PATH}
+      INSTALL_DIR   ${CMAKE_CURRENT_BINARY_DIR}/deps/rocprim
+      CMAKE_ARGS    -DBUILD_TEST=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_PREFIX_PATH=/opt/rocm
+      LOG_CONFIGURE TRUE
+      LOG_BUILD     TRUE
+      LOG_INSTALL   TRUE
     )
     FetchContent_MakeAvailable(prim)
     if(NOT TARGET roc::rocprim)
@@ -203,8 +313,6 @@ else()
     if(NOT TARGET roc::rocprim_hip)
       add_library(roc::rocprim_hip ALIAS rocprim_hip)
     endif()
-  else()
-    find_package(rocprim CONFIG REQUIRED)
   endif()
 endif()
 
