@@ -54,7 +54,7 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_BLOCK_SYNC_LDS_WITHO
 #define WORKAROUND_SWDEV_413051 1
 
 // LLVM buffer intrinsics llvm.amdgcn.buffer.* have been removed in HIP 6.4
-#define WORKAROUND_SWDEV_498660 (HIP_PACKAGE_VERSION_FLAT >= 6004000000)
+#define WORKAROUND_SWDEV_498660 (HIP_PACKAGE_VERSION_FLAT >= 60040000000)
 
 namespace miopen {
 
@@ -453,7 +453,7 @@ static inline bool is_use_amd_buffer_load_store(const ExecutionContext& ctx)
 {
 #if WORKAROUND_MIOPEN_ISSUE_557
     const auto device_name = ctx.GetStream().GetDeviceName();
-    return !StartsWith(device_name, "gfx103");
+    return !StartsWith(device_name, "gfx103") && !StartsWith(device_name, "gfx115");
 #else
     return true;
 #endif

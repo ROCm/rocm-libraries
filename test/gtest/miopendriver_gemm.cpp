@@ -54,7 +54,7 @@ class GPU_MIOpenDriverGemmTest_FP16 : public testing::TestWithParam<std::vector<
 
 void RunMIOpenDriver(const std::vector<TestCase>& testCases)
 {
-    using e_mask = enabled<Gpu::gfx94X, Gpu::gfx103X, Gpu::gfx110X>;
+    using e_mask = enabled<Gpu::gfx94X, Gpu::gfx103X, Gpu::gfx110X, Gpu::gfx115X>;
     using d_mask = disabled<Gpu::Default>;
     if(!ShouldRunMIOpenDriverTest<d_mask, e_mask>())
     {

@@ -34,7 +34,7 @@
 #endif
 
 #define MIOPEN_USE_AMDGCN 0
-#if defined(__AMDGCN__) && !(MIO_BN_GFX103X || MIO_BN_GFX110X || MIO_BN_GFX120X)
+#if defined(__AMDGCN__) && !(MIO_BN_GFX103X || MIO_BN_GFX110X || MIO_BN_GFX120X || MIO_BN_GFX115X)
 #undef MIOPEN_USE_AMDGCN
 #define MIOPEN_USE_AMDGCN 1
 #endif
@@ -166,3 +166,4 @@ MIOpenBatchNormActivBwdPerActivation(const __global _FLOAT* __restrict x_in,
 #pragma clang diagnostic pop
 #pragma clang diagnostic pop
 #endif
+
