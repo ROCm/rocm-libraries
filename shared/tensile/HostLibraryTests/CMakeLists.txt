@@ -217,7 +217,7 @@ if(TENSILE_ENABLE_COVERAGE OR BUILD_CODE_COVERAGE)
         DEPENDS TensileTests
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${coverage_dir}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${coverage_dir}/profraw"
-        COMMAND ${CMAKE_COMMAND} -E env "LLVM_PROFILE_FILE=${coverage_dir}/profraw/tensile-host-coverage_%p.profraw"
+        COMMAND ${CMAKE_COMMAND} -E env "LLVM_PROFILE_FILE=${coverage_dir}/profraw/tensile-host-coverage_%m.profraw"
                                         GTEST_LISTENER=NO_PASS_LINE_IN_LOG 
                                         $<TARGET_FILE:TensileTests>
                                         "--gtest_filter=-*Extended*:HipSolutionAdapter/RunGEMMKernelTestHip.TestAllSolutions/504:HipSolutionAdapter/RunGEMMKernelTestHip.TestAllSolutions/505:HipSolutionAdapter/RunGEMMKernelTestHip.TestAllSolutions/506:HipSolutionAdapter/RunGEMMKernelTestHip.TestAllSolutions/507:HipSolutionAdapter/RunGEMMKernelTestHip.TestAllSolutions/508:HipSolutionAdapter/RunGEMMKernelTestHip.TestAllSolutions/509"
