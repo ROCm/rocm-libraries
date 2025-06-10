@@ -44,7 +44,6 @@ if(TENSILE_ENABLE_COVERAGE OR BUILD_CODE_COVERAGE)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type." FORCE)
     message(STATUS "Setting build type to Debug for coverage build.")
 endif()
-
 if(TENSILE_USE_HIP)
     set(TENSILE_COMPONENTS HIP)
     if(TENSILE_USE_LLVM)
@@ -210,10 +209,6 @@ if(TENSILE_ENABLE_COVERAGE OR BUILD_CODE_COVERAGE)
     target_compile_options(TensileHost PRIVATE -fprofile-instr-generate -fcoverage-mapping)
     target_link_options(TensileHost PUBLIC -fprofile-instr-generate)
     message(STATUS "Applied coverage flags to TensileHost.")
-
-    # target_compile_options(TensileTests PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-    # target_link_options(TensileTests PRIVATE -fprofile-instr-generate)
-    # message(STATUS "Applied coverage flags to TensileTests.")
 
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
 
