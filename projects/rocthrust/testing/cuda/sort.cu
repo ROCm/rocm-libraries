@@ -24,32 +24,18 @@
 #include <thrust/iterator/transform_iterator.h>
 #include <thrust/sort.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/limits>
-namespace _std = ::cuda::std;
-#elif defined(__has_include)
-#  if __has_include(<cuda/std/functional>)
-#    include <cuda/std/limits>
-namespace _std = ::cuda::std;
-#  else
-#    include <limits>
-namespace _std = std;
-#  endif
-#else
-#  include <limits>
-namespace _std = std;
-#endif
+#include <cuda/std/limits>
 
+#include <algorithm>
 #include <cstdint>
 #include <exception>
-#include <utility>
 
 #include <unittest/unittest.h>
 
 template <typename T>
 struct my_less
 {
-  THRUST_HOST_DEVICE bool operator()(const T& lhs, const T& rhs) const
+  _CCCL_HOST_DEVICE bool operator()(const T& lhs, const T& rhs) const
   {
     return lhs < rhs;
   }
@@ -129,18 +115,7 @@ VariableUnitTest<TestSortDeviceDevice, unittest::type_list<unittest::int8_t, uni
 
 void TestSortCudaStreams()
 {
-  thrust::device_vector<int> keys(10);
-
-  keys[0] = 9;
-  keys[1] = 3;
-  keys[2] = 2;
-  keys[3] = 0;
-  keys[4] = 4;
-  keys[5] = 7;
-  keys[6] = 8;
-  keys[7] = 1;
-  keys[8] = 5;
-  keys[9] = 6;
+  thrust::device_vector<int> keys{9, 3, 2, 0, 4, 7, 8, 1, 5, 6};
 
   cudaStream_t s;
   cudaStreamCreate(&s);
@@ -156,18 +131,7 @@ DECLARE_UNITTEST(TestSortCudaStreams);
 
 void TestComparisonSortCudaStreams()
 {
-  thrust::device_vector<int> keys(10);
-
-  keys[0] = 9;
-  keys[1] = 3;
-  keys[2] = 2;
-  keys[3] = 0;
-  keys[4] = 4;
-  keys[5] = 7;
-  keys[6] = 8;
-  keys[7] = 1;
-  keys[8] = 5;
-  keys[9] = 6;
+  thrust::device_vector<int> keys{9, 3, 2, 0, 4, 7, 8, 1, 5, 6};
 
   cudaStream_t s;
   cudaStreamCreate(&s);
@@ -186,19 +150,34 @@ struct TestRadixSortDispatch
 {
   static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, thrust::less<T>>::value, "");
   static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, thrust::greater<T>>::value, "");
-  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, std::less<T>>::value, "");
-  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, std::greater<T>>::value, "");
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, ::cuda::std::less<T>>::value, "");
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, ::cuda::std::greater<T>>::value, "");
 
   static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, thrust::less<>>::value, "");
   static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, thrust::greater<>>::value, "");
-  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, std::less<>>::value, "");
-  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, std::greater<>>::value, "");
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, ::cuda::std::less<>>::value, "");
+  static_assert(thrust::cuda_cub::__smart_sort::can_use_primitive_sort<T, ::cuda::std::greater<>>::value, "");
 
   void operator()() const {}
 };
-// TODO(bgruber): use a single test case with a concatenated key list and a cartesion product with the comparators
-SimpleUnitTest<TestRadixSortDispatch, IntegralTypes> TestRadixSortDispatchIntegralInstance;
-SimpleUnitTest<TestRadixSortDispatch, FloatingPointTypes> TestRadixSortDispatchFPInstance;
+SimpleUnitTest<TestRadixSortDispatch,
+               unittest::concat<IntegralTypes,
+                                FloatingPointTypes
+#ifndef _LIBCUDACXX_HAS_NO_INT128
+                                ,
+                                unittest::type_list<__int128_t, __uint128_t>
+#endif // _LIBCUDACXX_HAS_NO_INT128
+#ifdef _CCCL_HAS_NVFP16
+                                ,
+                                unittest::type_list<__half>
+#endif // _CCCL_HAS_NVFP16
+#ifdef _CCCL_HAS_NVBF16
+                                ,
+                                unittest::type_list<__nv_bfloat16>
+#endif // _CCCL_HAS_NVBF16
+                                >>
+  TestRadixSortDispatchInstance;
+
 /**
  * Copy of CUB testing utility
  */
@@ -206,9 +185,11 @@ template <typename UnsignedIntegralKeyT>
 struct index_to_key_value_op
 {
   static constexpr std::size_t max_key_value =
-    static_cast<std::size_t>(_std::numeric_limits<UnsignedIntegralKeyT>::max());
+    static_cast<std::size_t>(::cuda::std::numeric_limits<UnsignedIntegralKeyT>::max());
   static constexpr std::size_t lowest_key_value =
-    static_cast<std::size_t>(_std::numeric_limits<UnsignedIntegralKeyT>::lowest());
+    static_cast<std::size_t>(::cuda::std::numeric_limits<UnsignedIntegralKeyT>::lowest());
+  static_assert(sizeof(UnsignedIntegralKeyT) < sizeof(std::size_t),
+                "Calculation of num_distinct_key_values would overflow");
   static constexpr std::size_t num_distinct_key_values = (max_key_value - lowest_key_value + std::size_t{1ULL});
 
   __device__ __host__ UnsignedIntegralKeyT operator()(std::size_t index)
@@ -225,9 +206,11 @@ class index_to_expected_key_op
 {
 private:
   static constexpr std::size_t max_key_value =
-    static_cast<std::size_t>(_std::numeric_limits<UnsignedIntegralKeyT>::max());
+    static_cast<std::size_t>(::cuda::std::numeric_limits<UnsignedIntegralKeyT>::max());
   static constexpr std::size_t lowest_key_value =
-    static_cast<std::size_t>(_std::numeric_limits<UnsignedIntegralKeyT>::lowest());
+    static_cast<std::size_t>(::cuda::std::numeric_limits<UnsignedIntegralKeyT>::lowest());
+  static_assert(sizeof(UnsignedIntegralKeyT) < sizeof(std::size_t),
+                "Calculation of num_distinct_key_values would overflow");
   static constexpr std::size_t num_distinct_key_values = (max_key_value - lowest_key_value + std::size_t{1ULL});
 
   // item_count / num_distinct_key_values
@@ -315,7 +298,7 @@ SimpleUnitTest<TestSortAscendingKey,
                                 unittest::type_list<__int128_t, __uint128_t>
 #endif
 // CTK 12.2 offers __host__ __device__ operators for __half and __nv_bfloat16, so we can use std::sort
-#if _CCCL_CUDACC_VER >= 1202000
+#if _CCCL_CUDACC_AT_LEAST(12, 2)
 #  if defined(_CCCL_HAS_NVFP16) || !defined(__CUDA_NO_HALF_OPERATORS__) && !defined(__CUDA_NO_HALF_CONVERSIONS__)
                                 ,
                                 unittest::type_list<__half>
@@ -325,6 +308,6 @@ SimpleUnitTest<TestSortAscendingKey,
                                 ,
                                 unittest::type_list<__nv_bfloat16>
 #  endif
-#endif // _CCCL_CUDACC_VER >= 1202000
+#endif // _CCCL_CUDACC_AT_LEAST(12, 2)
                                 >>
   TestSortAscendingKeyMoreTypes;
