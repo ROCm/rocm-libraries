@@ -23,6 +23,15 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 cmake_policy(VERSION 3.16...3.25)
 
+# --------------------------------------
+# Update these variables at release time
+#
+# Set the library version
+set(VERSION_STRING "4.0.0")
+# Set the minimum required rocPRIM version
+set(MIN_ROCPRIM_PACKAGE_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM to search for when ROCPRIM_FETCH_METHOD is set to PACKAGE.")
+# --------------------------------------
+
 # Install prefix
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
 
@@ -53,7 +62,7 @@ include(CMakeDependentOption)
 # Build options
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(CODE_COVERAGE "Enable code coverage" OFF)
-option(DEPENDENCIES_FORCE_DOWNLOAD "Download dependencies and do not search for packages" OFF)
+option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Download non-ROCm dependencies and do not search for packages" OFF)
 option(DOWNLOAD_CUB "Download CUB and thrust. Do not search for CUB package" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
 option(BUILD_EXAMPLE "Build Examples" OFF)
@@ -74,6 +83,24 @@ endif()
 
 # Set the header wrapper OFF by default.
 option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
+
+# Set up options for obtaining dependency rocPRIM.
+# PACKAGE: Search for an install package that contains the dependency.
+# MONOREPO: Assume this is a monorepo checkout and search for the dependency in the directory at ../../projects/.
+# DOWNLOAD: Download the dependency from the monorepo.
+set(FETCH_METHOD_OPTIONS "PACKAGE" "MONOREPO" "DOWNLOAD")
+
+set(ROCPRIM_FETCH_METHOD "PACKAGE" CACHE STRING "How to obtain the rocPRIM dependency")
+
+# This function checks to see if the fetch method variable it's passed is defined, and contains a valid value.
+# If it does not contain a valid value, it issues a fatal failure with an error message.
+function(check_fetch_method method)
+  if (DEFINED ${method} AND NOT ${${method}} IN_LIST FETCH_METHOD_OPTIONS)
+    message(FATAL_ERROR "Unrecognized ${method}: \"${${method}}\". Valid options are: ${FETCH_METHOD_OPTIONS}.")
+  endif()
+endfunction()
+
+check_fetch_method(ROCPRIM_FETCH_METHOD)
 
 # Add hipCUB's CMake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -120,6 +147,10 @@ else()
   endif()
 endif()
 
+# Setup the library version
+rocm_setup_version(VERSION ${VERSION_STRING})
+math(EXPR hipcub_VERSION_NUMBER "${hipcub_VERSION_MAJOR} * 100000 + ${hipcub_VERSION_MINOR} * 100 + ${hipcub_VERSION_PATCH}")
+
 # Find and verify HIP.
 include(VerifyCompiler)
 
@@ -141,11 +172,6 @@ if(BUILD_OFFLOAD_COMPRESS)
     message(STATUS "Warning: BUILD_OFFLOAD_COMPRESS=ON but flag not supported by compiler. Ignoring option.")
   endif()
 endif()
-
-# Setup VERSION
-set(VERSION_STRING "4.0.0")
-rocm_setup_version(VERSION ${VERSION_STRING})
-math(EXPR hipcub_VERSION_NUMBER "${hipcub_VERSION_MAJOR} * 100000 + ${hipcub_VERSION_MINOR} * 100 + ${hipcub_VERSION_PATCH}")
 
 # hipCUB library
 add_subdirectory(hipcub)
