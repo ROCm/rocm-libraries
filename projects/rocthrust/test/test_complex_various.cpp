@@ -60,6 +60,8 @@
     }                                                                                                        \
   } while (0)
 
+#define GET_EPS(x) ((std::abs(x) < 0.05) ? 1e-1 : std::abs(x) * 0.05)
+
 // This test suite aims to test vairous different implementations
 // in the thrust/detail/complex directory
 
@@ -118,8 +120,8 @@ void run_trig_tests(
       thrust::complex<T> thrust_out = thrust_func(thrust_complex);
       std::complex<T> std_out       = std_func(std_complex);
 
-      T real_eps = (std::abs(std_out.real()) < 0.05) ? 1e-1 : std::abs(std_out.real() * 0.05);
-      T imag_eps = (std::abs(std_out.imag()) < 0.05) ? 1e-1 : std::abs(std_out.imag() * 0.05);
+      T real_eps = GET_EPS(std_out.real());
+      T imag_eps = GET_EPS(std_out.imag());
 
       CHECK_CORRECT(std_out, thrust_out, real_eps, imag_eps, real, imag);
     }
@@ -850,26 +852,28 @@ TYPED_TEST(VariousComplexTest, exp)
 // //
 // // ===================================================================
 
+template <typename DataType>
+std::complex<DataType> stdLog(std::complex<DataType>& x)
+{
+  double t_real = x.real();
+  double t_imag = x.imag();
+
+  double r     = std::sqrt(std::pow(t_real, 2) + std::pow(t_imag, 2));
+  double theta = std::atan2(t_imag, t_real);
+
+  double real = std::log(r);
+  double imag = theta;
+
+  return std::complex<DataType>((DataType) real, (DataType) imag);
+}
+
 TYPED_TEST(VariousComplexTest, log)
 {
   using T     = typename TestFixture::T;
   T max_range = std::sqrt(std::numeric_limits<T>::max() / 5);
 
-  auto std_log = [](std::complex<T>& x) {
-    double t_real = x.real();
-    double t_imag = x.imag();
-
-    double r     = std::sqrt(std::pow(t_real, 2) + std::pow(t_imag, 2));
-    double theta = std::atan2(t_imag, t_real);
-
-    double real = std::log(r);
-    double imag = theta;
-
-    return std::complex<T>((T) real, (T) imag);
-  };
-
   run_trig_tests<T>(
-    std_log,
+    stdLog<T>,
     [](thrust::complex<T>& x) {
       return thrust::log(x);
     },
@@ -877,16 +881,49 @@ TYPED_TEST(VariousComplexTest, log)
     max_range,
     -max_range,
     max_range);
+}
 
-  run_trig_tests<T>(
-    std_log,
-    [](thrust::complex<T>& x) {
-      return thrust::log(x);
-    },
-    -5,
-    5,
-    -5,
-    5);
+TEST(VariousComplexTest, logf_special_cases)
+{
+  using T = float;
+
+  auto run_test = [=](T real, T imag) {
+    std::complex<T> std_in(real, imag);
+    thrust::complex<T> thrust_in(real, imag);
+
+    std::complex<T> std_out       = stdLog<T>(std_in);
+    thrust::complex<T> thrust_out = thrust::log(thrust_in);
+
+    T real_eps = GET_EPS(std_out.real());
+    T imag_eps = GET_EPS(std_out.imag());
+
+    CHECK_CORRECT(std_out, thrust_out, real_eps, imag_eps, real, imag);
+  };
+
+  // Testing clogf for case of ay > 1e34
+  run_test(2e34f, 3e34f);
+  // checking cases where real is 1, and imaginary is less than 1
+  run_test(1.0f, 5e-20f);
+  run_test(1.0f, 0.5);
+
+  // checking cases where real or imag is less than 1e-6
+  run_test(5e-7f, 0.5);
+  run_test(0.5f, 5e-7f);
+  run_test(0.0, 0.5);
+  run_test(0.5, 0.0);
+
+  // checking cases where real or imag is greater than 1e6
+  run_test(5e7f, 0.5);
+  run_test(0.5f, 5e7f);
+  run_test(0x7f800000, 0.5); // inf
+  run_test(0.5, 0x7f800000); // inf
+
+  //checking case where r <= 0.7
+  run_test(0.55, 0.55);
+
+  //checking NAN cases
+  run_test(0xffc00001, 0xffc00001);
+
 }
 
 TYPED_TEST(VariousComplexTest, log10)
