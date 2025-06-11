@@ -26,6 +26,11 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <type_traits>
+#  include <utility>
+#endif
+
 THRUST_DIAG_PUSH
 THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
@@ -61,9 +66,7 @@ using VectorTestsParams = ::testing::Types<
   Params<thrust::device_vector<float>>,
   Params<thrust::device_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::device_memory_resource>>>,
   Params<thrust::universal_vector<int>>,
-  Params<thrust::device_vector<
-    int,
-    thrust::mr::stateless_resource_allocator<int, thrust::universal_host_pinned_memory_resource>>>>;
+  Params<thrust::universal_host_pinned_vector<int>>>;
 
 using IntegralVectorTestsParams =
   ::testing::Types<Params<thrust::host_vector<signed char>>,
@@ -202,24 +205,74 @@ DECLARE_UNARY_ARITHMETIC_FUNCTIONAL_UNITTEST(negate, Negate);
 THRUST_DIAG_POP
 DECLARE_UNARY_LOGICAL_FUNCTIONAL_UNITTEST(logical_not, LogicalNot);
 
+// TODO(bgruber): replace by cuda::std::as_const in C++14
+template <class _Tp>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+typename ::cuda::std::add_const<_Tp>::type& as_const(_Tp& __t) noexcept
+#else
+typename ::std::add_const<_Tp>::type& as_const(_Tp& __t) noexcept
+#endif
+{
+  return __t;
+}
+
 // Ad-hoc testing for other functionals
-TYPED_TEST(VectorTests, TestIdentityFunctional) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+TEST(AllTypesTests, TestIdentityFunctional) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using ::cuda::std::is_same;
+#else
+  using ::std::is_same;
+#endif
+
+  int i    = 42;
+  double d = 3.14;
+
+  // pass through
+  ASSERT_EQ(thrust::identity<int>{}(i), 42);
+  ASSERT_EQ(thrust::identity<int>{}(d), 3);
+
+  // modification through
+  thrust::identity<int>{}(i) = 1337;
+  ASSERT_EQ(i, 1337);
+
+  // value categories and const
+  static_assert(is_same<decltype(thrust::identity<int>{}(42)), int&&>::value, "");
+  static_assert(is_same<decltype(thrust::identity<int>{}(i)), int&>::value, "");
+  static_assert(is_same<decltype(thrust::identity<int>{}(as_const(i))), const int&>::value, "");
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  static_assert(is_same<decltype(thrust::identity<int>{}(::cuda::std::move(i))), int&&>::value, "");
+#else
+  static_assert(is_same<decltype(thrust::identity<int>{}(::std::move(i))), int&&>::value, "");
+#endif
+  static_assert(is_same<decltype(thrust::identity<int>{}(static_cast<const int&&>(i))), const int&>::value, "");
+
+  // value categories when casting to different type
+  static_assert(is_same<decltype(thrust::identity<int>{}(3.14)), int&&>::value, "");
+  // unfortunately, old versions of MSVC pick the `const int&` overload instead of `int&&`
+#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && THRUST_MSVC_VERSION >= 1929
+  static_assert(is_same<decltype(thrust::identity<int>{}(d)), int&&>::value, "");
+  static_assert(is_same<decltype(thrust::identity<int>{}(as_const(d))), int&&>::value, "");
+#endif
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  static_assert(is_same<decltype(thrust::identity<int>{}(::cuda::std::move(d))), int&&>::value, "");
+#else
+  static_assert(is_same<decltype(thrust::identity<int>{}(::std::move(d))), int&&>::value, "");
+#endif
+  static_assert(is_same<decltype(thrust::identity<int>{}(static_cast<const double&&>(d))), int&&>::value, "");
+}
+
+TYPED_TEST(VectorTests, TestIdentityFunctionalVector) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   using Vector = typename TestFixture::input_type;
   using T      = typename Vector::value_type;
-
-  Vector input(4);
-  input[0] = 0;
-  input[1] = 1;
-  input[2] = 2;
-  input[3] = 3;
-
+  Vector input{0, 1, 2, 3};
   Vector output(4);
-
   thrust::transform(input.begin(), input.end(), output.begin(), thrust::identity<T>());
-
   ASSERT_EQ(input, output);
 }
 
@@ -230,16 +283,8 @@ TYPED_TEST(VectorTests, TestProject1stFunctional) THRUST_DISABLE_BROKEN_GCC_VECT
   using Vector = typename TestFixture::input_type;
   using T      = typename Vector::value_type;
 
-  Vector lhs(4);
-  Vector rhs(4);
-  lhs[0] = 0;
-  rhs[0] = 3;
-  lhs[1] = 1;
-  rhs[1] = 4;
-  lhs[2] = 2;
-  rhs[2] = 5;
-  lhs[2] = 3;
-  rhs[2] = 6;
+  Vector lhs{0, 1, 2, 3};
+  Vector rhs{3, 4, 5, 6};
 
   Vector output(4);
 
@@ -255,16 +300,8 @@ TYPED_TEST(VectorTests, TestProject2ndFunctional) THRUST_DISABLE_BROKEN_GCC_VECT
   using Vector = typename TestFixture::input_type;
   using T      = typename Vector::value_type;
 
-  Vector lhs(4);
-  Vector rhs(4);
-  lhs[0] = 0;
-  rhs[0] = 3;
-  lhs[1] = 1;
-  rhs[1] = 4;
-  lhs[2] = 2;
-  rhs[2] = 5;
-  lhs[2] = 3;
-  rhs[2] = 6;
+  Vector lhs{0, 1, 2, 3};
+  Vector rhs{3, 4, 5, 6};
 
   Vector output(4);
 
@@ -280,25 +317,15 @@ TYPED_TEST(VectorTests, TestMaximumFunctional) THRUST_DISABLE_BROKEN_GCC_VECTORI
   using Vector = typename TestFixture::input_type;
   using T      = typename Vector::value_type;
 
-  Vector input1(4);
-  Vector input2(4);
-  input1[0] = 8;
-  input1[1] = 3;
-  input1[2] = 7;
-  input1[3] = 7;
-  input2[0] = 5;
-  input2[1] = 6;
-  input2[2] = 9;
-  input2[3] = 3;
+  Vector input1{8, 3, 7, 7};
+  Vector input2{5, 6, 9, 3};
 
   Vector output(4);
 
   thrust::transform(input1.begin(), input1.end(), input2.begin(), output.begin(), thrust::maximum<T>());
 
-  ASSERT_EQ(output[0], 8);
-  ASSERT_EQ(output[1], 6);
-  ASSERT_EQ(output[2], 9);
-  ASSERT_EQ(output[3], 7);
+  Vector ref{8, 6, 9, 7};
+  ASSERT_EQ(output, ref);
 }
 
 TYPED_TEST(VectorTests, TestMinimumFunctional) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
@@ -308,25 +335,15 @@ TYPED_TEST(VectorTests, TestMinimumFunctional) THRUST_DISABLE_BROKEN_GCC_VECTORI
   using Vector = typename TestFixture::input_type;
   using T      = typename Vector::value_type;
 
-  Vector input1(4);
-  Vector input2(4);
-  input1[0] = 8;
-  input1[1] = 3;
-  input1[2] = 7;
-  input1[3] = 7;
-  input2[0] = 5;
-  input2[1] = 6;
-  input2[2] = 9;
-  input2[3] = 3;
+  Vector input1{8, 3, 7, 7};
+  Vector input2{5, 6, 9, 3};
 
   Vector output(4);
 
   thrust::transform(input1.begin(), input1.end(), input2.begin(), output.begin(), thrust::minimum<T>());
 
-  ASSERT_EQ(output[0], 5);
-  ASSERT_EQ(output[1], 3);
-  ASSERT_EQ(output[2], 7);
-  ASSERT_EQ(output[3], 3);
+  Vector ref{5, 3, 7, 3};
+  ASSERT_EQ(output, ref);
 }
 
 TYPED_TEST(IntegralVectorTests, TestNot1) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
@@ -336,22 +353,14 @@ TYPED_TEST(IntegralVectorTests, TestNot1) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
   using Vector = typename TestFixture::input_type;
   using T      = typename Vector::value_type;
 
-  Vector input(5);
-  input[0] = 1;
-  input[1] = 0;
-  input[2] = 1;
-  input[3] = 1;
-  input[4] = 0;
+  Vector input{1, 0, 1, 1, 0};
 
   Vector output(5);
 
   thrust::transform(input.begin(), input.end(), output.begin(), thrust::not_fn(thrust::identity<T>()));
 
-  ASSERT_EQ(output[0], 0);
-  ASSERT_EQ(output[1], 1);
-  ASSERT_EQ(output[2], 0);
-  ASSERT_EQ(output[3], 0);
-  ASSERT_EQ(output[4], 1);
+  Vector ref{0, 1, 0, 0, 1};
+  ASSERT_EQ(output, ref);
 }
 
 // GCC 11 fails to build this test case with a spurious error in a
@@ -370,28 +379,15 @@ TYPED_TEST(VectorTests, TestNot2) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
   using Vector = typename TestFixture::input_type;
   using T      = typename Vector::value_type;
 
-  Vector input1(5);
-  Vector input2(5);
-  input1[0] = 1;
-  input1[1] = 0;
-  input1[2] = 1;
-  input1[3] = 1;
-  input1[4] = 0;
-  input2[0] = 1;
-  input2[1] = 1;
-  input2[2] = 0;
-  input2[3] = 1;
-  input2[4] = 1;
+  Vector input1{1, 0, 1, 1, 0};
+  Vector input2{1, 1, 0, 1, 1};
 
   Vector output(5);
 
   thrust::transform(input1.begin(), input1.end(), input2.begin(), output.begin(), thrust::not_fn(thrust::equal_to<T>()));
 
-  ASSERT_EQ(output[0], 0);
-  ASSERT_EQ(output[1], 1);
-  ASSERT_EQ(output[2], 1);
-  ASSERT_EQ(output[3], 0);
-  ASSERT_EQ(output[4], 1);
+  Vector ref{0, 1, 1, 0, 1};
+  ASSERT_EQ(output, ref);
 }
 
 #endif // Weird GCC11 failure case
