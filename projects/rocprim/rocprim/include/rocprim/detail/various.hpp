@@ -190,10 +190,11 @@ struct match_fundamental_type
         >::type;
 };
 
-// A storage-backing wrapper that allows types with non-trivial constructors to be aliased in unions
+// A storage-backing wrapper that allows types with non-trivial constructors to be aliased in unions.
+// Due to the reinterpret cast, it may in some cases be technically UB, but the generated code is usually
+// more performant than proper code.
 template<typename T>
-struct [[deprecated("To store non default-constructible types in local memory, use "
-                    "rocprim::uninitialized_array instead")]] raw_storage
+struct raw_storage
 {
     // Biggest memory-access word that T is a whole multiple of and is not larger than the alignment of T
     using device_word = typename detail::match_fundamental_type<T>::type;
