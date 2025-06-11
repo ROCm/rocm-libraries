@@ -25,10 +25,13 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/scan.h>
 
-#include <array>
-#include <ostream>
-
 #include <unittest/unittest.h>
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/array>
+#else
+#  include <array>
+#endif
 
 template <typename T>
 struct max_functor
@@ -40,9 +43,10 @@ struct max_functor
 };
 
 template <class Vector>
-void TestScanSimple(void)
+void TestScanSimple()
 {
   using T = typename Vector::value_type;
+
   // icc miscompiles the intermediate sum updates for custom_numeric.
   // The issue doesn't happen with opts disabled, or on other compilers.
   // Printing the intermediate sum each iteration "fixes" the issue,
@@ -207,7 +211,7 @@ void TestExclusiveScanDispatchImplicit()
 }
 DECLARE_UNITTEST(TestExclusiveScanDispatchImplicit);
 
-void TestInclusiveScan32(void)
+void TestInclusiveScan32()
 {
   using T  = int;
   size_t n = 32;
@@ -225,7 +229,7 @@ void TestInclusiveScan32(void)
 }
 DECLARE_UNITTEST(TestInclusiveScan32);
 
-void TestExclusiveScan32(void)
+void TestExclusiveScan32()
 {
   using T  = int;
   size_t n = 32;
@@ -245,7 +249,7 @@ void TestExclusiveScan32(void)
 DECLARE_UNITTEST(TestExclusiveScan32);
 
 template <class IntVector, class FloatVector>
-void TestScanMixedTypes(void)
+void TestScanMixedTypes()
 {
   // make sure we get types for default args and operators correct
   IntVector int_input{1, 2, 3, 4};
@@ -296,12 +300,12 @@ void TestScanMixedTypes(void)
   ASSERT_EQUAL(float_output[2], 8.5f); // out: 8.0f  in: 3 accum: 11.5f
   ASSERT_EQUAL(float_output[3], 11.5f); // out: 11.f  in: 4 accum: 15.5f
 }
-void TestScanMixedTypesHost(void)
+void TestScanMixedTypesHost()
 {
   TestScanMixedTypes<thrust::host_vector<int>, thrust::host_vector<float>>();
 }
 DECLARE_UNITTEST(TestScanMixedTypesHost);
-void TestScanMixedTypesDevice(void)
+void TestScanMixedTypesDevice()
 {
   TestScanMixedTypes<thrust::device_vector<int>, thrust::device_vector<float>>();
 }
@@ -431,7 +435,7 @@ struct TestScanToDiscardIterator
 VariableUnitTest<TestScanToDiscardIterator, unittest::type_list<unittest::int8_t, unittest::int16_t, unittest::int32_t>>
   TestScanToDiscardIteratorInstance;
 
-void TestScanMixedTypes(void)
+void TestScanMixedTypes()
 {
   const unsigned int n = 113;
 
@@ -471,7 +475,7 @@ void TestScanMixedTypes(void)
 DECLARE_UNITTEST(TestScanMixedTypes);
 
 template <typename T, unsigned int N>
-void _TestScanWithLargeTypes(void)
+void _TestScanWithLargeTypes()
 {
   size_t n = (1024 * 1024) / sizeof(FixedVector<T, N>);
 
@@ -497,7 +501,7 @@ void _TestScanWithLargeTypes(void)
   ASSERT_EQUAL_QUIET(h_output, d_output);
 }
 
-void TestScanWithLargeTypes(void)
+void TestScanWithLargeTypes()
 {
   _TestScanWithLargeTypes<int, 1>();
 
@@ -526,7 +530,7 @@ struct plus_mod3
 };
 
 template <typename Vector>
-void TestInclusiveScanWithIndirection(void)
+void TestInclusiveScanWithIndirection()
 {
   // add numbers modulo 3 with external lookup table
   using T = typename Vector::value_type;
@@ -555,10 +559,11 @@ struct const_ref_plus_mod3
 };
 
 template <typename Vector>
-void TestInclusiveScanWithConstAccumulator(void)
+void TestInclusiveScanWithConstAccumulator()
 {
   // add numbers modulo 3 with external lookup table
   using T = typename Vector::value_type;
+
   Vector data{0, 1, 2, 1, 2, 0, 1};
   Vector table{0, 1, 2, 0, 1, 2};
   thrust::inclusive_scan(
@@ -695,12 +700,20 @@ DECLARE_UNITTEST(TestInclusiveScanWithUserDefinedType);
 
 // Represents a permutation as a tuple of integers, see also: https://en.wikipedia.org/wiki/Permutation
 // We need a distinct type (instead of an alias) for operator<< to be found via ADL
-struct permutation_t : std::array<int, 5>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct permutation_t : ::cuda::std::array<int, 5>
+#else
+struct permutation_t : ::std::array<int, 5>
+#endif
 {
   permutation_t() = default;
 
   constexpr THRUST_HOST_DEVICE permutation_t(int a, int b, int c, int d, int e)
-      : std::array<int, 5>{a, b, c, d, e}
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+      : ::cuda::std::array<int, 5>{a, b, c, d, e}
+#else
+      : ::std::array<int, 5>{a, b, c, d, e}
+#endif
   {}
 
   friend std::ostream& operator<<(std::ostream& os, const permutation_t& p)
