@@ -25,6 +25,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+// NOTE(HIP/AMD): currently barrier is not supported on AMD hardware
 // UNSUPPORTED: hipcc
 
 // UNSUPPORTED: pre-sm-80
