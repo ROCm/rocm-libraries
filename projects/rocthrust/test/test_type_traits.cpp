@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -26,7 +26,8 @@
 #include <thrust/tuple.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
-#include <unittest/unittest.h>
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  if defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
@@ -56,21 +57,25 @@
 #  include <utility>
 #endif // THRUST_DEVICE_SYSTEM
 
-void TestIsContiguousIterator()
+TESTS_DEFINE(TypeTraitsTests, FullTestsParams);
+
+TEST(TypeTraitsTests, TestIsContiguousIterator)
 {
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
   using HostVector   = thrust::host_vector<int>;
   using DeviceVector = thrust::device_vector<int>;
 
-  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<int*>::value, true);
-  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<thrust::device_ptr<int>>::value, true);
+  ASSERT_EQ((bool) thrust::is_contiguous_iterator<int*>::value, true);
+  ASSERT_EQ((bool) thrust::is_contiguous_iterator<thrust::device_ptr<int>>::value, true);
 
-  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<HostVector::iterator>::value, true);
-  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<HostVector::const_iterator>::value, true);
+  ASSERT_EQ((bool) thrust::is_contiguous_iterator<HostVector::iterator>::value, true);
+  ASSERT_EQ((bool) thrust::is_contiguous_iterator<HostVector::const_iterator>::value, true);
 
-  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<DeviceVector::iterator>::value, true);
-  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<DeviceVector::const_iterator>::value, true);
+  ASSERT_EQ((bool) thrust::is_contiguous_iterator<DeviceVector::iterator>::value, true);
+  ASSERT_EQ((bool) thrust::is_contiguous_iterator<DeviceVector::const_iterator>::value, true);
 
-  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<thrust::device_ptr<int>>::value, true);
+  ASSERT_EQ((bool) thrust::is_contiguous_iterator<thrust::device_ptr<int>>::value, true);
 
   using HostIteratorTuple = thrust::tuple<HostVector::iterator, HostVector::iterator>;
 
@@ -79,120 +84,120 @@ void TestIsContiguousIterator()
   using TransformIterator = thrust::transform_iterator<thrust::identity<int>, HostVector::iterator>;
   using ZipIterator       = thrust::zip_iterator<HostIteratorTuple>;
 
-  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<ConstantIterator>::value, false);
-  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<CountingIterator>::value, false);
-  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<TransformIterator>::value, false);
-  ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<ZipIterator>::value, false);
+  ASSERT_EQ((bool) thrust::is_contiguous_iterator<ConstantIterator>::value, false);
+  ASSERT_EQ((bool) thrust::is_contiguous_iterator<CountingIterator>::value, false);
+  ASSERT_EQ((bool) thrust::is_contiguous_iterator<TransformIterator>::value, false);
+  ASSERT_EQ((bool) thrust::is_contiguous_iterator<ZipIterator>::value, false);
 }
-DECLARE_UNITTEST(TestIsContiguousIterator);
 
-void TestIsCommutative()
+TEST(TypeTraitsTests, TestIsCommutative)
 {
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
   {
     using T  = int;
     using Op = thrust::plus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
     using Op = thrust::multiplies<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
     using Op = thrust::minimum<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
     using Op = thrust::maximum<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
     using Op = thrust::logical_or<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
     using Op = thrust::logical_and<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
     using Op = thrust::bit_or<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
     using Op = thrust::bit_and<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = int;
     using Op = thrust::bit_xor<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
 
   {
     using T  = char;
     using Op = thrust::plus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = short;
     using Op = thrust::plus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = long;
     using Op = thrust::plus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = long long;
     using Op = thrust::plus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = float;
     using Op = thrust::plus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
   {
     using T  = double;
     using Op = thrust::plus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, true);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, true);
   }
 
   {
     using T  = int;
     using Op = thrust::minus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, false);
   }
   {
     using T  = int;
     using Op = thrust::divides<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, false);
   }
   {
     using T  = float;
     using Op = thrust::divides<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, false);
   }
   {
     using T  = float;
     using Op = thrust::minus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, false);
   }
 
   {
     using T  = thrust::tuple<int, int>;
     using Op = thrust::plus<T>;
-    ASSERT_EQUAL((bool) thrust::detail::is_commutative<Op>::value, false);
+    ASSERT_EQ((bool) thrust::detail::is_commutative<Op>::value, false);
   }
 }
-DECLARE_UNITTEST(TestIsCommutative);
 
 struct NonTriviallyCopyable
 {
@@ -207,8 +212,10 @@ static_assert(!::std::is_trivially_copyable<NonTriviallyCopyable>::value, "");
 #endif
 static_assert(thrust::is_trivially_relocatable<NonTriviallyCopyable>::value, "");
 
-void TestTriviallyRelocatable()
+TEST(TypeTraitsTests, TestTriviallyRelocatable)
 {
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
   using ::cuda::std::complex;
   using ::cuda::std::pair;
@@ -260,5 +267,4 @@ void TestTriviallyRelocatable()
   static_assert(thrust::is_trivially_relocatable<thrust::tuple<NonTriviallyCopyable>>::value, "");
 #endif
   static_assert(thrust::is_trivially_relocatable<tuple<NonTriviallyCopyable>>::value, "");
-};
-DECLARE_UNITTEST(TestTriviallyRelocatable);
+}
