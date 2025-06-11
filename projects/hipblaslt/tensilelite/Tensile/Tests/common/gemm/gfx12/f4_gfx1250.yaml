@@ -80,15 +80,14 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - SourceSwap: [1]
         - WavefrontSize: [32]
-        - AssertFree0ElementMultiple: [ 16 ] # no edge
-        - AssertFree1ElementMultiple: [ 16 ] # no edge
-        - AssertSummationElementMultiple: [ 128 ] # no tail
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 512]
+          - Exact: [127, 128, 1, 40] # edge/tail cases
+          - Exact: [128, 127, 1, 264] # edge/tail cases
 
   #######################################
   # NN - standard
@@ -144,15 +143,14 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - SourceSwap: [1]
         - WavefrontSize: [32]
-        - AssertFree0ElementMultiple: [ 16 ] # no edge
-        - AssertFree1ElementMultiple: [ 16 ] # no edge
-        - AssertSummationElementMultiple: [ 128 ] # no tail
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 512]
+          # - Exact: [127, 128, 1, 40] # edge/tail cases # Todo: enable this case when LDSTrInst with edge is supported
+          - Exact: [128, 127, 1, 264] # edge/tail cases
 
   #######################################
   # NT - standard
@@ -208,15 +206,14 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - SourceSwap: [1]
         - WavefrontSize: [32]
-        - AssertFree0ElementMultiple: [ 16 ] # no edge
-        - AssertFree1ElementMultiple: [ 16 ] # no edge
-        - AssertSummationElementMultiple: [ 128 ] # no tail
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 512]
+          # - Exact: [127, 128, 1, 40] # edge/tail cases # Todo: enable this case when LDSTrInst with edge is supported
+          # - Exact: [128, 127, 1, 264] # edge/tail cases # Todo: enable this case when LDSTrInst with edge is supported
 
   #######################################
   # TT - standard
@@ -272,12 +269,11 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - SourceSwap: [1]
         - WavefrontSize: [32]
-        - AssertFree0ElementMultiple: [ 16 ] # no edge
-        - AssertFree1ElementMultiple: [ 16 ] # no edge
-        - AssertSummationElementMultiple: [ 128 ] # no tail
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 512]
+          - Exact: [127, 128, 1, 40] # edge/tail cases
+          # - Exact: [128, 127, 1, 264] # edge/tail cases # Todo: enable this case when LDSTrInst with edge is supported

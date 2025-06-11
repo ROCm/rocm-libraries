@@ -7436,14 +7436,14 @@ class KernelWriterAssembly(KernelWriter):
               shiftK.add(VSubU32(dst=vgpr(kReg), src0=sgpr(loopCntSgpr), src1=vgpr(kReg_first), comment="get distance between size and k index"))
               shiftK.add(VCmpLtI32(dst=sgpr(tmpSgprX2, self.states.laneSGPRCount), src0=vgpr(kReg), src1=numMIInput, comment="set partial 0 if distance less than input per thread"))
             TailLoop_SkipZeroOutMask = Label((self.labels.getUniqueNamePrefix("TailLoop_SkipZeroOutMask")), comment="")
-            shiftK.add(SAndB32(dst=sgpr(tmpSgprX1), src0=sgpr("SizeL"), src1=8-1, comment="if summation is multiple of 8, skip masking"))
-            shiftK.add(SCmpEQU32(src0=sgpr(tmpSgprX1), src1=0))
-            shiftK.add(SCBranchSCC1(labelName=TailLoop_SkipZeroOutMask.getLabelName(), comment="skip mask"))
             if is_wmma_v3:
               shiftK.add(SAndB32(dst=sgpr(tmpSgprX1), src0=sgpr(loopCntSgpr), src1=int((64 // (numRegistersIn * 32))-1), comment="get inputs for edge thread"))
               shiftK.add(SSubU32(dst=sgpr(tmpSgprX1), src0=int((64 // (numRegistersIn * 32))), src1=sgpr(tmpSgprX1), comment="use shift to fill 0 for outside element"))
               shiftK.add(SLShiftLeftB32(dst=sgpr(tmpSgprX1), shiftHex=log2(shiftPerElement), src=sgpr(tmpSgprX1), comment="use shift to fill 0 for outside element"))
             else:
+              shiftK.add(SAndB32(dst=sgpr(tmpSgprX1), src0=sgpr("SizeL"), src1=8-1, comment="if summation is multiple of 8, skip masking"))
+              shiftK.add(SCmpEQU32(src0=sgpr(tmpSgprX1), src1=0))
+              shiftK.add(SCBranchSCC1(labelName=TailLoop_SkipZeroOutMask.getLabelName(), comment="skip mask"))
               shiftK.add(SAndB32(dst=sgpr(tmpSgprX1), src0=sgpr(loopCntSgpr), src1=numMIInput-1, comment="get inputs for edge thread"))
               shiftK.add(SSubU32(dst=sgpr(tmpSgprX1), src0=numMIInput, src1=sgpr(tmpSgprX1), comment="use shift to fill 0 for outside element"))
               shiftK.add(SLShiftLeftB32(dst=sgpr(tmpSgprX1), shiftHex=log2(shiftPerElement), src=sgpr(tmpSgprX1), comment="use shift to fill 0 for outside element"))
@@ -8744,6 +8744,9 @@ class KernelWriterAssembly(KernelWriter):
                             tmpVgprPool.append(self.vgprPool.checkOut(1, 'destVgprHi'))
                             destVgprHi = tmpVgprPool[-1]
                   regIdx = r // 2
+                elif dataType.isFloat4():
+                  numElementsPerLoad = 8
+                  regIdx = r // 8
                 elif dataType.isInt8x4() or dataType.isSingle():
                   # Only supported for buffer loads since it has OOB checks
                   if kernel["BufferLoad"]:
@@ -8861,6 +8864,12 @@ class KernelWriterAssembly(KernelWriter):
                       hi8  = (loopCnt%4) %2 if tP["glvw"]==1 else (r%4) %2
                       hi16 = False if tP["glvw"]==1 else (r%4)//2
                       comment="load one buffer value"
+
+                  if (dataType.isFloat4()) and not tP["isM"]:
+                    if numElementsPerLoad==8:
+                      # Pack 8 FP4 elements into a single load dword
+                      r += numElementsPerLoad-1 # skip next (numElementsPerLoad-1) element since we loaded dword here
+                      comment = "Load 8 elements for Float4 in single VGPR."
 
                   useBuffer = not isTr
                   bpl = numElementsPerLoad*(tP["bpeGR"] if not tP["isM"] else tP["bpe"]) # bytesPerLoad

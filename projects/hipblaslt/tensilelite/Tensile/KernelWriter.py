@@ -3835,7 +3835,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if not kernel["NoTailLoop"]:
       ########################################
       # Tail Loop
-      # which means tail loop not needed.
+      # which means tail loop needed.
       ########################################
       self.states.inTailLoop = True
       module.addComment2("Tail Loop")

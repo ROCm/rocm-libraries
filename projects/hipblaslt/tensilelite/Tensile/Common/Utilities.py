@@ -407,6 +407,8 @@ def wmmaV3InputVgprLayout(wmma: Sequence[int], dtypeBitWidth: Optional[int] = No
         assert dtypeBitWidth
         if dtypeBitWidth == 8:
             return (4, 16, 2, 16)
+        if dtypeBitWidth == 4:
+            return (2, 16, 2, 32)
         assert False, f"Unsupported datatype bitwidth: {dtypeBitWidth}"
     else:
         assert False, f"Unhandled WMMA: {wmma}"
