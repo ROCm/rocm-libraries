@@ -26,17 +26,14 @@ trigger:
     - release-staging/rocm-rel-7.*
   paths:
     include:
-    - projects/rocprim
+    - projects/rocfft
     exclude:
-    - projects/rocprim/.githooks
-    - projects/rocprim/.github
-    - projects/rocprim/.gitlab
-    - projects/rocprim/.jenkins
-    - projects/rocprim/docs
-    - projects/rocprim/'.*.y*ml'
-    - projects/rocprim/'*.md'
-    - projects/rocprim/LICENSE.txt
-    - projects/rocprim/NOTICES.txt
+    - projects/rocfft/.githooks
+    - projects/rocfft/.github
+    - projects/rocfft/.jenkins
+    - projects/rocfft/docs
+    - projects/rocfft/'.*.y*ml'
+    - projects/rocfft/'*.md'
 
 pr:
   autoCancel: true
@@ -46,21 +43,18 @@ pr:
     - release-staging/rocm-rel-7.*
   paths:
     include:
-    - projects/rocprim
+    - projects/rocfft
     exclude:
-    - projects/rocprim/.githooks
-    - projects/rocprim/.github
-    - projects/rocprim/.gitlab
-    - projects/rocprim/.jenkins
-    - projects/rocprim/docs
-    - projects/rocprim/'.*.y*ml'
-    - projects/rocprim/'*.md'
-    - projects/rocprim/LICENSE.txt
-    - projects/rocprim/NOTICES.txt
+    - projects/rocfft/.githooks
+    - projects/rocfft/.github
+    - projects/rocfft/.jenkins
+    - projects/rocfft/docs
+    - projects/rocfft/'.*.y*ml'
+    - projects/rocfft/'*.md'
   drafts: false
 
 jobs:
-  - template: ${{ variables.CI_COMPONENT_PATH }}/rocPRIM.yml@pipelines_repo
+  - template: ${{ variables.CI_COMPONENT_PATH }}/rocFFT.yml@pipelines_repo
     parameters:
-      sparseCheckoutDir: projects/rocprim
+      sparseCheckoutDir: projects/rocfft
       triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
