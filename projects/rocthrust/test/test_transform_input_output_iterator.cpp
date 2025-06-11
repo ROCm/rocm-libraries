@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -21,8 +21,10 @@
 #include <thrust/iterator/transform_input_output_iterator.h>
 #include <thrust/reduce.h>
 #include <thrust/sequence.h>
+#include <thrust/universal_vector.h>
 
-#include <unittest/unittest.h>
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 // There is an unfortunate miscompilation of the gcc-13 vectorizer leading to OOB writes
 // Adding this attribute suffices that this miscompilation does not appear anymore
@@ -32,10 +34,43 @@
 #  define THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 #endif
 
-template <class Vector>
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformInputOutputIterator()
+using VectorTestsParams = ::testing::Types<
+  Params<thrust::host_vector<signed char>>,
+  Params<thrust::host_vector<short>>,
+  Params<thrust::host_vector<int>>,
+  Params<thrust::host_vector<float>>,
+  Params<thrust::host_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::host_memory_resource>>>,
+  Params<thrust::device_vector<signed char>>,
+  Params<thrust::device_vector<short>>,
+  Params<thrust::device_vector<int>>,
+  Params<thrust::device_vector<float>>,
+  Params<thrust::device_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::device_memory_resource>>>,
+  Params<thrust::universal_vector<int>>,
+  Params<thrust::universal_host_pinned_vector<int>>>;
+
+using IntegralTypes = ::testing::Types<
+  Params<char>,
+  Params<signed char>,
+  Params<unsigned char>,
+  Params<short>,
+  Params<unsigned short>,
+  Params<int>,
+  Params<unsigned int>,
+  Params<long>,
+  Params<unsigned long>,
+  Params<long long>,
+  Params<unsigned long long>>;
+
+TESTS_DEFINE(TransformInputOutputIteratorVectorTests, VectorTestsParams);
+TESTS_DEFINE(TransformInputOutputIteratorVariableUnitTests, IntegralTypes);
+
+TYPED_TEST(TransformInputOutputIteratorVectorTests, TestTransformInputOutputIterator)
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 {
-  using T = typename Vector::value_type;
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   using InputFunction  = thrust::negate<T>;
   using OutputFunction = thrust::square<T>;
@@ -57,21 +92,23 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformInputOutputIterator()
 
   Vector gold_squared{1, 4, 9, 16};
 
-  ASSERT_EQUAL(squared, gold_squared);
+  ASSERT_EQ(squared, gold_squared);
 
   // negated value read from transform_iter
   thrust::copy_n(transform_iter, squared.size(), negated.begin());
 
   Vector gold_negated{-1, -4, -9, -16};
 
-  ASSERT_EQUAL(negated, gold_negated);
+  ASSERT_EQ(negated, gold_negated);
 }
-DECLARE_VECTOR_UNITTEST(TestTransformInputOutputIterator);
 
-template <class Vector>
-THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestMakeTransformInputOutputIterator()
+TYPED_TEST(TransformInputOutputIteratorVectorTests, TestMakeTransformInputOutputIterator)
+THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 {
-  using T = typename Vector::value_type;
+  using Vector = typename TestFixture::input_type;
+  using T      = typename Vector::value_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   using InputFunction  = thrust::negate<T>;
   using OutputFunction = thrust::square<T>;
@@ -90,7 +127,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestMakeTransformInputOutputIterator()
 
   Vector gold_negated{-1, -2, -3, -4};
 
-  ASSERT_EQUAL(negated, gold_negated);
+  ASSERT_EQ(negated, gold_negated);
 
   // squared value writen by transform iterator
   thrust::copy(negated.begin(),
@@ -99,20 +136,24 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestMakeTransformInputOutputIterator()
 
   Vector gold_squared{1, 4, 9, 16};
 
-  ASSERT_EQUAL(squared, gold_squared);
+  ASSERT_EQ(squared, gold_squared);
 }
-DECLARE_VECTOR_UNITTEST(TestMakeTransformInputOutputIterator);
 
-template <typename T>
-struct TestTransformInputOutputIteratorScan
+TYPED_TEST(TransformInputOutputIteratorVariableUnitTests, TestTransformInputOutputIteratorScan)
 {
-  void operator()(const size_t n)
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  for (auto size : get_sizes())
   {
-    thrust::host_vector<T> h_data   = unittest::random_samples<T>(n);
+    SCOPED_TRACE(testing::Message() << "with size= " << size);
+
+    thrust::host_vector<T> h_data   = random_samples<T>(size);
     thrust::device_vector<T> d_data = h_data;
 
-    thrust::host_vector<T> h_result(n);
-    thrust::device_vector<T> d_result(n);
+    thrust::host_vector<T> h_result(size);
+    thrust::device_vector<T> d_result(size);
 
     // run on host (uses forward iterator negate)
     thrust::inclusive_scan(
@@ -125,7 +166,6 @@ struct TestTransformInputOutputIteratorScan
       d_data.end(),
       thrust::make_transform_input_output_iterator(d_result.begin(), thrust::square<T>(), thrust::negate<T>()));
 
-    ASSERT_EQUAL(h_result, d_result);
+    ASSERT_EQ(h_result, d_result);
   }
-};
-VariableUnitTest<TestTransformInputOutputIteratorScan, IntegralTypes> TestTransformInputOutputIteratorScanInstance;
+}
