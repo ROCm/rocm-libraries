@@ -397,15 +397,9 @@ protected:
 
     void Verify()
     {
-        // Computation error of fp16 is ~2^13 (=8192) bigger than
-        // the one of fp32 because mantissa is shorter by 13 bits.
-        auto threshold = std::is_same<T, float>::value ? 1.5e-5 : 8.2e-2;
+        auto threshold = std::is_same<T, float>::value ? 1.5e-5 : 4e-3;
 
-        // bf16 mantissa has 7 bits, by 3 bits shorter than fp16.
-        if(std::is_same<T, bfloat16>::value)
-            threshold *= 8.0;
         auto error = miopen::rms_range(ref_output, output);
-
         EXPECT_TRUE(miopen::range_distance(ref_output) == miopen::range_distance(output));
         EXPECT_TRUE(error < threshold)
             << "Error output beyond tolerance Error:" << error << ",  Threshold: " << threshold;
@@ -510,8 +504,6 @@ protected:
 
         ws_sizeInBytes = miopen::GetLayerNormBackwardWorkspaceSize(
             handle, dy.desc, x.desc, weight.desc, mean.desc, rstd.desc, dx.desc, dw.desc, db.desc, ln_mode, normalized_dim);
-        if(ws_sizeInBytes == static_cast<size_t>(-1))
-            GTEST_SKIP();
 
         workspace_dims.push_back(ws_sizeInBytes / sizeof(T));
         if(ws_sizeInBytes != 0)
@@ -570,16 +562,7 @@ protected:
 
     void Verify()
     {
-        // Computation error of fp16 is ~2^13 (=8192) bigger than
-        // the one of fp32 because mantissa is shorter by 13 bits.
-        // In the case of layernorm, there is a cumulative sum operation, and in the case of
-        // floating point operation, the result value can change if the order of the summed values
-        // is changed. So apply a threshold that is 10 times larger than other operations.
-        auto threshold = std::is_same<T, float>::value ? 1.5e-5 : 8.2e-2;
-
-        // bf16 mantissa has 7 bits, by 3 bits shorter than fp16.
-        if(std::is_same<T, bfloat16>::value)
-            threshold *= 80.0;
+        auto threshold = std::is_same<T, float>::value ? 1.5e-5 : 4e-3;
 
         auto error = miopen::rms_range(ref_dx, dx);
         EXPECT_TRUE(miopen::range_distance(ref_dx) == miopen::range_distance(dx));

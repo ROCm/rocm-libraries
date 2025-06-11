@@ -34,12 +34,10 @@
 #include "random.hpp"
 #include "tensor_driver.hpp"
 #include "timer.hpp"
-#include <algorithm>
 #include <cfloat>
 #include <cstdlib>
 #include <memory>
 #include <miopen/tensor.hpp>
-#include <numeric>
 #include <vector>
 
 template <typename Tgpu, typename Tcheck>
@@ -387,7 +385,7 @@ int LayerNormDriver<Tgpu, Tref>::GetandSetData()
 template <typename Tgpu, typename Tref>
 int LayerNormDriver<Tgpu, Tref>::AddCmdLineArgs()
 {
-    inflags.AddInputFlag("forw", 'F', "0", "Run only Forward LayerNorm (Default=1)", "int");
+    inflags.AddInputFlag("forw", 'F', "0", "Run only Forward LayerNorm (Default=0)", "int");
     inflags.AddTensorFlag("input", 'X', "100x3x32x32", "input tensor descriptor");
 
     inflags.AddInputFlag("eps", 'e', "0.00001", "Alpha (Default=0.00001)", "double");
@@ -422,9 +420,9 @@ int LayerNormDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
     size_t dw_sz             = GetTensorSize(dwDesc);
     size_t db_sz             = GetTensorSize(dbDesc);
 
-    miopenGetLayerNormBackwardWorkspaceSize(
+    auto status = miopenGetLayerNormBackwardWorkspaceSize(
         GetHandle(), mode, dyDesc, inputDesc, weightDesc, meanDesc, rstdDesc, dim, dxDesc, dwDesc, dbDesc, &ws_sizeInBytes);
-    if(ws_sizeInBytes == static_cast<size_t>(-1))
+    if(status != miopenStatusSuccess)
         return miopenStatusAllocFailed;
 
     uint32_t ctx = 0;
