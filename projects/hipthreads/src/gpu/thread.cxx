@@ -24,6 +24,11 @@
 
 namespace gpu {
 
+enum {
+    CPU_WORK_QUEUE_SIZE = 4096U, // TODO: Make this depend on hardware_concurrency or something.
+    MAIN_WORK_QUEUE_SIZE = 4096U, // TODO: Make this depend on hardware_concurrency or something.
+};
+
 namespace internal {
 
 template <size_t queueSize>
@@ -340,7 +345,7 @@ static __host__ void prepDeviceForWork() {
         __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
     }
 
-    hipLaunchKernelGGL(threading_main, dim3(thread::hardware_concurrency()), dim3(MAX_THREAD_WIDTH), 0, mainStream);
+    hipLaunchKernelGGL(threading_main, dim3(thread::hardware_concurrency()), dim3(gpu::thread::max_width()), 0, mainStream);
 }
 
 static __host__ void notifyDeviceThereMightNotBeAnyMoreWork [[maybe_unused]] (bool blocking = false) {
@@ -402,7 +407,7 @@ static __device__ bool shouldKeepPollingForWork() {
 
 static __global__ void threading_main() {
     for (bool workFound = true; workFound || shouldKeepPollingForWork();) {
-        // TODO: why do we need this when blockDim.x == MAX_THREAD_WIDTH == warpSize?
+        // TODO: why do we need this when blockDim.x == gpu::thread::max_width() == warpSize?
         __syncthreads();
         workFound = invokeNext();
         if (!workFound)
