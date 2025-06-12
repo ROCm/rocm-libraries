@@ -44,7 +44,7 @@ struct WorkNode_Header {
     // Not initialized when a WorkNode is constructed from device code because we don't need it.
     size_t worknodeSize;
     // TODO: fix vthread_id - it's currently non-functional
-    uint32_t vthread_id = {}; // TODO: should this be a MAX_THREAD_WIDTH array? For now we just store the lowest id.
+    uint32_t vthread_id = {}; // TODO: should this be a gpu::thread::max_width() array? For now we just store the lowest id.
 };
 static_assert(std::is_standard_layout_v<WorkNode_Header>);
 
@@ -117,7 +117,7 @@ __device__ void wrapper(WorkNode_Header *worknode, bool yielding) {
     }
     __threadfence();
     // TODO: figure out how to make all the threads with idx > width 'catch up' on missed __syncthreads() calls.
-    // Shouldn't be a concern as long as blockDim.x == MAX_THREAD_WIDTH == warpSize
+    // Shouldn't be a concern as long as blockDim.x == gpu::thread::max_width() == warpSize
 }
 
 template <class Callable_t>

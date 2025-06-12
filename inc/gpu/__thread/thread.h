@@ -50,12 +50,6 @@ namespace gpu {
 
 namespace internal {
 
-enum {
-    MAX_THREAD_WIDTH = 32,
-    CPU_WORK_QUEUE_SIZE = 4096U, // TODO: Make this depend on hardware_concurrency or something.
-    MAIN_WORK_QUEUE_SIZE = 4096U, // TODO: Make this depend on hardware_concurrency or something.
-};
-
 //====================================================================================================================//
 //      THREAD CLASS DEFINITION
 //====================================================================================================================//
@@ -116,7 +110,7 @@ class thread {
     __host__ __device__ void join();
     __host__ __device__ void detach();
 
-    __host__ __device__ static constexpr unsigned int max_width() noexcept { return MAX_THREAD_WIDTH; }
+    __host__ __device__ static constexpr unsigned int max_width() noexcept { return 32; }
     __device__ static unsigned int hardware_concurrency() noexcept;
     __host__ static unsigned int hardware_concurrency() noexcept;
 
@@ -139,8 +133,8 @@ using internal::thread;
 
 template <class Fn_t, class... Args_t>
 inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
-    if (width > MAX_THREAD_WIDTH) {
-        throw std::length_error("thread::thread: width must not exceed " + std::to_string(MAX_THREAD_WIDTH));
+    if (width > max_width()) {
+        throw std::length_error("thread::thread: width must not exceed " + std::to_string(max_width()));
     }
 
     auto worknode_h = make_worknode(width, std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
@@ -171,7 +165,7 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
 template <class Fn_t, class... Args_t>
 inline __device__ thread::thread(uint32_t width [[maybe_unused]], Fn_t &&typed_fn [[maybe_unused]], Args_t &&...args [[maybe_unused]]) {
 #ifdef __HIP_DEVICE_COMPILE__
-    assert(width <= MAX_THREAD_WIDTH);
+    assert(width <= max_width());
     assert(threadIdx.x == 0);
     auto typed_worknode_ptr = make_worknode(width, std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
 
