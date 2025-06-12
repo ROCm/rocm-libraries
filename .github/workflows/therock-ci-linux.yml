@@ -23,6 +23,8 @@ jobs:
       id-token: write
     env:
       CACHE_DIR: ${{ github.workspace }}/.container-cache
+      CCACHE_DIR: "${{ github.workspace }}/.container-cache/ccache"
+      CCACHE_MAXSIZE: "700M"
     steps:
       - name: Generate a token for rocm-libraries
         id: generate-token
