@@ -198,7 +198,7 @@ namespace rocsparse
         // Allocation.
         //
         RETURN_IF_HIP_ERROR(
-            rocsparse_hipMallocAsync((void**)&seq_ptr, sizeof(J) * (n + 1), handle->stream));
+            rocsparse_hipMallocAsync(&seq_ptr, sizeof(J) * (n + 1), handle->stream));
 
         //
         // Set to 0.
@@ -351,7 +351,7 @@ rocsparse_status rocsparse::csrcolor_core(rocsparse_handle          handle,
     //
     J* workspace;
     RETURN_IF_HIP_ERROR(
-        rocsparse_hipMallocAsync((void**)&workspace, sizeof(J) * blocksize, handle->stream));
+        rocsparse_hipMallocAsync(&workspace, sizeof(J) * blocksize, handle->stream));
 
     //
     // Initialize colors

@@ -143,19 +143,19 @@ try
     // Clear bsrsv meta data (this includes lower, upper and their transposed equivalents
     if(!rocsparse::check_trm_shared(info, info->bsrsv_lower_info))
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsrsv_lower_info));
+        rocsparse::trm_info_t::destroy(info->bsrsv_lower_info);
     }
     if(!rocsparse::check_trm_shared(info, info->bsrsvt_lower_info))
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsrsvt_lower_info));
+        rocsparse::trm_info_t::destroy(info->bsrsvt_lower_info);
     }
     if(!rocsparse::check_trm_shared(info, info->bsrsv_upper_info))
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsrsv_upper_info));
+        rocsparse::trm_info_t::destroy(info->bsrsv_upper_info);
     }
     if(!rocsparse::check_trm_shared(info, info->bsrsvt_upper_info))
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsrsvt_upper_info));
+        rocsparse::trm_info_t::destroy(info->bsrsvt_upper_info);
     }
 
     info->bsrsv_lower_info  = nullptr;
