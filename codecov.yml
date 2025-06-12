@@ -1,0 +1,9 @@
+coverage:
+  status:
+    project:
+      rocRAND:
+        flags: rocRAND
+        target: 80%
+      rocThrust:
+        flags: rocThrust
+        target: 80%
