@@ -109,6 +109,3 @@ jobs:
       cmake_options: ${{ matrix.projects.cmake_options }}
       project_to_test: ${{ matrix.projects.project_to_test }}
       subtree_checkout: ${{ matrix.projects.subtree_checkout }}
-    secrets:
-      app_id: ${{ secrets.APP_ID }}
-      app_private_key: ${{ secrets.APP_PRIVATE_KEY }}
