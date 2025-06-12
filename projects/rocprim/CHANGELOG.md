@@ -53,6 +53,7 @@ This is a complete list of affected functions and how their default accumulator 
   * `rocprim::deterministic_exclusive_scan`
     * Previous default: `class AccType = detail::input_type_t<InitValueType>>`
     * Current default: `class AccType = rocprim::accumulator_t<BinaryFunction, rocprim::detail::input_type_t<InitValueType>>`
+* Undeprecated internal `detail::raw_storage`.
     
 ### Deprecations
 
