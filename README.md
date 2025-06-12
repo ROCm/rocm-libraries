@@ -32,7 +32,7 @@ This table provides the current status of the migration of specific ROCm librari
 | `rocsparse`         | Pending     |  |
 | `rocthrust`         | Completed   |  |
 | `rocroller`         | Pending     |  |
-| `tensile`           | Pending     |  |
+| `tensile`           | Pending     | Next in line. |
 
 ---
 
