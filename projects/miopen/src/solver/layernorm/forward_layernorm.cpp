@@ -78,6 +78,12 @@ LayernormForward::GetSolution(const ExecutionContext& context,
             outer_size *= dims[i];
         }
 
+        size_t inner_size = 1;
+        for(size_t i = problem.GetNormalizedDim(); i < dims.size(); i++)
+        {
+            inner_size *= dims[i];
+        }
+
         size_t xlocalsize = LOCAL_SIZE;
         size_t xgridsize  = outer_size * xlocalsize;
         size_t ylocalsize = 1;
@@ -96,6 +102,10 @@ LayernormForward::GetSolution(const ExecutionContext& context,
             {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
             {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
             {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
+            {"OUTER_SIZE", outer_size},
+            {"INNER_SIZE", inner_size},
+            {"STRIDE", 1},
+            {"PARALLEL_SIZE", 1},
             {"LOCAL_SIZE", LOCAL_SIZE},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
             {"MIOPEN_WEIGHT_BIAS", 1},
@@ -123,14 +133,6 @@ LayernormForward::GetSolution(const ExecutionContext& context,
             decltype(auto) kernel = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::layernorm::InvokeParams>();
 
-            auto dims         = params.xDesc->GetLengths();
-            size_t inner_size = 1;
-
-            for(size_t i = params.normalized_dim; i < dims.size(); i++)
-            {
-                inner_size *= dims[i];
-            }
-
             kernel(params.x,
                    params.weight,
                    params.bias,
@@ -138,7 +140,6 @@ LayernormForward::GetSolution(const ExecutionContext& context,
                    params.mean,
                    params.rstd,
                    params.epsilon,
-                   inner_size,
                    static_cast<int32_t>(params.mode));
         };
     };
@@ -193,6 +194,12 @@ LayernormForwardStride::GetSolution(const ExecutionContext& context,
                 outer_size *= dims[i];
             }
         }
+        
+        size_t inner_size = 1;
+        for(size_t i = problem.GetNormalizedDim(); i < dims.size(); i++)
+        {
+            inner_size *= dims[i];
+        }
 
         size_t xlocalsize = LOCAL_SIZE;
         size_t xgridsize  = outer_size * stride * xlocalsize;
@@ -212,6 +219,10 @@ LayernormForwardStride::GetSolution(const ExecutionContext& context,
             {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
             {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
             {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
+            {"OUTER_SIZE", outer_size},
+            {"INNER_SIZE", inner_size},
+            {"STRIDE", stride},
+            {"PARALLEL_SIZE", 1},
             {"LOCAL_SIZE", LOCAL_SIZE},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
             {"MIOPEN_WEIGHT_BIAS", 1},
@@ -239,21 +250,6 @@ LayernormForwardStride::GetSolution(const ExecutionContext& context,
             decltype(auto) kernel = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::layernorm::InvokeParams>();
 
-            auto dims         = params.xDesc->GetLengths();
-            size_t inner_size = 1;
-
-            for(size_t i = params.normalized_dim; i < dims.size(); i++)
-            {
-                inner_size *= dims[i];
-            }
-
-            auto layout   = params.xDesc->GetLayoutEnum();
-            size_t stride = 1;
-            if(params.normalized_dim > 1 && layout.has_value() && (layout.value() == miopenTensorNHWC || layout.value() == miopenTensorNDHWC))
-            {
-                stride = dims[1]; // stride = C
-            }
-
             kernel(params.x,
                    params.weight,
                    params.bias,
@@ -261,8 +257,6 @@ LayernormForwardStride::GetSolution(const ExecutionContext& context,
                    params.mean,
                    params.rstd,
                    params.epsilon,
-                   inner_size,
-                   stride,
                    static_cast<int32_t>(params.mode));
         };
     };
