@@ -74,14 +74,14 @@ jobs:
             linux-build-packages-manylinux-v2-
 
       - name: Build Linux Packages
-        uses: ROCm/TheRock/build_linux_action@users/geomin12/fix-monorepo-fork
+        uses: ROCm/TheRock/.github/actions/build_linux_action@users/geomin12/fix-monorepo-fork
         with:
           package_version: "ADHOCBUILD"
           amdgpu_families: "gfx94X-dcgpu"
           extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ inputs.cmake_options }}"
 
       - name: Artifact Upload
-        uses: ROCm/TheRock/artifact_upload_action@users/geomin12/fix-monorepo-fork
+        uses: ROCm/TheRock/.github/actions/artifact_upload_action@users/geomin12/fix-monorepo-fork
         with:
           build_directory: "build"
           amdgpu_families: "gfx94X-dcgpu"
