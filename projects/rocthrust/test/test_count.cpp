@@ -30,12 +30,7 @@ TYPED_TEST(CountTests, TestCountSimple)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data(5);
-  data[0] = 1;
-  data[1] = 1;
-  data[2] = 0;
-  data[3] = 0;
-  data[4] = 1;
+  Vector data{1, 1, 0, 0, 1};
 
   ASSERT_EQ(thrust::count(data.begin(), data.end(), 0), 2);
   ASSERT_EQ(thrust::count(data.begin(), data.end(), 1), 3);
@@ -84,12 +79,7 @@ TYPED_TEST(CountTests, TestCountIfSimple)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data(5);
-  data[0] = 1;
-  data[1] = 6;
-  data[2] = 1;
-  data[3] = 9;
-  data[4] = 2;
+  Vector data{1, 6, 1, 9, 2};
 
   ASSERT_EQ(thrust::count_if(data.begin(), data.end(), greater_than_five<T>()), 2);
 }
@@ -127,12 +117,7 @@ TYPED_TEST(CountTests, TestCountFromConstIteratorSimple)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector data(5);
-  data[0] = 1;
-  data[1] = 1;
-  data[2] = 0;
-  data[3] = 0;
-  data[4] = 1;
+  Vector data{1, 1, 0, 0, 1};
 
   ASSERT_EQ(thrust::count(data.cbegin(), data.cend(), 0), 2);
   ASSERT_EQ(thrust::count(data.cbegin(), data.cend(), 1), 3);
@@ -191,7 +176,9 @@ TEST(CountTests, TestCountWithBigIndexes)
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   TestCountWithBigIndexesHelper(30);
+#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
   TestCountWithBigIndexesHelper(31);
   TestCountWithBigIndexesHelper(32);
   TestCountWithBigIndexesHelper(33);
+#endif
 }
