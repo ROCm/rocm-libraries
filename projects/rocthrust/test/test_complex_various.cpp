@@ -915,23 +915,15 @@ TEST(VariousComplexTest, logf_special_cases)
   // checking cases where real or imag is greater than 1e6
   run_test(5e7f, 0.5);
   run_test(0.5f, 5e7f);
+  run_test(0x7f800000, 0.5); // inf
+  run_test(0.5, 0x7f800000); // inf
 
-  union converter
-  {
-    uint32_t in;
-    float out;
-  } c;
-
-  c.in = 0x7f800000;
-  run_test(c.out, 0.5); // inf
-  run_test(0.5, c.out); // inf
-
-  // checking case where r <= 0.7
+  //checking case where r <= 0.7
   run_test(0.55, 0.55);
 
-  // checking NAN cases
-  c.in = 0xffc00001;
-  run_test(c.out, c.out);
+  //checking NAN cases
+  run_test(0xffc00001, 0xffc00001);
+
 }
 
 TYPED_TEST(VariousComplexTest, log10)
