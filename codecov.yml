@@ -1,9 +1,11 @@
 coverage:
   status:
     project:
+      default:
+        enabled: false
       rocRAND:
-        flags: rocRAND
+        flags: [rocRAND]
         target: 80%
       rocThrust:
-        flags: rocThrust
+        flags: [rocThrust]
         target: 80%
