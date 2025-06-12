@@ -23,12 +23,7 @@
 template <class Vector>
 void TestCountSimple()
 {
-  Vector data(5);
-  data[0] = 1;
-  data[1] = 1;
-  data[2] = 0;
-  data[3] = 0;
-  data[4] = 1;
+  Vector data{1, 1, 0, 0, 1};
 
   ASSERT_EQUAL(thrust::count(data.begin(), data.end(), 0), 2);
   ASSERT_EQUAL(thrust::count(data.begin(), data.end(), 1), 3);
@@ -63,12 +58,7 @@ void TestCountIfSimple()
 {
   using T = typename Vector::value_type;
 
-  Vector data(5);
-  data[0] = 1;
-  data[1] = 6;
-  data[2] = 1;
-  data[3] = 9;
-  data[4] = 2;
+  Vector data{1, 6, 1, 9, 2};
 
   ASSERT_EQUAL(thrust::count_if(data.begin(), data.end(), greater_than_five<T>()), 2);
 }
@@ -90,12 +80,7 @@ DECLARE_VARIABLE_UNITTEST(TestCountIf);
 template <typename Vector>
 void TestCountFromConstIteratorSimple()
 {
-  Vector data(5);
-  data[0] = 1;
-  data[1] = 1;
-  data[2] = 0;
-  data[3] = 0;
-  data[4] = 1;
+  Vector data{1, 1, 0, 0, 1};
 
   ASSERT_EQUAL(thrust::count(data.cbegin(), data.cend(), 0), 2);
   ASSERT_EQUAL(thrust::count(data.cbegin(), data.cend(), 1), 3);
@@ -151,8 +136,10 @@ void TestCountWithBigIndexesHelper(int magnitude)
 void TestCountWithBigIndexes()
 {
   TestCountWithBigIndexesHelper(30);
+#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
   TestCountWithBigIndexesHelper(31);
   TestCountWithBigIndexesHelper(32);
   TestCountWithBigIndexesHelper(33);
+#endif
 }
 DECLARE_UNITTEST(TestCountWithBigIndexes);
