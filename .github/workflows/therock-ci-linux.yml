@@ -45,31 +45,7 @@ jobs:
           fetch-depth: 0  # Needed for subtree splitting
           token: ${{ steps.generate-token.outputs.token }}
           path: "rocm-libraries"
-      
-      - name: Runner Health Settings
-        run: |
-          echo "CCACHE_DIR=${CCACHE_DIR}"
-          df -h
-          ccache -z
-          mkdir -p $CCACHE_DIR
-          cmake --version
-          echo "Installed Python versions:"
-          ls -d /opt/python
-          echo "python: $(which python), python3: $(which python3)"
-          echo "Git version: $(git --version)"
-          git config --global --add safe.directory $PWD
-          git config fetch.parallel 10
-
-      # TODO: We shouldn't be using a cache on actual release branches, but it
-      # really helps for iteration time.
-      - name: Enable cache
-        uses: actions/cache/restore@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
-        with:
-          path: ${{ env.CACHE_DIR }}
-          key: linux-build-packages-manylinux-v2-${{ github.sha }}
-          restore-keys: |
-            linux-build-packages-manylinux-v2-
-
+    
       - name: Build Linux Packages
         uses: ROCm/TheRock/.github/actions/build_linux_action@users/geomin12/fix-monorepo-fork
         with:
@@ -82,13 +58,6 @@ jobs:
         with:
           build_directory: "build"
           amdgpu_families: "gfx94X-dcgpu"
-
-      - name: Save cache
-        uses: actions/cache/save@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
-        if: always()
-        with:
-          path: ${{ env.CACHE_DIR }}
-          key: linux-build-packages-manylinux-v2-${{ github.sha }}
 
   therock-test-linux:
     name: "Test"
