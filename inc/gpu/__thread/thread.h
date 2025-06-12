@@ -158,7 +158,7 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
     #pragma GCC diagnostic pop
 
 #ifndef __HIP_DEVICE_COMPILE__
-    worknode_d.reset(sendWorkNodeToGPU(worknode_h.get()));
+    worknode_d.reset(worknode_h->sendToGPU());
 #endif
 }
 
@@ -177,7 +177,7 @@ inline __device__ thread::thread(uint32_t width [[maybe_unused]], Fn_t &&typed_f
 
     worknode_d = typed_worknode_ptr;
 
-    insertWorkNodeIntoMainQueue(worknode_d);
+    worknode_d->insertIntoMainQueue();
 #endif // __HIP_DEVICE_COMPILE__
 }
 

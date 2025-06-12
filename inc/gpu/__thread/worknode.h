@@ -13,6 +13,7 @@ struct WorkNode_Header;
 
 typedef void (*WrappedFnPointer)(WorkNode_Header *, bool);
 
+// TODO: Can we make a bunch of these members private?
 struct WorkNode_Header {
     WrappedFnPointer wrapper_fn = nullptr;
 
@@ -45,6 +46,39 @@ struct WorkNode_Header {
     size_t worknodeSize;
     // TODO: fix vthread_id - it's currently non-functional
     uint32_t vthread_id = {}; // TODO: should this be a gpu::thread::max_width() array? For now we just store the lowest id.
+
+    // Attempts to lock the WorkNode at location, and if successful, returns the WorkNode. If unsuccessful (i.e. it's
+    // already locked) returns nullptr.
+    [[nodiscard]] static __device__ WorkNode_Header *tryLockAndFetch(WorkNode_Header **location);
+
+    // Locks and returns the WorkNode at location. If *location == nullptr (i.e. it's currently locked), spins until the
+    // WorkNode is unlocked.
+    [[nodiscard]] static __device__ WorkNode_Header *lockAndFetch(WorkNode_Header **location);
+
+    // Lock a worknode we already have a pointer to. For convenience, returns worknode->link_to_self (which might be nullptr
+    // if the node has finished executing). This function is not safe to call from the scheduler, and is only meant for use
+    // in join and detach, where we can be sure that the worknode pointer isn't going to be invalidated unexpectedly while
+    // we are trying to acquire the lock for it.
+    __device__ WorkNode_Header **lock();
+
+    // For use in functions like get_width where worknode hasn't moved anywhere, and we know *link_to_self == nullptr.
+    __device__ void unlockActive();
+    __device__ void moveAndUnlock(WorkNode_Header **new_location);
+    // Signal that we're abdicating any responsability for freeing worknode, unless we're the last one to do so, in which
+    // case, free worknode.
+    // Returns true if we're the last one with any responsability for worknode (i.e. the WorkNode has already been detached,
+    // or the WorkNode has finished execution).
+    __device__ bool release();
+    __device__ bool isSchedulerDoneWith();
+
+    // Postcondition: unlocks node
+    __device__ void makeCurrent(bool yielding);
+
+    // Post-condition: worknode is likely unlocked and may get invalidated
+    __device__ void insertIntoMainQueue();
+
+    __host__ WorkNode_Header *sendToGPU();
+    __host__ WorkNode_Header *sendToGPU(WorkNode_Header **new_location);
 };
 static_assert(std::is_standard_layout_v<WorkNode_Header>);
 
@@ -96,9 +130,6 @@ __device__ auto make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args)
 //      INTERNAL/HELPER FUNCTIONS
 //====================================================================================================================//
 
-// Postcondition: unlocks node
-__device__ void setCurrentWorkNode(WorkNode_Header *node, bool yielding);
-
 // Precondition: We're still holding the lock acquired in invokeNext. Needed to make sure detach doesn't make worknode
 // an invalid pointer before we load typed_node_ptr and width.
 template <class WorkNode_t>
@@ -111,7 +142,7 @@ __device__ void wrapper(WorkNode_Header *worknode, bool yielding) {
     __threadfence();
     // Also unlocks worknode
     if (threadIdx.x == 0)
-        setCurrentWorkNode(worknode, yielding);
+        worknode->makeCurrent(yielding);
     if (threadIdx.x < width) {
         fn();
     }
@@ -168,13 +199,6 @@ __host__ WorkNode<Callable_t>::WorkNode(uint32_t w, Callable_t &&callable) : fn(
     }();
     wrapper_fn = saved_wrapper_fn;
 }
-
-// TODO: many of these might be better as member functions of WorkNode or WorkNode_Header, and we could potentially make
-// a bunch of WorkNode_Header's member variables private
-
-// Post-condition: worknode is likely unlocked and may get invalidated
-__device__ void insertWorkNodeIntoMainQueue(WorkNode_Header *worknode);
-__host__ WorkNode_Header *sendWorkNodeToGPU(WorkNode_Header *worknode_h);
 
 } // namespace gpu::internal
 

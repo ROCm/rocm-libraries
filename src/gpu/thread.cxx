@@ -84,7 +84,7 @@ std::atomic<uint32_t> gpuThreadFromHost_counter = 0;
 
 // Attempts to lock the WorkNode at location, and if successful, returns the WorkNode. If unsuccessful (i.e. it's
 // already locked) returns nullptr.
-[[nodiscard]] static inline __device__ WorkNode_Header *tryLockAndFetchWorkNode(WorkNode_Header **location) {
+[[nodiscard]] __device__ WorkNode_Header *WorkNode_Header::tryLockAndFetch(WorkNode_Header **location) {
     // Note: I think access through this cast might be a strict aliasing violation, but it's kind of unavoidable.
     // atomicExch only accepts arithmetic types, so we have to cast location to an arithmetic type like uintptr_t,
     // resulting in a strict aliasing violation.
@@ -93,84 +93,84 @@ std::atomic<uint32_t> gpuThreadFromHost_counter = 0;
 
 // Locks and returns the WorkNode at location. If *location == nullptr (i.e. it's currently locked), spins until the
 // WorkNode is unlocked.
-[[nodiscard]] static inline __device__ WorkNode_Header *lockAndFetchWorkNode(WorkNode_Header **location) {
+[[nodiscard]] __device__ WorkNode_Header *WorkNode_Header::lockAndFetch(WorkNode_Header **location) {
     WorkNode_Header *worknode;
     do {
-        worknode = tryLockAndFetchWorkNode(location);
+        worknode = tryLockAndFetch(location);
     } while (worknode == nullptr);
     return worknode;
 }
 
-// Lock a worknode we already have a pointer to. For convenience, returns worknode->link_to_self (which might be nullptr
-// if the node has finished executing). This function is not safe to call from the scheduler, and is only meant for use
-// in join and detach, where we can be sure that the worknode pointer isn't going to be invalidated unexpectedly while
-// we are trying to acquire the lock for it.
-static inline __device__ WorkNode_Header **lockWorkNode(WorkNode_Header *worknode) {
-    // Even if we know worknode will remain valid, worknode->link_to_self might change/be invalidated while we try to
+// Lock a WorkNode we already have a pointer to. For convenience, returns this->link_to_self (which might be nullptr if
+// the node has finished executing). This function is not safe to call from the scheduler, and is only meant for use in
+// join and detach, where we can be sure that the WorkNode pointer isn't going to be invalidated unexpectedly while we
+// are trying to acquire the lock for it.
+__device__ WorkNode_Header **WorkNode_Header::lock() {
+    // Even if we know *this will remain valid, this->link_to_self might change/be invalidated while we try to
     // acquire the lock. That's OK though, because the CAS will only succeed if we have an up-to-date value for
-    // link_to_self AND nobody is currently holding a lock on worknode.
-    WorkNode_Header **link_to_self;
-    for (link_to_self = reinterpret_cast<WorkNode_Header **>(atomicAdd(reinterpret_cast<uintptr_t*>(&worknode->link_to_self), 0));
-         link_to_self != nullptr /* While worknode has not finished executing and ... */ &&
-         atomicCAS(reinterpret_cast<uintptr_t *>(link_to_self), reinterpret_cast<uintptr_t>(worknode), 0) !=
-             reinterpret_cast<uintptr_t>(worknode) /* ... we failed to acquire the lock, keep trying. */;
-         link_to_self = reinterpret_cast<WorkNode_Header **>(atomicAdd(reinterpret_cast<uintptr_t*>(&worknode->link_to_self), 0))) {
+    // link_to_self AND nobody is currently holding a lock on *this.
+    WorkNode_Header **copy_of_lts;
+    for (copy_of_lts = reinterpret_cast<WorkNode_Header **>(atomicAdd(reinterpret_cast<uintptr_t*>(&this->link_to_self), 0));
+         copy_of_lts != nullptr /* While *this has not finished executing and ... */ &&
+         atomicCAS(reinterpret_cast<uintptr_t *>(copy_of_lts), reinterpret_cast<uintptr_t>(this), 0) !=
+             reinterpret_cast<uintptr_t>(this) /* ... we failed to acquire the lock, keep trying. */;
+         copy_of_lts = reinterpret_cast<WorkNode_Header **>(atomicAdd(reinterpret_cast<uintptr_t*>(&this->link_to_self), 0))) {
         //__builtin_amdgcn_s_sleep(1);
     }
-    return link_to_self;
+    return copy_of_lts;
 }
 
-// For use in functions like get_width where worknode hasn't moved anywhere, and we know *link_to_self == nullptr.
-static inline __device__ void unlockActiveWorkNode(WorkNode_Header *worknode) {
+// For use in functions like get_width where the WorkNode hasn't moved anywhere, and we know *link_to_self == nullptr.
+__device__ void WorkNode_Header::unlockActive() {
     __threadfence();
     // I think this might be a strict aliasing violation, but it's kind of unavoidable
-    atomicExch(reinterpret_cast<uintptr_t*>(&currentWorkNode[blockIdx.x]), reinterpret_cast<uintptr_t>(worknode));
+    atomicExch(reinterpret_cast<uintptr_t*>(&currentWorkNode[blockIdx.x]), reinterpret_cast<uintptr_t>(this));
     // assert(oldValue == nullptr);
 }
-static inline __device__ void moveAndUnlockWorkNode(WorkNode_Header *worknode, WorkNode_Header **new_location) {
+__device__ void WorkNode_Header::moveAndUnlock(WorkNode_Header **new_location) {
     // assert(new_location != nullptr);
     // TODO: do we need a __threadfence() here to establish a synchronizes-with relationship on link_to_self and not just new_location?
     // See https://en.cppreference.com/w/cpp/atomic/atomic_thread_fence.
     // __threadfence();
-    // Update link_to_self = new_location; (unless link_to_self == nullptr) - worknode isn't unlocked just yet!
-    if (atomicAdd(reinterpret_cast<uintptr_t*>(&worknode->link_to_self), 0) != 0)
-        atomicExch(reinterpret_cast<uintptr_t*>(&worknode->link_to_self), reinterpret_cast<uintptr_t>(new_location));
+    // Update link_to_self = new_location; (unless link_to_self == nullptr)
+    if (atomicAdd(reinterpret_cast<uintptr_t*>(&this->link_to_self), 0) != 0)
+        atomicExch(reinterpret_cast<uintptr_t*>(&this->link_to_self), reinterpret_cast<uintptr_t>(new_location));
 
     __threadfence();
-    // Complete the unlock process for worknode by setting *new_location = worknode;
-    atomicExch(reinterpret_cast<uintptr_t*>(new_location), reinterpret_cast<uintptr_t>(worknode));
+    // Complete the unlock process by setting *new_location = this;
+    atomicExch(reinterpret_cast<uintptr_t*>(new_location), reinterpret_cast<uintptr_t>(this));
 }
-// Signal that we're abdicating any responsability for freeing worknode, unless we're the last one to do so, in which
-// case, free worknode.
-// Returns true if we're the last one with any responsability for worknode (i.e. the WorkNode has already been detached,
-// or the WorkNode has finished execution).
-static inline __device__ bool releaseWorkNode(WorkNode_Header *worknode) {
-    // Use a threadfence to establishing a synchronizes-with relationship between releaseWorkNode and itself, and
-    // between lockWorkNode and releaseWorkNode. See https://en.cppreference.com/w/cpp/atomic/atomic_thread_fence.
+// Signal that the caller is abdicating any responsability for freeing the WorkNode, unless the caller is the last one
+// to do so, in which case, free the WorkNode. Note that it is legal to call `delete this`:
+// https://isocpp.org/wiki/faq/freestore-mgmt#delete-this, so presumably free(this) is also legal for trivially
+// destructible types (as long as we're careful).
+// Returns true if we're the last one with any responsability for the WorkNode (i.e. the WorkNode has already been
+// detached, or the WorkNode has finished execution).
+__device__ bool WorkNode_Header::release() {
+    // Use a threadfence to establishing a synchronizes-with relationship between WorkNode_Header::release and itself,
+    // and between WorkNode_Header::lock and WorkNode_Header::release. See
+    // https://en.cppreference.com/w/cpp/atomic/atomic_thread_fence.
     __threadfence();
-    if (atomicExch(reinterpret_cast<uintptr_t*>(&worknode->link_to_self), 0) == 0) {
-        ::free(worknode);
+    if (atomicExch(reinterpret_cast<uintptr_t*>(&this->link_to_self), 0) == 0) {
+        ::free(this);
         return true;
     }
     return false;
 }
-[[maybe_unused]] static inline __device__ bool isSchedulerDoneWithWorkNode(WorkNode_Header *worknode) {
-    return atomicAdd(reinterpret_cast<uintptr_t*>(&worknode->link_to_self), 0) == 0;
+[[nodiscard]] __device__ bool WorkNode_Header::isSchedulerDoneWith() {
+    return atomicAdd(reinterpret_cast<uintptr_t*>(&this->link_to_self), 0) == 0;
 }
 
 // Postcondition: unlocks node
-__device__ void setCurrentWorkNode(WorkNode_Header *node, bool yielding) {
+__device__ void WorkNode_Header::makeCurrent(bool yielding) {
     // assert(node->link_to_self == nullptr || *(node->link_to_self) == nullptr);
     if (yielding) {
-        node->hasWaiting = true;
-        WorkNode_Header *yieldingWorkNode = lockAndFetchWorkNode(&currentWorkNode[blockIdx.x]);
-        moveAndUnlockWorkNode(yieldingWorkNode, &node->next);
+        this->hasWaiting = true;
+        WorkNode_Header *yieldingWorkNode = lockAndFetch(&currentWorkNode[blockIdx.x]);
+        yieldingWorkNode->moveAndUnlock(&this->next);
     }
-    moveAndUnlockWorkNode(node, const_cast<WorkNode_Header **>(&currentWorkNode[blockIdx.x]));
+    this->moveAndUnlock(&currentWorkNode[blockIdx.x]);
 }
-
-// TODO: many of these might be better as member functions of WorkNode or WorkNode_Header, and we could potentially make
-// a bunch of WorkNode_Header's member variables private
 
 // Post-condition: worknode is likely unlocked and may get invalidated
 template <size_t queueSize>
@@ -179,10 +179,10 @@ __device__ void WorkQueue<queueSize>::push(WorkNode_Header *worknode) {
 
     const uint32_t myPushCount = atomicAdd(&pushCount, 1);
     waitForSpace(myPushCount);
-    moveAndUnlockWorkNode(worknode, &queue[myPushCount % queueSize]);
+    worknode->moveAndUnlock(&queue[myPushCount % queueSize]);
 }
-__device__ void insertWorkNodeIntoMainQueue(WorkNode_Header *worknode) {
-    mainWorkQueue.push(worknode);
+__device__ void WorkNode_Header::insertIntoMainQueue() {
+    mainWorkQueue.push(this);
 }
 
 template <size_t queueSize>
@@ -201,7 +201,7 @@ __device__ void WorkQueue<queueSize>::waitForSpace(uint32_t myPushCount) {
 // else got to it first, returns nullptr.
 template <size_t queueSize>
 [[nodiscard]] __device__ WorkNode_Header *WorkQueue<queueSize>::tryPop(bool shouldIncrementActiveCount, uint32_t index) {
-    WorkNode_Header *work = tryLockAndFetchWorkNode(&queue[index]);
+    WorkNode_Header *work = WorkNode_Header::tryLockAndFetch(&queue[index]);
     if (work == nullptr) {
         return nullptr;
     }
@@ -278,16 +278,16 @@ static inline __device__ bool invokeNext(bool yielding = false) {
 
     // Now we have to re-lock it and re-fetch worknode in case it was detached while the user function was running.
     if (threadIdx.x == 0) {
-        WorkNode_Header *worknode = lockAndFetchWorkNode(&currentWorkNode[blockIdx.x]);
+        WorkNode_Header *worknode = WorkNode_Header::lockAndFetch(&currentWorkNode[blockIdx.x]);
         if (!yielding) {
             atomicSub(&activeVcoreCount, 1);
         } else {
             // If we were called from pseudo_yield, restore the original worknode.
-            WorkNode_Header *waiting = lockAndFetchWorkNode(&worknode->next);
-            setCurrentWorkNode(waiting, false);
+            WorkNode_Header *waiting = WorkNode_Header::lockAndFetch(&worknode->next);
+            waiting->makeCurrent(false);
         }
 
-        releaseWorkNode(worknode);
+        worknode->release();
     }
     return true;
 }
@@ -360,14 +360,14 @@ static __host__ void notifyDeviceThereMightNotBeAnyMoreWork [[maybe_unused]] (bo
     }
 }
 
-static __host__ WorkNode_Header *sendWorkNodeToGPU(WorkNode_Header *worknode_h, WorkNode_Header **new_location) {
+__host__ WorkNode_Header *WorkNode_Header::sendToGPU(WorkNode_Header **new_location) {
     prepDeviceForWork();
 
-    worknode_h->link_to_self = new_location;
-    // TODO: set worknode_h->vthread_id
+    this->link_to_self = new_location;
+    // TODO: set this->vthread_id
 
-    std::unique_ptr<WorkNode_Header, WorkNodeDeleter> worknode_d(static_cast<WorkNode_Header *>(gpu::malloc(worknode_h->worknodeSize)));
-    __LIBGPU_HIP_CHECK__(hipMemcpyAsync(worknode_d.get(), worknode_h, worknode_h->worknodeSize, hipMemcpyHostToDevice, getEnqueingStream()));
+    std::unique_ptr<WorkNode_Header, WorkNodeDeleter> worknode_d(static_cast<WorkNode_Header *>(gpu::malloc(this->worknodeSize)));
+    __LIBGPU_HIP_CHECK__(hipMemcpyAsync(worknode_d.get(), this, this->worknodeSize, hipMemcpyHostToDevice, getEnqueingStream()));
 
     // *new_location = worknode_d.get();
     WorkNode_Header *temp = worknode_d.get();
@@ -376,13 +376,13 @@ static __host__ WorkNode_Header *sendWorkNodeToGPU(WorkNode_Header *worknode_h, 
     __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
     return worknode_d.release();
 }
-__host__ WorkNode_Header *sendWorkNodeToGPU(WorkNode_Header *worknode_h) {
+__host__ WorkNode_Header *WorkNode_Header::sendToGPU() {
     const uint32_t myPushCount = cpuWorkQueuePushCount++;
     const size_t myPushIndex = myPushCount % CPU_WORK_QUEUE_SIZE;
 
     waitForSpaceInCPUQueue(myPushCount);
 
-    return sendWorkNodeToGPU(worknode_h, getCPUWorkQueueAddr() + myPushIndex);
+    return sendToGPU(getCPUWorkQueueAddr() + myPushIndex);
 }
 
 static __device__ bool shouldKeepPollingForWork() {
@@ -418,7 +418,7 @@ static __global__ void threading_main() {
 static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode) {
     WorkNode_Header *newWorkNode = static_cast<WorkNode_Header *>(::malloc(oldWorkNode->worknodeSize));
 
-    WorkNode_Header **link_to_self = lockWorkNode(oldWorkNode);
+    WorkNode_Header **link_to_self = oldWorkNode->lock();
     if (link_to_self == nullptr) {
         // workitem has already finished, so the scheduler has no way of finding oldWorkNode. Thus, we don't have to
         // worry about updating its state or copying it. Just return so the gpu::thread destructor can free oldWorkNode.
@@ -434,13 +434,13 @@ static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode) {
     // If there is a waiting worknode, update its link_to_self value so it points at newWorkNode->next.
     if (oldWorkNode->hasWaiting) {
         // Lock next in case it's also in the middle of being detached.
-        WorkNode_Header *next = lockAndFetchWorkNode(&oldWorkNode->next);
-        moveAndUnlockWorkNode(next, &newWorkNode->next);
+        WorkNode_Header *next = WorkNode_Header::lockAndFetch(&oldWorkNode->next);
+        next->moveAndUnlock(&newWorkNode->next);
     }
 
     // This does an extra unnecessary load of newWorkNode->link_to_self to check if it's null, but that's unlikely to
     // have a major performance impact.
-    moveAndUnlockWorkNode(newWorkNode, link_to_self);
+    newWorkNode->moveAndUnlock(link_to_self);
 }
 
 } // namespace internal
@@ -458,10 +458,10 @@ __device__ gpu::thread::id get_id() noexcept {
     using namespace internal;
     __shared__ WorkNode_Header *current;
     if (threadIdx.x == 0)
-        current = lockAndFetchWorkNode(&currentWorkNode[blockIdx.x]);
+        current = WorkNode_Header::lockAndFetch(&currentWorkNode[blockIdx.x]);
     gpu::thread::id tid = current->vthread_id + threadIdx.x;
     if (threadIdx.x == 0)
-        unlockActiveWorkNode(current);
+        current->unlockActive();
     return tid;
 }
 
@@ -480,11 +480,11 @@ __device__ unsigned int get_width() noexcept {
     using namespace internal;
     __shared__ WorkNode_Header *current;
     if (threadIdx.x == 0)
-        current = lockAndFetchWorkNode(&currentWorkNode[blockIdx.x]);
+        current = WorkNode_Header::lockAndFetch(&currentWorkNode[blockIdx.x]);
     __threadfence();
     unsigned int width = current->width;
     if (threadIdx.x == 0)
-        unlockActiveWorkNode(current);
+        current->unlockActive();
     return width;
 }
 __device__ unsigned int get_fiber_id() noexcept {
@@ -582,7 +582,7 @@ __host__ __device__ void thread::join() {
         assert(false && "Attempted to join the gpu::thread object associated with the active thread");
     }
     // We don't need to lock here because we know nobody is going to call detach on worknode_d.
-    while (!isSchedulerDoneWithWorkNode(worknode_d)) {
+    while (!worknode_d->isSchedulerDoneWith()) {
         // spin while we wait for it to finish.
         __builtin_amdgcn_s_sleep(8);
     }
@@ -612,7 +612,7 @@ __host__ __device__ void thread::detach() {
         assert(joinable() && "Attempted to detach a gpu::thread object that doesn't have an associated thread");
     }
 
-    releaseWorkNode(worknode_d);
+    worknode_d->release();
 
     worknode_d = nullptr;
 #else // __HIP_DEVICE_COMPILE__
