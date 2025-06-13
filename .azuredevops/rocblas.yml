@@ -26,37 +26,37 @@ trigger:
     - release-staging/rocm-rel-7.*
   paths:
     include:
-    - projects/hiprand
+    - projects/rocblas
     exclude:
-    - projects/hiprand/.githooks
-    - projects/hiprand/.github
-    - projects/hiprand/.jenkins
-    - projects/hiprand/docs
-    - projects/hiprand/.*.y*ml
-    - projects/hiprand/*.md
-    - projects/hiprand/LICENSE.txt
+    - projects/rocblas/.githooks
+    - projects/rocblas/.github
+    - projects/rocblas/.jenkins
+    - projects/rocblas/docs
+    - projects/rocblas/.*.y*ml
+    - projects/rocblas/*.md
+    - projects/rocblas/*.rst
 
 pr:
   autoCancel: true
   branches:
     include:
     - develop
-    - release-staging/rocm-rel-7.*
+    - mainline
   paths:
     include:
-    - projects/hiprand
+    - projects/rocblas
     exclude:
-    - projects/hiprand/.githooks
-    - projects/hiprand/.github
-    - projects/hiprand/.jenkins
-    - projects/hiprand/docs
-    - projects/hiprand/.*.y*ml
-    - projects/hiprand/*.md
-    - projects/hiprand/LICENSE.txt
+    - projects/rocblas/.githooks
+    - projects/rocblas/.github
+    - projects/rocblas/.jenkins
+    - projects/rocblas/docs
+    - projects/rocblas/.*.y*ml
+    - projects/rocblas/*.md
+    - projects/rocblas/*.rst
   drafts: false
 
 jobs:
-  - template: ${{ variables.CI_COMPONENT_PATH }}/hipRAND.yml@pipelines_repo
+  - template: ${{ variables.CI_COMPONENT_PATH }}/rocBLAS.yml@pipelines_repo
     parameters:
-      sparseCheckoutDir: projects/hiprand
+      sparseCheckoutDir: projects/rocblas
       triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}

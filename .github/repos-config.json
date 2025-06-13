@@ -14,8 +14,8 @@
       "url": "ROCm/composable_kernel",
       "branch": "release-staging/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false,
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
       "enable_pr_fanout": false
     },
     {

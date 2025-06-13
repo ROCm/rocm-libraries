@@ -23,6 +23,7 @@ trigger:
   branches:
     include:
     - develop
+    - release-staging/rocm-rel-7.*
   paths:
     include:
     - projects/rocthrust
@@ -32,8 +33,8 @@ trigger:
     - projects/rocthrust/.jenkins
     - projects/rocthrust/doc
     - projects/rocthrust/docs
-    - projects/rocthrust/'.*.y*ml'
-    - projects/rocthrust/'*.md'
+    - projects/rocthrust/.*.y*ml
+    - projects/rocthrust/*.md
     - projects/rocthrust/LICENSE
     - projects/rocthrust/NOTICES.txt
 
@@ -42,6 +43,7 @@ pr:
   branches:
     include:
     - develop
+    - release-staging/rocm-rel-7.*
   paths:
     include:
     - projects/rocthrust
@@ -51,8 +53,8 @@ pr:
     - projects/rocthrust/.jenkins
     - projects/rocthrust/doc
     - projects/rocthrust/docs
-    - projects/rocthrust/'.*.y*ml'
-    - projects/rocthrust/'*.md'
+    - projects/rocthrust/.*.y*ml
+    - projects/rocthrust/*.md
     - projects/rocthrust/LICENSE
     - projects/rocthrust/NOTICES.txt
   drafts: false

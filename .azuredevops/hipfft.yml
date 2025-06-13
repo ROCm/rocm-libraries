@@ -26,17 +26,14 @@ trigger:
     - release-staging/rocm-rel-7.*
   paths:
     include:
-    - projects/hipcub
+    - projects/hipfft
     exclude:
-    - projects/hipcub/.githooks
-    - projects/hipcub/.github
-    - projects/hipcub/.gitlab
-    - projects/hipcub/.jenkins
-    - projects/hipcub/docs
-    - projects/hipcub/.*.y*ml
-    - projects/hipcub/*.md
-    - projects/hipcub/LICENSE.txt
-    - projects/hipcub/NOTICES.txt
+    - projects/hipfft/.githooks
+    - projects/hipfft/.github
+    - projects/hipfft/.jenkins
+    - projects/hipfft/docs
+    - projects/hipfft/.*.y*ml
+    - projects/hipfft/*.md
 
 pr:
   autoCancel: true
@@ -46,21 +43,18 @@ pr:
     - release-staging/rocm-rel-7.*
   paths:
     include:
-    - projects/hipcub
+    - projects/hipfft
     exclude:
-    - projects/hipcub/.githooks
-    - projects/hipcub/.github
-    - projects/hipcub/.gitlab
-    - projects/hipcub/.jenkins
-    - projects/hipcub/docs
-    - projects/hipcub/.*.y*ml
-    - projects/hipcub/*.md
-    - projects/hipcub/LICENSE.txt
-    - projects/hipcub/NOTICES.txt
+    - projects/hipfft/.githooks
+    - projects/hipfft/.github
+    - projects/hipfft/.jenkins
+    - projects/hipfft/docs
+    - projects/hipfft/.*.y*ml
+    - projects/hipfft/*.md
   drafts: false
 
 jobs:
-  - template: ${{ variables.CI_COMPONENT_PATH }}/hipCUB.yml@pipelines_repo
+  - template: ${{ variables.CI_COMPONENT_PATH }}/hipFFT.yml@pipelines_repo
     parameters:
-      sparseCheckoutDir: projects/hipcub
+      sparseCheckoutDir: projects/hipfft
       triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
