@@ -86,8 +86,8 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 512]
-          - Exact: [127, 128, 1, 40] # edge/tail cases
-          - Exact: [128, 127, 1, 264] # edge/tail cases
+          - Exact: [127, 128, 1, 48] # edge/tail cases
+          - Exact: [128, 127, 1, 272] # edge/tail cases
 
   #######################################
   # NN - standard
@@ -149,8 +149,8 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 512]
-          # - Exact: [127, 128, 1, 40] # edge/tail cases # Todo: enable this case when LDSTrInst with edge is supported
-          - Exact: [128, 127, 1, 264] # edge/tail cases
+          - Exact: [127, 128, 1, 48] # edge/tail cases # Todo: enable this case when LDSTrInst with edge is supported
+          - Exact: [128, 127, 1, 272] # edge/tail cases
 
   #######################################
   # NT - standard
@@ -212,8 +212,8 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 512]
-          # - Exact: [127, 128, 1, 40] # edge/tail cases # Todo: enable this case when LDSTrInst with edge is supported
-          # - Exact: [128, 127, 1, 264] # edge/tail cases # Todo: enable this case when LDSTrInst with edge is supported
+          - Exact: [127, 128, 1, 48] # edge/tail cases # Todo: enable this case when LDSTrInst with edge is supported
+          - Exact: [128, 127, 1, 272] # edge/tail cases # Todo: enable this case when LDSTrInst with edge is supported
 
   #######################################
   # TT - standard
@@ -275,5 +275,5 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [128, 128, 1, 512]
-          - Exact: [127, 128, 1, 40] # edge/tail cases
-          # - Exact: [128, 127, 1, 264] # edge/tail cases # Todo: enable this case when LDSTrInst with edge is supported
+          - Exact: [127, 128, 1, 48] # edge/tail cases
+          - Exact: [128, 127, 1, 272] # edge/tail cases # Todo: enable this case when LDSTrInst with edge is supported

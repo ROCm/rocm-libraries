@@ -1895,10 +1895,11 @@ class Solution(collections.abc.Mapping):
     # Some restrictions for float4 and 6bitFloat:
     # TODO: remove this if edge and tail are supported for fp4/fp6/bf6
     if isa[:2] == (12, 5) and state["KernelLanguage"] == "Assembly" \
-      and state["ProblemType"]["DataType"].is6bitFloat():
-      state["AssertFree0ElementMultiple"] = 16
-      state["AssertFree1ElementMultiple"] = 16
-      state["AssertSummationElementMultiple"] = state["DepthU"]
+      and (state["ProblemType"]["DataType"].isFloat4() or state["ProblemType"]["DataType"].is6bitFloat()):
+      if state["ProblemType"]["DataType"].is6bitFloat():
+        state["AssertFree0ElementMultiple"] = 16
+        state["AssertFree1ElementMultiple"] = 16
+        state["AssertSummationElementMultiple"] = state["DepthU"]
 
       if state["ProblemType"]["DataType"].isFloat4():
         if not state["enableLDSTrA"] and not state["UnrollMajorLDSA"]:
@@ -1908,6 +1909,17 @@ class Solution(collections.abc.Mapping):
         if not state["enableLDSTrB"] and not state["UnrollMajorLDSB"]:
           reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSB == False")
           return
+        
+        # Currently we do not support edge with enableLDSTrA / enableLDSTrB
+        # TODO: Enalbe edge with enableLDSTrA / enableLDSTrB
+        if state["enableLDSTrA"] and not state["UnrollMajorLDSA"]:
+          state["AssertFree0ElementMultiple"] = 16
+
+        if state["enableLDSTrB"] and not state["UnrollMajorLDSB"]:
+          state["AssertFree1ElementMultiple"] = 16
+
+        # Currently we support fp4 tail-loop AssertSummationElementMultiple=16.
+        state["AssertSummationElementMultiple"] = 16
 
     # We have the real "1LDSBuffer" value now, so we have to test the rejection condition here
     # TODO-
