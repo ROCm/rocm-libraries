@@ -22,7 +22,13 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/detail/malloc_and_free.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/pointer.h>
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/detail/raw_reference_cast.h>
@@ -32,13 +38,7 @@
 
 THRUST_NAMESPACE_BEGIN
 
-/*! \defgroup memory_management Memory Management
- *
- *  All Thrust functionalities related to memory allocation and deallocation.
- *
- */
-
-/** \addtogroup memory_management Memory Management
+/*! \addtogroup memory_management Memory Management
  *  \{
  */
 
@@ -138,6 +138,8 @@ template<typename Element, typename Tag, typename Reference = thrust::use_defaul
 };
 #endif
 
+#ifndef THRUST_DOXYGEN_INVOKED // Doxygen cannot handle both versions
+
 /*! This version of \p malloc allocates untyped uninitialized storage associated with a given system.
  *
  *  \param system The Thrust system with which to associate the storage.
@@ -173,6 +175,8 @@ template<typename Element, typename Tag, typename Reference = thrust::use_defaul
 template <typename DerivedPolicy>
 THRUST_HOST_DEVICE pointer<void, DerivedPolicy>
 malloc(const thrust::detail::execution_policy_base<DerivedPolicy>& system, std::size_t n);
+
+#endif // THRUST_DOXYGEN_INVOKED
 
 /*! This version of \p malloc allocates typed uninitialized storage associated with a given system.
  *
@@ -377,7 +381,7 @@ THRUST_HOST_DEVICE typename detail::raw_reference<T>::type raw_reference_cast(T&
  *  If the argument is not a reference wrapper, the result is a reference to the argument.
  *
  *  \param ref The reference of interest.
- *  \return <tt>*raw_reference_cast(&ref)</tt>.
+ *  \return <tt>*raw_pointer_cast(&ref)</tt>.
  *  \note There are two versions of \p raw_reference_cast. One for <tt>const</tt> references,
  *        and one for non-<tt>const</tt>.
  *  \see raw_pointer_cast

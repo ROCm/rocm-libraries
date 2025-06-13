@@ -23,6 +23,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/reference.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/device_ptr.h>
@@ -45,7 +52,7 @@ THRUST_NAMESPACE_BEGIN
  *  \code
  *  #include <thrust/device_vector.h>
  *
- *  int main(void)
+ *  int main()
  *  {
  *    thrust::device_vector<int> vec(1, 13);
  *
@@ -66,7 +73,7 @@ THRUST_NAMESPACE_BEGIN
  *  #include <thrust/device_vector.h>
  *  #include <iostream>
  *
- *  int main(void)
+ *  int main()
  *  {
  *    thrust::device_vector<int> vec(1, 13);
  *
@@ -88,7 +95,7 @@ THRUST_NAMESPACE_BEGIN
  *  #include <thrust/device_vector.h>
  *  #include <iostream>
  *
- *  int main(void)
+ *  int main()
  *  {
  *    thrust::device_vector<int> vec(1, 13);
  *
@@ -118,7 +125,7 @@ THRUST_NAMESPACE_BEGIN
  *    int x;
  *  };
  *
- *  int main(void)
+ *  int main()
  *  {
  *    thrust::device_vector<foo> foo_vec(1);
  *
@@ -140,7 +147,7 @@ THRUST_NAMESPACE_BEGIN
  *    int x;
  *  };
  *
- *  int main(void)
+ *  int main()
  *  {
  *    thrust::device_vector<foo> foo_vec(1);
  *
@@ -167,7 +174,7 @@ THRUST_NAMESPACE_BEGIN
  *  #include <stdio.h>
  *  #include <thrust/device_vector.h>
  *
- *  int main(void)
+ *  int main()
  *  {
  *    thrust::device_vector<int> vec(1,13);
  *
@@ -227,9 +234,9 @@ public:
    *  <tt>device_reference<const T></tt> from <tt>device_reference<T></tt>.
    */
   template <typename OtherT>
-  THRUST_HOST_DEVICE device_reference(
-    const device_reference<OtherT>& other,
-    typename thrust::detail::enable_if_convertible<typename device_reference<OtherT>::pointer, pointer>::type* = 0)
+  THRUST_HOST_DEVICE
+  device_reference(const device_reference<OtherT>& other,
+                   thrust::detail::enable_if_convertible_t<typename device_reference<OtherT>::pointer, pointer>* = 0)
       : super_t(other)
   {}
 
@@ -954,7 +961,7 @@ THRUST_HOST_DEVICE void swap(device_reference<T>& x, device_reference<T>& y)
 
 // declare these methods for the purpose of Doxygenating them
 // they actually are defined for a base class
-#if THRUST_DOXYGEN
+#ifdef THRUST_DOXYGEN_INVOKED
 /*! Writes to an output stream the value of a \p device_reference.
  *
  *  \param os The output stream.
