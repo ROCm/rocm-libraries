@@ -15,11 +15,16 @@
  *  limitations under the License.
  */
 
+#include <thrust/device_malloc_allocator.h>
 #include <thrust/sequence.h>
 
 #include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
+
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <utility>
+#endif
 
 TESTS_DEFINE(VectorInsertTests, FullTestsParams);
 TESTS_DEFINE(VectorInsertPrimitiveTests, NumericalTestsParams);
@@ -27,7 +32,6 @@ TESTS_DEFINE(VectorInsertPrimitiveTests, NumericalTestsParams);
 TYPED_TEST(VectorInsertTests, TestVectorRangeInsertSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -50,19 +54,11 @@ TYPED_TEST(VectorInsertTests, TestVectorRangeInsertSimple)
 
   v2.insert(v2.begin() + 1, v1.begin(), v1.end());
 
-  ASSERT_EQ(T(0), v2[0]);
+  Vector ref{0, 0, 1, 2, 3, 4, 1, 2};
+  ASSERT_EQ(ref, v2);
 
-  ASSERT_EQ(T(0), v2[1]);
-  ASSERT_EQ(T(1), v2[2]);
-  ASSERT_EQ(T(2), v2[3]);
-  ASSERT_EQ(T(3), v2[4]);
-  ASSERT_EQ(T(4), v2[5]);
-
-  ASSERT_EQ(T(1), v2[6]);
-  ASSERT_EQ(T(2), v2[7]);
-
-  ASSERT_EQ(T(8), v2.size());
-  ASSERT_EQ(T(10), v2.capacity());
+  ASSERT_EQ(8lu, v2.size());
+  ASSERT_EQ(10lu, v2.capacity());
 
   // test when insertion range fits inside capacity
   // and the size of the insertion is equal to the number
@@ -79,21 +75,11 @@ TYPED_TEST(VectorInsertTests, TestVectorRangeInsertSimple)
   ASSERT_EQ(true, insertion_size == num_displaced);
 
   v3.insert(v3.begin(), v1.begin(), v1.end());
+  ref = {0, 1, 2, 3, 4, 0, 1, 2, 3, 4};
+  ASSERT_EQ(ref, v3);
 
-  ASSERT_EQ(T(0), v3[0]);
-  ASSERT_EQ(T(1), v3[1]);
-  ASSERT_EQ(T(2), v3[2]);
-  ASSERT_EQ(T(3), v3[3]);
-  ASSERT_EQ(T(4), v3[4]);
-
-  ASSERT_EQ(T(0), v3[5]);
-  ASSERT_EQ(T(1), v3[6]);
-  ASSERT_EQ(T(2), v3[7]);
-  ASSERT_EQ(T(3), v3[8]);
-  ASSERT_EQ(T(4), v3[9]);
-
-  ASSERT_EQ(10, v3.size());
-  ASSERT_EQ(10, v3.capacity());
+  ASSERT_EQ(10lu, v3.size());
+  ASSERT_EQ(10lu, v3.capacity());
 
   // test when insertion range fits inside capacity
   // and the size of the insertion is less than the
@@ -111,19 +97,11 @@ TYPED_TEST(VectorInsertTests, TestVectorRangeInsertSimple)
 
   v4.insert(v4.begin() + 1, v1.begin(), v1.begin() + 3);
 
-  ASSERT_EQ(T(0), v4[0]);
+  ref = {0, 0, 1, 2, 1, 2, 3, 4};
+  ASSERT_EQ(ref, v4);
 
-  ASSERT_EQ(T(0), v4[1]);
-  ASSERT_EQ(T(1), v4[2]);
-  ASSERT_EQ(T(2), v4[3]);
-
-  ASSERT_EQ(T(1), v4[4]);
-  ASSERT_EQ(T(2), v4[5]);
-  ASSERT_EQ(T(3), v4[6]);
-  ASSERT_EQ(T(4), v4[7]);
-
-  ASSERT_EQ(8, v4.size());
-  ASSERT_EQ(10, v4.capacity());
+  ASSERT_EQ(8lu, v4.size());
+  ASSERT_EQ(10lu, v4.capacity());
 
   // test when insertion range does not fit inside capacity
   Vector v5(5);
@@ -135,20 +113,10 @@ TYPED_TEST(VectorInsertTests, TestVectorRangeInsertSimple)
 
   v5.insert(v5.begin() + 1, v1.begin(), v1.end());
 
-  ASSERT_EQ(T(0), v5[0]);
+  ref = {0, 0, 1, 2, 3, 4, 1, 2, 3, 4};
+  ASSERT_EQ(ref, v5);
 
-  ASSERT_EQ(T(0), v5[1]);
-  ASSERT_EQ(T(1), v5[2]);
-  ASSERT_EQ(T(2), v5[3]);
-  ASSERT_EQ(T(3), v5[4]);
-  ASSERT_EQ(T(4), v5[5]);
-
-  ASSERT_EQ(T(1), v5[6]);
-  ASSERT_EQ(T(2), v5[7]);
-  ASSERT_EQ(T(3), v5[8]);
-  ASSERT_EQ(T(4), v5[9]);
-
-  ASSERT_EQ(10, v5.size());
+  ASSERT_EQ(10lu, v5.size());
 }
 
 TYPED_TEST(VectorInsertPrimitiveTests, TestVectorRangeInsert)
@@ -167,7 +135,6 @@ TYPED_TEST(VectorInsertPrimitiveTests, TestVectorRangeInsert)
 
       thrust::host_vector<T> h_src =
         get_random_data<T>(size + 3, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
-
       thrust::host_vector<T> h_dst = get_random_data<T>(
         size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed + seed_value_addition);
 
@@ -179,7 +146,12 @@ TYPED_TEST(VectorInsertPrimitiveTests, TestVectorRangeInsert)
       size_t end   = size > 0 ? (size_t) h_src[size + 1] % size : 0;
       if (end < begin)
       {
-        thrust::swap(begin, end);
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+        using ::cuda::std::swap;
+#else
+        using ::std::swap;
+#endif
+        swap(begin, end);
       }
 
       // choose insertion position at random
@@ -194,15 +166,17 @@ TYPED_TEST(VectorInsertPrimitiveTests, TestVectorRangeInsert)
       ASSERT_EQ(h_dst, d_dst);
     }
   }
-}
+} // end TestVectorRangeInsert
 
 TYPED_TEST(VectorInsertTests, TestVectorFillInsertSimple)
 {
   using Vector = typename TestFixture::input_type;
-  using T      = typename Vector::value_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
+  // test when insertion range fits inside capacity
+  // and the size of the insertion is greater than the number
+  // of displaced elements
   Vector v1(3);
   v1.reserve(10);
   thrust::sequence(v1.begin(), v1.end());
@@ -216,19 +190,11 @@ TYPED_TEST(VectorInsertTests, TestVectorFillInsertSimple)
 
   v1.insert(v1.begin() + 1, insertion_size, 13);
 
-  ASSERT_EQ(T(0), v1[0]);
+  Vector ref{0, 13, 13, 13, 13, 13, 1, 2};
+  ASSERT_EQ(ref, v1);
 
-  ASSERT_EQ(T(13), v1[1]);
-  ASSERT_EQ(T(13), v1[2]);
-  ASSERT_EQ(T(13), v1[3]);
-  ASSERT_EQ(T(13), v1[4]);
-  ASSERT_EQ(T(13), v1[5]);
-
-  ASSERT_EQ(T(1), v1[6]);
-  ASSERT_EQ(T(2), v1[7]);
-
-  ASSERT_EQ(8, v1.size());
-  ASSERT_EQ(10, v1.capacity());
+  ASSERT_EQ(8lu, v1.size());
+  ASSERT_EQ(10lu, v1.capacity());
 
   // test when insertion range fits inside capacity
   // and the size of the insertion is equal to the number
@@ -246,20 +212,11 @@ TYPED_TEST(VectorInsertTests, TestVectorFillInsertSimple)
 
   v2.insert(v2.begin(), insertion_size, 13);
 
-  ASSERT_EQ(T(13), v2[0]);
-  ASSERT_EQ(T(13), v2[1]);
-  ASSERT_EQ(T(13), v2[2]);
-  ASSERT_EQ(T(13), v2[3]);
-  ASSERT_EQ(T(13), v2[4]);
+  ref = {13, 13, 13, 13, 13, 0, 1, 2, 3, 4};
+  ASSERT_EQ(ref, v2);
 
-  ASSERT_EQ(T(0), v2[5]);
-  ASSERT_EQ(T(1), v2[6]);
-  ASSERT_EQ(T(2), v2[7]);
-  ASSERT_EQ(T(3), v2[8]);
-  ASSERT_EQ(T(4), v2[9]);
-
-  ASSERT_EQ(10, v2.size());
-  ASSERT_EQ(10, v2.capacity());
+  ASSERT_EQ(10lu, v2.size());
+  ASSERT_EQ(10lu, v2.capacity());
 
   // test when insertion range fits inside capacity
   // and the size of the insertion is less than the
@@ -277,19 +234,11 @@ TYPED_TEST(VectorInsertTests, TestVectorFillInsertSimple)
 
   v3.insert(v3.begin() + 1, insertion_size, 13);
 
-  ASSERT_EQ(T(0), v3[0]);
+  ref = {0, 13, 13, 13, 1, 2, 3, 4};
+  ASSERT_EQ(ref, v3);
 
-  ASSERT_EQ(T(13), v3[1]);
-  ASSERT_EQ(T(13), v3[2]);
-  ASSERT_EQ(T(13), v3[3]);
-
-  ASSERT_EQ(T(1), v3[4]);
-  ASSERT_EQ(T(2), v3[5]);
-  ASSERT_EQ(T(3), v3[6]);
-  ASSERT_EQ(T(4), v3[7]);
-
-  ASSERT_EQ(8, v3.size());
-  ASSERT_EQ(10, v3.capacity());
+  ASSERT_EQ(8lu, v3.size());
+  ASSERT_EQ(10lu, v3.capacity());
 
   // test when insertion range does not fit inside capacity
   Vector v4(5);
@@ -302,21 +251,11 @@ TYPED_TEST(VectorInsertTests, TestVectorFillInsertSimple)
 
   v4.insert(v4.begin() + 1, insertion_size, 13);
 
-  ASSERT_EQ(T(0), v4[0]);
+  ref = {0, 13, 13, 13, 13, 13, 1, 2, 3, 4};
+  ASSERT_EQ(ref, v4);
 
-  ASSERT_EQ(T(13), v4[1]);
-  ASSERT_EQ(T(13), v4[2]);
-  ASSERT_EQ(T(13), v4[3]);
-  ASSERT_EQ(T(13), v4[4]);
-  ASSERT_EQ(T(13), v4[5]);
-
-  ASSERT_EQ(T(1), v4[6]);
-  ASSERT_EQ(T(2), v4[7]);
-  ASSERT_EQ(T(3), v4[8]);
-  ASSERT_EQ(T(4), v4[9]);
-
-  ASSERT_EQ(10, v4.size());
-}
+  ASSERT_EQ(10lu, v4.size());
+} // end TestVectorFillInsertSimple
 
 TYPED_TEST(VectorInsertPrimitiveTests, TestVectorFillInsert)
 {
@@ -344,12 +283,12 @@ TYPED_TEST(VectorInsertPrimitiveTests, TestVectorFillInsert)
       size_t insertion_size = size > 0 ? (size_t) h_dst[size] % size : 13;
 
       // insert on host
-      h_dst.insert(h_dst.begin() + position, insertion_size, T(13));
+      h_dst.insert(h_dst.begin() + position, insertion_size, 13);
 
       // insert on device
-      d_dst.insert(d_dst.begin() + position, insertion_size, T(13));
+      d_dst.insert(d_dst.begin() + position, insertion_size, 13);
 
       ASSERT_EQ(h_dst, d_dst);
     }
   }
-}
+} // end TestVectorFillInsert
