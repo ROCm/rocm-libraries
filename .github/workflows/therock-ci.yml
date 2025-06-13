@@ -118,6 +118,7 @@ jobs:
       matrix:
         projects: ${{ fromJSON(needs.setup.outputs.projects) }}
     uses: ./.github/workflows/therock-ci-windows.yml
+    secrets: inherit
     with:
       cmake_options: ${{ matrix.projects.cmake_options }}
       project_to_test: ${{ matrix.projects.project_to_test }}
