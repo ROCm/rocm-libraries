@@ -155,14 +155,14 @@ public:
     return *this;
   }
 
-#if THRUST_DOXYGEN
+#ifdef THRUST_DOXYGEN_INVOKED
   /*! \brief Return the raw pointer that this \c device_ptr points to.
    */
   THRUST_HOST_DEVICE T* get() const;
 #endif
 };
 
-#if THRUST_DOXYGEN
+#ifdef THRUST_DOXYGEN_INVOKED
 /*! Write the address that a \c device_ptr points to to an output stream.
  *
  *  \param os The output stream.
