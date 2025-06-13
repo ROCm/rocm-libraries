@@ -29,6 +29,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/detail/minmax.h>
 #  include <thrust/distance.h>
@@ -45,7 +53,7 @@ namespace hip_rocprim
 {
 
 template <class Derived, class InputIt1, class InputIt2, class T, class ReduceOp, class ProductOp>
-T THRUST_HIP_FUNCTION inner_product(
+T THRUST_HOST_DEVICE inner_product(
   execution_policy<Derived>& policy,
   InputIt1 first1,
   InputIt1 last1,
@@ -58,14 +66,14 @@ T THRUST_HIP_FUNCTION inner_product(
   size_type num_items    = static_cast<size_type>(thrust::distance(first1, last1));
   using binop_iterator_t = transform_pair_of_input_iterators_t<T, InputIt1, InputIt2, ProductOp>;
 
-  return reduce_n(policy, binop_iterator_t(first1, first2, product_op), num_items, init, reduce_op);
+  return hip_rocprim::reduce_n(policy, binop_iterator_t(first1, first2, product_op), num_items, init, reduce_op);
 }
 
 template <class Derived, class InputIt1, class InputIt2, class T>
-T THRUST_HIP_FUNCTION
+T THRUST_HOST_DEVICE
 inner_product(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2, T init)
 {
-  return inner_product(policy, first1, last1, first2, init, plus<T>(), multiplies<T>());
+  return hip_rocprim::inner_product(policy, first1, last1, first2, init, plus<T>(), multiplies<T>());
 }
 
 } // namespace hip_rocprim

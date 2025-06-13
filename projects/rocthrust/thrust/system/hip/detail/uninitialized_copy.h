@@ -29,8 +29,15 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#  include <thrust/detail/memory_wrapper.h>
 #  include <thrust/distance.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
 #  include <thrust/system/hip/detail/parallel_for.h>
@@ -39,8 +46,10 @@
 #  include <iterator>
 
 THRUST_NAMESPACE_BEGIN
+
 namespace hip_rocprim
 {
+
 namespace __uninitialized_copy
 {
 
@@ -63,8 +72,7 @@ struct functor
   void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
   {
     InputType const& in = raw_reference_cast(input[idx]);
-    OutputType& out =
-      raw_reference_cast(output[static_cast<typename std::pointer_traits<OutputIt>::difference_type>(idx)]);
+    OutputType& out     = raw_reference_cast(output[idx]);
 
     ::new (static_cast<void*>(&out)) OutputType(in);
   }
@@ -73,17 +81,18 @@ struct functor
 } // namespace __uninitialized_copy
 
 template <class Derived, class InputIt, class Size, class OutputIt>
-OutputIt THRUST_HIP_FUNCTION
+OutputIt THRUST_HOST_DEVICE
 uninitialized_copy_n(execution_policy<Derived>& policy, InputIt first, Size count, OutputIt result)
 {
   using functor_t = __uninitialized_copy::functor<InputIt, OutputIt>;
 
   hip_rocprim::parallel_for(policy, functor_t(first, result), count);
-  return result + static_cast<typename std::pointer_traits<OutputIt>::difference_type>(count);
+
+  return result + count;
 }
 
 template <class Derived, class InputIt, class OutputIt>
-OutputIt THRUST_HIP_FUNCTION
+OutputIt THRUST_HOST_DEVICE
 uninitialized_copy(execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
   return hip_rocprim::uninitialized_copy_n(policy, first, thrust::distance(first, last), result);
