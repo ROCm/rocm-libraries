@@ -4749,10 +4749,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["MFMA_BF16_1K"] and not self.states.asmCaps["HasMFMA_bf16_1k"]:
         raise RuntimeError("BF16_1k MatrixInstruction not supported for {0}".format(self.states.version))
 
-      # Modification: Add "HasSWMMA" to asmCaps for wave-32. Separatlly check for SMFMA and SWMMA.
+      # Modification: Add "HasSWMMAC" to asmCaps for wave-32. Separatlly check for SMFMA and SWMMAC.
       if kernel["ProblemType"]["Sparse"]:
-        if kernel["WavefrontSize"] == 32 and not self.states.asmCaps["HasSWMMA"]:
-          raise RuntimeError("Sparse MatrixInstruction SWMMA not supported for {0}".format(self.states.version))
+        if kernel["WavefrontSize"] == 32 and not self.states.asmCaps["HasSWMMAC"]:
+          raise RuntimeError("Sparse MatrixInstruction SWMMAC not supported for {0}".format(self.states.version))
         if kernel["WavefrontSize"] == 64 and not self.states.asmCaps["HasSMFMA"]:
           raise RuntimeError("Sparse MatrixInstruction SMFMA not supported for {0}".format(self.states.version))
 

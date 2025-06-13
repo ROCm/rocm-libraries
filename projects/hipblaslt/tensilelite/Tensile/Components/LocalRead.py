@@ -644,7 +644,7 @@ class LocalReadMFMA(LocalRead):
                 # gfx950 sparse track only has one block for each thread group.
                 # TODO adjust this value for other arch.
                 blocksPerTGroupSMFMA = 1 if isSparseTrack else 2
-                if writer.states.asmCaps["HasSWMMA_gfx1250"] and not tP["isM"]: blocksPerTGroupSMFMA = 2
+                if writer.states.asmCaps["HasSWMMAC_gfx1250"] and not tP["isM"]: blocksPerTGroupSMFMA = 2
                 if blocksPerTGroupSMFMA > 1:
                     threadGroups = kernel["MatrixInstK"] // kernel["MIInputPerThread"]
                     elementsPerBlockSMFMA = kernel["MIInputPerThread%s"%tc] // blocksPerTGroupSMFMA  # need adjust if blocks > 1 and is sparse track.
