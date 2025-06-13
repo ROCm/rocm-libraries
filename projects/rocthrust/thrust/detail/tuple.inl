@@ -19,9 +19,17 @@
 #include <thrust/detail/config.h>
 
 #include <thrust/detail/type_traits.h>
-#include <thrust/detail/swap.h>
 
 THRUST_NAMESPACE_BEGIN
+
+THRUST_EXEC_CHECK_DISABLE
+template <typename Assignable1, typename Assignable2>
+THRUST_HOST_DEVICE inline void swap(Assignable1& a, Assignable2& b)
+{
+  Assignable1 temp = a;
+  a                = b;
+  b                = temp;
+} // end swap()
 
 // forward declaration for tuple
 template <

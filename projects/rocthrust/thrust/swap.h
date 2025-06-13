@@ -22,18 +22,24 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execution_policy.h>
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/utility>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
-/*! \addtogroup utility
- *  \{
- */
-
-/*! \addtogroup swap
- *  \{
- */
-
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+using ::cuda::std::swap;
+#else
 /*! \p swap assigns the contents of \c a to \c b and the
  *  contents of \c b to \c a. This is used as a primitive operation
  *  by many other algorithms.
@@ -61,12 +67,7 @@ THRUST_NAMESPACE_BEGIN
  */
 template <typename Assignable1, typename Assignable2>
 THRUST_HOST_DEVICE inline void swap(Assignable1& a, Assignable2& b);
-
-/*! \} // swap
- */
-
-/*! \} // utility
- */
+#endif
 
 /*! \addtogroup copying
  *  \{
@@ -175,4 +176,4 @@ ForwardIterator2 swap_ranges(ForwardIterator1 first1, ForwardIterator1 last1, Fo
 
 THRUST_NAMESPACE_END
 
-#include <thrust/detail/swap.inl>
+#include <thrust/detail/swap_ranges.inl>
