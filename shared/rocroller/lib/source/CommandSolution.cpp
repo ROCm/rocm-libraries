@@ -39,6 +39,9 @@
 #include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
+#include <rocRoller/KernelGraph/Transforms/MemoryTracer.hpp>
+
+
 namespace rocRoller
 {
 
@@ -600,6 +603,8 @@ namespace rocRoller
         auto inv   = getKernelInvocation(args);
 
         loadKernel();
+
+	memoryTrace(*m_kernelGraph, inv, kargs);
 
         if(timer)
             m_executableKernel->executeKernel(kargs, inv, timer, iteration);
