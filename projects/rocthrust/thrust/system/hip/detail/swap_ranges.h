@@ -29,21 +29,31 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#  include <iterator>
-// This include is not required
-// #include <thrust/system/hip/detail/transform.h>
 #  include <thrust/distance.h>
 #  include <thrust/swap.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/parallel_for.h>
+#  include <thrust/system/hip/detail/transform.h>
+
+#  include <iterator>
 
 THRUST_NAMESPACE_BEGIN
 
 namespace hip_rocprim
 {
+
 namespace __swap_ranges
 {
+
 template <class ItemsIt1, class ItemsIt2>
 struct swap_f
 {
@@ -62,6 +72,7 @@ struct swap_f
   template <class Size>
   void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
   {
+    // TODO(bgruber): this should probably use ::cuda::std::iter_swap(items1 + idx, items2 + idx);
     value1_type item1 = items1[idx];
     value2_type item2 = items2[idx];
     // XXX thrust::swap is buggy
@@ -78,7 +89,7 @@ struct swap_f
 } // namespace __swap_ranges
 
 template <class Derived, class ItemsIt1, class ItemsIt2>
-ItemsIt2 THRUST_HIP_FUNCTION
+ItemsIt2 THRUST_HOST_DEVICE
 swap_ranges(execution_policy<Derived>& policy, ItemsIt1 first1, ItemsIt1 last1, ItemsIt2 first2)
 {
   using size_type = typename iterator_traits<ItemsIt1>::difference_type;
@@ -86,6 +97,7 @@ swap_ranges(execution_policy<Derived>& policy, ItemsIt1 first1, ItemsIt1 last1, 
   size_type num_items = static_cast<size_type>(thrust::distance(first1, last1));
 
   hip_rocprim::parallel_for(policy, __swap_ranges::swap_f<ItemsIt1, ItemsIt2>(first1, first2), num_items);
+
   return first2 + num_items;
 }
 

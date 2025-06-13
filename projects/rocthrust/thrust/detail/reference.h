@@ -23,6 +23,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/reference_forward_declaration.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/adl/assign_value.h>
@@ -484,8 +491,10 @@ class tagged_reference<void const, Tag>
  *  \param x The first \p tagged_reference of interest.
  *  \param y The second \p tagged_reference of interest.
  */
+// note: this is not a hidden friend, because we have template specializations of tagged_reference
 template <typename Element, typename Tag>
-THRUST_HOST_DEVICE void swap(tagged_reference<Element, Tag>& x, tagged_reference<Element, Tag>& y)
+THRUST_HOST_DEVICE void
+swap(tagged_reference<Element, Tag>& x, tagged_reference<Element, Tag>& y) noexcept(noexcept(x.swap(y)))
 {
   x.swap(y);
 }

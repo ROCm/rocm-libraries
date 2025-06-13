@@ -20,7 +20,11 @@
 
 #include <unittest/unittest.h>
 
-void TestDeviceReferenceConstructorFromDeviceReference(void)
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <utility>
+#endif
+
+void TestDeviceReferenceConstructorFromDeviceReference()
 {
   using T = int;
 
@@ -45,7 +49,7 @@ void TestDeviceReferenceConstructorFromDeviceReference(void)
 }
 DECLARE_UNITTEST(TestDeviceReferenceConstructorFromDeviceReference);
 
-void TestDeviceReferenceConstructorFromDevicePointer(void)
+void TestDeviceReferenceConstructorFromDevicePointer()
 {
   using T = int;
 
@@ -71,7 +75,7 @@ void TestDeviceReferenceConstructorFromDevicePointer(void)
 }
 DECLARE_UNITTEST(TestDeviceReferenceConstructorFromDevicePointer);
 
-void TestDeviceReferenceAssignmentFromDeviceReference(void)
+void TestDeviceReferenceAssignmentFromDeviceReference()
 {
   // test same types
   using T0 = int;
@@ -101,7 +105,7 @@ void TestDeviceReferenceAssignmentFromDeviceReference(void)
 }
 DECLARE_UNITTEST(TestDeviceReferenceAssignmentFromDeviceReference);
 
-void TestDeviceReferenceManipulation(void)
+void TestDeviceReferenceManipulation()
 {
   using T1 = int;
 
@@ -224,7 +228,7 @@ void TestDeviceReferenceManipulation(void)
 }
 DECLARE_UNITTEST(TestDeviceReferenceManipulation);
 
-void TestDeviceReferenceSwap(void)
+void TestDeviceReferenceSwap()
 {
   using T = int;
 
@@ -235,8 +239,13 @@ void TestDeviceReferenceSwap(void)
   ref1 = 7;
   ref2 = 13;
 
-  // test thrust::swap()
-  thrust::swap(ref1, ref2);
+  // test ADL two-step swap
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using ::cuda::std::swap;
+#else
+  using ::std::swap;
+#endif
+  swap(ref1, ref2);
   ASSERT_EQUAL(13, ref1);
   ASSERT_EQUAL(7, ref2);
 
