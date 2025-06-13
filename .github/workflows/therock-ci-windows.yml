@@ -87,34 +87,6 @@ jobs:
       - name: Configure MSVC
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
-      - name: Runner Health Settings
-        run: |
-          echo "CCACHE_DIR=${CCACHE_DIR}"
-          df -h
-          mkdir -p $CCACHE_DIR
-
-          echo "cmake: $(which cmake)"
-          cmake --version
-          echo "ninja: $(which ninja)"
-          ninja --version
-          echo "CC: $CC"
-          echo "CXX: $CXX"
-
-          echo "python: $(which python), python3: $(which python3)"
-          python --version
-
-          echo "gcc: $(which gcc)"
-          gcc --version
-          echo "perl: $(which perl)"
-          perl --version
-          echo "gfortran: $(which gfortran)"
-          gfortran --version
-
-          echo "Git version: $(git --version)"
-          git config fetch.parallel 10
-          nthreads=$(nproc --all)
-          echo [*] Logical Processors available: $nthreads...
-
       - name: Fetch sources
         run: |
           python ./build_tools/fetch_sources.py --jobs 96
