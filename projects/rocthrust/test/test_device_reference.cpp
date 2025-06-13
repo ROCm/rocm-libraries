@@ -21,6 +21,10 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <utility>
+#endif
+
 TESTS_DEFINE(DeviceReferenceTests, NumericalTestsParams);
 TESTS_DEFINE(DeviceReferenceIntegerTests, IntegerTestsParams);
 
@@ -30,7 +34,7 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceConstructorFromDeviceReferen
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::device_vector<T> v(1, T(0));
+  thrust::device_vector<T> v(1, 0);
   thrust::device_reference<T> ref = v[0];
 
   // ref equals the object at v[0]
@@ -40,13 +44,13 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceConstructorFromDeviceReferen
   ASSERT_EQ(&v[0], &ref);
 
   // modifying v[0] modifies ref
-  v[0] = T(13);
-  ASSERT_EQ(T(13), ref);
+  v[0] = 13;
+  ASSERT_EQ(13, ref);
   ASSERT_EQ(v[0], ref);
 
   // modifying ref modifies v[0]
-  ref = T(7);
-  ASSERT_EQ(T(7), v[0]);
+  ref = 7;
+  ASSERT_EQ(7, v[0]);
   ASSERT_EQ(v[0], ref);
 }
 
@@ -56,7 +60,7 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceConstructorFromDevicePointer
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::device_vector<T> v(1, T(0));
+  thrust::device_vector<T> v(1, 0);
   thrust::device_ptr<T> ptr = &v[0];
   thrust::device_reference<T> ref(ptr);
 
@@ -67,13 +71,13 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceConstructorFromDevicePointer
   ASSERT_EQ(ptr, &ref);
 
   // modifying *ptr modifies ref
-  *ptr = T(13);
-  ASSERT_EQ(T(13), ref);
+  *ptr = 13;
+  ASSERT_EQ(13, ref);
   ASSERT_EQ(v[0], ref);
 
   // modifying ref modifies *ptr
-  ref = T(7);
-  ASSERT_EQ(T(7), *ptr);
+  ref = 7;
+  ASSERT_EQ(7, *ptr);
   ASSERT_EQ(v[0], ref);
 }
 
@@ -110,140 +114,140 @@ TEST(DeviceReferenceTests, TestDeviceReferenceAssignmentFromDeviceReference)
 
 TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceManipulation)
 {
-  using T = typename TestFixture::input_type;
+  using T1 = typename TestFixture::input_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::device_vector<T> v(1, T(0));
-  thrust::device_ptr<T> ptr = &v[0];
-  thrust::device_reference<T> ref(ptr);
+  thrust::device_vector<T1> v(1, 0);
+  thrust::device_ptr<T1> ptr = &v[0];
+  thrust::device_reference<T1> ref(ptr);
 
   // reset
-  ref = T(0);
+  ref = 0;
 
   // test prefix increment
   ++ref;
-  ASSERT_EQ(T(1), ref);
-  ASSERT_EQ(T(1), *ptr);
-  ASSERT_EQ(T(1), v[0]);
+  ASSERT_EQ(1, ref);
+  ASSERT_EQ(1, *ptr);
+  ASSERT_EQ(1, v[0]);
 
   // reset
-  ref = T(0);
+  ref = 0;
 
   // test postfix increment
-  T x1 = ref++;
-  ASSERT_EQ(T(0), x1);
-  ASSERT_EQ(T(1), ref);
-  ASSERT_EQ(T(1), *ptr);
-  ASSERT_EQ(T(1), v[0]);
+  T1 x1 = ref++;
+  ASSERT_EQ(0, x1);
+  ASSERT_EQ(1, ref);
+  ASSERT_EQ(1, *ptr);
+  ASSERT_EQ(1, v[0]);
 
   // reset
-  ref = T(0);
+  ref = 0;
 
   // test addition-assignment
-  ref += T(5);
-  ASSERT_EQ(T(5), ref);
-  ASSERT_EQ(T(5), *ptr);
-  ASSERT_EQ(T(5), v[0]);
+  ref += 5;
+  ASSERT_EQ(5, ref);
+  ASSERT_EQ(5, *ptr);
+  ASSERT_EQ(5, v[0]);
 
   // reset
-  ref = T(0);
+  ref = 0;
 
   // test prefix decrement
   --ref;
-  ASSERT_EQ(T(-1), ref);
-  ASSERT_EQ(T(-1), *ptr);
-  ASSERT_EQ(T(-1), v[0]);
+  ASSERT_EQ(T1(-1), ref);
+  ASSERT_EQ(T1(-1), *ptr);
+  ASSERT_EQ(T1(-1), v[0]);
 
   // reset
-  ref = T(0);
+  ref = 0;
 
   // test subtraction-assignment
-  ref -= T(5);
-  ASSERT_EQ(T(-5), ref);
-  ASSERT_EQ(T(-5), *ptr);
-  ASSERT_EQ(T(-5), v[0]);
+  ref -= 5;
+  ASSERT_EQ(T1(-5), ref);
+  ASSERT_EQ(T1(-5), *ptr);
+  ASSERT_EQ(T1(-5), v[0]);
 
   // reset
-  ref = T(1);
+  ref = 1;
 
   // test multiply-assignment
-  ref *= T(5);
-  ASSERT_EQ(T(5), ref);
-  ASSERT_EQ(T(5), *ptr);
-  ASSERT_EQ(T(5), v[0]);
+  ref *= 5;
+  ASSERT_EQ(5, ref);
+  ASSERT_EQ(5, *ptr);
+  ASSERT_EQ(5, v[0]);
 
   // reset
-  ref = T(5);
+  ref = 5;
 
   // test divide-assignment
-  ref /= T(5);
-  ASSERT_EQ(T(1), ref);
-  ASSERT_EQ(T(1), *ptr);
-  ASSERT_EQ(T(1), v[0]);
+  ref /= 5;
+  ASSERT_EQ(1, ref);
+  ASSERT_EQ(1, *ptr);
+  ASSERT_EQ(1, v[0]);
 
   // test equality of const references
-  thrust::device_reference<const T> ref1 = v[0];
+  thrust::device_reference<const T1> ref1 = v[0];
   ASSERT_EQ(true, ref1 == ref);
 }
 
 TYPED_TEST(DeviceReferenceIntegerTests, TestDeviceReferenceIntegerManipulation)
 {
-  using T = typename TestFixture::input_type;
+  using T1 = typename TestFixture::input_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::device_vector<T> v(1, T(0));
-  thrust::device_ptr<T> ptr = &v[0];
-  thrust::device_reference<T> ref(ptr);
+  thrust::device_vector<T1> v(1, 0);
+  thrust::device_ptr<T1> ptr = &v[0];
+  thrust::device_reference<T1> ref(ptr);
 
   // reset
-  ref = T(5);
+  ref = 5;
 
   // test modulus-assignment
-  ref %= T(5);
-  ASSERT_EQ(T(0), ref);
-  ASSERT_EQ(T(0), *ptr);
-  ASSERT_EQ(T(0), v[0]);
+  ref %= 5;
+  ASSERT_EQ(0, ref);
+  ASSERT_EQ(0, *ptr);
+  ASSERT_EQ(0, v[0]);
 
   // reset
-  ref = T(1);
+  ref = 1;
 
   // test left shift-assignment
-  ref <<= T(1);
-  ASSERT_EQ(T(2), ref);
-  ASSERT_EQ(T(2), *ptr);
-  ASSERT_EQ(T(2), v[0]);
+  ref <<= 1;
+  ASSERT_EQ(2, ref);
+  ASSERT_EQ(2, *ptr);
+  ASSERT_EQ(2, v[0]);
 
   // reset
-  ref = T(2);
+  ref = 2;
 
   // test right shift-assignment
-  ref >>= T(1);
-  ASSERT_EQ(T(1), ref);
-  ASSERT_EQ(T(1), *ptr);
-  ASSERT_EQ(T(1), v[0]);
+  ref >>= 1;
+  ASSERT_EQ(1, ref);
+  ASSERT_EQ(1, *ptr);
+  ASSERT_EQ(1, v[0]);
 
   // reset
-  ref = T(0);
+  ref = 0;
 
   // test OR-assignment
-  ref |= T(1);
-  ASSERT_EQ(T(1), ref);
-  ASSERT_EQ(T(1), *ptr);
-  ASSERT_EQ(T(1), v[0]);
+  ref |= 1;
+  ASSERT_EQ(1, ref);
+  ASSERT_EQ(1, *ptr);
+  ASSERT_EQ(1, v[0]);
 
   // reset
-  ref = T(1);
+  ref = 1;
 
   // test XOR-assignment
-  ref ^= T(1);
-  ASSERT_EQ(T(0), ref);
-  ASSERT_EQ(T(0), *ptr);
-  ASSERT_EQ(T(0), v[0]);
+  ref ^= 1;
+  ASSERT_EQ(0, ref);
+  ASSERT_EQ(0, *ptr);
+  ASSERT_EQ(0, v[0]);
 
   // test equality of const references
-  thrust::device_reference<const T> ref1 = v[0];
+  thrust::device_reference<const T1> ref1 = v[0];
   ASSERT_EQ(true, ref1 == ref);
 }
 
@@ -253,20 +257,25 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceSwap)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::device_vector<T> v(T(2));
+  thrust::device_vector<T> v(2);
   thrust::device_reference<T> ref1 = v.front();
   thrust::device_reference<T> ref2 = v.back();
 
-  ref1 = T(7);
-  ref2 = T(13);
+  ref1 = 7;
+  ref2 = 13;
 
-  // test thrust::swap()
-  thrust::swap(ref1, ref2);
-  ASSERT_EQ(T(13), ref1);
-  ASSERT_EQ(T(7), ref2);
+  // test ADL two-step swap
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using ::cuda::std::swap;
+#else
+  using ::std::swap;
+#endif
+  swap(ref1, ref2);
+  ASSERT_EQ(13, ref1);
+  ASSERT_EQ(7, ref2);
 
   // test .swap()
   ref1.swap(ref2);
-  ASSERT_EQ(T(7), ref1);
-  ASSERT_EQ(T(13), ref2);
+  ASSERT_EQ(7, ref1);
+  ASSERT_EQ(13, ref2);
 }

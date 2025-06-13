@@ -21,6 +21,10 @@
 
 #include <unittest/unittest.h>
 
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <utility>
+#endif
+
 using namespace unittest;
 
 template <typename T>
@@ -475,7 +479,7 @@ struct TestTupleTie
 };
 SimpleUnitTest<TestTupleTie, NumericTypes> TestTupleTieInstance;
 
-void TestTupleSwap(void)
+void TestTupleSwap()
 {
   int a = 7;
   int b = 13;
@@ -488,7 +492,12 @@ void TestTupleSwap(void)
   thrust::tuple<int, int, int> t1(a, b, c);
   thrust::tuple<int, int, int> t2(x, y, z);
 
-  thrust::swap(t1, t2);
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using ::cuda::std::swap;
+#else
+  using ::std::swap;
+#endif
+  swap(t1, t2);
 
   ASSERT_EQUAL(x, thrust::get<0>(t1));
   ASSERT_EQUAL(y, thrust::get<1>(t1));
@@ -515,7 +524,7 @@ void TestTupleSwap(void)
 DECLARE_UNITTEST(TestTupleSwap);
 
 #if THRUST_CPP_DIALECT >= 2017
-void TestTupleStructuredBindings(void)
+void TestTupleStructuredBindings()
 {
   const int a = 0;
   const int b = 42;
