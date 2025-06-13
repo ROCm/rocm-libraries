@@ -26,35 +26,37 @@ trigger:
     - release-staging/rocm-rel-7.*
   paths:
     include:
-    - projects/hipfft
+    - projects/rocblas
     exclude:
-    - projects/hipfft/.githooks
-    - projects/hipfft/.github
-    - projects/hipfft/.jenkins
-    - projects/hipfft/docs
-    - projects/hipfft/.*.y*ml
-    - projects/hipfft/*.md
+    - projects/rocblas/.githooks
+    - projects/rocblas/.github
+    - projects/rocblas/.jenkins
+    - projects/rocblas/docs
+    - projects/rocblas/.*.y*ml
+    - projects/rocblas/*.md
+    - projects/rocblas/*.rst
 
 pr:
   autoCancel: true
   branches:
     include:
     - develop
-    - release-staging/rocm-rel-7.*
+    - mainline
   paths:
     include:
-    - projects/hipfft
+    - projects/rocblas
     exclude:
-    - projects/hipfft/.githooks
-    - projects/hipfft/.github
-    - projects/hipfft/.jenkins
-    - projects/hipfft/docs
-    - projects/hipfft/.*.y*ml
-    - projects/hipfft/*.md
+    - projects/rocblas/.githooks
+    - projects/rocblas/.github
+    - projects/rocblas/.jenkins
+    - projects/rocblas/docs
+    - projects/rocblas/.*.y*ml
+    - projects/rocblas/*.md
+    - projects/rocblas/*.rst
   drafts: false
 
 jobs:
-  - template: ${{ variables.CI_COMPONENT_PATH }}/hipFFT.yml@pipelines_repo
+  - template: ${{ variables.CI_COMPONENT_PATH }}/rocBLAS.yml@pipelines_repo
     parameters:
-      sparseCheckoutDir: projects/hipfft
+      sparseCheckoutDir: projects/rocblas
       triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}

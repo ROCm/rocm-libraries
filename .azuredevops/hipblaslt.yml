@@ -26,17 +26,14 @@ trigger:
     - release-staging/rocm-rel-7.*
   paths:
     include:
-    - projects/hipcub
+    - projects/hipblaslt
     exclude:
-    - projects/hipcub/.githooks
-    - projects/hipcub/.github
-    - projects/hipcub/.gitlab
-    - projects/hipcub/.jenkins
-    - projects/hipcub/docs
-    - projects/hipcub/.*.y*ml
-    - projects/hipcub/*.md
-    - projects/hipcub/LICENSE.txt
-    - projects/hipcub/NOTICES.txt
+    - projects/hipblaslt/.githooks
+    - projects/hipblaslt/.github
+    - projects/hipblaslt/docs
+    - projects/hipblaslt/CODEOWNERS
+    - projects/hipblaslt/.*.y*ml
+    - projects/hipblaslt/*.md
 
 pr:
   autoCancel: true
@@ -46,21 +43,18 @@ pr:
     - release-staging/rocm-rel-7.*
   paths:
     include:
-    - projects/hipcub
+    - projects/hipblaslt
     exclude:
-    - projects/hipcub/.githooks
-    - projects/hipcub/.github
-    - projects/hipcub/.gitlab
-    - projects/hipcub/.jenkins
-    - projects/hipcub/docs
-    - projects/hipcub/.*.y*ml
-    - projects/hipcub/*.md
-    - projects/hipcub/LICENSE.txt
-    - projects/hipcub/NOTICES.txt
+    - projects/hipblaslt/.githooks
+    - projects/hipblaslt/.github
+    - projects/hipblaslt/docs
+    - projects/hipblaslt/CODEOWNERS
+    - projects/hipblaslt/.*.y*ml
+    - projects/hipblaslt/*.md
   drafts: false
 
 jobs:
-  - template: ${{ variables.CI_COMPONENT_PATH }}/hipCUB.yml@pipelines_repo
+  - template: ${{ variables.CI_COMPONENT_PATH }}/hipBLASLt.yml@pipelines_repo
     parameters:
-      sparseCheckoutDir: projects/hipcub
+      sparseCheckoutDir: projects/hipblaslt
       triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
