@@ -29,6 +29,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  include <thrust/system/hip/config.h>
 
@@ -42,14 +50,14 @@ namespace hip_rocprim
 
 // XXX forward declare to circumvent circular depedency
 template <class Derived, class InputIt, class Predicate>
-InputIt THRUST_HIP_FUNCTION find_if(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate);
+InputIt THRUST_HOST_DEVICE find_if(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate);
 
 template <class Derived, class InputIt, class Predicate>
-InputIt THRUST_HIP_FUNCTION
+InputIt THRUST_HOST_DEVICE
 find_if_not(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate);
 
 template <class Derived, class InputIt, class T>
-InputIt THRUST_HIP_FUNCTION find(execution_policy<Derived>& policy, InputIt first, InputIt last, T const& value);
+InputIt THRUST_HOST_DEVICE find(execution_policy<Derived>& policy, InputIt first, InputIt last, T const& value);
 
 }; // namespace hip_rocprim
 THRUST_NAMESPACE_END
@@ -60,12 +68,14 @@ THRUST_NAMESPACE_END
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
+
 namespace __find_if
 {
+
 template <typename TupleType>
 struct functor
 {
-  TupleType THRUST_HIP_DEVICE_FUNCTION operator()(const TupleType& lhs, const TupleType& rhs) const
+  THRUST_HIP_DEVICE_FUNCTION TupleType operator()(const TupleType& lhs, const TupleType& rhs) const
   {
     // select the smallest index among true results
     if (thrust::get<0>(lhs) && thrust::get<0>(rhs))
@@ -85,7 +95,7 @@ struct functor
 } // namespace __find_if
 
 template <class Derived, class InputIt, class Size, class Predicate>
-InputIt THRUST_HIP_FUNCTION
+InputIt THRUST_HOST_DEVICE
 find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Predicate predicate)
 {
   using result_type = typename thrust::tuple<bool, Size>;
@@ -134,29 +144,28 @@ find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Pred
     }
   }
 
-  hip_rocprim::throw_on_error(hip_rocprim::synchronize_optional(policy), "find_if_n: failed to synchronize");
-
   // nothing was found if we reach here...
   return first + num_items;
 }
 
 template <class Derived, class InputIt, class Predicate>
-InputIt THRUST_HIP_FUNCTION find_if(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
+InputIt THRUST_HOST_DEVICE find_if(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
 {
   return hip_rocprim::find_if_n(policy, first, thrust::distance(first, last), predicate);
 }
 
 template <class Derived, class InputIt, class Predicate>
-InputIt THRUST_HIP_FUNCTION
+InputIt THRUST_HOST_DEVICE
 find_if_not(execution_policy<Derived>& policy, InputIt first, InputIt last, Predicate predicate)
 {
   return hip_rocprim::find_if(policy, first, last, thrust::not_fn(predicate));
 }
 
 template <class Derived, class InputIt, class T>
-InputIt THRUST_HIP_FUNCTION find(execution_policy<Derived>& policy, InputIt first, InputIt last, T const& value)
+InputIt THRUST_HOST_DEVICE find(execution_policy<Derived>& policy, InputIt first, InputIt last, T const& value)
 {
   using thrust::placeholders::_1;
+
   return hip_rocprim::find_if(policy, first, last, _1 == value);
 }
 
