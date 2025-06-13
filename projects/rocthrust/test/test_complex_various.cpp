@@ -21,7 +21,7 @@
 #include <complex>
 #include <random>
 
-#include "test_header.hpp"
+#include <gtest/gtest.h>
 
 #define CHECK_CORRECT(std_complex, thrust_complex, real_eps, imag_eps, real_val, imag_val)                   \
   do                                                                                                         \
@@ -900,6 +900,12 @@ TEST(VariousComplexTest, logf_special_cases)
     CHECK_CORRECT(std_out, thrust_out, real_eps, imag_eps, real, imag);
   };
 
+  union converted
+  {
+    float out;
+    uint32_t in;
+  } c;
+
   // Testing clogf for case of ay > 1e34
   run_test(2e34f, 3e34f);
   // checking cases where real is 1, and imaginary is less than 1
@@ -915,15 +921,17 @@ TEST(VariousComplexTest, logf_special_cases)
   // checking cases where real or imag is greater than 1e6
   run_test(5e7f, 0.5);
   run_test(0.5f, 5e7f);
-  run_test(0x7f800000, 0.5); // inf
-  run_test(0.5, 0x7f800000); // inf
+  
+  c.in = 0x7f800000;
+  run_test(c.out, 0.5); // inf
+  run_test(0.5, c.out); // inf
 
-  //checking case where r <= 0.7
+  // checking case where r <= 0.7
   run_test(0.55, 0.55);
 
-  //checking NAN cases
-  run_test(0xffc00001, 0xffc00001);
-
+  // checking NAN cases
+  c.in = 0xffc00001;
+  run_test(c.out, c.out);
 }
 
 TYPED_TEST(VariousComplexTest, log10)

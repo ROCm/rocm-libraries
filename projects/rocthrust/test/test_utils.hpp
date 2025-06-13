@@ -46,6 +46,140 @@
 #include <cstdlib>
 #include <string>
 
+// HIP API
+#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#  include <hip/hip_runtime.h>
+#  include <hip/hip_runtime_api.h>
+
+// GoogleTest-compatible HIP_CHECK macro. FAIL is called to log the Google Test trace.
+// The lambda is invoked immediately as assertions that generate a fatal failure can
+// only be used in void-returning functions.
+#  ifndef HIP_CHECK
+#    define HIP_CHECK(condition)                                                 \
+      do                                                                         \
+      {                                                                          \
+        hipError_t error = condition;                                            \
+        if (error != hipSuccess)                                                 \
+        {                                                                        \
+          [error]() {                                                            \
+            FAIL() << "HIP error " << error << ": " << hipGetErrorString(error); \
+          }();                                                                   \
+          exit(error);                                                           \
+        }                                                                        \
+      } while (0)
+#  endif
+
+#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+
+
+namespace test
+{
+
+inline char* get_env(const char* name)
+{
+  char* env;
+#ifdef _MSC_VER
+  size_t len;
+  errno_t err = _dupenv_s(&env, &len, name);
+  if (err)
+  {
+    return nullptr;
+  }
+#else
+  env = std::getenv(name);
+#endif
+  return env;
+}
+
+inline void clean_env(char* name)
+{
+#ifdef _MSC_VER
+  if (name != nullptr)
+  {
+    free(name);
+  }
+#endif
+  (void) name;
+}
+
+inline int set_device_from_ctest()
+{
+  static const std::string rg0 = "CTEST_RESOURCE_GROUP_0";
+  char* env                    = get_env(rg0.c_str());
+  int device                   = 0;
+  if (env != nullptr)
+  {
+    std::string amdgpu_target(env);
+    std::transform(
+      amdgpu_target.cbegin(),
+      amdgpu_target.cend(),
+      amdgpu_target.begin(),
+      // Feeding std::toupper plainly results in implicitly truncating conversions between int and char triggering
+      // warnings.
+      [](unsigned char c) {
+        return static_cast<char>(std::toupper(c));
+      });
+    char* env_reqs = get_env((rg0 + "_" + amdgpu_target).c_str());
+    std::string reqs(env_reqs);
+    device = std::atoi(reqs.substr(reqs.find(':') + 1, reqs.find(',') - (reqs.find(':') + 1)).c_str());
+    clean_env(env_reqs);
+    HIP_CHECK(hipSetDevice(device));
+  }
+  clean_env(env);
+  return device;
+}
+} // namespace test
+
+// If enabled, set up the database for inter-run bitwise reproducibility testing.
+// Inter-run testing is enabled through the following environment variables:
+// ROCTHRUST_BWR_PATH - path to the database (or where it should be created)
+// ROCTHRUST_BWR_GENERATE - if set to 1, info about any function calls not
+// found in the database will be inserted. No errors will be reported in this mode.
+namespace inter_run_bwr
+{
+// Disable this testing by default.
+bool enabled = false;
+
+// This code doesn't need to be visible outside this file.
+namespace
+{
+const static std::string path_env     = "ROCTHRUST_BWR_PATH";
+const static std::string generate_env = "ROCTHRUST_BWR_GENERATE";
+
+// Check the environment variables to see if the database should be
+// instantiated, and if so, what mode it should be in.
+std::unique_ptr<BitwiseReproDB> create_db()
+{
+  // Get the path to the database from an environment variable.
+  const char* db_path = std::getenv(path_env.c_str());
+  const char* db_mode = std::getenv(generate_env.c_str());
+  if (db_path)
+  {
+    // Check if we are allowed to insert rows into the database if
+    // we encounter calls that aren't already recorded.
+    BitwiseReproDB::Mode mode = BitwiseReproDB::Mode::test_mode;
+    if (db_mode && std::stoi(db_mode) > 0)
+    {
+      mode = BitwiseReproDB::Mode::generate_mode;
+    }
+
+    enabled = true;
+    return std::make_unique<BitwiseReproDB>(db_path, mode);
+  }
+  else if (db_mode)
+  {
+    throw std::runtime_error("ROCTHRUST_BWR_GENERATE is defined, but no database path was given.\n"
+                             "Please set ROCTHRUST_BWR_PATH to the database path.");
+  }
+
+  return nullptr;
+}
+} // namespace
+
+// Create/open the run-to-run bitwise reproducibility database.
+std::unique_ptr<BitwiseReproDB> db = create_db();
+} // namespace inter_run_bwr
+
 #ifdef __GNUC__
 inline std::string demangle(const char* name)
 {

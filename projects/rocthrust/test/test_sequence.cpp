@@ -21,7 +21,8 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/sequence.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(SequenceTests, FullTestsParams);
 TESTS_DEFINE(PrimitiveSequenceTests, NumericalTestsParams);

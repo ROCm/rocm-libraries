@@ -17,7 +17,9 @@
 
 #include <thrust/complex.h>
 
-#include "test_header.hpp"
+#include "test_imag_assertions.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 #define CHECK_CORRECT(stComplex, ttComplex)                                          \
   do                                                                                 \
