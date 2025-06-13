@@ -2027,7 +2027,7 @@ optional(T) -> optional<T>;
 #endif
 
 // Doxygen chokes on the trailing return types used below.
-#if !defined(THRUST_DOXYGEN)
+#if !defined(THRUST_DOXYGEN_INVOKED)
 /// \exclude
 namespace detail
 {
@@ -2085,7 +2085,7 @@ THRUST_HOST_DEVICE auto optional_map_impl(Opt&& opt, F&& f) -> optional<monostat
 }
 #  endif
 } // namespace detail
-#endif // !defined(THRUST_DOXYGEN)
+#endif // !defined(THRUST_DOXYGEN_INVOKED)
 
 /// Specialization for when `T` is a reference. `optional<T&>` acts similarly
 /// to a `T*`, but provides more operations and shows intent more clearly.

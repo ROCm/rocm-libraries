@@ -109,12 +109,12 @@ THRUST_NAMESPACE_BEGIN
  *  \see pair
  *  \see tuple
  */
-#  ifdef DOXYGEN_SHOULD_SKIP_THIS // Provide a fake alias for doxygen
+#  ifdef THRUST_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <size_t N, class T>
 using tuple_element = _THRUST_STD::tuple_element<N, T>;
-#  else // ^^^ DOXYGEN_SHOULD_SKIP_THIS ^^^ / vvv !DOXYGEN_SHOULD_SKIP_THIS vvv
+#  else // ^^^ THRUST_DOXYGEN_INVOKED ^^^ / vvv !THRUST_DOXYGEN_INVOKED vvv
 using _THRUST_STD::tuple_element;
-#  endif // DOXYGEN_SHOULD_SKIP_THIS
+#  endif // THRUST_DOXYGEN_INVOKED
 
 /*! This metafunction returns the number of elements
  *  of a \p tuple type of interest.
@@ -124,12 +124,12 @@ using _THRUST_STD::tuple_element;
  *  \see pair
  *  \see tuple
  */
-#  ifdef DOXYGEN_SHOULD_SKIP_THIS // Provide a fake alias for doxygen
+#  ifdef THRUST_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <class T>
 using tuple_size = _THRUST_STD::tuple_size<T>;
-#  else // ^^^ DOXYGEN_SHOULD_SKIP_THIS ^^^ / vvv !DOXYGEN_SHOULD_SKIP_THIS vvv
+#  else // ^^^ THRUST_DOXYGEN_INVOKED ^^^ / vvv !THRUST_DOXYGEN_INVOKED vvv
 using _THRUST_STD::tuple_size;
-#  endif // DOXYGEN_SHOULD_SKIP_THIS
+#  endif // THRUST_DOXYGEN_INVOKED
 
 /*! \brief \p tuple is a heterogeneous, fixed-size collection of values.
  *  An instantiation of \p tuple with two arguments is similar to an
@@ -168,12 +168,12 @@ using _THRUST_STD::tuple_size;
  *  \see tuple_size
  *  \see tie
  */
-#  ifdef DOXYGEN_SHOULD_SKIP_THIS // Provide a fake alias for doxygen
+#  ifdef THRUST_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <class... Ts>
 using tuple = _THRUST_STD::tuple<T...>;
-#  else // ^^^ DOXYGEN_SHOULD_SKIP_THIS ^^^ / vvv !DOXYGEN_SHOULD_SKIP_THIS vvv
+#  else // ^^^ THRUST_DOXYGEN_INVOKED ^^^ / vvv !THRUST_DOXYGEN_INVOKED vvv
 using _THRUST_STD::tuple;
-#  endif // DOXYGEN_SHOULD_SKIP_THIS
+#  endif // THRUST_DOXYGEN_INVOKED
 
 using _THRUST_STD::get;
 using _THRUST_STD::make_tuple;
