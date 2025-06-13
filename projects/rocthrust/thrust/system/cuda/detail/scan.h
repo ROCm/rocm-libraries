@@ -28,13 +28,22 @@
 
 #include <thrust/detail/config.h>
 
-#ifdef _CCCL_CUDA_COMPILER
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#if _CCCL_HAS_CUDA_COMPILER
 
 #  include <thrust/system/cuda/config.h>
 
 #  include <cub/device/device_scan.cuh>
 
 #  include <thrust/detail/integer_math.h>
+#  include <thrust/detail/temporary_array.h>
 #  include <thrust/detail/type_traits.h>
 #  include <thrust/distance.h>
 #  include <thrust/iterator/iterator_traits.h>
@@ -137,7 +146,7 @@ _CCCL_HOST_DEVICE OutputIt inclusive_scan_n_impl(
   cudaError_t status;
 
   // Negative number of items are normalized to `0`
-  if (num_items < 0)
+  if (thrust::detail::is_negative(num_items))
   {
     num_items = 0;
   }

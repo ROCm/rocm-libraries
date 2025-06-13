@@ -40,7 +40,7 @@
 
 #if _CCCL_STD_VER >= 2017
 
-#  ifdef _CCCL_CUDA_COMPILER
+#  if _CCCL_HAS_CUDA_COMPILER
 
 #    include <thrust/system/cuda/config.h>
 
