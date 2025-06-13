@@ -40,11 +40,14 @@
 
 #  include <thrust/system/hip/config.h>
 
+#  include <thrust/advance.h>
 #  include <thrust/detail/alignment.h>
+#  include <thrust/detail/function.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/distance.h>
 #  include <thrust/iterator/iterator_traits.h>
 #  include <thrust/iterator/transform_iterator.h>
+#  include <thrust/system/hip/detail/dispatch.h>
 #  include <thrust/system/hip/detail/general/temp_storage.h>
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
@@ -226,7 +229,7 @@ THRUST_RUNTIME_FUNCTION OutputIt copy_if(
 
   auto flags = thrust::make_transform_iterator(stencil, predicate);
 
-  // Determine temporary device storage requirements.
+  // Query temporary storage requirements
   hip_rocprim::throw_on_error(
     rocprim::select(
       nullptr, temp_storage_bytes, first, flags, output, static_cast<size_type*>(nullptr), num_items, stream, debug_sync),
@@ -240,7 +243,7 @@ THRUST_RUNTIME_FUNCTION OutputIt copy_if(
   auto l_part =
     make_linear_partition(make_partition(&temp_stor, temp_storage_bytes), ptr_aligned_array(&d_num_selected_out, 1));
 
-  // Calculate storage_size including alignment
+  // Allocate temporary storage.
   hip_rocprim::throw_on_error(partition(ptr, storage_size, l_part));
 
   // Allocate temporary storage.
