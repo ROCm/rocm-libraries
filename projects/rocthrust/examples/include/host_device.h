@@ -17,7 +17,8 @@
 
 #pragma once
 
-#ifndef _CCCL_CUDA_COMPILER
+#if !(THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVHPC \
+      || defined(__CUDACC_RTC__))
 
 #  ifndef __host__
 #    define __host__
