@@ -57,6 +57,7 @@ namespace Tensile
         gfx1100,
         gfx1101,
         gfx1102,
+        gfx1103,
         All
     };
 
@@ -103,6 +104,8 @@ namespace Tensile
             return "TensileLibrary_*_gfx1101";
         case LazyLoadingInit::gfx1102:
             return "TensileLibrary_*_gfx1102";
+        case LazyLoadingInit::gfx1103:
+            return "TensileLibrary_*_gfx1103";
         case LazyLoadingInit::None:
             return "";
         }
