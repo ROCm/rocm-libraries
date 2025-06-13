@@ -1599,7 +1599,11 @@ public:
     {
       if (rhs.has_value())
       {
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+        using ::cuda::std::swap;
+#else
         using thrust::swap;
+#endif
         swap(**this, *rhs);
       }
       else

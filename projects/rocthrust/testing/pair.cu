@@ -21,6 +21,10 @@
 
 #include <unittest/unittest.h>
 
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <utility>
+#endif
+
 template <typename T>
 struct TestPairManipulation
 {
@@ -268,7 +272,7 @@ struct TestPairTupleSize
 };
 SimpleUnitTest<TestPairTupleSize, PairConstVolatileTypes> TestPairTupleSizeInstance;
 
-void TestPairTupleElement(void)
+void TestPairTupleElement()
 {
   using type0 = thrust::tuple_element<0, thrust::pair<int, float>>::type;
   using type1 = thrust::tuple_element<1, thrust::pair<int, float>>::type;
@@ -292,7 +296,7 @@ void TestPairTupleElement(void)
 };
 DECLARE_UNITTEST(TestPairTupleElement);
 
-void TestPairSwap(void)
+void TestPairSwap()
 {
   int x = 7;
   int y = 13;
@@ -303,7 +307,12 @@ void TestPairSwap(void)
   thrust::pair<int, int> a(x, y);
   thrust::pair<int, int> b(z, w);
 
-  thrust::swap(a, b);
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using ::cuda::std::swap;
+#else
+  using ::std::swap;
+#endif
+  swap(a, b);
 
   ASSERT_EQUAL(z, a.first);
   ASSERT_EQUAL(w, a.second);
@@ -328,7 +337,7 @@ void TestPairSwap(void)
 DECLARE_UNITTEST(TestPairSwap);
 
 #if THRUST_CPP_DIALECT >= 2017
-void TestPairStructuredBindings(void)
+void TestPairStructuredBindings()
 {
   const int a = 42;
   const int b = 1337;
