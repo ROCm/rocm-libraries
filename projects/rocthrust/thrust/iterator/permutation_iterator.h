@@ -122,7 +122,9 @@ THRUST_NAMESPACE_BEGIN
  *  \see make_permutation_iterator
  */
 template <typename ElementIterator, typename IndexIterator>
-#if defined(_WIN32) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
+#if !defined(THRUST_DOXYGEN_INVOKED)                    \
+  && (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC \
+      || (defined(__has_declspec_attribute) && __has_declspec_attribute(empty_bases)))
 class __declspec(empty_bases) permutation_iterator
 #else
 class permutation_iterator
