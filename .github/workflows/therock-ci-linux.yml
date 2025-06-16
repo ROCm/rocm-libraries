@@ -46,7 +46,6 @@ jobs:
           sparse-checkout: |
             .github
             ${{ inputs.subtree_checkout }}
-          fetch-depth: 0  # Needed for subtree splitting
           token: ${{ steps.generate-token.outputs.token }}
       
       - name: Checkout TheRock repository
@@ -85,6 +84,8 @@ jobs:
           extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=${{ github.workspace }} ${{ inputs.cmake_options }}"
         run: |
           python3 TheRock/build_tools/github_actions/build_linux_configure.py
+          echo "ls curr"
+          ls
 
       - name: Build therock-dist
         run: cmake --build TheRock/build --target therock-dist
