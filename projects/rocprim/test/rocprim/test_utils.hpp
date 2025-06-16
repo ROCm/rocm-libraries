@@ -26,6 +26,7 @@
 #include "../../common/utils.hpp"
 #include "../../common/utils_custom_type.hpp"
 #include "../../common/utils_data_generation.hpp"
+#include "../../common/utils_device_ptr.hpp"
 #include "../../common/utils_half.hpp"
 
 // Identity iterator
@@ -628,6 +629,43 @@ template<bool MakeConst, typename T>
 inline auto wrap_in_const(T* ptr) -> typename std::enable_if_t<!MakeConst, T*>
 {
     return ptr;
+}
+
+template<typename F>
+inline auto test_kernel_wrapper(F func, hipStream_t stream, const bool use_graphs = false)
+{
+    // temp storage
+    size_t temp_storage_size_bytes;
+
+    // Get size of d_temp_storage
+    HIP_CHECK(func(nullptr, temp_storage_size_bytes));
+
+    // temp_storage_size_bytes must be >0
+    ASSERT_GT(temp_storage_size_bytes, 0);
+
+    // allocate temporary storage
+    common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+
+    test_utils::GraphHelper gHelper;
+    if(use_graphs)
+    {
+        gHelper.startStreamCapture(stream);
+    }
+
+    // Run
+    HIP_CHECK(func(d_temp_storage.get(), temp_storage_size_bytes));
+
+    if(use_graphs)
+    {
+        gHelper.createAndLaunchGraph(stream);
+    }
+
+    HIP_CHECK(hipDeviceSynchronize());
+
+    if(use_graphs)
+    {
+        gHelper.cleanupGraphHelper();
+    }
 }
 
 } // namespace test_utils
