@@ -54,6 +54,7 @@ This is a complete list of affected functions and how their default accumulator 
     * Previous default: `class AccType = detail::input_type_t<InitValueType>>`
     * Current default: `class AccType = rocprim::accumulator_t<BinaryFunction, rocprim::detail::input_type_t<InitValueType>>`
 * Undeprecated internal `detail::raw_storage`.
+* Changed cmake flag `BUILD_COVDE_COVERAGE` to `CODE_COVERAGE` to more consistent with `rocRAND`, `rocThrust`, and `hipCUB`
     
 ### Deprecations
 

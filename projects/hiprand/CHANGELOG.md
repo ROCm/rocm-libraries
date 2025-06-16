@@ -23,6 +23,7 @@ Documentation for hipRAND is available at
 
 * When building hipRAND on Windows, use `HIP_PATH` (instead of the former `HIP_DIR`) to specify the path to the HIP SDK installation.
   * When building with the `rmake.py` script, if `HIP_PATH` is not set, it will default to `C:\hip`.
+* `BUILD_COVDE_COVERAGE` cmake flag changed to `CODE_COVERAGE` to be more consistent with `rocRAND`, `rocThrust`, and `hipCUB`
 
 ### Resolved issues
 
