@@ -4,35 +4,37 @@ Welcome to the ROCm Libraries monorepo. This repository consolidates multiple RO
 
 # Monorepo Migration Status
 
-This table provides the current status of the migration of specific ROCm libraries.
+This table provides the current status of the migration of specific ROCm libraries and their develop branch.
+Another column has been provided to show if release-staging for 7.0 happens on the monorepo.
 
 **Key:**
 - **Completed**: Fully migrated and integrated. This monorepo should be considered the source of truth for this project. The old repo may still be used for release activities.
 - **In Progress**: Ongoing migration, tests, or integration. Please refrain from submitting new pull requests on the individual repo of the project, and develop on the monorepo.
 - **Pending**: Not yet started or in the early planning stages. The individual repo should be considered the source of truth for this project.
 
-| Component           | Migration Status | Notes                                 |
-|---------------------|------------------|---------------------------------------|
-| `composablekernel`  | Pending     |  |
-| `hipblas`           | Pending     |  |
-| `hipblas-common`    | Completed   |  |
-| `hipblaslt`         | Pending     | Next in line. |
-| `hipcub`            | Completed   |  |
-| `hipfft`            | Pending     | Considered in next set to migrate. |
-| `hiprand`           | Completed   |  |
-| `hipsolver`         | Pending     |  |
-| `hipsparse`         | Pending     |  |
-| `hipsparselt`       | Pending     |  |
-| `miopen`            | Pending     |  |
-| `rocblas`           | Pending     |  |
-| `rocfft`            | Pending     | Considered in next set to migrate. |
-| `rocprim`           | Completed   |  |
-| `rocrand`           | Completed   |  |
-| `rocsolver`         | Pending     |  |
-| `rocsparse`         | Pending     |  |
-| `rocthrust`         | Completed   |  |
-| `rocroller`         | Pending     |  |
-| `tensile`           | Completed   |  |
+| Component           | Develop Migration Status | Release-Staging on Monorepo | Notes                                 |
+|---------------------|------------------|-------|--------------------------------|
+| `composablekernel`  | Pending     | | |
+| `hipblas`           | Pending     | | |
+| `hipblas-common`    | Completed   | | |
+| `hipblaslt`         | Pending     | | Next in line. |
+| `hipcub`            | Completed   | ✅ | |
+| `hipfft`            | Pending     | | |
+| `hiprand`           | Completed   | ✅ | |
+| `hipsolver`         | Pending     | | |
+| `hipsparse`         | Pending     | | |
+| `hipsparselt`       | Pending     | | |
+| `miopen`            | Pending     | | |
+| `mxdatagenerator`   | Pending     | | In the queue. |
+| `rocblas`           | Pending     | | In the queue. |
+| `rocfft`            | Pending     | | |
+| `rocprim`           | Completed   | ✅ | |
+| `rocrand`           | Completed   | ✅ | |
+| `rocsolver`         | Pending     | | |
+| `rocsparse`         | Pending     | | |
+| `rocthrust`         | Completed   | ✅ | |
+| `rocroller`         | Pending     | | In the queue. |
+| `tensile`           | Completed   | | |
 
 ---
 
