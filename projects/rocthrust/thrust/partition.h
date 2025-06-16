@@ -1185,7 +1185,7 @@ thrust::pair<OutputIterator1, OutputIterator2> stable_partition_copy(
  *
  *  \note Though similar, \p partition_point is not redundant with \p find_if_not.
  *        \p partition_point's precondition provides an opportunity for a
- *        faster implemention.
+ *        faster implementation.
  *
  *  \code
  *  #include <thrust/partition.h>
@@ -1237,7 +1237,7 @@ THRUST_HOST_DEVICE ForwardIterator partition_point(
  *
  *  \note Though similar, \p partition_point is not redundant with \p find_if_not.
  *        \p partition_point's precondition provides an opportunity for a
- *        faster implemention.
+ *        faster implementation.
  *
  *  \code
  *  #include <thrust/partition.h>

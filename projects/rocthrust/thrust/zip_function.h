@@ -28,12 +28,26 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/modern_gcc_required.h>
 #if !defined(THRUST_LEGACY_GCC)
 
 #  include <thrust/detail/type_deduction.h>
 #  include <thrust/tuple.h>
 #  include <thrust/type_traits/integer_sequence.h>
+#  if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#    include <thrust/detail/functional/address_stability.h>
+#  endif
+
+#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#    include <cuda/functional>
+#  endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -96,7 +110,7 @@ THRUST_HOST_DEVICE auto apply_impl(Function&& func, Tuple&& args, index_sequence
  *  \p tuple.
  *
  *  The \p make_zip_function convenience function is provided to avoid having
- *  to explicitely define the type of the functor when creating a \p zip_function,
+ *  to explicitly define the type of the functor when creating a \p zip_function,
  *  whic is especially helpful when using lambdas as the functor.
  *
  *  \code
@@ -214,5 +228,22 @@ THRUST_HOST_DEVICE zip_function<typename std::decay<Function>::type> make_zip_fu
  */
 
 THRUST_NAMESPACE_END
+
+#  if _THRUST_HAS_DEVICE_SYSTEM_STD
+_LIBCUDACXX_BEGIN_NAMESPACE_CUDA
+#  else
+THRUST_NAMESPACE_BEGIN
+namespace detail
+{
+#  endif
+template <typename F>
+struct proclaims_copyable_arguments<THRUST_NS_QUALIFIER::zip_function<F>> : proclaims_copyable_arguments<F>
+{};
+#  if _THRUST_HAS_DEVICE_SYSTEM_STD
+_LIBCUDACXX_END_NAMESPACE_CUDA
+#  else
+}
+THRUST_NAMESPACE_END
+#  endif
 
 #endif
