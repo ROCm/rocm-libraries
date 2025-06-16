@@ -3255,6 +3255,7 @@ namespace TensileLite
         ContractionSolution::projectedPerformance(Problem const&  problem,
                                                   Hardware const& hardware) const
     {
+        calculateAutoGSU(problem, &hardware);
         ProjectedPerformance pp;
 
         double M = 1.0, N = 1.0;
@@ -3388,6 +3389,7 @@ namespace TensileLite
                                                 double          model_K,
                                                 double          model_NumBatches) const
     {
+        calculateAutoGSU(problem, &hardware);
         double M = 1.0, N = 1.0;
         if(problem.freeIndicesA().size() > 1 || sizeMapping.packBatchDims & 0x1)
         {

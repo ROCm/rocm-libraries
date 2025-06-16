@@ -170,6 +170,7 @@ set(
     catch/ExpressionToStringTest.cpp
     catch/ExpressionTransformationTest.cpp
     catch/FastArithmeticTest.cpp
+    catch/FastDivisionTransformationTest.cpp
     catch/GlobalLoadStoreTest.cpp
     catch/HazardObserverTest.cpp
     catch/HypergraphTest.cpp

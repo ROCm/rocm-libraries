@@ -102,6 +102,40 @@ namespace rocRoller
             }
         };
 
+        template <>
+        struct SimplifyByConstant<Subtract>
+        {
+            VariableType  resultVarType;
+            ExpressionPtr lhs;
+
+            template <typename RHS>
+            requires(CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
+            {
+                if(rhs == 0)
+                    return lhs;
+
+                if constexpr(std::signed_integral<RHS>)
+                {
+                    if(rhs < 0)
+                        return lhs + literal(-rhs);
+                }
+
+                return nullptr;
+            }
+
+            template <typename RHS>
+            requires(!CIntegral<RHS>) ExpressionPtr operator()(RHS rhs)
+            {
+                return nullptr;
+            }
+
+            ExpressionPtr call(ExpressionPtr lhs_, CommandArgumentValue rhs)
+            {
+                lhs = lhs_;
+                return visit(*this, rhs);
+            }
+        };
+
         template <CShift ShiftType>
         struct SimplifyByConstant<ShiftType>
         {
@@ -480,6 +514,16 @@ namespace rocRoller
             {
                 if(!expr)
                     return expr;
+
+                auto evalTimes = evaluationTimes(expr);
+                if(evalTimes[EvaluationTime::Translate])
+                {
+                    auto rv = literal(evaluate(expr));
+                    AssertFatal(resultVariableType(rv) == resultVariableType(expr),
+                                ShowValue(rv),
+                                ShowValue(expr));
+                    return rv;
+                }
 
                 auto rv = std::visit(*this, *expr);
                 return rv;

@@ -41,6 +41,13 @@ namespace rocRoller
 
         namespace ConnectWorkgroupsDetail
         {
+
+            Expression::ExpressionPtr toInt32(Expression::ExpressionPtr expr)
+            {
+                return std::make_shared<Expression::Expression>(
+                    Expression::Convert{{.arg{expr}}, DataType::Int32});
+            }
+
             void TileSizeInfo::recordSize(int dim, int tileNumTag, auto direction, auto expr)
             {
                 // TODO: Is there a way to make this safer?
@@ -49,11 +56,7 @@ namespace rocRoller
                 //
                 //     matrixSize(M) / tileSize(M)
                 //
-                // should fit within a UInt32
-                auto toUInt32 = [](Expression::ExpressionPtr expr) -> Expression::ExpressionPtr {
-                    return std::make_shared<Expression::Expression>(
-                        Expression::Convert{{.arg{expr}}, DataType::UInt32});
-                };
+                // should fit within a Int32
 
                 AssertFatal(0 <= dim && dim < 3);
 
@@ -62,7 +65,7 @@ namespace rocRoller
                     if(sizes[dim] == nullptr)
                     {
                         sizes[dim]
-                            = resultType(expr).varType != DataType::UInt32 ? toUInt32(expr) : expr;
+                            = resultType(expr).varType != DataType::Int32 ? toInt32(expr) : expr;
                     }
                     else
                     {
@@ -231,8 +234,8 @@ namespace rocRoller
                 using ExpressionPtrVectorPair
                     = std::pair<std::vector<ExpressionPtr>, std::vector<ExpressionPtr>>;
 
-                auto one  = Expression::literal(1u);
-                auto zero = Expression::literal(0u);
+                auto one  = Expression::literal(1);
+                auto zero = Expression::literal(0);
 
                 auto PA = [](int slot) {
                     return std::make_shared<Expression::Expression>(
@@ -242,9 +245,12 @@ namespace rocRoller
                 auto parallelSize      = info.sizes[dimension];
                 auto perpendicularSize = info.sizes[1 - dimension];
 
-                auto blockSize     = size * perpendicularSize;
-                auto bigBlockSize  = (totalSize / blockSize) * blockSize;
-                auto tailBlockSize = parallelSize % size;
+                auto blockSize = toInt32(size * perpendicularSize);
+                setComment(blockSize, "WGM block size");
+                auto mainBlockSize = toInt32(totalSize / blockSize) * blockSize;
+                setComment(mainBlockSize, "WGM main block size");
+                auto tailBlockSize = toInt32(parallelSize % size);
+                setComment(tailBlockSize, "WGM tail block size");
 
                 auto groupNumber = graph.coordinates.addElement(Linear());
                 auto groupIndex  = graph.coordinates.addElement(Linear(size, nullptr));
@@ -252,8 +258,8 @@ namespace rocRoller
                 auto blockNumber = graph.coordinates.addElement(Linear());
                 auto blockIndex  = graph.coordinates.addElement(Linear(perpendicularSize, nullptr));
 
-                auto bigBlockNumber = graph.coordinates.addElement(Linear());
-                auto bigBlockIndex  = graph.coordinates.addElement(Linear(bigBlockSize, nullptr));
+                auto mainBlockNumber = graph.coordinates.addElement(Linear());
+                auto mainBlockIndex  = graph.coordinates.addElement(Linear(mainBlockSize, nullptr));
 
                 auto tailBlockNumber = graph.coordinates.addElement(Linear());
                 auto tailBlockIndex  = graph.coordinates.addElement(Linear(tailBlockSize, nullptr));
@@ -262,12 +268,13 @@ namespace rocRoller
                 auto perpendicular
                     = graph.coordinates.addElement(Linear(perpendicularSize, nullptr));
 
-                // 0 argument is bigBlockNumber
-                auto condition = PA(0) == Expression::literal(0u);
+                // 0 argument is mainBlockNumber
+                auto condition = PA(0) == Expression::literal(0);
 
                 ExpressionPtrVectorPair stridesParallel{{zero, size, one, zero},
                                                         {zero, zero, zero, one}};
-                ExpressionPtrPair initialValuesParallel{nullptr, (parallelSize / size) * size};
+                ExpressionPtrPair       initialValuesParallel{nullptr,
+                                                        toInt32(parallelSize / size) * size};
 
                 ExpressionPtrVectorPair stridesPerpendicular{{zero, one, zero}, {zero, zero, one}};
                 ExpressionPtrPair       initialValuesPerpendicular{nullptr, nullptr};
@@ -278,40 +285,40 @@ namespace rocRoller
                                                                      stridesPerpendicular,
                                                                      initialValuesPerpendicular),
                                                  {perpendicular},
-                                                 {bigBlockNumber, blockIndex, tailBlockNumber});
+                                                 {mainBlockNumber, blockIndex, tailBlockNumber});
 
                     graph.coordinates.addElement(
                         PiecewiseAffineJoin(condition, stridesParallel, initialValuesParallel),
                         {parallel},
-                        {bigBlockNumber, blockNumber, groupIndex, tailBlockIndex});
+                        {mainBlockNumber, blockNumber, groupIndex, tailBlockIndex});
 
                     graph.coordinates.addElement(
-                        Flatten(), {tailBlockNumber, tailBlockIndex}, {bigBlockIndex});
+                        Flatten(), {tailBlockNumber, tailBlockIndex}, {mainBlockIndex});
 
                     graph.coordinates.addElement(
                         Flatten(), {blockNumber, blockIndex}, {groupNumber});
                     graph.coordinates.addElement(Flatten(), {groupNumber, groupIndex}, {workgroup});
                     graph.coordinates.addElement(
-                        Flatten(), {bigBlockNumber, bigBlockIndex}, {workgroup});
+                        Flatten(), {mainBlockNumber, mainBlockIndex}, {workgroup});
                 }
                 else
                 {
                     graph.coordinates.addElement(
-                        Tile(), {workgroup}, {bigBlockNumber, bigBlockIndex});
+                        Tile(), {workgroup}, {mainBlockNumber, mainBlockIndex});
                     graph.coordinates.addElement(Tile(), {workgroup}, {groupNumber, groupIndex});
                     graph.coordinates.addElement(Tile(), {groupNumber}, {blockNumber, blockIndex});
                     graph.coordinates.addElement(
-                        Tile(), {bigBlockIndex}, {tailBlockNumber, tailBlockIndex});
+                        Tile(), {mainBlockIndex}, {tailBlockNumber, tailBlockIndex});
 
                     graph.coordinates.addElement(
                         PiecewiseAffineJoin(condition, stridesParallel, initialValuesParallel),
-                        {bigBlockNumber, blockNumber, groupIndex, tailBlockIndex},
+                        {mainBlockNumber, blockNumber, groupIndex, tailBlockIndex},
                         {parallel});
 
                     graph.coordinates.addElement(PiecewiseAffineJoin(condition,
                                                                      stridesPerpendicular,
                                                                      initialValuesPerpendicular),
-                                                 {bigBlockNumber, blockIndex, tailBlockNumber},
+                                                 {mainBlockNumber, blockIndex, tailBlockNumber},
                                                  {perpendicular});
                 }
 
