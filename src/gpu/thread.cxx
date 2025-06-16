@@ -456,13 +456,31 @@ _LIBGPU_EXPORTED_FROM_ABI __host__ __device__ void sleep_for(cuda::std::chrono::
 
 __device__ gpu::thread::id get_id() noexcept {
     using namespace internal;
-    __shared__ WorkNode_Header *current;
-    if (threadIdx.x == 0)
-        current = WorkNode_Header::lockAndFetch(&currentWorkNode[blockIdx.x]);
-    gpu::thread::id tid = current->vthread_id + threadIdx.x;
-    if (threadIdx.x == 0)
+    __shared__ gpu::thread::id base_vtid;
+    if (threadIdx.x == 0) {
+        WorkNode_Header *current = WorkNode_Header::lockAndFetch(&currentWorkNode[blockIdx.x]);
+        base_vtid = current->vthread_id;
         current->unlockActive();
-    return tid;
+    }
+    // TODO: What if only some of the fibers call this_thread::get_id()? This could deadlock. Also, what if the fiber
+    // with threadIdx.x == 0 isn't one of the calling fibers?
+    __syncthreads();
+    return base_vtid + threadIdx.x;
+
+    // Something along these lines might work for when threadIdx.x == 0 isn't among the calling fibers.
+    // __shared__ gpu::thread::id base_vtid;
+    // base_vtid = 0;
+    // // TODO: this could still deadlock though...
+    // __syncthreads();
+    // do {
+    //     WorkNode_Header *current = WorkNode_Header::tryLockAndFetch(&currentWorkNode[blockIdx.x]);
+    //     if (current != nullptr) {
+    //         base_vtid = current->vthread_id;
+    //         current->unlockActive();
+    //     }
+    //     __syncthreads();
+    // } while (base_vtid == 0);
+    // return base_vtid + threadIdx.x;
 }
 
 __device__ void pseudo_yield() {
@@ -478,13 +496,15 @@ __device__ void pseudo_yield() {
 }
 __device__ unsigned int get_width() noexcept {
     using namespace internal;
-    __shared__ WorkNode_Header *current;
-    if (threadIdx.x == 0)
-        current = WorkNode_Header::lockAndFetch(&currentWorkNode[blockIdx.x]);
-    __threadfence();
-    unsigned int width = current->width;
-    if (threadIdx.x == 0)
+    __shared__ unsigned int width;
+    if (threadIdx.x == 0) {
+        WorkNode_Header *current = WorkNode_Header::lockAndFetch(&currentWorkNode[blockIdx.x]);
+        width = current->width;
         current->unlockActive();
+    }
+    // TODO: What if only some of the fibers call this_thread::get_width()? This could deadlock. Also, what if the fiber
+    // with threadIdx.x == 0 isn't one of the calling fibers?
+    __syncthreads();
     return width;
 }
 __device__ unsigned int get_fiber_id() noexcept {
