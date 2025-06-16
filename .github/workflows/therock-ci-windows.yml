@@ -18,6 +18,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    defaults:
+      run:
+        shell: bash
     env:
       BASE_BUILD_DIR_POWERSHELL: B:\tmpbuild
       CCACHE_DIR: "${{ github.workspace }}/.container-cache/ccache"

@@ -1,9 +1,6 @@
 name: TheRock CI
 
 on:
-  push:
-    branches:
-      - users/geomin12/adding-windows-build
   pull_request:
     types:
       - opened
