@@ -245,7 +245,7 @@ trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t
   {
     return status;
   }
-  status = hip_rocprim::synchronize(policy);
+  status = hip_rocprim::synchronize_optional(policy);
   return status;
 }
 
