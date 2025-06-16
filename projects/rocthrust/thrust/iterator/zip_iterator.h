@@ -131,7 +131,9 @@ THRUST_NAMESPACE_BEGIN
  *  \see get
  */
 template <typename IteratorTuple>
-#if defined(_WIN32) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
+#if !defined(THRUST_DOXYGEN_INVOKED)                    \
+  && (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC \
+      || (defined(__has_declspec_attribute) && __has_declspec_attribute(empty_bases)))
 class __declspec(empty_bases) zip_iterator : public detail::zip_iterator_base<IteratorTuple>::type
 #else
 class zip_iterator : public detail::zip_iterator_base<IteratorTuple>::type
