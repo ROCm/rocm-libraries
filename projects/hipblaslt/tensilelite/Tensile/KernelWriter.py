@@ -23,7 +23,7 @@
 ################################################################################
 
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
-            countLocalRead, countLocalWrite, countDSLoadB192, countDSStoreB192, countDSStoreB256, getMFMAs
+            countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, getMFMAs
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody
 from rocisa.container import RegisterContainer, replaceHolder, HWRegContainer, VCC
 from rocisa.label import LabelManager
@@ -1470,9 +1470,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           while (localReadItemsThisLoop):
             item = localReadItemsThisLoop.pop(0)
             iterCode.add(item)
-            localReadsIssuedInThisIter += (1 + countDSLoadB192(item))
+            localReadsIssuedInThisIter += countWeightedLocalRead(item)
             if (i == 0):
-              localReadsWaitcnt += (1 + countDSLoadB192(item))
+              localReadsWaitcnt += countWeightedLocalRead(item)
           item = Module()
           iterCode.add(item)
           self.localReadsVacancy.append({ "items": item, \
@@ -1492,9 +1492,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if localReadItemsThisLoop:
             item = localReadItemsThisLoop.pop(0)
             iterCode.add(item)
-            localReadsIssuedInThisIter += (1 + countDSStoreB192(item))
+            localReadsIssuedInThisIter += countWeightedLocalRead(item)
             if (i == 0):
-              localReadsWaitcnt += (1 + countDSStoreB192(item))
+              localReadsWaitcnt += countWeightedLocalRead(item)
         if not localReadItemsThisLoop and latencyLeft > 0 and iteration < isBarrier and \
             not(mfmaIndex > self.states.sync1LdsMfmaIndex and oneBufferScheduling):
           item = Module()
@@ -1566,10 +1566,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
               self.states.scheduledGRInstCounts += countGlobalRead(writeItem) # PGR2 case GR is in localWriteCode
               # if there is localWrite at first mfma, need to skip it in waitcnt.
               if i == 0:
-                # TODO:find a better way to cal actual DSS counts, ex:countLocalWrite(item) should return correct counts
-                skipLocalWriteWaitcnt += countLocalWrite(writeItem) + countDSStoreB256(writeItem) + countDSStoreB192(writeItem)
+                skipLocalWriteWaitcnt += countWeightedLocalWrite(writeItem)
               if not localReadItemsThisLoop:
-                self.states.perIterLocalWriteCanSkip[iteration] += countLocalWrite(writeItem) + countDSStoreB256(writeItem) + countDSStoreB192(writeItem)
+                self.states.perIterLocalWriteCanSkip[iteration] += countWeightedLocalWrite(writeItem)
           if kernel["ForceUnrollSubIter"] and (writeItems and i == (numMfmaPerIter - 1)):
             # if ForceUnrollSubIter, we need to schedule all localWrite in last mfma
             while writeItems:
@@ -1582,9 +1581,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # generate all remaining pre code before the first Store C
             iterCode.add(writeItem)
             if i == 0:
-              skipLocalWriteWaitcnt += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
+              skipLocalWriteWaitcnt += countWeightedLocalWrite(writeItem)
             if not localReadItemsThisLoop:
-              self.states.perIterLocalWriteCanSkip[iteration] += countLocalWrite(writeItem) + countDSStoreB256(writeItem) + countDSStoreB192(writeItem)
+              self.states.perIterLocalWriteCanSkip[iteration] += countWeightedLocalWrite(writeItem)
 
         ####
         # scheduled pointer
@@ -1646,7 +1645,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             item = localReadItemsNextLoop.pop(0)
             iterCode.add(item)
             if (i == 0):
-              localReadsWaitcnt += (1 + countDSLoadB192(item))
+              localReadsWaitcnt += countWeightedLocalRead(item)
 
         ####
         # scheduled wait localReads
@@ -2184,15 +2183,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
         iterCode.addComment0("dataAtIterB=%u numReadsIterB=%u skipReadsIterB=%u readsPerIterB=%u" % (dataAtIterB, numReadsIterB, skipReadsIterB, self.states.numReadsPerIterB))
         if scheduleIterAlg == 0 or scheduleIterAlg == 1:
           for i in range (max(dataAtIterA,dataAtIterB),iteration+1):
-            localWrites += countLocalWrite(self.codes.perIterLocalWrite[i][1])
-            localWrites += countDSStoreB256(self.codes.perIterLocalWrite[i[1]])
-            localWrites += countDSStoreB192(self.codes.perIterLocalWrite[i][1])
+            localWrites += countWeightedLocalWrite(self.codes.perIterLocalWrite[i][1])
         # ScheduleIterAlg=2, localwrite is after waitCnt, no need to count it's current iteration.
         if scheduleIterAlg == 3:
           for i in range (max(dataAtIterA,dataAtIterB)+1,iteration):
-            localWrites += countLocalWrite(self.codes.perIterLocalWrite[i][1])
-            localWrites += countDSStoreB256(self.codes.perIterLocalWrite[i][1])
-            localWrites += countDSStoreB192(self.codes.perIterLocalWrite[i][1])
+            localWrites += countWeightedLocalWrite(self.codes.perIterLocalWrite[i][1])
           if kernel["ScheduleLocalWrite"] > 0:
             # current iteration localWrite count
             localWrites += skipLocalWriteWaitcnt
@@ -2203,8 +2198,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         dscnt += localWrites
       else:
         for item in list(iterCode.items()):
-          localReads  = countLocalRead(item)
-          localWrites = countLocalWrite(item) + countDSStoreB256(item) + countDSStoreB192(item)
+          localReads  = countWeightedLocalRead(item)
+          localWrites = countWeightedLocalWrite(item)
           if self.states.numItersPLR:
             # SQ: If PrefetchLocalRead = 1 and DepthU == LocalSplitU, then there is no double
             #  buffering and we must wait for all localReads but not localWrites.
