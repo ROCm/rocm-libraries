@@ -25,9 +25,11 @@ jobs:
     strategy:
       fail-fast: true
     env:
+      CACHE_DIR: ${{ github.workspace }}/.container-cache
       CCACHE_DIR: "${{ github.workspace }}/.container-cache/ccache"
       CCACHE_MAXSIZE: "700M"
       AMDGPU_FAMILIES: "gfx94X-dcgpu"
+      TEATIME_FORCE_INTERACTIVE: 0
     steps:
       - name: Generate a token for rocm-libraries
         id: generate-token
