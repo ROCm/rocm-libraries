@@ -11633,13 +11633,12 @@ class KernelWriterAssembly(KernelWriter):
     GSUtotal = max(2,GSUtotal)
     return GSUtotal
 
-    def setOccupancy():
-      # Use VGPR up to next occupancy threshold:
-      # Account for additional temp sgprs that will be required for code gen, up to physical limits. +5 approximates upper end of required temp space for GSU sync
-      requiredSgprs = min(self.sgprPool.size() + 5, self.states.regCaps["MaxSgpr"])
-
-      maxVgprs, occupancy = self.getMaxRegsForOccupancy(kernel["NumThreads"], self.vgprPool.size(), requiredSgprs, \
-                                                        self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
+  def setOccupancy(self, kernel):
+    # Use VGPR up to next occupancy threshold:
+    # Account for additional temp sgprs that will be required for code gen, up to physical limits. +5 approximates upper end of required temp space for GSU sync
+    requiredSgprs = min(self.sgprPool.size() + 5, self.states.regCaps["MaxSgpr"])
+    maxVgprs, occupancy = self.getMaxRegsForOccupancy(kernel["NumThreads"], self.vgprPool.size(), requiredSgprs, \
+                                                      self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
     # Set occupancy limit for register pools
     # TODO: Support gfx12
     if kernel["ISA"][0] != 12:
