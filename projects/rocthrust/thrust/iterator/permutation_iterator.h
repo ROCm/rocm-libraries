@@ -122,7 +122,12 @@ THRUST_NAMESPACE_BEGIN
  *  \see make_permutation_iterator
  */
 template <typename ElementIterator, typename IndexIterator>
-class permutation_iterator : public thrust::detail::permutation_iterator_base<ElementIterator, IndexIterator>::type
+#if defined(_WIN32) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC
+class __declspec(empty_bases) permutation_iterator
+#else
+class permutation_iterator
+#endif
+    : public thrust::detail::permutation_iterator_base<ElementIterator, IndexIterator>::type
 {
   /*! \cond
    */
