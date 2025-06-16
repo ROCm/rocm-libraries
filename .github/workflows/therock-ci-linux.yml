@@ -53,7 +53,6 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: users/geomin12/fix-cmake-options
 
       - name: Runner Health Settings
         run: |
@@ -84,12 +83,6 @@ jobs:
           extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
         run: |
           python3 TheRock/build_tools/github_actions/build_linux_configure.py
-          echo "ls curr"
-          ls
-          echo "ls projs"
-          ls projects
-          echo "ls projects prim"
-          ls projects/rocprim
 
       - name: Build therock-dist
         run: cmake --build TheRock/build --target therock-dist
