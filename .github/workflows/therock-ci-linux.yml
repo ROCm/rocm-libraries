@@ -86,6 +86,10 @@ jobs:
           python3 TheRock/build_tools/github_actions/build_linux_configure.py
           echo "ls curr"
           ls
+          echo "ls projs"
+          ls projects
+          echo "ls projects prim"
+          ls projects/rocprim
 
       - name: Build therock-dist
         run: cmake --build TheRock/build --target therock-dist
