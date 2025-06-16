@@ -147,6 +147,8 @@ __device__ void wrapper(WorkNode_Header *worknode, bool yielding) {
         fn();
     }
     __threadfence();
+    // fn will get destructed when it goes out of scope, which will in turn invoke the destructor for the Fn_t and
+    // Args_t the user passed in when constructing the thread.
     // TODO: figure out how to make all the threads with idx > width 'catch up' on missed __syncthreads() calls.
     // Shouldn't be a concern as long as blockDim.x == gpu::thread::max_width() == warpSize
 }
