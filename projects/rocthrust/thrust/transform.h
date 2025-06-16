@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execution_policy.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -103,7 +110,7 @@ THRUST_HOST_DEVICE OutputIterator transform(
  *  \param first The beginning of the input sequence.
  *  \param last The end of the input sequence.
  *  \param result The beginning of the output sequence.
- *  \param op The tranformation operation.
+ *  \param op The transformation operation.
  *  \return The end of the output sequence.
  *
  *  \tparam InputIterator is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
@@ -154,7 +161,7 @@ OutputIterator transform(InputIterator first, InputIterator last, OutputIterator
  *  \param last1 The end of the first input sequence.
  *  \param first2 The beginning of the second input sequence.
  *  \param result The beginning of the output sequence.
- *  \param op The tranformation operation.
+ *  \param op The transformation operation.
  *  \return The end of the output sequence.
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
@@ -221,7 +228,7 @@ THRUST_HOST_DEVICE OutputIterator transform(
  *  \param last1 The end of the first input sequence.
  *  \param first2 The beginning of the second input sequence.
  *  \param result The beginning of the output sequence.
- *  \param op The tranformation operation.
+ *  \param op The transformation operation.
  *  \return The end of the output sequence.
  *
  *  \tparam InputIterator1 is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
@@ -263,7 +270,7 @@ transform(InputIterator1 first1, InputIterator1 last1, InputIterator2 first2, Ou
 /*! This version of \p transform_if conditionally applies a unary function
  *  to each element of an input sequence and stores the result in the corresponding
  *  position in an output sequence if the corresponding position in the input sequence
- *  satifies a predicate. Otherwise, the corresponding position in the
+ *  satisfies a predicate. Otherwise, the corresponding position in the
  *  output sequence is not modified.
  *
  *  Specifically, for each iterator <tt>i</tt> in the range <tt>[first, last)</tt> the
@@ -280,7 +287,7 @@ transform(InputIterator1 first1, InputIterator1 last1, InputIterator2 first2, Ou
  *  \param first The beginning of the input sequence.
  *  \param last The end of the input sequence.
  *  \param result The beginning of the output sequence.
- *  \param op The tranformation operation.
+ *  \param op The transformation operation.
  *  \param pred The predicate operation.
  *  \return The end of the output sequence.
  *
@@ -309,7 +316,7 @@ transform(InputIterator1 first1, InputIterator1 last1, InputIterator2 first2, Ou
  *
  *  struct is_odd
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x % 2;
@@ -343,7 +350,7 @@ THRUST_HOST_DEVICE ForwardIterator transform_if(
 /*! This version of \p transform_if conditionally applies a unary function
  *  to each element of an input sequence and stores the result in the corresponding
  *  position in an output sequence if the corresponding position in the input sequence
- *  satifies a predicate. Otherwise, the corresponding position in the
+ *  satisfies a predicate. Otherwise, the corresponding position in the
  *  output sequence is not modified.
  *
  *  Specifically, for each iterator <tt>i</tt> in the range <tt>[first, last)</tt> the
@@ -357,7 +364,7 @@ THRUST_HOST_DEVICE ForwardIterator transform_if(
  *  \param first The beginning of the input sequence.
  *  \param last The end of the input sequence.
  *  \param result The beginning of the output sequence.
- *  \param op The tranformation operation.
+ *  \param op The transformation operation.
  *  \param pred The predicate operation.
  *  \return The end of the output sequence.
  *
@@ -382,7 +389,7 @@ THRUST_HOST_DEVICE ForwardIterator transform_if(
  *
  *  struct is_odd
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int x)
  *    {
  *      return x % 2;
@@ -426,7 +433,7 @@ transform_if(InputIterator first, InputIterator last, ForwardIterator result, Un
  *  \param last The end of the input sequence.
  *  \param stencil The beginning of the stencil sequence.
  *  \param result The beginning of the output sequence.
- *  \param op The tranformation operation.
+ *  \param op The transformation operation.
  *  \param pred The predicate operation.
  *  \return The end of the output sequence.
  *
@@ -501,7 +508,7 @@ THRUST_HOST_DEVICE ForwardIterator transform_if(
  *  \param last The end of the input sequence.
  *  \param stencil The beginning of the stencil sequence.
  *  \param result The beginning of the output sequence.
- *  \param op The tranformation operation.
+ *  \param op The transformation operation.
  *  \param pred The predicate operation.
  *  \return The end of the output sequence.
  *
@@ -554,7 +561,7 @@ ForwardIterator transform_if(
 /*! This version of \p transform_if conditionally applies a binary function
  *  to each pair of elements from two input sequences and stores the result in the corresponding
  *  position in an output sequence if the corresponding position in a stencil sequence
- *  satifies a predicate. Otherwise, the corresponding position in the
+ *  satisfies a predicate. Otherwise, the corresponding position in the
  *  output sequence is not modified.
  *
  *  Specifically, for each iterator <tt>i</tt> in the range <tt>[first1, last1)</tt> and
@@ -640,7 +647,7 @@ THRUST_HOST_DEVICE ForwardIterator transform_if(
 /*! This version of \p transform_if conditionally applies a binary function
  *  to each pair of elements from two input sequences and stores the result in the corresponding
  *  position in an output sequence if the corresponding position in a stencil sequence
- *  satifies a predicate. Otherwise, the corresponding position in the
+ *  satisfies a predicate. Otherwise, the corresponding position in the
  *  output sequence is not modified.
  *
  *  Specifically, for each iterator <tt>i</tt> in the range <tt>[first1, last1)</tt> and
