@@ -338,7 +338,7 @@ TYPED_TEST(TransformVectorTests, TestTransformBinarySimple) THRUST_DISABLE_BROKE
 
   typename Vector::iterator iter;
 
-  // There is a strange gcc bug here where it belives we would write out of bounds.
+  // There is a strange gcc bug here where it believes we would write out of bounds.
   // It seems to go away if we add one more element that we leave untouched. Luckily 0 - 0 = 0 so all is fine.
   // Note that we still write the element, so it does not hide a functional thrust bug
   Vector input1{1, -2, 3};

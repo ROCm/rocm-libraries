@@ -85,7 +85,7 @@ void THRUST_HOST_DEVICE
 fill(execution_policy<Derived>& policy, ForwardIterator first, ForwardIterator last, const T& value)
 {
   hip_rocprim::fill_n(policy, first, thrust::distance(first, last), value);
-} // func filll
+} // func fill
 
 } // namespace hip_rocprim
 THRUST_NAMESPACE_END

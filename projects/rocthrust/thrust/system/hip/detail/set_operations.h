@@ -363,7 +363,7 @@ struct SetOpAgent
 
         union
         {
-          // Allocate extra shmem than truely neccessary
+          // Allocate extra shmem than truly necessary
           // This will permit to avoid range checks in
           // serial set operations, e.g. serial_set_difference
           ::rocprim::uninitialized_array<key_type, BLOCK_THREADS + ITEMS_PER_THREAD * BLOCK_THREADS> keys_shared;
@@ -567,7 +567,7 @@ struct serial_set_intersection
       bool pA = compare_op(aKey, bKey);
       bool pB = compare_op(bKey, aKey);
 
-      // The outputs must come from A by definition of set interection.
+      // The outputs must come from A by definition of set intersection.
       output[i]  = aKey;
       indices[i] = aBegin;
 

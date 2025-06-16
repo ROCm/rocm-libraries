@@ -169,27 +169,16 @@ TYPED_TEST(ForEachVectorTests, TestForEachSimple)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector input(5);
+  Vector input{3, 2, 3, 4, 6};
   Vector output(7, (T) 0);
-
-  input[0] = 3;
-  input[1] = 2;
-  input[2] = 3;
-  input[3] = 4;
-  input[4] = 6;
 
   mark_present_for_each<T> f;
   f.ptr = thrust::raw_pointer_cast(output.data());
 
   typename Vector::iterator result = thrust::for_each(input.begin(), input.end(), f);
 
-  ASSERT_EQ(output[0], 0);
-  ASSERT_EQ(output[1], 0);
-  ASSERT_EQ(output[2], 1);
-  ASSERT_EQ(output[3], 1);
-  ASSERT_EQ(output[4], 1);
-  ASSERT_EQ(output[5], 0);
-  ASSERT_EQ(output[6], 1);
+  Vector ref{0, 0, 1, 1, 1, 0, 1};
+  ASSERT_EQ(output, ref);
   ASSERT_EQ_QUIET(result, input.end());
 }
 
@@ -237,27 +226,16 @@ TYPED_TEST(ForEachVectorTests, TestForEachNSimple)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  Vector input(5);
+  Vector input{3, 2, 3, 4, 6};
   Vector output(7, (T) 0);
-
-  input[0] = 3;
-  input[1] = 2;
-  input[2] = 3;
-  input[3] = 4;
-  input[4] = 6;
 
   mark_present_for_each<T> f;
   f.ptr = thrust::raw_pointer_cast(output.data());
 
   typename Vector::iterator result = thrust::for_each_n(input.begin(), input.size(), f);
 
-  ASSERT_EQ(output[0], 0);
-  ASSERT_EQ(output[1], 0);
-  ASSERT_EQ(output[2], 1);
-  ASSERT_EQ(output[3], 1);
-  ASSERT_EQ(output[4], 1);
-  ASSERT_EQ(output[5], 0);
-  ASSERT_EQ(output[6], 1);
+  Vector ref{0, 0, 1, 1, 1, 0, 1};
+  ASSERT_EQ(output, ref);
   ASSERT_EQ_QUIET(result, input.end());
 }
 
@@ -310,13 +288,8 @@ TEST(ForEachVectorTests, TestForEachSimpleAnySystem)
   thrust::counting_iterator<int> result =
     thrust::for_each(thrust::make_counting_iterator(0), thrust::make_counting_iterator(5), f);
 
-  ASSERT_EQ(output[0], 1);
-  ASSERT_EQ(output[1], 1);
-  ASSERT_EQ(output[2], 1);
-  ASSERT_EQ(output[3], 1);
-  ASSERT_EQ(output[4], 1);
-  ASSERT_EQ(output[5], 0);
-  ASSERT_EQ(output[6], 0);
+  thrust::device_vector<int> ref{1, 1, 1, 1, 1, 0, 0};
+  ASSERT_EQ(output, ref);
   ASSERT_EQ_QUIET(result, thrust::make_counting_iterator(5));
 }
 
@@ -331,13 +304,8 @@ TEST(ForEachVectorTests, TestForEachNSimpleAnySystem)
 
   thrust::counting_iterator<int> result = thrust::for_each_n(thrust::make_counting_iterator(0), 5, f);
 
-  ASSERT_EQ(output[0], 1);
-  ASSERT_EQ(output[1], 1);
-  ASSERT_EQ(output[2], 1);
-  ASSERT_EQ(output[3], 1);
-  ASSERT_EQ(output[4], 1);
-  ASSERT_EQ(output[5], 0);
-  ASSERT_EQ(output[6], 0);
+  thrust::device_vector<int> ref{1, 1, 1, 1, 1, 0, 0};
+  ASSERT_EQ(output, ref);
   ASSERT_EQ_QUIET(result, thrust::make_counting_iterator(5));
 }
 
@@ -358,7 +326,7 @@ TYPED_TEST(ForEachPrimitiveTests, TestForEach)
       SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
       thrust::host_vector<T> h_input =
-        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+        get_random_data<size_t>(size, get_default_limits<size_t>::min(), get_default_limits<size_t>::max(), seed);
 
       for (size_t i = 0; i < size; i++)
       {
@@ -403,7 +371,7 @@ TYPED_TEST(ForEachPrimitiveTests, TestForEachN)
       SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
       thrust::host_vector<T> h_input =
-        get_random_data<T>(size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+        get_random_data<size_t>(size, get_default_limits<size_t>::min(), get_default_limits<size_t>::max(), seed);
 
       for (size_t i = 0; i < size; i++)
       {
@@ -484,7 +452,7 @@ TEST(ForEachVectorTests, TestForEachWithLargeTypes)
   _TestForEachWithLargeTypes<int, 256>();
   _TestForEachWithLargeTypes<int, 512>();
 
-  // XXX parallel_for doens't support large types
+  // XXX parallel_for doesn't support large types
   _TestForEachWithLargeTypes<int, 1024>(); // fails on Vista 64 w/ VS2008
 }
 
@@ -526,7 +494,7 @@ TEST(ForEachVectorTests, TestForEachNWithLargeTypes)
   _TestForEachNWithLargeTypes<int, 256>();
   _TestForEachNWithLargeTypes<int, 512>();
 
-  // XXX parallel_for doens't support large types
+  // XXX parallel_for doesn't support large types
   _TestForEachNWithLargeTypes<int, 1024>(); // fails on Vista 64 w/ VS2008
 }
 
