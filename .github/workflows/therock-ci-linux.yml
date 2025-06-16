@@ -71,7 +71,7 @@ jobs:
       
       - name: Fetch sources
         run: |
-          ./build_tools/fetch_sources.py --jobs 12
+          ./build_tools/fetch_sources.py --jobs 12 --no-include-math-libs
 
       - name: Install python deps
         run: |
@@ -80,8 +80,8 @@ jobs:
       - name: Configure Projects
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
-          package_version: 'ADHOCBUILD'
-          extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=${{ github.workspace }}/rocm-libraries ${{ inputs.cmake_options }}"
+          package_version: ADHOCBUILD
+          extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ inputs.cmake_options }}"
         run: |
             python3 build_tools/github_actions/build_linux_configure.py
 
