@@ -167,7 +167,7 @@ struct tuple_element<Id, THRUST_NS_QUALIFIER::detail::tuple_of_iterator_referenc
 
 _LIBCUDACXX_END_NAMESPACE_STD
 
-// structured bindings suppport
+// structured bindings support
 namespace std
 {
 
