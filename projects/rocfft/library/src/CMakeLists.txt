@@ -108,6 +108,7 @@ set( kgen_embed_cpp ${CMAKE_BINARY_DIR}/library/src/device/kernel-generator-embe
 set( kgen_embed_files
      ${CMAKE_SOURCE_DIR}/shared/rocfft_complex.h
      ${CMAKE_SOURCE_DIR}/library/src/device/kernels/common.h
+     ${CMAKE_SOURCE_DIR}/library/src/device/kernels/device_enum.h
      ${CMAKE_SOURCE_DIR}/library/src/device/kernels/memory_gfx.h
      ${CMAKE_SOURCE_DIR}/library/src/device/kernels/callback.h
      ${CMAKE_SOURCE_DIR}/library/src/device/kernels/butterfly_constant.h
@@ -161,10 +162,10 @@ set( kgen_logic_files
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_2d.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_base.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_cc.h
-     ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_pp_gen_cc.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_cr.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_rc.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_rr.h
+     ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_pp_gen_cc.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_pp_gen_rr.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/bluestein_generator.h
      ${CMAKE_SOURCE_DIR}/library/src/rtc_compile.cpp
@@ -347,6 +348,16 @@ foreach( target
 
 endforeach()
 
+# Standalone executables that link in the rocFFT shared library need
+# to implement some globals that common code is expecting to exist.
+# But in a static build the executables will get globals from rocFFT,
+# and don't need the stub.
+if( BUILD_SHARED_LIBS )
+  set( ROCFFT_SHARED_STUB rocfft_stub.cpp )
+else()
+  set( ROCFFT_SHARED_STUB "" )
+endif()
+
 add_executable( rocfft_aot_helper
   enum_printer.cpp
   rocfft_aot_helper.cpp
@@ -363,14 +374,14 @@ if( ROCFFT_BUILD_OFFLINE_TUNER )
     ../../shared/array_validator.cpp
     enum_printer.cpp
     rocfft_offline_tuner.cpp
-    rocfft_stub.cpp
+    ${ROCFFT_SHARED_STUB}
   )
   target_compile_options( rocfft_offline_tuner PRIVATE -DROCFFT_BUILD_OFFLINE_TUNER )
 
   add_executable( rocfft_solmap_convert
     enum_printer.cpp
     rocfft_solmap_convert.cpp
-    rocfft_stub.cpp
+    ${ROCFFT_SHARED_STUB}
   )
   target_compile_options( rocfft_solmap_convert PRIVATE -DROCFFT_BUILD_OFFLINE_TUNER )
 endif()

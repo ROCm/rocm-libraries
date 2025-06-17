@@ -48,7 +48,7 @@ namespace rocsparse
                T* __restrict__ B,
                int64_t ldb,
                int* __restrict__ done_array,
-               J* __restrict__ map,
+               const J* __restrict__ map,
                J* __restrict__ zero_pivot,
                rocsparse_index_base idx_base,
                rocsparse_fill_mode  fill_mode,
@@ -140,7 +140,7 @@ namespace rocsparse
         // Initialize buffers
         RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, sizeof(int) * m * narrays, stream));
 
-        const rocsparse_trm_info csrsm_info
+        const rocsparse::trm_info_t* csrsm_info
             = (descr->fill_mode == rocsparse_fill_mode_upper)
                   ? ((trans_A == rocsparse_operation_none) ? info->csrsm_upper_info
                                                            : info->csrsmt_upper_info)
@@ -182,12 +182,13 @@ namespace rocsparse
             T* csrt_val = At;
 
             // Gather values
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::gthr_template(handle,
-                                                               nnz,
-                                                               csr_val,
-                                                               csrt_val,
-                                                               (const I*)csrsm_info->trmt_perm,
-                                                               rocsparse_index_base_zero));
+            RETURN_IF_ROCSPARSE_ERROR(
+                (rocsparse::gthr_template<I, T>(handle,
+                                                nnz,
+                                                csr_val,
+                                                csrt_val,
+                                                (const I*)csrsm_info->get_transposed_perm(),
+                                                rocsparse_index_base_zero)));
 
             if(trans_A == rocsparse_operation_conjugate_transpose)
             {
@@ -195,8 +196,8 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::conjugate(handle, nnz, csrt_val));
             }
 
-            local_csr_row_ptr = (const I*)csrsm_info->trmt_row_ptr;
-            local_csr_col_ind = (const J*)csrsm_info->trmt_col_ind;
+            local_csr_row_ptr = (const I*)csrsm_info->get_transposed_row_ptr();
+            local_csr_col_ind = (const J*)csrsm_info->get_transposed_col_ind();
             local_csr_val     = (const T*)csrt_val;
 
             fill_mode = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
@@ -234,7 +235,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (J*)csrsm_info->row_map,
+                        (const J*)csrsm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -259,7 +260,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (J*)csrsm_info->row_map,
+                        (const J*)csrsm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -287,7 +288,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (J*)csrsm_info->row_map,
+                        (const J*)csrsm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -312,7 +313,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (J*)csrsm_info->row_map,
+                        (const J*)csrsm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -340,7 +341,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (J*)csrsm_info->row_map,
+                        (const J*)csrsm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -365,7 +366,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (J*)csrsm_info->row_map,
+                        (const J*)csrsm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -393,7 +394,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (J*)csrsm_info->row_map,
+                        (const J*)csrsm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -418,7 +419,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (J*)csrsm_info->row_map,
+                        (const J*)csrsm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -446,7 +447,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (J*)csrsm_info->row_map,
+                        (const J*)csrsm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -471,7 +472,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (J*)csrsm_info->row_map,
+                        (const J*)csrsm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,

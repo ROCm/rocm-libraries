@@ -260,7 +260,9 @@ streamK: false
 streamKTwoTile: false
 matchMemoryAccess: true
 scale_A: None
+scaleType_A: None
 scale_B: None
+scaleType_B: None
 scaleBlockSize: 0
 loadScaleLDS_A: false
 loadScaleLDS_B: false
@@ -310,7 +312,9 @@ type_C: half
 type_D: half
 type_acc: float
 scale_A: None
+scaleType_A: None
 scale_B: None
+scaleType_B: None
 scaleBlockSize: 0
 loadScaleLDS_A: false
 loadScaleLDS_B: false
@@ -404,6 +408,27 @@ def build_problem_params():
     """Build list of problem parameters to test."""
     # Should consider making this a container
     return [["--m", "512", "--n", "512", "--k", "256", "--numWGs", "4"]]
+
+
+def build_wgm_params():
+    """Build list of workgroup-mapping parameters to test."""
+    size = [1024, 1024, 512]
+    tile_size = [64, 64, 64]
+    num_tiles = [size[i] // tile_size[i] for i in range(len(size))]
+
+    params = []
+    for dimension in [0, 1]:
+        # the last entry will have no "tail block"
+        for wgm in [1, 3, 5, 16, num_tiles[dimension]]:
+            solution_params = [
+                f"--mac_m={tile_size[0]}",
+                f"--mac_n={tile_size[1]}",
+                f"--mac_k={tile_size[2]}",
+                f"--workgroupMapping={dimension},{wgm}",
+            ]
+            problem_params = [f"--m={size[0]}", f"--n={size[1]}", f"--k={size[2]}"]
+            params.append([solution_params, problem_params])
+    return params
 
 
 #
@@ -587,6 +612,15 @@ def test_gemm_validate_once(tmp_path, solution_params, problem_params):
         return
 
     gemm_validate_two_stage_codeobject(tmp_path, solution_params, problem_params)
+
+
+@pytest.mark.parametrize("solution_params,problem_params", build_wgm_params())
+def test_gemm_wgm(tmp_path, solution_params, problem_params):
+    # TODO This is a temporary fix to enable GFX12 CI
+    if rocm_gfx().startswith("gfx12"):
+        return
+
+    gemm_validate_single_stage(tmp_path, solution_params, problem_params)
 
 
 if __name__ == "__main__":

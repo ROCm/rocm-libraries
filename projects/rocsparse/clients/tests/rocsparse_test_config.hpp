@@ -82,8 +82,8 @@ struct rocsparse_test_config_it_complex_only
 {
 };
 
-struct rocsparse_test_config_it_plus_int8_float16
-    : rocsparse_test_config_template<rocsparse_test_dispatch_enum::it_plus_int8_float16,
+struct rocsparse_test_config_it_gather_scatter
+    : rocsparse_test_config_template<rocsparse_test_dispatch_enum::it_gather_scatter,
                                      rocsparse_test_numeric_types_enum::all>
 {
 };

@@ -52,9 +52,11 @@ struct StockhamKernelCR : public StockhamKernel
     {
         // CR: we do "direct-to-reg" and "non-linear", but never do "direct-from-reg"
         if(direct_to_from_reg)
-            return {Declaration{direct_load_to_reg,
-                                And{directReg_type == "DirectRegType::TRY_ENABLE_IF_SUPPORT",
-                                    embedded_type == "EmbeddedType::NONE"}},
+            return {Declaration{
+                        direct_load_to_reg,
+                        ebtype == EmbeddedType::NONE
+                            ? Expression{directReg_type == "DirectRegType::TRY_ENABLE_IF_SUPPORT"}
+                            : Expression{Literal{"false"}}},
                     Declaration{direct_store_from_reg, Literal{"false"}},
                     Declaration{lds_linear, Not{direct_load_to_reg}}};
         else
@@ -210,30 +212,36 @@ struct StockhamKernelCR : public StockhamKernel
             StatementList stmts_c2real_pre_no_edge;
             stmts_c2real_pre_no_edge += regular_load;
             stmts_c2real_pre_no_edge += LineBreak{};
-            stmts_c2real_pre_no_edge += CommentLines{"append extra global loading for C2Real "
-                                                     "pre-process only, one more element per col."};
 
-            stmts_c2real_pre_no_edge += If{
-                Equal{embedded_type, "EmbeddedType::C2Real_PRE"},
-                {If{Less{thread_id, transforms_per_block},
+            if(ebtype == EmbeddedType::C2Real_PRE)
+            {
+                stmts_c2real_pre_no_edge
+                    += CommentLines{"append extra global loading for C2Real "
+                                    "pre-process only, one more element per col."};
+                stmts_c2real_pre_no_edge += If{
+                    Less{thread_id, transforms_per_block},
                     {Assign{lds_complex[tid_hor * stride_lds + length],
-                            LoadGlobal{buf, offset + offset_tile_rbuf(length / stripmine_h)}}}}}};
+                            LoadGlobal{buf, offset + offset_tile_rbuf(length / stripmine_h)}}}};
+            }
 
             non_edge_stmts += stmts_c2real_pre_no_edge;
 
             StatementList stmts_c2real_pre_edge;
             stmts_c2real_pre_edge += regular_load;
             stmts_c2real_pre_edge += LineBreak{};
-            stmts_c2real_pre_edge += CommentLines{"append extra global loading for C2Real "
-                                                  "pre-process only, one more element per col."};
 
-            stmts_c2real_pre_edge += If{
-                Equal{embedded_type, "EmbeddedType::C2Real_PRE"},
-                {If{Less{thread_id,
+            if(ebtype == EmbeddedType::C2Real_PRE)
+            {
+                stmts_c2real_pre_edge
+                    += CommentLines{"append extra global loading for C2Real "
+                                    "pre-process only, one more element per col."};
+                stmts_c2real_pre_edge += If{
+                    Less{thread_id,
                          Parens{transforms_per_block
                                 - (tile_index + 1) * transforms_per_block % lengths[1]}},
                     {Assign{lds_complex[tid_hor * stride_lds + length],
-                            LoadGlobal{buf, offset + offset_tile_rbuf(length / stripmine_h)}}}}}};
+                            LoadGlobal{buf, offset + offset_tile_rbuf(length / stripmine_h)}}}};
+            }
 
             edge_stmts += stmts_c2real_pre_edge;
 
@@ -396,9 +404,9 @@ struct StockhamKernelCR : public StockhamKernel
         return tpls;
     }
 
-    StatementList real_trans_pre_post(ProcessingType type) override
+    StatementList real_trans_pre_post() override
     {
-        if(type == ProcessingType::POST)
+        if(ebtype != EmbeddedType::C2Real_PRE)
             return {};
 
         auto twd_offset = (length - factors.front());
@@ -406,7 +414,7 @@ struct StockhamKernelCR : public StockhamKernel
         StatementList stmts;
         stmts += CommentLines{
             "handle even-length real to complex pre-process in lds before transform"};
-        stmts += real2cmplx_pre_post(length, type, threads_per_transform, twd_offset);
+        stmts += real2cmplx_pre_post(length, threads_per_transform, twd_offset);
         return stmts;
     }
 };

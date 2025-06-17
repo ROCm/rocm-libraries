@@ -231,7 +231,7 @@ namespace
                 case rocsparse_test_dispatch_enum::it:
                 case rocsparse_test_dispatch_enum::it_sparse_to_dense:
                 case rocsparse_test_dispatch_enum::it_dense_to_sparse:
-                case rocsparse_test_dispatch_enum::it_plus_int8_float16:
+                case rocsparse_test_dispatch_enum::it_gather_scatter:
                 {
                     s << rocsparse_indextype2string(arg.index_type_I) << '_'
                       << rocsparse_datatype2string(arg.compute_type);

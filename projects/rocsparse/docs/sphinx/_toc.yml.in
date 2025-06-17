@@ -29,6 +29,7 @@ subtrees:
     subtrees:
     - entries:
       - file: reference/api.rst
+      - file: reference/debugging.rst
       - file: reference/types.rst
       - file: reference/precision.rst
       - file: reference/env_variables.rst

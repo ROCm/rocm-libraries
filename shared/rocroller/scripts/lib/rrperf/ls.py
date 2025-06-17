@@ -26,10 +26,18 @@
 """List benchmark suites."""
 
 import argparse
+import functools
+import os
 
 import rrperf.args as args
 import rrperf.rrsuites
 import rrperf.utils as utils
+
+
+@functools.cache
+def hline():
+    width = os.get_terminal_size().columns
+    return "-" * width
 
 
 def get_args(parser: argparse.ArgumentParser):
@@ -48,4 +56,10 @@ def run(args):
 
     generator = getattr(rrperf.rrsuites, suite)
     for x in generator():
-        print(x)
+        print(hline())
+        print("-- rocRoller benchmark run")
+        print("--")
+        print("Token: ", x)
+        print("")
+        print(utils.sjoin(x.command()))
+        print("")

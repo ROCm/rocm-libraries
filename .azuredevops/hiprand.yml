@@ -32,8 +32,8 @@ trigger:
     - projects/hiprand/.github
     - projects/hiprand/.jenkins
     - projects/hiprand/docs
-    - projects/hiprand/'.*.y*ml'
-    - projects/hiprand/'*.md'
+    - projects/hiprand/.*.y*ml
+    - projects/hiprand/*.md
     - projects/hiprand/LICENSE.txt
 
 pr:
@@ -50,8 +50,8 @@ pr:
     - projects/hiprand/.github
     - projects/hiprand/.jenkins
     - projects/hiprand/docs
-    - projects/hiprand/'.*.y*ml'
-    - projects/hiprand/'*.md'
+    - projects/hiprand/.*.y*ml
+    - projects/hiprand/*.md
     - projects/hiprand/LICENSE.txt
   drafts: false
 

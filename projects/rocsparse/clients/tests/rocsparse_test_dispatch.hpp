@@ -71,12 +71,12 @@ struct rocsparse_test_dispatch<rocsparse_test_dispatch_enum::it_dense_to_sparse>
 };
 
 template <>
-struct rocsparse_test_dispatch<rocsparse_test_dispatch_enum::it_plus_int8_float16>
+struct rocsparse_test_dispatch<rocsparse_test_dispatch_enum::it_gather_scatter>
 {
     template <template <typename...> class TEST>
     static auto dispatch(const Arguments& arg)
     {
-        return rocsparse_it_plus_int8_float16_dispatch<TEST>(arg);
+        return rocsparse_it_gather_scatter_dispatch<TEST>(arg);
     }
 };
 

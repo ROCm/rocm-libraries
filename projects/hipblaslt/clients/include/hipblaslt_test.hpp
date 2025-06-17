@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -102,6 +102,18 @@
             return;                         \
         }                                   \
     } while(0)
+
+#define CHECK_RETURNED_WORKSPACE_SIZE(WORKSPACE_SIZE, MAX_WORKSPACE_SIZE)         \
+    do                                                                            \
+    {                                                                             \
+        if(WORKSPACE_SIZE > MAX_WORKSPACE_SIZE)                                   \
+        {                                                                         \
+            FAIL() << "Returned workspace size (" << WORKSPACE_SIZE << ") is    \
+                    larger than user allocated (" \
+                   << MAX_WORKSPACE_SIZE << ")!";                                 \
+            return;                                                               \
+        }                                                                         \
+    } while(0)
 #else // GOOGLE_TEST
 
 inline void hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expect)
@@ -145,6 +157,18 @@ inline void hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expe
                            << std::endl;                                               \
             return;                                                                    \
         }                                                                              \
+    } while(0)
+#define CHECK_RETURNED_WORKSPACE_SIZE(WORKSPACE_SIZE, MAX_WORKSPACE_SIZE)                \
+    do                                                                                   \
+    {                                                                                    \
+        if(WORKSPACE_SIZE > MAX_WORKSPACE_SIZE)                                          \
+        {                                                                                \
+            hipblaslt_cerr << "Returned workspace size (" << WORKSPACE_SIZE << ") is   \
+                           larger than user allocated(" \
+                           << MAX_WORKSPACE_SIZE << ")!"                                 \
+                           << " at " __FILE__ ":" << __LINE__ << std::endl;              \
+            return;                                                                      \
+        }                                                                                \
     } while(0)
 #endif // GOOGLE_TEST
 

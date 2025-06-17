@@ -415,14 +415,15 @@ rocsparse_status
         // Allocate memory on device to hold csrmv info, if required
         if(csrmv_info->adaptive.size > 0)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync((void**)&csrmv_info->adaptive.row_blocks,
+
+            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&csrmv_info->adaptive.row_blocks,
                                                          sizeof(I) * csrmv_info->adaptive.size,
                                                          handle->stream));
             RETURN_IF_HIP_ERROR(
-                rocsparse_hipMallocAsync((void**)&csrmv_info->adaptive.wg_flags,
+                rocsparse_hipMallocAsync(&csrmv_info->adaptive.wg_flags,
                                          sizeof(uint32_t) * csrmv_info->adaptive.size,
                                          handle->stream));
-            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync((void**)&csrmv_info->adaptive.wg_ids,
+            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&csrmv_info->adaptive.wg_ids,
                                                          sizeof(J) * csrmv_info->adaptive.size,
                                                          handle->stream));
 
