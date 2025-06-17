@@ -206,11 +206,9 @@ namespace rocisa
             for(int i=0; i<srcs.size(); i++){
                 if(std::holds_alternative<std::shared_ptr<Container>>(srcs[i]) && std::get<std::shared_ptr<Container>>(srcs[i]) != nullptr){
                     auto gpr = dynamic_cast<RegisterContainer*>(std::get<std::shared_ptr<Container>>(srcs[i]).get());
-                    if(gpr){
-                        if(gpr->regType == "v"){
-                            msbSrc[i] = gpr->msb;
-                            hasVgpr = true;
-                        }
+                    if(gpr && gpr->regType == "v"){
+                        msbSrc[i] = gpr->msb;
+                        hasVgpr = true;
                     }
                 }
             }
@@ -218,11 +216,9 @@ namespace rocisa
             if(dst){
                 std::string s = dst->toString();
                 auto gpr = dynamic_cast<RegisterContainer*>(dst.get());
-                if(gpr){
-                    if(gpr->regType == "v"){
-                        msbDst = gpr->msb;
-                        hasVgpr = true;
-                    }
+                if(gpr && gpr->regType == "v"){
+                    msbDst = gpr->msb;
+                    hasVgpr = true;
                 }
             }
             if(!hasVgpr){

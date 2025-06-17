@@ -2052,17 +2052,16 @@ namespace rocisa
             kStr2 += dsCopy->toString();
             kStr = formatWithComment(kStr);
             kStr2 = formatWithComment(kStr2);
-            // TODO: refactor this
-            auto dstCopy = RegisterContainer(*dynamic_cast<RegisterContainer*>(dst.get()));
-            auto dstCopyPtr = std::make_shared<RegisterContainer>(dstCopy);
+            // compute 2 different dst vgpr msb
+            auto dstCopyPtr = std::make_shared<RegisterContainer>(*dynamic_cast<RegisterContainer*>(dst.get()));
+            int idx = dstCopyPtr->regName->offsets.size() - 1;
             int regNum = 4;
             dstCopyPtr->regNum = regNum;
-            dstCopyPtr->toString();
+            dstCopyPtr->setMsb();
             setMsb(kStr, {srcs}, dstCopyPtr);
-            int idx                       = dstCopyPtr->regName->offsets.size() - 1;
             dstCopyPtr->regName->offsets[idx] = dstCopyPtr->regName->offsets[idx] + regNum;
             dstCopyPtr->regNum = 2;
-            dstCopyPtr->toString();
+            dstCopyPtr->setMsb();
             setMsb(kStr2, {srcs}, dstCopyPtr);
             return kStr + kStr2;
         }
@@ -2413,17 +2412,16 @@ namespace rocisa
             kStr2 += dsCopy->toString();
             kStr = formatWithComment(kStr);
             kStr2 = formatWithComment(kStr2);
-            // TODO: refactor this
-            auto srcCopy = RegisterContainer(*dynamic_cast<RegisterContainer*>(src0.get()));
-            auto srcCopyPtr = std::make_shared<RegisterContainer>(srcCopy);
+            // compute 2 different src vgpr msb
+            auto srcCopyPtr = std::make_shared<RegisterContainer>(*dynamic_cast<RegisterContainer*>(src0.get()));
+            int idx = srcCopyPtr->regName->offsets.size() - 1;
             int regNum = 4;
             srcCopyPtr->regNum = regNum;
-            srcCopyPtr->toString();
+            srcCopyPtr->setMsb();
             setMsb(kStr, {dstAddr, srcCopyPtr}, nullptr);
-            int idx                       = srcCopyPtr->regName->offsets.size() - 1;
             srcCopyPtr->regName->offsets[idx] = srcCopyPtr->regName->offsets[idx] + regNum;
             srcCopyPtr->regNum = 2;
-            srcCopyPtr->toString();
+            srcCopyPtr->setMsb();
             setMsb(kStr2, {dstAddr, srcCopyPtr}, nullptr);
             return kStr + kStr2;
         }
