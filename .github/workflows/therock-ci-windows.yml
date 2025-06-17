@@ -64,7 +64,7 @@ jobs:
       - name: "Create build dir"
         shell: powershell
         run: |
-          $buildDir = "TheRock\\$env:BASE_BUILD_DIR_POWERSHELL\"
+          $buildDir = "$env:BASE_BUILD_DIR_POWERSHELL\TheRock"
           echo "BUILD_DIR_POWERSHELL=$buildDir" >> $env:GITHUB_ENV
           mkdir "$buildDir"
           Write-Host "Generated Build Directory: $buildDir"
