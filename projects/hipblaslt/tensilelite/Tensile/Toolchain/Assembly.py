@@ -49,34 +49,9 @@ def makeAssemblyToolchain(assembler_path, bundler_path, co_version, build_id_kin
    return AssemblyToolchain(compiler, linker, bundler)
 
 
-def _batchObjectFiles(ldPath: str, objFiles: List[str], coPathDest: Union[Path, str], maxObjFiles: int=10000) -> List[str]:
-    numObjFiles = len(objFiles)
-
-    if numObjFiles <= maxObjFiles:
-      return objFiles
-
-    batchedObjFiles = [objFiles[i:i+maxObjFiles] for i in range(0, numObjFiles, maxObjFiles)]
-    numBatches = int(math.ceil(numObjFiles / maxObjFiles))
-
-    newObjFiles = [str(coPathDest) + "." + str(i) for i in range(0, numBatches)]
-    newObjFilesOutput = []
-
-    for batch, filename in zip(batchedObjFiles, newObjFiles):
-      if len(batch) > 1:
-        args = [ldPath, "-r"] + batch + [ "-o", filename]
-        print2(f"Linking object files into fewer object files: {' '.join(args)}")
-        subprocess.check_call(args)
-        newObjFilesOutput.append(filename)
-      else:
-        newObjFilesOutput.append(batchedObjFiles[0])
-
-    return newObjFilesOutput
-
-
 def buildAssemblyCodeObjectFiles(
       linker: Linker,
       bundler: Bundler,
-      ldPath: str,
       kernels: List[Solution],
       destDir: Union[Path, str],
       asmDir: Union[Path, str],
@@ -118,7 +93,6 @@ def buildAssemblyCodeObjectFiles(
           coFileMap[asmDir / (coName + extCoRaw)].add(str(asmDir / (kernel["BaseName"] + extObj)))
 
       for coFileRaw, objFiles in coFileMap.items():
-        objFiles = _batchObjectFiles(ldPath, objFiles, coFileRaw)
         linker(objFiles, str(coFileRaw))
         coFile = destDir / coFileRaw.name.replace(extCoRaw, extCo)
         if compress:

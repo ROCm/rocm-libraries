@@ -256,18 +256,18 @@ void build_stockham_function_pool(CompileQueue& queue)
         stockham_combo(
             scheme,
             i.second,
-            [=, &queue](int                     direction,
-                        rocfft_result_placement placement,
-                        rocfft_array_type       inArrayType,
-                        rocfft_array_type       outArrayType,
-                        EmbeddedType            ebtype,
-                        SBRC_TRANSPOSE_TYPE     sbrc_trans_type,
-                        DirectRegType           dir_reg_type,
-                        IntrinsicAccessType     intrinsic,
-                        int                     ltwd_base,
-                        int                     ltwd_step,
-                        bool                    unitstride,
-                        CallbackType            cbtype) {
+            [=, &queue, &specs](int                     direction,
+                                rocfft_result_placement placement,
+                                rocfft_array_type       inArrayType,
+                                rocfft_array_type       outArrayType,
+                                EmbeddedType            ebtype,
+                                SBRC_TRANSPOSE_TYPE     sbrc_trans_type,
+                                DirectRegType           dir_reg_type,
+                                IntrinsicAccessType     intrinsic,
+                                int                     ltwd_base,
+                                int                     ltwd_step,
+                                bool                    unitstride,
+                                CallbackType            cbtype) {
                 // intrinsic mode require non-callback and enable dir_reg
                 if((cbtype != CallbackType::NONE || dir_reg_type == FORCE_OFF_OR_NOT_SUPPORT)
                    && (intrinsic != IntrinsicAccessType::DISABLE_BOTH))
@@ -282,6 +282,7 @@ void build_stockham_function_pool(CompileQueue& queue)
                     if((scheme == CS_KERNEL_STOCKHAM && !unitstride) || length1D % 2 != 0)
                         return;
                 }
+                specs.ebtype = ebtype;
 
                 auto kernel_name = stockham_rtc_kernel_name(specs,
                                                             specs,
@@ -295,7 +296,6 @@ void build_stockham_function_pool(CompileQueue& queue)
                                                             ltwd_base,
                                                             ltwd_step,
                                                             false,
-                                                            ebtype,
                                                             dir_reg_type,
                                                             intrinsic,
                                                             sbrc_trans_type,
@@ -306,14 +306,6 @@ void build_stockham_function_pool(CompileQueue& queue)
                                                             {});
                 std::function<std::string(const std::string&)> generate_src
                     = [=](const std::string& kernel_name) -> std::string {
-                    StockhamGeneratorSpecs specs{factors,
-                                                 {},
-                                                 {static_cast<unsigned int>(precision)},
-                                                 static_cast<unsigned int>(i.second.workgroup_size),
-                                                 PrintScheme(scheme)};
-                    specs.threads_per_transform = i.second.threads_per_transform[0];
-                    specs.half_lds              = i.second.half_lds;
-                    specs.direct_to_from_reg    = i.second.direct_to_from_reg;
                     return stockham_rtc(specs,
                                         specs,
                                         nullptr,
@@ -328,7 +320,6 @@ void build_stockham_function_pool(CompileQueue& queue)
                                         ltwd_base,
                                         ltwd_step,
                                         false,
-                                        ebtype,
                                         dir_reg_type,
                                         intrinsic,
                                         sbrc_trans_type,
@@ -684,6 +675,7 @@ void build_solution_kernels(CompileQueue& queue)
                 // kernel_sol should specify the static_dim, need to set here,
                 // so move specs to local instead of captured (need mutable if captured)
                 specs.static_dim = static_dim;
+                specs.ebtype     = ebtype;
 
                 auto kernel_name = stockham_rtc_kernel_name(specs,
                                                             specs,
@@ -697,7 +689,6 @@ void build_solution_kernels(CompileQueue& queue)
                                                             ltwd_base,
                                                             ltwd_step,
                                                             false,
-                                                            ebtype,
                                                             dir_reg_type,
                                                             intrinsic,
                                                             sbrc_trans_type,
@@ -723,7 +714,6 @@ void build_solution_kernels(CompileQueue& queue)
                                         ltwd_base,
                                         ltwd_step,
                                         false,
-                                        ebtype,
                                         dir_reg_type,
                                         intrinsic,
                                         sbrc_trans_type,

@@ -37,9 +37,8 @@ import tempfile
 from pathlib import Path
 from typing import Dict, List
 
-import rrperf.args as args
+import rrperf
 from rrperf.problems import GEMMRun
-from rrperf.run import get_build_dir, load_suite
 
 
 def has_omniperf() -> bool:
@@ -132,7 +131,7 @@ def profile_rr(
 
 def get_args(parser: argparse.ArgumentParser):
     common_args = [
-        args.suite,
+        rrperf.args.suite,
     ]
     for arg in common_args:
         arg(parser)
@@ -176,22 +175,14 @@ def profile(
 
     if suite is not None:
         if build_dir is None:
-            build_dir = get_build_dir()
+            build_dir = rrperf.utils.get_build_dir()
         else:
             build_dir = Path(build_dir)
 
-        for i, problem in enumerate(load_suite(suite)):
+        for i, problem in enumerate(rrperf.utils.load_suite(suite)):
             profile_rr(
                 problem,
                 f"{i:02}",
                 output_dir,
                 build_dir,
             )
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    get_args(parser)
-
-    parsed_args = parser.parse_args()
-    run(parsed_args)

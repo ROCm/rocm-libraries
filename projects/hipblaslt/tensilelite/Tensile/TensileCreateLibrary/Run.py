@@ -309,7 +309,6 @@ def writeSolutionsAndKernels(
         codeObjectFiles += buildAssemblyCodeObjectFiles(
             asmToolchain.linker,
             asmToolchain.bundler,
-            globalParameters["ROCmLdPath"],
             asmKernels,
             destLibPath,
             assemblyTmpPath,
@@ -389,7 +388,6 @@ def writeSolutionsAndKernelsTCL(
     buildAssemblyCodeObjectFiles(
         asmToolchain.linker,
         asmToolchain.bundler,
-        globalParameters["ROCmLdPath"],
         asmKernels,
         destLibPath,
         assemblyTmpPath,

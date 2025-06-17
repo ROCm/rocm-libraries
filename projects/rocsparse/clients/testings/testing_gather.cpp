@@ -115,12 +115,14 @@ void testing_gather(const Arguments& arg)
 
 INSTANTIATE(int32_t, int8_t);
 INSTANTIATE(int32_t, _Float16);
+INSTANTIATE(int32_t, rocsparse_bfloat16);
 INSTANTIATE(int32_t, float);
 INSTANTIATE(int32_t, double);
 INSTANTIATE(int32_t, rocsparse_float_complex);
 INSTANTIATE(int32_t, rocsparse_double_complex);
 INSTANTIATE(int64_t, int8_t);
 INSTANTIATE(int64_t, _Float16);
+INSTANTIATE(int64_t, rocsparse_bfloat16);
 INSTANTIATE(int64_t, float);
 INSTANTIATE(int64_t, double);
 INSTANTIATE(int64_t, rocsparse_float_complex);

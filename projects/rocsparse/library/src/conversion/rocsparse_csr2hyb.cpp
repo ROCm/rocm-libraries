@@ -207,8 +207,8 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
     {
         // Allocate workspace
         rocsparse_int* workspace = nullptr;
-        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-            (void**)&workspace, sizeof(rocsparse_int) * blocks, handle->stream));
+        RETURN_IF_HIP_ERROR(
+            rocsparse_hipMallocAsync(&workspace, sizeof(rocsparse_int) * blocks, handle->stream));
 
         // HYB == ELL - no COO part - compute maximum nnz per row
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::ell_width_kernel_part1<CSR2ELL_DIM>),
@@ -252,15 +252,15 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
     if(hyb->ell_nnz > 0)
     {
         RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-            (void**)&hyb->ell_col_ind, sizeof(rocsparse_int) * hyb->ell_nnz, handle->stream));
+            &hyb->ell_col_ind, sizeof(rocsparse_int) * hyb->ell_nnz, handle->stream));
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMallocAsync(&hyb->ell_val, sizeof(T) * hyb->ell_nnz, handle->stream));
     }
 
     // Allocate workspace
     rocsparse_int* workspace = NULL;
-    RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-        (void**)&workspace, sizeof(rocsparse_int) * (m + 1), handle->stream));
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMallocAsync(&workspace, sizeof(rocsparse_int) * (m + 1), handle->stream));
 
     // If there is a COO part, compute the COO non-zero elements per row
     if(partition_type != rocsparse_hyb_partition_max)
@@ -326,9 +326,9 @@ rocsparse_status rocsparse::csr2hyb_template(rocsparse_handle          handle,
     if(hyb->coo_nnz > 0)
     {
         RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-            (void**)&hyb->coo_row_ind, sizeof(rocsparse_int) * hyb->coo_nnz, handle->stream));
+            &hyb->coo_row_ind, sizeof(rocsparse_int) * hyb->coo_nnz, handle->stream));
         RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-            (void**)&hyb->coo_col_ind, sizeof(rocsparse_int) * hyb->coo_nnz, handle->stream));
+            &hyb->coo_col_ind, sizeof(rocsparse_int) * hyb->coo_nnz, handle->stream));
         RETURN_IF_HIP_ERROR(
             rocsparse_hipMallocAsync(&hyb->coo_val, sizeof(T) * hyb->coo_nnz, handle->stream));
     }

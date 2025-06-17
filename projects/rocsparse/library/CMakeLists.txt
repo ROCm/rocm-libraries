@@ -52,6 +52,7 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-version.h.in"
 # Public rocSPARSE headers
 set(rocsparse_headers_public
   include/rocsparse-auxiliary.h
+  include/rocsparse-debugging.h
   include/rocsparse-functions.h
   include/rocsparse-types.h
   include/rocsparse-complex-types.h

@@ -1537,12 +1537,18 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                     // 'tmpd' will be updated with the distances D - lambda_i.
                     // deflated values are not changed.
                     rocblas_int linfo;
+
+#if defined(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
+                    linfo = slaed4(dd, cc, tmpd + j * n, zz, std::abs(p), ev[j]);
+#else
                     if(cc == dd - 1)
                         linfo = seq_solve_ext(dd, tmpd + j * n, zz, (p < 0 ? -p : p), ev + j, eps,
                                               ssfmin, ssfmax);
                     else
                         linfo = seq_solve(dd, tmpd + j * n, zz, (p < 0 ? -p : p), cc, ev + j, eps,
                                           ssfmin, ssfmax);
+#endif
+
                     if(p < 0)
                         ev[j] *= -1;
                 }
@@ -1559,13 +1565,10 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                     if(mask[j] == 1)
                     {
                         valg = tmpd[i + j * n];
-                        if(p > 0)
-                            valf *= (per[i] == j) ? valg : valg / (diag[per[i]] - diag[j]);
-                        else
-                            valf *= (per[i] == j) ? valg : -valg / (diag[per[i]] - diag[j]);
+                        valf *= (per[i] == j) ? valg : valg / (diag[per[i]] - diag[j]);
                     }
                 }
-                valf = sqrt(-valf);
+                valf = sqrt(std::abs(valf));
                 zz[i] = zz[i] < 0 ? -valf : valf;
             }
             /* ----------------------------------------------------------------- */

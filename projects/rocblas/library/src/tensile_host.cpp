@@ -728,6 +728,10 @@ namespace
                         // For ASAN packaging, library file directory will be lib/asan
                         // so need to prefix ../ to set search base_path to lib/rocblas/library
                         base_path += "/../rocblas/library";
+                    else if(TestPath(base_path + "/../Tensile/library"))
+                        // The build tree can lay out its library directory in this way when Tensile
+                        // is added as a subdirectory, but the install tree will never use this form
+                        base_path += "/../Tensile/library";
                     else
                         base_path += "/rocblas/library";
 

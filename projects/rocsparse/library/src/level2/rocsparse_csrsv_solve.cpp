@@ -45,7 +45,7 @@ namespace rocsparse
                       int64_t x_inc,
                       T* __restrict__ y,
                       int* __restrict__ done_array,
-                      J* __restrict__ map,
+                      const J* __restrict__ map,
                       int offset,
                       J* __restrict__ zero_pivot,
                       rocsparse_index_base idx_base,
@@ -105,7 +105,7 @@ namespace rocsparse
         // Initialize buffers
         RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, sizeof(int) * m, stream));
 
-        rocsparse_trm_info csrsv
+        const rocsparse::trm_info_t* csrsv
             = (descr->fill_mode == rocsparse_fill_mode_upper)
                   ? ((trans == rocsparse_operation_none) ? info->csrsv_upper_info
                                                          : info->csrsvt_upper_info)
@@ -139,12 +139,13 @@ namespace rocsparse
             T* csrt_val = reinterpret_cast<T*>(ptr);
 
             // Gather values
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::gthr_template(handle,
-                                                               nnz,
-                                                               csr_val,
-                                                               csrt_val,
-                                                               (const I*)csrsv->trmt_perm,
-                                                               rocsparse_index_base_zero));
+            RETURN_IF_ROCSPARSE_ERROR(
+                (rocsparse::gthr_template<I, T>(handle,
+                                                nnz,
+                                                csr_val,
+                                                csrt_val,
+                                                (const I*)csrsv->get_transposed_perm(),
+                                                rocsparse_index_base_zero)));
 
             if(trans == rocsparse_operation_conjugate_transpose)
             {
@@ -152,8 +153,8 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::conjugate(handle, nnz, csrt_val));
             }
 
-            local_csr_row_ptr = (const I*)csrsv->trmt_row_ptr;
-            local_csr_col_ind = (const J*)csrsv->trmt_col_ind;
+            local_csr_row_ptr = (const I*)csrsv->get_transposed_row_ptr();
+            local_csr_col_ind = (const J*)csrsv->get_transposed_col_ind();
             local_csr_val     = (const T*)csrt_val;
 
             fill_mode = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
@@ -187,7 +188,7 @@ namespace rocsparse
                 x_inc,
                 y,
                 done_array,
-                (J*)csrsv->row_map,
+                (const J*)csrsv->get_row_map(),
                 0,
                 (J*)info->zero_pivot,
                 descr->base,
@@ -217,7 +218,7 @@ namespace rocsparse
                     x_inc,
                     y,
                     done_array,
-                    (J*)csrsv->row_map,
+                    (const J*)csrsv->get_row_map(),
                     0,
                     (J*)info->zero_pivot,
                     descr->base,
@@ -245,7 +246,7 @@ namespace rocsparse
                     x_inc,
                     y,
                     done_array,
-                    (J*)csrsv->row_map,
+                    (const J*)csrsv->get_row_map(),
                     0,
                     (J*)info->zero_pivot,
                     descr->base,

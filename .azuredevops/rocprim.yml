@@ -33,8 +33,8 @@ trigger:
     - projects/rocprim/.gitlab
     - projects/rocprim/.jenkins
     - projects/rocprim/docs
-    - projects/rocprim/'.*.y*ml'
-    - projects/rocprim/'*.md'
+    - projects/rocprim/.*.y*ml
+    - projects/rocprim/*.md
     - projects/rocprim/LICENSE.txt
     - projects/rocprim/NOTICES.txt
 
@@ -53,8 +53,8 @@ pr:
     - projects/rocprim/.gitlab
     - projects/rocprim/.jenkins
     - projects/rocprim/docs
-    - projects/rocprim/'.*.y*ml'
-    - projects/rocprim/'*.md'
+    - projects/rocprim/.*.y*ml
+    - projects/rocprim/*.md
     - projects/rocprim/LICENSE.txt
     - projects/rocprim/NOTICES.txt
   drafts: false

@@ -42,5 +42,17 @@ target_include_directories(common-test-utilities
         $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}>
 )
 
-add_subdirectory(include/common)
+target_sources(common-test-utilities
+    PRIVATE
+        "${_CMAKE_CURRENT_SOURCE_DIR}/common/CommonGraphs.hpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/common/CommonGraphs_impl.hpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/common/F8Values.hpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/common/GEMMProblem.hpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/common/mxDataGen.hpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/common/SourceMatcher.hpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/common/TestValues.hpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/common/Utilities.hpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/common/WidenAddrExprTo64bit.hpp"
+)
+
 add_subdirectory(src)
