@@ -23,6 +23,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execute_with_allocator.h>
 #include <thrust/detail/execution_policy.h>
 #include <thrust/detail/seq.h>
@@ -265,7 +272,7 @@ struct device_execution_policy : thrust::system::__THRUST_DEVICE_SYSTEM_NAMESPAC
  *
  *  struct printf_functor
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    void operator()(int x)
  *    {
  *      printf("%d\n", x);
@@ -312,7 +319,7 @@ static const detail::host_t host;
  *
  *  struct printf_functor
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    void operator()(int x)
  *    {
  *      printf("%d\n", x);
@@ -351,7 +358,7 @@ THRUST_INLINE_CONSTANT detail::device_t device;
  *
  *  struct printf_functor
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    void operator()(int x)
  *    {
  *      printf("%d\n", x);
