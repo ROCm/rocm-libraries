@@ -274,9 +274,9 @@ namespace rocRoller
 
             graph.coordinates.addElement(Tile(), {iWaveX}, {SIMDBlock, SIMDIndex, laneInSIMD});
 
-            uint numElements = waveTile.elements();
-            uint wfs         = static_cast<uint>(wavefrontSize);
-            uint numVgpr     = numElements / wfs;
+            uint numElements       = waveTile.elements();
+            uint activeLanesInWave = static_cast<uint>(wavefrontSize);
+            uint numVgpr           = numElements / activeLanesInWave;
 
             uint const nVgprIndex = macTile.miTileSizes[2];
             uint const nVgprBlock = numVgpr / nVgprIndex;
@@ -292,7 +292,7 @@ namespace rocRoller
 
             graph.coordinates.addElement(PassThrough(), {iWaveY}, {vgpr});
 
-            auto wavefrontSizeLiteral = literal(wfs);
+            auto activeLanesInWaveLiteral = literal(activeLanesInWave);
 
             auto wave  = graph.coordinates.addElement(Wavefront(-1));
             auto waveX = graph.coordinates.addElement(Wavefront(0));
@@ -300,7 +300,8 @@ namespace rocRoller
             graph.coordinates.addElement(Flatten(), {waveX, waveY}, {wave});
 
             auto workitem = graph.coordinates.addElement(Workitem(0));
-            auto lane     = graph.coordinates.addElement(Lane(wavefrontSizeLiteral, literal(1u)));
+            auto lane = graph.coordinates.addElement(Lane(activeLanesInWaveLiteral, literal(1u)));
+            connections.push_back(DC<Lane>(lane));
             graph.coordinates.addElement(Flatten(), {wave, lane}, {workitem});
             graph.coordinates.addElement(Flatten(), {SIMDBlock, SIMDIndex, laneInSIMD}, {lane});
 
@@ -366,23 +367,24 @@ namespace rocRoller
             auto waveY = graph.coordinates.addElement(Wavefront(1));
             auto wave  = graph.coordinates.addElement(Wavefront(-1));
 
-            uint numElements = waveTile.elements();
-            uint wfs         = static_cast<uint>(wavefrontSize);
-            uint numGPR      = numElements / wfs;
+            uint numElements       = waveTile.elements();
+            uint activeLanesInWave = static_cast<uint>(wavefrontSize);
+            uint numGPR            = numElements / activeLanesInWave;
 
             uint M   = macTile.subTileSizes[0];
             uint N   = macTile.subTileSizes[1];
             uint K   = macTile.subTileSizes[2];
-            uint K_L = K / (wfs / M);
+            uint K_L = K / (activeLanesInWave / M);
 
-            auto wavefrontSizeLiteral = literal(wfs);
+            auto activeLanesInWaveLiteral = literal(activeLanesInWave);
 
-            auto lane = graph.coordinates.addElement(Lane(wavefrontSizeLiteral, nullptr));
+            auto lane = graph.coordinates.addElement(Lane(activeLanesInWaveLiteral, nullptr));
             auto vgpr = graph.coordinates.addElement(VGPR(literal(numGPR), nullptr));
 
             graph.coordinates.addElement(Flatten(), {waveX, waveY}, {wave});
             graph.coordinates.addElement(Flatten(), {wave, lane}, {workitem});
 
+            connections.push_back(DC<Lane>(lane));
             connections.push_back(DC<VGPR>(vgpr));
 
             auto bitsPerElement = DataTypeInfo::Get(varType).elementBits;
@@ -420,7 +422,7 @@ namespace rocRoller
                                                M,
                                                K,
                                                bitsPerElement,
-                                               wavefrontSize);
+                                               activeLanesInWave);
                 }
                 else if(!isF8F6F4)
                 {
@@ -450,7 +452,7 @@ namespace rocRoller
                                             vgpr,
                                             K,
                                             bitsPerElement,
-                                            wavefrontSize);
+                                            activeLanesInWave);
                 }
 
                 if(params->swizzleScale)
@@ -481,7 +483,7 @@ namespace rocRoller
                                                M,
                                                K,
                                                bitsPerElement,
-                                               wavefrontSize);
+                                               activeLanesInWave);
                 }
                 else if(!isF8F6F4)
                 {
@@ -511,7 +513,7 @@ namespace rocRoller
                                             vgpr,
                                             K,
                                             bitsPerElement,
-                                            wavefrontSize);
+                                            activeLanesInWave);
                 }
 
                 if(params->swizzleScale)
@@ -523,10 +525,11 @@ namespace rocRoller
 
             case LayoutType::MATRIX_ACCUMULATOR:
             {
-                auto numGPRsPerLaneInWave = wfs == 64 ? 4 : 8; // A wave can have 256 GPR in total
-                uint simdsPerWave         = wavefrontSize / 16u; // Each SIMD consists of 16 lanes
-                auto simdsPerWaveLiteral  = literal(simdsPerWave);
-                auto unitStride           = literal(1u);
+                auto numGPRsPerLaneInWave
+                    = activeLanesInWave == 64 ? 4 : 8; // A wave can have 256 GPR in total
+                uint simdsPerWave = activeLanesInWave / 16u; // Each SIMD consists of 16 lanes
+                auto simdsPerWaveLiteral = literal(simdsPerWave);
+                auto unitStride          = literal(1u);
 
                 auto nRowBlocks = literal(waveTile.sizes[0] / simdsPerWave);
                 auto nColBlocks = literal(waveTile.sizes[1] / simdsPerWave);
@@ -543,8 +546,8 @@ namespace rocRoller
                     VGPRBlockNumber(literal(numGPR / numGPRsPerLaneInWave), unitStride));
                 auto iVblk = graph.coordinates.addElement(
                     VGPRBlockIndex(literal(numGPRsPerLaneInWave), unitStride));
-                auto nLblk = graph.coordinates.addElement(
-                    Adhoc("LANEBlockNumber", literal(wfs / simdsPerWave), unitStride));
+                auto nLblk = graph.coordinates.addElement(Adhoc(
+                    "LANEBlockNumber", literal(activeLanesInWave / simdsPerWave), unitStride));
                 auto iLblk = graph.coordinates.addElement(
                     Adhoc("LANEBlockIndex", simdsPerWaveLiteral, unitStride));
                 auto block = graph.coordinates.addElement(
@@ -959,12 +962,12 @@ namespace rocRoller
             auto waveTile    = WaveTile(macTile);
             auto waveTileTag = graph.coordinates.addElement(waveTile);
 
-            uint numElements = waveTile.sizes[0] * waveTile.sizes[1];
-            uint wfs         = static_cast<uint>(wavefrontSize);
-            uint numGPR      = numElements / wfs;
+            uint numElements       = waveTile.sizes[0] * waveTile.sizes[1];
+            uint activeLanesInWave = static_cast<uint>(wavefrontSize);
+            uint numGPR            = numElements / activeLanesInWave;
 
-            auto numGPRsPerLaneInWave = wfs == 64 ? 4 : 8;
-            uint simdsPerWave         = wavefrontSize / 16u;
+            auto numGPRsPerLaneInWave = activeLanesInWave == 64 ? 4 : 8;
+            uint simdsPerWave         = activeLanesInWave / 16u;
             auto simdsPerWaveLiteral  = literal(simdsPerWave);
 
             auto nRowBlocks = literal(waveTile.sizes[0] / simdsPerWave);
@@ -975,15 +978,15 @@ namespace rocRoller
             auto iWaveX = graph.coordinates.addElement(waveTile.tileIndex(0));
             auto iWaveY = graph.coordinates.addElement(waveTile.tileIndex(1));
 
-            auto wavefrontSizeLiteral = literal(static_cast<uint>(wavefrontSize));
-            auto unitStride           = literal(1u);
+            auto activeLanesInWaveLiteral = literal(activeLanesInWave);
+            auto unitStride               = literal(1u);
 
             auto nVblk = graph.coordinates.addElement(
                 VGPRBlockNumber(literal(numGPR / numGPRsPerLaneInWave), unitStride));
             auto iVblk = graph.coordinates.addElement(
                 VGPRBlockIndex(literal(numGPRsPerLaneInWave), unitStride));
             auto nLblk = graph.coordinates.addElement(
-                Adhoc("LANEBlockNumber", literal(wfs / simdsPerWave), unitStride));
+                Adhoc("LANEBlockNumber", literal(activeLanesInWave / simdsPerWave), unitStride));
             auto iLblk = graph.coordinates.addElement(
                 Adhoc("LANEBlockIndex", simdsPerWaveLiteral, unitStride));
             auto block = graph.coordinates.addElement(
@@ -1000,12 +1003,13 @@ namespace rocRoller
 
             graph.coordinates.addElement(Tile(), {wave}, {waveX, waveY});
 
-            auto lane = graph.coordinates.addElement(Lane(wavefrontSizeLiteral, unitStride));
+            auto lane = graph.coordinates.addElement(Lane(activeLanesInWaveLiteral, unitStride));
             auto vgpr = graph.coordinates.addElement(VGPR(literal(numGPR), unitStride));
 
             connections.push_back(DC<WaveTile>(waveTileTag));
             connections.push_back(DC<VGPRBlockNumber>(nVblk));
             connections.push_back(DC<VGPRBlockIndex>(iVblk));
+            connections.push_back(DC<Lane>(lane));
             connections.push_back(DC<VGPR>(vgpr));
 
             graph.coordinates.addElement(Tile(), {vgpr}, {nVblk, iVblk});
@@ -1609,12 +1613,12 @@ namespace rocRoller
                     auto laneInSIMD
                         = graph.coordinates.addElement(Lane(literal(lanesPerSIMD), nullptr));
 
-                    uint const numElements   = waveTile.elements();
-                    auto       wavefrontSize = m_context->kernel()->wavefront_size();
-                    uint const wfs           = static_cast<uint>(wavefrontSize);
-                    uint const numVgpr       = numElements / wfs;
-                    uint const nVgprIndex    = macTile.miTileSizes[2];
-                    uint const nVgprBlock    = numVgpr / nVgprIndex;
+                    uint const numElements       = waveTile.elements();
+                    auto       wavefrontSize     = m_context->kernel()->wavefront_size();
+                    uint const activeLanesInWave = static_cast<uint>(wavefrontSize);
+                    uint const numVgpr           = numElements / activeLanesInWave;
+                    uint const nVgprIndex        = macTile.miTileSizes[2];
+                    uint const nVgprBlock        = numVgpr / nVgprIndex;
 
                     auto vgprBlock = graph.coordinates.addElement(
                         VGPRBlockNumber(literal(nVgprBlock), literal(1u)));

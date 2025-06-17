@@ -49,7 +49,7 @@ namespace rocsparse
                                   const T*                  csr_val,
                                   const I*                  csr_row_ptr,
                                   const J*                  csr_col_ind,
-                                  rocsparse_trm_info        info,
+                                  rocsparse::trm_info_t*    info,
                                   J**                       zero_pivot,
                                   void*                     temp_buffer);
 

@@ -217,6 +217,7 @@ std::string
 
     src += rocfft_complex_h;
     src += common_h;
+    src += device_enum_h;
     src += rtc_precision_type_decl(precision);
     src += "static constexpr double TWO_PI = -6.283185307179586476925286766559;\n";
     src += "static const unsigned int TWIDDLES_MAX_RADICES = "

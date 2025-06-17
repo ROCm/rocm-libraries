@@ -1,0 +1,264 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+set(_CMAKE_CURRENT_SOURCE_DIR ${TEMP_HOST_SOURCE_DIR}/src)
+
+target_sources(
+  rocblas-helper
+  PRIVATE ${_CMAKE_CURRENT_SOURCE_DIR}/handle.cpp
+          ${_CMAKE_CURRENT_SOURCE_DIR}/logging.cpp
+          ${_CMAKE_CURRENT_SOURCE_DIR}/rocblas_auxiliary.cpp
+          ${_CMAKE_CURRENT_SOURCE_DIR}/buildinfo.cpp
+          ${_CMAKE_CURRENT_SOURCE_DIR}/rocblas_ostream.cpp
+          ${_CMAKE_CURRENT_SOURCE_DIR}/check_numerics_vector.cpp
+          ${_CMAKE_CURRENT_SOURCE_DIR}/check_numerics_matrix.cpp
+          ${_CMAKE_CURRENT_SOURCE_DIR}/utility.cpp)
+
+if(ROCBLAS_ENABLE_TENSILE)
+  target_sources(rocblas PRIVATE ${_CMAKE_CURRENT_SOURCE_DIR}/tensile_host.cpp)
+endif()
+
+if(ROCBLAS_ENABLE_HIPBLASLT)
+  target_sources(rocblas
+                 PRIVATE ${_CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_host.cpp)
+endif()
+
+target_sources(
+  rocblas
+  PRIVATE
+    # rocblas_blas3_source: L3 sources that use Tensile but can also use source
+    # GEMM as fallback
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_trsm.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_trsm_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_trsm_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_trsm_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_trsm_batched_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_hemm.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_hemm_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_hemm_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_herk.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_herk_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_herk_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_her2k.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_her2k_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_her2k_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_herkx.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_herkx_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_herkx_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_symm.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_symm_hemm_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_symm_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_symm_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_syrk.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_syrk_herk_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_syrk_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_syrk_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_syr2k.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_syr2k_her2k_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_syr2k_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_syr2k_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_gemm.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_gemm_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_gemm_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/Tensile/gemm_templates.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_syrkx.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_syrkx_herkx_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_syrkx_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_syrkx_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_trmm.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_trmm_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_trmm_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_trmm_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_trtri.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_trtri_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_trtri_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_trtri_kernels.cpp
+    # rocblas_blas3_source_no_tensile
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_dgmm.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_dgmm_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_dgmm_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_dgmm_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_geam.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_geam_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_geam_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas3/rocblas_geam_strided_batched.cpp
+    # rocblas_blas2_source
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_trsv.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_trsv_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_trsv_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_trsv_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_gemv.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_gemv_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_gemv_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_gemv_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_tpmv.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_tpmv_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_tpmv_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_tpmv_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_gbmv.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_gbmv_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_gbmv_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_gbmv_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_tbsv.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_tbsv_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_tbsv_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_tbsv_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_trmv.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_trmv_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_trmv_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_trmv_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_ger.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_ger_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_ger_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_ger_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hbmv.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hbmv_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hbmv_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hbmv_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hemv.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hemv_symv_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hemv_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hemv_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_her.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_her_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_her_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_her_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_her2.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_her2_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_her2_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_her2_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hpmv.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hpmv_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hpmv_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hpmv_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hpr.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hpr_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hpr_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hpr_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hpr2.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hpr2_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hpr2_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_hpr2_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_spr.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_spr_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_spr_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_spr_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_spr2.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_spr2_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_spr2_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_spr2_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_syr.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_syr_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_syr_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_syr_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_syr2.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_syr2_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_syr2_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_syr2_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_tbmv.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_tbmv_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_tbmv_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_tbmv_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_tpsv.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_tpsv_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_tpsv_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_tpsv_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_sbmv.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_sbmv_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_sbmv_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_sbmv_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_spmv.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_spmv_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_spmv_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_spmv_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_symv.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_symv_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas2/rocblas_symv_strided_batched.cpp
+    # rocblas_blas1_source
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_iamax_iamin_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_iamin.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_iamin_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_iamin_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_iamax.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_iamax_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_iamax_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_asum.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_asum_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_asum_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_axpy.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_axpy_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_axpy_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_axpy_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_copy.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_copy_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_copy_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_copy_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_dot.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_dot_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_dot_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_dot_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_nrm2.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_nrm2_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_nrm2_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_asum_nrm2_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_rot.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_rot_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_rot_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_rot_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_rotg.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_rotg_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_rotg_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_rotg_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_rotm.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_rotm_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_rotm_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_rotm_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_rotmg.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_rotmg_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_rotmg_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_rotmg_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_scal.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_scal_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_scal_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_scal_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_swap.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_swap_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_swap_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas1/rocblas_swap_strided_batched.cpp
+    # rocblas_ex_source_no_tensile
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_axpy_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_axpy_ex_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_axpy_batched_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_axpy_strided_batched_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_dot_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_dot_ex_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_dot_batched_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_dot_strided_batched_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_rot_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_rot_ex_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_rot_batched_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_rot_strided_batched_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_scal_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_scal_ex_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_scal_batched_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_scal_strided_batched_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_nrm2_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_nrm2_ex_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_nrm2_batched_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_nrm2_strided_batched_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_geam_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_geam_ex_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_gemmt.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_gemmt_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_gemmt_strided_batched.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_gemmt_kernels.cpp
+    # May use Tensile or source GEMM as fallback
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_gemm_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_gemm_batched_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_gemm_strided_batched_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_gemm_ex_kernels.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_trsv_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_trsv_strided_batched_ex.cpp
+    ${_CMAKE_CURRENT_SOURCE_DIR}/blas_ex/rocblas_trsv_batched_ex.cpp)
+
+add_subdirectory(src64)

@@ -721,9 +721,9 @@ struct StockhamKernelRC : public StockhamKernel
         return {If{sbrc_type == "SBRC_3D_FFT_ERC_TRANS_Z_XY", stmts}};
     }
 
-    StatementList real_trans_pre_post(ProcessingType type) override
+    StatementList real_trans_pre_post() override
     {
-        if(type == ProcessingType::PRE)
+        if(ebtype != EmbeddedType::Real2C_POST)
             return {};
 
         // POST is implemented when sbrc_typs is SBRC_3D_FFT_ERC_TRANS_Z_XY

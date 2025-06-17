@@ -102,7 +102,6 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     Variable scalar_type{"scalar_type", "typename"};
     Variable callback_type{"cbtype", "CallbackType"};
     Variable stride_type{"sb", "StrideBin"};
-    Variable embedded_type{"ebtype", "EmbeddedType"};
     Variable directReg_type{"drtype", "DirectRegType"};
 
     //
@@ -241,7 +240,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
     virtual TemplateList global_templates()
     {
-        return {scalar_type, stride_type, embedded_type, callback_type, directReg_type};
+        return {scalar_type, stride_type, callback_type, directReg_type};
     }
 
     virtual ArgumentList device_lds_reg_inout_arguments()
@@ -275,9 +274,11 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     {
         // by default (RR): "direct-to-reg" and "direct-from-reg" at the same time
         if(direct_to_from_reg)
-            return {Declaration{direct_load_to_reg,
-                                And{directReg_type == "DirectRegType::TRY_ENABLE_IF_SUPPORT",
-                                    embedded_type == "EmbeddedType::NONE"}},
+            return {Declaration{
+                        direct_load_to_reg,
+                        ebtype == EmbeddedType::NONE
+                            ? Expression{directReg_type == "DirectRegType::TRY_ENABLE_IF_SUPPORT"}
+                            : Expression{Literal{"false"}}},
                     Declaration{direct_store_from_reg, direct_load_to_reg},
                     Declaration{lds_linear, Literal{"true"}}};
         else
@@ -289,7 +290,8 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     virtual StatementList set_lds_is_real()
     {
         if(half_lds)
-            return {Declaration{lds_is_real, embedded_type == "EmbeddedType::NONE"}};
+            return {Declaration{lds_is_real,
+                                ebtype == EmbeddedType::NONE ? Literal{"true"} : Literal{"false"}}};
         else
             return {Declaration{lds_is_real, Literal{"false"}}};
     }
@@ -305,12 +307,6 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         return {};
     }
 
-    enum class ProcessingType
-    {
-        PRE,
-        POST,
-    };
-
     enum class ThreadGuardMode
     {
         NO_GUARD,
@@ -318,7 +314,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         GURAD_BY_FUNC_ARG,
     };
 
-    virtual StatementList real_trans_pre_post(ProcessingType type)
+    virtual StatementList real_trans_pre_post()
     {
         return {};
     }
@@ -327,7 +323,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     // processing
     virtual Expression get_lds_padding()
     {
-        return Ternary{embedded_type == "EmbeddedType::NONE", 0, 1};
+        return ebtype == EmbeddedType::NONE ? Literal{0} : Literal{1};
     }
 
     StatementList load_lds_generator(unsigned int h,
@@ -794,7 +790,8 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         loadlds += load_from_global(false);
         loadlds += LineBreak{};
         // handle even-length real to complex pre-process in lds before transform
-        loadlds += real_trans_pre_post(ProcessingType::PRE);
+        if(ebtype == EmbeddedType::C2Real_PRE)
+            loadlds += real_trans_pre_post();
 
         if(!direct_to_from_reg)
         {
@@ -868,7 +865,8 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         StatementList storelds;
         storelds += LineBreak{};
         // handle even-length complex to real post-process in lds after transform
-        storelds += real_trans_pre_post(ProcessingType::POST);
+        if(ebtype == EmbeddedType::Real2C_POST)
+            storelds += real_trans_pre_post();
         storelds += LineBreak{};
         storelds += CommentLines{"store global"};
         storelds += SyncThreads{};
@@ -929,16 +927,15 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                 Literal{"true"}};
     }
 
-    StatementList real2cmplx_pre_post(unsigned int   half_N,
-                                      ProcessingType type,
-                                      unsigned int   tpt,
-                                      unsigned int   twd_offset)
+    StatementList
+        real2cmplx_pre_post(unsigned int half_N, unsigned int tpt, unsigned int twd_offset)
     {
-        std::string function_name = type == ProcessingType::PRE
+        if(ebtype == EmbeddedType::NONE)
+            return {};
+
+        std::string function_name = ebtype == EmbeddedType::C2Real_PRE
                                         ? "real_pre_process_kernel_inplace"
                                         : "real_post_process_kernel_inplace";
-        std::string template_type = type == ProcessingType::PRE ? "EmbeddedType::C2Real_PRE"
-                                                                : "EmbeddedType::Real2C_POST";
         Variable    Ndiv4{half_N % 2 == 0 ? "true" : "false", "bool"};
         auto        quarter_N = half_N / 2;
         if(half_N % 2 == 1)
@@ -970,12 +967,12 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                                          twiddles + twd_offset};
             stmts += Call{function_name, tpls, args};
         }
-        if(type == ProcessingType::PRE)
+        if(ebtype == EmbeddedType::C2Real_PRE)
         {
             stmts += SyncThreads();
             stmts += LineBreak();
         }
 
-        return {If{Equal{embedded_type, template_type}, stmts}};
+        return stmts;
     }
 };

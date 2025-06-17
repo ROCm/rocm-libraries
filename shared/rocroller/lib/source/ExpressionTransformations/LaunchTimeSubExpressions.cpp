@@ -78,8 +78,9 @@ namespace rocRoller
 
                 auto argName = kernel->uniqueArgName(argumentName(expr));
 
-                Log::debug("LTSE: Adding arg {}: varType {}, expr {}",
+                Log::debug("LTSE: Adding arg {} complexity {}, varType {}, expr {}",
                            argName,
+                           complexity(expr),
                            toString(varType),
                            toString(expr));
 
@@ -109,7 +110,8 @@ namespace rocRoller
                 auto                        ex2    = sub.call(expr);
                 auto                        myComp = complexity(ex2);
 
-                if(ignoreComplexity || complexity(expr) >= m_minComplexity)
+                if(ignoreComplexity || !evalTimes[EvaluationTime::KernelExecute]
+                   || complexity(expr) >= m_minComplexity)
                     return addLaunchEval(expr);
 
                 return nullptr;

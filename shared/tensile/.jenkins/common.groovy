@@ -26,14 +26,14 @@
 // If you are interested in running your own Jenkins,
 // please raise a github issue for assistance.
 
-def runCompileCommand(platform, project, jobName, boolean debug=false)
+def runCompileCommand(platform, project, jobName, boolean debug=false, boolean codecov=false)
 {
     project.paths.construct_build_prefix()
 
     String compiler = '/opt/rocm/bin/amdclang++'
     // Do release build of HostLibraryTests on CI until it is upgraded to rocm 5.3 to
     // avoid bug causing long build times of certain files.
-    String buildType = 'Release' // debug ? 'Debug' : 'RelWithDebInfo'
+    String buildType = (debug || codecov) ? 'Debug' : 'Release'
     
     int systemCPUs = sh(script: 'nproc', returnStdout: true ).trim().toInteger()
     long containerRAMbytes = sh(script: 'if [ -f /sys/fs/cgroup/memory.max ]; then cat /sys/fs/cgroup/memory.max; else cat /sys/fs/cgroup/memory/memory.limit_in_bytes; fi', returnStdout: true ).trim().toLong()
@@ -50,6 +50,8 @@ def runCompileCommand(platform, project, jobName, boolean debug=false)
     {
         sclCommand = "source scl_source enable gcc-toolset-12"
     }
+
+    String codeCovString = codecov ? "-DTENSILE_ENABLE_COVERAGE=ON" : ""
 
     def command = """#!/usr/bin/env bash
             set -ex
@@ -69,7 +71,10 @@ def runCompileCommand(platform, project, jobName, boolean debug=false)
                 -DCMAKE_CXX_COMPILER=${compiler} \
                 -DCMAKE_CXX_FLAGS="-D__HIP_HCC_COMPAT_MODE__=1" \
                 -DTensile_CPU_THREADS=${buildThreads} \
-                -DTensile_ROOT=`pwd`/../Tensile
+                -DTensile_ROOT=`pwd`/../Tensile \
+                -DCMAKE_FIND_DEBUG_MODE=ON \
+                ${codeCovString}
+
             
             make -j\$((`nproc`<16 ? `nproc` : 16))
 
@@ -79,6 +84,20 @@ def runCompileCommand(platform, project, jobName, boolean debug=false)
     platform.runCommand(this, command)
 }
 
+def runCodecovTestCommand(platform, project, jobName)
+{
+    def command = "cd ${project.paths.project_build_prefix}/build && make coverage"
+    platform.runCommand(this, command)
+
+    this.publishHTML([allowMissing: false,
+        alwaysLinkToLastBuild: false,
+        keepAll: false,
+        reportDir: "${project.paths.project_build_prefix}/build/coverage-report",
+        reportFiles: "index.html",
+        reportName: "Code coverage report",
+        reportTitles: "Code coverage report"
+    ])
+}
 
 def runTestCommand(platform, project, jobName, testMark, boolean runHostTest=true, boolean runUnitTest=true, boolean runToxTest=true)
 {

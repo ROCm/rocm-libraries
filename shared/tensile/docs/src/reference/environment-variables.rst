@@ -10,60 +10,59 @@ Environment variables
 
 This topic lists the environment variables that enable testing, debugging, and experimental features for Tensile clients and applications.
 
-.. list-table:: Environment variables
-  :header-rows: 1
-  :widths: 30 30 30
+.. list-table::
+    :header-rows: 1
+    :widths: 50,50
 
-  * - Environment variable
-    - Description
-    - Values
+    * - **Environment variable**
+      - **Value**
 
-  * - TENSILE_DB
-    - Enables debugging features based on the supplied value.
-      TENSILE_DB is a bit field, so options can be set individually or combined. To enable all debug output, set TENSILE_DB=0xFFFF.
-    - | 0x2 or 0x4 \- Prints extra information about the solution selection process. Indicates if a kernel was an exact match, or if a sequence of kernels is considered for a closest match.
-      | 0x8 \- Prints extra information about the hardware selection process.
-      | 0x10 \- Prints debug-level information about predicate evaluations.
-      | 0x20 \- Prints a list of loaded or missing code object libraries.
-      | 0x40 \- Prints kernel launch arguments, including the kernel name, work group size and count, and all arguments passed.
-      | 0x80 \- Prints size of allocated tensors.
-      | 0x100 \- Prints debug information about convolution reference calculations.
-      | 0x200 \- Prints more detailed information about convolution reference calculations.
-      | 0x1000 \- Prints information about the loading of embedded, YAML, or MessagePack libraries.
-      | 0x4000 \- Prints solution lookup efficiency.
-      | 0x8000 \- Prints the name of selected kernels.
-      | 0x80000 \- Prints the name of selected kernels and number of common kernel parameters such as Matrix Instruction, MacroTile, ThreadTile, DepthU, and so on.
+    * - | ``TENSILE_DB``
+        | Enables debugging features based on the supplied value. Bit field options can be set individually or combined.
+      - | Hexadecimal bit field values:
+        | ``0x2`` or ``0x4``: Solution selection process information
+        | ``0x8``: Hardware selection process information
+        | ``0x10``: Predicate evaluation debug information
+        | ``0x20``: Code object library loading status
+        | ``0x40``: Kernel launch arguments and parameters
+        | ``0x80``: Allocated tensor sizes
+        | ``0x100``: Convolution reference calculation debug info
+        | ``0x200``: Detailed convolution reference calculations
+        | ``0x1000``: Library loading information (YAML/MessagePack)
+        | ``0x4000``: Solution lookup efficiency
+        | ``0x8000``: Selected kernel names
+        | ``0x80000``: Detailed kernel parameters (Matrix Instruction, MacroTile, etc.)
+        | ``0xFFFF``: Enable all debug output
 
-  * - TENSILE_DB2
-    - Enables extended debugging features based on the supplied value. When enabled, Tensile skips launching kernels for debug purposes, but continues to perform other steps such as kernel selection,
-      data allocation, and initialization.
-    - | 1 \- Enable
-      | 2 \- Disable
+    * - | ``TENSILE_DB2``
+        | Enables extended debugging features. Skips kernel launches but continues kernel selection and data allocation.
+      - | ``1``: Enable extended debugging
+        | ``2``: Disable extended debugging
 
-  * - TENSILE_NAIVE_SEARCH
-    - Performs a naive search for matching kernels instead of the standard optimized search.
-    - | 1 \- Enable
-      | 2 \- Disable
+    * - | ``TENSILE_NAIVE_SEARCH``
+        | Performs naive search for matching kernels instead of optimized search.
+      - | ``1``: Enable naive search
+        | ``2``: Disable naive search
 
-  * - TENSILE_TAM_SELECTION_ENABLE
-    - Enables tile aware solution selection.
-    - | 1 \- Enable
-      | 2 \- Disable
+    * - | ``TENSILE_TAM_SELECTION_ENABLE``
+        | Enables tile aware solution selection.
+      - | ``1``: Enable tile aware selection
+        | ``2``: Disable tile aware selection
 
-  * - TENSILE_SOLUTION_INDEX
-    - Prints the index of the selected solution.
-    - | 1 \- Enable
-      | 2 \- Disable
+    * - | ``TENSILE_SOLUTION_INDEX``
+        | Prints the index of the selected solution.
+      - | ``1``: Enable solution index printing
+        | ``2``: Disable solution index printing
 
-  * - TENSILE_METRIC
-    - Overrides the default distance matrix for solution selection with the supplied value.
-    - | "Euclidean"
-      | "JSD"
-      | "Manhattan"
-      | "Ratio"
-      | "Random"
+    * - | ``TENSILE_METRIC``
+        | Overrides the default distance matrix for solution selection.
+      - | "Euclidean": Euclidean distance metric
+        | "JSD": Jensen-Shannon divergence metric
+        | "Manhattan": Manhattan distance metric
+        | "Ratio": Ratio-based metric
+        | "Random": Random selection metric
 
-  * - TENSILE_PROFILE
-    - When enabled, all functions decorated with ``@profile`` are profiled and results are generated as ``.prof`` files.
-    - | 1, "ON", "TRUE" \- Enable
-      | Any other value \- Disable
+    * - | ``TENSILE_PROFILE``
+        | Enables profiling of functions decorated with @profile decorator. Results generated as .prof files.
+      - | ``1``, "ON", "TRUE": Enable profiling
+        | Any other value: Disable profiling

@@ -26,12 +26,14 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <catch2/generators/catch_generators_range.hpp>
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
@@ -57,7 +59,7 @@ namespace ConnectWorkgroupsTest
 
         KernelGraph graph0;
 
-        uint vX = 5u, vY = 7u;
+        int vX = 5, vY = 7;
 
         auto tileNumAD = graph0.coordinates.addElement(MacroTileNumber(0, literal(vX), nullptr));
         auto tileNumBD = graph0.coordinates.addElement(MacroTileNumber(1, literal(vY), nullptr));
@@ -131,11 +133,9 @@ namespace ConnectWorkgroupsTest
         using GD = rocRoller::Graph::Direction;
 
     public:
-        RemapWorkgroupKernel(rocRoller::ContextPtr context, int dim, uint numTilesM, uint numTilesN)
+        RemapWorkgroupKernel(rocRoller::ContextPtr context, int dim)
             : AssemblyTestKernel(context)
             , m_dim(dim)
-            , m_numTilesX(numTilesM)
-            , m_numTilesY(numTilesN)
         {
             makeGraph();
         }
@@ -156,11 +156,6 @@ namespace ConnectWorkgroupsTest
             return exprs;
         }
 
-        uint reference(uint wg)
-        {
-            return 0;
-        }
-
         void generate() override
         {
             using namespace rocRoller;
@@ -179,12 +174,12 @@ namespace ConnectWorkgroupsTest
                 auto v_wgx
                     = Register::Value::Placeholder(m_context,
                                                    Register::Type::Vector,
-                                                   {DataType::UInt32, PointerType::PointerGlobal},
+                                                   {DataType::Int32, PointerType::PointerGlobal},
                                                    1);
                 auto v_wgy
                     = Register::Value::Placeholder(m_context,
                                                    Register::Type::Vector,
-                                                   {DataType::UInt32, PointerType::PointerGlobal},
+                                                   {DataType::Int32, PointerType::PointerGlobal},
                                                    1);
 
                 co_yield v_wgx->allocate();
@@ -207,17 +202,17 @@ namespace ConnectWorkgroupsTest
                 co_yield Expression::generate(s_remappedY, exprs[1], m_context);
 
                 auto v_remappedX = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, {DataType::UInt32}, 1);
+                    m_context, Register::Type::Vector, {DataType::Int32}, 1);
                 co_yield m_context->copier()->copy(v_remappedX, s_remappedX, "Move value");
 
                 auto v_remappedY = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, {DataType::UInt32}, 1);
+                    m_context, Register::Type::Vector, {DataType::Int32}, 1);
                 co_yield m_context->copier()->copy(v_remappedY, s_remappedY, "Move value");
 
                 co_yield m_context->mem()->storeGlobal(
-                    v_wgx, v_remappedX, 0, DataTypeInfo::Get(DataType::UInt32).elementBytes);
+                    v_wgx, v_remappedX, 0, DataTypeInfo::Get(DataType::Int32).elementBytes);
                 co_yield m_context->mem()->storeGlobal(
-                    v_wgy, v_remappedY, 0, DataTypeInfo::Get(DataType::UInt32).elementBytes);
+                    v_wgy, v_remappedY, 0, DataTypeInfo::Get(DataType::Int32).elementBytes);
             };
 
             m_context->schedule(kb());
@@ -237,30 +232,54 @@ namespace ConnectWorkgroupsTest
 
             m_command  = std::make_shared<rocRoller::Command>();
             auto wgmOp = m_command->addOperation(
-                rocRoller::Operations::Scalar(rocRoller::DataType::UInt32));
+                rocRoller::Operations::Scalar(rocRoller::DataType::Int32));
             auto wgmCommandArgument
-                = m_command->allocateArgument(rocRoller::DataType::UInt32,
+                = m_command->allocateArgument(rocRoller::DataType::Int32,
                                               wgmOp,
                                               rocRoller::ArgumentType::Value,
                                               rocRoller::DataDirection::ReadOnly);
             m_wgm = kernel->addArgument({"WGM",
-                                         rocRoller::DataType::UInt32,
+                                         rocRoller::DataType::Int32,
                                          rocRoller::DataDirection::ReadOnly,
                                          wgmCommandArgument->expression()});
+
+            auto numTilesXOp = m_command->addOperation(
+                rocRoller::Operations::Scalar(rocRoller::DataType::Int32));
+            auto numTilesXCommandArgument
+                = m_command->allocateArgument(rocRoller::DataType::Int32,
+                                              numTilesXOp,
+                                              rocRoller::ArgumentType::Value,
+                                              rocRoller::DataDirection::ReadOnly);
+            m_numTilesX = kernel->addArgument({"numTilesX",
+                                               {rocRoller::DataType::Int32},
+                                               rocRoller::DataDirection::ReadOnly,
+                                               numTilesXCommandArgument->expression()});
+
+            auto numTilesYOp = m_command->addOperation(
+                rocRoller::Operations::Scalar(rocRoller::DataType::Int32));
+            auto numTilesYCommandArgument
+                = m_command->allocateArgument(rocRoller::DataType::Int32,
+                                              numTilesYOp,
+                                              rocRoller::ArgumentType::Value,
+                                              rocRoller::DataDirection::ReadOnly);
+            m_numTilesY = kernel->addArgument({"numTilesY",
+                                               {rocRoller::DataType::Int32},
+                                               rocRoller::DataDirection::ReadOnly,
+                                               numTilesYCommandArgument->expression()});
+            enableDivideBy(m_numTilesY, m_context);
+
             kernel->addArgument(
                 {"WGX",
-                 {rocRoller::DataType::UInt32, rocRoller::PointerType::PointerGlobal},
+                 {rocRoller::DataType::Int32, rocRoller::PointerType::PointerGlobal},
                  rocRoller::DataDirection::WriteOnly});
             kernel->addArgument(
                 {"WGY",
-                 {rocRoller::DataType::UInt32, rocRoller::PointerType::PointerGlobal},
+                 {rocRoller::DataType::Int32, rocRoller::PointerType::PointerGlobal},
                  rocRoller::DataDirection::WriteOnly});
 
             KernelGraph graph;
 
-            TileSizeInfo info{.sizes = {rocRoller::Expression::literal(m_numTilesX),
-                                        rocRoller::Expression::literal(m_numTilesY),
-                                        nullptr}};
+            TileSizeInfo info{.sizes = {m_numTilesX, m_numTilesY, nullptr}};
 
             std::tie(m_workgroupU, m_wgx, m_wgy) = workgroupMapping(
                 info, graph, rocRoller::Graph::Direction::Downstream, m_dim, m_wgm);
@@ -271,20 +290,15 @@ namespace ConnectWorkgroupsTest
         rocRoller::KernelGraph::KernelGraphPtr m_graph;
         rocRoller::CommandPtr                  m_command;
 
-        uint m_numTilesX, m_numTilesY;
-
         int m_dim;
         int m_workgroupU;
         int m_wgx, m_wgy;
 
-        rocRoller::Expression::ExpressionPtr m_wgm;
+        rocRoller::Expression::ExpressionPtr m_wgm, m_numTilesX, m_numTilesY;
     };
 
     TEST_CASE("Remap Workgroup GPU", "[kernel-graph][gpu]")
     {
-        uint numTilesM = 22u;
-        uint numTilesN = 7u;
-
         auto remapDim = GENERATE(0, 1);
         {
             // Note:
@@ -294,52 +308,81 @@ namespace ConnectWorkgroupsTest
             //
             // The remapped dimension is baked into the kernel
 
-            auto context = TestContext::ForTestDevice().get();
-            auto kernel  = RemapWorkgroupKernel(context, remapDim, numTilesM, numTilesN);
+            auto context = TestContext::ForTestDevice();
+            auto kernel  = RemapWorkgroupKernel(context.get(), remapDim);
 
-            auto totalSize = numTilesM * numTilesN;
+            auto numTilesM = GENERATE(22, 55);
+            auto numTilesN = GENERATE(7, 8, 11);
 
-            auto WGM = GENERATE(3u, 5u, 7u);
+            uint totalSize = numTilesM * numTilesN;
+
+            auto WGM = GENERATE(range(1, 50));
             {
                 //
                 // WGM is the workgroup-mapping "group size".  It is a kernel argument.
                 //
 
                 // Launch kernel
-                std::vector<uint> wgx(totalSize), wgy(totalSize);
+                std::vector<int> wgx(totalSize), wgy(totalSize);
                 {
                     auto d_wgx      = make_shared_device(wgx);
                     auto d_wgy      = make_shared_device(wgy);
                     auto invocation = rocRoller::KernelInvocation{{totalSize, 1, 1}, {1, 1, 1}, 0};
-                    kernel(invocation, WGM, d_wgx.get(), d_wgy.get());
+
+                    kernel(invocation,
+                           WGM,
+                           numTilesM,
+                           numTilesN,
+                           evaluate(magicMultiple(rocRoller::Expression::literal(numTilesN))),
+                           evaluate(magicShifts(rocRoller::Expression::literal(numTilesN))),
+                           evaluate(magicSign(rocRoller::Expression::literal(numTilesN))),
+                           d_wgx.get(),
+                           d_wgy.get());
 
                     CHECK_THAT(
                         hipMemcpy(
-                            wgx.data(), d_wgx.get(), sizeof(uint) * totalSize, hipMemcpyDefault),
+                            wgx.data(), d_wgx.get(), sizeof(int) * totalSize, hipMemcpyDefault),
                         HasHipSuccess(0));
                     CHECK_THAT(
                         hipMemcpy(
-                            wgy.data(), d_wgy.get(), sizeof(uint) * totalSize, hipMemcpyDefault),
+                            wgy.data(), d_wgy.get(), sizeof(int) * totalSize, hipMemcpyDefault),
                         HasHipSuccess(0));
                 }
 
-                // Check result
-                std::map<std::pair<uint, uint>, int> coverage;
+                // Build coverage
+                std::map<std::pair<int, int>, int> coverage;
                 for(uint i = 0; i < totalSize; ++i)
                 {
-                    auto mapped = std::pair<uint, uint>{wgx[i], wgy[i]};
+                    auto mapped = std::pair<int, int>{wgx[i], wgy[i]};
                     coverage[mapped]++;
                 }
 
-                CHECK(coverage.size() == totalSize);
-                for(uint i = 0; i < numTilesM; ++i)
+                // Make sure everything is covered
+                bool coverageOK = true;
+                for(int i = 0; i < numTilesM; ++i)
                 {
-                    for(uint j = 0; j < numTilesN; ++j)
+                    for(int j = 0; j < numTilesN; ++j)
                     {
-                        auto mapped = std::pair<uint, uint>{i, j};
-                        CHECK(coverage[mapped] == 1);
+                        auto mapped = std::pair<int, int>{i, j};
+                        coverageOK &= coverage[mapped] == 1;
                     }
                 }
+
+                // Make sure first few entries are correct
+                bool fastDimOK = true;
+                int  blockSize = std::min(WGM, remapDim == 0 ? numTilesM : numTilesN);
+                for(int i = 0; i < blockSize; ++i)
+                {
+                    auto value = remapDim == 0 ? wgx[i] : wgy[i];
+                    if(value != i)
+                        fastDimOK = false;
+                }
+
+                INFO(fmt::format(
+                    " M {:2d} N {:2d} remap ({},{:2d})", numTilesM, numTilesN, remapDim, WGM));
+                CHECK(coverage.size() == totalSize);
+                CHECK(coverageOK);
+                CHECK(fastDimOK);
             }
         }
     }
@@ -399,7 +442,7 @@ namespace ConnectWorkgroupsTest
             auto kernel = m_context->kernel();
 
             kernel->addArgument({"result",
-                                 {DataType::UInt32, PointerType::PointerGlobal},
+                                 {DataType::Int32, PointerType::PointerGlobal},
                                  DataDirection::WriteOnly});
 
             m_context->schedule(kernel->preamble());
@@ -412,7 +455,7 @@ namespace ConnectWorkgroupsTest
                 auto v_result
                     = Register::Value::Placeholder(m_context,
                                                    Register::Type::Vector,
-                                                   {DataType::UInt32, PointerType::PointerGlobal},
+                                                   {DataType::Int32, PointerType::PointerGlobal},
                                                    1);
 
                 auto expr = kernelRemapWorkgroupExpression();
@@ -429,11 +472,11 @@ namespace ConnectWorkgroupsTest
                 co_yield Expression::generate(s_remappedWG, expr, m_context);
 
                 auto v_remappedWG = Register::Value::Placeholder(
-                    m_context, Register::Type::Vector, {DataType::UInt32}, 1);
+                    m_context, Register::Type::Vector, {DataType::Int32}, 1);
                 co_yield m_context->copier()->copy(v_remappedWG, s_remappedWG, "Move value");
 
                 co_yield m_context->mem()->storeGlobal(
-                    v_result, v_remappedWG, 0, DataTypeInfo::Get(DataType::UInt32).elementBytes);
+                    v_result, v_remappedWG, 0, DataTypeInfo::Get(DataType::Int32).elementBytes);
             };
 
             m_context->schedule(kb());
@@ -529,8 +572,8 @@ namespace ConnectWorkgroupsTest
         uint numXCC = 8u;
         uint size   = 55u * numXCC + 3u;
 
-        auto context = TestContext::ForTestDevice().get();
-        auto kernel  = RemapWorkgroupXCCKernel(context, numXCC, size);
+        auto context = TestContext::ForTestDevice();
+        auto kernel  = RemapWorkgroupXCCKernel(context.get(), numXCC, size);
 
         // Launch kernel
         std::vector<uint> result(size);

@@ -34,6 +34,7 @@ import rrperf.optimize_weights
 import rrperf.profile
 import rrperf.rocm_control
 import rrperf.run
+import rrperf.generate
 import rrperf.ls
 import rrperf.specs
 from rrperf.problems import *

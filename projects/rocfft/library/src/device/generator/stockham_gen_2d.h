@@ -132,8 +132,10 @@ struct StockhamKernelFused2D : public StockhamKernelRR
                                   LoadGlobal{buf, offset + thread_id * stride[0] + length1}}}};
             }
 
-            stmts += If{embedded_type != "EmbeddedType::C2Real_PRE", load_stmts};
-            stmts += Else{load_trans_stmts};
+            if(ebtype != EmbeddedType::C2Real_PRE)
+                stmts += load_stmts;
+            else
+                stmts += load_trans_stmts;
         }
         else
         {
@@ -178,12 +180,13 @@ struct StockhamKernelFused2D : public StockhamKernelRR
                 store_stmts += LineBreak{};
                 store_stmts += CommentLines{"append extra global store for Real2C "
                                             "post-process only, one more element per row."};
-                store_stmts
-                    += If{Equal{embedded_type, "EmbeddedType::Real2C_POST"},
-                          {If{Less{thread_id, length1},
+
+                if(ebtype == EmbeddedType::Real2C_POST)
+                    store_stmts
+                        += If{Less{thread_id, length1},
                               {StoreGlobal{buf,
                                            offset + (thread_id * stride[1]) + length0,
-                                           lds_complex[(thread_id * stride_lds) + length0]}}}}};
+                                           lds_complex[(thread_id * stride_lds) + length0]}}};
             }
 
             // store when shape is transposed (for C2Real_PRE)
@@ -204,8 +207,10 @@ struct StockhamKernelFused2D : public StockhamKernelRR
                 }
             }
 
-            stmts += If{embedded_type != "EmbeddedType::C2Real_PRE", store_stmts};
-            stmts += Else{store_trans_stmts};
+            if(ebtype != EmbeddedType::C2Real_PRE)
+                stmts += store_stmts;
+            else
+                stmts += store_trans_stmts;
         }
         else
         {
@@ -215,11 +220,14 @@ struct StockhamKernelFused2D : public StockhamKernelRR
         return stmts;
     }
 
-    StatementList real_trans_pre_post(ProcessingType type) override
+    StatementList real_trans_pre_post() override
     {
-        std::string pre_post     = (type == ProcessingType::PRE) ? " before " : " after ";
-        auto        pre_post_len = (type == ProcessingType::PRE) ? kernel1.length : kernel0.length;
-        auto        pre_post_tpt = (type == ProcessingType::PRE) ? kernel1.threads_per_transform
+        if(ebtype == EmbeddedType::NONE)
+            return {};
+
+        std::string pre_post = (ebtype == EmbeddedType::C2Real_PRE) ? " before " : " after ";
+        auto pre_post_len = (ebtype == EmbeddedType::C2Real_PRE) ? kernel1.length : kernel0.length;
+        auto pre_post_tpt = (ebtype == EmbeddedType::C2Real_PRE) ? kernel1.threads_per_transform
                                                                  : kernel0.threads_per_transform;
 
         auto twd_offset = (kernel0.length - kernel0.factors.front());
@@ -231,7 +239,7 @@ struct StockhamKernelFused2D : public StockhamKernelRR
         StatementList stmts;
         stmts += CommentLines{"handle even-length real to complex pre-process in lds" + pre_post
                               + "transform"};
-        stmts += real2cmplx_pre_post(pre_post_len, type, pre_post_tpt, twd_offset);
+        stmts += real2cmplx_pre_post(pre_post_len, pre_post_tpt, twd_offset);
         return stmts;
     }
 
@@ -296,12 +304,10 @@ struct StockhamKernelFused2D : public StockhamKernelRR
         body += Declaration{direct_store_from_reg, "false"};
         body += CallbackLoadDeclaration{scalar_type.name, callback_type.name};
         body += CallbackStoreDeclaration{scalar_type.name, callback_type.name};
-        body += Declaration{
-            SB_1ST,
-            Ternary{Parens(embedded_type == "EmbeddedType::C2Real_PRE"), "SB_NONUNIT", "SB_UNIT"}};
-        body += Declaration{
-            SB_2ND,
-            Ternary{Parens(embedded_type == "EmbeddedType::C2Real_PRE"), "SB_UNIT", "SB_NONUNIT"}};
+        body
+            += Declaration{SB_1ST, (ebtype == EmbeddedType::C2Real_PRE) ? "SB_NONUNIT" : "SB_UNIT"};
+        body
+            += Declaration{SB_2ND, (ebtype == EmbeddedType::C2Real_PRE) ? "SB_UNIT" : "SB_NONUNIT"};
 
         body += LineBreak{};
         body += CommentLines{"transform is: 2D slab number (1 per block)"};
@@ -326,11 +332,10 @@ struct StockhamKernelFused2D : public StockhamKernelRR
         body += Assign{offset, offset + batch0 * stride[dim]};
 
         body += Assign{stride_lds,
-                       Ternary{Parens(embedded_type == "EmbeddedType::Real2C_POST"),
-                               length0_ebtype_post_padded,
-                               Ternary{Parens(embedded_type == "EmbeddedType::C2Real_PRE"),
-                                       length1_ebtype_pre_padded,
-                                       length0_padded}}};
+                       ebtype == EmbeddedType::Real2C_POST
+                           ? length0_ebtype_post_padded
+                           : (ebtype == EmbeddedType::C2Real_PRE ? length1_ebtype_pre_padded
+                                                                 : length0_padded)};
 
         // load
         body += LineBreak{};
@@ -361,9 +366,9 @@ struct StockhamKernelFused2D : public StockhamKernelRR
 
         body += CommentLines{"offset_lds is the starting lds-ptr of each ROW (or COL if C2R_PRE)"};
         body += Assign{offset_lds,
-                       Ternary{Parens(embedded_type != "EmbeddedType::C2Real_PRE"),
-                               stride_lds * (thread_id / height),
-                               thread_id / height}};
+                       (ebtype != EmbeddedType::C2Real_PRE)
+                           ? Expression{stride_lds * (thread_id / height)}
+                           : Expression{thread_id / height}};
         body += CommentLines{"calc the thread_in_device value once and for all device funcs"};
         body += Declaration{thread_in_device,
                             Ternary{lds_linear,
@@ -404,12 +409,16 @@ struct StockhamKernelFused2D : public StockhamKernelRR
 
             body += dim1_work_stmts;
             body += LineBreak{};
-            body += CommentLines{"if C2Real_PRE, then we have to do an extra transform"};
-            body += If{Equal{embedded_type, "EmbeddedType::C2Real_PRE"}, dim1_work_pre_stmts};
+            if(ebtype == EmbeddedType::C2Real_PRE)
+            {
+                body += CommentLines{"if C2Real_PRE, then we have to do an extra transform"};
+                body += dim1_work_pre_stmts;
+            }
         }
 
         // handle even-length complex to real post-process in lds after transform
-        body += real_trans_pre_post(ProcessingType::POST);
+        if(ebtype == EmbeddedType::Real2C_POST)
+            body += real_trans_pre_post();
 
         // note there is a syncthreads at the start of the next call
         // -------------
@@ -435,9 +444,9 @@ struct StockhamKernelFused2D : public StockhamKernelRR
             body += Assign{write, thread_id < active_threads_cols};
         body += CommentLines{"offset_lds is the starting lds-ptr of each COL (or ROW if R2C_POST)"};
         body += Assign{offset_lds,
-                       Ternary{Parens(embedded_type != "EmbeddedType::C2Real_PRE"),
-                               thread_id / height,
-                               stride_lds * (thread_id / height)}};
+                       (ebtype != EmbeddedType::C2Real_PRE)
+                           ? Expression{thread_id / height}
+                           : Expression{stride_lds * (thread_id / height)}};
 
         body += CommentLines{"calc the thread_in_device value once and for all device funcs"};
         body += Assign{thread_in_device,
@@ -446,7 +455,8 @@ struct StockhamKernelFused2D : public StockhamKernelRR
                                thread_id / kernel1.transforms_per_block}};
 
         // handle even-length real to complex pre-process in lds before transform
-        body += real_trans_pre_post(ProcessingType::PRE);
+        if(ebtype == EmbeddedType::C2Real_PRE)
+            body += real_trans_pre_post();
 
         body += LineBreak{};
 
@@ -484,8 +494,12 @@ struct StockhamKernelFused2D : public StockhamKernelRR
 
             body += dim2_work_stmts;
             body += LineBreak{};
-            body += CommentLines{"if Real2C_POST, then we have to do an extra transform"};
-            body += If{Equal{embedded_type, "EmbeddedType::Real2C_POST"}, dim2_work_post_stmts};
+
+            if(ebtype == EmbeddedType::Real2C_POST)
+            {
+                body += CommentLines{"if Real2C_POST, then we have to do an extra transform"};
+                body += dim2_work_post_stmts;
+            }
         }
 
         // store

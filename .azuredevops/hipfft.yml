@@ -32,8 +32,8 @@ trigger:
     - projects/hipfft/.github
     - projects/hipfft/.jenkins
     - projects/hipfft/docs
-    - projects/hipfft/'.*.y*ml'
-    - projects/hipfft/'*.md'
+    - projects/hipfft/.*.y*ml
+    - projects/hipfft/*.md
 
 pr:
   autoCancel: true
@@ -49,8 +49,8 @@ pr:
     - projects/hipfft/.github
     - projects/hipfft/.jenkins
     - projects/hipfft/docs
-    - projects/hipfft/'.*.y*ml'
-    - projects/hipfft/'*.md'
+    - projects/hipfft/.*.y*ml
+    - projects/hipfft/*.md
   drafts: false
 
 jobs:

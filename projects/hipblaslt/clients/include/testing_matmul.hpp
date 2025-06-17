@@ -405,7 +405,7 @@ void epilogue_func(int64_t     m,
     auto in_Tact = static_cast<Tact>(in[pos]) + bias_data;                                    \
     if(e && !gradient)                                                                        \
     {                                                                                         \
-        saturate_cast_to_type(e, in_Tact * scaleE, aux_type, pos);                            \
+        saturate_cast_to_type(e, in_Tact* scaleE, aux_type, pos);                             \
     }                                                                                         \
     Tact in_Tact_act = 0;                                                                     \
     if(gradient)                                                                              \
@@ -551,12 +551,12 @@ void epilogue_func(int64_t     m,
                    bool        gradient,
                    hipDataType To)
 {
-#define CALCULATE_EPILOGUE_BASIC                                \
-    auto pos  = j * ld + i;                                     \
-    Tc   temp = static_cast<Ti>(*(in + pos)) + bias_data;       \
-    if(e)                                                       \
-    {                                                           \
-        saturate_cast_to_type(e, temp * scaleE, aux_type, pos); \
+#define CALCULATE_EPILOGUE_BASIC                               \
+    auto pos  = j * ld + i;                                    \
+    Tc   temp = static_cast<Ti>(*(in + pos)) + bias_data;      \
+    if(e)                                                      \
+    {                                                          \
+        saturate_cast_to_type(e, temp* scaleE, aux_type, pos); \
     }
 
     for(int i = 0; i < m; i++)
@@ -2542,12 +2542,16 @@ void testing_matmul_with_bias(const Arguments& arg,
                                    tmpAlgo[j].algo, tuningVec[t], tmpWorkspaceSize)
                                == HIPBLAS_STATUS_SUCCESS)
                             {
-                                heuristicResult.push_back(tmpAlgo[j]);
-                                heuristicTuningIndex.push_back(t);
-                                workspace_size = std::max(workspace_size, tmpWorkspaceSize);
-                                foundAlgo      = true;
+                                if(tmpWorkspaceSize <= max_workspace_size)
+                                {
+                                    heuristicResult.push_back(tmpAlgo[j]);
+                                    heuristicTuningIndex.push_back(t);
+                                    workspace_size = std::max(workspace_size, tmpWorkspaceSize);
+                                    foundAlgo      = true;
+                                }
                             }
                         }
+                        CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                         if(foundAlgo)
                             break;
                     }
@@ -2571,13 +2575,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                     tmpWorkspaceSize)
                                == HIPBLAS_STATUS_SUCCESS)
                             {
-                                heuristicResult.push_back(tmpAlgo[j]);
-                                heuristicTuningIndex.push_back(t);
-                                workspace_size = std::max(workspace_size, tmpWorkspaceSize);
-                                foundAlgo      = true;
-                                break;
+                                if(tmpWorkspaceSize <= max_workspace_size)
+                                {
+                                    heuristicResult.push_back(tmpAlgo[j]);
+                                    heuristicTuningIndex.push_back(t);
+                                    workspace_size = std::max(workspace_size, tmpWorkspaceSize);
+                                    foundAlgo      = true;
+                                    break;
+                                }
                             }
                         }
+                        CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                     }
                 }
             }
@@ -2635,12 +2643,16 @@ void testing_matmul_with_bias(const Arguments& arg,
                                tmpAlgo[j].algo, tuningVec[t], tmpWorkspaceSize)
                            == HIPBLAS_STATUS_SUCCESS)
                         {
-                            heuristicResult.push_back(tmpAlgo[j]);
-                            heuristicTuningIndex.push_back(t);
-                            workspace_size = std::max(workspace_size, tmpWorkspaceSize);
-                            foundAlgo      = true;
+                            if(tmpWorkspaceSize <= max_workspace_size)
+                            {
+                                heuristicResult.push_back(tmpAlgo[j]);
+                                heuristicTuningIndex.push_back(t);
+                                workspace_size = std::max(workspace_size, tmpWorkspaceSize);
+                                foundAlgo      = true;
+                            }
                         }
                     }
+                    CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                     if(foundAlgo)
                         break;
                 }
@@ -2724,12 +2736,16 @@ void testing_matmul_with_bias(const Arguments& arg,
                                tmpAlgo[j].algo, tuningVec[t], tmpWorkspaceSize)
                            == HIPBLAS_STATUS_SUCCESS)
                         {
-                            addRequest = 1;
-                            heuristicResult.push_back(tmpAlgo[j]);
-                            heuristicTuningIndex.push_back(t);
-                            workspace_size = std::max(workspace_size, tmpWorkspaceSize);
+                            if(tmpWorkspaceSize <= max_workspace_size)
+                            {
+                                addRequest = 1;
+                                heuristicResult.push_back(tmpAlgo[j]);
+                                heuristicTuningIndex.push_back(t);
+                                workspace_size = std::max(workspace_size, tmpWorkspaceSize);
+                            }
                         }
                     }
+                    CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                     requestCount += addRequest;
                     if(requestCount >= requestAlgoCount)
                     {
@@ -2757,12 +2773,16 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                 tmpWorkspaceSize)
                            == HIPBLAS_STATUS_SUCCESS)
                         {
-                            addRequest = 1;
-                            heuristicResult.push_back(tmpAlgo[j]);
-                            heuristicTuningIndex.push_back(t);
-                            workspace_size = std::max(workspace_size, tmpWorkspaceSize);
+                            if(tmpWorkspaceSize <= max_workspace_size)
+                            {
+                                addRequest = 1;
+                                heuristicResult.push_back(tmpAlgo[j]);
+                                heuristicTuningIndex.push_back(t);
+                                workspace_size = std::max(workspace_size, tmpWorkspaceSize);
+                            }
                         }
                     }
+                    CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                     requestCount += addRequest;
                     if(requestCount >= requestAlgoCount)
                     {
@@ -2826,12 +2846,16 @@ void testing_matmul_with_bias(const Arguments& arg,
                            tmpAlgo[j].algo, tuningVec[t], tmpWorkspaceSize)
                        == HIPBLAS_STATUS_SUCCESS)
                     {
-                        addRequest = 1;
-                        heuristicResult.push_back(tmpAlgo[j]);
-                        heuristicTuningIndex.push_back(t);
-                        workspace_size = std::max(workspace_size, tmpWorkspaceSize);
+                        if(tmpWorkspaceSize <= max_workspace_size)
+                        {
+                            addRequest = 1;
+                            heuristicResult.push_back(tmpAlgo[j]);
+                            heuristicTuningIndex.push_back(t);
+                            workspace_size = std::max(workspace_size, tmpWorkspaceSize);
+                        }
                     }
                 }
+                CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                 requestCount += addRequest;
                 if(requestCount >= requestAlgoCount)
                 {
@@ -2896,11 +2920,15 @@ void testing_matmul_with_bias(const Arguments& arg,
                                tmpAlgo[j].algo, tuningVec[t], tmpWorkspaceSize)
                            == HIPBLAS_STATUS_SUCCESS)
                         {
-                            heuristicResult.push_back(tmpAlgo[j]);
-                            heuristicTuningIndex.push_back(t);
-                            workspace_size = std::max(workspace_size, tmpWorkspaceSize);
+                            if(tmpWorkspaceSize <= max_workspace_size)
+                            {
+                                heuristicResult.push_back(tmpAlgo[j]);
+                                heuristicTuningIndex.push_back(t);
+                                workspace_size = std::max(workspace_size, tmpWorkspaceSize);
+                            }
                         }
                     }
+                    CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                 }
                 returnedAlgoCount = heuristicResult.size();
             }
@@ -2928,6 +2956,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             for(int i = 0; i < returnedAlgoCount; i++)
                 workspace_size = std::max(workspace_size, heuristicResult[i].workspaceSize);
+            CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
         }
         else
         {

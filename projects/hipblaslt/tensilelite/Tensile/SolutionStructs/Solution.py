@@ -2227,32 +2227,34 @@ class Solution(collections.abc.Mapping):
 
       # Try to enlarge GLVW for metadata
       bGlobalReadVectorWidthMetadata = state["GlobalReadVectorWidthMetadata"]
-      if state["ProblemType"]["Sparse"] == 2:
-        GlobalReadVectorWidth = min(state["GlobalReadVectorWidthMetadata"] * state["NumLoadsPerpendicularB"], depthUM) #sum all need read
-        tvm = totalElementsM // GlobalReadVectorWidth
-        if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, GlobalReadVectorWidth, printRejectionReason):
-          #fallback
-          tvm = totalElementsM // bGlobalReadVectorWidthMetadata
-          Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, bGlobalReadVectorWidthMetadata, printRejectionReason)
+      glvwMlimit = 16
+      if state["GlobalReadVectorWidthMetadata"] < glvwMlimit:
+        if state["ProblemType"]["Sparse"] == 2:
+          GlobalReadVectorWidth = min(state["GlobalReadVectorWidthMetadata"] * state["NumLoadsPerpendicularB"], depthUM, glvwMlimit) #sum all need read
+          tvm = totalElementsM // GlobalReadVectorWidth
+          if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, GlobalReadVectorWidth, printRejectionReason):
+            #fallback
+            tvm = totalElementsM // bGlobalReadVectorWidthMetadata
+            Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, bGlobalReadVectorWidthMetadata, printRejectionReason)
 
-        GlobalReadVectorWidthMetadata = state["GlobalReadVectorWidthMetadata"]
-        if GlobalReadVectorWidthMetadata == 0:
-          GlobalReadVectorWidthMetadata = 1
-        totalVectorsCoalescedM = totalElementsCoalescedM // GlobalReadVectorWidthMetadata
-        totalVectorsM = totalElementsM // GlobalReadVectorWidthMetadata
-      else:
-        GlobalReadVectorWidth = min(state["GlobalReadVectorWidthMetadata"] * state["NumLoadsPerpendicularA"], depthUM) #sum all need read
-        tvm = totalElementsM // GlobalReadVectorWidth
-        if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, GlobalReadVectorWidth, printRejectionReason):
-          #fallback
-          tvm = totalElementsM // bGlobalReadVectorWidthMetadata
-          Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, bGlobalReadVectorWidthMetadata, printRejectionReason)
+          GlobalReadVectorWidthMetadata = state["GlobalReadVectorWidthMetadata"]
+          if GlobalReadVectorWidthMetadata == 0:
+            GlobalReadVectorWidthMetadata = 1
+          totalVectorsCoalescedM = totalElementsCoalescedM // GlobalReadVectorWidthMetadata
+          totalVectorsM = totalElementsM // GlobalReadVectorWidthMetadata
+        else:
+          GlobalReadVectorWidth = min(state["GlobalReadVectorWidthMetadata"] * state["NumLoadsPerpendicularA"], depthUM, glvwMlimit) #sum all need read
+          tvm = totalElementsM // GlobalReadVectorWidth
+          if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, GlobalReadVectorWidth, printRejectionReason):
+            #fallback
+            tvm = totalElementsM // bGlobalReadVectorWidthMetadata
+            Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, bGlobalReadVectorWidthMetadata, printRejectionReason)
 
-        GlobalReadVectorWidthMetadata = state["GlobalReadVectorWidthMetadata"]
-        if GlobalReadVectorWidthMetadata == 0:
-          GlobalReadVectorWidthMetadata = 1
-        totalVectorsCoalescedM = totalElementsCoalescedM // GlobalReadVectorWidthMetadata
-        totalVectorsM = totalElementsM // GlobalReadVectorWidthMetadata
+          GlobalReadVectorWidthMetadata = state["GlobalReadVectorWidthMetadata"]
+          if GlobalReadVectorWidthMetadata == 0:
+            GlobalReadVectorWidthMetadata = 1
+          totalVectorsCoalescedM = totalElementsCoalescedM // GlobalReadVectorWidthMetadata
+          totalVectorsM = totalElementsM // GlobalReadVectorWidthMetadata
 
       if not Solution.setGlobalLoadTileDimClassic(state, "Metadata", state["NumLoadsMetadata"], \
           totalVectorsCoalescedM, totalElementsPerpM, depthUM, printRejectionReason):
