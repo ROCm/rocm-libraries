@@ -30,6 +30,7 @@
 #endif // no system header
 
 #include <thrust/detail/config/compiler.h> // IWYU pragma: export
+#include <thrust/detail/config/deprecated.h> // IWYU pragma: export
 
 // Deprecation warnings may be silenced by defining the following macros. These
 // may be combined.
@@ -44,28 +45,6 @@
 // - THRUST_IGNORE_DEPRECATED_COMPILER
 //   Ignore deprecation warnings when using deprecated compilers. Compiling
 //   with C++03, C++11 and C++14 will still issue warnings.
-
-// Check for the CUB opt-outs as well:
-#if !defined(THRUST_IGNORE_DEPRECATED_CPP_DIALECT) && defined(CUB_IGNORE_DEPRECATED_CPP_DIALECT)
-#  define THRUST_IGNORE_DEPRECATED_CPP_DIALECT
-#endif
-#if !defined(THRUST_IGNORE_DEPRECATED_CPP_11) && defined(CUB_IGNORE_DEPRECATED_CPP_11)
-#  define THRUST_IGNORE_DEPRECATED_CPP_11
-#endif
-#if !defined(THRUST_IGNORE_DEPRECATED_CPP_14) && defined(CUB_IGNORE_DEPRECATED_CPP_14)
-#  define THRUST_IGNORE_DEPRECATED_CPP_14
-#endif
-#if !defined(THRUST_IGNORE_DEPRECATED_COMPILER) && defined(CUB_IGNORE_DEPRECATED_COMPILER)
-#  define THRUST_IGNORE_DEPRECATED_COMPILER
-#endif
-
-#ifdef THRUST_IGNORE_DEPRECATED_CPP_DIALECT
-#  define THRUST_IGNORE_DEPRECATED_CPP_11
-#  define THRUST_IGNORE_DEPRECATED_CPP_14
-#  ifndef THRUST_IGNORE_DEPRECATED_COMPILER
-#    define THRUST_IGNORE_DEPRECATED_COMPILER
-#  endif // !THRUST_IGNORE_DEPRECATED_COMPILER
-#endif // THRUST_IGNORE_DEPRECATED_CPP_DIALECT
 
 // Define this to override the built-in detection.
 #ifndef THRUST_CPP_DIALECT
@@ -115,13 +94,15 @@
 #  define THRUST_COMP_DEPR_IMPL(msg) THRUST_PRAGMA(GCC warning #msg)
 #endif
 
+// clang-format off
 #define THRUST_COMPILER_DEPRECATION(REQ) \
-  THRUST_COMP_DEPR_IMPL(Thrust requires at least REQ.Define THRUST_IGNORE_DEPRECATED_COMPILER to suppress this message.)
+  THRUST_COMP_DEPR_IMPL(Thrust requires at least REQ. Define THRUST_IGNORE_DEPRECATED_COMPILER to suppress this message.)
 
-#define THRUST_COMPILER_DEPRECATION_SOFT(REQ, CUR)                                                             \
-  THRUST_COMP_DEPR_IMPL(                                                                                       \
-    Thrust requires at least REQ.CUR is deprecated but still supported.CUR support will be removed in a future \
-      release.Define THRUST_IGNORE_DEPRECATED_CPP_DIALECT to suppress this message.)
+#define THRUST_COMPILER_DEPRECATION_SOFT(REQ, CUR)                                                        \
+  THRUST_COMP_DEPR_IMPL(                                                                                  \
+    Thrust requires at least REQ. CUR is deprecated but still supported. CUR support will be removed in a \
+      future release. Define THRUST_IGNORE_DEPRECATED_CPP_DIALECT to suppress this message.)
+// clang-format on
 
 #ifndef THRUST_IGNORE_DEPRECATED_COMPILER
 
