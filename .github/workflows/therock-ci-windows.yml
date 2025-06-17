@@ -24,7 +24,7 @@ jobs:
       run:
         shell: bash
     env:
-      BASE_BUILD_DIR_POWERSHELL: B:\tmpbuild
+      BASE_BUILD_DIR_POWERSHELL: B:\TheRock\tmpbuild
       CCACHE_DIR: "${{ github.workspace }}/.container-cache/ccache"
       CCACHE_MAXSIZE: "700M"
       AMDGPU_FAMILIES: "gfx1151"
@@ -64,7 +64,7 @@ jobs:
       - name: "Create build dir"
         shell: powershell
         run: |
-          $buildDir = "$env:BASE_BUILD_DIR_POWERSHELL\TheRock"
+          $buildDir = "$env:BASE_BUILD_DIR_POWERSHELL\"
           echo "BUILD_DIR_POWERSHELL=$buildDir" >> $env:GITHUB_ENV
           mkdir "$buildDir"
           Write-Host "Generated Build Directory: $buildDir"
