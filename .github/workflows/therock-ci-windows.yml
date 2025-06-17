@@ -24,7 +24,7 @@ jobs:
       run:
         shell: bash
     env:
-      BASE_BUILD_DIR_POWERSHELL: B:\TheRock\tmpbuild
+      BASE_BUILD_DIR_POWERSHELL: B:\tmpbuild
       CCACHE_DIR: "${{ github.workspace }}/.container-cache/ccache"
       CCACHE_MAXSIZE: "700M"
       AMDGPU_FAMILIES: "gfx1151"
