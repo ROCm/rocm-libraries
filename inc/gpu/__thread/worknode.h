@@ -13,9 +13,32 @@ struct WorkNode_Header;
 
 typedef void (*WrappedFnPointer)(WorkNode_Header *, bool);
 
+// Info about the thread itself that the user might query. (As opposed to info the scheduler uses behind the scenes)
+struct ThreadData {
+    // How many threads per block/vthread are active.
+    uint32_t width = 0;
+    // TODO: should this be a gpu::thread::max_width() array? For now we just store a common "base" id. See
+    // this_thread::get_id for details on how the base id is converted to a full thread id.
+    uint32_t vthread_id = {};
+
+    __device__ ThreadData() = default;
+    __host__ ThreadData() = default;
+
+    __device__ ThreadData(uint32_t width);
+    __host__ ThreadData(uint32_t width);
+  private:
+    static __device__ uint32_t nextTid();
+    static __host__ uint32_t nextTid();
+};
+
 // TODO: Can we make a bunch of these members private?
 struct WorkNode_Header {
-    WrappedFnPointer wrapper_fn = nullptr;
+    const WrappedFnPointer wrapper_fn;
+    const ThreadData tdata;
+
+    // Stores the sizeof(WorkNode<T>), so we can do a memcpy without knowing T.
+    // Not initialized when a WorkNode is constructed from device code because we don't need it.
+    const size_t worknodeSize = 0;
 
     // link_to_self enables thread::detach() to copy a worknode into memory the gpu can free on its own.
     // It can be either &mainWorkQueue[i], &cpuWorkQueue[i], &currentWorkNode[blockIdx.x], &(prev->next) or nullptr
@@ -40,12 +63,6 @@ struct WorkNode_Header {
     // Since *link_to_self == nullptr is used as a per-workitem lock, we need some way to differentiate between
     // next == nullptr because there's nobody waiting and next == nullptr because next has been locked.
     bool hasWaiting = false;
-    uint32_t width = 1; // How many threads per block/vthread are active
-    // Stores the sizeof(WorkNode<T>), so we can do a memcpy without knowing T.
-    // Not initialized when a WorkNode is constructed from device code because we don't need it.
-    size_t worknodeSize;
-    // TODO: fix vthread_id - it's currently non-functional
-    uint32_t vthread_id = {}; // TODO: should this be a gpu::thread::max_width() array? For now we just store the lowest id.
 
     // Attempts to lock the WorkNode at location, and if successful, returns the WorkNode. If unsuccessful (i.e. it's
     // already locked) returns nullptr.
@@ -136,7 +153,7 @@ template <class WorkNode_t>
 __device__ void wrapper(WorkNode_Header *worknode, bool yielding) {
     WorkNode_t *typed_node_ptr = static_cast<WorkNode_t *>(worknode);
     typename WorkNode_t::Callable fn = std::move(typed_node_ptr->fn);
-    uint32_t width = typed_node_ptr->width;
+    uint32_t width = typed_node_ptr->tdata.width;
     __syncthreads();
     // Include a threadfence for all threads just to be safe.
     __threadfence();
@@ -154,10 +171,8 @@ __device__ void wrapper(WorkNode_Header *worknode, bool yielding) {
 }
 
 template <class Callable_t>
-__device__ WorkNode<Callable_t>::WorkNode(uint32_t w, Callable_t &&callable) : fn(std::move(callable)) {
-    wrapper_fn = wrapper<WorkNode<Callable_t>>;
-    width = w;
-}
+__device__ WorkNode<Callable_t>::WorkNode(uint32_t w, Callable_t &&callable)
+    : WorkNode_Header{wrapper<WorkNode<Callable_t>>, ThreadData(w)}, fn(std::move(callable)) {}
 
 template <class WorkNode_t>
 __global__ void getWrapperFn(WrappedFnPointer *ptr) {
@@ -165,9 +180,7 @@ __global__ void getWrapperFn(WrappedFnPointer *ptr) {
 }
 
 template <class Callable_t>
-__host__ WorkNode<Callable_t>::WorkNode(uint32_t w, Callable_t &&callable) : fn(std::move(callable)) {
-    width = w;
-    worknodeSize = sizeof(WorkNode<Callable_t>);
+__host__ WrappedFnPointer getWrapperFn() {
     // Only way to pass the device the information about how to invoke WorkNode<Callable_t>.fn is by launching a kernel.
     // Why do we NEED a kernel?
     // We can't reference __device__ functions from __host__ functions, so this is illegal:
@@ -199,8 +212,13 @@ __host__ WorkNode<Callable_t>::WorkNode(uint32_t w, Callable_t &&callable) : fn(
         // specialization of the WorkNode class, it cannot grow indefinitely.
         return *tmp;
     }();
-    wrapper_fn = saved_wrapper_fn;
+    return saved_wrapper_fn;
 }
+
+template <class Callable_t>
+__host__ WorkNode<Callable_t>::WorkNode(uint32_t w, Callable_t &&callable)
+    : WorkNode_Header{getWrapperFn<Callable_t>(), ThreadData(w), sizeof(WorkNode<Callable_t>)},
+      fn(std::move(callable)) {}
 
 } // namespace gpu::internal
 
