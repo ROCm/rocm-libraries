@@ -54,15 +54,56 @@ template<class InputIterator,
              typename std::iterator_traits<InputIterator>::value_type>::type>
 class transform_iterator
 {
+private:
+    template<typename T>
+    class proxy_ref
+    {
+        T value_;
+
+    public:
+        ROCPRIM_HOST_DEVICE
+        inline proxy_ref(const T& value)
+            : value_(value)
+        {}
+
+        ROCPRIM_HOST_DEVICE operator const T&() const
+        {
+            return value_;
+        }
+    };
+
+    template<typename T>
+    class proxy_pointer
+    {
+        T value_;
+
+    public:
+        ROCPRIM_HOST_DEVICE
+        inline proxy_pointer(const T& value)
+            : value_(value)
+        {}
+
+        ROCPRIM_HOST_DEVICE
+        const T* operator->() const
+        {
+            return &value_;
+        }
+
+        ROCPRIM_HOST_DEVICE const T& operator*() const
+        {
+            return value_;
+        }
+    };
+
 public:
     /// The type of the value that can be obtained by dereferencing the iterator.
     using value_type = ValueType;
     /// \brief A reference type of the type iterated over (\p value_type).
     /// It's `const` since transform_iterator is a read-only iterator.
-    using reference = const value_type&;
+    using reference = const proxy_ref<std::remove_reference_t<value_type>>;
     /// \brief A pointer type of the type iterated over (\p value_type).
     /// It's `const` since transform_iterator is a read-only iterator.
-    using pointer = const value_type*;
+    using pointer = const proxy_pointer<std::remove_reference_t<value_type>>;
     /// A type used for identify distance between iterators.
     using difference_type = typename std::iterator_traits<InputIterator>::difference_type;
     /// The category of the iterator.
@@ -70,6 +111,7 @@ public:
     /// The type of unary function used to transform input range.
     using unary_function = UnaryFunction;
 
+public:
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
     using self_type = transform_iterator;
 #endif
@@ -120,19 +162,17 @@ public:
     }
 
     ROCPRIM_HOST_DEVICE inline
-    value_type operator*() const
+    reference operator*() const
     {
-        return transform_(*iterator_);
+        return reference(transform_(*iterator_));
     }
 
-    ROCPRIM_HOST_DEVICE inline
-    pointer operator->() const
+    ROCPRIM_HOST_DEVICE inline pointer operator->() const
     {
-        return &(*(*this));
+        return pointer(transform_(*iterator_));
     }
 
-    ROCPRIM_HOST_DEVICE inline
-    value_type operator[](difference_type distance) const
+    ROCPRIM_HOST_DEVICE inline value_type operator[](difference_type distance) const
     {
         transform_iterator i = (*this) + distance;
         return *i;
