@@ -22,9 +22,9 @@
  * ************************************************************************ */
 
 #include "internal/generic/rocsparse_spmv.h"
-#include "control.h"
-#include "handle.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_handle.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "rocsparse_bsrmv.hpp"
 #include "rocsparse_coomv.hpp"
@@ -32,8 +32,64 @@
 #include "rocsparse_cscmv.hpp"
 #include "rocsparse_csrmv.hpp"
 #include "rocsparse_ellmv.hpp"
+#include "rocsparse_enum_utils.hpp"
 #include "rocsparse_spmv.hpp"
-#include "to_string.hpp"
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_spmv_alg value_)
+{
+#define CASE(C) \
+    case C:     \
+        return #C
+    switch(value_)
+    {
+        CASE(rocsparse_spmv_alg_default);
+        CASE(rocsparse_spmv_alg_coo);
+        CASE(rocsparse_spmv_alg_csr_adaptive);
+        CASE(rocsparse_spmv_alg_csr_rowsplit);
+        CASE(rocsparse_spmv_alg_ell);
+        CASE(rocsparse_spmv_alg_coo_atomic);
+        CASE(rocsparse_spmv_alg_bsr);
+        CASE(rocsparse_spmv_alg_csr_lrb);
+#undef CASE
+    }
+    // LCOV_EXCL_START
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
+}
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_spmv_stage value_)
+{
+#define CASE(C) \
+    case C:     \
+        return #C
+    switch(value_)
+    {
+        CASE(rocsparse_spmv_stage_buffer_size);
+        CASE(rocsparse_spmv_stage_preprocess);
+        CASE(rocsparse_spmv_stage_compute);
+#undef CASE
+    }
+    // LCOV_EXCL_START
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_spmv_stage value_)
+{
+    switch(value_)
+    {
+    case rocsparse_spmv_stage_buffer_size:
+    case rocsparse_spmv_stage_preprocess:
+    case rocsparse_spmv_stage_compute:
+    {
+        return false;
+    }
+    }
+    return true;
+}
 
 rocsparse_status rocsparse::check_spmv_alg(rocsparse_format format, rocsparse_spmv_alg alg)
 {

@@ -27,7 +27,7 @@ The hipSPARSELt public repository is located at `<https://github.com/ROCm/hipSPA
   .. grid-item-card:: Conceptual
 
     * :doc:`Storage formats <./conceptual/storage-format>`
-    * :doc:`MI300 features <./conceptual/mi300-features>`
+    * :doc:`Features for the Instinct MI300 series <./conceptual/mi300-features>`
 
   .. grid-item-card:: How to
 

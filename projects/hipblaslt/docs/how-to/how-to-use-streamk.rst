@@ -35,7 +35,13 @@ Set this variable to ``2`` to enable the Stream-K library or leave it set to ``0
    *  The heuristic best kernel is selected from the Stream-K library.
    *  User-driven tuning (tunable ops) considers all kernels from the standard grid, the free-size library, and the Stream-K library.
 
-Configuring the kernel selection strategy
+.. note::
+
+   Stream-K supports a different range of data types on different AMD accelerators. For example, the MI300A APU supports
+   a wider variety of data types, including ``FP32``, ``FP16``, ``BF16``, ``FP8``, and ``BF8``.
+   ``TENSILE_SOLUTION_SELECTION_METHOD=2`` is used to enable Stream-K on all MI300 platforms.
+
+Configuring the kernel launch behavior
 =========================================
 
 You can control The Stream-K kernel launch behavior using the environment variables listed in the following table.

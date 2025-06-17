@@ -27,9 +27,9 @@
 #include "rocsparse_common.h"
 #include "rocsparse_csrmm.hpp"
 
-#include "common.h"
-#include "templates.h"
-#include "utility.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_templates.hpp"
+#include "rocsparse_utility.hpp"
 #include <hip/hip_runtime.h>
 
 namespace rocsparse

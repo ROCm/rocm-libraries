@@ -25,9 +25,9 @@
 #include "rocsparse_csrsm.hpp"
 
 #include "../level2/rocsparse_csrsv.hpp"
-#include "common.h"
-#include "control.h"
-#include "utility.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 template <typename I, typename J, typename T>
 rocsparse_status rocsparse::csrsm_analysis_core(rocsparse_handle          handle,

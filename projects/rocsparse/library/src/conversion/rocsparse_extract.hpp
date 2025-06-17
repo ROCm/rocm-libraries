@@ -21,9 +21,9 @@
  *
  * ************************************************************************ */
 #pragma once
-#include "control.h"
 #include "internal/generic/rocsparse_extract.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 struct _rocsparse_extract_descr
 {

@@ -22,9 +22,10 @@
  * ************************************************************************ */
 
 #include "rocsparse_gcreate_identity_permutation.hpp"
-#include "control.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_identity.hpp"
-#include "utility.h"
+#include "rocsparse_internal_convert_scalar.hpp"
+#include "rocsparse_utility.hpp"
 
 rocsparse_status rocsparse::gcreate_identity_permutation(rocsparse_handle    handle_,
                                                          int64_t             nnz,

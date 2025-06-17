@@ -36290,7 +36290,6 @@
     ThreadTileB: 4
     TransposeLDS: 1
     TransposeLDSMetadata: true
-    TunningSkip: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: true
@@ -36846,7 +36845,6 @@
     ThreadTileB: 4
     TransposeLDS: 1
     TransposeLDSMetadata: true
-    TunningSkip: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: true
@@ -37124,7 +37122,6 @@
     ThreadTileB: 6
     TransposeLDS: 1
     TransposeLDSMetadata: true
-    TunningSkip: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: true
@@ -37402,7 +37399,6 @@
     ThreadTileB: 4
     TransposeLDS: 1
     TransposeLDSMetadata: true
-    TunningSkip: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: true
@@ -37680,7 +37676,6 @@
     ThreadTileB: 6
     TransposeLDS: 1
     TransposeLDSMetadata: true
-    TunningSkip: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: true
@@ -37999,6 +37994,10 @@
     - [134, 0.0]
   - - [1024, 24576, 1, 1024]
     - [135, 0.0]
+  - - [7168, 312, 1, 8192]
+    - [3, 0.0]
+  - - [7168, 320, 1, 8192]
+    - [3, 0.0]
 - null
 - null
 - DeviceEfficiency

@@ -22,8 +22,8 @@
  *
  * ************************************************************************ */
 
-#include "control.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "csrmm/nnz_split/kernel_declarations.h"
 #include "csrmm_device_nnz_split.h"

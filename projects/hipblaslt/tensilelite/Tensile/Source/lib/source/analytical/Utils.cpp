@@ -196,8 +196,8 @@ namespace TensileLite
                                                        element_size_A, //ElementSizeA
                                                        element_size_B, //ElementSizeB
                                                        element_size_out, //ElementSizeout
-                                                       mx_block_size,
                                                        WGM,
+                                                       mx_block_size,
                                                        debug);
 
                 if(latency < best_latency)

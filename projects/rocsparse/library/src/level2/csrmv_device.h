@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,7 @@
 
 #pragma once
 
-#include "common.h"
+#include "rocsparse_common.hpp"
 
 namespace rocsparse
 {
@@ -497,10 +497,7 @@ namespace rocsparse
                 // To force the compiler to stick to the order of operations, we need acquire/release fences.
                 // Workgroup scope is sufficient for this purpose, to only invalidate L1 and avoid L2
                 // invalidations.
-#if defined(__gfx1200__) || defined(__gfx1201__)
-#define __gfx12__
-#endif
-#if defined(__gfx12__)
+#if defined(__GFX12__)
                 __threadfence();
 #else
                 __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
@@ -1047,10 +1044,7 @@ namespace rocsparse
             // To force the compiler to stick to the order of operations, we need acquire/release fences.
             // Workgroup scope is sufficient for this purpose, to only invalidate L1 and avoid L2
             // invalidations.
-#if defined(__gfx1200__) || defined(__gfx1201__)
-#define __gfx12__
-#endif
-#if defined(__gfx12__)
+#if defined(__GFX12__)
             __threadfence();
 #else
             __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");

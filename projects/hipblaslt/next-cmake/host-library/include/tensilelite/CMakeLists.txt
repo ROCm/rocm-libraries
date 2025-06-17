@@ -33,6 +33,8 @@ if(HIPBLASLT_ENABLE_HIP)
   add_subdirectory(hip)
 endif()
 
+add_subdirectory(analytical)
+
 set(_CMAKE_CURRENT_SOURCE_DIR "${TEMP_TENSILE_HOST_SOURCE_DIR}/include")
 
 target_sources(hipblaslt

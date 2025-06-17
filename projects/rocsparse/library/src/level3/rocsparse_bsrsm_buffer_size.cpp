@@ -22,12 +22,12 @@
  *
  * ************************************************************************ */
 
-#include "control.h"
 #include "internal/level3/rocsparse_bsrsm.h"
 #include "rocsparse_bsrsm.hpp"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
-#include "rocsparse_primitives.h"
+#include "rocsparse_primitives.hpp"
 
 rocsparse_status rocsparse::bsrsm_buffer_size_quickreturn(rocsparse_handle          handle,
                                                           rocsparse_direction       dir,

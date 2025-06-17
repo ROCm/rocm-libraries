@@ -123,7 +123,7 @@ def runCoverageCommand (platform, project, gfilter, String dirmode = "release")
                 """
 
         platform.runCommand(this, command)
-        
+
         publishHTML([allowMissing: false,
                     alwaysLinkToLastBuild: false,
                     keepAll: false,

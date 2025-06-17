@@ -20,6 +20,10 @@ Documentation for rocThrust available at
 
 * `thrust::device_malloc_allocator` is deprecated as of this version. It will be removed in an upcoming version.
 
+### Resolved issues
+
+* Fixed an issue with internal calls to unqualified `distance()` which would be ambigious due to also visibile implementation through ADL.
+
 ## rocThrust 3.4.0 for ROCm 6.5
 
 ### Added

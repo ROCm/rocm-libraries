@@ -27,6 +27,41 @@
 
 #include "gtsv_interleaved_batch_device.h"
 
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_gtsv_interleaved_alg value_)
+{
+#define CASE(C) \
+    case C:     \
+        return #C
+    switch(value_)
+    {
+        CASE(rocsparse_gtsv_interleaved_alg_default);
+        CASE(rocsparse_gtsv_interleaved_alg_thomas);
+        CASE(rocsparse_gtsv_interleaved_alg_lu);
+        CASE(rocsparse_gtsv_interleaved_alg_qr);
+#undef CASE
+    }
+    // LCOV_EXCL_START
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_gtsv_interleaved_alg value_)
+{
+    switch(value_)
+    {
+    case rocsparse_gtsv_interleaved_alg_default:
+    case rocsparse_gtsv_interleaved_alg_thomas:
+    case rocsparse_gtsv_interleaved_alg_lu:
+    case rocsparse_gtsv_interleaved_alg_qr:
+    {
+        return false;
+    }
+    }
+    return true;
+}
+
 template <typename T>
 rocsparse_status
     rocsparse::gtsv_interleaved_batch_buffer_size_template(rocsparse_handle               handle,

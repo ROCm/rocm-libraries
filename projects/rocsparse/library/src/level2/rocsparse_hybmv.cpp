@@ -23,12 +23,46 @@
  * ************************************************************************ */
 
 #include "internal/level2/rocsparse_hybmv.h"
-#include "control.h"
 #include "rocsparse_common.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_coomv.hpp"
 #include "rocsparse_ellmv.hpp"
 #include "rocsparse_hybmv.hpp"
-#include "utility.h"
+#include "rocsparse_one.hpp"
+#include "rocsparse_utility.hpp"
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_hyb_partition value)
+{
+#define CASE(C) \
+    case C:     \
+        return #C
+    switch(value)
+    {
+        CASE(rocsparse_hyb_partition_auto);
+        CASE(rocsparse_hyb_partition_user);
+        CASE(rocsparse_hyb_partition_max);
+#undef CASE
+    }
+    // LCOV_EXCL_START
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_hyb_partition value)
+{
+    switch(value)
+    {
+    case rocsparse_hyb_partition_auto:
+    case rocsparse_hyb_partition_user:
+    case rocsparse_hyb_partition_max:
+    {
+        return false;
+    }
+    }
+    return true;
+}
 
 template <typename T>
 rocsparse_status rocsparse::hybmv_template(rocsparse_handle          handle,

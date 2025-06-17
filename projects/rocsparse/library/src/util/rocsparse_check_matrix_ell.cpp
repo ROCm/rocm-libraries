@@ -23,8 +23,8 @@
  * ************************************************************************ */
 #include "internal/util/rocsparse_check_matrix_ell.h"
 #include "rocsparse_check_matrix_ell.hpp"
-#include "to_string.hpp"
-#include "utility.h"
+#include "rocsparse_enum_utils.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "check_matrix_ell_device.h"
 
@@ -80,7 +80,7 @@ rocsparse_status rocsparse::check_matrix_ell_core(rocsparse_handle       handle,
 
     if(*data_status != rocsparse_data_status_success)
     {
-        rocsparse::log_debug(handle, rocsparse::to_string(*data_status));
+        rocsparse::log_debug(handle, rocsparse::enum_utils::to_string(*data_status));
     }
 
     return rocsparse_status_success;

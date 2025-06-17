@@ -67887,7 +67887,6 @@
     ThreadTileB: 6
     TransposeLDS: 1
     TransposeLDSMetadata: true
-    TunningSkip: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: true

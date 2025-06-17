@@ -23,12 +23,12 @@
  * ************************************************************************ */
 #include "internal/util/rocsparse_check_matrix_csr.h"
 #include "rocsparse_check_matrix_csr.hpp"
-#include "to_string.hpp"
-#include "utility.h"
+#include "rocsparse_enum_utils.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "check_matrix_csr_device.h"
 
-#include "rocsparse_primitives.h"
+#include "rocsparse_primitives.hpp"
 
 #define LAUNCH_CHECK_MATRIX_CSR(block_size, wf_size)                                              \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::check_matrix_csr_device<block_size, wf_size>), \
@@ -114,7 +114,7 @@ rocsparse_status rocsparse::check_matrix_csr_core(rocsparse_handle       handle,
 
     if(*data_status != rocsparse_data_status_success)
     {
-        rocsparse::log_debug(handle, rocsparse::to_string(*data_status));
+        rocsparse::log_debug(handle, rocsparse::enum_utils::to_string(*data_status));
 
         return rocsparse_status_success;
     }
@@ -197,7 +197,7 @@ rocsparse_status rocsparse::check_matrix_csr_core(rocsparse_handle       handle,
 
     if(*data_status != rocsparse_data_status_success)
     {
-        rocsparse::log_debug(handle, rocsparse::to_string(*data_status));
+        rocsparse::log_debug(handle, rocsparse::enum_utils::to_string(*data_status));
     }
 
     return rocsparse_status_success;
@@ -263,7 +263,7 @@ rocsparse_status rocsparse::check_matrix_csr_checkarg(rocsparse_handle       han
         {
             rocsparse::log_debug(handle,
                                  ("Matrix was specified to be "
-                                  + std::string(rocsparse::to_string(matrix_type))
+                                  + std::string(rocsparse::enum_utils::to_string(matrix_type))
                                   + " but m != n"));
         }
     }

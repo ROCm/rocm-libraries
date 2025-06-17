@@ -21,7 +21,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include "internal/conversion/rocsparse_csr2coo.h"
 #include "rocsparse_csr2coo.hpp"

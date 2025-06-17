@@ -22,14 +22,205 @@
  * ************************************************************************ */
 
 #include "internal/generic/rocsparse_spgeam.h"
-#include "control.h"
-#include "to_string.hpp"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_enum_utils.hpp"
+#include "rocsparse_utility.hpp"
 
+#include "../conversion/rocsparse_convert_array.hpp"
 #include "../conversion/rocsparse_convert_scalar.hpp"
 #include "rocsparse_csrgeam.hpp"
 #include "rocsparse_csrgeam_numeric.hpp"
 #include "rocsparse_csrgeam_symbolic.hpp"
+
+rocsparse_status _rocsparse_spgeam_descr::csrgeam_allocate_descr_memory(rocsparse_handle handle,
+                                                                        int64_t          m,
+                                                                        int64_t          n,
+                                                                        const void*      alpha,
+                                                                        int64_t          nnz_A,
+                                                                        const void*      beta,
+                                                                        int64_t          nnz_B)
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    // Clean up row pointer array
+    if(this->csr_row_ptr_C != nullptr)
+    {
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(this->csr_row_ptr_C, handle->stream));
+    }
+
+    // Clean up rocprim buffer
+    if(this->rocprim_buffer != nullptr && this->rocprim_alloc)
+    {
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(this->rocprim_buffer, handle->stream));
+    }
+
+    this->indextype = (nnz_A + nnz_B) <= std::numeric_limits<int32_t>::max()
+                          ? rocsparse_indextype_i32
+                          : rocsparse_indextype_i64;
+
+    // We do not know how many nonzeros will exist in C yet therefore use an int64_t row ptr array
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMallocAsync(&this->csr_row_ptr_C,
+                                 rocsparse::indextype_sizeof(this->indextype) * (m + 1),
+                                 handle->stream));
+
+    this->rocprim_alloc  = false;
+    this->rocprim_buffer = nullptr;
+    this->rocprim_size   = 0;
+
+    this->m = m;
+
+    return rocsparse_status_success;
+}
+
+rocsparse_status
+    _rocsparse_spgeam_descr::csrgeam_copy_row_pointer(rocsparse_handle          handle,
+                                                      int64_t                   m,
+                                                      int64_t                   n,
+                                                      const rocsparse_mat_descr descr_C,
+                                                      rocsparse_indextype csr_row_ptr_C_indextype,
+                                                      void*               csr_row_ptr_C,
+                                                      int64_t*            nnz_C)
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    if(this->csr_row_ptr_C != nullptr)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::convert_array(handle,
+                                                           m + 1,
+                                                           csr_row_ptr_C_indextype,
+                                                           csr_row_ptr_C,
+                                                           descr_C->base,
+                                                           this->indextype,
+                                                           this->csr_row_ptr_C,
+                                                           rocsparse_index_base_zero));
+        return rocsparse_status_success;
+    }
+
+    return rocsparse_status_success;
+}
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_spgeam_alg value_)
+{
+#define CASE(C) \
+    case C:     \
+        return #C
+    switch(value_)
+    {
+        CASE(rocsparse_spgeam_alg_default);
+#undef CASE
+    }
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+}
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_spgeam_stage value_)
+{
+#define CASE(C) \
+    case C:     \
+        return #C
+    switch(value_)
+    {
+        CASE(rocsparse_spgeam_stage_analysis);
+        CASE(rocsparse_spgeam_stage_compute);
+        CASE(rocsparse_spgeam_stage_symbolic);
+        CASE(rocsparse_spgeam_stage_numeric);
+#undef CASE
+    }
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+}
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_spgeam_input value_)
+{
+#define CASE(C) \
+    case C:     \
+        return #C
+    switch(value_)
+    {
+        CASE(rocsparse_spgeam_input_alg);
+        CASE(rocsparse_spgeam_input_scalar_datatype);
+        CASE(rocsparse_spgeam_input_compute_datatype);
+        CASE(rocsparse_spgeam_input_operation_A);
+        CASE(rocsparse_spgeam_input_operation_B);
+#undef CASE
+    }
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+}
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_spgeam_output value_)
+{
+#define CASE(C) \
+    case C:     \
+        return #C
+    switch(value_)
+    {
+        CASE(rocsparse_spgeam_output_nnz);
+#undef CASE
+    }
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_spgeam_alg value_)
+{
+    switch(value_)
+    {
+    case rocsparse_spgeam_alg_default:
+    {
+        return false;
+    }
+    }
+    return true;
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_spgeam_stage value_)
+{
+    switch(value_)
+    {
+    case rocsparse_spgeam_stage_analysis:
+    case rocsparse_spgeam_stage_compute:
+    case rocsparse_spgeam_stage_symbolic:
+    case rocsparse_spgeam_stage_numeric:
+    {
+        return false;
+    }
+    }
+    return true;
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_spgeam_input value_)
+{
+    switch(value_)
+    {
+    case rocsparse_spgeam_input_alg:
+    case rocsparse_spgeam_input_scalar_datatype:
+    case rocsparse_spgeam_input_compute_datatype:
+    case rocsparse_spgeam_input_operation_A:
+    case rocsparse_spgeam_input_operation_B:
+    {
+        return false;
+    }
+    }
+    return true;
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_spgeam_output value_)
+{
+    switch(value_)
+    {
+    case rocsparse_spgeam_output_nnz:
+    {
+        return false;
+    }
+    }
+    return true;
+}
 
 namespace rocsparse
 {

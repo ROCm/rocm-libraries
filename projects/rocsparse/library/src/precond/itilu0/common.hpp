@@ -23,7 +23,7 @@
  * ************************************************************************ */
 
 #include "rocsparse-types.h"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 #include <iostream>
 
 namespace rocsparse

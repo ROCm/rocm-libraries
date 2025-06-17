@@ -129,7 +129,9 @@ namespace rocRoller
                 TransposeType transB;
 
                 Operations::ScaleMode scaleA;
+                DataType              scaleTypeA;
                 Operations::ScaleMode scaleB;
+                DataType              scaleTypeB;
 
                 int scaleBlockSize;
 

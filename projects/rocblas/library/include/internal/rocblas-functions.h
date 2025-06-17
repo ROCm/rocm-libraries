@@ -25024,7 +25024,25 @@ ROCBLAS_EXPORT rocblas_status rocblas_get_device_memory_size(rocblas_handle hand
 
 /*! \brief
     \details
-    Allows user to set the device memory for the handle to use as a workspace (user-owned scheme).
+    Changes the size of allocated device memory at runtime.
+
+    Any previously allocated device memory managed by the handle is freed.
+
+    If size > 0 sets the device memory size to the specified size (in bytes).
+    If size == 0, frees the memory allocated so far, and lets rocBLAS manage device memory in the future, expanding it when necessary.
+    Returns rocblas_status_invalid_handle if handle is nullptr; rocblas_status_invalid_pointer if size is nullptr; rocblas_status_success otherwise
+    @param[in]
+    handle          rocblas handle
+    @param[in]
+    size            size of allocated device memory
+ ******************************************************************************/
+ROCBLAS_DEPRECATED_MSG("rocblas_set_device_memory_size will be removed in a future release and "
+                       "supported modes will be rocblas_managed & user_owned")
+ROCBLAS_EXPORT rocblas_status rocblas_set_device_memory_size(rocblas_handle handle, size_t size);
+
+/*! \brief
+    \details
+    Sets the device workspace for the handle to use.
 
     Any previously allocated device memory managed by the handle is freed.
 
@@ -25046,6 +25064,16 @@ ROCBLAS_EXPORT rocblas_status rocblas_set_workspace(rocblas_handle handle, void*
     handle          rocblas handle
  ******************************************************************************/
 ROCBLAS_EXPORT bool rocblas_is_managing_device_memory(rocblas_handle handle);
+
+/*! \brief
+    \details
+    Returns true when device memory in handle is managed by the user
+    @param[in]
+    handle          rocblas handle
+ ******************************************************************************/
+ROCBLAS_DEPRECATED_MSG("rocblas_is_user_managing_device_memory will be removed in a future release "
+                       "and supported modes will be rocblas_managed and user_owned")
+ROCBLAS_EXPORT bool rocblas_is_user_managing_device_memory(rocblas_handle handle);
 
 /*! \brief
     \details

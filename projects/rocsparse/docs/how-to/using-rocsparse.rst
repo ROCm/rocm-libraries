@@ -69,7 +69,7 @@ Graph support for rocSPARSE
 Many of the rocSPARSE functions can be captured into a graph node using the HIP Graph Management APIs. See :ref:`Functions supported with Graph Capture` to determine
 whether a rocSPARSE routine is supported or not. For a list of graph-related HIP APIs, see the `HIP Graph Management API <https://rocm.docs.amd.com/projects/HIP/en/latest/doxygen/html/group___graph.html#graph-management>`_.
 
-The following code creates a graph with ``rocsparse_function()`` as the graph node. 
+The following code creates a graph with ``rocsparse_function()`` as the graph node.
 
 .. code-block:: c++
 
@@ -362,7 +362,7 @@ For :cpp:func:`rocsparse_sddmm()`, ``hipGraph`` is supported only when using the
 Storage formats
 ===============
 
-This section describes the supported matrix storage formats.  
+This section describes the supported matrix storage formats.
 
 .. note::
     The different storage formats support indexing from a base of 0 or 1 as described in :ref:`index_base`.

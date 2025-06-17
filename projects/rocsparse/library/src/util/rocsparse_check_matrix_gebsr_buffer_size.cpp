@@ -24,9 +24,9 @@
 #include "internal/util/rocsparse_check_matrix_gebsr.h"
 
 #include "rocsparse_check_matrix_gebsr.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
-#include "rocsparse_primitives.h"
+#include "rocsparse_primitives.hpp"
 
 #include "check_matrix_gebsr_device.h"
 

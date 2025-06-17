@@ -23,6 +23,7 @@ trigger:
   branches:
     include:
     - develop
+    - release-staging/rocm-rel-7.*
   paths:
     include:
     - projects/rocrand
@@ -31,8 +32,8 @@ trigger:
     - projects/rocrand/.github
     - projects/rocrand/.jenkins
     - projects/rocrand/docs
-    - projects/rocrand/'.*.y*ml'
-    - projects/rocrand/'*.md'
+    - projects/rocrand/.*.y*ml
+    - projects/rocrand/*.md
     - projects/rocrand/LICENSE.txt
 
 pr:
@@ -40,6 +41,7 @@ pr:
   branches:
     include:
     - develop
+    - release-staging/rocm-rel-7.*
   paths:
     include:
     - projects/rocrand
@@ -48,8 +50,8 @@ pr:
     - projects/rocrand/.github
     - projects/rocrand/.jenkins
     - projects/rocrand/docs
-    - projects/rocrand/'.*.y*ml'
-    - projects/rocrand/'*.md'
+    - projects/rocrand/.*.y*ml
+    - projects/rocrand/*.md
     - projects/rocrand/LICENSE.txt
   drafts: false
 

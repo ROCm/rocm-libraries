@@ -22,11 +22,11 @@
  *
  * ************************************************************************ */
 
-#include "common.h"
 #include "internal/extra/rocsparse_bsrgeam.h"
 #include "rocsparse_common.h"
+#include "rocsparse_common.hpp"
 #include "rocsparse_csrgeam.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {

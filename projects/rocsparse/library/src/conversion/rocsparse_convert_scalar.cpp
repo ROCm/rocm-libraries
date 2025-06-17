@@ -21,9 +21,9 @@
  *
  * ************************************************************************ */
 
-#include "control.h"
-#include "handle.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_handle.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "rocsparse_convert_scalar.hpp"
 #include <map>

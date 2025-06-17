@@ -99,19 +99,6 @@ rocsparselt_compute_type_ HIPComputetypeToRocSparseLtComputetype(hipsparseLtComp
     }
 }
 
-hipsparseLtComputetype_t RocSparseLtComputetypeToHIPComputetype(rocsparselt_compute_type_ type)
-{
-    switch(type)
-    {
-    case rocsparselt_compute_f32:
-        return HIPSPARSELT_COMPUTE_32F;
-
-    case rocsparselt_compute_i32:
-        return HIPSPARSELT_COMPUTE_32I;
-    }
-    throw HIPSPARSE_STATUS_NOT_SUPPORTED;
-}
-
 rocsparselt_operation_ HIPOperationToHCCOperation(hipsparseOperation_t op)
 {
     switch(op)
@@ -155,36 +142,12 @@ rocsparselt_order_ HIPOrderToHCCOrder(hipsparseOrder_t op)
     }
 }
 
-hipsparseOrder_t HCCOrderToHIPOrder(rocsparselt_order_ op)
-{
-    switch(op)
-    {
-    case rocsparselt_order_row:
-        return HIPSPARSE_ORDER_ROW;
-    case rocsparselt_order_column:
-        return HIPSPARSE_ORDER_COL;
-    default:
-        throw HIPSPARSE_STATUS_NOT_SUPPORTED;
-    }
-}
-
 rocsparselt_sparsity_ HIPSparsityToRocSparseLtSparsity(hipsparseLtSparsity_t sparsity)
 {
     switch(sparsity)
     {
     case HIPSPARSELT_SPARSITY_50_PERCENT:
         return rocsparselt_sparsity_50_percent;
-    default:
-        throw HIPSPARSE_STATUS_NOT_SUPPORTED;
-    }
-}
-
-hipsparseLtSparsity_t RocSparseLtSparsityToHIPSparsity(rocsparselt_sparsity_ sparsity)
-{
-    switch(sparsity)
-    {
-    case rocsparselt_sparsity_50_percent:
-        return HIPSPARSELT_SPARSITY_50_PERCENT;
     default:
         throw HIPSPARSE_STATUS_NOT_SUPPORTED;
     }
@@ -234,63 +197,6 @@ rocsparselt_matmul_descr_attribute_
     }
 }
 
-hipsparseLtMatmulDescAttribute_t
-    RocSparseLtMatmulDescAttributeToHIPMatmulDescAttribute(rocsparselt_matmul_descr_attribute_ attr)
-{
-    switch(attr)
-    {
-    case rocsparselt_matmul_activation_relu:
-        return HIPSPARSELT_MATMUL_ACTIVATION_RELU;
-    case rocsparselt_matmul_activation_relu_upperbound:
-        return HIPSPARSELT_MATMUL_ACTIVATION_RELU_UPPERBOUND;
-    case rocsparselt_matmul_activation_relu_threshold:
-        return HIPSPARSELT_MATMUL_ACTIVATION_RELU_THRESHOLD;
-    case rocsparselt_matmul_activation_gelu:
-        return HIPSPARSELT_MATMUL_ACTIVATION_GELU;
-    case rocsparselt_matmul_activation_gelu_scaling:
-        return HIPSPARSELT_MATMUL_ACTIVATION_GELU_SCALING;
-    case rocsparselt_matmul_alpha_vector_scaling:
-        return HIPSPARSELT_MATMUL_ALPHA_VECTOR_SCALING;
-    case rocsparselt_matmul_beta_vector_scaling:
-        return HIPSPARSELT_MATMUL_BETA_VECTOR_SCALING;
-    case rocsparselt_matmul_bias_stride:
-        return HIPSPARSELT_MATMUL_BIAS_STRIDE;
-    case rocsparselt_matmul_bias_pointer:
-        return HIPSPARSELT_MATMUL_BIAS_POINTER;
-    case rocsparselt_matmul_activation_abs:
-        return HIPSPARSELT_MATMUL_ACTIVATION_ABS;
-    case rocsparselt_matmul_activation_leakyrelu:
-        return HIPSPARSELT_MATMUL_ACTIVATION_LEAKYRELU;
-    case rocsparselt_matmul_activation_leakyrelu_alpha:
-        return HIPSPARSELT_MATMUL_ACTIVATION_LEAKYRELU_ALPHA;
-    case rocsparselt_matmul_activation_sigmoid:
-        return HIPSPARSELT_MATMUL_ACTIVATION_SIGMOID;
-    case rocsparselt_matmul_activation_tanh:
-        return HIPSPARSELT_MATMUL_ACTIVATION_TANH;
-    case rocsparselt_matmul_activation_tanh_alpha:
-        return HIPSPARSELT_MATMUL_ACTIVATION_TANH_ALPHA;
-    case rocsparselt_matmul_activation_tanh_beta:
-        return HIPSPARSELT_MATMUL_ACTIVATION_TANH_BETA;
-    case rocsparselt_matmul_bias_type:
-        return HIPSPARSELT_MATMUL_BIAS_TYPE;
-    default:
-        throw HIPSPARSE_STATUS_NOT_SUPPORTED;
-    }
-}
-
-hipsparseLtMatDescAttribute_t
-    RocSparseLtMatDescAttributeToHIPMatDescAttribute(rocsparselt_mat_descr_attribute_ attr)
-{
-    switch(attr)
-    {
-    case rocsparselt_mat_num_batches:
-        return HIPSPARSELT_MAT_NUM_BATCHES;
-    case rocsparselt_mat_batch_stride:
-        return HIPSPARSELT_MAT_BATCH_STRIDE;
-    default:
-        throw HIPSPARSE_STATUS_NOT_SUPPORTED;
-    }
-}
 
 rocsparselt_mat_descr_attribute_
     HIPMatDescAttributeToRocSparseLtMatDescAttribute(hipsparseLtMatDescAttribute_t attr)
@@ -312,17 +218,6 @@ rocsparselt_matmul_alg_ HIPMatmulAlgToRocSparseLtMatmulAlg(hipsparseLtMatmulAlg_
     {
     case HIPSPARSELT_MATMUL_ALG_DEFAULT:
         return rocsparselt_matmul_alg_default;
-    default:
-        throw HIPSPARSE_STATUS_NOT_SUPPORTED;
-    }
-}
-
-hipsparseLtMatmulAlg_t RocSparseLtMatmulAlgToHIPMatmulAlg(rocsparselt_matmul_alg_ alg)
-{
-    switch(alg)
-    {
-    case rocsparselt_matmul_alg_default:
-        return HIPSPARSELT_MATMUL_ALG_DEFAULT;
     default:
         throw HIPSPARSE_STATUS_NOT_SUPPORTED;
     }
@@ -350,28 +245,6 @@ rocsparselt_matmul_alg_attribute_
     }
 }
 
-hipsparseLtMatmulAlgAttribute_t
-    RocSparseLtAlgAttributeToHIPMatmulAlgAttribute(rocsparselt_matmul_alg_attribute_ alg)
-{
-    switch(alg)
-    {
-    case rocsparselt_matmul_alg_config_id:
-        return HIPSPARSELT_MATMUL_ALG_CONFIG_ID;
-    case rocsparselt_matmul_alg_config_max_id:
-        return HIPSPARSELT_MATMUL_ALG_CONFIG_MAX_ID;
-    case rocsparselt_matmul_search_iterations:
-        return HIPSPARSELT_MATMUL_SEARCH_ITERATIONS;
-    case rocsparselt_matmul_split_k:
-        return HIPSPARSELT_MATMUL_SPLIT_K;
-    case rocsparselt_matmul_split_k_mode:
-        return HIPSPARSELT_MATMUL_SPLIT_K_MODE;
-    case rocsparselt_matmul_split_k_buffers:
-        return HIPSPARSELT_MATMUL_SPLIT_K_BUFFERS;
-    default:
-        throw HIPSPARSE_STATUS_NOT_SUPPORTED;
-    }
-}
-
 rocsparselt_prune_alg_ HIPPruneAlgToRocSparseLtPruneAlg(hipsparseLtPruneAlg_t alg)
 {
     switch(alg)
@@ -385,19 +258,6 @@ rocsparselt_prune_alg_ HIPPruneAlgToRocSparseLtPruneAlg(hipsparseLtPruneAlg_t al
     }
 }
 
-hipsparseLtPruneAlg_t RocSparseLtPruneAlgToHIPPruneAlg(rocsparselt_prune_alg_ alg)
-{
-    switch(alg)
-    {
-    case rocsparselt_prune_smfmac_tile:
-        return HIPSPARSELT_PRUNE_SPMMA_TILE;
-    case rocsparselt_prune_smfmac_strip:
-        return HIPSPARSELT_PRUNE_SPMMA_STRIP;
-    default:
-        throw HIPSPARSE_STATUS_NOT_SUPPORTED;
-    }
-}
-
 rocsparselt_split_k_mode HIPSplitKModeToRocSparseLtSplitKMode(hipsparseLtSplitKMode_t mode)
 {
     switch(mode)
@@ -406,19 +266,6 @@ rocsparselt_split_k_mode HIPSplitKModeToRocSparseLtSplitKMode(hipsparseLtSplitKM
         return rocsparselt_splik_k_mode_one_kernel;
     case HIPSPARSELT_SPLIT_K_MODE_TWO_KERNELS:
         return rocsparselt_split_k_mode_two_kernels;
-    default:
-        throw HIPSPARSE_STATUS_NOT_SUPPORTED;
-    }
-}
-
-hipsparseLtSplitKMode_t RocSparseLtSplitKModeToHIPSplitKMode(rocsparselt_split_k_mode mode)
-{
-    switch(mode)
-    {
-    case rocsparselt_splik_k_mode_one_kernel:
-        return HIPSPARSELT_SPLIT_K_MODE_ONE_KERNEL;
-    case rocsparselt_split_k_mode_two_kernels:
-        return HIPSPARSELT_SPLIT_K_MODE_TWO_KERNELS;
     default:
         throw HIPSPARSE_STATUS_NOT_SUPPORTED;
     }

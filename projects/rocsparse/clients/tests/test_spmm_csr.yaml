@@ -639,6 +639,7 @@ Tests:
   M: 1
   N: [40, 41, 42, 52]
   K: 1
+  tolm: 5.0
   alpha_beta: *alpha_beta_range_nightly
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none]

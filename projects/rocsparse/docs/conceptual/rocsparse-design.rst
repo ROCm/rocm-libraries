@@ -371,7 +371,7 @@ Subroutine                         Shares metadata with
 ================================== ====
 
 .. note::
-   
+
    This functionality can be further expanded on rocSPARSE extensions to significantly improve metadata collection performance.
 
 .. _rocsparse_clients:

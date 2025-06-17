@@ -23,12 +23,12 @@
  * ************************************************************************ */
 
 #include "../conversion/rocsparse_convert_array.hpp"
-#include "common.h"
-#include "control.h"
 #include "internal/extra/rocsparse_csrgeam.h"
 #include "rocsparse_common.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csrgeam.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include "csrgeam_device.h"
 

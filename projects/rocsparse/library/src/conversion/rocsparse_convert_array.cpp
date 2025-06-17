@@ -21,11 +21,11 @@
  *
  * ************************************************************************ */
 
-#include "common.h"
-#include "control.h"
-#include "handle.h"
 #include "rocsparse.h"
-#include "utility.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_control.hpp"
+#include "rocsparse_handle.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "rocsparse_convert_array.hpp"
 

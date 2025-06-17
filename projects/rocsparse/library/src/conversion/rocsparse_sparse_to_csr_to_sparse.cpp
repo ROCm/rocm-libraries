@@ -23,7 +23,7 @@
 
 #include "rocsparse_sparse_to_csr_to_sparse.hpp"
 #include "rocsparse_internal_spmat_print.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 rocsparse_status rocsparse::sparse_to_csr_to_sparse(rocsparse_handle                 handle_,
                                                     rocsparse_sparse_to_sparse_descr descr_,

@@ -700,7 +700,14 @@ namespace TensileLite
 
         if(sizeMapping.streamK != 0)
         {
-            assert(gsu == 1);
+            // SK doesn't care gsu
+            if(gsu > 1)
+            {
+                std::cerr << "Warning: Stream-K Data Parallel does not support GSU > 1, "
+                          << "setting GSU to 1." << std::endl;
+                gsu = 1;
+            }
+
             auto tiles = problem.getNumTiles(sizeMapping, gsu);
 
             // Clamp minimum iters per tile to 1 to allow stream-k index calculation to work in case K==0
@@ -958,18 +965,18 @@ namespace TensileLite
 
         AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
         assert(pAMDGPU);
-        uint32_t numCUs    = pAMDGPU->computeUnitCount;
-        uint32_t numWGs    = getNumWorkGroups(problem, sizeMapping);
-        uint32_t MT0       = sizeMapping.macroTile.x;
-        uint32_t MT1       = sizeMapping.macroTile.y;
-        uint32_t MT2       = sizeMapping.depthU;
-        uint32_t M         = problem.freeSizeA(0);
-        uint32_t N         = problem.freeSizeB(0);
-        uint32_t B         = problem.batchSize(0);
-        uint32_t K         = problem.boundSize(0);
-        uint32_t GSULimit1 = max(1, (uint32_t)std::floor(numCUs / numWGs));
-        uint32_t GSULimit2 = max(1, (uint32_t)std::ceil((float)K / (float)MT2 / 2.0));
-        autoGSU            = min(GSULimit2, max(1, GSULimit1));
+        uint32_t numCUs       = pAMDGPU->computeUnitCount;
+        uint32_t numWGs       = getNumWorkGroups(problem, sizeMapping);
+        uint32_t MT0          = sizeMapping.macroTile.x;
+        uint32_t MT1          = sizeMapping.macroTile.y;
+        uint32_t MT2          = sizeMapping.depthU;
+        uint32_t M            = problem.freeSizeA(0);
+        uint32_t N            = problem.freeSizeB(0);
+        uint32_t B            = problem.batchSize(0);
+        uint32_t K            = problem.boundSize(0);
+        uint32_t GSULimit1    = max(1, (uint32_t)std::floor(numCUs / numWGs));
+        uint32_t GSULimit2    = max(1, (uint32_t)std::floor((float)K / (float)MT2 / 3.0));
+        autoGSU               = min(GSULimit2, max(1, GSULimit1));
 
         // WorkspaceCheck
         if(autoGSU > 1)
@@ -3117,8 +3124,8 @@ namespace TensileLite
                                                      y,
                                                      z,
                                                      batch,
-                                                     true,
-                                                     false,
+                                                     problem.transA(),
+                                                     problem.transB(),
                                                      *(hipAMDGPU->analyticalHardware),
                                                      sizeMapping.macroTile.x,
                                                      sizeMapping.macroTile.y,
