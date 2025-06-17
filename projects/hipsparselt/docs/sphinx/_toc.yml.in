@@ -21,7 +21,7 @@ subtrees:
   - file: conceptual/storage-format
     title: Storage formats
   - file: conceptual/mi300-features
-    title: MI300 features
+    title: Features for the Instinct MI300 series
 
 - caption: How to
   entries:

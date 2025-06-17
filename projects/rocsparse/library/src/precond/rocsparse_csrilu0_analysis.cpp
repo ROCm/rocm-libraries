@@ -94,11 +94,7 @@ namespace rocsparse
         // User is explicitly asking to force a re-analysis, or no valid data has been
         // found to be re-used.
 
-        // Clear csrilu0 info
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->csrilu0_info));
-
-        // Create csrilu0 info
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::create_trm_info(&info->csrilu0_info));
+        rocsparse::trm_info_t::recreate(&info->csrilu0_info);
 
         // Perform analysis
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::trm_analysis(handle,
@@ -118,7 +114,7 @@ namespace rocsparse
             if(info->singular_pivot == nullptr)
             {
                 RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-                    (void**)&(info->singular_pivot), sizeof(rocsparse_int), handle->stream));
+                    &info->singular_pivot, sizeof(rocsparse_int), handle->stream));
             }
             RETURN_IF_HIP_ERROR(hipMemcpyAsync(info->singular_pivot,
                                                info->zero_pivot,

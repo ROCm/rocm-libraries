@@ -25,12 +25,14 @@
 set(rocsparse_source
 
 # Auxiliary
-  src/auxiliary/handle.cpp
   src/auxiliary/rocsparse_auxiliary.cpp
   src/auxiliary/rocsparse_error.cpp
 
 # Common
   src/common/rocsparse_common.cpp
+  src/common/rocsparse_handle.cpp
+  src/common/rocsparse_mat_info.cpp
+  src/common/rocsparse_trm_info.cpp
   src/common/rocsparse_indextype_utils.cpp
   src/common/rocsparse_datatype_utils.cpp
   src/common/rocsparse_one.cpp
@@ -61,9 +63,11 @@ set(rocsparse_source
   src/level1/rocsparse_doti.cpp
   src/level1/rocsparse_dotci.cpp
   src/level1/rocsparse_gthr.cpp
+  src/level1/rocsparse_gthr_impl.cpp
   src/level1/rocsparse_gthrz.cpp
   src/level1/rocsparse_roti.cpp
   src/level1/rocsparse_sctr.cpp
+  src/level1/rocsparse_sctr_impl.cpp
   src/level1/rocsparse_axpby.cpp
   src/level1/rocsparse_gather.cpp
   src/level1/rocsparse_scatter.cpp
@@ -101,6 +105,9 @@ set(rocsparse_source
   src/level2/rocsparse_csrmv_template_lrb.cpp
   src/level2/rocsparse_csrmv_impl.cpp
   src/level2/rocsparse_csrmv.cpp
+  src/level2/rocsparse_csrmv_info.cpp
+  src/level2/rocsparse_csrmv_adaptive_info.cpp
+  src/level2/rocsparse_csrmv_lrb_info.cpp
   src/level2/rocsparse_csrmv_analysis.cpp
   #
   src/level2/rocsparse_cscmv_impl.cpp
@@ -115,6 +122,7 @@ set(rocsparse_source
   src/level2/rocsparse_csrsv_buffer_size.cpp
   src/level2/rocsparse_csrsv_solve.cpp
   src/level2/rocsparse_csritsv.cpp
+  src/level2/rocsparse_csritsv_info.cpp
   src/level2/rocsparse_csritsv_buffer_size.cpp
   src/level2/rocsparse_csritsv_analysis.cpp
   src/level2/rocsparse_csritsv_solve.cpp
@@ -377,6 +385,7 @@ set(rocsparse_source
   src/extra/rocsparse_csrgeam_nnz.cpp
   src/extra/rocsparse_csrgeam_buffer_size.cpp
   #
+  src/extra/rocsparse_csrgemm_info.cpp
   src/extra/rocsparse_csrgemm_scal_buffer_size.cpp
   src/extra/rocsparse_csrgemm_scal_nnz.cpp
   src/extra/rocsparse_csrgemm_scal.cpp

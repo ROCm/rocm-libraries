@@ -37,72 +37,9 @@ from pathlib import Path
 from typing import Dict, Tuple
 
 import pandas as pd
-import rrperf
-import rrperf.args as args
-import rrperf.utils as utils
 import yaml
 
-
-def empty():
-    yield from ()
-
-
-def load_suite(suite: str):
-    """Load performance suite from rrsuites.py."""
-    return getattr(rrperf.rrsuites, suite)()
-
-
-def first_problem_from_suite(suite: str):
-    for problem in load_suite(suite):
-        return problem
-    raise RuntimeError(f"Suite {suite} has no problems.")
-
-
-def try_getting_commit(repo):
-    if repo is not None:
-        try:
-            return rrperf.git.short_hash(repo)
-        except Exception:
-            pass
-    return None
-
-
-def get_commit(rundir: str = None, build_dir: Path = None) -> str:
-    commit = try_getting_commit(build_dir)
-    if commit is None:
-        commit = try_getting_commit(rundir)
-    if commit is None:
-        commit = try_getting_commit(".")
-    if commit is None:
-        commit = try_getting_commit(Path(__file__).resolve().parent)
-    if commit is None:
-        commit = "NO_COMMIT"
-    return commit
-
-
-def get_work_dir(rundir: str = None, build_dir: Path = None) -> Path:
-    """Return a new work directory path."""
-
-    date = datetime.date.today().strftime("%Y-%m-%d")
-    root = "."
-    commit = get_commit(rundir, build_dir)
-
-    if rundir is not None:
-        root = Path(rundir)
-
-    serial = len(list(Path(root).glob(f"{date}-{commit}-*")))
-    return root / Path(f"{date}-{commit}-{serial:03d}")
-
-
-def get_build_dir() -> Path:
-    varname = "ROCROLLER_BUILD_DIR"
-    if varname in os.environ:
-        return Path(os.environ[varname])
-    default = rrperf.git.top() / "build"
-    if default.is_dir():
-        return default
-
-    raise RuntimeError(f"Build directory not found.  Set {varname} to override.")
+import rrperf
 
 
 def submit_directory(suite: str, wrkdir: Path, ptsdir: Path) -> None:
@@ -162,7 +99,7 @@ def run_problems(
             if p.returncode == 0:
                 status = "ok"
             elif p.returncode == SOLUTION_NOT_SUPPORTED_ON_ARCH:
-                status = "skipped (not supported on " + utils.rocm_gfx() + ")"
+                status = "skipped (not supported on " + rrperf.utils.rocm_gfx() + ")"
             else:
                 status = "error"
                 result = False
@@ -198,8 +135,8 @@ def backcast(generator, build_dir):
 
 def get_args(parser: argparse.ArgumentParser):
     common_args = [
-        args.rundir,
-        args.suite,
+        rrperf.args.rundir,
+        rrperf.args.suite,
     ]
     for arg in common_args:
         arg(parser)
@@ -250,25 +187,25 @@ def run_cli(
         rrperf.rocm_control.pin_clocks(rocm_smi)
 
     if suite is None and token is None:
-        suite = "all_gfx120X" if utils.rocm_gfx().startswith("gfx120") else "all"
+        suite = "all_gfx120X" if rrperf.utils.rocm_gfx().startswith("gfx120") else "all"
 
-    generator = empty()
+    generator = rrperf.utils.empty()
     if suite is not None:
-        generator = chain(generator, load_suite(suite))
+        generator = chain(generator, rrperf.utils.load_suite(suite))
     if token is not None:
         generator = chain(generator, from_token(token))
     if recast:
         generator = backcast(generator, build_dir)
 
     if build_dir is None:
-        build_dir = get_build_dir()
+        build_dir = rrperf.utils.get_build_dir()
     else:
         build_dir = Path(build_dir)
 
     env = dict(os.environ)
     env["ROCROLLER_ENFORCE_GRAPH_CONSTRAINTS"] = "1"
 
-    rundir = get_work_dir(rundir, build_dir)
+    rundir = rrperf.utils.get_work_dir(rundir, build_dir)
     rundir.mkdir(parents=True, exist_ok=True)
 
     # pts.create_git_info(str(wrkdir / "git-commit.txt"))
@@ -294,11 +231,3 @@ def run_cli(
         submit_directory(suite, rundir, ptsdir)
 
     return result, rundir
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    get_args(parser)
-
-    parsed_args = parser.parse_args()
-    run(parsed_args)

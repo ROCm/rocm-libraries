@@ -166,7 +166,7 @@ if(ROCROLLER_ENABLE_YAML_CPP)
 endif()
 
 target_compile_definitions(rocroller
-    PUBLIC 
+    PUBLIC
         ROCROLLER_USE_HIP
         __HIP_PLATFORM_AMD__
 )
@@ -211,7 +211,8 @@ configure_file(
 )
 target_sources(rocroller PRIVATE "${PROJECT_BINARY_DIR}/rocRoller/src/Version.cpp")
 
-add_subdirectory(host-library)
+add_subdirectory(src)
+add_subdirectory(include)
 add_subdirectory(GPUArchitectureGenerator)
 
 if(ROCROLLER_EMBED_ARCH_DEF)

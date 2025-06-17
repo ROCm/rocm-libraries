@@ -45,6 +45,7 @@ target_sources(rocroller-tests-catch
         "${_CMAKE_CURRENT_SOURCE_DIR}/ExpressionToStringTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/ExpressionTransformationTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/FastArithmeticTest.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/FastDivisionTransformationTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/GlobalLoadStoreTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/HazardObserverTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/HypergraphTest.cpp"

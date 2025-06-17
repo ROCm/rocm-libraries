@@ -6410,12 +6410,25 @@ class KernelWriterAssembly(KernelWriter):
             if numTmpSgpr == 4:
                tmpSgprX3 = tmpSgprInfo.idx+3
 
-          sparseInputBlocksA = 1
-          sparseInputBlocksB = 1
-          if kernel["MIInputPerThread"] * kernel["ProblemType"]["DataTypeB"].numBytes() > 16 :
-            sparseInputBlocksA = 2 if kernel["ProblemType"]["Sparse"] == 2 else 1
-            sparseInputBlocksB = 2 if kernel["ProblemType"]["Sparse"] == 1 else 1
+          def findSparseOffset(isA:bool):
+            blocksPerTGroupSMFMA = 1
+            elementsPerBlockSMFMA = 1
+            blockOffsetSMFMA =1
+            if kernel["ProblemType"]["Sparse"] != 0:
+                if kernel["MIInputPerThread"] * kernel["ProblemType"]["DataTypeB"].numBytes() > 16: # double K
+                    isSparseTrack = (kernel["ProblemType"]["Sparse"] == 1 and isA) or (kernel["ProblemType"]["Sparse"] == 2 and not isA)
+                    # gfx950 sparse track only has one block for each thread group.
+                    # TODO adjust this value for other arch.
+                    blocksPerTGroupSMFMA = 1 if isSparseTrack else 2
+                    if blocksPerTGroupSMFMA > 1:
+                        threadGroups = kernel["MatrixInstK"] // kernel["MIInputPerThread"]
+                        elementsPerBlockSMFMA = kernel["MIInputPerThread"] // blocksPerTGroupSMFMA
+                        blockStride = elementsPerBlockSMFMA * threadGroups
+                        blockOffsetSMFMA = blockStride - elementsPerBlockSMFMA
+            return blocksPerTGroupSMFMA, elementsPerBlockSMFMA, blockOffsetSMFMA
 
+          blocksPerTGroupSMFMAA, elementsPerBlockSMFMAA, blockOffsetSMFMAA = findSparseOffset(True)
+          blocksPerTGroupSMFMAB, elementsPerBlockSMFMAB, blockOffsetSMFMAB = findSparseOffset(False)
           # replace 0 for differnet thread
           if kernel["ProblemType"]["Sparse"] == 1 and numMIInput//8 >= 1:
             vgprPerSet0Group = 1
@@ -6436,16 +6449,15 @@ class KernelWriterAssembly(KernelWriter):
           for group in range(0, numSet0GroupA):
             if numSet0GroupA > 1 or (is_wmma_v2 and vgprPerInputA > 2):
               if group == 0:
-                if kernel["ProblemType"]["Sparse"] == 1:
-                    multiplyBy = numMIInput//sparseInputBlocksA
+                if kernel["ProblemType"]["Sparse"]:
+                    multiplyBy = numMIInput//blocksPerTGroupSMFMAA
                 else:
                     multiplyBy = numMIInput//2 if vgprPerInputA == 8 else numMIInput
                 shiftK.add(vectorStaticMultiply(vgpr(kReg_first), vgpr(kReg_first), multiplyBy, tmpSgprInfo))
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), 0, ""))
-              elif kernel["ProblemType"]["Sparse"] == 2 and group == 2 and sparseInputBlocksA == 2:
-                is8bits = kernel["ProblemType"]["DataType"].numBytes() == 1
-                strideK = 3 if kernel["MatrixInstK"]== 32 or (is8bits and kernel["MatrixInstK"]== 64) else 7
-                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), numMIInput//numSet0GroupA*strideK, "add part of K"))
+              elif blocksPerTGroupSMFMAA == 2 and (group * vgprPerSet0Group) == (elementsPerBlockSMFMAA * numRegistersIn):
+                kIncA = blockOffsetSMFMAA + (numMIInput//numSet0GroupA) * max(group - 1, 0)
+                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncA, "add part of K"))
               else:
                 kIncA = numMIInput//numSet0GroupA
                 if self.states.asmCaps["HasMFMA_f8f6f4"]:
@@ -6482,16 +6494,15 @@ class KernelWriterAssembly(KernelWriter):
           for group in range(0, numSet0GroupB):
             if numSet0GroupB > 1 or (is_wmma_v2 and vgprPerInputB > 2):
               if group == 0:
-                if kernel["ProblemType"]["Sparse"] == 1:
-                    multiplyBy = numMIInput//sparseInputBlocksB
+                if kernel["ProblemType"]["Sparse"]:
+                    multiplyBy = numMIInput//blocksPerTGroupSMFMAB
                 else:
                     multiplyBy = numMIInput//2 if vgprPerInputB == 8 else numMIInput
                 shiftK.add(vectorStaticMultiply(vgpr(kReg_first), vgpr(kReg_first), multiplyBy, tmpSgprInfo))
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), 0, ""))
-              elif kernel["ProblemType"]["Sparse"] == 1 and group == 2 and sparseInputBlocksB == 2:
-                is8bits = kernel["ProblemType"]["DataType"].numBytes() == 1
-                strideK = 3 if kernel["MatrixInstK"]== 32 or (is8bits and kernel["MatrixInstK"]== 64) else 7
-                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), numMIInput//numSet0GroupB*strideK, "add part of K"))
+              elif blocksPerTGroupSMFMAB == 2 and (group * vgprPerSet0Group) == (elementsPerBlockSMFMAB * numRegistersIn):
+                kIncB = blockOffsetSMFMAB + (numMIInput//numSet0GroupB) * max(group - 1, 0)
+                shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncB, "add part of K"))
               else:
                 kIncB = numMIInput//numSet0GroupB
                 if group == 2 and vgprPerInputB == 8:

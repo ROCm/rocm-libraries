@@ -22,24 +22,54 @@
 #
 # ##############################################################################
 
+# Base architectures - used when "all" is specified for GPU_TARGETS
+set(BASE_ARCHITECTURES "")
+
+# All supported architectures including xnack variants - used for validation of GPU_TARGETS
 set(SUPPORTED_ARCHITECTURES "")
 
 if(NOT BUILD_ADDRESS_SANITIZER)
-    list(APPEND SUPPORTED_ARCHITECTURES 
+    list(APPEND BASE_ARCHITECTURES 
         "gfx803"
-        "gfx900;gfx906;gfx908;gfx90a"
+        "gfx900"
+        "gfx906"
+        "gfx908"
+        "gfx90a"
         "gfx942"
         "gfx950"
-        "gfx1010;gfx1011;gfx1012"
-        "gfx1030;gfx1031;gfx1032;gfx1034;gfx1035"
-        "gfx1100;gfx1101;gfx1102"
+        "gfx1010"
+        "gfx1011"
+        "gfx1012"
+        "gfx1030"
+        "gfx1031"
+        "gfx1032"
+        "gfx1034"
+        "gfx1035"
+        "gfx1100"
         "gfx1151"
-        "gfx1200;gfx1201")
-else()
+        "gfx1200"
+        "gfx1201")
+    
+    set(SUPPORTED_ARCHITECTURES ${BASE_ARCHITECTURES})
     list(APPEND SUPPORTED_ARCHITECTURES 
-        "gfx908:xnack+;gfx90a:xnack+"
+        "gfx906:xnack+"
+        "gfx906:xnack-"
+        "gfx908:xnack+"
+        "gfx908:xnack-"
+        "gfx90a:xnack+"
+        "gfx90a:xnack-"
+        "gfx942:xnack+"
+        "gfx942:xnack-"
+        "gfx950:xnack+"
+        "gfx950:xnack-")
+else()
+    # For address sanitizer builds, base and supported are the same
+    list(APPEND BASE_ARCHITECTURES 
+        "gfx908:xnack+"
+        "gfx90a:xnack+"
         "gfx942:xnack+"
         "gfx950:xnack+")
+    set(SUPPORTED_ARCHITECTURES ${BASE_ARCHITECTURES})
 endif()
 
 function(tensile_validate_gpu_targets targets)
@@ -58,5 +88,13 @@ function(tensile_validate_gpu_targets targets)
             message(FATAL_ERROR "Unsupported GPU target: ${target}\nSupported targets are: ${supported_list}")
         endif()
     endforeach()
+endfunction()
+
+function(tensile_get_base_architectures output_var)
+    set(${output_var} ${BASE_ARCHITECTURES} PARENT_SCOPE)
+endfunction()
+
+function(tensile_get_supported_architectures output_var)
+    set(${output_var} ${SUPPORTED_ARCHITECTURES} PARENT_SCOPE)
 endfunction()
 

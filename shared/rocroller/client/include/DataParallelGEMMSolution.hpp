@@ -110,10 +110,22 @@ namespace rocRoller
                                 "Scale mode not supported!",
                                 ShowValue(solutionParams.scaleB));
 
+                    AssertFatal(solutionParams.scaleA == Operations::ScaleMode::None
+                                    || solutionParams.scaleTypeA != DataType::None,
+                                "Scale mode is set but scale type was not provided!",
+                                ShowValue(solutionParams.scaleA),
+                                ShowValue(solutionParams.scaleTypeA));
+
+                    AssertFatal(solutionParams.scaleB == Operations::ScaleMode::None
+                                    || solutionParams.scaleTypeB != DataType::None,
+                                "Scale mode is set but scale type was not provided!",
+                                ShowValue(solutionParams.scaleB),
+                                ShowValue(solutionParams.scaleTypeB));
+
                     if(solutionParams.scaleA == Operations::ScaleMode::Separate)
                     {
                         m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                            2, DataType::E8M0, unitStrides(solutionParams.transA)));
+                            2, solutionParams.scaleTypeA, unitStrides(solutionParams.transA)));
                         m_tagLoadScaleA   = command->addOperation(
                             rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleA.value()));
 
@@ -126,8 +138,8 @@ namespace rocRoller
                     }
                     else if(solutionParams.scaleA == Operations::ScaleMode::SingleScale)
                     {
-                        m_tagTensorScaleA
-                            = command->addOperation(rocRoller::Operations::Scalar(DataType::E8M0));
+                        m_tagTensorScaleA = command->addOperation(
+                            rocRoller::Operations::Scalar(solutionParams.scaleTypeA));
                         m_tagLoadScaleA = command->addOperation(
                             rocRoller::Operations::T_Load_Scalar(m_tagTensorScaleA.value()));
                         m_tagBlockScaleA = mulInputA = command->addOperation(
@@ -137,7 +149,7 @@ namespace rocRoller
                     if(solutionParams.scaleB == Operations::ScaleMode::Separate)
                     {
                         m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                            2, DataType::E8M0, unitStrides(solutionParams.transB)));
+                            2, solutionParams.scaleTypeB, unitStrides(solutionParams.transB)));
                         m_tagLoadScaleB   = command->addOperation(
                             rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleB.value()));
 
@@ -150,8 +162,8 @@ namespace rocRoller
                     }
                     else if(solutionParams.scaleB == Operations::ScaleMode::SingleScale)
                     {
-                        m_tagTensorScaleB
-                            = command->addOperation(rocRoller::Operations::Scalar(DataType::E8M0));
+                        m_tagTensorScaleB = command->addOperation(
+                            rocRoller::Operations::Scalar(solutionParams.scaleTypeB));
                         m_tagLoadScaleB = command->addOperation(
                             rocRoller::Operations::T_Load_Scalar(m_tagTensorScaleB.value()));
                         m_tagBlockScaleB = mulInputB = command->addOperation(
@@ -199,7 +211,7 @@ namespace rocRoller
                     if(solutionParams.workgroupMapping.first != -1)
                     {
                         m_tagWGM = command->allocateTag();
-                        command->allocateArgument(DataType::UInt32,
+                        command->allocateArgument(DataType::Int32,
                                                   m_tagWGM,
                                                   ArgumentType::Value,
                                                   DataDirection::ReadOnly,
@@ -328,6 +340,20 @@ namespace rocRoller
                                         solutionParams.scaleBlockSize));
                     }
 
+                    AssertFatal(solutionParams.scaleA == Operations::ScaleMode::None
+                                    || arch.isSupportedScaleType(solutionParams.scaleTypeA),
+                                fmt::format("Scale mode for A set but architecture {} does not "
+                                            "support scale type {}.",
+                                            solutionParams.architecture.toString(),
+                                            toString(solutionParams.scaleTypeA)));
+
+                    AssertFatal(solutionParams.scaleB == Operations::ScaleMode::None
+                                    || arch.isSupportedScaleType(solutionParams.scaleTypeB),
+                                fmt::format("Scale mode for B set but architecture {} does not "
+                                            "support scale type {}.",
+                                            solutionParams.architecture.toString(),
+                                            toString(solutionParams.scaleTypeB)));
+
                     params->setManualKernelDimension(2);
                     params->setWaveTilesPerWavefront(wavetilePerWavefrontM, wavetilePerWavefrontN);
 
@@ -428,8 +454,7 @@ namespace rocRoller
 
                     if(solutionParams.workgroupMapping.first != -1)
                     {
-                        auto dim  = solutionParams.workgroupMapping.first;
-                        auto size = solutionParams.workgroupMapping.second;
+                        auto dim = solutionParams.workgroupMapping.first;
 
                         AssertFatal(
                             dim == 0 || dim == 1,

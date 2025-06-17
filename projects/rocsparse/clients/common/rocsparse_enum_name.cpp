@@ -53,6 +53,7 @@ const char* rocsparse_datatype_name(rocsparse_datatype value)
         CASE(rocsparse_datatype_u8_r);
         CASE(rocsparse_datatype_i32_r);
         CASE(rocsparse_datatype_u32_r);
+        CASE(rocsparse_datatype_bf16_r);
     }
     RETURN_INVALID;
 }
