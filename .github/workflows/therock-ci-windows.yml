@@ -7,6 +7,8 @@ on:
         type: string
       project_to_test:
         type: string
+      subtree_checkout:
+        type: string
 
 permissions:
   contents: read
@@ -92,7 +94,7 @@ jobs:
 
       - name: Fetch sources
         run: |
-          python ./build_tools/fetch_sources.py --jobs 96
+          python ./build_tools/fetch_sources.py --jobs 96 --no-include-math-libs
 
       - name: Checkout closed source AMDGPU/ROCm interop library folder
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -109,7 +111,7 @@ jobs:
           # Generate a new build id.
           package_version="ADHOCBUILD"
           amdgpu_families="${{ env.AMDGPU_FAMILIES }}"
-          extra_cmake_options="${{ inputs.cmake_options }}"
+          extra_cmake_options="-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ inputs.cmake_options }}"
           echo "Building package ${package_version}"
 
           # Build.
