@@ -40,7 +40,7 @@ __host__ __device__ void test()
   assert(T(0) == z.imag());
   assert(a[0] == z.real());
   assert(a[1] == z.imag());
-  // NOTE(HIP/AMD): fp16 currently does not provide assignement operator __half& operator=(T x) for host code when x is
+  // NOTE(HIP/AMD): fp16 currently does not provide assignment operator __half& operator=(T x) for host code when x is
   // an int (device only see https://github.com/ROCm/clr/blob/amd-staging/hipamd/include/hip/amd_detail/amd_hip_fp16.h)
   // corresponding ticket SWDEV-529927
   a[0] = static_cast<T>(5);
