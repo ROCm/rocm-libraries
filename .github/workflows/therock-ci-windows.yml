@@ -95,7 +95,7 @@ jobs:
 
       - name: Fetch sources
         run: |
-          git config --global core.longpaths true 
+          git config --global core.longpaths true
           python ./TheRock/build_tools/fetch_sources.py --jobs 96 --no-include-math-libs
 
       - name: Checkout closed source AMDGPU/ROCm interop library folder
@@ -109,13 +109,15 @@ jobs:
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: "ADHOCBUILD"
-          extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
+          extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=${{ github.workspace }} ${{ inputs.cmake_options }}"
           build_dir: ${{ env.BUILD_DIR_BASH }}
           vctools_install_dir: ${{ env.VCToolsInstallDir }}
         run: |
           # clear cache before build and after download
           ccache -z
           python3 TheRock/build_tools/github_actions/build_configure.py
+          echo "test ls"
+          ls
 
       - name: Build therock-dist
         run: cmake --build "${{ env.BUILD_DIR_BASH }}" --target therock-dist
