@@ -19,6 +19,7 @@
 
 #include "gpu/thread"
 
+#include <hip/atomic>
 // For cuda::std::__libcpp_thread_sleep_for
 #include <hip/std/atomic>
 
@@ -81,6 +82,23 @@ __device__ WorkNode_Header *currentWorkNode[8192] = {};
 
 hipStream_t mainStream;
 std::atomic<uint32_t> gpuThreadFromHost_counter = 0;
+
+__host__ uint32_t ThreadData::nextTid() {
+    static std::atomic<uint32_t> threadIdCounter = 1;
+    // Increment by 2 so host and device can use alternating ids.
+    return (threadIdCounter += 2);
+}
+__device__ uint32_t ThreadData::nextTid() {
+    static __device__ hip::atomic<uint32_t, hip::thread_scope_device> threadIdCounter = 2;
+    // Increment by 2 so host and device can use alternating ids.
+    return (threadIdCounter += 2);
+}
+
+__host__ ThreadData::ThreadData(uint32_t w) : width(w), vthread_id(nextTid()) {
+}
+__device__ ThreadData::ThreadData(uint32_t w) : width(w), vthread_id(nextTid()) {
+}
+
 
 // Attempts to lock the WorkNode at location, and if successful, returns the WorkNode. If unsuccessful (i.e. it's
 // already locked) returns nullptr.
@@ -364,7 +382,6 @@ __host__ WorkNode_Header *WorkNode_Header::sendToGPU(WorkNode_Header **new_locat
     prepDeviceForWork();
 
     this->link_to_self = new_location;
-    // TODO: set this->vthread_id
 
     std::unique_ptr<WorkNode_Header, WorkNodeDeleter> worknode_d(static_cast<WorkNode_Header *>(gpu::malloc(this->worknodeSize)));
     __LIBGPU_HIP_CHECK__(hipMemcpyAsync(worknode_d.get(), this, this->worknodeSize, hipMemcpyHostToDevice, getEnqueingStream()));
@@ -459,13 +476,13 @@ __device__ gpu::thread::id get_id() noexcept {
     __shared__ gpu::thread::id base_vtid;
     if (threadIdx.x == 0) {
         WorkNode_Header *current = WorkNode_Header::lockAndFetch(&currentWorkNode[blockIdx.x]);
-        base_vtid = current->vthread_id;
+        base_vtid = current->tdata.vthread_id;
         current->unlockActive();
     }
     // TODO: What if only some of the fibers call this_thread::get_id()? This could deadlock. Also, what if the fiber
     // with threadIdx.x == 0 isn't one of the calling fibers?
     __syncthreads();
-    return base_vtid + threadIdx.x;
+    return base_vtid * thread::max_width() + threadIdx.x;
 
     // Something along these lines might work for when threadIdx.x == 0 isn't among the calling fibers.
     // __shared__ gpu::thread::id base_vtid;
@@ -475,12 +492,12 @@ __device__ gpu::thread::id get_id() noexcept {
     // do {
     //     WorkNode_Header *current = WorkNode_Header::tryLockAndFetch(&currentWorkNode[blockIdx.x]);
     //     if (current != nullptr) {
-    //         base_vtid = current->vthread_id;
+    //         base_vtid = current->tdata.vthread_id;
     //         current->unlockActive();
     //     }
     //     __syncthreads();
     // } while (base_vtid == 0);
-    // return base_vtid + threadIdx.x;
+    // return base_vtid * thread::max_width() + threadIdx.x;
 }
 
 __device__ void pseudo_yield() {
@@ -499,7 +516,7 @@ __device__ unsigned int get_width() noexcept {
     __shared__ unsigned int width;
     if (threadIdx.x == 0) {
         WorkNode_Header *current = WorkNode_Header::lockAndFetch(&currentWorkNode[blockIdx.x]);
-        width = current->width;
+        width = current->tdata.width;
         current->unlockActive();
     }
     // TODO: What if only some of the fibers call this_thread::get_width()? This could deadlock. Also, what if the fiber
@@ -562,8 +579,8 @@ __host__ __device__ thread::id thread::get_id(uint32_t index) const {
     // Don't need to lock because it's illegal for gpu::thread::detach to be called at the same time as any other
     // gpu::thread method, so we know worknode_d won't change while we're in this function.
     // Also, since vthread_id doesn't change, we don't need to force a fetch from memory, a cached value is fine.
-    assert(index < worknode_d->width);
-    return worknode_d->vthread_id + index;
+    assert(index < worknode_d->tdata.width);
+    return worknode_d->tdata.vthread_id * thread::max_width() + index;
 #else // __HIP_DEVICE_COMPILE__
     // Don't need to lock because it's illegal for gpu::thread::detach to be called at the same time as any other
     // gpu::thread method, so we know worknode_d won't change while we're in this function.
@@ -571,7 +588,7 @@ __host__ __device__ thread::id thread::get_id(uint32_t index) const {
     // know the memcpy happens after the vthread_id has been assigned.
     // TODO: Is there any way for insertWorkNodeFromHost to be finished and for the write to worknode_d->vthread_id to
     // still be waiting in a cache somewhere? I'm pretty sure the answer is no.
-    WorkNode_Header hdr;
+    WorkNode_Header hdr{};
     // Copy just the parts we need. Almost guaranteed to copy 2 uint32_ts of data starting at &(worknode_d->width).
     // TODO: Do we want to store a copy of the vthread_id in gpu::thread (and only fetch from worknode_d->vthread_id if the cached copy is invalid)?
     // TODO: fix this
@@ -584,10 +601,10 @@ __host__ __device__ thread::id thread::get_id(uint32_t index) const {
     // }
     // __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
 
-    if (index >= hdr.width) {
+    if (index >= hdr.tdata.width) {
         throw std::out_of_range("thread::get_id: index is greater than thread width");
     }
-    return hdr.vthread_id + index;
+    return hdr.tdata.vthread_id * thread::max_width() + index;
 #endif // !__HIP_DEVICE_COMPILE__
 }
 
