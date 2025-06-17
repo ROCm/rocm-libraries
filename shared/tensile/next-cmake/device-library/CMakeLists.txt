@@ -21,7 +21,7 @@
 #
 # ##############################################################################
 
-list(JOIN GPU_TARGETS "$<SEMICOLON>" TENSILE_GPU_TARGETS_SEMI_ESCAPED)
+list(JOIN GPU_TARGETS "_" TENSILE_GPU_TARGETS_SEMI_ESCAPED)
 set(TENSILE_VERBOSITY
     ""
     CACHE STRING "Verbosity level for the TensileCreateLibrary command")
@@ -35,12 +35,13 @@ set(TENSILE_LOGIC_DIR
     "${tensile_SOURCE_DIR}/../../rocBLAS/library/src/blas3/Tensile/Logic/asm_full"
     CACHE STRING "Path to directory containing logic files")
 
+set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--no-enumerate")
 set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--merge-files")
 set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--separate-architectures")
 set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--lazy-library-loading")
 set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--no-short-file-names")
 set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS}
-                       "--architecture=\"${TENSILE_GPU_TARGETS_SEMI_ESCAPED}\"")
+                       "--architecture=${TENSILE_GPU_TARGETS_SEMI_ESCAPED}")
 set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS}
                        "--cxx-compiler=${CMAKE_CXX_COMPILER}")
 set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS}
@@ -53,6 +54,10 @@ if(TENSILE_JOBS)
 endif()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(ESC_PATH "$ENV{PATH}")
+if(WIN32)
+  string(REPLACE ";" "$<SEMICOLON>" ESC_PATH "${ESC_PATH}")
+endif()
 # Use `PROJECT_BINARY_DIR` as the output directory so that the device libraries are built
 # into the top-level Tensile binary directory, and are locatable by rocBLAS at runtime.
 set(TENSILE_CREATE_LIBRARY_COMMAND
@@ -62,9 +67,13 @@ set(output_stamp "${CMAKE_CURRENT_BINARY_DIR}/Tensile.stamp")
 add_custom_command(
   COMMENT "Building device libraries..."
   COMMAND ${TENSILE_CREATE_LIBRARY_COMMAND}
+  COMMAND "${CMAKE_COMMAND}" -E env "PATH=${ESC_PATH}" -- ${TENSILE_CREATE_LIBRARY_COMMAND}
   COMMAND ${CMAKE_COMMAND} -E touch "${output_stamp}"
   OUTPUT "${output_stamp}"
-  WORKING_DIRECTORY "${TENSILE_SOURCE_TREE}/../..")
+  WORKING_DIRECTORY "${TENSILE_SOURCE_TREE}/../.."
+  VERBATIM
+  # To see progress vs buffering when built with ninja.
+  USES_TERMINAL)
 
 block(SCOPE_FOR VARIABLES)
 list(JOIN TENSILE_CREATE_LIBRARY_COMMAND " " FORMATTED_TCL)
