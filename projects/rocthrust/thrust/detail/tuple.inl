@@ -32,7 +32,9 @@ THRUST_HOST_DEVICE inline void swap(Assignable1& a, Assignable2& b)
 } // end swap()
 
 // define null_type
-struct null_type {};
+struct THRUST_DEPRECATED_BECAUSE("Please remove null_type from parameters to tuple<...>") null_type {};
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 // null_type comparisons
 THRUST_HOST_DEVICE inline
@@ -52,6 +54,8 @@ bool operator<(const null_type&, const null_type&) { return false; }
 
 THRUST_HOST_DEVICE inline
 bool operator>(const null_type&, const null_type&) { return false; }
+
+THRUST_SUPPRESS_DEPRECATED_POP
 
 // forward declaration for tuple
 template <

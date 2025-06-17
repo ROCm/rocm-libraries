@@ -548,6 +548,7 @@ DECLARE_UNITTEST(TestTupleCTAD);
 #endif // THRUST_CPP_DIALECT >= 2017
 
 // Ensure that we are backwards compatible with the old thrust::tuple implementation
+THRUST_SUPPRESS_DEPRECATED_PUSH
 static_assert(
   thrust::tuple_size<thrust::tuple<thrust::null_type,
                                    thrust::null_type,
@@ -644,3 +645,4 @@ static_assert(
 static_assert(
   thrust::tuple_size<thrust::tuple<int, int, int, int, int, int, int, int, int, thrust::null_type>>::value == 9, "");
 static_assert(thrust::tuple_size<thrust::tuple<int, int, int, int, int, int, int, int, int, int>>::value == 10, "");
+THRUST_SUPPRESS_DEPRECATED_POP

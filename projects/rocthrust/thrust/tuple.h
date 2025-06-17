@@ -56,8 +56,10 @@
 THRUST_NAMESPACE_BEGIN
 
 // define null_type for backwards compatibility
-struct null_type
+struct THRUST_DEPRECATED_BECAUSE("Please remove null_type from parameters to tuple<...>") null_type
 {};
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 THRUST_HOST_DEVICE inline bool operator==(const null_type&, const null_type&)
 {
@@ -88,6 +90,8 @@ THRUST_HOST_DEVICE inline bool operator>(const null_type&, const null_type&)
 {
   return false;
 }
+
+THRUST_SUPPRESS_DEPRECATED_POP
 
 /*! \addtogroup utility
  *  \{
@@ -188,6 +192,7 @@ using _CUDA_VSTD::tie;
 THRUST_NAMESPACE_END
 
 _LIBCUDACXX_BEGIN_NAMESPACE_STD
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 template <>
 struct tuple_size<tuple<THRUST_NS_QUALIFIER::null_type,
@@ -296,6 +301,7 @@ struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8, THRUST_NS_QUALIFIER:
     : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8>>
 {};
 
+THRUST_SUPPRESS_DEPRECATED_POP
 _LIBCUDACXX_END_NAMESPACE_STD
 
 #else
@@ -313,7 +319,7 @@ THRUST_NAMESPACE_BEGIN
 /*! \cond
  */
 
-struct null_type;
+struct THRUST_DEPRECATED_BECAUSE("Please remove null_type from parameters to tuple<...>") null_type;
 
 /*! \endcond
  */
@@ -899,6 +905,8 @@ template <typename T0,
 THRUST_HOST_DEVICE inline tuple<T0&, T1&, T2&, T3&, T4&, T5&, T6&, T7&, T8&, T9&>
 tie(T0& t0, T1& t1, T2& t2, T3& t3, T4& t4, T5& t5, T6& t6, T7& t7, T8& t8, T9& t9);
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 THRUST_HOST_DEVICE inline bool operator==(const null_type&, const null_type&);
 
 THRUST_HOST_DEVICE inline bool operator>=(const null_type&, const null_type&);
@@ -910,6 +918,8 @@ THRUST_HOST_DEVICE inline bool operator!=(const null_type&, const null_type&);
 THRUST_HOST_DEVICE inline bool operator<(const null_type&, const null_type&);
 
 THRUST_HOST_DEVICE inline bool operator>(const null_type&, const null_type&);
+
+THRUST_SUPPRESS_DEPRECATED_POP
 
 /*! \endcond
  */
@@ -932,6 +942,8 @@ struct tuple_size<THRUST_NS_QUALIFIER::tuple<Ts...>> : std::tuple_size<std::tupl
 template <size_t Id, class... Ts>
 struct tuple_element<Id, THRUST_NS_QUALIFIER::tuple<Ts...>> : std::tuple_element<Id, std::tuple<Ts...>>
 {};
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 template <>
 struct tuple_size<THRUST_NS_QUALIFIER::tuple<
@@ -1055,6 +1067,8 @@ template <class T0, class T1, class T2, class T3, class T4, class T5, class T6, 
 struct tuple_size<THRUST_NS_QUALIFIER::tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8, THRUST_NS_QUALIFIER::null_type>>
     : std::integral_constant<std::size_t, 9>
 {};
+
+THRUST_SUPPRESS_DEPRECATED_POP
 
 } // namespace std
 
