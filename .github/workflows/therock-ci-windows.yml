@@ -45,6 +45,8 @@ jobs:
           sparse-checkout: |
             .github
             projects/rocprim 
+            projects/hipcub 
+            projects/rocthrust 
           # ${{ inputs.subtree_checkout }} temporary
           fetch-depth: 0  # Needed for subtree splitting
           token: ${{ steps.generate-token.outputs.token }}
