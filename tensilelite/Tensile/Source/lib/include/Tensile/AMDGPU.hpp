@@ -219,7 +219,7 @@ namespace TensileLite
         }
 
         AMDGPU();
-        AMDGPU(Processor p, int computeUnitCount, std::string const& deviceName);
+        AMDGPU(Processor p, int computeUnitCount, std::string const& deviceName, std::string const& pciDeviceID);
         ~AMDGPU();
 
         Processor   processor        = Processor::gfx900;
@@ -233,6 +233,7 @@ namespace TensileLite
         int         skFullTiles      = 1;
         mutable int isStandardCUs    = -1; // -1: unset, 0:false, 1:true
         std::string deviceName;
+        std::string pciDeviceID;
 
         virtual bool   isStandardCU() const;
         virtual bool   runsKernelTargeting(Processor p) const;

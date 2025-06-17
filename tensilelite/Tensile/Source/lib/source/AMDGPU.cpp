@@ -42,10 +42,11 @@ namespace TensileLite
 
     TENSILE_API AMDGPU::AMDGPU() {}
 
-    TENSILE_API AMDGPU::AMDGPU(AMDGPU::Processor p, int cus, std::string const& name)
+    TENSILE_API AMDGPU::AMDGPU(AMDGPU::Processor p, int cus, std::string const& name, std::string const& pciDeviceID)
         : processor(p)
         , computeUnitCount(cus)
         , deviceName(name)
+        , pciDeviceID(pciDeviceID)
         , skDynamicGrid(getSKDynamicGrid())
         , skMaxCUs(getSKMaxCUs())
         , skGridMultiplier(getSKGridMultiplier())
