@@ -25,7 +25,7 @@ jobs:
       BASE_BUILD_DIR_POWERSHELL: B:\tmpbuild
       CCACHE_DIR: "${{ github.workspace }}/.container-cache/ccache"
       CCACHE_MAXSIZE: "700M"
-      AMDGPU_FAMILIES: "gfx110X-dgpu"
+      AMDGPU_FAMILIES: "gfx1151"
     steps:
       - name: Generate a token for rocm-libraries
         id: generate-token
@@ -201,6 +201,6 @@ jobs:
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       project_to_test: ${{ inputs.project_to_test }}
-      amdgpu_families: "gfx110X-dgpu"
-      test_runs_on: ""
+      amdgpu_families: "gfx1151"
+      test_runs_on: "windows-strix-halo-gpu-rocm"
       platform: "windows"
