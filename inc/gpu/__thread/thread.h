@@ -77,11 +77,11 @@ class thread {
     __host__ __device__ thread(const thread &) = delete;
     __host__ __device__ thread(thread &&other) noexcept
 #ifdef __HIP_DEVICE_COMPILE__
-        : worknode_d(other.worknode_d) {
+        : worknode_d(other.worknode_d), cached_tdata(std::move(other.cached_tdata)) {
         other.worknode_d = nullptr;
     }
 #else
-        : worknode_d(std::move(other.worknode_d)) {}
+        : worknode_d(std::move(other.worknode_d)), cached_tdata(std::move(other.cached_tdata)) {}
 #endif
     __host__ __device__ thread &operator=(const thread&) = delete;
     __host__ __device__ thread &operator=(thread &&other) noexcept;
@@ -121,6 +121,7 @@ class thread {
 #else
     std::unique_ptr<WorkNode_Header, WorkNodeDeleter> worknode_d = nullptr;
 #endif
+    ThreadData cached_tdata;
 };
 
 } // namespace internal
@@ -138,6 +139,7 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
     }
 
     auto worknode_h = make_worknode(width, std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
+    cached_tdata = worknode_h->tdata;
     using WorkNode_t = typename decltype(worknode_h)::element_type;
     // First two are prerequisites for the third, and produce more user-friendly error messages
     // Note: is_trivially_copyable can behave strangely for extended lambdas. See
@@ -168,6 +170,7 @@ inline __device__ thread::thread(uint32_t width [[maybe_unused]], Fn_t &&typed_f
     assert(width <= max_width());
     assert(threadIdx.x == 0);
     auto typed_worknode_ptr = make_worknode(width, std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
+    cached_tdata = typed_worknode_ptr->tdata;
 
     // First two are prerequisites for the third, and produce more user-friendly error messages
     static_assert(std::is_trivially_destructible_v<Fn_t>);

@@ -550,6 +550,7 @@ __host__ __device__ thread &thread::operator=(thread &&other) noexcept {
 
     worknode_d = std::move(other.worknode_d);
 #endif // !__HIP_DEVICE_COMPILE__
+    cached_tdata = std::move(other.cached_tdata);
     return *this;
 }
 
@@ -579,33 +580,13 @@ __host__ __device__ thread::id thread::get_id(uint32_t index) const {
     // Don't need to lock because it's illegal for gpu::thread::detach to be called at the same time as any other
     // gpu::thread method, so we know worknode_d won't change while we're in this function.
     // Also, since vthread_id doesn't change, we don't need to force a fetch from memory, a cached value is fine.
-    assert(index < worknode_d->tdata.width);
-    return worknode_d->tdata.vthread_id * thread::max_width() + index;
+    assert(index < cached_tdata.width);
 #else // __HIP_DEVICE_COMPILE__
-    // Don't need to lock because it's illegal for gpu::thread::detach to be called at the same time as any other
-    // gpu::thread method, so we know worknode_d won't change while we're in this function.
-    // Also, since the memcpy happens in the same stream as the thread constructor launches insertWorkNodeFromHost, we
-    // know the memcpy happens after the vthread_id has been assigned.
-    // TODO: Is there any way for insertWorkNodeFromHost to be finished and for the write to worknode_d->vthread_id to
-    // still be waiting in a cache somewhere? I'm pretty sure the answer is no.
-    WorkNode_Header hdr{};
-    // Copy just the parts we need. Almost guaranteed to copy 2 uint32_ts of data starting at &(worknode_d->width).
-    // TODO: Do we want to store a copy of the vthread_id in gpu::thread (and only fetch from worknode_d->vthread_id if the cached copy is invalid)?
-    // TODO: fix this
-    // if constexpr (offsetof(WorkNode_Header, width) < offsetof(WorkNode_Header, vthread_id)) {
-    //     constexpr size_t size = (offsetof(WorkNode_Header, vthread_id) - offsetof(WorkNode_Header, width)) + sizeof(worknode_d->vthread_id);
-    //     __LIBGPU_HIP_CHECK__(hipMemcpyAsync(&(hdr.width), &(worknode_d->width), size, hipMemcpyDeviceToHost, getEnqueingStream()));
-    // } else {
-    //     constexpr size_t size = (offsetof(WorkNode_Header, width) - offsetof(WorkNode_Header, vthread_id)) + sizeof(worknode_d->width);
-    //     __LIBGPU_HIP_CHECK__(hipMemcpyAsync(&(hdr.vthread_id), &(worknode_d->vthread_id), size, hipMemcpyDeviceToHost, getEnqueingStream()));
-    // }
-    // __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
-
-    if (index >= hdr.tdata.width) {
+    if (index >= cached_tdata.width) {
         throw std::out_of_range("thread::get_id: index is greater than thread width");
     }
-    return hdr.tdata.vthread_id * thread::max_width() + index;
 #endif // !__HIP_DEVICE_COMPILE__
+    return cached_tdata.vthread_id * thread::max_width() + index;
 }
 
 __host__ __device__ void thread::join() {
