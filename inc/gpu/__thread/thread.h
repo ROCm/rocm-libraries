@@ -41,6 +41,8 @@
 
 #include "hip/hip_runtime.h"
 
+#include <hip/std/__utility/swap.h>
+
 #include "gpu/__support/hip_check.h"
 #include "gpu/__clib/malloc.h"
 #include "gpu/__clib/memcpy.h"
@@ -105,6 +107,8 @@ class thread {
         : thread(1, std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...) {}
 
     __host__ __device__ ~thread();
+
+    __host__ __device__ void swap(thread& __t) noexcept { hip::std::swap(worknode_d, __t.worknode_d); hip::std::swap(cached_tdata, __t.cached_tdata); }
 
     __host__ __device__ thread::id get_id(uint32_t index = 0) const;
     __host__ __device__ bool joinable() const noexcept { return worknode_d != nullptr; }
@@ -186,5 +190,9 @@ inline __device__ thread::thread(uint32_t width [[maybe_unused]], Fn_t &&typed_f
 }
 
 } // namespace gpu
+
+namespace cuda::std {
+    __host__ __device__ inline _LIBGPU_HIDE_FROM_ABI void swap(gpu::thread& __x, gpu::thread& __y) _NOEXCEPT { __x.swap(__y); }
+}
 
 #endif // __GPU___THREAD_THREAD_H__
