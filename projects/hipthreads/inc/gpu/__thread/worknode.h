@@ -5,6 +5,8 @@
 
 #include "hip/hip_runtime.h"
 
+#include <hip/std/__functional/invoke.h>
+
 #include "gpu/__functional/invoke.h"
 #include "gpu/__thread/id.h"
 
@@ -120,8 +122,8 @@ template <class Fn_t, class... Args_t>
 __host__ auto WorkNode_Header::make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
     // Ideally, we would also forward args in the capture (...args = std::forward<Args_t>(args)) to avoid an extra copy,
     // but that requires C++20
-    auto lambda = [typed_fn = std::forward<Fn_t>(typed_fn), args...] __device__() {
-        gpu::__invoke(std::move(typed_fn), std::move(args)...);
+    auto lambda = [typed_fn = std::forward<Fn_t>(typed_fn), args...] __device__() -> void {
+        cuda::std::invoke(std::move(typed_fn), std::move(args)...);
     };
     using WorkNode_t = WorkNode<decltype(lambda)>;
     WorkNode_t *worknode_ptr = new WorkNode_t(width, std::move(lambda));
@@ -140,8 +142,8 @@ __device__ auto WorkNode_Header::make_worknode(uint32_t width, Fn_t &&typed_fn, 
 
     // Ideally, we would also forward args in the capture (...args = std::forward<Args_t>(args)) to avoid an extra copy,
     // but that requires C++20
-    auto lambda = [typed_fn = std::forward<Fn_t>(typed_fn), args...] __device__() {
-        gpu::__invoke(std::move(typed_fn), std::move(args)...);
+    auto lambda = [typed_fn = std::forward<Fn_t>(typed_fn), args...] () {
+        cuda::std::invoke(std::move(typed_fn), std::move(args)...);
     };
 
     // Allocate memory using malloc instead of new, to guaranteed that ::free(worknode) is valid.
