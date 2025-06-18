@@ -23,6 +23,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+// TODO(HIP/AMD): Analyze support of this API on HIP platform with C++20
 // UNSUPPORTED: hipcc
 
 // UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
