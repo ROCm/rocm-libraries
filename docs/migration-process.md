@@ -15,7 +15,7 @@ To ensure consistency and maintainability during the migration, the following pr
    - Typically, this is limited to the pull requests targeting develop and release-staging branches.
    - Any point-fixes for previous releases will not be migrated over.
 
-1. **Pause Merges:**  
+3. **Pause Merges:**
    - There are GitHub Actions that automatically synchronize changes from the individual repos to the monorepo.
    - These automated actions need to be paused by selecting to disable the workflow on the GitHub UI.
    - develop branch workflow: https://github.com/ROCm/rocm-libraries/actions/workflows/update-subtrees.yml 
@@ -93,8 +93,13 @@ git push origin develop
 # Delete the temporary branches created in this sequence.
 ```
 
-### Step 4: Repository Adjustments  
+### Step 4: CICD Triggers
   
+1. **CICD Trigger Points:**
+   - Modify the existing CICD systems to be triggered off changes to this project in the monorepo.
+
+### Step 5: Repository Adjustments
+
 1. **Default Branch Deprecation:**  
    - Change the default branch of the original repository with a clear deprecation notice.
    - Example: https://github.com/ROCm/rocPRIM/tree/develop_deprecated
@@ -108,7 +113,7 @@ git push origin develop
    - Use branch protection to make the new default branch with the deprecation notice read-only.
    - Create a ruleset for the `develop` branch to also be restrictive, but allow the assistant-librarian bot exceptions to push patches to the original repository.
 
-### Step 5: Source of Truth Declaration
+### Step 6: Source of Truth Declaration
 
 1. **Update repo config json:**
    - Update the true/false values in the repo-config json file that automated workflows use to determine which way source gets synchornized.
