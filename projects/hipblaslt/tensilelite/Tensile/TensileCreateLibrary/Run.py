@@ -54,7 +54,7 @@ from Tensile.Common import (
 from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
-from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs
+from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
 
 from Tensile.CustomYamlLoader import load_logic_gfx_arch
 from Tensile.KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
@@ -90,6 +90,11 @@ class KernelCodeGenResult(NamedTuple):
     pgr: int
     mathclk: int
 
+class KernelMinResult(NamedTuple):
+    err: int
+    cuoccupancy: int
+    pgr: int
+    mathclk: int
 
 def processKernelSource(kernelWriterAssembly, data, splitGSU, kernel) -> KernelCodeGenResult:
     """
@@ -160,12 +165,12 @@ def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant,
 def passPostKernelInfoToSolution(results, kernels, solutions, splitGSU: bool):
     resultDict = {}
     for kernIdx, r in enumerate(results):
-        kName = getKeyNoInternalArgs(kernels[kernIdx], splitGSU)
+        kName = getKernelNameMin(kernels[kernIdx], splitGSU)
         resultDict["%s"%kName] = r
     for solution in solutions:
         solutionKernels = solution.getKernels()
         for kernel in solutionKernels:
-            kName = getKeyNoInternalArgs(kernel, splitGSU)
+            kName = getKernelNameMin(kernel, splitGSU)
             result = resultDict["%s"%kName]
             solution._state["CUOccupancy"] = result.cuoccupancy
             solution._state["PrefetchGlobalRead"] = result.pgr
@@ -180,10 +185,8 @@ def writeAssembly(asmPath: Union[Path, str], result: KernelCodeGenResult):
     with open(path, "w", encoding="utf-8") as f:
         f.write(result.src)
 
-    # result.src is very large so let garbage collector know to clean up
-    del result
-
-    return path, isa, wfsize
+    minResult = KernelMinResult(result.err, result.cuoccupancy, result.pgr, result.mathclk)
+    return path, isa, wfsize, minResult
 
 
 def writeHelpers(
@@ -280,7 +283,7 @@ def writeSolutionsAndKernels(
     )
 
     def assemble(ret):
-        p, isa, wavefrontsize = ret
+        p, isa, wavefrontsize, result = ret
         asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")))
 
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
@@ -332,6 +335,7 @@ def writeSolutionsAndKernelsTCL(
     outputPath,
     asmToolchain,
     srcToolchain,
+    solutions,
     kernels,
     kernelHelperObjs,
     kernelWriterAssembly,
@@ -367,8 +371,9 @@ def writeSolutionsAndKernelsTCL(
     uniqueAsmKernels = [k for k in asmKernels if not k.duplicate]
 
     def assemble(ret):
-        p, isa, wavefrontsize = ret
+        p, isa, wavefrontsize, result = ret
         asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")))
+        return result
 
     unaryProcessKernelSource = functools.partial(
         processKernelSource,
@@ -386,6 +391,11 @@ def writeSolutionsAndKernelsTCL(
         multiArg=False,
         return_as="list"
     )
+    passPostKernelInfoToSolution(
+        ret, uniqueAsmKernels, solutions, splitGSU
+    )
+    # result.src is very large so let garbage collector know to clean up
+    del ret
     buildAssemblyCodeObjectFiles(
         asmToolchain.linker,
         asmToolchain.bundler,
@@ -692,6 +702,7 @@ def run():
         outputPath,
         asmToolchain,
         srcToolchain,
+        solutions,
         kernels,
         kernelHelperObjs,
         kernelWriterAssembly,
@@ -709,6 +720,14 @@ def run():
     newLibraryDir = ensurePath(os.path.join(outputPath, "library"))
     splitGSU = False
 
+    solDict = {}
+    for solution in solutions:
+        solutionKernels = solution.getKernels()
+        for kernel in solutionKernels:
+            kName = getKeyNoInternalArgs(kernel, False)
+            if kName not in solDict:
+                solDict["%s"%kName] = kernel
+
     def writeMsl(name, lib):
         filename = os.path.join(newLibraryDir, name)
         lib.applyNaming(splitGSU)
@@ -723,6 +742,12 @@ def run():
                 masterFile = os.path.join(newLibraryDir, "TensileLibrary_" + archName)
             newMasterLibrary.applyNaming(splitGSU)
             LibraryIO.write(masterFile, state(newMasterLibrary), arguments["LibraryFormat"])
+
+            for name, lib in newMasterLibrary.lazyLibraries.items():
+                for k, s in lib.solutions.items():
+                    kName = getKeyNoInternalArgs(s.originalSolution, splitGSU)
+                    s.sizeMapping.CUOccupancy = solDict["%s"%kName]["CUOccupancy"]
+
             ParallelMap2(writeMsl,
                          newMasterLibrary.lazyLibraries.items(),
                          "Writing master solution libraries",

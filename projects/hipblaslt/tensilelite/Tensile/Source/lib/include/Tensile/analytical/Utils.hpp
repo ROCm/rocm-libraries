@@ -46,7 +46,8 @@ namespace TensileLite
                                        size_t, // MT_K
                                        size_t, // MI_M
                                        size_t, // MI_N
-                                       size_t // MI_K
+                                       size_t, // MI_K
+                                       size_t  // Occupancy
                                        >;
 
         using TileTuple = std::tuple<size_t, // MT_M
@@ -54,7 +55,8 @@ namespace TensileLite
                                      size_t, // MT_K
                                      size_t, // MI_M
                                      size_t, // MI_N
-                                     size_t // MI_K
+                                     size_t, // MI_K
+                                     size_t  // Occupancy
                                      >;
 
         size_t select_best_grid_size(size_t          M,
