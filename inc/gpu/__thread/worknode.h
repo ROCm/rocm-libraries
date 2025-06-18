@@ -65,6 +65,12 @@ struct WorkNode_Header {
     // next == nullptr because there's nobody waiting and next == nullptr because next has been locked.
     bool hasWaiting = false;
 
+    template <class Fn_t, class... Args_t>
+    static __host__ auto make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args);
+
+    template <class Fn_t, class... Args_t>
+    static __device__ auto make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args);
+
     // Attempts to lock the WorkNode at location, and if successful, returns the WorkNode. If unsuccessful (i.e. it's
     // already locked) returns nullptr.
     [[nodiscard]] static __device__ WorkNode_Header *tryLockAndFetch(WorkNode_Header **location);
@@ -111,7 +117,7 @@ struct WorkNode : WorkNode_Header {
 };
 
 template <class Fn_t, class... Args_t>
-__host__ auto make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
+__host__ auto WorkNode_Header::make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
     // Ideally, we would also forward args in the capture (...args = std::forward<Args_t>(args)) to avoid an extra copy,
     // but that requires C++20
     auto lambda = [typed_fn = std::forward<Fn_t>(typed_fn), args...] __device__() {
@@ -127,7 +133,7 @@ __host__ auto make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
     return std::unique_ptr<WorkNode_t>(worknode_ptr);
 }
 template <class Fn_t, class... Args_t>
-__device__ auto make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
+__device__ auto WorkNode_Header::make_worknode(uint32_t width, Fn_t &&typed_fn, Args_t &&...args) {
     // These will give a more user-friendly error message when the lambda is not move-constructible.
     static_assert(std::is_move_constructible_v<Fn_t>);
     static_assert((std::is_move_constructible_v<Args_t> && ...));
