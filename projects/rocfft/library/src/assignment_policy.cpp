@@ -1235,7 +1235,7 @@ void AssignmentPolicy::PadPlan(ExecPlan& execPlan)
 
     RecursiveTraverse(execPlan.rootPlan.get(), [&execPlan](TreeNode* n) {
         // Skip nodes that have partial passes
-        if(n->applyPartialPass)
+        if(n->isPartialPassEnabled())
             return;
 
         // Look for nodes that begin writing to a new temp buffer

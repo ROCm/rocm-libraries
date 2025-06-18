@@ -608,6 +608,12 @@ namespace rocsparse
                 (rocsparse::convert_data_array_compute_core<T, _Float16>)(p...));
             return rocsparse_status_success;
         }
+        case rocsparse_datatype_bf16_r:
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                (rocsparse::convert_data_array_compute_core<T, rocsparse_bfloat16>)(p...));
+            return rocsparse_status_success;
+        }
         case rocsparse_datatype_f32_r:
         {
             RETURN_IF_ROCSPARSE_ERROR((rocsparse::convert_data_array_compute_core<T, float>)(p...));
@@ -670,11 +676,17 @@ namespace rocsparse
                 (rocsparse::convert_data_array_compute_dispatch<uint32_t>)(source_datatype_, p...));
             return rocsparse_status_success;
         }
-
         case rocsparse_datatype_f16_r:
         {
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::convert_data_array_compute_dispatch<_Float16>(source_datatype_, p...));
+            return rocsparse_status_success;
+        }
+        case rocsparse_datatype_bf16_r:
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                rocsparse::convert_data_array_compute_dispatch<rocsparse_bfloat16>(source_datatype_,
+                                                                                   p...));
             return rocsparse_status_success;
         }
         case rocsparse_datatype_f32_r:
@@ -892,6 +904,7 @@ rocsparse_status rocsparse::dnvec_transfer_from(rocsparse_handle            hand
     case rocsparse_datatype_i32_r:
     case rocsparse_datatype_u32_r:
     case rocsparse_datatype_f16_r:
+    case rocsparse_datatype_bf16_r:
     case rocsparse_datatype_f32_r:
     case rocsparse_datatype_f64_r:
     {
@@ -911,6 +924,7 @@ rocsparse_status rocsparse::dnvec_transfer_from(rocsparse_handle            hand
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
         case rocsparse_datatype_f16_r:
+        case rocsparse_datatype_bf16_r:
         case rocsparse_datatype_f32_r:
         case rocsparse_datatype_f64_r:
         {

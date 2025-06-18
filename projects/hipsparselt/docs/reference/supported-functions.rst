@@ -20,6 +20,8 @@ Here is a list of the ROCm and NVIDIA CUDA functions supported by hipBLASLt:
     * ``BFLOAT16`` input/output, ``FP32`` matrix core accumulate
     * ``INT8`` input/output, ``INT32`` matrix core accumulate
     * ``INT8`` input, ``FP16`` output, ``INT32`` matrix core accumulate
+    * ``FP8`` input, ``FP32`` output, ``FP32`` matrix core accumulate
+    * ``BF8`` input, ``FP32`` output, ``FP32`` matrix core accumulate
 
   * Matrix pruning and compression functionalities
   * Auto-tuning functionality (see ``hipsparseLtMatmulSearch()``)

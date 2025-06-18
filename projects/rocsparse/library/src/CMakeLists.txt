@@ -63,9 +63,11 @@ set(rocsparse_source
   src/level1/rocsparse_doti.cpp
   src/level1/rocsparse_dotci.cpp
   src/level1/rocsparse_gthr.cpp
+  src/level1/rocsparse_gthr_impl.cpp
   src/level1/rocsparse_gthrz.cpp
   src/level1/rocsparse_roti.cpp
   src/level1/rocsparse_sctr.cpp
+  src/level1/rocsparse_sctr_impl.cpp
   src/level1/rocsparse_axpby.cpp
   src/level1/rocsparse_gather.cpp
   src/level1/rocsparse_scatter.cpp

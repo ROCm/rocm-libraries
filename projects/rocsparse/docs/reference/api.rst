@@ -9,6 +9,53 @@ Exported rocSPARSE functions
 
 This topic provides a list of the exported rocSPARSE functions in various categories.
 
+Debugging functions
+-------------------
++-----------------------------------------------------+
+|Function name                                        |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_enable_debug_kernel_launch`     |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_disable_debug_kernel_launch`    |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_state_debug_kernel_launch`      |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_enable_debug_arguments`         |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_disable_debug_arguments`        |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_state_debug_arguments`          |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_enable_debug_arguments_verbose` |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_disable_debug_arguments_verbose`|
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_state_debug_arguments_verbose`  |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_enable_debug`                   |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_disable_debug`                  |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_state_debug`                    |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_enable_debug_warnings`          |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_disable_debug_warnings`         |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_enable_debug_verbose`           |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_disable_debug_verbose`          |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_state_debug_verbose`            |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_enable_debug_force_host_assert` |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_disable_debug_force_host_assert`|
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_state_debug_force_host_assert`  |
++-----------------------------------------------------+
+
+
 Auxiliary functions
 -------------------
 

@@ -210,6 +210,16 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     // butterfly registers
     Variable R{"R", "scalar_type", false, false};
 
+    virtual unsigned int launcher_workgroup_size()
+    {
+        return workgroup_size;
+    }
+
+    virtual unsigned int launcher_transforms_per_block()
+    {
+        return transforms_per_block;
+    }
+
     virtual std::vector<unsigned int> launcher_lengths()
     {
         return {length};

@@ -140,12 +140,12 @@ namespace rocsparse
 
             // Gather values
             RETURN_IF_ROCSPARSE_ERROR(
-                rocsparse::gthr_template(handle,
-                                         nnz,
-                                         csr_val,
-                                         csrt_val,
-                                         (const I*)csrsv->get_transposed_perm(),
-                                         rocsparse_index_base_zero));
+                (rocsparse::gthr_template<I, T>(handle,
+                                                nnz,
+                                                csr_val,
+                                                csrt_val,
+                                                (const I*)csrsv->get_transposed_perm(),
+                                                rocsparse_index_base_zero)));
 
             if(trans == rocsparse_operation_conjugate_transpose)
             {
