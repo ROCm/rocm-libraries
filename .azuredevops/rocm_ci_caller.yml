@@ -4,6 +4,10 @@ pr:
     include:
       - develop
       - release-staging/rocm-rel-*
+  paths:  
+    include:  
+      - projects/*
+      - shared/*
   
 variables:
   - group: internal
