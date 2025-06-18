@@ -56,7 +56,6 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
-          ref: users/geomin12/windows-monorepo-cleanup
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -112,14 +111,11 @@ jobs:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: "ADHOCBUILD"
           extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=${{ github.workspace }} ${{ inputs.cmake_options }}"
-          build_dir: ${{ env.BUILD_DIR_BASH }}
-          vctools_install_dir: ${{ env.VCToolsInstallDir }}
+          BUILD_DIR: ${{ env.BUILD_DIR_BASH }}
         run: |
           # clear cache before build and after download
           ccache -z
           python3 TheRock/build_tools/github_actions/build_configure.py
-          echo "test ls"
-          ls
 
       - name: Build therock-dist
         run: cmake --build "${{ env.BUILD_DIR_BASH }}" --target therock-dist
