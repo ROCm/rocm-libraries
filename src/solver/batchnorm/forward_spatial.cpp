@@ -299,18 +299,8 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
     auto result = ConvSolution{miopenStatusSuccess};
 
     {
-        // TODO: in final merge request, this should be removed
-        constexpr bool enable_hip = true;
-        auto use_hip              = enable_hip && (variant == 1);
+        auto use_hip = variant == 1;
         auto kernel = KernelInfo{};
-        if(use_hip)
-        {
-            printf("forward_spatial: HIP variant %d\n", variant);
-        }
-        else
-        {
-            printf("forward_spatial: OCL variant %d\n", variant);
-        }
 
         auto build_params = KernelBuildParameters{
             {"MIOPEN_USE_FP16", static_cast<int>(bfp16parm)},
@@ -350,8 +340,8 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             build_params.Define("MIO_BN_NCHW", in_nchw);
         }
 
-        kernel.kernel_file      = +use_hip ? "MIOpenBatchNormFwdTrainSpatialHIP.cpp"
-                                           : "MIOpenBatchNormFwdTrainSpatial.cl";
+        kernel.kernel_file      = use_hip ? "MIOpenBatchNormFwdTrainSpatialHIP.cpp"
+                                          : "MIOpenBatchNormFwdTrainSpatial.cl";
         std::string kernel_name = "MIOpenBatchNormFwdTrainSpatial";
         if(use_hip)
         {
