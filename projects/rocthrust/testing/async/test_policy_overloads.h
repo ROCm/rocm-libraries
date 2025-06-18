@@ -25,6 +25,9 @@
 #  include <thrust/future.h>
 
 #  include <string>
+#  if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#    include <type_traits>
+#  endif
 
 #  include <unittest/unittest.h>
 
@@ -126,9 +129,9 @@ private:
       ASSERT_NOT_EQUAL(thrust::cuda_cub::default_stream(), e.stream().native_handle());
     };
 #  endif
+
     // When a policy uses a non-default stream, the implementation should pass
     // the stream through to the output:
-
 #  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
     thrust::system::hip::detail::unique_stream test_stream{};
 #  else
@@ -174,7 +177,11 @@ private:
   {
     // Sink the prefix tuple into a const local so it can be safely passed to
     // multiple invocations without worrying about potential modifications.
-    using prefix_tuple_type              = thrust::remove_cvref_t<PrefixArgTuple>;
+#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    using prefix_tuple_type = cuda::std::remove_cvref_t<PrefixArgTuple>;
+#  else
+    using prefix_tuple_type = ::std::remove_cv_t<::std::remove_reference_t<PrefixArgTuple>>;
+#  endif
     prefix_tuple_type const prefix_tuple = THRUST_FWD(prefix_tuple_ref);
 
     using postfix_tuple_type               = std::tuple_element_t<PostfixIdx, postfix_args_type>;
@@ -231,9 +238,9 @@ private:
     // debugging:
     using overload_t = std::tuple_element_t<PostfixIdx, postfix_args_type>;
 
-    std::string const overload_desc = unittest::demangle(typeid(overload_t).name());
-    std::string const input_desc    = unittest::demangle(typeid(input_type).name());
-    std::string const output_desc   = unittest::demangle(typeid(output_type).name());
+    std::string const overload_desc = unittest::type_name<overload_t>();
+    std::string const input_desc    = unittest::type_name<input_type>();
+    std::string const output_desc   = unittest::type_name<output_type>();
 
     exc
       << "\n"
@@ -288,6 +295,7 @@ private:
 #  else
     ASSERT_NOT_EQUAL_QUIET(thrust::cuda_cub::default_stream(), stream_a);
 #  endif
+
     //--------------------------------------------------------------------------
     // Test event consumption when the event is an rvalue.
     //--------------------------------------------------------------------------

@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
 #if THRUST_CPP_DIALECT >= 2017
@@ -30,7 +37,12 @@
 #  include <thrust/detail/static_assert.h>
 #  include <thrust/event.h>
 #  include <thrust/system/detail/adl/async/for_each.h>
-#  include <thrust/type_traits/remove_cvref.h>
+
+#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#    include <cuda/std/type_traits>
+#  else
+#    include <type_traits>
+#  endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -76,7 +88,12 @@ struct for_each_fn final
       template <typename ForwardIt, typename Sentinel, typename UnaryFunction>
       THRUST_HOST static auto call(ForwardIt&& first, Sentinel&& last, UnaryFunction&& f)
         THRUST_RETURNS(for_each_fn::call(
-          thrust::detail::select_system(typename iterator_system<remove_cvref_t<ForwardIt>>::type{}),
+#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+          thrust::detail::select_system(typename iterator_system<::cuda::std::remove_cvref_t<ForwardIt>>::type{}),
+#  else
+          thrust::detail::select_system(
+            typename iterator_system<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::type{}),
+#  endif
           THRUST_FWD(first),
           THRUST_FWD(last),
           THRUST_FWD(f)))

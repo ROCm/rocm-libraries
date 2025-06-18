@@ -37,10 +37,15 @@
 #include <thrust/system/detail/adl/iter_swap.h>
 #include <thrust/system/detail/generic/memory.h>
 #include <thrust/system/detail/generic/select_system.h>
-#include <thrust/type_traits/remove_cvref.h>
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/type_traits>
+#endif
 
 #include <ostream>
-#include <type_traits>
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -61,7 +66,11 @@ private:
 
 public:
   using pointer    = Pointer;
-  using value_type = typename thrust::remove_cvref<Element>::type;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using value_type = ::cuda::std::remove_cvref_t<Element>;
+#else
+  using value_type = ::std::remove_cv_t<::std::remove_reference_t<Element>>;
+#endif
 
   reference(reference const&) = default;
 

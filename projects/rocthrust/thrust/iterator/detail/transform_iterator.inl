@@ -28,7 +28,12 @@
 #include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/type_traits/remove_cvref.h>
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/type_traits>
+#else
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -51,7 +56,11 @@ private:
 
   // By default, dereferencing the iterator yields the same as the function.
   using reference  = typename ia_dflt_help<Reference, wrapped_func_ret_t>::type;
-  using value_type = typename ia_dflt_help<Value, remove_cvref<reference>>::type;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using value_type = typename ia_dflt_help<Value, ::cuda::std::remove_cvref<reference>>::type;
+#else
+  using value_type = typename ia_dflt_help<Value, ::std::remove_cv<::std::remove_reference_t<reference>>>::type;
+#endif
 
 public:
   using type =

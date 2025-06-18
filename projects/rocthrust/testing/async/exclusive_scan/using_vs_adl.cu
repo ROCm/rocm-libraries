@@ -17,6 +17,10 @@
 
 #include <thrust/detail/config.h>
 
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <type_traits>
+#endif
+
 #if THRUST_CPP_DIALECT >= 2017
 
 #  include <async/exclusive_scan/mixin.h>
@@ -46,7 +50,11 @@ struct adl_host_synchronous
     thrust::host_vector<input_value_type> host_input(input.cbegin(), input.cend());
     thrust::host_vector<output_value_type> host_output(host_input.size());
 
-    using OutIter = thrust::remove_cvref_t<decltype(host_output.begin())>;
+#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    using OutIter = cuda::std::remove_cvref_t<decltype(host_output.begin())>;
+#  else
+    using OutIter = ::std::remove_cv_t<::std::remove_reference_t<decltype(host_output.begin())>>;
+#  endif
 
     // ADL should resolve this to the synchronous `thrust::` algorithm.
     // This is checked by ensuring that the call returns an output iterator.

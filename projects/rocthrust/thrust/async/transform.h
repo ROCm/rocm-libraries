@@ -37,7 +37,12 @@
 #  include <thrust/detail/static_assert.h>
 #  include <thrust/event.h>
 #  include <thrust/system/detail/adl/async/transform.h>
-#  include <thrust/type_traits/remove_cvref.h>
+
+#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#    include <cuda/std/type_traits>
+#  else
+#    include <type_traits>
+#  endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -105,8 +110,13 @@ struct transform_fn final
   THRUST_RETURNS(
     transform_fn::call(
       thrust::detail::select_system(
-        typename iterator_system<remove_cvref_t<ForwardIt>>::type{}
-      , typename iterator_system<remove_cvref_t<OutputIt>>::type{}
+#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+        typename iterator_system<::cuda::std::remove_cvref_t<ForwardIt>>::type{}
+      , typename iterator_system<::cuda::std::remove_cvref_t<OutputIt>>::type{}
+#  else
+        typename iterator_system<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::type{}
+      , typename iterator_system<::std::remove_cv_t<::std::remove_reference_t<OutputIt>>>::type{}
+#  endif
       )
     , THRUST_FWD(first), THRUST_FWD(last)
     , THRUST_FWD(output)
