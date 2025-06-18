@@ -39,7 +39,7 @@ To ensure consistency and maintainability during the migration, the following pr
    - For pull requests with merge conflicts, add a comment explaining the merge conflict and blocking issue preventing import.  
    - Collaborate with contributors to import these PRs after the migration period, or the contributor can reopen the pull request themselves on the monorepo.
   
-3. **NPI Development**
+3. **NPI Development:**
    - Repeat this import process for the monorepo on GitHub EMU for npi work.
 
 ### Step 2: Issue and Comment Import  
