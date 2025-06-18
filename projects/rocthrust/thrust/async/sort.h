@@ -22,17 +22,24 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/cpp_version_check.h>
 
 #if THRUST_CPP_DIALECT >= 2017
 
 #  include <thrust/detail/select_system.h>
 #  include <thrust/detail/static_assert.h>
+#  include <thrust/detail/type_traits.h>
 #  include <thrust/event.h>
 #  include <thrust/system/detail/adl/async/sort.h>
 #  include <thrust/type_traits/is_execution_policy.h>
 #  include <thrust/type_traits/logical_metafunctions.h>
-#  include <thrust/type_traits/remove_cvref.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -98,7 +105,7 @@ struct stable_sort_fn final
       thrust::detail::derived_cast(thrust::detail::strip_const(exec))
     , THRUST_FWD(first), THRUST_FWD(last)
     , thrust::less<
-        typename iterator_traits<remove_cvref_t<ForwardIt>>::value_type
+        typename iterator_traits<::internal::remove_cvref_t<ForwardIt>>::value_type
       >{}
     )
   )
@@ -109,7 +116,7 @@ struct stable_sort_fn final
   THRUST_RETURNS(
     stable_sort_fn::call(
       thrust::detail::select_system(
-        typename iterator_system<remove_cvref_t<ForwardIt>>::type{}
+        typename iterator_system<::internal::remove_cvref_t<ForwardIt>>::type{}
       )
     , THRUST_FWD(first), THRUST_FWD(last)
     , THRUST_FWD(comp)
@@ -123,7 +130,7 @@ struct stable_sort_fn final
     stable_sort_fn::call(
       THRUST_FWD(first), THRUST_FWD(last)
     , thrust::less<
-        typename iterator_traits<remove_cvref_t<ForwardIt>>::value_type
+        typename iterator_traits<::internal::remove_cvref_t<ForwardIt>>::value_type
       >{}
     )
   )
@@ -195,7 +202,7 @@ struct sort_fn final
       exec
     , THRUST_FWD(first), THRUST_FWD(last)
     , thrust::less<
-        typename iterator_traits<remove_cvref_t<ForwardIt>>::value_type
+        typename iterator_traits<::internal::remove_cvref_t<ForwardIt>>::value_type
       >{}
     )
   )
@@ -208,7 +215,7 @@ struct sort_fn final
   THRUST_RETURNS(
     sort_fn::call(
       thrust::detail::select_system(
-        typename iterator_system<remove_cvref_t<ForwardIt>>::type{}
+        typename iterator_system<::internal::remove_cvref_t<ForwardIt>>::type{}
       )
     , THRUST_FWD(first), THRUST_FWD(last)
     , THRUST_FWD(comp)
@@ -223,7 +230,7 @@ struct sort_fn final
   static auto call(T1&& t1, T2&& t2, T3&& t3)
   THRUST_RETURNS(
     sort_fn::call3(THRUST_FWD(t1), THRUST_FWD(t2), THRUST_FWD(t3),
-                   thrust::is_execution_policy<thrust::remove_cvref_t<T1>>{})
+                   thrust::is_execution_policy<::internal::remove_cvref_t<T1>>{})
   )
 
   template <typename ForwardIt, typename Sentinel>
@@ -232,11 +239,11 @@ struct sort_fn final
   THRUST_RETURNS(
     sort_fn::call(
       thrust::detail::select_system(
-        typename iterator_system<remove_cvref_t<ForwardIt>>::type{}
+        typename iterator_system<::internal::remove_cvref_t<ForwardIt>>::type{}
       )
     , THRUST_FWD(first), THRUST_FWD(last)
     , thrust::less<
-        typename iterator_traits<remove_cvref_t<ForwardIt>>::value_type
+        typename iterator_traits<::internal::remove_cvref_t<ForwardIt>>::value_type
       >{}
     )
   )

@@ -49,12 +49,13 @@
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
 #  include <thrust/type_traits/is_contiguous_iterator.h>
-#  include <thrust/type_traits/remove_cvref.h>
 
 // rocprim include
 #  include <rocprim/rocprim.hpp>
 
 #  include <cstdint>
+
+#  include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -133,7 +134,7 @@ adjacent_difference(execution_policy<Derived>& policy, InputIt first, InputIt la
   using OutputValueT = thrust::iterator_value_t<UnwrapOutputIt>;
 
   constexpr bool can_compare_iterators =
-    ::std::is_pointer<UnwrapInputIt>::value && ::std::is_pointer<UnwrapOutputIt>::value
+    _THRUST_STD::is_pointer<UnwrapInputIt>::value && _THRUST_STD::is_pointer<UnwrapOutputIt>::value
     && std::is_same<InputValueT, OutputValueT>::value;
 
   auto first_unwrap  = thrust::try_unwrap_contiguous_iterator(first);
