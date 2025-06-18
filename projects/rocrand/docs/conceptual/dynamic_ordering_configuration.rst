@@ -34,7 +34,7 @@ and look for ``gfx`` in the "ISA Info" section.
 
 .. code-block:: shell
 
-   cd rocRAND
+   cd rocm-libraries/projects/rocrand
    cmake -S . -B ./build
       -D BUILD_BENCHMARK=ON
       -D BUILD_BENCHMARK_TUNING=ON
@@ -61,7 +61,7 @@ Using the number of multiprocessors as candidates
 
 Multiples of the number of multiprocessors on the GPU being benchmarked are
 good candidate values for ``BENCHMARK_TUNING_BLOCK_OPTIONS``. 
-The ``rocRAND/scripts/config-tuning/get_tuned_grid_sizes.py`` executable
+The ``rocm-libraries/projects/rocrand/scripts/config-tuning/get_tuned_grid_sizes.py`` executable
 runs ``rocminfo`` to acquire the number of multiprocessors and prints a comma-separated list
 of grid size candidates to the standard output.
 
@@ -93,12 +93,12 @@ Processing the benchmark results
 ================================
 
 After the benchmark results from all architectures in JSON format are available, the best configurations
-are selected using the ``rocRAND/scripts/config-tuning/select_best_config.py`` script.
+are selected using the ``rocm-libraries/projects/rocrand/scripts/config-tuning/select_best_config.py`` script.
 Ensure the prerequisite libraries are installed by running the following command:
 
 .. code-block:: shell
 
-   pip install -r rocRAND/scripts/config-tuning/requirements.txt.
+   pip install -r rocm-libraries/projects/rocrand/scripts/config-tuning/requirements.txt.
 
 Each rocRAND generator can generate a multitude of output types and distributions.
 However, a single configuration is selected for each GPU architecture, which applies uniformly to all types
@@ -110,7 +110,7 @@ The eventual decision about whether to apply the configuration is made by the li
 
 The ``select_best_config.py``  script produces a set of C++ header files as output
 that contain the definitions of the dynamic ordering configuration for the benchmarked architectures.
-These files are intended to be copied to the ``rocRAND/library/src/rng/config`` directory of the source tree
+These files are intended to be copied to the ``rocm-libraries/projects/rocrand/library/src/rng/config`` directory of the source tree
 and checked in to the version control system. The directory where the header files are written to
 can be specified using the ``--out-dir`` option.
 
@@ -123,7 +123,7 @@ The following invokation of the ``select_best_config.py`` script demonstrates al
 
 .. code-block:: shell
 
-   ./rocRAND/scripts/config-tuning/select_best_config.py --plot-out ./rocrand-tuning.svg --out-dir ./rocRAND/library/src/rng/config/ ./rocRAND/build/benchmark/tuning/rocrand_tuning_gfx908.json ./rocRAND/build/benchmark/tuning/rocrand_tuning_gfx1030.json
+   ./rocm-libraries/projects/rocrand/scripts/config-tuning/select_best_config.py --plot-out ./rocrand-tuning.svg --out-dir ./rocm-libraries/projects/rocrand/library/src/rng/config/ ./rocm-libraries/projects/rocrand/build/benchmark/tuning/rocrand_tuning_gfx908.json ./rocm-libraries/projects/rocrand/build/benchmark/tuning/rocrand_tuning_gfx1030.json
 
 Adding support for a new GPU architecture
 =========================================
@@ -139,4 +139,4 @@ To add support, follow this checklist:
 
 #. The tuning benchmarks must be compiled and run for the new architecture. See :ref:`tuning-benchmark-build` and :ref:`tuning-benchmark-run`.
 #. The benchmark results must be processed by the ``select_best_config.py`` script. See :ref:`tuning-benchmark-process`.
-#. The resulting header files must be added to version control in the ``rocRAND/library/src/rng/config`` directory.
+#. The resulting header files must be added to version control in the ``rocm-libraries/projects/rocrand/library/src/rng/config`` directory.

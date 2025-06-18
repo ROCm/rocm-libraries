@@ -16,7 +16,7 @@ subtrees:
 
   - caption: Examples
     entries:
-    - url: https://github.com/ROCm/rocRAND/tree/develop/python/rocrand/examples
+    - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand/python/rocrand/examples
       title: Examples
 
   - caption: API reference

@@ -81,14 +81,18 @@ This section provides the information required to build rocRAND from source.
 Obtaining the rocRAND source code
 ---------------------------------
 
-The rocRAND source code is available from the `rocRAND GitHub Repository <https://github.com/ROCm/rocRAND>`_.
+The rocRAND source code is available from the `rocrand <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand>`_ folder of the rocm-libraries GitHub repository.
 Use the branch that matches the ROCm version installed on the system.
-For example, on a system with ROCm 6.3 installed, use the following command to obtain the rocRAND version 6.3 source code:
+For example, on a system with ROCm 7.0 installed, use the following command to obtain the rocRAND version 7.0 source code:
 
 .. code-block:: shell
 
+   git clone -b release/rocm-rel-7.0 https://github.com/ROCm/rocm-libraries.git
 
-   git checkout -b rocm-6.3 https://github.com/ROCmSoftwarePlatform/rocRAND.git
+.. note::
+
+   To build ROCm release 6.4 and older, use the rocRAND repository at `<https://github.com/ROCm/rocRAND>`_.
+   For more information, see the documentation associated with the release you want to build.
 
 Building the library
 --------------------
@@ -97,7 +101,7 @@ After downloading the source code, use the installation script to build rocRAND:
 
 .. code-block:: shell
 
-   cd rocRAND
+   cd rocm-libraries/projects/rocrand
    ./install --install
 
 This automatically builds all required dependencies, excluding HIP and Git, and installs the project
@@ -107,12 +111,12 @@ Building with CMake
 --------------------
 
 For a more detailed installation process, build rocRAND manually using CMake.
-This enables certain configuration options that are not available through the ``./install`` script.
+This enables certain configuration options that are not available through the ``install`` script.
 To build rocRAND, use CMake with the following configuration:
 
 .. code-block:: shell
 
-   cd rocrand; mkdir build; cd build
+   cd rocm-libraries/projects/rocrand; mkdir build; cd build
    # Configure the project
    CXX=<compiler> cmake [options] ..
    # Build
@@ -152,8 +156,8 @@ To install support for rocRAND and HIP on Windows, use the ``rmake.py`` Python s
 
 .. code-block:: shell
 
-   git clone https://github.com/ROCm/rocRAND.git
-   cd rocRAND
+   git clone https://github.com/ROCm/rocm-libraries.git 
+   cd rocm-libraries/projects/rocrand
 
    # the -i option will install rocRAND to C:\hipSDK by default
    python rmake.py -i
@@ -190,7 +194,7 @@ The rocRAND Python API Wrapper requires the following dependencies:
 
    .. code-block:: shell
 
-      export ROCRAND_PATH=~/rocRAND/build/library/
+      export ROCRAND_PATH=~rocm-libraries/projects/rocrand/build/library/
 
 Installation
 --------------------
@@ -199,13 +203,13 @@ The Python rocRAND module can be installed using ``pip``:
 
 .. code-block:: shell
 
-   cd rocrand/python/rocrand
+   cd rocm-libraries/projects/rocrand/python/rocrand
    pip install .
 
 The tests can be executed as follows:
 
 .. code-block:: shell
 
-   cd rocrand/python/rocrand
+   cd rocm-libraries/projects/rocrand/python/rocrand
    python tests/rocrand_test.py
 
