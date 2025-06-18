@@ -57,7 +57,7 @@ To build hipRAND, CMake version 3.16 or later is required.
 Additionally, to build hipRAND for the ROCm platform, the following components are required:
 
 * `ROCm Software <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/>`_ (version 5.0.0 or later)
-* `rocRAND <https://github.com/ROCm/rocRAND.git>`_
+* `rocRAND <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand>`_
 
 To build hipRAND for the CUDA platform, the following applications are required:
 
@@ -67,13 +67,13 @@ To build hipRAND for the CUDA platform, the following applications are required:
 Downloading the source code
 ----------------------------
 
-You can find the hipRAND source code in the `hipRAND GitHub Repository <https://github.com/ROCm/hipRAND>`_.
+You can find the hipRAND source code in the `hipRAND GitHub repository <https://github.com/ROCm/hipRAND>`_.
 Use the branch that matches the ROCm version installed on the system.
-For example, on a system with ROCm 6.3 installed, use the following command to obtain the hipRAND version 6.3 source code:
+For example, on a system with ROCm 7.0 installed, use the following command to obtain the hipRAND version 7.0 source code:
 
 .. code-block:: shell
 
-    git checkout -b release/rocm-rel-6.3 https://github.com/ROCm/hipRAND.git
+   git clone -b release/rocm-rel-7.0 https://github.com/ROCm/rocm-libraries.git
 
 Building the library
 ----------------------------
@@ -82,7 +82,7 @@ After obtaining the sources and dependencies, build hipRAND for ROCm software us
 
 .. code-block:: shell
 
-    cd hipRAND
+    cd rocm-libraries/projects/hiprand
     ./install --install
 
 This automatically builds all required dependencies, excluding Git and the requirements listed above,
@@ -95,12 +95,12 @@ Building with CMake
 ----------------------------
 
 For a more detailed installation process, build hipRAND manually using CMake.
-This enables certain configuration options that are not available through the ``./install`` script.
+This enables certain configuration options that are not available through the ``install`` script.
 To build hipRAND, use CMake with the following configuration:
 
 .. code-block:: shell
 
-    cd hipRAND; mkdir build; cd build
+    cd rocm-libraries/projects/hiprand; mkdir build; cd build
     # Configure the project
     CXX=<compiler> cmake [options] ..
     # Build
@@ -143,7 +143,7 @@ Use the following tips to troubleshoot build problems.
       rocrandConfig.cmake
       rocrand-config.cmake
 
-   **Solution**: Install `rocRAND <https://github.com/ROCm/rocRAND.git>`_.
+   **Solution**: Install `rocRAND <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand>`_.
 
 *  ``ROCM`` package configuration file not found:
 
@@ -178,7 +178,7 @@ The hipRAND Python API Wrapper requires the following dependencies:
 
    .. code-block:: shell
 
-      export HIPRAND_PATH=~/hipRAND/build/library/
+      export HIPRAND_PATH=~/rocm-libraries/projects/hiprand/build/library/
 
 Installation
 ----------------------------
@@ -187,12 +187,12 @@ To install the Python hipRAND module using ``pip``, run these commands:
 
 .. code-block:: shell
 
-   cd hipRAND/python/hiprand
+   cd rocm-libraries/projects/hiprand/python/hiprand
    pip install .
 
 Use these commands to run the tests:
 
 .. code-block:: shell
 
-   cd hipRAND/python/hiprand
+   cd rocm-libraries/projects/hiprand/python/hiprand
    python tests/hiprand_test.py
