@@ -132,13 +132,37 @@ template<
 >
 class texture_cache_iterator
 {
+private:
+    template<typename V>
+    class proxy_pointer
+    {
+        V value_;
+
+    public:
+        ROCPRIM_HOST_DEVICE
+        inline proxy_pointer(const V& value)
+            : value_(value)
+        {}
+
+        ROCPRIM_HOST_DEVICE
+        const V* operator->() const
+        {
+            return &value_;
+        }
+
+        ROCPRIM_HOST_DEVICE const V& operator*() const
+        {
+            return value_;
+        }
+    };
+
 public:
     /// The type of the value that can be obtained by dereferencing the iterator.
     using value_type = typename std::remove_const<T>::type;
     /// \brief A reference type of the type iterated over (\p value_type).
     using reference = const value_type&;
     /// \brief A pointer type of the type iterated over (\p value_type).
-    using pointer = const value_type*;
+    using pointer = proxy_pointer<value_type>;
     /// A type used for identify distance between iterators.
     using difference_type = Difference;
     /// The category of the iterator.
@@ -236,10 +260,10 @@ public:
         #endif
     }
 
-    ROCPRIM_HOST_DEVICE inline
-    pointer operator->() const
+    ROCPRIM_HOST_DEVICE
+    inline pointer operator->() const
     {
-        return &(*(*this));
+        return pointer(*(*this));
     }
 
     ROCPRIM_HOST_DEVICE inline
