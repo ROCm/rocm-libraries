@@ -33,6 +33,9 @@
 #include <type_traits>
 #include <vector>
 
+// Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
+#include <limits>
+
 #include "test_seed.hpp"
 #include "thrust/detail/tuple.inl"
 
@@ -746,14 +749,16 @@ template <typename T>
 typename thrust::detail::disable_if<::internal::is_floating_point<T>::value, T>::type
 truncate_to_max_representable(std::size_t n)
 {
-  return thrust::min<std::size_t>(n, static_cast<std::size_t>(thrust::numeric_limits<T>::max()));
+  // Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
+  return static_cast<T>(thrust::min<std::size_t>(n, static_cast<std::size_t>(::std::numeric_limits<T>::max())));
 }
 
 // TODO: This probably won't work for `half`.
 template <typename T>
-typename ::std::enable_if<::internal::is_floating_point<T>::value, T>::type truncate_to_max_representable(std::size_t n)
+typename ::internal::enable_if_t<::internal::is_floating_point<T>::value, T> truncate_to_max_representable(std::size_t n)
 {
-  return thrust::min<T>(n, thrust::numeric_limits<T>::max());
+  // Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
+  return thrust::min<T>(static_cast<T>(n), ::std::numeric_limits<T>::max());
 }
 
 enum threw_status
