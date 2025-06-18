@@ -44,6 +44,7 @@
 #include <thrust/system_error.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <utility>
 
@@ -249,7 +250,7 @@ trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t
   return status;
 }
 
-inline void THRUST_HOST_DEVICE terminate()
+THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::terminate() instead") inline void THRUST_HOST_DEVICE terminate()
 {
   NV_IF_TARGET(NV_IS_HOST, (std::terminate();), (abort();));
 }
@@ -282,7 +283,14 @@ THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status)
 
     NV_IF_TARGET(NV_IS_HOST,
                  (throw thrust::system_error(status, thrust::hip_category());),
-                 (THRUST_TEMP_DEVICE_CODE; hip_rocprim::terminate();));
+                 (THRUST_TEMP_DEVICE_CODE;
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+                  _THRUST_STD::terminate();
+#else
+                  __builtin_trap();
+                  __builtin_unreachable();
+#endif
+                  ));
 
 #undef THRUST_TEMP_DEVICE_CODE
   }
@@ -316,7 +324,14 @@ THRUST_HOST_DEVICE inline void throw_on_error(hipError_t status, char const* msg
 
     NV_IF_TARGET(NV_IS_HOST,
                  (throw thrust::system_error(status, thrust::hip_category(), msg);),
-                 (THRUST_TEMP_DEVICE_CODE; hip_rocprim::terminate();));
+                 (THRUST_TEMP_DEVICE_CODE;
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+                  _THRUST_STD::terminate();
+#else
+                  __builtin_trap();
+                  __builtin_unreachable();
+#endif
+                  ));
 
 #undef THRUST_TEMP_DEVICE_CODE
   }
