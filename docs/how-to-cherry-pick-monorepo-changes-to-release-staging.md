@@ -53,7 +53,7 @@ A : Verify the CI status in `rocm-libraries`. If failed, ask the infra team; the
 Q : Can I push directly to the release-staging branch?  
 A : No. Always go through a PR so CI and reviewers can validate the cherry-pick.
 
-Q : What if commits have been pushed to develop that make a cherry-pick incompatible with release-staging?
+Q : What if commits have been pushed to develop that make a cherry-pick incompatible with release-staging?   
 A : It's likely that this fix/change will also be landed in develop at some point, else we risk divergent features/support. So, it's recommended to still land the change in develop first, and cherry-pick to release-staging, resolving any merge conflicts that arise. If for some reason the develop branch has diverged so far from the release-staging for your component that a cherry-pick is irreconcilable, land the changes in develop and release-staging using fully separate PRs, and add references to the other for traceability.
 
 ## Summary
