@@ -226,7 +226,7 @@ struct is_sample_vectorizable
 
 template<unsigned int BlockSize, unsigned int ItemsPerThread, unsigned int Channels, class Sample>
 ROCPRIM_DEVICE ROCPRIM_INLINE
-    typename std::enable_if<is_sample_vectorizable<ItemsPerThread, Channels, Sample>::value>::type
+typename std::enable_if<is_sample_vectorizable<ItemsPerThread, Channels, Sample>::value>::type
     load_samples(unsigned int flat_id,
                  Sample*      samples,
                  sample_vector<Sample, Channels> (&values)[ItemsPerThread])
@@ -489,6 +489,7 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void
         load_samples<BlockSize>(flat_id, samples, values, valid_count);
     }
 
+    ROCPRIM_UNROLL
     for(unsigned int i = 0; i < ItemsPerThread; i++)
     {
         for(unsigned int channel = 0; channel < ActiveChannels; channel++)

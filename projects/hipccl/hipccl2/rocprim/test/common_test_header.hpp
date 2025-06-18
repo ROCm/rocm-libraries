@@ -50,6 +50,7 @@
         hipError_t error = condition;                                                       \
         if(error == hipErrorOutOfMemory)                                                    \
         {                                                                                   \
+            (void) hipGetLastError();                                                       \
             std::cout << "Out of memory. Skipping size = " << size << std::endl;            \
             break;                                                                          \
         }                                                                                   \

@@ -198,7 +198,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void vectorized_copy_bytes(const void
     using vector_type                      = uint4;
     constexpr uint32_t ints_in_vector_type = sizeof(uint4) / sizeof(uint32_t);
 
-    constexpr auto warp_size = ::rocprim::arch::wavefront::min_size();
+    const auto     warp_size = ::rocprim::arch::wavefront::size();
     const auto     rank      = ::rocprim::detail::block_thread_id<0>() % warp_size;
 
     const uint8_t* src = reinterpret_cast<const uint8_t*>(input_buffer) + offset;
@@ -229,9 +229,6 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void vectorized_copy_bytes(const void
         out_ptr += warp_size;
         in_ptr += warp_size;
     }
-
-    // This can be outside the while block since 'warp_size % ints_in_vector_type' always is '0'
-    static_assert(warp_size % ints_in_vector_type == 0, "Warp size is not a multiple of 4");
 
     in_ptr                          = aligned.in_begin + rank * sizeof(vector_type);
     const uint32_t  in_offset       = (reinterpret_cast<size_t>(in_ptr) % ints_in_vector_type);
@@ -315,7 +312,7 @@ template<bool IsMemCpy,
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void
     copy_items(InputIt input_buffer, OutputIt output_buffer, Offset num_items, Offset offset = 0)
 {
-    constexpr auto warp_size = ::rocprim::arch::wavefront::min_size();
+    const auto warp_size = ::rocprim::arch::wavefront::size();
     output_buffer += offset;
     input_buffer += offset;
     for(Offset i = threadIdx.x % warp_size; i < num_items; i += warp_size)
@@ -326,6 +323,25 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void
 
 } // namespace batch_memcpy
 
+// This is a helper struct that defines the type used for the batch memcpy operation.
+// Use template specialization on IsMemCpy is done in order to avoid using std::conditional.
+// Using std::conditional can result in build errors because the compiler evaluates both sides
+// of the conditional.
+template <bool IsMemCpy, typename InputBufferItType>
+struct AliasType { };
+
+template<typename InputBufferItType>
+struct AliasType<false, InputBufferItType>
+{
+    using type = typename std::iterator_traits<typename std::iterator_traits<InputBufferItType>::value_type>::value_type;
+};
+
+template<typename InputBufferItType>
+struct AliasType<true, InputBufferItType>
+{
+    using type = unsigned char;
+};
+
 template<bool IsMemCpy, class InputBufferItType, class OutputBufferItType, class BufferSizeItType>
 struct batch_memcpy_impl
 {
@@ -333,13 +349,8 @@ struct batch_memcpy_impl
     using output_buffer_type = typename std::iterator_traits<OutputBufferItType>::value_type;
     using buffer_size_type   = typename std::iterator_traits<BufferSizeItType>::value_type;
 
-    using input_type = typename std::iterator_traits<input_buffer_type>::value_type;
-
-    using Alias =
-        typename std::conditional<IsMemCpy,
-                                  unsigned char,
-                                  typename std::iterator_traits<typename std::iterator_traits<
-                                      InputBufferItType>::value_type>::value_type>::type;
+    // This type is either unsigned char (if IsMemCpy is true) or the InputBufferItType's value type.
+    using Alias = typename AliasType<IsMemCpy, InputBufferItType>::type;
 
     // Offset over buffers.
     using buffer_offset_type = uint32_t;
@@ -620,7 +631,7 @@ private:
         {
             const uint32_t warp_id = rocprim::warp_id();
             const uint32_t warps_per_block
-                = rocprim::flat_block_size() / ::rocprim::arch::wavefront::min_size();
+                = rocprim::flat_block_size() / ::rocprim::arch::wavefront::size();
 
             for(buffer_offset_type buffer_offset = warp_id; buffer_offset < num_wlev_buffers;
                 buffer_offset += warps_per_block)
