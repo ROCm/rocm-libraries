@@ -26,8 +26,13 @@
 #include <thrust/mr/host_memory_resource.h>
 #include <thrust/mr/universal_memory_resource.h>
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/limits>
+#endif
+
 #include <cstdio>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
@@ -216,22 +221,30 @@ private:
   }
 };
 
-THRUST_NAMESPACE_BEGIN
-
+namespace std
+{
 template <>
 struct numeric_limits<custom_numeric> : numeric_limits<int>
 {};
+} // namespace std
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+_LIBCUDACXX_BEGIN_NAMESPACE_STD
+template <>
+struct numeric_limits<custom_numeric> : numeric_limits<int>
+{};
+_LIBCUDACXX_END_NAMESPACE_STD
+#endif
+
+THRUST_NAMESPACE_BEGIN
 namespace detail
 {
-
 // For random number generation
 template <>
 class integer_traits<custom_numeric> : public integer_traits_base<int, INT_MIN, INT_MAX>
 {};
 
 } // namespace detail
-
 THRUST_NAMESPACE_END
 
 using NumericTypes = unittest::type_list<

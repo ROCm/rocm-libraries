@@ -25,6 +25,7 @@
 #include <string>
 #include <typeinfo>
 #if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <limits>
 #  include <type_traits>
 #endif
 
@@ -50,7 +51,11 @@ typename THRUST_NS_QUALIFIER::detail::disable_if<::std::is_floating_point<T>::va
 truncate_to_max_representable(std::size_t n)
 {
   return static_cast<T>(
-    THRUST_NS_QUALIFIER::min<std::size_t>(n, static_cast<std::size_t>(THRUST_NS_QUALIFIER::numeric_limits<T>::max())));
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    THRUST_NS_QUALIFIER::min<std::size_t>(n, static_cast<std::size_t>(::cuda::std::numeric_limits<T>::max())));
+#else
+    THRUST_NS_QUALIFIER::min<std::size_t>(n, static_cast<std::size_t>(::std::numeric_limits<T>::max())));
+#endif
 }
 
 // TODO: This probably won't work for `half`.
@@ -62,7 +67,11 @@ typename ::std::enable_if_t<::std::is_floating_point<T>::value, T>
 #endif
 truncate_to_max_representable(std::size_t n)
 {
-  return THRUST_NS_QUALIFIER::min<T>(static_cast<T>(n), THRUST_NS_QUALIFIER::numeric_limits<T>::max());
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  return THRUST_NS_QUALIFIER::min<T>(static_cast<T>(n), ::cuda::std::numeric_limits<T>::max());
+#else
+  return THRUST_NS_QUALIFIER::min<T>(static_cast<T>(n), ::std::numeric_limits<T>::max());
+#endif
 }
 
 } // namespace unittest

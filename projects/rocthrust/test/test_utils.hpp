@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <random>
 #include <type_traits>
 #include <vector>
@@ -739,7 +740,8 @@ template <typename T>
 typename thrust::detail::disable_if<thrust::detail::is_floating_point<T>::value, T>::type
 truncate_to_max_representable(std::size_t n)
 {
-  return thrust::min<std::size_t>(n, static_cast<std::size_t>(thrust::numeric_limits<T>::max()));
+  return static_cast<T>(
+    THRUST_NS_QUALIFIER::min<std::size_t>(n, static_cast<std::size_t>(::std::numeric_limits<T>::max())));
 }
 
 // TODO: This probably won't work for `half`.
@@ -747,7 +749,7 @@ template <typename T>
 typename thrust::detail::enable_if<thrust::detail::is_floating_point<T>::value, T>::type
 truncate_to_max_representable(std::size_t n)
 {
-  return thrust::min<T>(n, thrust::numeric_limits<T>::max());
+  return THRUST_NS_QUALIFIER::min<T>(static_cast<T>(n), ::std::numeric_limits<T>::max());
 }
 
 enum threw_status
