@@ -65,6 +65,7 @@ To ensure consistency and maintainability during the migration, the following pr
    - Example commit view: https://github.com/ROCm/rocm-libraries/commit/ea8b6884a0f2a0ec80ff7811bc5ec042600790e9
 
 2. **command sequence example**
+
 Some steps are added to ensure you have latest checked out, in case you're copy-pasting and already have the repositories checked out beforehand.
 ```
 python3 -m pip install --user git-filter-repo
