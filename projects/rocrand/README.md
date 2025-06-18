@@ -9,7 +9,7 @@ programming language and optimized for AMD's latest discrete GPUs. It is designe
 of AMD's [ROCm](https://rocm.docs.amd.com) runtime, but it also works on CUDA-enabled GPUs.
 
 Prior to ROCm version 5.0, this project included the
-[hipRAND](https://github.com/ROCm/hipRAND.git) wrapper. As of version 5.0, it was
+[hipRAND](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hiprand) wrapper. As of version 5.0, it was
 split into a separate library. As of version 6.0, hipRAND can no longer be built from rocRAND.
 
 ## Supported random number generators
@@ -65,10 +65,10 @@ dependencies, rather than using the system-installed libraries.
 ## Build and install
 
 ```shell
-git clone https://github.com/ROCm/rocRAND.git
+git clone https://github.com/ROCm/rocm-libraries.git
 
 # Go to rocRAND directory, create and go to build directory
-cd rocRAND; mkdir build; cd build
+cd rocm-libraries/projects/rocrand; mkdir build; cd build
 
 # Configure rocRAND, setup options for your system
 # Build options: BUILD_TEST (off by default), BUILD_BENCHMARK (off by default), BUILD_SHARED_LIBS (on by default)
@@ -106,8 +106,8 @@ We've added initial support for HIP on Windows, which you can install using the 
 script:
 
 ```shell
-git clone https://github.com/ROCm/rocRAND.git
-cd rocRAND
+git clone https://github.com/ROCm/rocm-libraries.git
+cd rocm-libraries/projects/rocrand
 
 # the -i option will install rocPRIM to C:\hipSDK by default
 python rmake.py -i
@@ -125,7 +125,7 @@ help to solve the problem.
 
 ```shell
 # Go to rocRAND build directory
-cd rocRAND; cd build
+cd rocm-libraries/projects/rocrand; cd build
 
 # To run all tests
 ctest
@@ -138,7 +138,7 @@ ctest
 
 ```shell
 # Go to rocRAND build directory
-cd rocRAND; cd build
+cd rocm-libraries/projects/rocrand; cd build
 
 # To run benchmark for the host generate functions:
 # The benchmarks are registered with Google Benchmark as `device_generate<engine,distribution>`, where
@@ -257,7 +257,7 @@ You can then open `docs/_build/html/index.html` in your browser to view the docu
 ## Support
 
 Bugs and feature requests can be reported through the
-[issue tracker](https://github.com/ROCm/rocRAND/issues).
+[issue tracker](https://github.com/ROCm/rocm-libraries/issues).
 
 ## Contributions and license
 
