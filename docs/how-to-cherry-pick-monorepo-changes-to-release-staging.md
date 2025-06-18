@@ -1,5 +1,8 @@
 # How to cherry-pick monorepo changes into release-staging branches
 
+> [!IMPORTANT] DRAFT
+> This document is currently in draft and may be subject to change.
+
 When a project has been migrated into the ROCm monorepo, day-to-day work happens on the monorepo’s `develop` branch.  
 Down-stream teams, however, still consume the original (pre-monorepo) repositories, particularly their `release-staging/rocm-rel-x.y` branches, through a variety of mechanisms.
 This document explains how to move a change from the monorepo into those release-staging branches while guaranteeing that every commit on a release-staging branch also exists in the monorepo.  
