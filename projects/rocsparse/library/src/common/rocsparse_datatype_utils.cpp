@@ -81,6 +81,11 @@ size_t rocsparse::datatype_sizeof(rocsparse_datatype that)
         return sizeof(_Float16);
     }
 
+    case rocsparse_datatype_bf16_r:
+    {
+        return sizeof(rocsparse_bfloat16);
+    }
+
     case rocsparse_datatype_f32_r:
     {
         return sizeof(float);

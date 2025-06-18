@@ -226,7 +226,7 @@ namespace TensileLite
         int         wavefrontSize    = 64;
         int         simdPerCu        = 4;
         int         computeUnitCount = 0;
-        int         skDynamicGrid    = 3;
+        int         skDynamicGrid    = 6;
         int         skDynamicWGM     = 0;
         int         skMaxCUs         = 0;
         int         skGridMultiplier = 1;

@@ -37,6 +37,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
     std::optional<StockhamGeneratorSpecs> specs;
     std::optional<StockhamGeneratorSpecs> specs2d;
+    StockhamPartialPassParams             pp_params;
 
     // SBRC variants look in the function pool for plain BLOCK_RC to
     // learn the block width, then decide on the transpose type once
@@ -52,14 +53,12 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
     std::optional<FFTKernel> kernel;
 
-    // find function pool entry so we can construct specs for the generator
-    // NB: make sure all SBRC-type node have the correct trans_type value
-    FMKey key;
-    key = node.GetKernelKey();
     switch(pool_scheme)
     {
     case CS_KERNEL_STOCKHAM:
+    case CS_KERNEL_STOCKHAM_PP:
     case CS_KERNEL_STOCKHAM_BLOCK_CC:
+    case CS_KERNEL_STOCKHAM_PP_BLOCK_CC:
     case CS_KERNEL_STOCKHAM_BLOCK_CR:
     case CS_KERNEL_STOCKHAM_BLOCK_RC:
     {
@@ -70,28 +69,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
         // these go into the function pool normally and are passed to
         // the generator as-is
-        kernel = node.pool.get_kernel(key);
-
-        if(node.applyPartialPass)
-        {
-            // TODO: Hardcoded configuration for 64 x 64 x 64.
-            // Remove this once the partial-pass kernels are
-            // fully configurable in kernel-generator.py.
-            if(node.scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
-            {
-                kernel->threads_per_transform[0] = 8;
-                kernel->workgroup_size           = 64;
-            }
-            else if(node.scheme == CS_KERNEL_STOCKHAM)
-            {
-                kernel->threads_per_transform[0] = 8;
-                kernel->workgroup_size           = 128;
-                kernel->direct_to_from_reg       = false;
-            }
-
-            kernel->transforms_per_block
-                = kernel->workgroup_size / kernel->threads_per_transform[0];
-        }
+        kernel = node.GetKernel();
 
         std::vector<unsigned int> factors;
         std::copy(kernel->factors.begin(), kernel->factors.end(), std::back_inserter(factors));
@@ -106,11 +84,22 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         specs->half_lds              = kernel->half_lds;
         specs->direct_to_from_reg    = kernel->direct_to_from_reg;
         specs->ebtype                = node.ebtype;
+
+        if(node.isPartialPassEnabled())
+        {
+            pp_params.off_dim         = node.ppOffDim;
+            pp_params.current_dim     = node.ppCurrDim;
+            pp_params.factors_off_dim = std::vector<unsigned int>(
+                kernel->pp_params.factors_off_dim.begin(), kernel->pp_params.factors_off_dim.end());
+            pp_params.parent_length
+                = std::vector<unsigned int>(node.length.begin(), node.length.end());
+        }
+
         break;
     }
     case CS_KERNEL_2D_SINGLE:
     {
-        kernel = node.pool.get_kernel(key);
+        kernel = node.GetKernel();
 
         std::vector<unsigned int> factors1d;
         std::vector<unsigned int> factors2d;
@@ -173,11 +162,11 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
     bool unit_stride = node.inStride.front() == 1 && node.outStride.front() == 1;
 
     auto ppType = PartialPassType::PPT_NONE;
-    if(node.applyPartialPass)
+    if(node.isPartialPassEnabled())
     {
-        if(node.scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
+        if(node.scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
             ppType = PartialPassType::PPT_SBCC;
-        else if(node.scheme == CS_KERNEL_STOCKHAM)
+        else if(node.scheme == CS_KERNEL_STOCKHAM_PP)
             ppType = PartialPassType::PPT_SBRR;
         else
             throw std::runtime_error("Invalid scheme for partial pass");
@@ -209,6 +198,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
     generator.generate_src = [=, &node](const std::string& kernel_name) {
         return stockham_rtc(*specs,
                             specs2d ? *specs2d : *specs,
+                            pp_params,
                             nullptr,
                             kernel_name,
                             node.scheme,
@@ -227,8 +217,6 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                             node.GetCallbackType(enable_callbacks),
                             node.fuseBlue,
                             ppType,
-                            node.kernelFactorsPP,
-                            node.length[node.ppDim],
                             node.loadOps,
                             node.storeOps);
     };
@@ -246,11 +234,12 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
     RTCKernelArgs kargs;
 
     // twiddles
-    if(data.node->applyPartialPass && data.node->scheme == CS_KERNEL_STOCKHAM)
+    if(data.node->scheme == CS_KERNEL_STOCKHAM_PP)
         kargs.append_ptr(data.node->twiddles_pp);
     kargs.append_ptr(data.node->twiddles);
     // large 1D twiddles
-    if(data.node->scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
+    if(data.node->scheme == CS_KERNEL_STOCKHAM_BLOCK_CC
+       || data.node->scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
         kargs.append_ptr(data.node->twiddles_large);
     if(!hardcoded_dim)
         kargs.append_size_t(data.node->length.size());

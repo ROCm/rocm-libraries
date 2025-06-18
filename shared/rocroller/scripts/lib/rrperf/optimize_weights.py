@@ -58,8 +58,7 @@ import subprocess
 # import tempfile
 import yaml
 
-import rrperf.run
-import rrperf.problems
+import rrperf
 
 from dataclasses import dataclass, field, fields, asdict
 from typing import List, Tuple
@@ -149,6 +148,11 @@ class Weights:
 
     vmcnt: float = field(default_factory=random_inv_exp())
     lgkmcnt: float = field(default_factory=random_inv_exp())
+
+    vmemCycles: int = field(default_factory=random_int(max=500), metadata={"isCoefficient": False})
+    vmemQueueSize: int = field(default_factory=random_int(max=20), metadata={"isCoefficient": False})
+    dsmemCycles: int = field(default_factory=random_int(max=100), metadata={"isCoefficient": False})
+    dsmemQueueSize: int = field(default_factory=random_int(max=20), metadata={"isCoefficient": False})
 
     vmQueueLen: int = field(
         default_factory=random_int(), metadata={"isCoefficient": False}
@@ -301,7 +305,7 @@ def bench(
         process_result = subprocess.run(
             cmd,
             env=env,
-            cwd=rrperf.run.get_build_dir(),
+            cwd=rrperf.utils.get_build_dir(),
             stderr=subprocess.STDOUT,
             stdout=subprocess.PIPE,
         )
@@ -618,7 +622,7 @@ def get_args(parser: argparse.ArgumentParser):
     parser.add_argument(
         "--suite",
         dest="problem",
-        type=rrperf.run.first_problem_from_suite,
+        type=rrperf.utils.first_problem_from_suite,
         help="Benchmark suite to run. NOTE: Only the first problem from the "
         "suite will be used.",
     )

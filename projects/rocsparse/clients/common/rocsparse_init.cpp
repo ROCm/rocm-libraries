@@ -2180,6 +2180,7 @@ INSTANTIATE(int32_t);
 INSTANTIATE(int64_t);
 INSTANTIATE(size_t);
 INSTANTIATE(_Float16);
+INSTANTIATE(rocsparse_bfloat16);
 INSTANTIATE(float);
 INSTANTIATE(double);
 INSTANTIATE(rocsparse_float_complex);

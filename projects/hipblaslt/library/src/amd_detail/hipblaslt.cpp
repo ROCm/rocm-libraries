@@ -63,30 +63,6 @@ bool override_path_compare_git_version(OverrideSingleton& override, hipblasLtHan
     return false;
 }
 
-hipblasStatus_t hipErrorToHIPBLASStatus(hipError_t status)
-{
-    switch(status)
-    {
-    case hipSuccess:
-        return HIPBLAS_STATUS_SUCCESS;
-    case hipErrorMemoryAllocation:
-    case hipErrorLaunchOutOfResources:
-        return HIPBLAS_STATUS_ALLOC_FAILED;
-    case hipErrorInvalidDevicePointer:
-        return HIPBLAS_STATUS_INVALID_VALUE;
-    case hipErrorInvalidDevice:
-    case hipErrorInvalidResourceHandle:
-        return HIPBLAS_STATUS_NOT_INITIALIZED;
-    case hipErrorInvalidValue:
-        return HIPBLAS_STATUS_INVALID_VALUE;
-    case hipErrorNoDevice:
-    case hipErrorUnknown:
-        return HIPBLAS_STATUS_INTERNAL_ERROR;
-    default:
-        return HIPBLAS_STATUS_INTERNAL_ERROR;
-    }
-}
-
 hipblasStatus_t RocBlasLtStatusToHIPStatus(rocblaslt_status_ status)
 {
     switch(status)

@@ -162,6 +162,9 @@ std::string test_kernel_src(const std::string&               kernel_name,
                                  {static_cast<unsigned int>(rocfft_precision_single)},
                                  wgs,
                                  PrintScheme(compute_scheme)};
+
+    auto ppParams = StockhamPartialPassParams();
+
     specs.threads_per_transform = tpt;
     specs.half_lds              = half_lds;
     specs.direct_to_from_reg    = direct_to_from_reg;
@@ -170,6 +173,7 @@ std::string test_kernel_src(const std::string&               kernel_name,
 
     return stockham_rtc(specs,
                         specs,
+                        ppParams,
                         &transforms_per_block,
                         kernel_name,
                         compute_scheme,
@@ -189,8 +193,6 @@ std::string test_kernel_src(const std::string&               kernel_name,
                         CallbackType::NONE,
                         BluesteinFuseType::BFT_NONE,
                         PartialPassType::PPT_NONE,
-                        {},
-                        0,
                         {},
                         {});
 }
