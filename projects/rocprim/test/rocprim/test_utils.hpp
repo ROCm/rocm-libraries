@@ -660,6 +660,7 @@ inline auto test_kernel_wrapper(F func, hipStream_t stream, const bool use_graph
         gHelper.createAndLaunchGraph(stream);
     }
 
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     if(use_graphs)
