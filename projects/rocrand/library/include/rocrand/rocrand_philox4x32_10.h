@@ -172,7 +172,7 @@ public:
     __forceinline__ __device__ __host__ unsigned int next()
     {
     #if defined(__HIP_PLATFORM_AMD__)
-        unsigned int ret = m_state.result.data[m_state.substate];
+        unsigned int ret = ROCRAND_HIPVEC_ACCESS(m_state.result)[m_state.substate];
     #else
         unsigned int ret = (&m_state.result.x)[m_state.substate];
     #endif
