@@ -12,7 +12,7 @@ To ensure consistency and maintainability during the migration, the following pr
 
 2. **Identify Branches and Pull Requests:**  
    - Determine branches and active pull requests that will be affected by the migration.
-   - Typically, this is limited to the pull requests targeting develop and release-staging branches.
+   - Typically, this is limited to the pull requests targeting `develop` and `release-staging` branches.
    - Any point-fixes for previous releases will not be migrated over.
 
 3. **Pause Merges:**
