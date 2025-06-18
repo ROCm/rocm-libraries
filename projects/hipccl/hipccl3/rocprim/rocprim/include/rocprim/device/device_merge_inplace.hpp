@@ -885,20 +885,24 @@ inline hipError_t merge_inplace(void*             temporary_storage,
                                                                    block_block_size,
                                                                    impl::block_merge_kernel,
                                                                    stream));
+
+    const int min_grid_size = rocprim::min(
+        block_merge_grid_size,
+        static_cast<int>(rocprim::detail::ceiling_div(left_size + right_size, block_block_size)));
+
     if(debug_synchronous)
     {
         std::cout << "block_merge_kernel\n"
-                  << "  grid_size     : " << block_merge_grid_size << "\n"
+                  << "  grid_size     : " << min_grid_size << "\n"
                   << "  block_size    : " << block_block_size << std::endl;
     }
 
     // each of the sub merging problem can be solved within a block
-    impl::block_merge_kernel<<<block_merge_grid_size, block_block_size, 0, stream>>>(
-        data,
-        left_size + right_size,
-        compare_function,
-        work_storage,
-        scratch_storage);
+    impl::block_merge_kernel<<<min_grid_size, block_block_size, 0, stream>>>(data,
+                                                                             left_size + right_size,
+                                                                             compare_function,
+                                                                             work_storage,
+                                                                             scratch_storage);
     ROCPRIM_RETURN_ON_ERROR(hipGetLastError());
     if(debug_synchronous)
     {

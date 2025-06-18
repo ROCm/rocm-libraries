@@ -1345,8 +1345,8 @@ private:
         parser.set_optional<int>("trials", "trials", default_trials, "number of iterations");
         parser.set_optional<std::string>("name_format",
                                          "name_format",
-                                         "human",
-                                         "either: json,human,txt");
+                                         "json",
+                                         "either json, human, or txt");
 
         // Optionally run an evenly split subset of benchmarks for autotuning.
         parser.set_optional<int>("parallel_instance",

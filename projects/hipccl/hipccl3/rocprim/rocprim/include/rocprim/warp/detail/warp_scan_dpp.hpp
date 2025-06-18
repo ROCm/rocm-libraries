@@ -53,48 +53,48 @@ public:
 
         if(VirtualWaveSize > 1)
         {
-            T t = scan_op(warp_move_dpp<T, 0x111>(output), output); // row_shr:1
+            T t = warp_move_dpp<T, 0x111>(output); // row_shr:1
             if(row_lane_id >= 1)
-                output = t;
+                output = scan_op(t, output);
         }
         if(VirtualWaveSize > 2)
         {
-            T t = scan_op(warp_move_dpp<T, 0x112>(output), output); // row_shr:2
+            T t = warp_move_dpp<T, 0x112>(output); // row_shr:2
             if(row_lane_id >= 2)
-                output = t;
+                output = scan_op(t, output);
         }
         if(VirtualWaveSize > 4)
         {
-            T t = scan_op(warp_move_dpp<T, 0x114>(output), output); // row_shr:4
+            T t = warp_move_dpp<T, 0x114>(output); // row_shr:4
             if(row_lane_id >= 4)
-                output = t;
+                output = scan_op(t, output);
         }
         if(VirtualWaveSize > 8)
         {
-            T t = scan_op(warp_move_dpp<T, 0x118>(output), output); // row_shr:8
+            T t = warp_move_dpp<T, 0x118>(output); // row_shr:8
             if(row_lane_id >= 8)
-                output = t;
+                output = scan_op(t, output);
         }
 #ifdef ROCPRIM_DETAIL_HAS_DPP_BROADCAST
         if(VirtualWaveSize > 16)
         {
-            T t = scan_op(warp_move_dpp<T, 0x142>(output), output); // row_bcast:15
+            T t = warp_move_dpp<T, 0x142>(output); // row_bcast:15
             if(lane_id % 32 >= 16)
-                output = t;
+                output = scan_op(t, output);
         }
         if(VirtualWaveSize > 32)
         {
-            T t = scan_op(warp_move_dpp<T, 0x143>(output), output); // row_bcast:31
+            T t = warp_move_dpp<T, 0x143>(output); // row_bcast:31
             if(lane_id >= 32)
-                output = t;
+                output = scan_op(t, output);
         }
         static_assert(VirtualWaveSize <= 64, "VirtualWaveSize > 64 is not supported");
 #else
         if(VirtualWaveSize > 16)
         {
-            T t = scan_op(warp_swizzle<T, 0x1e0>(output), output); // row_bcast:15
+            T t = warp_swizzle<T, 0x1e0>(output); // row_bcast:15
             if(lane_id % 32 >= 16)
-                output = t;
+                output = scan_op(t, output);
         }
         static_assert(VirtualWaveSize <= 32,
                       "VirtualWaveSize > 32 is not supported without DPP broadcasts");
