@@ -130,6 +130,8 @@ constexpr auto rocsparse_datatype2string(rocsparse_datatype type)
         return "u32_r";
     case rocsparse_datatype_f16_r:
         return "f16_r";
+    case rocsparse_datatype_bf16_r:
+        return "bf16_r";
     }
     return "invalid";
 }

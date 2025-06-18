@@ -172,7 +172,8 @@ template <typename KeyT,
           typename ValueT,
           int NUM_THREADS,
           int ITEMS_PER_THREAD,
-          typename SynchronizationPolicy>
+          typename SynchronizationPolicy,
+          bool WARP_SORT = false>
 class BlockMergeSortStrategy
 {
   static_assert(PowerOfTwo<NUM_THREADS>::VALUE,
@@ -387,7 +388,7 @@ public:
       KeyT max_key = oob_default;
 
       #pragma unroll
-      for (int item = 1; item < ITEMS_PER_THREAD; ++item)
+      for (int item = WARP_SORT ? 1 : 0; item < ITEMS_PER_THREAD; ++item)
       {
         if (ITEMS_PER_THREAD * static_cast<int>(linear_tid) + item < valid_items)
         {
@@ -439,14 +440,16 @@ public:
 
       int thread_idx_in_thread_group_being_merged = mask & linear_tid;
 
+      const int COMPARE_NUM = WARP_SORT ? valid_items : ITEMS_PER_THREAD * blockDim.x;
+
       int diag =
-        (::rocprim::min)(valid_items,
+        (::rocprim::min)(COMPARE_NUM,
                    ITEMS_PER_THREAD * thread_idx_in_thread_group_being_merged);
 
-      int keys1_beg = (::rocprim::min)(valid_items, start);
-      int keys1_end = (::rocprim::min)(valid_items, keys1_beg + size);
+      int keys1_beg = (::rocprim::min)(COMPARE_NUM, start);
+      int keys1_end = (::rocprim::min)(COMPARE_NUM, keys1_beg + size);
       int keys2_beg = keys1_end;
-      int keys2_end = (::rocprim::min)(valid_items, keys2_beg + size);
+      int keys2_end = (::rocprim::min)(COMPARE_NUM, keys2_beg + size);
 
       int keys1_count = keys1_end - keys1_beg;
       int keys2_count = keys2_end - keys2_beg;

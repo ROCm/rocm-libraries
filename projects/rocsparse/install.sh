@@ -313,7 +313,6 @@ build_with_offload_compress=true
 matrices_dir=
 matrices_dir_install=
 gpu_architecture=all
-build_freorg_bkwdcomp=false
 declare -a cmake_common_options
 declare -a cmake_client_options
 
@@ -398,9 +397,6 @@ while true; do
             shift ;;
         --codecoverage)
             build_codecoverage=true
-            shift ;;
-        --rm-legacy-include-dir)
-            build_freorg_bkwdcomp=false
             shift ;;
         -a|--architecture)
             gpu_architecture=${2}
@@ -600,13 +596,6 @@ pushd .
     cmake_common_options+=("-DBUILD_WITH_ROCTX=ON")
   else
     cmake_common_options+=("-DBUILD_WITH_ROCTX=OFF")
-  fi
-
-  # freorg backward compatible support enable
-  if [[ "${build_freorg_bkwdcomp}" == true ]]; then
-    cmake_common_options+=("-DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=ON")
-  else
-    cmake_common_options+=("-DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=OFF")
   fi
 
   # code coverage

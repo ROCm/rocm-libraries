@@ -137,9 +137,11 @@ std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs& specs,
     switch(scheme)
     {
     case CS_KERNEL_STOCKHAM:
+    case CS_KERNEL_STOCKHAM_PP:
         kernel_name += "_sbrr";
         break;
     case CS_KERNEL_STOCKHAM_BLOCK_CC:
+    case CS_KERNEL_STOCKHAM_PP_BLOCK_CC:
         kernel_name += "_sbcc";
         break;
     case CS_KERNEL_STOCKHAM_BLOCK_CR:
@@ -247,30 +249,29 @@ std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs& specs,
     return kernel_name;
 }
 
-std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
-                         const StockhamGeneratorSpecs& specs2d,
-                         unsigned int*                 transforms_per_block,
-                         const std::string&            kernel_name,
-                         ComputeScheme                 scheme,
-                         int                           direction,
-                         rocfft_precision              precision,
-                         rocfft_result_placement       placement,
-                         rocfft_array_type             inArrayType,
-                         rocfft_array_type             outArrayType,
-                         bool                          unit_stride,
-                         size_t                        largeTwdBase,
-                         size_t                        largeTwdSteps,
-                         bool                          largeTwdBatchIsTransformCount,
-                         DirectRegType                 dir2regMode,
-                         IntrinsicAccessType           intrinsicMode,
-                         SBRC_TRANSPOSE_TYPE           transpose_type,
-                         CallbackType                  cbtype,
-                         const BluesteinFuseType&      fuseBlue,
-                         const PartialPassType&        ppType,
-                         const std::vector<size_t>&    ppFactors,
-                         const size_t                  ppLength,
-                         const LoadOps&                loadOps,
-                         const StoreOps&               storeOps)
+std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
+                         const StockhamGeneratorSpecs&    specs2d,
+                         const StockhamPartialPassParams& params_pp,
+                         unsigned int*                    transforms_per_block,
+                         const std::string&               kernel_name,
+                         ComputeScheme                    scheme,
+                         int                              direction,
+                         rocfft_precision                 precision,
+                         rocfft_result_placement          placement,
+                         rocfft_array_type                inArrayType,
+                         rocfft_array_type                outArrayType,
+                         bool                             unit_stride,
+                         size_t                           largeTwdBase,
+                         size_t                           largeTwdSteps,
+                         bool                             largeTwdBatchIsTransformCount,
+                         DirectRegType                    dir2regMode,
+                         IntrinsicAccessType              intrinsicMode,
+                         SBRC_TRANSPOSE_TYPE              transpose_type,
+                         CallbackType                     cbtype,
+                         const BluesteinFuseType&         fuseBlue,
+                         const PartialPassType&           ppType,
+                         const LoadOps&                   loadOps,
+                         const StoreOps&                  storeOps)
 {
     std::unique_ptr<Function> lds2reg, reg2lds, device;
     std::unique_ptr<Function> lds2reg_pp_steps, reg2lds_pp_steps;
@@ -311,39 +312,58 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
     else
     {
         std::unique_ptr<StockhamKernel> kernel;
+        if(scheme == CS_KERNEL_STOCKHAM)
+            kernel = std::make_unique<StockhamKernelRR>(specs);
+        else if(scheme == CS_KERNEL_STOCKHAM_PP)
+            kernel = std::make_unique<StockhamPartialPassKernelRR>(specs, params_pp);
+        else if(scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
+            kernel = std::make_unique<StockhamKernelCC>(
+                specs, largeTwdBatchIsTransformCount, fuseBluestein);
+        else if(scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
+            kernel = std::make_unique<StockhamPartialPassKernelCC>(
+                specs, params_pp, largeTwdBatchIsTransformCount);
+        else if(scheme == CS_KERNEL_STOCKHAM_BLOCK_CR)
+            kernel = std::make_unique<StockhamKernelCR>(specs);
+        else if(scheme == CS_KERNEL_STOCKHAM_BLOCK_RC)
+            kernel = std::make_unique<StockhamKernelRC>(specs, fuseBluestein);
+        else if(scheme == CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z)
+            kernel = std::make_unique<StockhamKernelRC>(specs, false);
+        else if(scheme == CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY)
+            kernel = std::make_unique<StockhamKernelRC>(specs, false);
+        else if(scheme == CS_KERNEL_STOCKHAM_R_TO_CMPLX_TRANSPOSE_Z_XY)
+            kernel = std::make_unique<StockhamKernelRC>(specs, false);
+        else
+            throw std::runtime_error("unhandled scheme");
+        if(transforms_per_block)
+            *transforms_per_block = kernel->transforms_per_block;
+
         switch(ppType)
         {
         case PPT_NONE:
         {
-            if(scheme == CS_KERNEL_STOCKHAM)
-                kernel = std::make_unique<StockhamKernelRR>(specs);
-            else if(scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
-                kernel = std::make_unique<StockhamKernelCC>(
-                    specs, largeTwdBatchIsTransformCount, fuseBluestein);
-            else if(scheme == CS_KERNEL_STOCKHAM_BLOCK_CR)
-                kernel = std::make_unique<StockhamKernelCR>(specs);
-            else if(scheme == CS_KERNEL_STOCKHAM_BLOCK_RC)
-                kernel = std::make_unique<StockhamKernelRC>(specs, fuseBluestein);
-            else if(scheme == CS_KERNEL_STOCKHAM_TRANSPOSE_XY_Z)
-                kernel = std::make_unique<StockhamKernelRC>(specs, false);
-            else if(scheme == CS_KERNEL_STOCKHAM_TRANSPOSE_Z_XY)
-                kernel = std::make_unique<StockhamKernelRC>(specs, false);
-            else if(scheme == CS_KERNEL_STOCKHAM_R_TO_CMPLX_TRANSPOSE_Z_XY)
-                kernel = std::make_unique<StockhamKernelRC>(specs, false);
-            else
-                throw std::runtime_error("unhandled scheme");
-
             lds2reg = std::make_unique<Function>(kernel->generate_lds_to_reg_input_function());
             reg2lds = std::make_unique<Function>(kernel->generate_lds_from_reg_output_function());
             device  = std::make_unique<Function>(kernel->generate_device_function());
+            break;
+        }
+        case PPT_SBRR:
+        {
+            auto kernel_pp = static_cast<StockhamPartialPassKernelRR*>(kernel.get());
 
+            lds2reg = std::make_unique<Function>(kernel_pp->generate_lds_to_reg_input_function());
+            reg2lds
+                = std::make_unique<Function>(kernel_pp->generate_lds_from_reg_output_function());
+            lds2reg_pp_steps = std::make_unique<Function>(
+                kernel_pp->generate_lds_to_reg_input_step_1_2_function());
+            reg2lds_pp_steps = std::make_unique<Function>(
+                kernel_pp->generate_lds_from_reg_output_pp_step_1_2_function());
+            twiddle_multiply_pp = std::make_unique<Function>(
+                kernel_pp->generate_twiddle_multiply_pp_function(direction));
+            device = std::make_unique<Function>(kernel_pp->generate_device_function());
             break;
         }
         case PPT_SBCC:
         {
-            kernel = std::make_unique<StockhamPartialPassKernelCC>(
-                specs, largeTwdBatchIsTransformCount, ppFactors);
-
             auto kernel_pp = static_cast<StockhamPartialPassKernelCC*>(kernel.get());
 
             lds2reg
@@ -357,34 +377,11 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
             local_transpose_pp
                 = std::make_unique<Function>(kernel_pp->generate_local_transpose_pp_function());
             device = std::make_unique<Function>(kernel_pp->generate_device_function());
-
-            break;
-        }
-        case PPT_SBRR:
-        {
-            kernel = std::make_unique<StockhamPartialPassKernelRR>(specs, ppFactors, ppLength);
-
-            auto kernel_pp = static_cast<StockhamPartialPassKernelRR*>(kernel.get());
-
-            lds2reg = std::make_unique<Function>(kernel_pp->generate_lds_to_reg_input_function());
-            reg2lds
-                = std::make_unique<Function>(kernel_pp->generate_lds_from_reg_output_function());
-            lds2reg_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_to_reg_input_step_1_2_function());
-            reg2lds_pp_steps = std::make_unique<Function>(
-                kernel_pp->generate_lds_from_reg_output_pp_step_1_2_function());
-            twiddle_multiply_pp = std::make_unique<Function>(
-                kernel_pp->generate_twiddle_multiply_pp_function(direction));
-            device = std::make_unique<Function>(kernel_pp->generate_device_function());
-
             break;
         }
         default:
             throw std::runtime_error("unhandled partial pass type");
-        };
-
-        if(transforms_per_block)
-            *transforms_per_block = kernel->transforms_per_block;
+        }
 
         if(fuseBluestein)
         {
@@ -409,7 +406,9 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
         all_factors = kernel->factors;
 
         if(ppType != PPT_NONE)
-            all_factors.insert(all_factors.end(), ppFactors.begin(), ppFactors.end());
+            all_factors.insert(all_factors.end(),
+                               params_pp.factors_off_dim.begin(),
+                               params_pp.factors_off_dim.end());
     }
 
     // generated functions default to forward in-place interleaved.
@@ -451,12 +450,12 @@ std::string stockham_rtc(const StockhamGeneratorSpecs& specs,
     src += butterfly_constant_h;
 
     // only SBCCs need this
-    if(scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
+    if(scheme == CS_KERNEL_STOCKHAM_BLOCK_CC || scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
         src += large_twiddles_h;
     // append the neccessary functions only
     append_radix_h(src, all_factors);
     // SBCCs don't need this
-    if(scheme != CS_KERNEL_STOCKHAM_BLOCK_CC)
+    if(scheme != CS_KERNEL_STOCKHAM_BLOCK_CC && scheme != CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
         src += real2complex_device_h;
 
     src += lds2reg->render();

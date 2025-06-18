@@ -9558,12 +9558,14 @@ template struct rocsparse_host<rocsparse_double_complex,
 
 INSTANTIATE_GATHER_SCATTER(int32_t, int8_t);
 INSTANTIATE_GATHER_SCATTER(int32_t, _Float16);
+INSTANTIATE_GATHER_SCATTER(int32_t, rocsparse_bfloat16);
 INSTANTIATE_GATHER_SCATTER(int32_t, float);
 INSTANTIATE_GATHER_SCATTER(int32_t, double);
 INSTANTIATE_GATHER_SCATTER(int32_t, rocsparse_float_complex);
 INSTANTIATE_GATHER_SCATTER(int32_t, rocsparse_double_complex);
 INSTANTIATE_GATHER_SCATTER(int64_t, int8_t);
 INSTANTIATE_GATHER_SCATTER(int64_t, _Float16);
+INSTANTIATE_GATHER_SCATTER(int64_t, rocsparse_bfloat16);
 INSTANTIATE_GATHER_SCATTER(int64_t, float);
 INSTANTIATE_GATHER_SCATTER(int64_t, double);
 INSTANTIATE_GATHER_SCATTER(int64_t, rocsparse_float_complex);

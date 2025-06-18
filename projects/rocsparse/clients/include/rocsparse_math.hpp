@@ -79,6 +79,12 @@ inline bool rocsparse_isnan(_Float16 arg)
 }
 
 template <>
+inline bool rocsparse_isnan(rocsparse_bfloat16 arg)
+{
+    return arg != arg;
+}
+
+template <>
 inline bool rocsparse_isnan(double arg)
 {
     return std::isnan(arg);

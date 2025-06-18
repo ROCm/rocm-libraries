@@ -237,29 +237,11 @@ endif()
 include(GenerateExportHeader)
 generate_export_header(hipsparse EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/hipsparse/hipsparse-export.h)
 
-if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_wrap_header_file(
-    hipsparse-version.h hipsparse-export.h
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS ${CMAKE_INSTALL_INCLUDEDIR} hipsparse/${CMAKE_INSTALL_INCLUDEDIR}
-    ORIGINAL_FILES ${PROJECT_BINARY_DIR}/include/hipsparse/hipsparse-version.h
-  )
-endif( )
-
 # Install targets
 rocm_install_targets(TARGETS hipsparse
                      INCLUDE
                        ${CMAKE_BINARY_DIR}/include
                      )
-
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_install(
-    DIRECTORY
-       "${PROJECT_BINARY_DIR}/hipsparse"
-        DESTINATION "." )
-  message( STATUS "Backward Compatible Sym Link Created for include directories" )
-endif()
-
 
 # Export targets
 if(NOT USE_CUDA)

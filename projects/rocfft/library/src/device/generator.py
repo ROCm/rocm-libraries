@@ -811,10 +811,15 @@ class Map(BaseNodeOps):
             Throw('std::runtime_error("' + str(what_error) + '")'))
         return If(Equal(status, "false"), throw)
 
-    def assert_insert(self, key, value, def_key_pool, function_map,
-                      lds_size_bytes):
+    def insert(self, key, value, def_key_pool, function_map, lds_size_bytes):
         return Call('insert_default_entry',
                     arguments=ArgumentList(key, value, def_key_pool,
+                                           function_map, lds_size_bytes))
+
+    def insert_pp(self, key, value_1, value_2, def_key_pool, function_map,
+                  lds_size_bytes):
+        return Call('insert_default_entry',
+                    arguments=ArgumentList(key, value_1, value_2, def_key_pool,
                                            function_map, lds_size_bytes))
 
     # def __getitem__(self, idx):

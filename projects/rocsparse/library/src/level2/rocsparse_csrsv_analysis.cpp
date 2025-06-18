@@ -138,12 +138,12 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
                 rocsparse::csr2coo_template(handle, csr_row_ptr, nnz, m, tmp_work1, descr->base));
 
             // Permute column indices
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse::gthr_template(handle,
-                                                               nnz,
-                                                               tmp_work1,
-                                                               (J*)transposed_col_ind,
-                                                               (const I*)transposed_perm,
-                                                               rocsparse_index_base_zero));
+            RETURN_IF_ROCSPARSE_ERROR((rocsparse::gthr_template<I, J>(handle,
+                                                                      nnz,
+                                                                      tmp_work1,
+                                                                      (J*)transposed_col_ind,
+                                                                      (const I*)transposed_perm,
+                                                                      rocsparse_index_base_zero)));
         }
         else
         {
