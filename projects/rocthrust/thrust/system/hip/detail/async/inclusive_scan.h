@@ -50,7 +50,6 @@
 #    include <thrust/system/hip/detail/async/customization.h>
 #    include <thrust/system/hip/detail/util.h>
 #    include <thrust/system/hip/future.h>
-#    include <thrust/type_traits/remove_cvref.h>
 
 #    include <type_traits>
 
