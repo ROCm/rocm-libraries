@@ -1,17 +1,4 @@
-# How to cherry pick monorepo changes to release staging branches
-
-As we migrate projects to the monorepo, it is important for developers to be able to maintain continuity with existing release patterns. Inside AMD, once the `release-staging/rocm-rel-x.y` branch has been cut for a specific component, it is common for subsequent changes to be integrated into this branch via a cherry-pick process. This document provides the standard procedure by which those components that have already been migrated to the monorepo can effect changes in the pre-monorepo projects' `release-staging/rocm-rel-x.y` branches, and thereby support projects that require them as a first-party dependency.
-
-1. Create a PR in [ROCm/rocm-libraries](https://github.com/bstefanuk/rocm-libraries) targeting `develop`. If possible, use squash merge such that only a single cherry-pick is required.
-2. Since the monorepo is set up to automatically push changes back to the original (pre-monorepo) projects on a 15 minute interval, once the PR is merged into [ROCm/rocm-libraries](https://github.com/bstefanuk/rocm-libraries), it will automatically populate on the original project's `develop` branch. Once this automatic push is complete, note the commit SHA on the individual project.
-3. In the individual project, cherry-pick the commit to a local branch and create a PR targetting `release-staging/rocm-rel-x.y`. Request approvals and merge.
-
-By following this approach, it will ensure that no commits are present on release staging branches that aren't present in the monorepo's `develop` branch.
-
-
-
-
-# Cherry-picking Monorepo Changes into Release-Staging Branches
+# How to cherry-pick monorepo changes into release-staging branches
 
 When a project has been migrated into the ROCm monorepo, day-to-day work happens on the monorepo’s `develop` branch.  
 Down-stream teams, however, still consume the original (pre-monorepo) repositories, particularly their `release-staging/rocm-rel-x.y` branches, through a variety of mechanisms.
