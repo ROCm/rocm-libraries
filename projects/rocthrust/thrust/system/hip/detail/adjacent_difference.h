@@ -49,12 +49,12 @@
 #  include <thrust/system/hip/detail/par_to_seq.h>
 #  include <thrust/system/hip/detail/util.h>
 #  include <thrust/type_traits/is_contiguous_iterator.h>
-#  include <thrust/type_traits/remove_cvref.h>
 
 // rocprim include
 #  include <rocprim/rocprim.hpp>
 
 #  include <cstdint>
+#  include <type_traits>
 
 THRUST_NAMESPACE_BEGIN
 

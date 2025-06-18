@@ -25,10 +25,10 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
+#include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/type_traits/remove_cvref.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -51,7 +51,7 @@ private:
 
   // By default, dereferencing the iterator yields the same as the function.
   using reference  = typename ia_dflt_help<Reference, wrapped_func_ret_t>::type;
-  using value_type = typename ia_dflt_help<Value, remove_cvref<reference>>::type;
+  using value_type = typename ia_dflt_help<Value, ::internal::remove_cvref<reference>>::type;
 
 public:
   using type =
