@@ -187,11 +187,12 @@ namespace TensileLite
             for(const auto& tile : selected_tiles)
             {
                 auto mapiter  = tile_map.find(std::make_tuple(std::get<1>(tile),
-                                                             std::get<2>(tile),
-                                                             std::get<3>(tile),
-                                                             std::get<4>(tile),
-                                                             std::get<5>(tile),
-                                                             std::get<6>(tile)));
+                                                              std::get<2>(tile),
+                                                              std::get<3>(tile),
+                                                              std::get<4>(tile),
+                                                              std::get<5>(tile),
+                                                              std::get<6>(tile),
+                                                              std::get<7>(tile)));
                 auto smapiter = solutionmap.find(mapiter->second);
                 if(mapiter != tile_map.end() && smapiter != solutionmap.end())
                 {
