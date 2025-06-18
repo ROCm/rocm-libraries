@@ -139,7 +139,7 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
         throw std::length_error("thread::thread: width must not exceed " + std::to_string(max_width()));
     }
 
-    auto worknode_h = make_worknode(width, std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
+    auto worknode_h = WorkNode_Header::make_worknode(width, std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
     cached_tdata = worknode_h->tdata;
     using WorkNode_t = typename decltype(worknode_h)::element_type;
     // First two are prerequisites for the third, and produce more user-friendly error messages
@@ -170,7 +170,7 @@ inline __device__ thread::thread(uint32_t width [[maybe_unused]], Fn_t &&typed_f
 #ifdef __HIP_DEVICE_COMPILE__
     assert(width <= max_width());
     assert(threadIdx.x == 0);
-    auto typed_worknode_ptr = make_worknode(width, std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
+    auto typed_worknode_ptr = WorkNode_Header::make_worknode(width, std::forward<Fn_t>(typed_fn), std::forward<Args_t>(args)...);
     cached_tdata = typed_worknode_ptr->tdata;
 
     // First two are prerequisites for the third, and produce more user-friendly error messages
