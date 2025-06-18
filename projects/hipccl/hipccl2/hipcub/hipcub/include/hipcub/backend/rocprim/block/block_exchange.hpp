@@ -210,7 +210,7 @@ public:
         OffsetT     (&ranks)[ITEMS_PER_THREAD],        ///< [in] Corresponding scatter ranks
         ValidFlag   (&is_valid)[ITEMS_PER_THREAD])     ///< [in] Corresponding flag denoting item validity
     {
-        ScatterToStriped(items, items, ranks, is_valid);
+        ScatterToStripedFlagged(items, items, ranks, is_valid);
     }
 
 #endif // DOXYGEN_SHOULD_SKIP_THIS

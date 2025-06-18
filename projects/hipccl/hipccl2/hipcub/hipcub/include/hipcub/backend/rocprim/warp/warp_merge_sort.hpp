@@ -129,7 +129,8 @@ class WarpMergeSort
         ValueT,
         LOGICAL_WARP_THREADS,
         ITEMS_PER_THREAD,
-        WarpMergeSort<KeyT, ITEMS_PER_THREAD, LOGICAL_WARP_THREADS, ValueT, PTX_ARCH>>
+        WarpMergeSort<KeyT, ITEMS_PER_THREAD, LOGICAL_WARP_THREADS, ValueT, PTX_ARCH>,
+        true>
 {
 private:
   constexpr static bool IS_ARCH_WARP = LOGICAL_WARP_THREADS == HIPCUB_DEVICE_WARP_THREADS;
@@ -140,7 +141,8 @@ private:
                                                          ValueT,
                                                          LOGICAL_WARP_THREADS,
                                                          ITEMS_PER_THREAD,
-                                                         WarpMergeSort>;
+                                                         WarpMergeSort,
+                                                         true>;
 
   const unsigned int warp_id;
   const uint64_t member_mask;
