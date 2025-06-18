@@ -81,8 +81,9 @@ jobs:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
           extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
+          BUILD_DIR: build
         run: |
-          python3 TheRock/build_tools/github_actions/build_linux_configure.py
+          python3 TheRock/build_tools/github_actions/build_configure.py
 
       - name: Build therock-dist
         run: cmake --build TheRock/build --target therock-dist

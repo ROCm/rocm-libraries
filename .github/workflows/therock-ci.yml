@@ -83,7 +83,8 @@ jobs:
       - name: Determine projects to run
         id: projects
         env:
-          SUBTREES: ${{ steps.detect.outputs.subtrees }}
+          # SUBTREES: ${{ steps.detect.outputs.subtrees }}
+          SUBTREES: "projects/rocprim"
         run: |
           python .github/scripts/therock_configure_ci.py
 
