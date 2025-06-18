@@ -82,3 +82,31 @@ void stockham_variants(const std::vector<std::string>& kernel_name,
                        const StockhamGeneratorSpecs&   specs,
                        const StockhamGeneratorSpecs&   specs2d,
                        std::ostream&                   output);
+
+struct StockhamPartialPassParams
+{
+    StockhamPartialPassParams() = default;
+
+    StockhamPartialPassParams(const std::vector<unsigned int>& parent_length,
+                              const unsigned int               current_dim,
+                              const unsigned int               off_dim,
+                              const std::vector<unsigned int>& factors_off_dim)
+        : parent_length(parent_length)
+        , current_dim(current_dim)
+        , off_dim(off_dim)
+        , factors_off_dim(factors_off_dim)
+    {
+    }
+
+    std::vector<unsigned int> parent_length;
+    unsigned int              current_dim = 0;
+    unsigned int              off_dim     = 0;
+    std::vector<unsigned int> factors_off_dim;
+};
+
+void stockham_partial_pass_variants(const std::string&               kernel_name,
+                                    const StockhamGeneratorSpecs&    specs1,
+                                    const StockhamGeneratorSpecs&    specs2,
+                                    const StockhamPartialPassParams& params_1,
+                                    const StockhamPartialPassParams& params_2,
+                                    std::ostream&                    output);

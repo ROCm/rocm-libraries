@@ -66,7 +66,7 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
     // negate
     SECTION("Negate")
     {
-        CHECK_THAT(simplify(-(one + one)), IdenticalTo(-literal(2)));
+        CHECK_THAT(simplify(-(one + one)), IdenticalTo(literal(-2)));
     }
 
     SECTION("Multiply")
@@ -437,6 +437,8 @@ TEST_CASE("launchTimeSubExpressions works", "[expression][expression-transformat
         auto argPtr = std::make_shared<AssemblyKernelArgument>(arg);
         return std::make_shared<Expression::Expression>(argPtr);
     }();
+
+    auto arg1e2 = launchTimeSubExpressions(arg1e, context.get());
 
     CHECK_THAT(ex1_launch, IdenticalTo(argExpr));
 

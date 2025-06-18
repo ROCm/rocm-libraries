@@ -52,6 +52,7 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-version.h.in"
 # Public rocSPARSE headers
 set(rocsparse_headers_public
   include/rocsparse-auxiliary.h
+  include/rocsparse-debugging.h
   include/rocsparse-functions.h
   include/rocsparse-types.h
   include/rocsparse-complex-types.h
@@ -95,8 +96,7 @@ endif()
 
 if (NOT WIN32)
   if (BUILD_SHARED_LIBS AND BUILD_WITH_ROCTX)
-    find_package(roctx REQUIRED)
-    target_link_libraries(rocsparse PRIVATE roctx::roctx)
+    target_link_libraries(rocsparse PRIVATE -lroctx64)
     target_compile_definitions( rocsparse PRIVATE ROCSPARSE_BUILT_WITH_ROCTX )
   endif()
 endif()
@@ -124,15 +124,6 @@ endif()
 include(GenerateExportHeader)
 generate_export_header(rocsparse EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-export.h)
 
-
-if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_wrap_header_file(
-    rocsparse-version.h rocsparse-export.h
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS ${CMAKE_INSTALL_INCLUDEDIR} rocsparse/${CMAKE_INSTALL_INCLUDEDIR}
-  )
-endif( )
-
 # Force installation of .f module file
 rocm_install(FILES "${CMAKE_SOURCE_DIR}/library/src/rocsparse.f90"
               "${CMAKE_SOURCE_DIR}/library/src/rocsparse_enums.f90"
@@ -145,33 +136,6 @@ rocm_install_targets(TARGETS rocsparse
                      INCLUDE
                        ${CMAKE_BINARY_DIR}/include
 )
-
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_install(
-    DIRECTORY
-       "${PROJECT_BINARY_DIR}/rocsparse"
-        DESTINATION "." )
-  if ( NOT WIN32 )
-
-    #Create SymLink for Fortran Object Module for backward compatibility
-    rocm_install(
-      CODE "
-        set(PREFIX \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX})
-	set(INPUT_FILES \${PREFIX}/include/rocsparse/rocsparse.f90 \${PREFIX}/include/rocsparse/rocsparse_enums.f90)
-        set(SYMLINK_LOCATIONS \${PREFIX}/rocsparse/include \${PREFIX}/include)
-	foreach(INPUT_FILE IN LISTS INPUT_FILES)
-          foreach(LOCATION IN LISTS SYMLINK_LOCATIONS)
-            file(MAKE_DIRECTORY \${LOCATION})
-            execute_process(COMMAND ln -sfr \${INPUT_FILE} \${LOCATION})
-            message(STATUS \"Created symlink in \${LOCATION} to \${INPUT_FILE}.\")
-          endforeach()
-        endforeach()
-        "
-    )
-  endif() #NOT WIN32
-
-  message( STATUS "Backward Compatible Sym Link Created for include directories" )
-endif()
 
 # Export targets
 rocm_export_targets(TARGETS roc::rocsparse

@@ -559,10 +559,6 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
             pass
         else:
             raise
-    globalParameters["ROCmLdPath"] = locateExe(
-        os.path.join(globalParameters["ROCmPath"], "lib/llvm/bin"),
-        "ld.lld" if os.name != "nt" else "ld.lld.exe"
-    )
 
     if "AsanBuild" in config:
         globalParameters["AsanBuild"] = config["AsanBuild"]

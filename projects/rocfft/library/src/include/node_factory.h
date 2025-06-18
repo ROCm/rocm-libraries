@@ -79,6 +79,7 @@ public:
                              NodeMetaData&        nodeData); // using scheme CS_2D_RC or not
     static bool use_CS_3D_BLOCK_RC(const function_pool& pool, NodeMetaData& nodeData);
     static bool use_CS_3D_RC(const function_pool& pool, NodeMetaData& nodeData);
+    static bool use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData);
     // how many SBRC kernels can we put into a 3D transform?
     static size_t count_3D_SBRC_nodes(const function_pool& pool, NodeMetaData& nodeData);
 

@@ -76,6 +76,25 @@ __device__ __host__ void
         swap(a[inca * tid], b[incb * tid]);
 }
 
+template <typename T, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
+__device__ __inline__ T shift_left(T& value, int lane_delta)
+{
+    T r = value;
+    r = __shfl_down(r, lane_delta);
+    return r;
+}
+
+template <typename T, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
+__device__ __inline__ T shift_left(T& value, int lane_delta)
+{
+    using S = decltype(std::real(T{}));
+    S r = value.real();
+    S i = value.imag();
+    r = __shfl_down(r, lane_delta);
+    i = __shfl_down(i, lane_delta);
+    return rocblas_complex_num<S>(r, i);
+}
+
 /** SWAPVECT device function swap vectors a and b of dimension n **/
 template <typename T>
 __device__ void

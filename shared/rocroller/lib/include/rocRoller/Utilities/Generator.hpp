@@ -58,11 +58,11 @@
 #endif
 
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <utility>
 
-#include <rocRoller/InstructionValues/Register_fwd.hpp>
 #include <rocRoller/Utilities/Concepts.hpp>
 
 namespace rocRoller

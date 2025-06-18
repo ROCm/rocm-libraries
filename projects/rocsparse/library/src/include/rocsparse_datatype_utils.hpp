@@ -38,6 +38,12 @@ namespace rocsparse
     };
 
     template <>
+    struct datatype_traits<rocsparse_datatype_bf16_r>
+    {
+        using type_t = rocsparse_bfloat16;
+    };
+
+    template <>
     struct datatype_traits<rocsparse_datatype_f32_r>
     {
         using type_t = float;

@@ -1520,16 +1520,17 @@ namespace rocRoller
 
             auto ldsOffset = Register::Value::Literal(ldsAllocation->getLDSAllocation()->offset());
 
-            uint numElements = waveTile.sizes[0] * waveTile.sizes[1];
-            uint wfs         = m_context->kernel()->wavefront_size();
+            uint numElements       = waveTile.sizes[0] * waveTile.sizes[1];
+            auto [_, lane]         = m_graph->getDimension<Lane>(tag);
+            auto activeLanesInWave = getUnsignedInt(evaluate(lane.size));
 
             auto packing = DataTypeInfo::Get(load.varType).packing;
-            AssertFatal(numElements % (wfs * packing) == 0,
+            AssertFatal(numElements % (activeLanesInWave * packing) == 0,
                         ShowValue(numElements),
-                        ShowValue(wfs),
+                        ShowValue(activeLanesInWave),
                         ShowValue(packing),
-                        ShowValue(wfs * packing));
-            uint numVgpr = numElements / (wfs * packing);
+                        ShowValue(activeLanesInWave * packing));
+            uint numVgpr = numElements / (activeLanesInWave * packing);
             AssertFatal(numVgpr > 0, "Invalid load dimensions.");
 
             co_yield moveTile<MemoryInstructions::MemoryDirection::Load>(
@@ -1559,17 +1560,18 @@ namespace rocRoller
             co_yield Instruction::Comment(
                 concatenate("GEN: loadMacroTileWAVE OP", tag, " WaveTile ", waveTileTag));
 
-            uint numElements = waveTile.sizes[0] * waveTile.sizes[1];
-            uint wfs         = m_context->kernel()->wavefront_size();
+            uint numElements       = waveTile.sizes[0] * waveTile.sizes[1];
+            auto [_, lane]         = m_graph->getDimension<Lane>(tag);
+            auto activeLanesInWave = getUnsignedInt(evaluate(lane.size));
 
             auto packing = DataTypeInfo::Get(load.varType).packing;
-            AssertFatal(numElements % (wfs * packing) == 0,
+            AssertFatal(numElements % (activeLanesInWave * packing) == 0,
                         ShowValue(numElements),
-                        ShowValue(wfs),
+                        ShowValue(activeLanesInWave),
                         ShowValue(packing),
-                        ShowValue(wfs * packing),
+                        ShowValue(activeLanesInWave * packing),
                         ShowValue(load.varType));
-            uint numVgpr = numElements / (wfs * packing);
+            uint numVgpr = numElements / (activeLanesInWave * packing);
             AssertFatal(numVgpr > 0, "Invalid load dimensions.");
 
             co_yield moveTile<MemoryInstructions::MemoryDirection::Load>(
@@ -1596,16 +1598,17 @@ namespace rocRoller
             co_yield Instruction::Comment(
                 concatenate("GEN: loadMacroTileWAVECIACCUM OP ", tag, " WaveTile ", waveTileTag));
 
-            uint numElements = waveTile.sizes[0] * waveTile.sizes[1];
-            uint wfs         = m_context->kernel()->wavefront_size();
+            uint numElements       = waveTile.sizes[0] * waveTile.sizes[1];
+            auto [_, lane]         = m_graph->getDimension<Lane>(tag);
+            auto activeLanesInWave = getUnsignedInt(evaluate(lane.size));
 
             auto packing = DataTypeInfo::Get(load.varType).packing;
-            AssertFatal(numElements % (wfs * packing) == 0,
+            AssertFatal(numElements % (activeLanesInWave * packing) == 0,
                         ShowValue(numElements),
-                        ShowValue(wfs),
+                        ShowValue(activeLanesInWave),
                         ShowValue(packing),
-                        ShowValue(wfs * packing));
-            uint numVgpr = numElements / wfs;
+                        ShowValue(activeLanesInWave * packing));
+            uint numVgpr = numElements / activeLanesInWave;
             AssertFatal(numVgpr > 0, "Invalid load dimensions.");
 
             auto [vgprBlockNumberTag, vgprBlockNumber]
@@ -1854,32 +1857,33 @@ namespace rocRoller
 
             auto ldsOffset = Register::Value::Literal(ldsAllocation->getLDSAllocation()->offset());
 
-            uint wfs = m_context->kernel()->wavefront_size();
+            auto [_, lane]         = m_graph->getDimension<Lane>(tag);
+            auto activeLanesInWave = getUnsignedInt(evaluate(lane.size));
 
             auto packing = DataTypeInfo::Get(store.varType).packing;
-            AssertFatal(waveTileNumElements % (wfs * packing) == 0,
+            AssertFatal(waveTileNumElements % (activeLanesInWave * packing) == 0,
                         ShowValue(waveTileNumElements),
-                        ShowValue(wfs),
+                        ShowValue(activeLanesInWave),
                         ShowValue(packing),
-                        ShowValue(wfs * packing));
+                        ShowValue(activeLanesInWave * packing));
 
             co_yield Instruction::Comment(concatenate(ShowValue(waveTile),
                                                       ShowValue(waveTileNumElements),
-                                                      ShowValue(wfs),
+                                                      ShowValue(activeLanesInWave),
                                                       ShowValue(packing),
-                                                      ShowValue(wfs * packing),
+                                                      ShowValue(activeLanesInWave * packing),
                                                       ShowValue(store.varType)));
 
-            uint numVgpr = waveTileNumElements / wfs;
+            uint numVgpr = waveTileNumElements / activeLanesInWave;
 
             auto agpr = m_context->registerTagManager()->getRegister(macTileTag);
 
             co_yield Instruction::Comment(concatenate(ShowValue(agpr->description()),
                                                       ShowValue(waveTile),
                                                       ShowValue(waveTileNumElements),
-                                                      ShowValue(wfs),
+                                                      ShowValue(activeLanesInWave),
                                                       ShowValue(packing),
-                                                      ShowValue(wfs * packing)));
+                                                      ShowValue(activeLanesInWave * packing)));
 
             auto [vgprBlockNumberTag, vgprBlockNumber]
                 = m_graph->getDimension<VGPRBlockNumber>(tag, 0);
@@ -1922,16 +1926,17 @@ namespace rocRoller
                                                       " WaveTile ",
                                                       waveTileTag));
 
-            uint numElements = waveTile.sizes[0] * waveTile.sizes[1];
-            uint wfs         = m_context->kernel()->wavefront_size();
+            uint numElements       = waveTile.sizes[0] * waveTile.sizes[1];
+            auto [_, lane]         = m_graph->getDimension<Lane>(tag);
+            auto activeLanesInWave = getUnsignedInt(evaluate(lane.size));
 
             auto packing = DataTypeInfo::Get(store.varType).packing;
-            AssertFatal(numElements % (wfs * packing) == 0,
+            AssertFatal(numElements % (activeLanesInWave * packing) == 0,
                         ShowValue(numElements),
-                        ShowValue(wfs),
+                        ShowValue(activeLanesInWave),
                         ShowValue(packing),
-                        ShowValue(wfs * packing));
-            uint numValues = numElements / wfs;
+                        ShowValue(activeLanesInWave * packing));
+            uint numValues = numElements / activeLanesInWave;
             AssertFatal(numValues > 0, "Invalid store dimensions.");
 
             auto [vgprBlockNumberTag, vgprBlockNumber]
