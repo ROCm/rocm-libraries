@@ -42,18 +42,6 @@ namespace test_utils_with_rocrand
 template<typename T, class StateT, typename U, typename V>
 inline __device__
 auto generate_casting(T* output, StateT& state, U min, V max, unsigned int global_id)
-    -> std::enable_if_t<rocprim::is_integral<T>::value>
-{
-    output[global_id]
-        = static_cast<T>((static_cast<float>(rocrand(&state)) / static_cast<float>(UINT_MAX))
-                             * (static_cast<float>(max) - static_cast<float>(min))
-                         + static_cast<float>(min));
-}
-
-template<typename T, class StateT, typename U, typename V>
-inline __device__
-auto generate_casting(T* output, StateT& state, U min, V max, unsigned int global_id)
-    -> std::enable_if_t<!rocprim::is_integral<T>::value>
 {
 
     float f_value = (static_cast<float>(rocrand(&state)) / static_cast<float>(UINT_MAX))
@@ -64,9 +52,14 @@ auto generate_casting(T* output, StateT& state, U min, V max, unsigned int globa
     {
         output[global_id] = static_cast<T>(__float2half_rn(f_value));
     }
+    else if constexpr(common::is_custom_type_copyable<T>::value)
+    {
+        output[global_id].x = static_cast<typename T::first_type>(f_value);
+        output[global_id].y = static_cast<typename T::second_type>(f_value);
+    }
     else
     {
-        output[global_id] = f_value;
+        output[global_id] = static_cast<T>(f_value);
     }
 }
 
