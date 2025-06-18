@@ -164,14 +164,8 @@ if (BUILD_WITH_COMPILER STREQUAL "HIP-NVCC" )
   set( WARNING_FLAGS ${NVCC_WARNING_FLAGS} )
 
 else()
-  # Define GPU targets
-  if(AMDGPU_TARGETS AND NOT GPU_TARGETS)
-    message( DEPRECATION "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS." )
-  endif()
-  set(AMDGPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if AMDGPU_TARGETS is not defined. (Deprecated, prefer GPU_TARGETS)")
-  rocm_check_target_ids(AMDGPU_TARGETS TARGETS "${AMDGPU_TARGETS}")
-  # Don't force, users should be able to override GPU_TARGETS at the command line if desired
-  set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to build for")
+  # Check support for the GPU target(s)
+  rocm_check_target_ids(GPU_TARGETS TARGETS "${GPU_TARGETS}")
   if( BUILD_WITH_COMPILER STREQUAL "HIP-CLANG" )
     set( HIP_PLATFORM "amd" )
     set( HIP_COMPILER "clang" )

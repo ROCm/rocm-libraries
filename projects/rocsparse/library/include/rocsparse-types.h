@@ -29,6 +29,7 @@
 #define ROCSPARSE_TYPES_H
 
 #include "rocsparse-complex-types.h"
+#include "rocsparse_bfloat16.h"
 
 #include <float.h>
 #include <stddef.h>
@@ -526,15 +527,16 @@ typedef enum rocsparse_indextype_
  */
 typedef enum rocsparse_datatype_
 {
-    rocsparse_datatype_f16_r = 150, /**< 16 bit floating point, real. */
-    rocsparse_datatype_f32_r = 151, /**< 32 bit floating point, real. */
-    rocsparse_datatype_f64_r = 152, /**< 64 bit floating point, real. */
-    rocsparse_datatype_f32_c = 154, /**< 32 bit floating point, complex. */
-    rocsparse_datatype_f64_c = 155, /**< 64 bit floating point, complex. */
-    rocsparse_datatype_i8_r  = 160, /**<  8-bit signed integer, real */
-    rocsparse_datatype_u8_r  = 161, /**<  8-bit unsigned integer, real */
-    rocsparse_datatype_i32_r = 162, /**< 32-bit signed integer, real */
-    rocsparse_datatype_u32_r = 163 /**< 32-bit unsigned integer, real */
+    rocsparse_datatype_f16_r  = 150, /**< 16 bit floating point, real. */
+    rocsparse_datatype_f32_r  = 151, /**< 32 bit floating point, real. */
+    rocsparse_datatype_f64_r  = 152, /**< 64 bit floating point, real. */
+    rocsparse_datatype_f32_c  = 154, /**< 32 bit floating point, complex. */
+    rocsparse_datatype_f64_c  = 155, /**< 64 bit floating point, complex. */
+    rocsparse_datatype_i8_r   = 160, /**<  8-bit signed integer, real */
+    rocsparse_datatype_u8_r   = 161, /**<  8-bit unsigned integer, real */
+    rocsparse_datatype_i32_r  = 162, /**< 32-bit signed integer, real */
+    rocsparse_datatype_u32_r  = 163, /**< 32-bit unsigned integer, real */
+    rocsparse_datatype_bf16_r = 168 /**< 16-bit bfloat, real */
 } rocsparse_datatype;
 
 /*! \ingroup types_module

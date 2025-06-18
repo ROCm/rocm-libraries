@@ -23,6 +23,11 @@ rocsparse_int
 
 .. doxygentypedef:: rocsparse_int
 
+rocsparse_bfloat16
+------------------
+
+.. doxygenstruct:: rocsparse_bfloat16
+
 rocsparse_float_complex
 -----------------------
 

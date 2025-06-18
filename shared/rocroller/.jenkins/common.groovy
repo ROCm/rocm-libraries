@@ -72,10 +72,14 @@ def runTestCommand (platform, project)
 
     def command = """#!/usr/bin/env bash
                 set -x
-                cd ${project.paths.project_build_prefix}/build/
+                cd ${project.paths.project_build_prefix}
 
+                pushd build
                 echo Using `nproc` threads for testing.
                 OMP_NUM_THREADS=8 ctest -j `nproc` --output-on-failure ${testExclude}
+
+                popd
+                scripts/rrperf generate --suite generate_gfx950 --arch gfx950
             """
 
     try

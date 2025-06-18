@@ -115,7 +115,27 @@ private:
         if(sysinfo(&info) != 0)
             return;
         total_bytes = info.totalram * info.mem_unit;
-        free_bytes  = info.freeram * info.mem_unit;
+        free_bytes  = (info.freeram + info.bufferram) * info.mem_unit;
+
+        // Adjust memory numbers for APU
+        try
+        {
+            auto deviceProp = get_curr_device_prop();
+            // on integrated APU, we can't expect to reuse "device" memory
+            // for "host" things.
+            if(deviceProp.integrated)
+            {
+                total_bytes -= deviceProp.totalGlobalMem;
+                if(free_bytes < deviceProp.totalGlobalMem)
+                    free_bytes = 0;
+                else
+                    free_bytes -= deviceProp.totalGlobalMem;
+            }
+        }
+        catch(std::runtime_error&)
+        {
+            // assume we're not on APU, can use full host memory
+        }
 
         // top-level memory cgroup may restrict this further
 
@@ -126,9 +146,10 @@ private:
         size_t        memcg1_usage_bytes;
         // use cgroupv1 limit if we can read the cgroup files and it's
         // smaller
-        if((memcg1_limit_file >> memcg1_limit_bytes) && (memcg1_usage_file >> memcg1_usage_bytes))
+        if((memcg1_limit_file >> memcg1_limit_bytes) && (memcg1_usage_file >> memcg1_usage_bytes)
+           && memcg1_limit_bytes < total_bytes)
         {
-            total_bytes = std::min<size_t>(total_bytes, memcg1_limit_bytes);
+            total_bytes = memcg1_limit_bytes;
             free_bytes  = total_bytes - memcg1_usage_bytes;
         }
 
@@ -139,28 +160,13 @@ private:
         size_t        memcg2_current_bytes;
         // use cgroupv2 limit if we can read the cgroup files and it's
         // smaller
-        if((memcg2_max_file >> memcg2_max_bytes) && (memcg2_current_file >> memcg2_current_bytes))
+        if((memcg2_max_file >> memcg2_max_bytes) && (memcg2_current_file >> memcg2_current_bytes)
+           && memcg2_max_bytes < total_bytes)
         {
-            total_bytes = std::min<size_t>(total_bytes, memcg2_max_bytes);
+            total_bytes = memcg2_max_bytes;
             free_bytes  = total_bytes - memcg2_current_bytes;
         }
-
 #endif
-
-        try
-        {
-            auto deviceProp = get_curr_device_prop();
-            // on integrated APU, we can't expect to reuse "device" memory
-            // for "host" things.
-            if(deviceProp.integrated)
-            {
-                total_bytes -= deviceProp.totalGlobalMem;
-            }
-        }
-        catch(std::runtime_error&)
-        {
-            // assume we're not on APU, can use full host memory
-        }
     }
 };
 

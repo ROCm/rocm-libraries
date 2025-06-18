@@ -23,7 +23,7 @@ beautifulsoup4==4.12.3
     # via pydata-sphinx-theme
 breathe==4.35.0
     # via rocm-docs-core
-certifi==2024.6.2
+certifi==2024.7.4
     # via requests
 cffi==1.16.0
     # via
@@ -37,7 +37,7 @@ click==8.1.7
     #   sphinx-external-toc
 comm==0.2.2
     # via ipykernel
-cryptography==42.0.8
+cryptography==44.0.1
     # via pyjwt
 debugpy==1.8.12
     # via ipykernel
@@ -81,7 +81,7 @@ ipython==8.31.0
     #   myst-nb
 jedi==0.19.2
     # via ipython
-jinja2==3.1.4
+jinja2==3.1.6
     # via
     #   myst-parser
     #   sphinx
@@ -151,7 +151,7 @@ pure-eval==0.2.3
     # via stack-data
 pycparser==2.22
     # via cffi
-pydata-sphinx-theme==0.15.3
+pydata-sphinx-theme==0.15.4
     # via
     #   rocm-docs-core
     #   sphinx-book-theme
@@ -184,11 +184,11 @@ referencing==0.36.1
     # via
     #   jsonschema
     #   jsonschema-specifications
-requests==2.32.3
+requests==2.32.4
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core==1.20.0
+rocm-docs-core==1.20.1
     # via -r requirements.in
 rpds-py==0.22.3
     # via
@@ -244,7 +244,7 @@ tabulate==0.9.0
     # via jupyter-cache
 tomli==2.0.1
     # via sphinx
-tornado==6.4.2
+tornado==6.5.1
     # via
     #   ipykernel
     #   jupyter-client
@@ -266,7 +266,7 @@ typing-extensions==4.12.2
     #   pygithub
     #   referencing
     #   sqlalchemy
-urllib3==2.2.1
+urllib3==2.2.2
     # via
     #   pygithub
     #   requests

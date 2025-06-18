@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,6 +27,14 @@
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
+
+#if defined(__HIP_PLATFORM_AMD__)
+#if HIP_VERSION_MAJOR < 7
+#define HIPBLASLT_HIPVEC_ACCESS(x) x.data
+#else
+#define HIPBLASLT_HIPVEC_ACCESS(x) x
+#endif
+#endif
 
 #define TRANSFORM_FUNC_NAME_HELPER(                                           \
     DType, SType, RowMajA, RowMajB, RowMajC, ThreadsM, ThreadsN, VectorWidth) \

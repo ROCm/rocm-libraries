@@ -98,6 +98,17 @@ void unit_check_general(
 }
 
 template <>
+void unit_check_general(int64_t                   M,
+                        int64_t                   N,
+                        const rocsparse_bfloat16* A,
+                        int64_t                   LDA,
+                        const rocsparse_bfloat16* B,
+                        int64_t                   LDB)
+{
+    ROCSPARSE_UNIT_CHECK(M, N, A, LDA, B, LDB, ASSERT_FLOAT_EQ);
+}
+
+template <>
 void unit_check_general(
     int64_t M, int64_t N, const float* A, int64_t LDA, const float* B, int64_t LDB)
 {
@@ -563,6 +574,12 @@ void unit_check_garray(rocsparse_datatype val_type,
     case rocsparse_datatype_f16_r:
     {
         unit_check_segments<_Float16>(size, (const _Float16*)source, (const _Float16*)t);
+        break;
+    }
+    case rocsparse_datatype_bf16_r:
+    {
+        unit_check_segments<rocsparse_bfloat16>(
+            size, (const rocsparse_bfloat16*)source, (const rocsparse_bfloat16*)t);
         break;
     }
     case rocsparse_datatype_i8_r:

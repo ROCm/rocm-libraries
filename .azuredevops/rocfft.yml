@@ -32,8 +32,8 @@ trigger:
     - projects/rocfft/.github
     - projects/rocfft/.jenkins
     - projects/rocfft/docs
-    - projects/rocfft/'.*.y*ml'
-    - projects/rocfft/'*.md'
+    - projects/rocfft/.*.y*ml
+    - projects/rocfft/*.md
 
 pr:
   autoCancel: true
@@ -49,8 +49,8 @@ pr:
     - projects/rocfft/.github
     - projects/rocfft/.jenkins
     - projects/rocfft/docs
-    - projects/rocfft/'.*.y*ml'
-    - projects/rocfft/'*.md'
+    - projects/rocfft/.*.y*ml
+    - projects/rocfft/*.md
   drafts: false
 
 jobs:

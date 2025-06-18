@@ -151,7 +151,7 @@ pure-eval==0.2.3
     # via stack-data
 pycparser==2.22
     # via cffi
-pydata-sphinx-theme==0.15.2
+pydata-sphinx-theme==0.15.4
     # via
     #   rocm-docs-core
     #   sphinx-book-theme
@@ -184,11 +184,11 @@ referencing==0.36.1
     # via
     #   jsonschema
     #   jsonschema-specifications
-requests==2.32.0
+requests==2.32.4
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core==1.20.0
+rocm-docs-core==1.20.1
     # via -r requirements.in
 rpds-py==0.22.3
     # via

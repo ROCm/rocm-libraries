@@ -44,10 +44,10 @@
         bsr_row_ptr,                                                        \
         bsr_col_ind,                                                        \
         bsr_val,                                                            \
-        (rocsparse_int*)info->bsrilu0_info->trm_diag_ind,                   \
+        (const rocsparse_int*)info->bsrilu0_info->get_diag_ind(),           \
         block_dim,                                                          \
         done_array,                                                         \
-        (rocsparse_int*)info->bsrilu0_info->row_map,                        \
+        (const rocsparse_int*)info->bsrilu0_info->get_row_map(),            \
         (rocsparse_int*)info->zero_pivot,                                   \
         base,                                                               \
         info->boost_enable,                                                 \
@@ -69,10 +69,10 @@
         bsr_row_ptr,                                                        \
         bsr_col_ind,                                                        \
         bsr_val,                                                            \
-        (rocsparse_int*)info->bsrilu0_info->trm_diag_ind,                   \
+        (const rocsparse_int*)info->bsrilu0_info->get_diag_ind(),           \
         block_dim,                                                          \
         done_array,                                                         \
-        (rocsparse_int*)info->bsrilu0_info->row_map,                        \
+        (const rocsparse_int*)info->bsrilu0_info->get_row_map(),            \
         (rocsparse_int*)info->zero_pivot,                                   \
         base,                                                               \
         info->boost_enable,                                                 \
@@ -94,10 +94,10 @@
         bsr_row_ptr,                                                        \
         bsr_col_ind,                                                        \
         bsr_val,                                                            \
-        (rocsparse_int*)info->bsrilu0_info->trm_diag_ind,                   \
+        (const rocsparse_int*)info->bsrilu0_info->get_diag_ind(),           \
         block_dim,                                                          \
         done_array,                                                         \
-        (rocsparse_int*)info->bsrilu0_info->row_map,                        \
+        (const rocsparse_int*)info->bsrilu0_info->get_row_map(),            \
         (rocsparse_int*)info->zero_pivot,                                   \
         base,                                                               \
         info->boost_enable,                                                 \
@@ -119,10 +119,10 @@
         bsr_row_ptr,                                                        \
         bsr_col_ind,                                                        \
         bsr_val,                                                            \
-        (rocsparse_int*)info->bsrilu0_info->trm_diag_ind,                   \
+        (const rocsparse_int*)info->bsrilu0_info->get_diag_ind(),           \
         block_dim,                                                          \
         done_array,                                                         \
-        (rocsparse_int*)info->bsrilu0_info->row_map,                        \
+        (const rocsparse_int*)info->bsrilu0_info->get_row_map(),            \
         (rocsparse_int*)info->zero_pivot,                                   \
         base,                                                               \
         info->boost_enable,                                                 \
@@ -263,11 +263,7 @@ rocsparse_status rocsparse::bsrilu0_analysis_template(rocsparse_handle          
     // User is explicitly asking to force a re-analysis, or no valid data has been
     // found to be re-used.
 
-    // Clear bsrilu0 info
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsrilu0_info));
-
-    // Create bsrilu0 info
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::create_trm_info(&info->bsrilu0_info));
+    rocsparse::trm_info_t::recreate(&info->bsrilu0_info);
 
     // Perform analysis
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::trm_analysis(handle,
@@ -661,7 +657,7 @@ try
     // If meta data is not shared, delete it
     if(!rocsparse::check_trm_shared(info, info->bsrilu0_info))
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsrilu0_info));
+        rocsparse::trm_info_t::destroy(info->bsrilu0_info);
     }
 
     info->bsrilu0_info = nullptr;

@@ -44,7 +44,7 @@ List of supported input and output types:
     - Input/output types
     - Library data type
     - AMD supports
-    - CUDA supports
+    - NVIDIA supports
   *
     - int8
     - HIP_R_8I
@@ -109,7 +109,7 @@ List of supported accumulator types:
     - Accumulator types
     - Library data type
     - AMD supports
-    - CUDA supports
+    - NVIDIA supports
   *
     - int8
     - Not supported

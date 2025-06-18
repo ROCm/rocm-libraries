@@ -104,36 +104,59 @@ FMKey LeafNode::GetKernelKey() const
 
 void LeafNode::GetKernelFactors()
 {
-    FMKey key     = GetKernelKey();
-    kernelFactors = pool.get_kernel(key).factors;
+    auto kernel   = GetKernel();
+    kernelFactors = kernel.factors;
 }
 
 void LeafNode::GetKernelPartialPassFactors()
 {
-    // Hard-coded partial-pass kernel factors for len 64x64x64.
-    // TODO: Remove this hard-coded logic once partial-pass
-    // kernels are configurable in kernel-generator.py.
-    if(scheme == CS_KERNEL_STOCKHAM && applyPartialPass)
+    auto kernel     = GetKernel();
+    kernelFactorsPP = std::vector<size_t>(kernel.pp_params.factors_off_dim.begin(),
+                                          kernel.pp_params.factors_off_dim.end());
+
+    switch(ppOffDim)
     {
-        kernelFactorsPP = {16};
-        std::stringstream msg;
-        msg << "work in the off-dimension:" << std::endl;
-        msg << "\t     radix: [";
-        for(const auto factor : kernelFactorsPP)
-            msg << " " << factor;
-        msg << " ] pass(es) + Hadamard product with twiddle factors. \n";
-        comments.push_back(msg.str());
+    case 0: // work along x will be split between y and z
+    {
+        throw std::runtime_error(
+            "GetKernelPartialPassFactors: partial-passes along x not currently supported");
+        break;
     }
-    if(scheme == CS_KERNEL_STOCKHAM_BLOCK_CC && applyPartialPass)
+    case 1: // work along y will be split between x and z
     {
-        kernelFactorsPP = {4};
-        std::stringstream msg;
-        msg << "work in the off-dimension:" << std::endl;
-        msg << "\t     local data transposition + radix: [";
-        for(const auto factor : kernelFactorsPP)
-            msg << " " << factor;
-        msg << " ] pass(es). \n";
-        comments.push_back(msg.str());
+        if(scheme == CS_KERNEL_STOCKHAM_PP)
+        {
+            std::stringstream msg;
+            msg << "work in the off-dimension:" << std::endl;
+            msg << "\t     radix: [";
+            for(const auto factor : kernelFactorsPP)
+                msg << " " << factor;
+            msg << " ] pass(es) + Hadamard product with twiddle factors. \n";
+            comments.push_back(msg.str());
+        }
+        if(scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
+        {
+            std::stringstream msg;
+            msg << "work in the off-dimension:" << std::endl;
+            msg << "\t     local data transposition + radix: [";
+            for(const auto factor : kernelFactorsPP)
+                msg << " " << factor;
+            msg << " ] pass(es). \n";
+            comments.push_back(msg.str());
+        }
+
+        break;
+    }
+    case 2: // work along z will be split between x and y
+    {
+        // x row fft + partial pass along z
+        // partial pass along z + y col fft
+        throw std::runtime_error(
+            "GetKernelPartialPassFactors: partial-passes along z not currently supported");
+        break;
+    }
+    default:
+        throw std::runtime_error("Invalid off-dimension for partial pass");
     }
 }
 
@@ -189,23 +212,17 @@ bool LeafNode::KernelCheck(std::vector<FMKey>& kernel_keys)
     // get the final key and check if we have the kernel.
     // Note that the check is trivial if we are using "specified_key"
     // since we definitly have the kernel, but not trivial if it's the auto-gen key
-    FMKey key = GetKernelKey();
-    if(!pool.has_function(key))
-    {
-        if(LOG_TRACE_ENABLED())
-            (*LogSingleton::GetInstance().GetTraceOS()) << PrintMissingKernelInfo(key);
-
+    if(!HasKernel())
         return false;
-    }
-
-    dir2regMode = (pool.get_kernel(key).direct_to_from_reg)
-                      ? DirectRegType::TRY_ENABLE_IF_SUPPORT
-                      : DirectRegType::FORCE_OFF_OR_NOT_SUPPORT;
 
     GetKernelFactors();
 
-    if(applyPartialPass)
+    if(isPartialPassEnabled())
         GetKernelPartialPassFactors();
+
+    auto kernel = GetKernel();
+    dir2regMode = (kernel.direct_to_from_reg) ? DirectRegType::TRY_ENABLE_IF_SUPPORT
+                                              : DirectRegType::FORCE_OFF_OR_NOT_SUPPORT;
 
     return true;
 }
@@ -281,8 +298,6 @@ void LeafNode::SetupGridParam(GridParam& gp)
     {
         if(pool.has_function(key))
         {
-            auto kernel = pool.get_kernel(key);
-
             // NB:
             // Special case on specific arch:
             // For some cases using hald_lds, finer tuning(enlarge) dynamic
@@ -296,8 +311,8 @@ void LeafNode::SetupGridParam(GridParam& gp)
                 double_half_lds_alloc = true;
             }
 
-            // no support for half-lds in partial-pass mode
-            if(kernel.half_lds && (!double_half_lds_alloc) && (!applyPartialPass))
+            auto kernel = pool.get_kernel(key);
+            if(kernel.half_lds && (!double_half_lds_alloc))
                 gp.lds_bytes /= 2;
         }
     }
@@ -311,12 +326,14 @@ void LeafNode::SetupGridParam(GridParam& gp)
             if(kernel.half_lds)
                 gp.lds_bytes /= 2;
         }
+    }
 
+    if(scheme == CS_KERNEL_STOCKHAM_BLOCK_CC || scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
+    {
         auto apply_large_twd = (largeTwdBase > 0 && ltwdSteps > 0);
         if(apply_large_twd && largeTwdBase < 8)
         {
             // append twiddle table to dynamic lds
-            auto kernel = pool.get_kernel(key);
             gp.lds_bytes += twiddles_large_size;
         }
     }

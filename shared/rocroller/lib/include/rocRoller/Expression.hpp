@@ -431,7 +431,7 @@ namespace rocRoller
             constexpr static inline auto            Type = Category::Arithmetic;
             constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::Translate,
                                                               EvaluationTime::KernelLaunch};
-            constexpr static inline int             Complexity = 50;
+            constexpr static inline int             Complexity = 0;
         };
 
         struct MagicShifts : Unary
@@ -439,7 +439,7 @@ namespace rocRoller
             constexpr static inline auto            Type = Category::Arithmetic;
             constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::Translate,
                                                               EvaluationTime::KernelLaunch};
-            constexpr static inline int             Complexity = 50;
+            constexpr static inline int             Complexity = 0;
         };
 
         struct MagicSign : Unary
@@ -447,7 +447,7 @@ namespace rocRoller
             constexpr static inline auto            Type = Category::Arithmetic;
             constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::Translate,
                                                               EvaluationTime::KernelLaunch};
-            constexpr static inline int             Complexity = 50;
+            constexpr static inline int             Complexity = 0;
         };
 
         struct Negate : Unary

@@ -32,8 +32,8 @@ trigger:
     - projects/rocrand/.github
     - projects/rocrand/.jenkins
     - projects/rocrand/docs
-    - projects/rocrand/'.*.y*ml'
-    - projects/rocrand/'*.md'
+    - projects/rocrand/.*.y*ml
+    - projects/rocrand/*.md
     - projects/rocrand/LICENSE.txt
 
 pr:
@@ -50,8 +50,8 @@ pr:
     - projects/rocrand/.github
     - projects/rocrand/.jenkins
     - projects/rocrand/docs
-    - projects/rocrand/'.*.y*ml'
-    - projects/rocrand/'*.md'
+    - projects/rocrand/.*.y*ml
+    - projects/rocrand/*.md
     - projects/rocrand/LICENSE.txt
   drafts: false
 

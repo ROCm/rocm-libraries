@@ -661,6 +661,7 @@ int main(int argc, char* argv[])
 
     // Set host memory limit from command-line options
     host_memory::singleton().set_limit_gbytes(ramgb);
+    std::cout << "Host memory limit: " << ramgb << " GiB" << std::endl;
 
     if(use_fftw_wisdom)
     {

@@ -276,24 +276,516 @@ void testing_aux_matmul_get_attr_bad_arg(const Arguments& arg)
 }
 
 void testing_aux_matmul_set_get_attr(const Arguments& arg)
-{
+{   
+    size_t              sizeWritten;
+    hipblasLtMatmulDesc_t matmul;
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(&matmul, arg.compute_type, arg.scale_type));
+    int64_t m = 1;
+    int64_t n = 1;
+    int64_t k = 1;
+    
+    // For ROCBLASLT_MATMUL_DESC_TRANSA
+    hipblasOperation_t transA = HIPBLAS_OP_T;
+    hipblasOperation_t transA_r = HIPBLAS_OP_N;
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_TRANSA, &transA, 0),
+                        HIPBLAS_STATUS_INVALID_VALUE); // edge case
+
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_TRANSA, &transA, sizeof(int32_t)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE); // edge case
+
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_TRANSA, &transA, sizeof(int32_t)),
+                            HIPBLAS_STATUS_SUCCESS); // normal case
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_BIAS_POINTER, &transA_r, 0, nullptr),
+                        HIPBLASLT_MATMUL_DESC_BIAS_POINTER); // edge case
+
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_TRANSA, &transA_r, sizeof(transA_r)/2, &sizeWritten),
+                        HIPBLAS_STATUS_INVALID_VALUE); // edge case
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_TRANSA, &transA_r, sizeof(transA_r), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS); // normal case
+    
+    ASSERT_TRUE(transA_r == transA); // validate
+
+    // For ROCBLASLT_MATMUL_DESC_TRANSB
+    
+    hipblasOperation_t transB = HIPBLAS_OP_N;
+    hipblasOperation_t transB_r = HIPBLAS_OP_T;
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_TRANSB, &transB, sizeof(int32_t)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE); // edge case
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_TRANSB, &transB, sizeof(int32_t)),
+                        HIPBLAS_STATUS_SUCCESS); // normal case             
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_TRANSB, &transB_r, sizeof(transB_r)/2, &sizeWritten),
+                        HIPBLAS_STATUS_INVALID_VALUE); // edge case
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_TRANSB, &transB_r, sizeof(transB_r), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS); // normal case  
+
+    ASSERT_TRUE(transB_r == transB); // validate
+
+    // for ROCBLASLT_MATMUL_DESC_EPILOGUE
+    hipblasLtEpilogue_t data   = HIPBLASLT_EPILOGUE_DEFAULT; 
+    hipblasLtEpilogue_t data_r = HIPBLASLT_EPILOGUE_RELU; 
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute( 
+                              matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE, &data, sizeof(data)), 
+                          HIPBLAS_STATUS_SUCCESS); 
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE, &data_r, sizeof(data_r), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(data_r == data);
+
+
+    // for ROCBLASLT_MATMUL_DESC_BIAS_POINTER set and get
+    void*                      d_bias;
+    void*                      d_bias_r;
+    CHECK_HIP_ERROR(hipMalloc(&d_bias, k * sizeof(hipblasLtHalf)));
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_BIAS_POINTER, &d_bias, sizeof(void*)), 
+                        HIPBLAS_STATUS_SUCCESS);
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_BIAS_POINTER, &d_bias_r, sizeof(d_bias_r), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS);
+    
+    ASSERT_TRUE(d_bias_r == d_bias);
+
+    // for ROCBLASLT_MATMUL_DESC_A_SCALE_POINTER & ROCBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT
+    // We create a new matmul_descr becasue we don't dont want to set matmulDesc->scaleAType as Scalar in advance.
+    // If we set it as Scalar, it will skip some cases, which is not what we desire for.
     const hipblasOperation_t opA = HIPBLAS_OP_T;
     const hipblasOperation_t opB = HIPBLAS_OP_N;
 
-    hipblaslt_local_matmul_descr matmul(opA, opB, arg.compute_type, arg.scale_type);
-    EXPECT_HIPBLAS_STATUS(matmul.status(), HIPBLAS_STATUS_SUCCESS);
-
-    hipblasLtEpilogue_t data   = HIPBLASLT_EPILOGUE_DEFAULT;
-    hipblasLtEpilogue_t data_r = HIPBLASLT_EPILOGUE_RELU;
-    size_t              sizeWritten;
+    hipblaslt_local_matmul_descr matmul_descr(opA, opB, arg.compute_type, arg.scale_type);
+    EXPECT_HIPBLAS_STATUS(matmul_descr.status(), HIPBLAS_STATUS_SUCCESS);
+    
+    float h_scale_a_for_desc_a_scale_pointer = 2.f; // Example scale value, adjust as needed
+    float* d_scale_a;
+    float* d_scale_a_r;
+    CHECK_HIP_ERROR(hipMalloc(&d_scale_a, sizeof(float)));
+    CHECK_HIP_ERROR(hipMemcpy(d_scale_a, &h_scale_a_for_desc_a_scale_pointer, sizeof(float), hipMemcpyHostToDevice));
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
-                              matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE, &data, sizeof(data)),
-                          HIPBLAS_STATUS_SUCCESS);
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatmulDescGetAttribute(
-            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE, &data_r, sizeof(data_r), &sizeWritten),
-        HIPBLAS_STATUS_SUCCESS);
-    ASSERT_TRUE(data == data_r);
+                            matmul_descr, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT, &d_scale_a, sizeof(void*)),
+                        HIPBLAS_STATUS_SUCCESS); // this is necessary to cover in set
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul_descr, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &d_scale_a, sizeof(float*)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul_descr, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &d_scale_a, sizeof(float*)),
+                        HIPBLAS_STATUS_SUCCESS);
+                        
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul_descr, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &d_scale_a_r, sizeof(float*)/2, &sizeWritten),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul_descr, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &d_scale_a_r, sizeof(float*), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(d_scale_a_r == d_scale_a); // validate
+
+    // ROCBLASLT_MATMUL_DESC_A_SCALE_MODE
+
+    hipblasLtMatmulMatrixScale_t scale_mode_a = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+    hipblasLtMatmulMatrixScale_t scale_mode_a_r = HIPBLASLT_MATMUL_MATRIX_SCALE_END;
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scale_mode_a_r, sizeof(uint32_t), &sizeWritten),
+                        HIPBLAS_STATUS_INVALID_VALUE); // we didn't set it yet, so we get error
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scale_mode_a, sizeof(uint32_t)/2), 
+                        HIPBLAS_STATUS_INVALID_VALUE);
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scale_mode_a, sizeof(uint32_t)), 
+                        HIPBLAS_STATUS_SUCCESS);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scale_mode_a_r, sizeof(uint32_t)/2, &sizeWritten),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scale_mode_a_r, sizeof(uint32_t), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS);
+    
+    ASSERT_TRUE(scale_mode_a_r == scale_mode_a); // validate
+
+    // ROCBLASLT_MATMUL_DESC_B_SCALE_MODE
+
+    hipblasLtMatmulMatrixScale_t scale_mode_b = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
+    hipblasLtMatmulMatrixScale_t scale_mode_b_r = HIPBLASLT_MATMUL_MATRIX_SCALE_END;
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &scale_mode_b_r, sizeof(uint32_t), &sizeWritten),
+                        HIPBLAS_STATUS_INVALID_VALUE); // we didn't set it yet, so we get error
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &scale_mode_b, sizeof(uint32_t)/2), 
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &scale_mode_b, sizeof(uint32_t)), 
+                        HIPBLAS_STATUS_SUCCESS);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &scale_mode_b_r, sizeof(uint32_t)/2, &sizeWritten),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &scale_mode_b_r, sizeof(uint32_t), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_TRUE(scale_mode_b_r == scale_mode_b); // validate
+
+    scale_mode_a = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+    scale_mode_b = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scale_mode_a, sizeof(uint32_t)),
+                        HIPBLAS_STATUS_SUCCESS);
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scale_mode_a_r, sizeof(uint32_t), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &scale_mode_b, sizeof(uint32_t)),
+                        HIPBLAS_STATUS_SUCCESS);
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &scale_mode_b_r, sizeof(uint32_t), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS);
+
+    
+    ASSERT_TRUE(scale_mode_a_r == scale_mode_a); // validate
+    ASSERT_TRUE(scale_mode_b_r == scale_mode_b); // ditto
+
+        
+    scale_mode_a = HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
+    scale_mode_b = HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F;
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scale_mode_a, sizeof(uint32_t)),
+                            HIPBLAS_STATUS_SUCCESS);
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scale_mode_a_r, sizeof(uint32_t), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS);
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &scale_mode_b, sizeof(uint32_t)),
+                        HIPBLAS_STATUS_SUCCESS);
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &scale_mode_b_r, sizeof(uint32_t), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS);
+    
+                        
+    ASSERT_TRUE(scale_mode_a_r == scale_mode_a); // validate
+
+    scale_mode_a = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3; // will not set anything
+    scale_mode_b = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3; // ditto
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scale_mode_a, sizeof(uint32_t)),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scale_mode_a_r, sizeof(uint32_t), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &scale_mode_b, sizeof(uint32_t)),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &scale_mode_b_r, sizeof(uint32_t), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS);
+
+
+    ASSERT_TRUE(scale_mode_a_r == HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F); // validate, it's still the previous value as expected
+    ASSERT_TRUE(scale_mode_b_r == HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F); // ditto
+
+
+    hipStream_t        stream;
+    CHECK_HIP_ERROR(hipStreamCreate(&stream));
+
+    // for HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT & ROCBLASLT_MATMUL_DESC_B_SCALE_POINTER 
+    float h_scale_b = 3.f;
+    float* d_scale_b;
+    float* d_scale_b_r;
+    CHECK_HIP_ERROR(hipMalloc(&d_scale_b, sizeof(float)));
+    CHECK_HIP_ERROR(hipMemcpyAsync(d_scale_b, &h_scale_b, sizeof(float), hipMemcpyHostToDevice, stream));
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, &d_scale_b, sizeof(float*)),
+                        HIPBLAS_STATUS_SUCCESS);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT, &d_scale_b, sizeof(float*)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, &d_scale_b, sizeof(float*)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, &d_scale_b, sizeof(float*)),
+                        HIPBLAS_STATUS_SUCCESS);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, &d_scale_b_r, sizeof(float*)/2, &sizeWritten),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, &d_scale_b_r, sizeof(float*), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_TRUE(d_scale_b == d_scale_b_r); // validate
+
+    // for ROCBLASLT_MATMUL_DESC_C_SCALE_POINTER & ROCBLASLT_MATMUL_DESC_D_SCALE_POINTER
+    float h_scale_c = 3.f;
+    float h_scale_d = 3.f;
+    float* d_scale_c;
+    float* d_scale_d;
+    CHECK_HIP_ERROR(hipMalloc(&d_scale_c, sizeof(float)));
+    CHECK_HIP_ERROR(hipMalloc(&d_scale_d, sizeof(float)));
+    CHECK_HIP_ERROR(hipMemcpyAsync(d_scale_c, &h_scale_c, sizeof(float), hipMemcpyHostToDevice, stream));
+    CHECK_HIP_ERROR(hipMemcpyAsync(d_scale_d, &h_scale_d, sizeof(float), hipMemcpyHostToDevice, stream));
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_C_SCALE_POINTER, &d_scale_c, sizeof(float*)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_C_SCALE_POINTER, &d_scale_c, sizeof(float*)),
+                        HIPBLAS_STATUS_SUCCESS);
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER, &d_scale_d, sizeof(float*)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER, &d_scale_d, sizeof(float*)),
+                        HIPBLAS_STATUS_SUCCESS);
+
+    
+    // for ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER
+    float h_scale_e = 3.f;
+    float* d_scale_e;
+    CHECK_HIP_ERROR(hipMalloc(&d_scale_e, sizeof(float)));
+    CHECK_HIP_ERROR(hipMemcpyAsync(d_scale_e, &h_scale_e, sizeof(float), hipMemcpyHostToDevice, stream));
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER, &d_scale_e, sizeof(float*)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER, &d_scale_e, sizeof(float*)),
+                        HIPBLAS_STATUS_SUCCESS);
+    
+    // For ROCBLASLT_MATMUL_DESC_POINTER_MODE
+    hipblasLtPointerMode_t pMode = HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST;
+    hipblasLtPointerMode_t pMode_r = HIPBLASLT_POINTER_MODE_HOST;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                                matmul, HIPBLASLT_MATMUL_DESC_POINTER_MODE, &pMode, sizeof(pMode)/2),
+                            HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                                matmul, HIPBLASLT_MATMUL_DESC_POINTER_MODE, &pMode, sizeof(pMode)),
+                            HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                                matmul, HIPBLASLT_MATMUL_DESC_POINTER_MODE, &pMode_r, sizeof(pMode_r)/2, &sizeWritten),
+                                HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                                matmul, HIPBLASLT_MATMUL_DESC_POINTER_MODE, &pMode_r, sizeof(pMode_r), &sizeWritten),
+                            HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_TRUE(pMode_r == pMode); // validate
+
+    // For ROCBLASLT_MATMUL_DESC_BIAS_DATA_TYPE Set Desc Bias Data Type
+    int32_t bias_data_type = HIP_R_16F;
+    int32_t bias_data_type_r = HIP_R_32F;
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                                matmul, HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, &bias_data_type, sizeof(bias_data_type)/2),
+                            HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                                matmul, HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, &bias_data_type, sizeof(bias_data_type)),
+                            HIPBLAS_STATUS_SUCCESS);
+
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                                matmul, HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, &bias_data_type_r, sizeof(bias_data_type_r)/2, &sizeWritten),
+                            HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                                matmul, HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, &bias_data_type_r, sizeof(bias_data_type_r), &sizeWritten),
+                                HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_TRUE(bias_data_type_r == bias_data_type); // validate
+
+
+    // For ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER Set auxiliary buffer
+    void* d_aux_buffer;
+    CHECK_HIP_ERROR(hipMalloc(&d_aux_buffer, m * n * sizeof(hipblasLtHalf)));
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER, &d_aux_buffer, sizeof(void*)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER, &d_aux_buffer, sizeof(void*)),
+                        HIPBLAS_STATUS_SUCCESS);
+
+    
+    // For ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER Set auxiliary leading dimension (ld)
+    const int64_t aux_ld = m;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD, &aux_ld, sizeof(aux_ld)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD, &aux_ld, sizeof(aux_ld)),
+                        HIPBLAS_STATUS_SUCCESS);
+    
+    // for ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE & Set Epilogue Aux Batch Stride
+    const int64_t aux_batch_stride = m * n;
+    EXPECT_HIPBLAS_STATUS( hipblasLtMatmulDescSetAttribute(
+                            matmul,HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE, &aux_batch_stride, sizeof(aux_batch_stride)/2), 
+                        HIPBLAS_STATUS_INVALID_VALUE);
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE, &aux_batch_stride, sizeof(aux_batch_stride)),
+                        HIPBLAS_STATUS_SUCCESS);
+
+    // for ROCBLASLT_MATMUL_DESC_AMAX_D_POINTER
+    void *d_out_amax;
+    void *d_out_amax_r;
+    CHECK_HIP_ERROR(hipMalloc(&d_out_amax, 1 * sizeof(float)));
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_AMAX_D_POINTER, &d_out_amax, sizeof(void*)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_AMAX_D_POINTER, &d_out_amax, sizeof(void*)),
+                        HIPBLAS_STATUS_SUCCESS);
+
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_AMAX_D_POINTER, &d_out_amax_r, sizeof(d_out_amax_r)/2, &sizeWritten),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_AMAX_D_POINTER, &d_out_amax_r, sizeof(d_out_amax_r), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_TRUE(d_out_amax == d_out_amax_r); // validate
+
+    // for ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE
+    hipDataType aux_type_r;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE, &arg.aux_type, sizeof(hipDataType)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE, &arg.aux_type, sizeof(hipDataType)),
+                        HIPBLAS_STATUS_SUCCESS);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE, &aux_type_r, sizeof(aux_type_r)/2, &sizeWritten),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE, &aux_type_r, sizeof(aux_type_r), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_TRUE(arg.aux_type == aux_type_r); // validate
+
+    // for ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT & ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT
+    hipDataType computeTypeA = HIP_R_16F;
+    hipDataType computeTypeA_r = HIP_R_32F;
+    hipDataType computeTypeB = HIP_R_16F;
+    hipDataType computeTypeB_r = HIP_R_32F;
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT, &computeTypeA, sizeof(computeTypeA)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT, &computeTypeA, sizeof(computeTypeA)),
+                        HIPBLAS_STATUS_SUCCESS);
+
+        
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT, &computeTypeB, sizeof(computeTypeB)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT, &computeTypeB, sizeof(computeTypeB)),
+                        HIPBLAS_STATUS_SUCCESS);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT, &computeTypeA_r, sizeof(computeTypeA_r)/2, &sizeWritten),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT, &computeTypeA_r, sizeof(computeTypeA_r), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS);
+
+                        
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT, &computeTypeB_r, sizeof(computeTypeB_r)/2, &sizeWritten),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT, &computeTypeB_r, sizeof(computeTypeB_r), &sizeWritten),
+                        HIPBLAS_STATUS_SUCCESS);
+
+    ASSERT_TRUE(computeTypeA_r == computeTypeA);
+    ASSERT_TRUE(computeTypeB_r == computeTypeB);
+
+    // for default
+
+    void* default_ptr;
+    void* default_ptr_r;
+    CHECK_HIP_ERROR(hipMalloc(&default_ptr, sizeof(hipblasLtHalf)));
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_MAX, &default_ptr, sizeof(void*)), 
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_MAX, &default_ptr_r, sizeof(default_ptr_r), &sizeWritten),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+    
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));
+    CHECK_HIP_ERROR(hipStreamDestroy(stream));
+    CHECK_HIP_ERROR(hipFree(d_scale_a));
+    CHECK_HIP_ERROR(hipFree(d_bias));
+    CHECK_HIP_ERROR(hipFree(d_scale_b));
+    CHECK_HIP_ERROR(hipFree(d_scale_c));
+    CHECK_HIP_ERROR(hipFree(d_scale_d));
+    CHECK_HIP_ERROR(hipFree(d_aux_buffer));
+    CHECK_HIP_ERROR(hipFree(d_out_amax));
+    CHECK_HIP_ERROR(hipFree(default_ptr));
 }
 
 void testing_aux_matmul_pref_get_attr_bad_arg(const Arguments& arg)

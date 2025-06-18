@@ -112,7 +112,7 @@ foreach( target ${TEST_TARGETS} )
       hip::host
       hip::device
     )
-    foreach( gpu_target ${AMDGPU_TARGETS} )
+    foreach( gpu_target ${GPU_TARGETS} )
       target_compile_options( ${target} PRIVATE --offload-arch=${gpu_target} )
     endforeach()
 

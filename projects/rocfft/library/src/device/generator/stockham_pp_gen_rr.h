@@ -25,8 +25,7 @@
 //       - Revisit all usages of transform_per_block and max_factor_pp.
 //       - Test with factors_pp.size() > 1
 //       - Revisit lstride usage and input/output strides
-//       - Revisit factor 64 logic in calculate_offsets() with different
-//         input lengths
+//       - Revisit factor 64 logic in calculate_offsets() with different input lengths
 
 // Variation of StockhamKernelRR that implements the partial pass
 // method. Similarities of StockhamPartialPassKernelRR with
@@ -44,21 +43,24 @@
 // is implemented.
 struct StockhamPartialPassKernelRR : public StockhamKernelRR
 {
-    explicit StockhamPartialPassKernelRR(const StockhamGeneratorSpecs& specs,
-                                         const std::vector<size_t>&    ppFactors,
-                                         const size_t                  ppLength)
+    explicit StockhamPartialPassKernelRR(const StockhamGeneratorSpecs&    specs,
+                                         const StockhamPartialPassParams& params)
         : StockhamKernelRR(specs)
-        , factors_pp(ppFactors)
-        , length_pp(ppLength)
+        , params(params)
     {
+        length_pp  = params.parent_length[params.off_dim];
+        factors_pp = params.factors_off_dim;
+
         max_factor_pp = *std::max_element(factors_pp.begin(), factors_pp.end());
 
         R.size = Expression{std::max(nregisters, max_factor_pp)};
     }
 
-    unsigned int        max_factor_pp;
-    std::vector<size_t> factors_pp;
-    unsigned int        length_pp;
+    StockhamPartialPassParams params;
+
+    unsigned int              max_factor_pp;
+    std::vector<unsigned int> factors_pp;
+    unsigned int              length_pp;
 
     Variable offset_pp{"offset_pp", "size_t"};
     Variable stride_lds_pp{"stride_lds_pp", "size_t"};
@@ -106,6 +108,11 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         return stmts;
     }
 
+    std::vector<unsigned int> launcher_lengths() override
+    {
+        return params.parent_length;
+    }
+
     StatementList load_global_generator(unsigned int h,
                                         unsigned int hr,
                                         unsigned int width,
@@ -151,7 +158,8 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
                 thread == threads_per_transform - 1,
                 {Assign{lds_complex[offset_lds + thread + (height - 1) * width + 1],
                         LoadGlobal{buf, offset + (thread + (height - 1) * width + 1) * stride0}}}};
-            stmts += If{embedded_type == Literal{"EmbeddedType::C2Real_PRE"}, stmts_c2real_pre};
+            if(ebtype == EmbeddedType::C2Real_PRE)
+                stmts += stmts_c2real_pre;
         }
         else
         {
@@ -192,7 +200,8 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
                       {StoreGlobal{buf,
                                    offset + (thread + (height - 1) * width + 1) * stride0,
                                    lds_complex[offset_lds + thread + (height - 1) * width + 1]}}};
-            stmts += If{Equal{embedded_type, "EmbeddedType::Real2C_POST"}, stmts_real2c_post};
+            if(ebtype == EmbeddedType::Real2C_POST)
+                stmts += stmts_real2c_post;
         }
         else
             throw std::runtime_error(
@@ -460,7 +469,8 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         loadlds += load_from_global(false);
         loadlds += LineBreak{};
         // handle even-length real to complex pre-process in lds before transform
-        loadlds += real_trans_pre_post(ProcessingType::PRE);
+        if(ebtype == EmbeddedType::C2Real_PRE)
+            loadlds += real_trans_pre_post();
 
         if(!direct_to_from_reg)
         {
@@ -532,7 +542,8 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         StatementList storelds;
         storelds += LineBreak{};
         // handle even-length complex to real post-process in lds after transform
-        storelds += real_trans_pre_post(ProcessingType::POST);
+        if(ebtype == EmbeddedType::Real2C_POST)
+            storelds += real_trans_pre_post();
         storelds += LineBreak{};
         storelds += CommentLines{"store global"};
         storelds += SyncThreads{};

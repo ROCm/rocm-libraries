@@ -23,7 +23,7 @@
  *
  * ************************************************************************ */
 
-#include "rocsparse-auxiliary.h"
+#include "rocsparse-debugging.h"
 
 #include "rocsparse_control.hpp"
 #include "rocsparse_envariables.hpp"

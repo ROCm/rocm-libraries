@@ -22,37 +22,10 @@
  * ************************************************************************ */
 
 #include "internal/generic/rocsparse_scatter.h"
-#include "internal/level1/rocsparse_sctr.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_handle.hpp"
-#include "rocsparse_utility.hpp"
-
 #include "rocsparse_sctr.hpp"
-
-namespace rocsparse
-{
-    template <typename I, typename T>
-    rocsparse_status scatter_template(rocsparse_handle            handle,
-                                      rocsparse_const_spvec_descr x,
-                                      rocsparse_dnvec_descr       y)
-    {
-        ROCSPARSE_ROUTINE_TRACE;
-
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::sctr_template<I, T>)(handle,
-                                                                   (I)x->nnz,
-                                                                   (const T*)x->const_val_data,
-                                                                   (const I*)x->const_idx_data,
-                                                                   (T*)y->values,
-                                                                   x->idx_base));
-        return rocsparse_status_success;
-    }
-}
-
-/*
- * ===========================================================================
- *    C wrapper
- * ===========================================================================
- */
+#include "rocsparse_utility.hpp"
 
 extern "C" rocsparse_status rocsparse_scatter(rocsparse_handle            handle,
                                               rocsparse_const_spvec_descr x,
@@ -78,85 +51,27 @@ try
     // Check for matching types while we do not support mixed precision computation
     ROCSPARSE_CHECKARG(2, y, (y->data_type != x->data_type), rocsparse_status_not_implemented);
 
-    // int8 ; i32
-    if(x->idx_type == rocsparse_indextype_i32 && x->data_type == rocsparse_datatype_i8_r)
-    {
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::scatter_template<int32_t, int8_t>)(handle, x, y));
-        return rocsparse_status_success;
-    }
-    // half real ; i32
-    if(x->idx_type == rocsparse_indextype_i32 && x->data_type == rocsparse_datatype_f16_r)
-    {
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::scatter_template<int32_t, _Float16>)(handle, x, y));
-        return rocsparse_status_success;
-    }
-    // single real ; i32
-    if(x->idx_type == rocsparse_indextype_i32 && x->data_type == rocsparse_datatype_f32_r)
-    {
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::scatter_template<int32_t, float>)(handle, x, y));
-        return rocsparse_status_success;
-    }
-    // double real ; i32
-    if(x->idx_type == rocsparse_indextype_i32 && x->data_type == rocsparse_datatype_f64_r)
-    {
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::scatter_template<int32_t, double>)(handle, x, y));
-        return rocsparse_status_success;
-    }
-    // single complex ; i32
-    if(x->idx_type == rocsparse_indextype_i32 && x->data_type == rocsparse_datatype_f32_c)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::scatter_template<int32_t, rocsparse_float_complex>)(handle, x, y));
-        return rocsparse_status_success;
-    }
-    // double complex ; i32
-    if(x->idx_type == rocsparse_indextype_i32 && x->data_type == rocsparse_datatype_f64_c)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::scatter_template<int32_t, rocsparse_double_complex>)(handle, x, y));
-        return rocsparse_status_success;
-    }
-    // int8 ; i64
-    if(x->idx_type == rocsparse_indextype_i64 && x->data_type == rocsparse_datatype_i8_r)
-    {
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::scatter_template<int64_t, int8_t>)(handle, x, y));
-        return rocsparse_status_success;
-    }
-    // half real ; i64
-    if(x->idx_type == rocsparse_indextype_i64 && x->data_type == rocsparse_datatype_f16_r)
-    {
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::scatter_template<int64_t, _Float16>)(handle, x, y));
-        return rocsparse_status_success;
-    }
-    // single real ; i64
-    if(x->idx_type == rocsparse_indextype_i64 && x->data_type == rocsparse_datatype_f32_r)
-    {
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::scatter_template<int64_t, float>)(handle, x, y));
-        return rocsparse_status_success;
-    }
-    // double real ; i64
-    if(x->idx_type == rocsparse_indextype_i64 && x->data_type == rocsparse_datatype_f64_r)
-    {
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::scatter_template<int64_t, double>)(handle, x, y));
-        return rocsparse_status_success;
-    }
-    // single complex ; i64
-    if(x->idx_type == rocsparse_indextype_i64 && x->data_type == rocsparse_datatype_f32_c)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::scatter_template<int64_t, rocsparse_float_complex>)(handle, x, y));
-        return rocsparse_status_success;
-    }
-    // double complex ; i64
-    if(x->idx_type == rocsparse_indextype_i64 && x->data_type == rocsparse_datatype_f64_c)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::scatter_template<int64_t, rocsparse_double_complex>)(handle, x, y));
-        return rocsparse_status_success;
-    }
+    rocsparse_status sctr(rocsparse_handle     handle,
+                          int64_t              nnz,
+                          rocsparse_datatype   x_datatype,
+                          const void*          x_val,
+                          rocsparse_indextype  x_indextype,
+                          const void*          x_ind,
+                          rocsparse_datatype   y_datatype,
+                          void*                y,
+                          rocsparse_index_base idx_base);
 
-    // LCOV_EXCL_START
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::sctr(handle,
+                                              x->nnz,
+                                              x->data_type,
+                                              x->const_val_data,
+                                              x->idx_type,
+                                              x->const_idx_data,
+                                              y->data_type,
+                                              y->values,
+                                              x->idx_base));
+
+    return rocsparse_status_success;
 }
 catch(...)
 {

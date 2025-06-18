@@ -39,6 +39,74 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+template <int MAX_THDS, typename T, typename I, typename U>
+ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) latrd_dot_scale_axpy(const I n,
+                                                                       U AA,
+                                                                       const rocblas_stride shiftA,
+                                                                       const rocblas_stride strideA,
+                                                                       T* WW,
+                                                                       const rocblas_stride shiftW,
+                                                                       const rocblas_stride strideW,
+                                                                       T* tauA,
+                                                                       const rocblas_stride strideP)
+{
+    I bid = blockIdx.z;
+    I tid = threadIdx.x;
+
+    // select batch instance
+    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    T* W = load_ptr_batch<T>(WW, bid, shiftW, strideW);
+    T* tau = load_ptr_batch<T>(tauA, bid, 0, strideP);
+
+    // shared variables
+    __shared__ T sval[MAX_THDS / warpSize];
+    __shared__ T sh_A[MAX_THDS];
+    __shared__ T sh_W[MAX_THDS];
+
+    // dot
+    T norm2 = 0;
+    for(I i = tid; i < n; i += MAX_THDS)
+    {
+        T tempA = A[i];
+        T tempW = W[i];
+        if(i < MAX_THDS)
+        {
+            sh_A[i] = tempA;
+            sh_W[i] = tempW;
+        }
+
+        norm2 += tempA * conj(tempW);
+    }
+
+    // reduce squared entries to find squared norm of x
+    norm2 += shift_left(norm2, 1);
+    norm2 += shift_left(norm2, 2);
+    norm2 += shift_left(norm2, 4);
+    norm2 += shift_left(norm2, 8);
+    norm2 += shift_left(norm2, 16);
+    if(warpSize > 32)
+        norm2 += shift_left(norm2, 32);
+    if(tid % warpSize == 0)
+        sval[tid / warpSize] = norm2;
+    __syncthreads();
+    if(tid == 0)
+    {
+        for(I k = 1; k < MAX_THDS / warpSize; k++)
+            norm2 += sval[k];
+        sval[0] = -0.5 * tau[0] * norm2;
+    }
+    __syncthreads();
+
+    // axpy
+    for(I i = tid; i < n; i += MAX_THDS)
+    {
+        if(i < MAX_THDS)
+            W[i] = sh_W[i] + sval[0] * sh_A[i];
+        else
+            W[i] = W[i] + sval[0] * A[i];
+    }
+}
+
 /********************************************************************************/
 /******************* Host functions for latrd api *******************************/
 /********************************************************************************/
@@ -162,13 +230,6 @@ rocblas_status rocsolver_latrd_template(rocblas_handle handle,
     rocblas_get_pointer_mode(handle, &old_mode);
     rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
 
-    // configure kernels
-    rocblas_int blocks = (batch_count - 1) / BS1 + 1;
-    dim3 grid_b(blocks, 1);
-    dim3 threads(BS1, 1, 1);
-    blocks = (n - 1) / BS1 + 1;
-    dim3 grid_n(blocks, batch_count);
-
     if(uplo == rocblas_fill_lower)
     {
         // reduce the first k columns of A
@@ -205,13 +266,9 @@ rocblas_status rocsolver_latrd_template(rocblas_handle handle,
                                             batch_count);
 
             // generate Householder reflector to work on column j
-            rocsolver_larfg_template(handle, n - j - 1, A, shiftA + idx2D(j + 1, j, lda), A,
-                                     shiftA + idx2D(std::min(j + 2, n - 1), j, lda), 1, strideA,
-                                     (tau + j), strideP, batch_count, work, norms);
-
-            // copy to E(j) the corresponding off-diagonal element of A, which is set to 1
-            ROCSOLVER_LAUNCH_KERNEL(set_offdiag<T>, grid_b, threads, 0, stream, batch_count, A,
-                                    shiftA + idx2D(j + 1, j, lda), strideA, (E + j), strideE);
+            rocsolver_larfg_template(handle, n - j - 1, A, shiftA + idx2D(j + 1, j, lda), E, j,
+                                     strideE, A, shiftA + idx2D(std::min(j + 2, n - 1), j, lda), 1,
+                                     strideA, (tau + j), strideP, batch_count, work, norms);
 
             // compute/update column j of W
             rocblasCall_symv_hemv<T>(
@@ -246,13 +303,10 @@ rocblas_status rocsolver_latrd_template(rocblas_handle handle,
             rocblasCall_scal<T>(handle, n - j - 1, (tau + j), strideP, W,
                                 shiftW + idx2D(j + 1, j, ldw), 1, strideW, batch_count);
 
-            rocblasCall_dot<COMPLEX, T>(handle, n - 1 - j, W, shiftW + idx2D(j + 1, j, ldw), 1,
-                                        strideW, A, shiftA + idx2D(j + 1, j, lda), 1, strideA,
-                                        batch_count, norms, work, workArr);
-
-            ROCSOLVER_LAUNCH_KERNEL(scale_axpy<T>, grid_n, threads, 0, stream, n - 1 - j, norms,
-                                    tau + j, strideP, A, shiftA + idx2D(j + 1, j, lda), strideA, W,
-                                    shiftW + idx2D(j + 1, j, ldw), strideW);
+            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<1024, T>), dim3(1, 1, batch_count),
+                                    dim3(1024, 1, 1), 0, stream, n - 1 - j, A,
+                                    shiftA + idx2D(j + 1, j, lda), strideA, W,
+                                    shiftW + idx2D(j + 1, j, ldw), strideW, tau + j, strideP);
         }
     }
 
@@ -294,13 +348,9 @@ rocblas_status rocsolver_latrd_template(rocblas_handle handle,
                                             lda, strideA, batch_count);
 
             // generate Householder reflector to work on column j
-            rocsolver_larfg_template(handle, j, A, shiftA + idx2D(j - 1, j, lda), A,
-                                     shiftA + idx2D(0, j, lda), 1, strideA, (tau + j - 1), strideP,
-                                     batch_count, work, norms);
-
-            // copy to E(j) the corresponding off-diagonal element of A, which is set to 1
-            ROCSOLVER_LAUNCH_KERNEL(set_offdiag<T>, grid_b, threads, 0, stream, batch_count, A,
-                                    shiftA + idx2D(j - 1, j, lda), strideA, (E + j - 1), strideE);
+            rocsolver_larfg_template(handle, j, A, shiftA + idx2D(j - 1, j, lda), E, j - 1, strideE,
+                                     A, shiftA + idx2D(0, j, lda), 1, strideA, (tau + j - 1),
+                                     strideP, batch_count, work, norms);
 
             // compute/update column j of W
             rocblasCall_symv_hemv<T>(handle, uplo, j, (scalars + 2), 0, A, shiftA, lda, strideA, A,
@@ -335,13 +385,10 @@ rocblas_status rocsolver_latrd_template(rocblas_handle handle,
             rocblasCall_scal<T>(handle, j, (tau + j - 1), strideP, W, shiftW + idx2D(0, jw, ldw), 1,
                                 strideW, batch_count);
 
-            rocblasCall_dot<COMPLEX, T>(handle, j, W, shiftW + idx2D(0, jw, ldw), 1, strideW, A,
-                                        shiftA + idx2D(0, j, lda), 1, strideA, batch_count, norms,
-                                        work, workArr);
-
-            ROCSOLVER_LAUNCH_KERNEL(scale_axpy<T>, grid_n, threads, 0, stream, j, norms,
-                                    tau + j - 1, strideP, A, shiftA + idx2D(0, j, lda), strideA, W,
-                                    shiftW + idx2D(0, jw, ldw), strideW);
+            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<1024, T>), dim3(1, 1, batch_count),
+                                    dim3(1024, 1, 1), 0, stream, j, A, shiftA + idx2D(0, j, lda),
+                                    strideA, W, shiftW + idx2D(0, jw, ldw), strideW, tau + j - 1,
+                                    strideP);
         }
     }
 
@@ -1052,6 +1099,93 @@ ROCSOLVER_KERNEL void latrd_upper_computeW_gemv_kernel(const rocblas_int mm,
     }
 }
 
+template <int NB_X, typename T, typename U>
+ROCSOLVER_KERNEL void latrd_upper_computeW_gemvt_kernel(const rocblas_int mm,
+                                                        const rocblas_int k,
+                                                        const rocblas_int c,
+                                                        U AA,
+                                                        const rocblas_int shiftA,
+                                                        const rocblas_int lda,
+                                                        const rocblas_stride strideA,
+                                                        T* WA,
+                                                        const rocblas_int shiftW,
+                                                        const rocblas_int ldw,
+                                                        const rocblas_stride strideW,
+                                                        T* yA,
+                                                        const rocblas_int shiftY,
+                                                        const rocblas_int ldy,
+                                                        const rocblas_stride strideY,
+                                                        T* workA,
+                                                        const rocblas_stride strideblk)
+{
+    rocblas_int bid = blockIdx.z;
+    rocblas_int tx = threadIdx.x;
+    rocblas_int i = blockIdx.x;
+
+    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    T* W = load_ptr_batch<T>(WA, bid, shiftW, strideW);
+    T* y1 = load_ptr_batch<T>(yA, bid, shiftY, strideY);
+    T* y2 = workA + bid * strideblk;
+
+    int n = c;
+    int cc = mm - c - 1;
+    // int m = mm + cc;
+    int cw = c - mm + k;
+    T* A1 = A;
+    T* A2 = W + idx2D(0, cw + 1, ldw);
+    int lda1 = lda;
+    int lda2 = ldw;
+    T* x = A + idx2D(0, c, lda);
+
+    int it = (i < mm) ? i : i - mm;
+    T* a = (i < mm) ? A1 : A2;
+    int ld = (i < mm) ? lda1 : lda2;
+    T* y = (i < mm) ? y1 : y2;
+
+    if(tx < n)
+        a += tx;
+
+    a += it * size_t(ld);
+
+    T res = 0;
+
+    __shared__ T sdata[NB_X];
+
+    // partial sums
+    rocblas_int n_full = (n / NB_X) * NB_X;
+
+    if(it != c)
+    {
+        for(rocblas_int j = 0; j < n_full; j += NB_X)
+            res += conj(a[j]) * x[tx + j];
+
+        if(tx + n_full < n)
+            res += conj(a[n_full]) * x[tx + n_full];
+
+        // reduction of partial sums
+        res += shift_left(res, 1);
+        res += shift_left(res, 2);
+        res += shift_left(res, 4);
+        res += shift_left(res, 8);
+        res += shift_left(res, 16);
+        if(warpSize > 32)
+            res += shift_left(res, 32);
+        if(tx % warpSize == 0)
+            sdata[tx / warpSize] = res;
+        __syncthreads();
+        if(tx == 0)
+        {
+            for(rocblas_int k = 1; k < NB_X / warpSize; k++)
+                res += sdata[k];
+        }
+    }
+
+    if(tx == 0)
+    {
+        y[it] = res;
+    }
+}
+
 template <typename T, typename U>
 ROCSOLVER_KERNEL void latrd_lower_computeW_gemv_kernel(const rocblas_int mm,
                                                        const rocblas_int c,
@@ -1176,6 +1310,91 @@ ROCSOLVER_KERNEL void latrd_lower_computeW_gemv_kernel(const rocblas_int mm,
         // write groups results in temp array for further reduction
         if(tidc == 0 && i < m)
             dac[i + bidc * ldd] = ac;
+    }
+}
+
+template <int NB_X, typename T, typename U>
+ROCSOLVER_KERNEL void latrd_lower_computeW_gemvt_kernel(const rocblas_int mm,
+                                                        const rocblas_int c,
+                                                        U AA,
+                                                        const rocblas_int shiftA,
+                                                        const rocblas_int lda,
+                                                        const rocblas_stride strideA,
+                                                        T* WA,
+                                                        const rocblas_int shiftW,
+                                                        const rocblas_int ldw,
+                                                        const rocblas_stride strideW,
+                                                        T* yA,
+                                                        const rocblas_int shiftY,
+                                                        const rocblas_int ldy,
+                                                        const rocblas_stride strideY,
+                                                        T* workA,
+                                                        const rocblas_stride strideblk)
+{
+    rocblas_int bid = blockIdx.z;
+    rocblas_int tx = threadIdx.x;
+    rocblas_int i = blockIdx.x;
+
+    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    T* W = load_ptr_batch<T>(WA, bid, shiftW, strideW);
+    T* y1 = workA + bid * strideblk;
+    T* y2 = load_ptr_batch<T>(yA, bid, shiftY, strideY);
+
+    int n = mm - c - 1;
+    // int m = mm + c;
+    T* A1 = W + idx2D(c + 1, 0, ldw);
+    T* A2 = A + idx2D(c + 1, 0, lda);
+    int lda1 = ldw;
+    int lda2 = lda;
+    T* x = A + idx2D(c + 1, c, lda);
+
+    int it = (i < c) ? i : i - c;
+    T* a = (i < c) ? A1 : A2;
+    int ld = (i < c) ? lda1 : lda2;
+    int it2 = it - c - 1;
+    T* y = (i < c) ? y1 : y2;
+
+    if(tx < n)
+        a += tx;
+
+    a += it * size_t(ld);
+
+    T res = 0;
+
+    __shared__ T sdata[NB_X];
+
+    // partial sums
+    rocblas_int n_full = (n / NB_X) * NB_X;
+
+    if(it != c)
+    {
+        for(rocblas_int j = 0; j < n_full; j += NB_X)
+            res += conj(a[j]) * x[tx + j];
+
+        if(tx + n_full < n)
+            res += conj(a[n_full]) * x[tx + n_full];
+
+        // reduction of partial sums
+        res += shift_left(res, 1);
+        res += shift_left(res, 2);
+        res += shift_left(res, 4);
+        res += shift_left(res, 8);
+        res += shift_left(res, 16);
+        if(warpSize > 32)
+            res += shift_left(res, 32);
+        if(tx % warpSize == 0)
+            sdata[tx / warpSize] = res;
+        __syncthreads();
+        if(tx == 0)
+        {
+            for(rocblas_int k = 1; k < NB_X / warpSize; k++)
+                res += sdata[k];
+        }
+    }
+
+    if(tx == 0)
+    {
+        y[it] = res;
     }
 }
 
@@ -1659,61 +1878,6 @@ ROCSOLVER_KERNEL void latrd_lower_updateW_kernel(const rocblas_int mm,
 /******************* Host functions for latrd aux of sytrd **********************/
 /********************************************************************************/
 
-// enum for the different modes to compute W
-typedef enum rocsolver_latrd_mode_
-{
-    rocsolver_latrd_mode_symv, // uses internal symv
-    rocsolver_latrd_mode_gemv_in, // uses internal gemv
-    rocsolver_latrd_mode_gemv_out // uses external gemv
-} rocsolver_latrd_mode;
-
-// Method to determine the mode depending on n and k
-// TODO: fine tuning may be required
-template <typename T>
-rocsolver_latrd_mode latrd_get_mode(const rocblas_int n, const rocblas_int k)
-{
-    rocsolver_latrd_mode mode;
-
-    if(k < 16)
-    {
-        if(n <= 1856)
-            mode = rocsolver_latrd_mode_symv;
-        else if(n <= 4864)
-            mode = rocsolver_latrd_mode_gemv_in;
-        else
-            mode = rocsolver_latrd_mode_gemv_out;
-    }
-    else if(k < 32)
-    {
-        if(n <= 1600)
-            mode = rocsolver_latrd_mode_symv;
-        else if(n <= 4608)
-            mode = rocsolver_latrd_mode_gemv_in;
-        else
-            mode = rocsolver_latrd_mode_gemv_out;
-    }
-    else if(k < 64)
-    {
-        if(n <= 1600)
-            mode = rocsolver_latrd_mode_symv;
-        else if(n <= 4352)
-            mode = rocsolver_latrd_mode_gemv_in;
-        else
-            mode = rocsolver_latrd_mode_gemv_out;
-    }
-    else
-    {
-        if(n <= 1024)
-            mode = rocsolver_latrd_mode_symv;
-        else if(n <= 4608)
-            mode = rocsolver_latrd_mode_gemv_in;
-        else
-            mode = rocsolver_latrd_mode_gemv_out;
-    }
-
-    return mode;
-}
-
 // Method to determine configuration for update kernels depending on n and k
 // TODO: fine tuning may be required
 template <typename T>
@@ -1747,119 +1911,6 @@ void latrd_get_config_for_updates(const rocblas_int n,
 
     *dr = 4;
     *dc = 0;
-}
-
-// Method to determine configuration for compute kernels depending on n, k and the mode
-// TODO: fine tuning may be required
-template <typename T>
-void latrd_get_config_for_compute(const rocblas_int n,
-                                  const rocblas_int k,
-                                  rocblas_int* dr,
-                                  rocblas_int* thr,
-                                  rocblas_int* dc,
-                                  rocblas_int* thc,
-                                  rocsolver_latrd_mode mode)
-{
-    if(mode == rocsolver_latrd_mode_symv)
-    {
-        if(n < 256)
-        {
-            *dr = 4;
-            *dc = 2;
-            *thr = 16;
-            *thc = 16;
-        }
-        else if(n < 512)
-        {
-            *dr = 4;
-            *dc = 2;
-            *thr = 8;
-            *thc = 16;
-        }
-        else if(n <= 1024)
-        {
-            *dr = 4;
-            *dc = 1;
-            *thr = 4;
-            *thc = 32;
-        }
-        else if(n < 1536)
-        {
-            *dr = 4;
-            *dc = 1;
-            *thr = 8;
-            *thc = 32;
-        }
-        else
-        {
-            *dr = 4;
-            *dc = 1;
-            *thr = 16;
-            *thc = 32;
-        }
-    }
-    else if(mode == rocsolver_latrd_mode_gemv_in)
-    {
-        if(n < 256)
-        {
-            *dr = 4;
-            *dc = 4;
-            *thr = 8;
-            *thc = 16;
-        }
-        else if(n < 512)
-        {
-            *dr = 4;
-            *dc = 2;
-            *thr = 8;
-            *thc = 32;
-        }
-        else if(n < 1280)
-        {
-            *dr = 4;
-            *dc = 1;
-            *thr = 16;
-            *thc = 32;
-        }
-        else
-        {
-            *dr = 4;
-            *dc = 1;
-            *thr = 32;
-            *thc = 8;
-        }
-    }
-    else
-    {
-        if(n < 256)
-        {
-            *dr = 4;
-            *dc = 4;
-            *thr = 8;
-            *thc = 8;
-        }
-        else if(n < 1024)
-        {
-            *dr = 4;
-            *dc = 4;
-            *thr = 8;
-            *thc = 32;
-        }
-        else if(n < 2048)
-        {
-            *dr = 4;
-            *dc = 2;
-            *thr = 4;
-            *thc = 32;
-        }
-        else
-        {
-            *dr = 4;
-            *dc = 1;
-            *thr = 8;
-            *thc = 64;
-        }
-    }
 }
 
 template <bool BATCHED, typename T>
@@ -1951,13 +2002,6 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    // configure set_offdiag and scale_axpy kernels:
-    rocblas_int blocks = (batch_count - 1) / BS1 + 1;
-    dim3 grid_b(blocks, 1);
-    dim3 threads(BS1, 1, 1);
-    blocks = (n - 1) / BS1 + 1;
-    dim3 grid_n(blocks, batch_count);
-
     // configure updateA and updateW kernels:
     rocblas_int dr, dc;
     rocblas_int thr_updates, thc_updates;
@@ -1966,23 +2010,7 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
     rocblas_int grr_updates = (n * dr / 4 - 1) / thr_updates + 1;
     rocblas_int grc_updates = (k * dc / 4 - 1) / thc_updates + 1;
 
-    // configure computeW kernels:
-    rocblas_int thr_compute, thc_compute;
-    rocsolver_latrd_mode mode = latrd_get_mode<T>(n, k);
-    latrd_get_config_for_compute<T>(n, k, &dr, &thr_compute, &dc, &thc_compute, mode);
-    size_t lmemsize_compute = sizeof(T) * (thr_compute * thc_compute);
-    rocblas_int ss = (mode == rocsolver_latrd_mode_gemv_out) ? 2 * k : n + k;
-    rocblas_int grr_compute = (ss * dr / 4 - 1) / thr_compute + 1;
-    rocblas_int grc_compute = ((n - 1) * dc / 4 - 1) / thc_compute + 1;
-
-    // configure reduce kernels:
-    rocblas_int thr_reduce = 64;
-    rocblas_int thc_reduce = 16;
-    size_t lmemsize_reduce = sizeof(T) * (thr_reduce * thc_reduce);
-    rocblas_int grr_reduce = (ss - 1) / thr_reduce + 1;
     rocblas_stride strideblk = k;
-    rocblas_stride strideD = ss * grc_compute;
-    rocblas_int ldd = ss;
 
     if(uplo == rocblas_fill_lower)
     {
@@ -2001,49 +2029,20 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
             // reduce column j of A with new reflector, then copy off-diagonal element
             // to E(j) and set off-diagonal to 1
             //----------------------------------------------------------
-            rocsolver_larfg_template(handle, n - j - 1, A, shiftA + idx2D(j + 1, j, lda), A,
-                                     shiftA + idx2D(std::min(j + 2, n - 1), j, lda), 1, strideA,
-                                     (tau + j), strideP, batch_count, work, norms);
-
-            ROCSOLVER_LAUNCH_KERNEL(set_offdiag<T>, grid_b, threads, 0, stream, batch_count, A,
-                                    shiftA + idx2D(j + 1, j, lda), strideA, (E + j), strideE);
+            rocsolver_larfg_template(handle, n - j - 1, A, shiftA + idx2D(j + 1, j, lda), E, j,
+                                     strideE, A, shiftA + idx2D(std::min(j + 2, n - 1), j, lda), 1,
+                                     strideA, (tau + j), strideP, batch_count, work, norms);
             //-----------------------------------------------------------
 
             // compute column j of W
             //--------------------------------------------------------------
-            if(mode == rocsolver_latrd_mode_gemv_out)
-            {
-                rocblasCall_gemv<T>(handle, rocblas_operation_none, n - j - 1, n - j - 1,
-                                    cast2constType<T>(scalars + 2), 0, A,
-                                    shiftA + idx2D(j + 1, j + 1, lda), lda, strideA, A,
-                                    shiftA + idx2D(j + 1, j, lda), 1, strideA,
-                                    cast2constType<T>(scalars + 1), 0, W,
-                                    shiftW + idx2D(j + 1, j, ldw), 1, strideW, batch_count, workArr);
-
-                ROCSOLVER_LAUNCH_KERNEL(
-                    latrd_lower_computeW_kernel<T>, dim3(grr_compute, grc_compute, batch_count),
-                    dim3(thr_compute, thc_compute, 1), lmemsize_compute, stream, n, j, A, shiftA,
-                    lda, strideA, W, shiftW, ldw, strideW, norms, ldd, strideD);
-            }
-            else if(mode == rocsolver_latrd_mode_gemv_in)
-                ROCSOLVER_LAUNCH_KERNEL(latrd_lower_computeW_gemv_kernel<T>,
-                                        dim3(grr_compute, grc_compute, batch_count),
-                                        dim3(thr_compute, thc_compute, 1), lmemsize_compute, stream,
-                                        n, j, A, shiftA, lda, strideA, W, shiftW, ldw, strideW,
-                                        norms, ldd, strideD);
-            else
-                ROCSOLVER_LAUNCH_KERNEL(latrd_lower_computeW_symv_kernel<T>,
-                                        dim3(grr_compute, grc_compute, batch_count),
-                                        dim3(thr_compute, thc_compute, 1), lmemsize_compute, stream,
-                                        n, j, A, shiftA, lda, strideA, W, shiftW, ldw, strideW,
-                                        norms, ldd, strideD);
-
-            rocblas_int mm = (mode == rocsolver_latrd_mode_gemv_out) ? 2 * j : n + j;
-            ROCSOLVER_LAUNCH_KERNEL(latrd_reduce_kernel<T>, dim3(grr_reduce, 1, batch_count),
-                                    dim3(thr_reduce, thc_reduce, 1), lmemsize_reduce, stream, uplo,
-                                    mm, grc_compute, j, norms, ldd, strideD, W,
-                                    shiftW + idx2D(0, j, ldw), ldw, strideW, work, strideblk);
-            //------------------------------------------------------------------
+            static constexpr int NB = 256;
+            dim3 gemvt_grid(n + j, 1, batch_count);
+            dim3 gemvt_threads(NB);
+            ROCSOLVER_LAUNCH_KERNEL((latrd_lower_computeW_gemvt_kernel<NB, T>), gemvt_grid,
+                                    gemvt_threads, 0, stream, n, j, A, shiftA, lda, strideA, W,
+                                    shiftW, ldw, strideW, W, shiftW + idx2D(0, j, ldw), ldw,
+                                    strideW, work, strideblk);
 
             // update column j of W
             //--------------------------------------------------------------
@@ -2052,13 +2051,10 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
                 dim3(thr_updates, thc_updates, 1), lmemsize_updates, stream, n, j, A, shiftA, lda,
                 strideA, W, shiftW, ldw, strideW, work, strideblk, tau, strideP);
 
-            rocblasCall_dot<COMPLEX, T>(handle, n - 1 - j, W, shiftW + idx2D(j + 1, j, ldw), 1,
-                                        strideW, A, shiftA + idx2D(j + 1, j, lda), 1, strideA,
-                                        batch_count, norms, work, workArr);
-
-            ROCSOLVER_LAUNCH_KERNEL(scale_axpy<T>, grid_n, threads, 0, stream, n - 1 - j, norms,
-                                    tau + j, strideP, A, shiftA + idx2D(j + 1, j, lda), strideA, W,
-                                    shiftW + idx2D(j + 1, j, ldw), strideW);
+            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<1024, T>), dim3(1, 1, batch_count),
+                                    dim3(1024, 1, 1), 0, stream, n - 1 - j, A,
+                                    shiftA + idx2D(j + 1, j, lda), strideA, W,
+                                    shiftW + idx2D(j + 1, j, ldw), strideW, tau + j, strideP);
             //--------------------------------------------------------------
         }
     }
@@ -2083,52 +2079,20 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
             // reduce column j of A with new reflector, then copy off-diagonal element
             // to E(j) and set off-diagonal to 1
             //----------------------------------------------------------
-            rocsolver_larfg_template(handle, j, A, shiftA + idx2D(j - 1, j, lda), A,
-                                     shiftA + idx2D(0, j, lda), 1, strideA, (tau + j - 1), strideP,
-                                     batch_count, work, norms);
-
-            ROCSOLVER_LAUNCH_KERNEL(set_offdiag<T>, grid_b, threads, 0, stream, batch_count, A,
-                                    shiftA + idx2D(j - 1, j, lda), strideA, (E + j - 1), strideE);
+            rocsolver_larfg_template(handle, j, A, shiftA + idx2D(j - 1, j, lda), E, j - 1, strideE,
+                                     A, shiftA + idx2D(0, j, lda), 1, strideA, (tau + j - 1),
+                                     strideP, batch_count, work, norms);
             //----------------------------------------------------------
 
             // compute column j of W
             //--------------------------------------------------------------
-            if(mode == rocsolver_latrd_mode_gemv_out)
-            {
-                rocblasCall_gemv<T>(handle, rocblas_operation_none, j, j,
-                                    cast2constType<T>(scalars + 2), 0, A, shiftA, lda, strideA, A,
-                                    shiftA + idx2D(0, j, lda), 1, strideA,
-                                    cast2constType<T>(scalars + 1), 0, W,
-                                    shiftW + idx2D(0, jw, ldw), 1, strideW, batch_count, workArr);
-
-                ROCSOLVER_LAUNCH_KERNEL(
-                    latrd_upper_computeW_kernel<T>, dim3(grr_compute, grc_compute, batch_count),
-                    dim3(thr_compute, thc_compute, 1), lmemsize_compute, stream, n, k, j, A, shiftA,
-                    lda, strideA, W, shiftW, ldw, strideW, norms, ldd, strideD);
-            }
-            else if(mode == rocsolver_latrd_mode_gemv_in)
-                ROCSOLVER_LAUNCH_KERNEL(latrd_upper_computeW_gemv_kernel<T>,
-                                        dim3(grr_compute, grc_compute, batch_count),
-                                        dim3(thr_compute, thc_compute, 1), lmemsize_compute, stream,
-                                        n, k, j, A, shiftA, lda, strideA, W, shiftW, ldw, strideW,
-                                        norms, ldd, strideD);
-            else
-                ROCSOLVER_LAUNCH_KERNEL(latrd_upper_computeW_symv_kernel<T>,
-                                        dim3(grr_compute, grc_compute, batch_count),
-                                        dim3(thr_compute, thc_compute, 1), lmemsize_compute, stream,
-                                        n, k, j, A, shiftA, lda, strideA, W, shiftW, ldw, strideW,
-                                        norms, ldd, strideD);
-
-            rocblas_int mm
-                = (mode == rocsolver_latrd_mode_gemv_out) ? 2 * (n - j - 1) : n + (n - j - 1);
-            rocblas_int shift = (mode == rocsolver_latrd_mode_gemv_out) ? idx2D(j + 1, jw, ldw)
-                                                                        : idx2D(0, jw, ldw);
-            rocblas_int jj = (mode == rocsolver_latrd_mode_gemv_out) ? n - j - 1 : n;
-            ROCSOLVER_LAUNCH_KERNEL(latrd_reduce_kernel<T>, dim3(grr_reduce, 1, batch_count),
-                                    dim3(thr_reduce, thc_reduce, 1), lmemsize_reduce, stream, uplo,
-                                    mm, grc_compute, jj, norms, ldd, strideD, W, shiftW + shift,
-                                    ldw, strideW, work, strideblk);
-            //----------------------------------------------------------
+            static constexpr int NB = 256;
+            dim3 gemvt_grid(n + n - j - 1, 1, batch_count);
+            dim3 gemvt_threads(NB);
+            ROCSOLVER_LAUNCH_KERNEL((latrd_upper_computeW_gemvt_kernel<NB, T>), gemvt_grid,
+                                    gemvt_threads, 0, stream, n, k, j, A, shiftA, lda, strideA, W,
+                                    shiftW, ldw, strideW, W, shiftW + idx2D(0, jw, ldw), ldw,
+                                    strideW, work, strideblk);
 
             // update column j of W
             //--------------------------------------------------------------
@@ -2137,13 +2101,10 @@ rocblas_status rocsolver_latrd_forsytrd_template(rocblas_handle handle,
                 dim3(thr_updates, thc_updates, 1), lmemsize_updates, stream, n, k, j, A, shiftA,
                 lda, strideA, W, shiftW, ldw, strideW, work, strideblk, tau, strideP);
 
-            rocblasCall_dot<COMPLEX, T>(handle, j, W, shiftW + idx2D(0, jw, ldw), 1, strideW, A,
-                                        shiftA + idx2D(0, j, lda), 1, strideA, batch_count, norms,
-                                        work, workArr);
-
-            ROCSOLVER_LAUNCH_KERNEL(scale_axpy<T>, grid_n, threads, 0, stream, j, norms,
-                                    tau + j - 1, strideP, A, shiftA + idx2D(0, j, lda), strideA, W,
-                                    shiftW + idx2D(0, jw, ldw), strideW);
+            ROCSOLVER_LAUNCH_KERNEL((latrd_dot_scale_axpy<1024, T>), dim3(1, 1, batch_count),
+                                    dim3(1024, 1, 1), 0, stream, j, A, shiftA + idx2D(0, j, lda),
+                                    strideA, W, shiftW + idx2D(0, jw, ldw), strideW, tau + j - 1,
+                                    strideP);
         }
     }
 

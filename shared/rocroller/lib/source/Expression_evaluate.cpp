@@ -458,6 +458,9 @@ namespace rocRoller
                 assertNonNullPointer(arg);
                 AssertFatal(arg != 1, "Fast division not supported for denominator == 1");
 
+                if(arg == 0)
+                    return 0;
+
                 auto magic = libdivide::libdivide_u32_branchfree_gen(arg);
 
                 return magic.magic;
@@ -466,6 +469,10 @@ namespace rocRoller
             int32_t evaluate(int32_t const& arg) const
             {
                 assertNonNullPointer(arg);
+
+                if(arg == 0)
+                    return 0;
+
                 auto magic = libdivide::libdivide_s32_branchfree_gen(arg);
 
                 return magic.magic;
@@ -474,6 +481,10 @@ namespace rocRoller
             int64_t evaluate(int64_t const& arg) const
             {
                 assertNonNullPointer(arg);
+
+                if(arg == 0)
+                    return 0;
+
                 auto magic = libdivide::libdivide_s64_branchfree_gen(arg);
 
                 return magic.magic;
@@ -511,6 +522,9 @@ namespace rocRoller
                 assertNonNullPointer(arg);
                 AssertFatal(arg != 1, "Fast division not supported for denominator == 1");
 
+                if(arg == 0)
+                    return 0;
+
                 auto magic = libdivide::libdivide_u32_branchfree_gen(arg);
 
                 return magic.more & libdivide::LIBDIVIDE_32_SHIFT_MASK;
@@ -520,6 +534,9 @@ namespace rocRoller
             {
                 assertNonNullPointer(arg);
 
+                if(arg == 0)
+                    return 0;
+
                 auto magic = libdivide::libdivide_s32_branchfree_gen(arg);
 
                 return magic.more & libdivide::LIBDIVIDE_32_SHIFT_MASK;
@@ -528,6 +545,9 @@ namespace rocRoller
             int evaluate(int64_t const& arg) const
             {
                 assertNonNullPointer(arg);
+
+                if(arg == 0)
+                    return 0;
 
                 auto magic = libdivide::libdivide_s64_branchfree_gen(arg);
 
@@ -542,6 +562,9 @@ namespace rocRoller
             {
                 assertNonNullPointer(arg);
 
+                if(arg == 0)
+                    return 0;
+
                 auto magic = libdivide::libdivide_s32_branchfree_gen(arg);
 
                 return static_cast<int32_t>((int8_t)magic.more >> 7);
@@ -550,6 +573,9 @@ namespace rocRoller
             int64_t evaluate(int64_t const& arg) const
             {
                 assertNonNullPointer(arg);
+
+                if(arg == 0)
+                    return 0;
 
                 auto magic = libdivide::libdivide_s64_branchfree_gen(arg);
 
