@@ -7,7 +7,7 @@ This document outlines the process for migrating from a single library repositor
 To ensure consistency and maintainability during the migration, the following pre-conditions must be satisfied:  
 
 1. **Identify Next Repo to Migrate:**
-   - Please refer to the main README.md on the order of repositories being migrated.
+   - Please refer to the main [README.md](README.md) on the order of repositories being migrated.
    - This is usually discussed in advance in meetings with the technical leads of that project.
 
 2. **Identify Branches and Pull Requests:**  
