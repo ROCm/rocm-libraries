@@ -117,7 +117,7 @@ git push origin develop
 ### Step 6: Source of Truth Declaration
 
 1. **Update repos-config.json:**
-   - Update the true/false values in the [`repos-config.json`](/.github/repos-config.json) file that automated workflows use to determine which way source gets synchornized.
+   - Update the true/false values in the [`repos-config.json`](/.github/repos-config.json) file that automated workflows use to determine which way the source gets synchronized..
    - `auto_subtree_pull` should now be false, `auto_subtree_push` should now be true for this migrated project.
    - Make this change on both the `develop` and `release-staging` branches.
    - https://github.com/ROCm/rocm-libraries/blob/develop/.github/repos-config.json
