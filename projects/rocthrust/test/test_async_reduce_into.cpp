@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -27,8 +27,11 @@
 #  include <thrust/device_vector.h>
 #  include <thrust/host_vector.h>
 
-#  include <unittest/unittest.h>
-#  include <unittest/util_async.h>
+#  include "test_param_fixtures.hpp"
+#  include "test_real_assertions.hpp"
+#  include "test_utils.hpp"
+
+TESTS_DEFINE(AsyncReduceIntoTests, NumericalTestsParams);
 
 THRUST_SUPPRESS_DEPRECATED_PUSH
 
@@ -107,7 +110,7 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
   ,
-  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ASSERT_EQ_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::reduce_into`.
   ,
   thrust::device.on(stream_),
@@ -128,7 +131,7 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
   ,
-  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ASSERT_EQ_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::reduce_into`.
   ,
   thrust::device(thrust::device_allocator<void>{}).on(stream_),
@@ -139,25 +142,21 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
 DEFINE_SYNC_REDUCE_INVOKER(reduce_sync_invoker, THRUST_FWD(first), THRUST_FWD(last));
 
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
-  reduce_into_async_invoker_init,
-  THRUST_FWD(first),
-  THRUST_FWD(last),
-  THRUST_FWD(output),
-  unittest::random_integer<T>());
+  reduce_into_async_invoker_init, THRUST_FWD(first), THRUST_FWD(last), THRUST_FWD(output), random_integer<T>());
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_init,
   thrust::device,
   THRUST_FWD(first),
   THRUST_FWD(last),
   THRUST_FWD(output),
-  unittest::random_integer<T>());
+  random_integer<T>());
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_allocator_init,
   thrust::device(thrust::device_allocator<void>{}),
   THRUST_FWD(first),
   THRUST_FWD(last),
   THRUST_FWD(output),
-  unittest::random_integer<T>());
+  random_integer<T>());
 DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_on_init
   // Members.
@@ -172,14 +171,14 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
   ,
-  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ASSERT_EQ_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::reduce_into`.
   ,
   thrust::device.on(stream_),
   THRUST_FWD(first),
   THRUST_FWD(last),
   THRUST_FWD(output),
-  unittest::random_integer<T>());
+  random_integer<T>());
 DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_allocator_on_init
   // Members.
@@ -194,23 +193,23 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
   ,
-  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ASSERT_EQ_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::reduce_into`.
   ,
   thrust::device(thrust::device_allocator<void>{}).on(stream_),
   THRUST_FWD(first),
   THRUST_FWD(last),
   THRUST_FWD(output),
-  unittest::random_integer<T>());
+  random_integer<T>());
 
-DEFINE_SYNC_REDUCE_INVOKER(reduce_sync_invoker_init, THRUST_FWD(first), THRUST_FWD(last), unittest::random_integer<T>());
+DEFINE_SYNC_REDUCE_INVOKER(reduce_sync_invoker_init, THRUST_FWD(first), THRUST_FWD(last), random_integer<T>());
 
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_init_plus,
   THRUST_FWD(first),
   THRUST_FWD(last),
   THRUST_FWD(output),
-  unittest::random_integer<T>(),
+  random_integer<T>(),
   thrust::plus<T>());
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_init_plus,
@@ -218,7 +217,7 @@ DEFINE_ASYNC_REDUCE_INTO_INVOKER(
   THRUST_FWD(first),
   THRUST_FWD(last),
   THRUST_FWD(output),
-  unittest::random_integer<T>(),
+  random_integer<T>(),
   thrust::plus<T>());
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_allocator_init_plus,
@@ -226,7 +225,7 @@ DEFINE_ASYNC_REDUCE_INTO_INVOKER(
   THRUST_FWD(first),
   THRUST_FWD(last),
   THRUST_FWD(output),
-  unittest::random_integer<T>(),
+  random_integer<T>(),
   thrust::plus<T>());
 DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_on_init_plus
@@ -242,14 +241,14 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
   ,
-  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ASSERT_EQ_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::reduce_into`.
   ,
   thrust::device.on(stream_),
   THRUST_FWD(first),
   THRUST_FWD(last),
   THRUST_FWD(output),
-  unittest::random_integer<T>(),
+  random_integer<T>(),
   thrust::plus<T>());
 DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_allocator_on_init_plus
@@ -265,25 +264,25 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
   ,
-  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ASSERT_EQ_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::reduce_into`.
   ,
   thrust::device(thrust::device_allocator<void>{}).on(stream_),
   THRUST_FWD(first),
   THRUST_FWD(last),
   THRUST_FWD(output),
-  unittest::random_integer<T>(),
+  random_integer<T>(),
   thrust::plus<T>());
 
 DEFINE_SYNC_REDUCE_INVOKER(
-  reduce_sync_invoker_init_plus, THRUST_FWD(first), THRUST_FWD(last), unittest::random_integer<T>(), thrust::plus<T>());
+  reduce_sync_invoker_init_plus, THRUST_FWD(first), THRUST_FWD(last), random_integer<T>(), thrust::plus<T>());
 
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_init_custom_plus,
   THRUST_FWD(first),
   THRUST_FWD(last),
   THRUST_FWD(output),
-  unittest::random_integer<T>(),
+  random_integer<T>(),
   custom_plus<T>());
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_init_custom_plus,
@@ -291,7 +290,7 @@ DEFINE_ASYNC_REDUCE_INTO_INVOKER(
   THRUST_FWD(first),
   THRUST_FWD(last),
   THRUST_FWD(output),
-  unittest::random_integer<T>(),
+  random_integer<T>(),
   custom_plus<T>());
 DEFINE_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_allocator_init_custom_plus,
@@ -299,7 +298,7 @@ DEFINE_ASYNC_REDUCE_INTO_INVOKER(
   THRUST_FWD(first),
   THRUST_FWD(last),
   THRUST_FWD(output),
-  unittest::random_integer<T>(),
+  random_integer<T>(),
   custom_plus<T>());
 DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_on_init_custom_plus
@@ -315,14 +314,14 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
   ,
-  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ASSERT_EQ_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::reduce_into`.
   ,
   thrust::device.on(stream_),
   THRUST_FWD(first),
   THRUST_FWD(last),
   THRUST_FWD(output),
-  unittest::random_integer<T>(),
+  random_integer<T>(),
   custom_plus<T>());
 DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   reduce_into_async_invoker_device_allocator_on_init_custom_plus
@@ -338,173 +337,217 @@ DEFINE_STATEFUL_ASYNC_REDUCE_INTO_INVOKER(
   thrust::THRUST_DEVICE_BACKEND_DETAIL::throw_on_error(SPECIALIZE_DEVICE_RESOURCE_NAME(StreamDestroy)(stream_));
   // `validate_event` member.
   ,
-  ASSERT_EQUAL_QUIET(stream_, e.stream().native_handle());
+  ASSERT_EQ_QUIET(stream_, e.stream().native_handle());
   // Arguments to `thrust::async::reduce_into`.
   ,
   thrust::device(thrust::device_allocator<void>{}).on(stream_),
   THRUST_FWD(first),
   THRUST_FWD(last),
   THRUST_FWD(output),
-  unittest::random_integer<T>(),
+  random_integer<T>(),
   custom_plus<T>());
 
 DEFINE_SYNC_REDUCE_INVOKER(
-  reduce_sync_invoker_init_custom_plus,
-  THRUST_FWD(first),
-  THRUST_FWD(last),
-  unittest::random_integer<T>(),
-  custom_plus<T>());
+  reduce_sync_invoker_init_custom_plus, THRUST_FWD(first), THRUST_FWD(last), random_integer<T>(), custom_plus<T>());
 
 ///////////////////////////////////////////////////////////////////////////////
 
-template <template <typename> class AsyncReduceIntoInvoker, template <typename> class SyncReduceIntoInvoker>
-struct test_async_reduce_into
+template <typename T, template <typename> class AsyncReduceIntoInvoker, template <typename> class SyncReduceIntoInvoker>
+THRUST_HOST void test_async_reduce_into()
 {
-  template <typename T>
-  struct tester
+  for (auto size : get_sizes())
   {
-    THRUST_HOST void operator()(std::size_t n)
-    {
-      thrust::host_vector<T> h0(unittest::random_integers<T>(n));
+    SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-      thrust::device_vector<T> d0a(h0);
-      thrust::device_vector<T> d0b(h0);
-      thrust::device_vector<T> d0c(h0);
-      thrust::device_vector<T> d0d(h0);
+    thrust::host_vector<T> h0(random_integers<T>(size));
 
-      auto s0a = thrust::device_make_unique<T>();
-      auto s0b = thrust::device_make_unique<T>();
-      auto s0c = thrust::device_make_unique<T>();
-      auto s0d = thrust::device_make_unique<T>();
+    thrust::device_vector<T> d0a(h0);
+    thrust::device_vector<T> d0b(h0);
+    thrust::device_vector<T> d0c(h0);
+    thrust::device_vector<T> d0d(h0);
 
-      auto const s0a_ptr = s0a.get();
-      auto const s0b_ptr = s0b.get();
-      auto const s0c_ptr = s0c.get();
-      auto const s0d_ptr = s0d.get();
+    auto s0a = thrust::device_make_unique<T>();
+    auto s0b = thrust::device_make_unique<T>();
+    auto s0c = thrust::device_make_unique<T>();
+    auto s0d = thrust::device_make_unique<T>();
 
-      AsyncReduceIntoInvoker<T> invoke_async;
-      SyncReduceIntoInvoker<T> invoke_sync;
+    auto const s0a_ptr = s0a.get();
+    auto const s0b_ptr = s0b.get();
+    auto const s0c_ptr = s0c.get();
+    auto const s0d_ptr = s0d.get();
 
-      ASSERT_EQUAL(h0, d0a);
-      ASSERT_EQUAL(h0, d0b);
-      ASSERT_EQUAL(h0, d0c);
-      ASSERT_EQUAL(h0, d0d);
+    AsyncReduceIntoInvoker<T> invoke_async;
+    SyncReduceIntoInvoker<T> invoke_sync;
 
-      auto f0a = invoke_async(d0a.begin(), d0a.end(), s0a_ptr);
-      auto f0b = invoke_async(d0b.begin(), d0b.end(), s0b_ptr);
-      auto f0c = invoke_async(d0c.begin(), d0c.end(), s0c_ptr);
-      auto f0d = invoke_async(d0d.begin(), d0d.end(), s0d_ptr);
+    ASSERT_EQ(h0, d0a);
+    ASSERT_EQ(h0, d0b);
+    ASSERT_EQ(h0, d0c);
+    ASSERT_EQ(h0, d0d);
 
-      invoke_async.validate_event(f0a);
-      invoke_async.validate_event(f0b);
-      invoke_async.validate_event(f0c);
-      invoke_async.validate_event(f0d);
+    auto f0a = invoke_async(d0a.begin(), d0a.end(), s0a_ptr);
+    auto f0b = invoke_async(d0b.begin(), d0b.end(), s0b_ptr);
+    auto f0c = invoke_async(d0c.begin(), d0c.end(), s0c_ptr);
+    auto f0d = invoke_async(d0d.begin(), d0d.end(), s0d_ptr);
 
-      // This potentially runs concurrently with the copies.
-      auto const r0 = invoke_sync(h0.begin(), h0.end());
+    invoke_async.validate_event(f0a);
+    invoke_async.validate_event(f0b);
+    invoke_async.validate_event(f0c);
+    invoke_async.validate_event(f0d);
 
-      TEST_EVENT_WAIT(thrust::when_all(f0a, f0b, f0c, f0d));
+    // This potentially runs concurrently with the copies.
+    auto const r0 = invoke_sync(h0.begin(), h0.end());
 
-      ASSERT_EQUAL(r0, *s0a_ptr);
-      ASSERT_EQUAL(r0, *s0b_ptr);
-      ASSERT_EQUAL(r0, *s0c_ptr);
-      ASSERT_EQUAL(r0, *s0d_ptr);
-    }
-  };
-};
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker, reduce_sync_invoker>::tester),
-  NumericTypes,
-  test_async_reduce_into);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device, reduce_sync_invoker>::tester),
-  NumericTypes,
-  test_async_reduce_into_policy);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device_allocator, reduce_sync_invoker>::tester),
-  NumericTypes,
-  test_async_reduce_into_policy_allocator);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device_on, reduce_sync_invoker>::tester),
-  NumericTypes,
-  test_async_reduce_into_policy_on);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<reduce_into_async_invoker_device_allocator_on, reduce_sync_invoker>::tester),
-  NumericTypes,
-  test_async_reduce_into_policy_allocator_on);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_init, reduce_sync_invoker_init>::tester),
-  NumericTypes,
-  test_async_reduce_into_init);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device_init, reduce_sync_invoker_init>::tester),
-  NumericTypes,
-  test_async_reduce_into_policy_init);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<reduce_into_async_invoker_device_allocator_init, reduce_sync_invoker_init>::tester),
-  NumericTypes,
-  test_async_reduce_into_policy_allocator_init);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<reduce_into_async_invoker_device_on_init, reduce_sync_invoker_init>::tester),
-  NumericTypes,
-  test_async_reduce_into_policy_on_init);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<reduce_into_async_invoker_device_allocator_on_init, reduce_sync_invoker_init>::tester),
-  NumericTypes,
-  test_async_reduce_into_policy_allocator_on_init);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<reduce_into_async_invoker_init_plus, reduce_sync_invoker_init_plus>::tester),
-  NumericTypes,
-  test_async_reduce_into_init_plus);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<reduce_into_async_invoker_device_init_plus, reduce_sync_invoker_init_plus>::tester),
-  NumericTypes,
-  test_async_reduce_into_policy_init_plus);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<reduce_into_async_invoker_device_allocator_init_plus, reduce_sync_invoker_init_plus>::tester),
-  NumericTypes,
-  test_async_reduce_into_policy_allocator_init_plus);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<reduce_into_async_invoker_device_on_init_plus, reduce_sync_invoker_init_plus>::tester),
-  NumericTypes,
-  test_async_reduce_into_policy_on_init_plus);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device_allocator_on_init_plus,
-                                               reduce_sync_invoker_init_plus>::tester),
-  NumericTypes,
-  test_async_reduce_into_policy_allocator_on_init_plus);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(
-    test_async_reduce_into<reduce_into_async_invoker_init_custom_plus, reduce_sync_invoker_init_custom_plus>::tester),
-  NumericTypes,
-  test_async_reduce_into_init_custom_plus);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device_init_custom_plus,
-                                               reduce_sync_invoker_init_custom_plus>::tester),
-  NumericTypes,
-  test_async_reduce_into_policy_init_custom_plus);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device_allocator_init_custom_plus,
-                                               reduce_sync_invoker_init_custom_plus>::tester),
-  NumericTypes,
-  test_async_reduce_into_policy_allocator_init_custom_plus);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device_on_init_custom_plus,
-                                               reduce_sync_invoker_init_custom_plus>::tester),
-  NumericTypes,
-  test_async_reduce_into_policy_on_init_custom_plus);
-DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
-  THRUST_PP_EXPAND_ARGS(test_async_reduce_into<reduce_into_async_invoker_device_allocator_on_init_custom_plus,
-                                               reduce_sync_invoker_init_custom_plus>::tester),
-  NumericTypes,
-  test_async_reduce_into_policy_allocator_on_init_custom_plus);
+    TEST_EVENT_WAIT(thrust::when_all(f0a, f0b, f0c, f0d));
+
+    ASSERT_EQ(r0, *s0a_ptr);
+    ASSERT_EQ(r0, *s0b_ptr);
+    ASSERT_EQ(r0, *s0c_ptr);
+    ASSERT_EQ(r0, *s0d_ptr);
+  }
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker, reduce_sync_invoker>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker_device, reduce_sync_invoker>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_allocator)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker_device_allocator, reduce_sync_invoker>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_on)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker_device_on, reduce_sync_invoker>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_allocator_on)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker_device_allocator_on, reduce_sync_invoker>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_init)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker_init, reduce_sync_invoker_init>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_init)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker_device_init, reduce_sync_invoker_init>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_allocator_init)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker_device_allocator_init, reduce_sync_invoker_init>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_on_init)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker_device_on_init, reduce_sync_invoker_init>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_allocator_on_init)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker_device_allocator_on_init, reduce_sync_invoker_init>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_init_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker_init_plus, reduce_sync_invoker_init_plus>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_init_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker_device_init_plus, reduce_sync_invoker_init_plus>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_allocator_init_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker_device_allocator_init_plus, reduce_sync_invoker_init_plus>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_on_init_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker_device_on_init_plus, reduce_sync_invoker_init_plus>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_allocator_on_init_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker_device_allocator_on_init_plus, reduce_sync_invoker_init_plus>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_init_custom_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker_init_custom_plus, reduce_sync_invoker_init_custom_plus>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_init_custom_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker_device_init_custom_plus, reduce_sync_invoker_init_custom_plus>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_allocator_init_custom_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T,
+                         reduce_into_async_invoker_device_allocator_init_custom_plus,
+                         reduce_sync_invoker_init_custom_plus>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_on_init_custom_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T, reduce_into_async_invoker_device_on_init_custom_plus, reduce_sync_invoker_init_custom_plus>();
+}
+
+TYPED_TEST(AsyncReduceIntoTests, test_async_reduce_into_policy_allocator_on_init_custom_plus)
+{
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  using T = typename TestFixture::input_type;
+  test_async_reduce_into<T,
+                         reduce_into_async_invoker_device_allocator_on_init_custom_plus,
+                         reduce_sync_invoker_init_custom_plus>();
+}
 
 #endif

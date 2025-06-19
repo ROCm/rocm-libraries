@@ -29,6 +29,8 @@
 #  include <unittest/unittest.h>
 #  include <unittest/util_async.h>
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 template <typename T>
 struct custom_plus
 {
@@ -564,12 +566,16 @@ struct test_async_reduce_using
     // When you import the customization points into the global namespace,
     // they should be selected instead of the synchronous algorithms.
     {
+      THRUST_SUPPRESS_DEPRECATED_PUSH
       using namespace thrust::async;
       f0a = reduce(d0a.begin(), d0a.end());
+      THRUST_SUPPRESS_DEPRECATED_POP
     }
     {
+      THRUST_SUPPRESS_DEPRECATED_PUSH
       using thrust::async::reduce;
       f0b = reduce(d0b.begin(), d0b.end());
+      THRUST_SUPPRESS_DEPRECATED_POP
     }
 
     // ADL should find the synchronous algorithms.
