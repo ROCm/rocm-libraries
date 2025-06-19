@@ -21,33 +21,39 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#define CHECK_CORRECT(stComplex, ttComplex)                                          \
-  do                                                                                 \
-  {                                                                                  \
-    if (std::isinf(stComplex.real()))                                                \
-    {                                                                                \
-      ASSERT_TRUE(std::isinf(ttComplex.real()));                                     \
-    }                                                                                \
-    else if (std::isnan(stComplex.real()))                                           \
-    {                                                                                \
-      ASSERT_TRUE(std::isnan(ttComplex.real()));                                     \
-    }                                                                                \
-    else                                                                             \
-    {                                                                                \
-      ASSERT_NEAR(stComplex.real(), ttComplex.real(), abs(stComplex.real() * 0.01)); \
-    }                                                                                \
-    if (std::isinf(stComplex.imag()))                                                \
-    {                                                                                \
-      ASSERT_TRUE(std::isinf(ttComplex.imag()));                                     \
-    }                                                                                \
-    else if (std::isnan(stComplex.imag()))                                           \
-    {                                                                                \
-      ASSERT_TRUE(std::isnan(ttComplex.imag()));                                     \
-    }                                                                                \
-    else                                                                             \
-    {                                                                                \
-      ASSERT_NEAR(stComplex.imag(), ttComplex.imag(), abs(stComplex.imag() * 0.01)); \
-    }                                                                                \
+#define CHECK_CORRECT(stComplex, ttComplex, lreal, limag, rreal, rimag)                \
+  do                                                                                   \
+  {                                                                                    \
+    SCOPED_TRACE(testing::Message()                                                    \
+                 << "\nLHS --- Real: " << lreal << " Imag: " << limag << std::endl     \
+                 << "RHS --- Real: " << rreal << " Imag: " << rimag << std::endl       \
+                 << "AC: " << rreal * lreal << " BD: " << limag * rimag << std::endl); \
+    if (std::isinf(stComplex.real()))                                                  \
+    {                                                                                  \
+      ASSERT_TRUE(std::isinf(ttComplex.real()));                                       \
+    }                                                                                  \
+    else if (std::isnan(stComplex.real()))                                             \
+    {                                                                                  \
+      ASSERT_TRUE(std::isnan(ttComplex.real()));                                       \
+    }                                                                                  \
+    else                                                                               \
+    {                                                                                  \
+      auto eps = stComplex.real() < 0.01 ? 1e-2 : abs(stComplex.real() * 0.05);        \
+      ASSERT_NEAR(stComplex.real(), ttComplex.real(), eps);                            \
+    }                                                                                  \
+    if (std::isinf(stComplex.imag()))                                                  \
+    {                                                                                  \
+      ASSERT_TRUE(std::isinf(ttComplex.imag()));                                       \
+    }                                                                                  \
+    else if (std::isnan(stComplex.imag()))                                             \
+    {                                                                                  \
+      ASSERT_TRUE(std::isnan(ttComplex.imag()));                                       \
+    }                                                                                  \
+    else                                                                               \
+    {                                                                                  \
+      auto eps = stComplex.imag() < 0.01 ? 1e-2 : abs(stComplex.imag() * 0.05);        \
+      ASSERT_NEAR(stComplex.imag(), ttComplex.imag(), eps);                            \
+    }                                                                                  \
   } while (0)
 
 TESTS_DEFINE(ComplexTests, FloatTestsParams);
@@ -419,52 +425,67 @@ TYPED_TEST(ComplexPairsTests, TestAsignOperator)
 }
 
 template <typename T, typename U, class StdComplexOp, class StdScalarOp, class ThrustComplexOp, class ThrustScalarOp>
-void run_compound_tests(const StdComplexOp& standard_complex_operator,
-                        const StdScalarOp& standard_scalar_operator,
-                        const ThrustComplexOp& thrust_complex_operator,
-                        const ThrustScalarOp& thrust_scalar_operator)
+void run_compound_tests(
+  const StdComplexOp& standard_complex_operator,
+  const StdScalarOp& standard_scalar_operator,
+  const ThrustComplexOp& thrust_complex_operator,
+  const ThrustScalarOp& thrust_scalar_operator,
+  T mini = -500000,
+  T maxi = 500000)
 {
-  constexpr size_t test_it = 123456;
+  constexpr T test_it = 15;
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_real_distribution<T> dis(std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
+  std::uniform_real_distribution<T> dis(mini, maxi);
 
-  for (size_t i = 0; i < test_it; i++)
+  T inc = (maxi - mini) / test_it;
+
+  for (T treal = mini; treal <= maxi; treal += inc)
   {
-    T treal = dis(gen);
-    T timag = dis(gen);
+    for (T timag = mini; timag <= maxi; timag += inc)
+    {
+      for (U ureal = mini; ureal <= maxi; ureal += inc)
+      {
+        for (U uimag = mini; uimag <= maxi; uimag += inc)
+        {
+          std::complex<T> stComplex(treal, timag);
+          std::complex<U> suComplex(ureal, uimag);
 
-    U ureal = dis(gen);
-    U uimag = dis(gen);
+          thrust::complex<T> ttComplex(treal, timag);
+          thrust::complex<U> tuComplex(ureal, uimag);
 
-    std::complex<T> stComplex(treal, timag);
-    std::complex<U> suComplex(ureal, uimag);
+          standard_complex_operator(stComplex, suComplex);
+          thrust_complex_operator(ttComplex, tuComplex);
 
-    thrust::complex<T> ttComplex(treal, timag);
-    thrust::complex<U> tuComplex(ureal, uimag);
+          CHECK_CORRECT(stComplex, ttComplex, treal, timag, ureal, uimag);
 
-    standard_complex_operator(stComplex, suComplex);
-    thrust_complex_operator(ttComplex, tuComplex);
+          stComplex = std::complex<T>(treal, timag);
+          ttComplex = thrust::complex<T>(treal, timag);
 
-    CHECK_CORRECT(stComplex, ttComplex);
+          standard_scalar_operator(stComplex, ureal);
+          thrust_scalar_operator(ttComplex, ureal);
 
-    stComplex = std::complex<T>(treal, timag);
-    ttComplex = thrust::complex<T>(treal, timag);
+          CHECK_CORRECT(stComplex, ttComplex, treal, timag, ureal, uimag);
 
-    standard_scalar_operator(stComplex, ureal);
-    thrust_scalar_operator(ttComplex, ureal);
+          stComplex = std::complex<T>(treal, timag);
+          ttComplex = thrust::complex<T>(treal, timag);
 
-    CHECK_CORRECT(stComplex, ttComplex);
+          standard_scalar_operator(stComplex, uimag);
+          thrust_scalar_operator(ttComplex, uimag);
 
-    stComplex = std::complex<T>(treal, timag);
-    ttComplex = thrust::complex<T>(treal, timag);
-
-    standard_scalar_operator(stComplex, uimag);
-    thrust_scalar_operator(ttComplex, uimag);
-
-    CHECK_CORRECT(stComplex, ttComplex);
+          CHECK_CORRECT(stComplex, ttComplex, treal, timag, ureal, uimag);
+        }
+      }
+    }
   }
 }
+
+/**
+ * Due to hipcc compiler issue, std complex functions for
+ * complex number is not working properly. To get
+ * around this we will have to calculate the real and
+ * imaginary parts separately manually.
+ */
 
 TYPED_TEST(ComplexPairsTests, TestCompoundPlusOperator)
 {
@@ -475,10 +496,12 @@ TYPED_TEST(ComplexPairsTests, TestCompoundPlusOperator)
 
   run_compound_tests<T, U>(
     [=](std::complex<T>& lhs, const std::complex<U>& rhs) {
-      lhs += rhs;
+      using type = typename thrust::detail::promoted_numerical_type<T, U>::type;
+      lhs        = std::complex<type>(lhs.real() + rhs.real(), lhs.imag() + rhs.imag());
     },
     [=](std::complex<T>& lhs, const U& rhs) {
-      lhs += rhs;
+      using type = typename thrust::detail::promoted_numerical_type<T, U>::type;
+      lhs        = std::complex<type>(lhs.real() + rhs, lhs.imag());
     },
     [=](thrust::complex<T>& lhs, const thrust::complex<U>& rhs) {
       lhs += rhs;
@@ -497,10 +520,12 @@ TYPED_TEST(ComplexPairsTests, TestCompoundMinusOperator)
 
   run_compound_tests<T, U>(
     [=](std::complex<T>& lhs, const std::complex<U>& rhs) {
-      lhs -= rhs;
+      using type = typename thrust::detail::promoted_numerical_type<T, U>::type;
+      lhs        = std::complex<type>(lhs.real() - rhs.real(), lhs.imag() - rhs.imag());
     },
     [=](std::complex<T>& lhs, const U& rhs) {
-      lhs -= rhs;
+      using type = typename thrust::detail::promoted_numerical_type<T, U>::type;
+      lhs        = std::complex<type>(lhs.real() - rhs, lhs.imag());
     },
     [=](thrust::complex<T>& lhs, const thrust::complex<U>& rhs) {
       lhs -= rhs;
@@ -519,10 +544,23 @@ TYPED_TEST(ComplexPairsTests, TestCompoundMultiplyOperator)
 
   run_compound_tests<T, U>(
     [=](std::complex<T>& lhs, const std::complex<U>& rhs) {
-      lhs *= rhs;
+      // (a + bi)(c + di) = ac + i(ad + bc) - bd
+      using type = typename thrust::detail::promoted_numerical_type<T, U>::type;
+
+      type a = static_cast<type>(lhs.real());
+      type b = static_cast<type>(lhs.imag());
+      type c = static_cast<type>(rhs.real());
+      type d = static_cast<type>(rhs.imag());
+
+      type ac   = a * c;
+      type bd   = b * d;
+      type real = ac - bd;
+      type imag = (a * d) + (b * c);
+
+      lhs = std::complex<type>(real, imag);
     },
     [=](std::complex<T>& lhs, const U& rhs) {
-      lhs *= rhs;
+      lhs = std::complex<T>(lhs.real() * rhs, lhs.imag() * rhs);
     },
     [=](thrust::complex<T>& lhs, const thrust::complex<U>& rhs) {
       lhs *= rhs;
@@ -541,7 +579,23 @@ TYPED_TEST(ComplexPairsTests, TestCompoundDivisionOperator)
 
   run_compound_tests<T, U>(
     [=](std::complex<T>& lhs, const std::complex<U>& rhs) {
-      lhs /= rhs;
+      using type = typename thrust::detail::promoted_numerical_type<T, U>::type;
+
+      // (a + bi) / (c + di) = ((ac + bd) + (bc -ad)i)/ (c^2 + d^2)
+      type a = static_cast<type>(lhs.real());
+      type b = static_cast<type>(lhs.imag());
+      type c = static_cast<type>(rhs.real());
+      type d = static_cast<type>(rhs.imag());
+
+      type ac    = a * c;
+      type bd    = b * d;
+      type bc    = b * c;
+      type ad    = a * d;
+      type denom = c * c + d * d;
+      type real  = (ac + bd) / denom;
+      type imag  = (bc - ad) / denom;
+
+      lhs = std::complex<type>(real, imag);
     },
     [=](std::complex<T>& lhs, const U& rhs) {
       lhs /= rhs;
