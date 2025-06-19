@@ -45,9 +45,9 @@ namespace rocRoller
      * @{
      */
     /**
-    *  @brief Floating point 8-bit type in E5M2 format
-    *
-    */
+     *  @brief Floating point 8-bit type in E5M2 format
+     *
+     */
     struct BF8
     {
         constexpr BF8()

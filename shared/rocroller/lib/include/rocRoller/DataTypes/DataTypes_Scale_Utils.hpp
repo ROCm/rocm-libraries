@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2019-2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,43 +25,24 @@
  *******************************************************************************/
 
 #pragma once
-#include <rocRoller/Context_fwd.hpp>
-#include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
+
+#include <type_traits>
 
 namespace rocRoller
 {
-    namespace KernelGraph
+    struct E8M0;
+    template <typename T>
+    concept CScaleType = std::is_same_v<T, E8M0>;
+
+    template <CScaleType T>
+    inline float scaleToFloat(T scale)
     {
-
-        /**
-         * @brief Rewrite KernelGraph to add LDS operations for
-         * loading/storing data.
-         *
-         * Modifies the coordinate and control graphs to add LDS
-         * information.
-         *
-         * @ingroup Transformations
-         */
-        class AddLDS : public GraphTransform
-        {
-        public:
-            AddLDS(CommandParametersPtr params, ContextPtr context)
-                : m_params(params)
-                , m_context(context)
-            {
-            }
-
-            KernelGraph apply(KernelGraph const& original) override;
-            std::string name() const override
-            {
-                return "AddLDS";
-            }
-
-            std::vector<GraphConstraint> postConstraints() const override;
-
-        private:
-            CommandParametersPtr m_params;
-            ContextPtr           m_context;
-        };
+        return static_cast<float>(scale);
     }
-}
+
+    template <CScaleType T>
+    inline T floatToScale(float value)
+    {
+        return T(value);
+    }
+} // namespace rocRoller

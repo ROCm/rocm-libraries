@@ -153,6 +153,7 @@ set(
     catch/CustomAssertions.cpp
     catch/TestKernels.cpp
 
+    catch/AddPrefetchTest.cpp
     catch/AliasDataFlowTagsTest.cpp
     catch/AnnotateInstructionsTest.cpp
     catch/BinaryExpressionTest.cpp
@@ -202,6 +203,7 @@ set(
     catch/WMMAObserverUnitTest.cpp
     catch/WidenAddrExprTo64bitTest.cpp
     catch/mxDataGeneratorTest.cpp
+    catch/ScaleUtilsTest.cpp
 )
 
 add_executable(rocRollerTests_catch ${rocRollerTests_catch_SOURCES})

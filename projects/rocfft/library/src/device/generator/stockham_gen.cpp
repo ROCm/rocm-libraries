@@ -764,6 +764,14 @@ int main()
             if(!threads_per_transform.empty())
                 specs2d.threads_per_transform = threads_per_transform.back();
 
+            // 2D_SINGLE kernels use the specified workgroup size
+            // directly
+            if(scheme == "CS_KERNEL_2D_SINGLE")
+            {
+                specs.wgs_is_derived   = true;
+                specs2d.wgs_is_derived = true;
+            }
+
             // aim for occupancy-2 by default
             specs.lds_byte_limit   = lds_size_bytes / 2;
             specs2d.lds_byte_limit = lds_size_bytes / 2;

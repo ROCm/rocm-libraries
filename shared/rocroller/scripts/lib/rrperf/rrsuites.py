@@ -1425,6 +1425,7 @@ def fp4_target_d2lds_mi32x32x64_pf4x1():
         M=4096,
         N=4096,
         K=32768,
+        beta=0.0,
         mac_m=256,
         mac_n=256,
         mac_k=128,
@@ -1473,6 +1474,7 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
         M=4096,
         N=4096,
         K=32768,
+        beta=0.0,
         mac_m=256,
         mac_n=256,
         mac_k=128,
@@ -1521,6 +1523,7 @@ def fp4_no_scale_target_d2lds_mi16x16x128_pf4x1():
         M=4096,
         N=4096,
         K=32768,
+        beta=0.0,
         mac_m=256,
         mac_n=256,
         mac_k=128,
@@ -1565,6 +1568,18 @@ def fp4_kernels():
     yield from fp4_target_d2lds_mi32x32x64_pf4x1()
     yield from fp4_target_d2lds_mi16x16x128_pf4x1()
     yield from fp4_no_scale_target_d2lds_mi16x16x128_pf4x1()
+
+
+def add_wgm(mapping, suite):
+    for run in suite:
+        run.workgroupMapping = mapping
+        yield run
+
+
+def fp4_target_sweep_wgms():
+    for wgm_dim in [0, 1]:
+        for wgm_value in range(1, 50):
+            yield from add_wgm((wgm_dim, wgm_value), fp4_no_scale_target_d2lds_mi16x16x128_pf4x1())
 
 
 def generate_gfx950():

@@ -135,6 +135,7 @@ endif()
 find_package(hip REQUIRED)
 find_package(LLVM REQUIRED)
 find_package(LLD REQUIRED)
+find_package(amd_comgr REQUIRED)
 
 if(ROCROLLER_BUILD_SHARED_LIBS)
     add_library(rocroller SHARED)
@@ -183,6 +184,7 @@ target_link_libraries(rocroller
        hip::host
     PRIVATE
         ${msgpack_libs}
+        amd_comgr
 )
 target_include_directories(rocroller PUBLIC "${LLD_INCLUDE_DIRS}")
 

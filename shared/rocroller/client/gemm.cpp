@@ -254,7 +254,9 @@ namespace rocRoller::Client::GEMMClient
                                    problemParams.beta,
                                    problemParams.transA == TransposeType::T,
                                    problemParams.transB == TransposeType::T,
-                                   problemParams.scaleBlockSize);
+                                   problemParams.scaleBlockSize,
+                                   problemParams.scaleTypeA,
+                                   problemParams.scaleTypeB);
         }
         else
         {
@@ -406,7 +408,7 @@ namespace rocRoller::Client::GEMMClient
         }
         else if(problemParams.scaleA == Operations::ScaleMode::SingleScale)
         {
-            auto scaleValue             = floatToScale(problemParams.scaleValueA);
+            uint8_t scaleValue = floatToScale(problemParams.scaleTypeA, problemParams.scaleValueA);
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
             commandArgs.setArgument(aScaleTag.value(), ArgumentType::Value, scaleValue);
 
@@ -426,7 +428,7 @@ namespace rocRoller::Client::GEMMClient
         }
         else if(problemParams.scaleB == Operations::ScaleMode::SingleScale)
         {
-            auto scaleValue             = floatToScale(problemParams.scaleValueB);
+            uint8_t scaleValue = floatToScale(problemParams.scaleTypeB, problemParams.scaleValueB);
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
             commandArgs.setArgument(bScaleTag.value(), ArgumentType::Value, scaleValue);
 
@@ -1550,12 +1552,14 @@ int main(int argc, const char* argv[])
     {
         types.scaleB        = Operations::ScaleMode::SingleScale;
         problem.scaleValueB = 1.0f;
+        types.scaleTypeB    = types.scaleTypeA;
     }
 
     if(types.scaleB != Operations::ScaleMode::None && types.scaleA == Operations::ScaleMode::None)
     {
         types.scaleA        = Operations::ScaleMode::SingleScale;
         problem.scaleValueA = 1.0f;
+        types.scaleTypeA    = types.scaleTypeB;
     }
 
     auto const& arch = GPUArchitectureLibrary::getInstance()->GetArch(solution.architecture);
@@ -1581,7 +1585,9 @@ int main(int argc, const char* argv[])
     problem.transA         = types.transA;
     problem.transB         = types.transB;
     problem.scaleA         = types.scaleA;
+    problem.scaleTypeA     = types.scaleTypeA;
     problem.scaleB         = types.scaleB;
+    problem.scaleTypeB     = types.scaleTypeB;
     problem.scaleBlockSize = types.scaleBlockSize;
 
     solution.typeA          = types.typeA;

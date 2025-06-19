@@ -38,6 +38,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/library_types.h>
 #include <hipblas-common/hipblas-common.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __HIP_PLATFORM_NVCC__

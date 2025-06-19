@@ -29,10 +29,8 @@ struct StockhamKernelFused2D : public StockhamKernelRR
         , kernel0(specs0)
         , kernel1(specs1)
     {
-        threads_per_transform = std::max(specs1.length * specs0.threads_per_transform,
-                                         specs0.length * specs1.threads_per_transform);
+        threads_per_transform = specs0.threads_per_transform;
         // 2D_SINGLE does one 2D slab per workgroup(threadblock)
-        workgroup_size       = threads_per_transform;
         transforms_per_block = 1;
         R.size               = std::max(kernel0.nregisters, kernel1.nregisters);
         kernel0.writeGuard   = true;
@@ -86,6 +84,11 @@ struct StockhamKernelFused2D : public StockhamKernelRR
             auto length0  = kernel0.length;
             auto length1  = kernel1.length;
             auto rw_iters = length0 * length1 / workgroup_size;
+
+            // assert that workgroup_size evenly divides the lengths,
+            // as currently there's no logic to load the remainder
+            if(length0 * length1 % workgroup_size)
+                throw std::runtime_error("workgroup size does not evenly divide 2d length");
 
             StatementList load_stmts;
             StatementList load_trans_stmts;
@@ -154,6 +157,9 @@ struct StockhamKernelFused2D : public StockhamKernelRR
             auto length0  = kernel0.length;
             auto length1  = kernel1.length;
             auto rw_iters = length0 * length1 / workgroup_size;
+
+            if(length0 * length1 % workgroup_size)
+                throw std::runtime_error("workgroup size does not evenly divide 2d length");
 
             StatementList store_stmts;
             StatementList store_trans_stmts;
@@ -270,12 +276,9 @@ struct StockhamKernelFused2D : public StockhamKernelRR
         body += LineBreak{};
         body += CommentLines{"",
                              "this kernel:",
-                             "  uses " + std::to_string(threads_per_transform)
+                             "  uses " + std::to_string(workgroup_size)
                                  + " threads per 2d transform",
-                             "  does 1 2d transforms per thread block",
-                             "therefore it should be called with " + std::to_string(workgroup_size)
-                                 + " threads per block",
-                             ""};
+                             "  (1 2d slab per thread block)"};
 
         Variable d{"d", "int"};
         Variable index_along_d{"index_along_d", "size_t"};

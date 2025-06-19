@@ -71,7 +71,7 @@ def runTestCommand (platform, project)
     String testExclude = platform.jenkinsLabel.contains('compile') ? '-LE GPU' : ''
 
     def command = """#!/usr/bin/env bash
-                set -x
+                set -ex
                 cd ${project.paths.project_build_prefix}
 
                 pushd build
@@ -349,7 +349,7 @@ def runPerformanceCommand (platform, project)
             def ARCHIVE_LIMIT = "101"
 
             def command = """#!/usr/bin/env bash
-                        set -x
+                        set -ex
                         cd ${project.paths.project_build_prefix}/
 
                         ${sshBlock}

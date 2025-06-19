@@ -24,44 +24,28 @@
  *
  *******************************************************************************/
 
-#pragma once
-#include <rocRoller/Context_fwd.hpp>
-#include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
+#include <catch2/catch_template_test_macros.hpp>
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
-namespace rocRoller
+#include "CustomSections.hpp"
+#include "SimpleTest.hpp"
+
+using namespace rocRoller;
+using namespace Catch::Matchers;
+
+TEMPLATE_TEST_CASE("ConvertScales", "[datatypes]", E8M0)
 {
-    namespace KernelGraph
+    float prevValue = 0;
+    for(int i = 0; i < 255; i++)
     {
+        uint8_t scale    = i;
+        auto    curValue = scaleToFloat<TestType>(static_cast<TestType>(scale));
+        if(prevValue != 0)
+            CHECK(curValue == prevValue * 2.0f);
+        auto convertBack = static_cast<uint8_t>(floatToScale<TestType>(curValue));
+        CHECK(scale == convertBack);
 
-        /**
-         * @brief Rewrite KernelGraph to add LDS operations for
-         * loading/storing data.
-         *
-         * Modifies the coordinate and control graphs to add LDS
-         * information.
-         *
-         * @ingroup Transformations
-         */
-        class AddLDS : public GraphTransform
-        {
-        public:
-            AddLDS(CommandParametersPtr params, ContextPtr context)
-                : m_params(params)
-                , m_context(context)
-            {
-            }
-
-            KernelGraph apply(KernelGraph const& original) override;
-            std::string name() const override
-            {
-                return "AddLDS";
-            }
-
-            std::vector<GraphConstraint> postConstraints() const override;
-
-        private:
-            CommandParametersPtr m_params;
-            ContextPtr           m_context;
-        };
+        prevValue = curValue;
     }
 }

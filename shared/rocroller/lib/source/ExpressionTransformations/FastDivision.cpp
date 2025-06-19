@@ -45,6 +45,39 @@ namespace rocRoller
          * operations.
          */
 
+        std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr>
+            getMagicMultipleShiftAndSign(ExpressionPtr denominator, ContextPtr context)
+        {
+            auto multiple = launchTimeSubExpressions(magicMultiple(denominator), context);
+
+            auto resultType = resultVariableType(denominator);
+            auto typeInfo   = DataTypeInfo::Get(resultType);
+
+            if(!typeInfo.isSigned)
+            {
+                auto shifts = launchTimeSubExpressions(magicShifts(denominator), context);
+
+                return {multiple, shifts, nullptr};
+            }
+
+            auto bitfield = launchTimeSubExpressions(magicShiftAndSign(denominator), context);
+
+            auto mask   = typeInfo.elementBits - 1;
+            auto shifts = bitfield & literal(mask);
+
+            // Sign is in the most significant bit of the least significant byte
+            // (i.e. bit 7). We want every bit to match bit 7.
+            // 1. Shift it left into the most significant bit.
+            // 2. Arithmetic shift right by the width of the type to sign
+            // extend into every bit.
+            int  startingBit = 7;
+            int  endingBit   = typeInfo.elementBits - 1;
+            auto sign        = (convert(resultType, bitfield) << literal((endingBit - startingBit)))
+                        >> literal(endingBit);
+
+            return {multiple, shifts, sign};
+        }
+
         void enableDivideBy(ExpressionPtr expr, ContextPtr context)
         {
             expr = FastArithmetic(context)(expr);
@@ -69,8 +102,8 @@ namespace rocRoller
 
             AssertFatal(exprTimes[EvaluationTime::KernelLaunch], ShowValue(exprTimes));
 
-            auto magicExpr     = launchTimeSubExpressions(magicMultiple(expr), context);
-            auto numShiftsExpr = launchTimeSubExpressions(magicShifts(expr), context);
+            auto const& [magicExpr, numShiftsExpr, signExpr]
+                = getMagicMultipleShiftAndSign(expr, context);
 
             auto magicTimes = evaluationTimes(magicExpr);
             auto shiftTimes = evaluationTimes(numShiftsExpr);
@@ -85,7 +118,7 @@ namespace rocRoller
 
             if(isSigned)
             {
-                auto signExpr  = launchTimeSubExpressions(magicSign(expr), context);
+                AssertFatal(signExpr != nullptr);
                 auto signTimes = evaluationTimes(signExpr);
 
                 AssertFatal(signTimes[EvaluationTime::KernelExecute],
@@ -120,8 +153,8 @@ namespace rocRoller
 
             auto k = context->kernel();
 
-            auto magicExpr     = launchTimeSubExpressions(magicMultiple(denominator), context);
-            auto numShiftsExpr = launchTimeSubExpressions(magicShifts(denominator), context);
+            auto const& [magicExpr, numShiftsExpr, signExpr]
+                = getMagicMultipleShiftAndSign(denominator, context);
 
             {
                 EvaluationTimes evalTimes
@@ -155,8 +188,6 @@ namespace rocRoller
             }
             else
             {
-                auto signExpr = launchTimeSubExpressions(magicSign(denominator), context);
-
                 {
                     EvaluationTimes evalTimes = evaluationTimes(signExpr);
 

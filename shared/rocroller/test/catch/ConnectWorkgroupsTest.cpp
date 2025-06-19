@@ -334,8 +334,7 @@ namespace ConnectWorkgroupsTest
                            numTilesM,
                            numTilesN,
                            evaluate(magicMultiple(rocRoller::Expression::literal(numTilesN))),
-                           evaluate(magicShifts(rocRoller::Expression::literal(numTilesN))),
-                           evaluate(magicSign(rocRoller::Expression::literal(numTilesN))),
+                           evaluate(magicShiftAndSign(rocRoller::Expression::literal(numTilesN))),
                            d_wgx.get(),
                            d_wgy.get());
 
