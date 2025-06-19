@@ -128,12 +128,15 @@ git push origin develop
    - https://github.com/ROCm/rocm-libraries/blob/develop/README.md
 
 ## Post-Migration Activities  
-  
-1. **Communication:**  
+
+1. **Re-enable synchronization jobs:**
+   - Re-enable any automated workflows that were paused.
+
+2. **Communication:**  
    - Communicate to key stakeholders the successful completion of the migration.
    - Continue daily meetings and active written communications to offer support for any issues that arise. 
   
-2. **Automated Patching of Original Repos:**
+3. **Automated Patching of Original Repos:**
     - During the migration period, when a pull request is merged on the monorepo, the contents of the pull request will be split into patches to be pushed onto the original repos.
     - This supports potential pull requests that touch multiple projects.
     - Example pull request on the monorepo: https://github.com/ROCm/rocm-libraries/pull/230
@@ -144,7 +147,7 @@ git push origin develop
         - https://github.com/ROCm/rocRAND/commit/39fe7d9dca493765573c3c8be275328547ea2abe
         - https://github.com/ROCm/rocThrust/commit/cdcc666a4c42770fcb7d9fde7c71c243b53c476e
 
-3. **Monitoring:**  
+4. **Monitoring:**  
    - Monitor the monorepo for any issues or discrepancies.
    - If the automated patching for a PR failed to make it to the original repo, use this GitHub Action: https://github.com/ROCm/rocm-libraries/actions/workflows/pr-merge-sync-patches-manual.yml
   
