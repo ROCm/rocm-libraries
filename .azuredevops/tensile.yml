@@ -51,7 +51,6 @@ pr:
     - shared/tensile/tuning_docs
     - shared/tensile/*.md
     - shared/tensile/.*.y*ml
-  drafts: false
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/Tensile.yml@pipelines_repo
