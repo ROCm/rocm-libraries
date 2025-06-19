@@ -17,6 +17,9 @@
 
 #include <thrust/detail/config.h>
 
+// need to suppress deprecation warnings inside a lot of thrust headers
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 // Disabled on MSVC && NVCC < 11.1 for GH issue #1098.
 #if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && defined(__CUDACC__)
 #  if (__CUDACC_VER_MAJOR__ < 11) || (__CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ < 1)
@@ -31,8 +34,6 @@
 #  include <thrust/host_vector.h>
 
 #  include <unittest/unittest.h>
-
-THRUST_SUPPRESS_DEPRECATED_PUSH
 
 enum wait_policy
 {
@@ -194,3 +195,8 @@ DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES_AND_NAME(
 // TODO: Test future return type.
 
 #endif
+
+// we need to leak the suppression on clang/MSVC to suppresses warnings from the cudafe1.stub.c file
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+THRUST_SUPPRESS_DEPRECATED_POP
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
