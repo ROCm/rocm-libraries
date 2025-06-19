@@ -59,6 +59,9 @@ using is_int128 = std::false_type;
 template<class T>
 using is_uint128 = std::false_type;
 #endif // ROCPRIM_HAS_INT128_SUPPORT
+
+template<class T>
+using is_double_custom_type = std::is_same<typename std::remove_cv<T>::type, common::custom_type<double,double,1>>;
     
 namespace {
 // On Windows, GTest doesn't provide the appropriate overloads
@@ -77,10 +80,16 @@ constexpr bool is_win32 = true;
 constexpr bool is_win32 = false;
 #endif
 
-template <class T>
-void inline protected_assert_eq(T val, T expected, const bool use_assert_true, size_t index=-1)
+template <typename T>
+constexpr bool is_printable = !is_win32 || (
+    !test_utils::is_int128<T>::value &&
+    !test_utils::is_uint128<T>::value &&
+    !test_utils::is_double_custom_type<T>::value);
+
+template <class T, bool UseGTestAssert = is_printable<T>>
+void inline protected_assert_eq(T val, T expected, size_t index=-1)
 {
-    if (use_assert_true)
+    if constexpr (UseGTestAssert)
     {
         const bool result = (val == expected);
         if (index > -1)
@@ -126,7 +135,7 @@ void assert_eq(const std::vector<T>& result,
         if(bit_equal(result[i], expected[i]))
             continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
 
-        protected_assert_eq(result[i], expected[i], is_win32 && (test_utils::is_int128<T>::value || test_utils::is_uint128<T>::value || (typeid(T) == typeid(common::custom_type<double,double,1>))), i);
+        protected_assert_eq(result[i], expected[i], i);
     }
 }
 
@@ -144,7 +153,7 @@ void assert_eq(const std::vector<common::custom_type<T, T, true>>& result,
         if(bit_equal(result[i].x, expected[i].x) && bit_equal(result[i].y, expected[i].y))
             continue; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
 
-        protected_assert_eq(result[i], expected[i], is_win32, i);
+        protected_assert_eq(result[i], expected[i], i);
     }
 }
 
@@ -185,7 +194,7 @@ void assert_eq(const T& result, const T& expected)
     if(bit_equal(result, expected))
         return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
 
-    protected_assert_eq(result, expected, is_win32 && (test_utils::is_int128<T>::value || test_utils::is_uint128<T>::value));
+    protected_assert_eq(result, expected);
 }
 
 template<class T>
@@ -194,7 +203,7 @@ void assert_eq(const common::custom_type<T, T, true>& result,
 {
     if(bit_equal(result.x, expected.x) && bit_equal(result.y, expected.y))
         return; // Check bitwise equality for +NaN, -NaN, +0.0, -0.0, +inf, -inf.
-    protected_assert_eq(result, expected, is_win32 && (test_utils::is_int128<T>::value || test_utils::is_uint128<T>::value));
+    protected_assert_eq(result, expected);
 }
 
 template<>
@@ -254,7 +263,7 @@ auto assert_near(const std::vector<T>& result, const std::vector<T>& expected, c
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
     {
-        protected_assert_eq(result[i], expected[i], is_win32 && (test_utils::is_int128<T>::value || test_utils::is_uint128<T>::value), i);
+        protected_assert_eq(result[i], expected[i], i);
     }
 }
 
@@ -295,8 +304,8 @@ auto assert_near(const std::vector<common::custom_type<T, T, true>>& result,
     ASSERT_EQ(result.size(), expected.size());
     for(size_t i = 0; i < result.size(); i++)
     {
-        protected_assert_eq(result[i].x, expected[i].x, is_win32 && (test_utils::is_int128<T>::value || test_utils::is_uint128<T>::value), i);
-        protected_assert_eq(result[i].y, expected[i].y, is_win32 && (test_utils::is_int128<T>::value || test_utils::is_uint128<T>::value), i);
+        protected_assert_eq(result[i].x, expected[i].x, i);
+        protected_assert_eq(result[i].y, expected[i].y, i);
     }
 }
 
@@ -335,7 +344,7 @@ template<class T>
 auto assert_near(const T& result, const T& expected, const float)
     -> typename std::enable_if<std::is_integral<T>::value>::type
 {
-    protected_assert_eq(result, expected, is_win32 && (test_utils::is_int128<T>::value || test_utils::is_uint128<T>::value));
+    protected_assert_eq(result, expected);
 }
 
 template<class T, std::enable_if_t<std::is_same<T, rocprim::bfloat16>::value ||
@@ -364,8 +373,8 @@ auto assert_near(const common::custom_type<T, T, true>& result,
                  const common::custom_type<T, T, true>& expected,
                  const float) -> typename std::enable_if<std::is_integral<T>::value>::type
 {
-    protected_assert_eq(result.x, expected.x, is_win32 && (test_utils::is_int128<T>::value || test_utils::is_uint128<T>::value));
-    protected_assert_eq(result.y, expected.y, is_win32 && (test_utils::is_int128<T>::value || test_utils::is_uint128<T>::value));
+    protected_assert_eq(result.x, expected.x);
+    protected_assert_eq(result.y, expected.y);
 }
 
 template<class T>
