@@ -50,6 +50,7 @@ namespace async
 namespace unimplemented
 {
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 template <typename FromPolicy, typename ToPolicy, typename ForwardIt, typename Sentinel, typename OutputIt>
 THRUST_DEPRECATED THRUST_HOST event<FromPolicy> async_copy(
   thrust::execution_policy<FromPolicy>& /*from_exec*/,
@@ -62,6 +63,7 @@ THRUST_DEPRECATED THRUST_HOST event<FromPolicy> async_copy(
                            "this algorithm is not implemented for the specified system");
   return {};
 }
+THRUST_SUPPRESS_DEPRECATED_POP
 
 } // namespace unimplemented
 

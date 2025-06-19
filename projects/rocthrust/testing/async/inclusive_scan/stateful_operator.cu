@@ -17,6 +17,8 @@
 
 #include <thrust/detail/config.h>
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 #if THRUST_CPP_DIALECT >= 2017
 
 #  include <async/inclusive_scan/mixin.h>
@@ -31,7 +33,7 @@ struct stateful_operator
 {
   T offset;
 
-  THRUST_HOST_DEVICE T operator()(T v1, T v2)
+  __host__ __device__ T operator()(T v1, T v2)
   {
     return v1 + v2 + offset;
   }
@@ -78,4 +80,9 @@ struct test_stateful_operator
 };
 DECLARE_GENERIC_SIZED_UNITTEST_WITH_TYPES(test_stateful_operator, NumericTypes);
 
-#endif // C++14
+#endif // C++17
+
+// we need to leak the suppression on clang/MSVC to suppresses warnings from the cudafe1.stub.c file
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+THRUST_SUPPRESS_DEPRECATED_POP
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
