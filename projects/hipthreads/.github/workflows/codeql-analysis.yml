@@ -1,0 +1,46 @@
+name: "CodeQL Analysis"
+
+on:
+    push:
+        branches: [ "main", "gpu_thread" ]
+    pull_request:
+        branches: [ "main", "gpu_thread" ]
+
+jobs:
+    analyze:
+        name: Analyze
+        runs-on: gpu-thread-code-scan
+        permissions:
+            actions: read
+            contents: read
+            security-events: write
+        
+        steps:
+        -   name: Checkout repository
+            uses: actions/checkout@v4
+        
+        -   name: Install Dependencies
+            run: |
+                sudo apt-get update
+                sudo apt-get install -y wget gnupg2
+                wget -qO - https://repo.radeon.com/rocm/rocm.gpg.key | sudo apt-key add -
+                echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/6.4.1/ jammy main" | sudo tee /etc/apt/sources.list.d/rocm.list
+                echo -e "Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 1001" | sudo tee /etc/apt/preferences.d/rocm.pref
+                sudo apt-get update
+                sudo apt-get install -y g++ cmake rocm-dev
+            
+        -   name: Initialize CodeQL
+            uses: github/codeql-action/init@v3
+            with:
+                languages: cpp
+                queries: ./codeql-amd-checks.qls
+        
+        -   name: Build Project
+            run: |
+                cmake -S . -B build
+                cmake --build build
+            
+        -   name: Perform CodeQL Analysis
+            uses: github/codeql-action/analyze@v3
+            with:
+                category: "/language:cpp"
