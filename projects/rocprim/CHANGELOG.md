@@ -94,6 +94,7 @@ when the input or inital type was smaller than the output type.
 * Fixed device radix sort not returning the correct required temporary storage when a double buffer contains `nullptr`.
 * Fixed constness of equality operators (`==` and `!=`) in `rocprim::key_value_pair`.
 * Fixed an issue for the comparison operators in `arg_index_iterator` and `texture_cache_iterator`, where `<` and `>` comparators were swapped.
+* Fixed an issue for the `rocprim::thread_reduce` not working correctly with a prefix value.
 
 ### Known issues
 * When using `rocprim::deterministic_inclusive_scan_by_key` and `rocprim::deterministic_exclusive_scan_by_key` the intermediate values can change order on Navi3x

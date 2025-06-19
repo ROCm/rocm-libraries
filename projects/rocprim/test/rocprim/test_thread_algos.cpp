@@ -36,7 +36,6 @@
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
 
-#include <cstdint>
 #include <rocprim/config.hpp>
 #include <rocprim/functional.hpp>
 #include <rocprim/intrinsics/thread.hpp>
