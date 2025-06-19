@@ -75,9 +75,9 @@ def build_client(c, clean=True, configure=True, build=True, arch=None):
             f"-DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++",
             "-DCMAKE_BUILD_TYPE=Release",
             # "-DTENSILE_ENABLE_CLIENT=ON",
-            # "-DTENSILE_ENABLE_HOST=ON",
+            # "-DTENSILE_ENABLE_HOST=OFF",
             # "-DTENSILE_ENABLE_DEVICE=OFF",
-            # "-DTENSILE_BUILD_TESTING=OFF",
+            # "-DTENSILE_BUILD_TESTING=ON",
             "-DGPU_TARGETS=gfx1201"
         ]
         
