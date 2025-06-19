@@ -116,8 +116,8 @@ git push origin develop
 
 ### Step 6: Source of Truth Declaration
 
-1. **Update repo config json:**
-   - Update the true/false values in the repo-config json file that automated workflows use to determine which way source gets synchornized.
+1. **Update repos-config.json:**
+   - Update the true/false values in the [`repos-config.json`](/.github/repos-config.json) file that automated workflows use to determine which way source gets synchornized.
    - `auto_subtree_pull` should now be false, `auto_subtree_push` should now be true for this migrated project.
    - Make this change on both the `develop` and `release-staging` branches.
    - https://github.com/ROCm/rocm-libraries/blob/develop/.github/repos-config.json
@@ -132,7 +132,7 @@ git push origin develop
 1. **Re-enable synchronization jobs:**
    - Re-enable any automated workflows that were paused.
 
-2. **Communication:**  
+2. **Communication:**
    - Communicate to key stakeholders the successful completion of the migration.
    - Continue daily meetings and active written communications to offer support for any issues that arise. 
   
@@ -147,7 +147,7 @@ git push origin develop
         - https://github.com/ROCm/rocRAND/commit/39fe7d9dca493765573c3c8be275328547ea2abe
         - https://github.com/ROCm/rocThrust/commit/cdcc666a4c42770fcb7d9fde7c71c243b53c476e
 
-4. **Monitoring:**  
+4. **Monitoring:**
    - Monitor the monorepo for any issues or discrepancies.
    - If the automated patching for a PR failed to make it to the original repo, use this GitHub Action: https://github.com/ROCm/rocm-libraries/actions/workflows/pr-merge-sync-patches-manual.yml
   
