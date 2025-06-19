@@ -58,6 +58,29 @@ class arg_index_iterator
 private:
     using input_category = typename std::iterator_traits<InputIterator>::iterator_category;
 
+    template<typename T>
+    class proxy_pointer
+    {
+        T value_;
+
+    public:
+        ROCPRIM_HOST_DEVICE
+        inline proxy_pointer(const T& value)
+            : value_(value)
+        {}
+
+        ROCPRIM_HOST_DEVICE
+        const T* operator->() const
+        {
+            return &value_;
+        }
+
+        ROCPRIM_HOST_DEVICE const T& operator*() const
+        {
+            return value_;
+        }
+    };
+
 public:
     /// The type of the value that can be obtained by dereferencing the iterator.
     using value_type = ::rocprim::key_value_pair<Difference, InputValueType>;
@@ -66,7 +89,7 @@ public:
     using reference = const value_type&;
     /// \brief A pointer type of the type iterated over (\p value_type).
     /// It's `const` since arg_index_iterator is a read-only iterator.
-    using pointer = const value_type*;
+    using pointer = const proxy_pointer<InputValueType>;
     /// A type used for identify distance between iterators.
     using difference_type = Difference;
     /// The category of the iterator.
@@ -122,7 +145,7 @@ public:
     ROCPRIM_HOST_DEVICE inline
     pointer operator->() const
     {
-        return &(*(*this));
+        return pointer(*iterator_);
     }
 
     ROCPRIM_HOST_DEVICE inline
