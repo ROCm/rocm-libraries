@@ -58,31 +58,27 @@ def hostlibtest(c, clean=False, configure=False, build=False, run=False, coverag
         "arch": "Specify the GPU architecture to build for (e.g., gfx90a)."
     }
 )
-def buildclient(c, clean=True, configure=True, build=True, install=False, arch=None):
+def build_client(c, clean=True, configure=True, build=True, arch=None):
     client_build_dir = "build/client"
 
     if clean and os.path.exists(client_build_dir):
-        print("Cleaning previous client build directory...")
         c.run(f"rm -rf {client_build_dir}")
 
     if configure:
-        print("Configuring tensile-client...")
         os.makedirs(client_build_dir, exist_ok=True)
-        
-        rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
         
         cmake_cmd = [
             "cmake",
             "-S", "next-cmake",
             "-B", client_build_dir,
-            f"-DCMAKE_PREFIX_PATH={rocm_path}",
-            f"-DCMAKE_CXX_COMPILER={rocm_path}/bin/amdclang++",
+            f"-DCMAKE_PREFIX_PATH=/opt/rocm",
+            f"-DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++",
             "-DCMAKE_BUILD_TYPE=Release",
             # "-DTENSILE_ENABLE_CLIENT=ON",
             # "-DTENSILE_ENABLE_HOST=ON",
             # "-DTENSILE_ENABLE_DEVICE=OFF",
             # "-DTENSILE_BUILD_TESTING=OFF",
-            "-DGPU_TARGETS=gfx90a"
+            "-DGPU_TARGETS=gfx1201"
         ]
         
         # if arch:
@@ -91,11 +87,5 @@ def buildclient(c, clean=True, configure=True, build=True, install=False, arch=N
         c.run(" ".join(cmake_cmd))
 
     if build:
-        print("Building tensile-client...")
         c.run(f"cmake --build {client_build_dir} --parallel")
 
-    if install:
-        print("Installing tensile-client...")
-        c.run(f"cmake --install {client_build_dir}")
-
-    # print(f"Build complete. Executable at: {client_build_dir}/bin/tensile-client")
