@@ -57,6 +57,7 @@ namespace async
 namespace unimplemented
 {
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename T, typename BinaryOp>
 THRUST_DEPRECATED THRUST_HOST future<DerivedPolicy, T>
 async_reduce(thrust::execution_policy<DerivedPolicy>&, ForwardIt, Sentinel, T, BinaryOp)
@@ -65,6 +66,7 @@ async_reduce(thrust::execution_policy<DerivedPolicy>&, ForwardIt, Sentinel, T, B
                            "this algorithm is not implemented for the specified system");
   return {};
 }
+THRUST_SUPPRESS_DEPRECATED_POP
 
 } // namespace unimplemented
 
@@ -230,6 +232,7 @@ THRUST_INLINE_CONSTANT reduce_detail::reduce_fn reduce{};
 namespace unimplemented
 {
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename OutputIt, typename T, typename BinaryOp>
 THRUST_DEPRECATED THRUST_HOST event<DerivedPolicy>
 async_reduce_into(thrust::execution_policy<DerivedPolicy>&, ForwardIt, Sentinel, OutputIt, T, BinaryOp)
@@ -238,6 +241,7 @@ async_reduce_into(thrust::execution_policy<DerivedPolicy>&, ForwardIt, Sentinel,
                            "this algorithm is not implemented for the specified system");
   return {};
 }
+THRUST_SUPPRESS_DEPRECATED_POP
 
 } // namespace unimplemented
 

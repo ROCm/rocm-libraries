@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -25,7 +25,8 @@ THRUST_SUPPRESS_DEPRECATED_PUSH
 #include <thrust/system/omp/detail/par.h>
 #include <thrust/system/tbb/detail/par.h>
 
-#include <unittest/unittest.h>
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  include <thrust/system/cuda/detail/par.h>
@@ -71,7 +72,7 @@ struct TestDependencyAttachment
   template <typename... Expected, typename T>
   static void assert_correct(T)
   {
-    ASSERT_EQUAL(
+    ASSERT_EQ(
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
       (::cuda::std::is_same<
 #else
@@ -85,7 +86,7 @@ struct TestDependencyAttachment
   template <typename Allocator, typename... Expected, typename T>
   static void assert_correct_with_allocator(T)
   {
-    ASSERT_EQUAL(
+    ASSERT_EQ(
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
       (::cuda::std::is_same<
 #else
@@ -135,19 +136,28 @@ using cuda_par_info = policy_info<thrust::system::cuda::detail::par_t, thrust::c
 using hip_par_info = policy_info<thrust::system::hip::detail::par_t, thrust::hip_rocprim::execute_on_stream_base>;
 #endif
 
-SimpleUnitTest<TestDependencyAttachment,
-               unittest::type_list<
+using PolicyTestsParams = ::testing::Types<
 // TODO: uncomment when dependencies are generalized to all backends
-// sequential_info,
-// cpp_par_info,
-// omp_par_info,
-// tbb_par_info,
+// Params<sequential_info>,
+// Params<cpp_par_info>,
+// Params<omp_par_info>,
+// Params<tbb_par_info>,
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                 cuda_par_info
+  Params<cuda_par_info>>;
 #else
-                 hip_par_info
+  Params<hip_par_info>>;
 #endif
-                 >>
-  TestDependencyAttachmentInstance;
+
+TESTS_DEFINE(DependenciesAwarePoliciesTests, PolicyTestsParams);
+
+TYPED_TEST(DependenciesAwarePoliciesTests, TestDependencyAttachmentInstance)
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  TestDependencyAttachment<T> test;
+  test();
+}
 
 THRUST_SUPPRESS_DEPRECATED_POP

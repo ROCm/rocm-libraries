@@ -36,12 +36,13 @@
 #include <tuple>
 #include <type_traits>
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
 
-struct capture_as_dependency_fn
+struct THRUST_DEPRECATED capture_as_dependency_fn
 {
   template <typename Dependency>
   auto operator()(Dependency&& dependency) const THRUST_DECLTYPE_RETURNS(capture_as_dependency(THRUST_FWD(dependency)))
@@ -49,14 +50,16 @@ struct capture_as_dependency_fn
 
 // Default implementation: universal forwarding.
 template <typename Dependency>
-auto capture_as_dependency(Dependency&& dependency) THRUST_DECLTYPE_RETURNS(THRUST_FWD(dependency))
+THRUST_DEPRECATED auto capture_as_dependency(Dependency&& dependency) THRUST_DECLTYPE_RETURNS(THRUST_FWD(dependency))
 
-  template <typename... Dependencies>
-  auto capture_as_dependency(std::tuple<Dependencies...>& dependencies)
+  THRUST_SUPPRESS_DEPRECATED_PUSH template <typename... Dependencies>
+  THRUST_DEPRECATED auto capture_as_dependency(std::tuple<Dependencies...>& dependencies)
     THRUST_DECLTYPE_RETURNS(tuple_for_each(THRUST_FWD(dependencies), capture_as_dependency_fn{}))
+      THRUST_SUPPRESS_DEPRECATED_POP
 
-      template <template <typename> class BaseSystem, typename... Dependencies>
-      struct execute_with_dependencies : BaseSystem<execute_with_dependencies<BaseSystem, Dependencies...>>
+  template <template <typename> class BaseSystem, typename... Dependencies>
+  struct THRUST_DEPRECATED execute_with_dependencies
+    : BaseSystem<execute_with_dependencies<BaseSystem, Dependencies...>>
 {
 private:
   using super_t = BaseSystem<execute_with_dependencies<BaseSystem, Dependencies...>>;
@@ -128,7 +131,7 @@ public:
 };
 
 template <typename Allocator, template <typename> class BaseSystem, typename... Dependencies>
-struct execute_with_allocator_and_dependencies
+struct THRUST_DEPRECATED execute_with_allocator_and_dependencies
     : BaseSystem<execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>>
 {
 private:
@@ -208,9 +211,9 @@ public:
 
 template <template <typename> class BaseSystem, typename... Dependencies>
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST std::tuple<::cuda::std::remove_cvref_t<Dependencies>...>
+THRUST_DEPRECATED THRUST_HOST std::tuple<::cuda::std::remove_cvref_t<Dependencies>...>
 #else
-THRUST_HOST std::tuple<::std::remove_cv_t<::std::remove_reference_t<Dependencies>>...>
+THRUST_DEPRECATED THRUST_HOST std::tuple<::std::remove_cv_t<::std::remove_reference_t<Dependencies>>...>
 #endif
 extract_dependencies(thrust::detail::execute_with_dependencies<BaseSystem, Dependencies...>&& system)
 {
@@ -218,9 +221,9 @@ extract_dependencies(thrust::detail::execute_with_dependencies<BaseSystem, Depen
 }
 template <template <typename> class BaseSystem, typename... Dependencies>
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST std::tuple<::cuda::std::remove_cvref_t<Dependencies>...>
+THRUST_DEPRECATED THRUST_HOST std::tuple<::cuda::std::remove_cvref_t<Dependencies>...>
 #else
-THRUST_HOST std::tuple<::std::remove_cv_t<::std::remove_reference_t<Dependencies>>...>
+THRUST_DEPRECATED THRUST_HOST std::tuple<::std::remove_cv_t<::std::remove_reference_t<Dependencies>>...>
 #endif
 extract_dependencies(thrust::detail::execute_with_dependencies<BaseSystem, Dependencies...>& system)
 {
@@ -229,31 +232,34 @@ extract_dependencies(thrust::detail::execute_with_dependencies<BaseSystem, Depen
 
 template <typename Allocator, template <typename> class BaseSystem, typename... Dependencies>
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST std::tuple<::cuda::std::remove_cvref_t<Dependencies>...> extract_dependencies(
+THRUST_DEPRECATED THRUST_HOST std::tuple<::cuda::std::remove_cvref_t<Dependencies>...>
 #else
-THRUST_HOST std::tuple<::std::remove_cv_t<::std::remove_reference_t<Dependencies>>...> extract_dependencies(
+THRUST_DEPRECATED THRUST_HOST std::tuple<::std::remove_cv_t<::std::remove_reference_t<Dependencies>>...>
 #endif
+extract_dependencies(
   thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>&& system)
 {
   return std::move(system).extract_dependencies();
 }
 template <typename Allocator, template <typename> class BaseSystem, typename... Dependencies>
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST std::tuple<::cuda::std::remove_cvref_t<Dependencies>...> extract_dependencies(
+THRUST_DEPRECATED THRUST_HOST std::tuple<::cuda::std::remove_cvref_t<Dependencies>...>
 #else
-THRUST_HOST std::tuple<::std::remove_cv_t<::std::remove_reference_t<Dependencies>>...> extract_dependencies(
+THRUST_DEPRECATED THRUST_HOST std::tuple<::std::remove_cv_t<::std::remove_reference_t<Dependencies>>...>
 #endif
+extract_dependencies(
   thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>& system)
 {
   return std::move(system).extract_dependencies();
 }
 
 template <typename System>
-THRUST_HOST std::tuple<> extract_dependencies(System&&)
+THRUST_DEPRECATED THRUST_HOST std::tuple<> extract_dependencies(System&&)
 {
   return std::tuple<>{};
 }
 
 } // namespace detail
 
+THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END

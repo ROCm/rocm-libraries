@@ -55,6 +55,7 @@ namespace async
 namespace unimplemented
 {
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename UnaryFunction>
 THRUST_DEPRECATED THRUST_HOST event<DerivedPolicy>
 async_for_each(thrust::execution_policy<DerivedPolicy>&, ForwardIt, Sentinel, UnaryFunction)
@@ -63,6 +64,7 @@ async_for_each(thrust::execution_policy<DerivedPolicy>&, ForwardIt, Sentinel, Un
                            "this algorithm is not implemented for the specified system");
   return {};
 }
+THRUST_SUPPRESS_DEPRECATED_POP
 
 } // namespace unimplemented
 

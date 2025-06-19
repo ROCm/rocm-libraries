@@ -15,14 +15,26 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/config.h>
+
+// need to suppress deprecation warnings for execute_with_allocator_and_dependencies here and inside type traits
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 #include <thrust/detail/seq.h>
 #include <thrust/system/cpp/detail/par.h>
-#include <thrust/system/hip/detail/par.h>
 #include <thrust/system/omp/detail/par.h>
 #include <thrust/system/tbb/detail/par.h>
 
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <thrust/system/cuda/detail/par.h>
+#else
+#  include <thrust/system/hip/detail/par.h>
+
+#  include <type_traits>
+#endif
 
 template <typename T>
 struct test_allocator_t
@@ -63,7 +75,11 @@ struct TestAllocatorAttachment
   static void assert_correct(T)
   {
     ASSERT_EQ(
-      (thrust::detail::is_same<
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+      (::cuda::std::is_same<
+#else
+      (::std::is_same<
+#endif
         T,
         typename PolicyInfo::template apply_base_second<thrust::detail::execute_with_allocator, Expected>::type>::value),
       true);
@@ -73,10 +89,14 @@ struct TestAllocatorAttachment
   static void assert_npa_correct(T)
   {
     ASSERT_EQ(
-      (thrust::detail::is_same<T,
-                               typename PolicyInfo::template apply_base_second<
-                                 thrust::detail::execute_with_allocator,
-                                 thrust::mr::allocator<thrust::detail::max_align_t, ExpectedResource>>::type>::value),
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+      (::cuda::std::is_same<T,
+#else
+      (::std::is_same<T,
+#endif
+                            typename PolicyInfo::template apply_base_second<
+                              thrust::detail::execute_with_allocator,
+                              thrust::mr::allocator<thrust::detail::max_align_t, ExpectedResource>>::type>::value),
       true);
   }
 
@@ -87,6 +107,7 @@ struct TestAllocatorAttachment
 
     return_temporary_buffer(policy, get_temporary_buffer<int>(policy, 123).first, 123);
   }
+
   void operator()()
   {
     typename PolicyInfo::policy policy;
@@ -97,6 +118,7 @@ struct TestAllocatorAttachment
     assert_correct<test_allocator_t<int>>(policy(const_test_allocator));
 
     assert_npa_correct<test_memory_resource_t>(policy(&test_memory_resource));
+
     // test whether the resulting policy is actually usable
     // a real allocator is necessary here, unlike above
     std::allocator<int> alloc;
@@ -115,11 +137,21 @@ struct TestAllocatorAttachment
 
 using sequential_info = policy_info<thrust::detail::seq_t, thrust::system::detail::sequential::execution_policy>;
 using cpp_par_info    = policy_info<thrust::system::cpp::detail::par_t, thrust::system::cpp::detail::execution_policy>;
-using hip_par_info    = policy_info<thrust::system::hip::detail::par_t, thrust::hip_rocprim::execute_on_stream_base>;
 using omp_par_info    = policy_info<thrust::system::omp::detail::par_t, thrust::system::omp::detail::execution_policy>;
 using tbb_par_info    = policy_info<thrust::system::tbb::detail::par_t, thrust::system::tbb::detail::execution_policy>;
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+using cuda_par_info = policy_info<thrust::system::cuda::detail::par_t, thrust::cuda_cub::execute_on_stream_base>;
+#else
+using hip_par_info = policy_info<thrust::system::hip::detail::par_t, thrust::hip_rocprim::execute_on_stream_base>;
+#endif
+
 using PolicyTestsParams = ::testing::
-  Types<Params<sequential_info>, Params<cpp_par_info>, Params<hip_par_info>, Params<omp_par_info>, Params<tbb_par_info>>;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  Types<Params<sequential_info>, Params<cuda_par_info>, Params<cpp_par_info>, Params<omp_par_info>, Params<tbb_par_info>>;
+#else
+  Types<Params<sequential_info>, Params<hip_par_info>, Params<cpp_par_info>, Params<omp_par_info>, Params<tbb_par_info>>;
+#endif
 
 TESTS_DEFINE(AllocatorAwarePoliciesTests, PolicyTestsParams);
 
@@ -132,3 +164,5 @@ TYPED_TEST(AllocatorAwarePoliciesTests, TestAllocatorAttachmentInstance)
   TestAllocatorAttachment<T> test;
   test();
 }
+
+THRUST_SUPPRESS_DEPRECATED_POP
