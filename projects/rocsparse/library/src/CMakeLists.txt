@@ -23,21 +23,27 @@
 
 # rocSPARSE source
 set(rocsparse_source
-  src/handle.cpp
-  src/rocsparse_common.cpp
-  src/rocsparse_error.cpp
-  src/rocsparse_auxiliary.cpp
-  src/rocsparse_blas.cpp
-  src/rocsparse_blas_rocblas.cpp
-  src/rocsparse_envariables.cpp
-  src/rocsparse_memstat.cpp
-  ##
-  src/rocsparse_debug.cpp
-  src/rocsparse_argdescr.cpp
-  src/rocsparse_message.cpp
-  ##
-  src/to_string.cpp
-  src/utility.cpp
+
+# Auxiliary
+  src/auxiliary/handle.cpp
+  src/auxiliary/rocsparse_auxiliary.cpp
+  src/auxiliary/rocsparse_error.cpp
+
+# Common
+  src/common/rocsparse_common.cpp
+  src/common/rocsparse_indextype_utils.cpp
+  src/common/rocsparse_datatype_utils.cpp
+  src/common/rocsparse_one.cpp
+  src/common/rocsparse_assign_async.cpp
+  src/common/rocsparse_blas.cpp
+  src/common/rocsparse_blas_rocblas.cpp
+  src/common/rocsparse_envariables.cpp
+  src/common/rocsparse_memstat.cpp
+  src/common/rocsparse_debug.cpp
+  src/common/rocsparse_argdescr.cpp
+  src/common/rocsparse_message.cpp
+  src/common/rocsparse_determine_indextype.cpp
+
 
 # Primitives
   src/primitives/rocsparse_radix_sort_pairs.cpp
@@ -447,6 +453,7 @@ set(rocsparse_source
   src/precond/itilu0/rocsparse_csritilu0_sync_split_fusion.cpp
 
 # Conversion
+  src/conversion/rocsparse_calculate_nnz.cpp
   src/conversion/rocsparse_nnz.cpp
   src/conversion/rocsparse_csxsldu_buffer_size.cpp
   src/conversion/rocsparse_csxsldu_preprocess.cpp

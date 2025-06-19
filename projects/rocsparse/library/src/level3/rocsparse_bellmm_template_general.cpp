@@ -23,7 +23,7 @@
  * ************************************************************************ */
 
 #include "bellmm_device_general.h"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {

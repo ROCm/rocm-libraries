@@ -28,9 +28,9 @@
 #include "internal/level2/rocsparse_csrsv.h"
 
 #include "../level2/rocsparse_csrsv.hpp"
-#include "control.h"
 #include "csric0_device.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 template <typename T>
 rocsparse_status rocsparse::csric0_analysis_template(rocsparse_handle          handle, //0
@@ -1074,7 +1074,7 @@ try
 }
 catch(...)
 {
-    return rocsparse::exception_to_rocsparse_status();
+    RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
 
@@ -1112,7 +1112,7 @@ try
 }
 catch(...)
 {
-    return rocsparse::exception_to_rocsparse_status();
+    RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP
 
@@ -1148,6 +1148,6 @@ try
 }
 catch(...)
 {
-    return rocsparse::exception_to_rocsparse_status();
+    RETURN_ROCSPARSE_EXCEPTION();
 }
 // LCOV_EXCL_STOP

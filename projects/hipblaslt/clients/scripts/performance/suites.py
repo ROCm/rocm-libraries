@@ -56,7 +56,8 @@ lengths = {
 def api_overhead():
     """API overhead"""
 
-    problemlist = [Problem(args={"--cold_iters" : "10" , "--iters" : "10000"})]
+    # iteraion 10000 takes too long time for "getAll", 1000 is enough
+    problemlist = [Problem(args={"--cold_iters" : "10" , "--iters" : "1000"})]
     yield ProblemSet(benchType="api_overhead", name="benchset_1", problems=problemlist)
 
 def amax_example():

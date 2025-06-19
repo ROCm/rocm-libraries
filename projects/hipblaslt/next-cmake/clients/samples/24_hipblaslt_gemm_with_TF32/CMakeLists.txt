@@ -21,5 +21,5 @@
 #
 # ########################################################################
 
-add_executable(sample_hipblaslt_gemm_with_TF32 ${TEMP_HIPBLASLT_SAMPLE_DIR}/25_gemm_with_TF32/sample_hipblaslt_gemm_with_TF32.cpp)
+add_executable(sample_hipblaslt_gemm_with_TF32 ${TEMP_HIPBLASLT_SAMPLE_DIR}/24_gemm_with_TF32/sample_hipblaslt_gemm_with_TF32.cpp)
 target_link_libraries(sample_hipblaslt_gemm_with_TF32 PRIVATE sample-helper)

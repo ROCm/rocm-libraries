@@ -267,7 +267,7 @@ inline rocsparselt_status validateMatrixArgs(const _rocsparselt_handle* handle,
             break;
 #endif
     default:
-        hipsparselt_cerr << "datatype (" << hipDataType_to_string(valueType) << ") is not supported"
+        hipsparselt_cerr << "datatype (" << hip_datatype_to_string(valueType) << ") is not supported"
                          << std::endl;
         log_error(handle, __func__, "datatype is not supported");
         return rocsparselt_status_not_implemented;
@@ -357,10 +357,10 @@ inline rocsparselt_status validateMatmulDescrArgs(const _rocsparselt_handle* han
         else
         {
             std::ostringstream stringStream;
-            stringStream << "datatype A=" << hipDataType_to_string(type_a);
-            stringStream << " B=" << hipDataType_to_string(type_b);
-            stringStream << " C=" << hipDataType_to_string(type_c);
-            stringStream << " D=" << hipDataType_to_string(type_d);
+            stringStream << "datatype A=" << hip_datatype_to_string(type_a);
+            stringStream << " B=" << hip_datatype_to_string(type_b);
+            stringStream << " C=" << hip_datatype_to_string(type_c);
+            stringStream << " D=" << hip_datatype_to_string(type_d);
             stringStream << " computeType=" << rocsparselt_compute_type_to_string(compute_type);
             stringStream << " is not supported";
             auto msg = stringStream.str();

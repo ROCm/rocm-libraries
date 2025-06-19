@@ -43,9 +43,18 @@
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
+
+template <typename Transform, typename... Args>
+rocRoller::KernelGraph::KernelGraph transform(rocRoller::KernelGraph::KernelGraph& graph,
+                                              Args... args)
+{
+    auto xform = std::make_shared<Transform>(std::forward<Args>(args)...);
+    return graph.transform(xform);
+}
 
 template <typename T>
 std::shared_ptr<T> make_shared_device(std::size_t n = 1, T init = {})
@@ -400,7 +409,9 @@ namespace rocRoller
                      float                       beta,
                      bool                        transA,
                      bool                        transB,
-                     const uint                  scaleBlockSize);
+                     const uint                  scaleBlockSize = 32,
+                     const DataType              scaleTypeA     = DataType::E8M0,
+                     const DataType              scaleTypeB     = DataType::E8M0);
 
     template <typename TA, typename TB, typename TC, typename TD>
     void ScaledCPUMM(std::vector<TD>&            D,
@@ -416,7 +427,9 @@ namespace rocRoller
                      float                       beta,
                      bool                        transA,
                      bool                        transB,
-                     const uint                  scaleBlockSize)
+                     const uint                  scaleBlockSize = 32,
+                     const DataType              scaleTypeA     = DataType::E8M0,
+                     const DataType              scaleTypeB     = DataType::E8M0)
     {
         if constexpr(std::same_as<TD, float> && std::same_as<TC, float>)
         {
@@ -435,7 +448,9 @@ namespace rocRoller
                         beta,
                         transA,
                         transB,
-                        scaleBlockSize);
+                        scaleBlockSize,
+                        scaleTypeA,
+                        scaleTypeB);
         }
         else if constexpr((std::same_as<TD, __half> && std::same_as<TC, __half>)
                           || (std::same_as<TD, BFloat16> && std::same_as<TC, BFloat16>))
@@ -456,7 +471,9 @@ namespace rocRoller
                         beta,
                         transA,
                         transB,
-                        scaleBlockSize);
+                        scaleBlockSize,
+                        scaleTypeA,
+                        scaleTypeB);
 #pragma omp parallel for
             for(std::size_t i = 0; i != floatD.size(); ++i)
             {

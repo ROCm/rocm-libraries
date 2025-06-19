@@ -473,7 +473,7 @@ struct RocsparseltContractionProblem
                             "bias_stride",
                             prob.bias_stride,
                             "bias_type",
-                            hipDataType_to_string(prob.bias_type),
+                            hip_datatype_to_string(prob.bias_type),
                             "alpha_vector_scaling",
                             prob.alpha_vector_scaling));
     };

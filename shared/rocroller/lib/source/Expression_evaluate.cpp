@@ -458,6 +458,9 @@ namespace rocRoller
                 assertNonNullPointer(arg);
                 AssertFatal(arg != 1, "Fast division not supported for denominator == 1");
 
+                if(arg == 0)
+                    return std::numeric_limits<uint32_t>::max() / 2;
+
                 auto magic = libdivide::libdivide_u32_branchfree_gen(arg);
 
                 return magic.magic;
@@ -466,6 +469,10 @@ namespace rocRoller
             int32_t evaluate(int32_t const& arg) const
             {
                 assertNonNullPointer(arg);
+
+                if(arg == 0)
+                    return std::numeric_limits<int32_t>::max() / 2;
+
                 auto magic = libdivide::libdivide_s32_branchfree_gen(arg);
 
                 return magic.magic;
@@ -474,6 +481,10 @@ namespace rocRoller
             int64_t evaluate(int64_t const& arg) const
             {
                 assertNonNullPointer(arg);
+
+                if(arg == 0)
+                    return std::numeric_limits<int64_t>::max() / 2;
+
                 auto magic = libdivide::libdivide_s64_branchfree_gen(arg);
 
                 return magic.magic;
@@ -511,49 +522,48 @@ namespace rocRoller
                 assertNonNullPointer(arg);
                 AssertFatal(arg != 1, "Fast division not supported for denominator == 1");
 
+                if(arg == 0)
+                    return 0;
+
                 auto magic = libdivide::libdivide_u32_branchfree_gen(arg);
 
                 return magic.more & libdivide::LIBDIVIDE_32_SHIFT_MASK;
             }
-
-            int evaluate(int32_t const& arg) const
-            {
-                assertNonNullPointer(arg);
-
-                auto magic = libdivide::libdivide_s32_branchfree_gen(arg);
-
-                return magic.more & libdivide::LIBDIVIDE_32_SHIFT_MASK;
-            }
-
-            int evaluate(int64_t const& arg) const
-            {
-                assertNonNullPointer(arg);
-
-                auto magic = libdivide::libdivide_s64_branchfree_gen(arg);
-
-                return magic.more & libdivide::LIBDIVIDE_64_SHIFT_MASK;
-            }
         };
 
         template <>
-        struct OperationEvaluatorVisitor<MagicSign> : public UnaryEvaluatorVisitor<MagicSign>
+        struct OperationEvaluatorVisitor<MagicShiftAndSign>
+            : public UnaryEvaluatorVisitor<MagicShiftAndSign>
         {
-            int32_t evaluate(int32_t const& arg) const
+            static_assert(libdivide::LIBDIVIDE_32_SHIFT_MASK == 31,
+                          "magicNumberDivision assumes this is true.");
+            static_assert(libdivide::LIBDIVIDE_64_SHIFT_MASK == 63,
+                          "magicNumberDivision assumes this is true.");
+            static_assert(libdivide::LIBDIVIDE_NEGATIVE_DIVISOR == 1 << 7,
+                          "magicNumberDivision assumes this is true.");
+
+            uint32_t evaluate(int32_t const& arg) const
             {
                 assertNonNullPointer(arg);
+
+                if(arg == 0)
+                    return 0;
 
                 auto magic = libdivide::libdivide_s32_branchfree_gen(arg);
 
-                return static_cast<int32_t>((int8_t)magic.more >> 7);
+                return static_cast<uint32_t>(magic.more);
             }
 
-            int64_t evaluate(int64_t const& arg) const
+            uint32_t evaluate(int64_t const& arg) const
             {
                 assertNonNullPointer(arg);
 
+                if(arg == 0)
+                    return 0;
+
                 auto magic = libdivide::libdivide_s64_branchfree_gen(arg);
 
-                return static_cast<int64_t>((int8_t)magic.more >> 7);
+                return static_cast<uint32_t>(magic.more);
             }
         };
 

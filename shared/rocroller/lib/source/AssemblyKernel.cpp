@@ -28,6 +28,7 @@
 
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
+#include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 
 namespace rocRoller
@@ -328,9 +329,11 @@ namespace rocRoller
         }
 
         auto typeInfo = DataTypeInfo::Get(arg.variableType);
-        if(arg.variableType == DataType::E8M0)
+        if(isScaleType(typeInfo.variableType.dataType))
         {
-            typeInfo = DataTypeInfo::Get(DataType::E8M0x4);
+            auto packedVarType = typeInfo.packedVariableType();
+            AssertFatal(packedVarType, "Scale types must have a packed variable type.");
+            typeInfo = DataTypeInfo::Get(packedVarType.value());
         }
         if(arg.offset == -1)
         {

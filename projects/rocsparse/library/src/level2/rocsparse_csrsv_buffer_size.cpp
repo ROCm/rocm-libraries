@@ -22,11 +22,11 @@
  *
  * ************************************************************************ */
 
-#include "control.h"
 #include "internal/level2/rocsparse_csrsv.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csrsv.hpp"
-#include "rocsparse_primitives.h"
-#include "utility.h"
+#include "rocsparse_primitives.hpp"
+#include "rocsparse_utility.hpp"
 
 template <typename I, typename J, typename T>
 rocsparse_status rocsparse::csrsv_buffer_size_template(rocsparse_handle          handle,

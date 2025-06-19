@@ -28,6 +28,7 @@
 
 #include <rocRoller/KernelArguments.hpp>
 
+#include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
 
 #include <concepts>
@@ -142,25 +143,15 @@ namespace rocRoller
         return msg.str();
     }
 
-    template <>
-    inline void KernelArguments::writeValue(size_t offset, E8M0 value)
+    template <CScaleType T>
+    inline void KernelArguments::append(std::string const& argName, T value, bool bound)
     {
-        size_t argSize = sizeof(E8M0x4);
-        if(offset + argSize > m_data.size())
-        {
-            throw std::runtime_error("Value exceeds allocated bounds.");
-        }
+        auto constexpr PACKED_SCALE_ALIGN = alignof(typename PackedTypeOf<T>::type);
+        auto constexpr PACKED_SCALE_SIZE  = sizeof(typename PackedTypeOf<T>::type);
 
-        std::memset(&m_data[offset], value.scale, argSize);
-    }
-
-    template <>
-    inline void KernelArguments::append(std::string const& argName, E8M0 value, bool bound)
-    {
-        alignTo(alignof(E8M0x4));
-
+        alignTo(PACKED_SCALE_ALIGN);
         size_t offset  = m_data.size();
-        size_t argSize = sizeof(E8M0x4);
+        size_t argSize = PACKED_SCALE_SIZE;
 
         if(m_log)
         {
@@ -170,6 +161,20 @@ namespace rocRoller
 
         m_data.insert(m_data.end(), argSize, 0);
         writeValue(offset, value);
+    }
+
+    template <CScaleType T>
+    inline void KernelArguments::writeValue(size_t offset, T value)
+    {
+        auto constexpr PACKED_SCALE_SIZE = sizeof(typename PackedTypeOf<T>::type);
+
+        size_t argSize = PACKED_SCALE_SIZE;
+        if(offset + argSize > m_data.size())
+        {
+            throw std::runtime_error("Value exceeds allocated bounds.");
+        }
+
+        std::memset(&m_data[offset], value.scale, argSize);
     }
 
     template <typename T>

@@ -22,8 +22,8 @@
  *
  * ************************************************************************ */
 
-#include "control.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "rocsparse_csrgeam.hpp"
 

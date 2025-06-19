@@ -22,7 +22,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_extract.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {

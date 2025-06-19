@@ -19,6 +19,7 @@ Architectures:
       HasDSReadTransposeB6: 0
       HasDSReadTransposeB8: 0
       HasDirectToLds: 0
+      HasE8M0Scale: 0
       HasExpcnt: 0
       HasExplicitVectorCO: 0
       HasExplicitVectorRevCO: 0

@@ -5431,7 +5431,6 @@
     ThreadTileB: 8
     TransposeLDS: 0
     TransposeLDSMetadata: true
-    TunningSkip: 1
     ULSGRODoubleG2L: 0
     UnrollLoopSwapGlobalReadOrder: 0
     UnrollMajorLDSA: 0

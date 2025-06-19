@@ -48,29 +48,6 @@ std::string prefix(const char* layer, const char* caller)
     return std::string(buf.get());
 }
 
-const char* hipDataType_to_string(hipDataType type)
-{
-    switch(type)
-    {
-    case HIP_R_16F:
-        return "f16_r";
-    case HIP_R_32F:
-        return "f32_r";
-    case HIP_R_8I:
-        return "i8_r";
-    case HIP_R_16BF:
-        return "bf16_r";
-#if HIP_FP8_TYPE_OCP
-    case HIP_R_8F_E4M3:
-        return "f8_r";
-    case HIP_R_8F_E5M2:
-        return "bf8_r";
-#endif
-    default:
-        return "Invalid";
-    }
-}
-
 const char* rocsparselt_compute_type_to_string(rocsparselt_compute_type type)
 {
     switch(type)

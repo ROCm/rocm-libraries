@@ -26,14 +26,14 @@
 #include "internal/conversion/rocsparse_csr2bsr.h"
 #include "internal/conversion/rocsparse_csr2coo.h"
 
-#include "control.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csr2bsr.hpp"
 #include "rocsparse_csr2gebsr.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include "csr2gebsr_device.h"
 #include "rocsparse_common.h"
-#include "rocsparse_primitives.h"
+#include "rocsparse_primitives.hpp"
 
 namespace rocsparse
 {

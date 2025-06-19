@@ -94,16 +94,16 @@ if(TENSILE_USE_MSGPACK)
     # Prefer 6.x (msgpack-cxx) as that is what we bundle in the build.
     find_package(msgpack-cxx CONFIG)
     if(msgpack-cxx_FOUND)
-        # Version 6.x
         message(STATUS "Found msgpack-cxx (>=6.x)")
-        target_link_libraries(TensileHost PUBLIC msgpack-cxx)
+        set(msgpack_target msgpack-cxx)
     else()
-        # Fallback to <= 5.x
         find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
         message(STATUS "Found msgpack (<=5.x)")
-        target_link_libraries(TensileHost PUBLIC msgpackc)
+        set(msgpack_target msgpackc)
     endif()
-    target_compile_definitions(TensileHost PUBLIC -DTENSILE_MSGPACK=1)
+    get_target_property(msgpack_inc ${msgpack_target} INTERFACE_INCLUDE_DIRECTORIES)
+    target_include_directories(TensileHost PRIVATE "${msgpack_inc}")
+    target_compile_definitions(TensileHost PRIVATE TENSILE_MSGPACK=1)
 endif()
 
 if(TENSILE_USE_LLVM)

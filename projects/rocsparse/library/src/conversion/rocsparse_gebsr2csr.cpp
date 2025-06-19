@@ -23,11 +23,12 @@
  * ************************************************************************ */
 
 #include "internal/conversion/rocsparse_gebsr2csr.h"
-#include "common.h"
-#include "control.h"
-#include "utility.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "rocsparse_bsr2csr.hpp"
+#include "rocsparse_calculate_nnz.hpp"
 #include "rocsparse_common.h"
 #include "rocsparse_gebsr2csr.hpp"
 

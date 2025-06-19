@@ -1,0 +1,69 @@
+/*! \file */
+
+/* ************************************************************************
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
+
+#include "rocsparse_control.hpp"
+#include "rocsparse_debug.hpp"
+#include "rocsparse_enum_utils.hpp"
+#include "rocsparse_envariables.hpp"
+#include <map>
+
+void rocsparse::message(const char* msg_, const char* function_, const char* file_, int line_)
+{
+    if(rocsparse_debug_variables.get_debug_verbose())
+    {
+        std::cout << "// rocSPARSE.log:     { \"function\": \"" << function_ << "\"," << std::endl
+                  << "//                      \"line\"    : \"" << line_ << "\"," << std::endl
+                  << "//                      \"msg\"     : \"" << msg_ << "\" }" << std::endl;
+    }
+}
+
+void rocsparse::warning_message(const char* msg_,
+                                const char* function_,
+                                const char* file_,
+                                int         line_)
+{
+    if(rocsparse_debug_variables.get_debug_warnings())
+    {
+        std::cout << "// rocSPARSE.warning: { \"function\": \"" << function_ << "\"," << std::endl
+                  << "//                      \"line\"    : \"" << line_ << "\"," << std::endl
+                  << "//                      \"msg\"     : \"" << msg_ << "\" }" << std::endl;
+    }
+}
+
+void rocsparse::error_message(
+    rocsparse_status status_, const char* msg_, const char* function_, const char* file_, int line_)
+{
+    if(rocsparse_debug_variables.get_debug_verbose())
+    {
+        std::cout << "// rocSPARSE.error.trace:   { \"function\": \"" << function_ << "\","
+                  << std::endl
+                  << "//                            \"line\"    : \"" << line_ << "\"," << std::endl
+                  << "//                            \"file\"    : \"" << file_ << "\"," << std::endl
+                  << "//                            \"status\"  : \""
+                  << rocsparse::enum_utils::to_string(status_) << "\"," << std::endl
+                  << "//                            \"msg\"     : \"" << msg_ << "\" }"
+                  << std::endl;
+    }
+}

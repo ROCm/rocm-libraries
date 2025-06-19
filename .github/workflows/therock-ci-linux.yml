@@ -1,0 +1,34 @@
+name: TheRock CI
+
+on:
+  workflow_call:
+    inputs:
+      cmake_options:
+        type: string
+      project_to_test:
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  therock-build-linux:
+    name: Build Linux Packages
+    permissions:
+      contents: read
+      id-token: write
+    uses: ROCm/TheRock/.github/workflows/build_linux_packages.yml@866f163742246445138d7addff8a4010e86bddee
+    with:
+      amdgpu_families: "gfx94X-dcgpu"
+      expect_failure: false
+      extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries ${{ inputs.cmake_options }}"
+
+  therock-test-linux:
+    name: "Test"
+    needs: [therock-build-linux]
+    uses: ./.github/workflows/therock-test-packages.yml
+    with:
+      project_to_test: ${{ inputs.project_to_test }}
+      amdgpu_families: "gfx94X-dcgpu"
+      test_runs_on: "linux-mi300-1gpu-ossci-rocm"
+      platform: "linux"

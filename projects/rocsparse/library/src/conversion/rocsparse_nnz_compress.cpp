@@ -23,12 +23,12 @@
  * ************************************************************************ */
 
 #include "internal/conversion/rocsparse_nnz_compress.h"
-#include "control.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_nnz_compress.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include "nnz_compress_device.h"
-#include "rocsparse_primitives.h"
+#include "rocsparse_primitives.hpp"
 
 namespace rocsparse
 {

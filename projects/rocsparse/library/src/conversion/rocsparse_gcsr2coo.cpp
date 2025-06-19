@@ -20,8 +20,8 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "control.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "rocsparse_convert_array.hpp"
 #include "rocsparse_csr2coo.hpp"

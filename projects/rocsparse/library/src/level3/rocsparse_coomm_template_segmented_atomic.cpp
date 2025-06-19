@@ -22,9 +22,9 @@
 *
 * ************************************************************************ */
 
-#include "common.h"
-#include "control.h"
-#include "utility.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "coomm/segmented_atomic/kernel_declarations.h"
 #include "coomm_device_segmented_atomic.h"

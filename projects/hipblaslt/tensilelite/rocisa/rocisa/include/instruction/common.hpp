@@ -35,7 +35,7 @@ namespace rocisa
                 const std::shared_ptr<RegisterContainer>& src,
                 const std::string&                        comment = "")
             : CommonInstruction(
-                  InstType::INST_I32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_I32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_abs_i32");
         }
@@ -643,7 +643,7 @@ namespace rocisa
     {
         SGetPCB64(const std::shared_ptr<Container>& dst, const std::string& comment = "")
             : CommonInstruction(
-                  InstType::INST_B64, dst, {}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B64, dst, {}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_getpc_b64");
         }
@@ -917,7 +917,7 @@ namespace rocisa
                  const InstructionInput&           src,
                  const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B64, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B64, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             if(kernel().wavefront == 32)
             {
@@ -947,7 +947,7 @@ namespace rocisa
                 const InstructionInput&           src,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_mov_b32");
         }
@@ -969,7 +969,7 @@ namespace rocisa
                 const InstructionInput&           src,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B64, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B64, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_mov_b64");
         }
@@ -991,7 +991,7 @@ namespace rocisa
                  const InstructionInput&           src,
                  const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_cmov_b32");
         }
@@ -1013,7 +1013,7 @@ namespace rocisa
                  const InstructionInput&           src,
                  const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B64, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B64, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_cmov_b64");
         }
@@ -1035,7 +1035,7 @@ namespace rocisa
                 const InstructionInput&           src,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_ff1_i32_b32");
         }
@@ -1085,7 +1085,7 @@ namespace rocisa
                  const InstructionInput&           src,
                  const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_I32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_I32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_movk_i32");
         }
@@ -1107,7 +1107,7 @@ namespace rocisa
                       const InstructionInput&           src,
                       const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_I32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_I32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_sext_i32_i16");
         }
@@ -1129,7 +1129,7 @@ namespace rocisa
                         const InstructionInput&           src,
                         const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_and_saveexec_b32");
         }
@@ -1151,7 +1151,7 @@ namespace rocisa
                         const InstructionInput&           src,
                         const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B64, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B64, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_and_saveexec_b64");
         }
@@ -1173,7 +1173,7 @@ namespace rocisa
                        const InstructionInput&           src,
                        const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_or_saveexec_b32");
         }
@@ -1195,7 +1195,7 @@ namespace rocisa
                        const InstructionInput&           src,
                        const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B64, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B64, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_or_saveexec_b64");
         }
@@ -1413,7 +1413,7 @@ namespace rocisa
                    const InstructionInput&           src,
                    const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_getreg_b32");
         }
@@ -1435,7 +1435,7 @@ namespace rocisa
                    const InstructionInput&           src,
                    const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_setreg_b32");
         }
@@ -1457,7 +1457,7 @@ namespace rocisa
                         const InstructionInput&           src,
                         const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("s_setreg_IMM32_b32");
         }
@@ -2027,7 +2027,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F16, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F16, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_add_f16");
         }
@@ -2052,7 +2052,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, {src0, src1}, dpp, sdwa, std::nullopt, comment)
+                InstType::INST_F32, dst, {src0, src1}, dpp, sdwa, std::nullopt, comment)
         {
             setInst("v_add_f32");
         }
@@ -2086,7 +2086,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F64, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F64, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_add_f64");
         }
@@ -2110,7 +2110,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_I32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_I32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             if(getAsmBugs()["ExplicitNC"])
             {
@@ -2172,7 +2172,7 @@ namespace rocisa
                 const std::vector<InstructionInput>& srcs,
                 const std::string&                   comment = "")
             : CommonInstruction(
-                  InstType::INST_U32, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_U32, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             if(getAsmBugs()["ExplicitNC"])
             {
@@ -2233,7 +2233,7 @@ namespace rocisa
                   const std::vector<InstructionInput>& srcs,
                   const std::string&                   comment = "")
             : CommonInstruction(
-                  InstType::INST_U32, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_U32, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             this->dst1 = dst1;
             if(getAsmBugs()["ExplicitCO"])
@@ -2293,7 +2293,7 @@ namespace rocisa
                    const std::vector<InstructionInput>& srcs,
                    const std::string&                   comment = "")
             : CommonInstruction(
-                  InstType::INST_U32, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_U32, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             this->dst1 = dst1;
             if(getAsmBugs()["ExplicitNC"])
@@ -2329,7 +2329,7 @@ namespace rocisa
                   std::optional<VOP3PModifiers>     vop3    = std::nullopt,
                   const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F16, dst, {src0, src1}, std::nullopt, std::nullopt, vop3, comment)
+                InstType::INST_F16, dst, {src0, src1}, std::nullopt, std::nullopt, vop3, comment)
         {
             setInst("v_pk_add_f16");
         }
@@ -2353,7 +2353,7 @@ namespace rocisa
                    std::optional<VOP3PModifiers>     vop3    = std::nullopt,
                    const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, {src0, src1}, std::nullopt, std::nullopt, vop3, comment)
+                InstType::INST_F32, dst, {src0, src1}, std::nullopt, std::nullopt, vop3, comment)
         {
             setInst("v_pk_add_f32");
         }
@@ -2363,7 +2363,7 @@ namespace rocisa
                    std::optional<VOP3PModifiers>        vop3    = std::nullopt,
                    const std::string&                   comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, srcs, std::nullopt, std::nullopt, vop3, comment)
+                InstType::INST_F32, dst, srcs, std::nullopt, std::nullopt, vop3, comment)
         {
             setInst("v_pk_add_f32");
         }
@@ -2460,7 +2460,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F16, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F16, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_mul_f16");
         }
@@ -2484,7 +2484,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_mul_f32");
         }
@@ -2494,7 +2494,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>         sdwa    = std::nullopt,
                 const std::string&                   comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, srcs, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F32, dst, srcs, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_mul_f32");
         }
@@ -2518,7 +2518,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F64, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F64, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_mul_f64");
         }
@@ -2543,7 +2543,7 @@ namespace rocisa
                   std::optional<VOP3PModifiers>     vop3    = std::nullopt,
                   const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F16, dst, {src0, src1}, std::nullopt, sdwa, vop3, comment)
+                InstType::INST_F16, dst, {src0, src1}, std::nullopt, sdwa, vop3, comment)
         {
             setInst("v_pk_mul_f16");
         }
@@ -2568,7 +2568,7 @@ namespace rocisa
                    std::optional<VOP3PModifiers>     vop3    = std::nullopt,
                    const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, vop3, comment)
+                InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, vop3, comment)
         {
             setInst("v_pk_mul_f32");
         }
@@ -2593,7 +2593,7 @@ namespace rocisa
                    std::optional<VOP3PModifiers>     vop3    = std::nullopt,
                    const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, vop3, comment)
+                InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, vop3, comment)
         {
             setInst("v_pk_mul_f32");
         }
@@ -2849,7 +2849,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_sub_f32");
         }
@@ -2988,7 +2988,7 @@ namespace rocisa
                 std::optional<VOP3PModifiers>     vop3    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, {src0, src1}, std::nullopt, std::nullopt, vop3, comment)
+                InstType::INST_F32, dst, {src0, src1}, std::nullopt, std::nullopt, vop3, comment)
             , addDstToSrc(false)
         {
             if(getAsmCaps()["v_fmac_f32"])
@@ -3043,7 +3043,7 @@ namespace rocisa
                      std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                      const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             if(kernel().isaVersion[0] >= 11)
             {
@@ -3134,7 +3134,7 @@ namespace rocisa
                       std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                       const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             if(kernel().isaVersion[0] >= 11)
             {
@@ -3404,7 +3404,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F16, dst, {src}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F16, dst, {src}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_exp_f16");
         }
@@ -3426,7 +3426,7 @@ namespace rocisa
                 const InstructionInput&           src,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_F32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("v_exp_f32");
         }
@@ -3449,7 +3449,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F16, dst, {src}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F16, dst, {src}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_rcp_f16");
         }
@@ -3471,7 +3471,7 @@ namespace rocisa
                 const InstructionInput&           src,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_F32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("v_rcp_f32");
         }
@@ -3493,7 +3493,7 @@ namespace rocisa
                      const InstructionInput&           src,
                      const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_F32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("v_rcp_iflag_f32");
         }
@@ -3516,7 +3516,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F16, dst, {src}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F16, dst, {src}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_rsq_f16");
         }
@@ -3538,7 +3538,7 @@ namespace rocisa
                 const InstructionInput&           src,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_F32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("v_rsq_f32");
         }
@@ -3560,7 +3560,7 @@ namespace rocisa
                      const InstructionInput&           src,
                      const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_F32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("v_rsq_iflag_f32");
         }
@@ -3584,7 +3584,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F16, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F16, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_max_f16");
         }
@@ -3608,7 +3608,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_max_f32");
         }
@@ -3632,7 +3632,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F64, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F64, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_max_f64");
         }
@@ -3656,7 +3656,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_I32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_I32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_max_i32");
         }
@@ -3681,7 +3681,7 @@ namespace rocisa
                   std::optional<VOP3PModifiers>     vop3    = std::nullopt,
                   const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F16, dst, {src0, src1}, std::nullopt, sdwa, vop3, comment)
+                InstType::INST_F16, dst, {src0, src1}, std::nullopt, sdwa, vop3, comment)
         {
             setInst("v_pk_max_f16");
         }
@@ -3763,7 +3763,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F16, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F16, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_min_f16");
         }
@@ -3787,7 +3787,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_min_f32");
         }
@@ -3811,7 +3811,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F64, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_F64, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_min_f64");
         }
@@ -3835,7 +3835,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_I32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_I32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_min_i32");
         }
@@ -3914,7 +3914,7 @@ namespace rocisa
                 const InstructionInput&           src,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("v_not_b32");
         }
@@ -3938,7 +3938,7 @@ namespace rocisa
                std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_B32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_or_b32");
         }
@@ -3948,7 +3948,7 @@ namespace rocisa
                std::optional<SDWAModifiers>         sdwa    = std::nullopt,
                const std::string&                   comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, srcs, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_B32, dst, srcs, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_or_b32");
         }
@@ -3972,7 +3972,7 @@ namespace rocisa
                 std::optional<SDWAModifiers>      sdwa    = std::nullopt,
                 const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_B32, dst, {src0, src1}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_xor_b32");
         }
@@ -3994,7 +3994,7 @@ namespace rocisa
                  const InstructionInput&           src,
                  const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("v_prng_b32");
         }
@@ -4089,7 +4089,7 @@ namespace rocisa
                        const std::vector<InstructionInput>& srcs,
                        const std::string&                   comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B32, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("v_lshlrev_b32");
         }
@@ -4211,7 +4211,7 @@ namespace rocisa
                           const std::vector<InstructionInput>& srcs,
                           const std::string&                   comment)
             : CommonInstruction(
-                  InstType::INST_B32, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B32, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("v_lshl_or_b32");
         }
@@ -4317,7 +4317,7 @@ namespace rocisa
                            const std::vector<InstructionInput>& srcs,
                            const std::string&                   comment = "")
             : CommonInstruction(
-                  InstType::INST_U32, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_U32, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("v_add_lshl_u32");
         }
@@ -4406,7 +4406,7 @@ namespace rocisa
                            std::optional<VOP3PModifiers>        vop3    = std::nullopt,
                            const std::string&                   comment = "")
             : CommonInstruction(
-                  InstType::INST_U32, dst, srcs, std::nullopt, std::nullopt, vop3, comment)
+                InstType::INST_U32, dst, srcs, std::nullopt, std::nullopt, vop3, comment)
         {
             setInst("v_lshl_add_u32");
         }
@@ -4479,7 +4479,7 @@ namespace rocisa
                 const std::optional<SDWAModifiers>& sdwa    = std::nullopt,
                 const std::string&                  comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, {src}, std::nullopt, sdwa, std::nullopt, comment)
+                InstType::INST_B32, dst, {src}, std::nullopt, sdwa, std::nullopt, comment)
         {
             setInst("v_mov_b32");
         }
@@ -4501,7 +4501,7 @@ namespace rocisa
                  const InstructionInput&           src,
                  const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B64, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B64, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("v_mov_b64");
         }
@@ -4510,7 +4510,7 @@ namespace rocisa
                  const std::vector<InstructionInput>& srcs,
                  const std::string&                   comment = "")
             : CommonInstruction(
-                  InstType::INST_B64, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B64, dst, srcs, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("v_mov_b64");
         }
@@ -4670,7 +4670,7 @@ namespace rocisa
                       std::optional<VOP3PModifiers>     vop3    = std::nullopt,
                       const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, {src0, src1}, std::nullopt, std::nullopt, vop3, comment)
+                InstType::INST_B32, dst, {src0, src1}, std::nullopt, std::nullopt, vop3, comment)
         {
             setInst("v_pack_b32_f16");
         }
@@ -4692,7 +4692,7 @@ namespace rocisa
                         const InstructionInput&           src,
                         const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("v_accvgpr_read_b32");
         }
@@ -4741,7 +4741,7 @@ namespace rocisa
                          const InstructionInput&           src,
                          const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("v_accvgpr_write_b32");
         }
@@ -4763,7 +4763,7 @@ namespace rocisa
                           const InstructionInput&           src,
                           const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_B32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("v_readfirstlane_b32");
         }
@@ -4785,7 +4785,7 @@ namespace rocisa
                   const InstructionInput&           src,
                   const std::string&                comment = "")
             : CommonInstruction(
-                  InstType::INST_F32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
+                InstType::INST_F32, dst, {src}, std::nullopt, std::nullopt, std::nullopt, comment)
         {
             setInst("v_rndne_f32");
         }

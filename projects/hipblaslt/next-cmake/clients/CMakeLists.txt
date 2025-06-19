@@ -57,8 +57,11 @@ target_link_libraries(hipblaslt-clients-common
 target_compile_definitions(hipblaslt-clients-common PRIVATE CLIENTS_NO_FORTRAN) # necessary?
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
+    if(NOT TARGET roc::mxDataGenerator)
+        find_package(mxDataGenerator REQUIRED)
+    endif()
     target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_USE_ROCROLLER)
-    target_link_libraries(hipblaslt-clients-common PRIVATE roc::rocroller)
+    target_link_libraries(hipblaslt-clients-common PRIVATE roc::rocroller roc::mxDataGenerator)
 endif()
 if(HIPBLASLT_ENABLE_ASAN)
     hipblaslt_target_configure_sanitizers(hipblaslt-clients-common PUBLIC)

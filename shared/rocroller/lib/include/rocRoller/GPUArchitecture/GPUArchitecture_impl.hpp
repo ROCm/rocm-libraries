@@ -206,10 +206,17 @@ namespace rocRoller
 
     inline bool GPUArchitecture::isSupportedScaleBlockSize(int size) const
     {
-        if(m_capabilities.contains(GPUCapability::HasBlockScaling32) && (size == 32))
+        return m_capabilities.contains(GPUCapability::HasBlockScaling32) && (size == 32);
+    }
+
+    inline bool GPUArchitecture::isSupportedScaleType(DataType type) const
+    {
+        switch(type)
         {
-            return true;
+        case DataType::E8M0:
+            return m_capabilities.contains(GPUCapability::HasE8M0Scale);
+        default:
+            return false;
         }
-        return false;
     }
 }

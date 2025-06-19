@@ -9,17 +9,17 @@ rocBLAS documentation is available at
 
 * gfx950 support
 * `ROCBLAS_LAYER = 8` internal API logging for `gemm` debugging
-* Support for AOCL 5.0 gcc build as a client reference library 
-* Allow `PkgConfig` for client reference library fallback detection 
+* Support for AOCL 5.0 gcc build as a client reference library
+* Allow `PkgConfig` for client reference library fallback detection
 
 ### Changed
 
-* `CMAKE_CXX_COMPILER` is now passed on during compilation for a Tensile build 
+* `CMAKE_CXX_COMPILER` is now passed on during compilation for a Tensile build
 * Change default atomics mode from `allowed` to `not allowed`
 
 ### Removed
 
-* Support code for non-production gfx targets 
+* Support code for non-production gfx targets
 * `rocblas_hgemm_kernel_name`, `rocblas_sgemm_kernel_name`, and `rocblas_dgemm_kernel_name` API functions
 * Use of `warpSize` as a constexpr
 * Use of deprecated behavior of `hipPeekLastError`
@@ -29,8 +29,8 @@ rocBLAS documentation is available at
 
 ### Optimized
 
-* Optimized `gemm` by using `gemv` kernels when applicable 
-* Optimized `gemv` for small `m` and `n` with a large batch count on gfx942 
+* Optimized `gemm` by using `gemv` kernels when applicable
+* Optimized `gemv` for small `m` and `n` with a large batch count on gfx942
 * Improved the performance of Level 1 `dot` for all precisions and variants when `N > 100000000` on gfx942
 * Improved the performance of Level 1 `asum` and `nrm2` for all precisions and variants on gfx942
 * Improved the performance of Level 2 `sger` (single precision) on gfx942
@@ -38,17 +38,22 @@ rocBLAS documentation is available at
 
 ### Resolved issues
 
-* Fixed environment variable path-based logging to append multiple handle output to the same file 
-* Support numerics when `trsm` is running with `rocblas_status_perf_degraded` 
+* Fixed environment variable path-based logging to append multiple handle output to the same file
+* Support numerics when `trsm` is running with `rocblas_status_perf_degraded`
 * Fixed the build dependency installation of `joblib` on some operating systems
-* Return `rocblas_status_internal_error` when `rocblas_[set,get]_ [matrix,vector]` is called with a host pointer in place of a device pointer 
+* Return `rocblas_status_internal_error` when `rocblas_[set,get]_ [matrix,vector]` is called with a host pointer in place of a device pointer
 * Reduced the default verbosity level for internal GEMM backend information
 * Updated from the deprecated rocm-cmake to ROCmCMakeBuildTools
 * Corrected AlmaLinux gfortran package dependencies
 
 ### Upcoming changes
 
-* Deprecated the use of negative indices to indicate the default solution is being used for `gemm_ex` with `rocblas_gemm_algo_solution_index` 
+* Deprecated the use of negative indices to indicate the default solution is being used for `gemm_ex` with `rocblas_gemm_algo_solution_index`
+
+## rocBLAS 4.4.1 for ROCm 6.4.2
+
+### Resolved issues
+* Zero imaginary portion of diagonal of C matrix for cherk/zherk for gfx90a/gfx942 with problem sizes `k > 500`
 
 ## rocBLAS 4.4.0 for ROCm 6.4
 

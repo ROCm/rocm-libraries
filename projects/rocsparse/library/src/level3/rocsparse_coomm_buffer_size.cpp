@@ -22,9 +22,9 @@
 *
 * ************************************************************************ */
 
-#include "control.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_coomm.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 template <>
 inline bool rocsparse::enum_utils::is_invalid(rocsparse_coomm_alg value_)
