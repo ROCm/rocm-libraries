@@ -5,7 +5,8 @@ pr:
       - develop
       - release-staging/rocm-rel-*
   paths:  
-    include:  
+    include:
+      - .azuredevops/rocm_ci_caller.yml
       - projects/*
       - shared/*
   
