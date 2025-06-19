@@ -19,6 +19,8 @@
 
 #include <thrust/detail/type_traits.h>
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 #if THRUST_CPP_DIALECT >= 2017
 
 #  include <async/inclusive_scan/mixin.h>
@@ -184,4 +186,9 @@ void test_using_cpo()
 }
 DECLARE_UNITTEST(test_using_cpo);
 
-#endif // C++14
+#endif // C++17
+
+// we need to leak the suppression on clang/MSVC to suppresses warnings from the cudafe1.stub.c file
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+THRUST_SUPPRESS_DEPRECATED_POP
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC

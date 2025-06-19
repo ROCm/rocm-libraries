@@ -19,6 +19,9 @@
 
 #include <thrust/detail/config.h>
 
+// need to suppress deprecation warnings inside several thrust headers
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 #if THRUST_CPP_DIALECT >= 2017
 
 #  include <thrust/async/copy.h>
@@ -28,8 +31,6 @@
 
 #  include <unittest/unittest.h>
 #  include <unittest/util_async.h>
-
-THRUST_SUPPRESS_DEPRECATED_PUSH
 
 template <typename T>
 struct custom_plus
@@ -566,16 +567,12 @@ struct test_async_reduce_using
     // When you import the customization points into the global namespace,
     // they should be selected instead of the synchronous algorithms.
     {
-      THRUST_SUPPRESS_DEPRECATED_PUSH
       using namespace thrust::async;
       f0a = reduce(d0a.begin(), d0a.end());
-      THRUST_SUPPRESS_DEPRECATED_POP
     }
     {
-      THRUST_SUPPRESS_DEPRECATED_PUSH
       using thrust::async::reduce;
       f0b = reduce(d0b.begin(), d0b.end());
-      THRUST_SUPPRESS_DEPRECATED_POP
     }
 
     // ADL should find the synchronous algorithms.
@@ -912,3 +909,8 @@ struct test_async_reduce_bug1886
 DECLARE_UNITTEST(test_async_reduce_bug1886);
 
 #endif
+
+// we need to leak the suppression on clang/MSVC to suppresses warnings from the cudafe1.stub.c file
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+THRUST_SUPPRESS_DEPRECATED_POP
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_CLANG && THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
