@@ -55,10 +55,9 @@ def hostlibtest(c, clean=False, configure=False, build=False, run=False, coverag
         "clean": "Remove the client build directory before building.",
         "configure": "Run CMake configuration for the client.",
         "build": "Compile the tensile-client executable.",
-        "arch": "Specify the GPU architecture to build for (e.g., gfx90a)."
     }
 )
-def build_client(c, clean=True, configure=True, build=True, arch=None):
+def build_client(c, clean=True, configure=True, build=True):
     client_build_dir = "build/client"
 
     if clean and os.path.exists(client_build_dir):
@@ -71,18 +70,14 @@ def build_client(c, clean=True, configure=True, build=True, arch=None):
             "cmake",
             "-S", "next-cmake",
             "-B", client_build_dir,
-            f"-DCMAKE_PREFIX_PATH=/opt/rocm",
-            f"-DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++",
+            "-DCMAKE_PREFIX_PATH=/opt/rocm",
+            "-DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++",
             "-DCMAKE_BUILD_TYPE=Release",
-            # "-DTENSILE_ENABLE_CLIENT=ON",
-            # "-DTENSILE_ENABLE_HOST=OFF",
-            # "-DTENSILE_ENABLE_DEVICE=OFF",
-            # "-DTENSILE_BUILD_TESTING=ON",
-            "-DGPU_TARGETS=gfx1201"
+            "-DTENSILE_ENABLE_CLIENT=ON",
+            "-DTENSILE_ENABLE_HOST=ON",
+            "-DTENSILE_ENABLE_DEVICE=OFF",
+            # "-DGPU_TARGETS=gfx1201"
         ]
-        
-        # if arch:
-        #     cmake_cmd.append(f"-DGPU_TARGETS={arch}")
 
         c.run(" ".join(cmake_cmd))
 

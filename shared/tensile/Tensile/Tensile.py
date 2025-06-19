@@ -343,10 +343,19 @@ def Tensile(userArgs):
         print("Overriding {0}={1}".format(key, value))
         globalParameters[key] = value
 
-    # Execute Steps in the config script
-    if clientPath is not None:
-        clientPath = os.path.abspath(clientPath)
+
+## DELETE THIS?????
+    # # Execute Steps in the config script
+    # if clientPath is not None:
+    #     clientPath = os.path.abspath(clientPath)
     ClientExecutable.getClientExecutable(clientPath)
+    # executeStepsInConfig(config)
+
+    # if clientPath is not None:
+    #     clientPath = plib(clientPath)
+    
+    # clientPath = os.path.join("build", "client", "tensile-client")
+
     executeStepsInConfig(config)
 
     if not globalParameters["KeepBuildTmp"]:
