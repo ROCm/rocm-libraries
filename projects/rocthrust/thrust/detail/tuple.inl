@@ -364,6 +364,7 @@ template <class HT, class TT>
   inline THRUST_HOST_DEVICE
   cons& operator=( const cons<HT2, null_type>& u ) {
     head = u.head;
+    tail = thrust::null_type();
     return *this;
   }
 
