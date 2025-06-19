@@ -94,10 +94,10 @@ git push origin develop
 # Delete the temporary branches created in this sequence.
 ```
 
-### Step 4: CICD Triggers
+### Step 4: CI/CD Triggers
   
-1. **CICD Trigger Points:**
-   - Modify the existing CICD systems to be triggered off changes to this project in the monorepo.
+1. **CI/CD Trigger Points:**
+   - Modify the existing CI/CD systems to be triggered off changes to this project in the monorepo.
 
 ### Step 5: Repository Adjustments
 
