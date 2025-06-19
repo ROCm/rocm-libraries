@@ -45,6 +45,8 @@ using BuiltinNumericTypes = ::testing::Types<
 
 TESTS_DEFINE(AsyncCopyTests, BuiltinNumericTypes);
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 #  define DEFINE_ASYNC_COPY_CALLABLE(name, ...)                                                \
     struct THRUST_PP_CAT2(name, _fn)                                                           \
     {                                                                                          \
