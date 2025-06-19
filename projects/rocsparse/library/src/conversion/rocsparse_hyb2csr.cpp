@@ -23,14 +23,14 @@
  * ************************************************************************ */
 
 #include "internal/conversion/rocsparse_hyb2csr.h"
-#include "control.h"
 #include "internal/conversion/rocsparse_coo2csr.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_hyb2csr.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include "hyb2csr_device.h"
 #include "rocsparse_common.h"
-#include "rocsparse_primitives.h"
+#include "rocsparse_primitives.hpp"
 
 namespace rocsparse
 {

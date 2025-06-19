@@ -24,17 +24,98 @@
 #include <map>
 #include <sstream>
 
-#include "control.h"
-#include "handle.h"
 #include "rocsparse.h"
-#include "to_string.hpp"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_enum_utils.hpp"
+#include "rocsparse_handle.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "rocsparse_bellmm.hpp"
 #include "rocsparse_bsrmm.hpp"
 #include "rocsparse_coomm.hpp"
 #include "rocsparse_cscmm.hpp"
 #include "rocsparse_csrmm.hpp"
+#include "rocsparse_determine_indextype.hpp"
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_spmm_alg value_)
+{
+#define CASE(C) \
+    case C:     \
+        return #C
+    switch(value_)
+    {
+        CASE(rocsparse_spmm_alg_default);
+        CASE(rocsparse_spmm_alg_csr);
+        CASE(rocsparse_spmm_alg_coo_segmented);
+        CASE(rocsparse_spmm_alg_coo_atomic);
+        CASE(rocsparse_spmm_alg_csr_row_split);
+        CASE(rocsparse_spmm_alg_csr_nnz_split);
+        CASE(rocsparse_spmm_alg_csr_merge_path);
+        CASE(rocsparse_spmm_alg_coo_segmented_atomic);
+        CASE(rocsparse_spmm_alg_bell);
+        CASE(rocsparse_spmm_alg_bsr);
+#undef CASE
+    }
+    // LCOV_EXCL_START
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
+}
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_spmm_stage value_)
+{
+#define CASE(C) \
+    case C:     \
+        return #C
+    switch(value_)
+    {
+        CASE(rocsparse_spmm_stage_buffer_size);
+        CASE(rocsparse_spmm_stage_preprocess);
+        CASE(rocsparse_spmm_stage_compute);
+#undef CASE
+    }
+    // LCOV_EXCL_START
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_spmm_alg value_)
+{
+    switch(value_)
+    {
+    case rocsparse_spmm_alg_default:
+    case rocsparse_spmm_alg_csr:
+    case rocsparse_spmm_alg_coo_segmented:
+    case rocsparse_spmm_alg_coo_atomic:
+    case rocsparse_spmm_alg_csr_row_split:
+    case rocsparse_spmm_alg_csr_nnz_split:
+    case rocsparse_spmm_alg_csr_merge_path:
+    case rocsparse_spmm_alg_coo_segmented_atomic:
+    case rocsparse_spmm_alg_bell:
+    case rocsparse_spmm_alg_bsr:
+    {
+        return false;
+    }
+    }
+    return true;
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_spmm_stage value_)
+{
+    switch(value_)
+    {
+    case rocsparse_spmm_stage_buffer_size:
+    case rocsparse_spmm_stage_preprocess:
+    case rocsparse_spmm_stage_compute:
+    {
+        return false;
+    }
+    }
+    return true;
+}
 
 namespace rocsparse
 {
@@ -857,12 +938,12 @@ namespace rocsparse
         {
             std::stringstream sstr;
             sstr << "invalid precision configuration: "
-                 << "compute_type: " << rocsparse::to_string(compute_type_)
-                 << ", i_type: " << rocsparse::to_string(i_type_)
-                 << ", j_type: " << rocsparse::to_string(j_type_)
-                 << ", a_type: " << rocsparse::to_string(a_type_)
-                 << ", b_type: " << rocsparse::to_string(b_type_)
-                 << ", c_type: " << rocsparse::to_string(c_type_);
+                 << "compute_type: " << rocsparse::enum_utils::to_string(compute_type_)
+                 << ", i_type: " << rocsparse::enum_utils::to_string(i_type_)
+                 << ", j_type: " << rocsparse::enum_utils::to_string(j_type_)
+                 << ", a_type: " << rocsparse::enum_utils::to_string(a_type_)
+                 << ", b_type: " << rocsparse::enum_utils::to_string(b_type_)
+                 << ", c_type: " << rocsparse::enum_utils::to_string(c_type_);
 
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                    sstr.str().c_str());
@@ -950,14 +1031,13 @@ try
     }
 
     rocsparse::spmm_template_t spmm_function;
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::spmm_template_find(&spmm_function,
-                                      compute_type,
-                                      rocsparse::determine_I_index_type(mat_A),
-                                      rocsparse::determine_J_index_type(mat_A),
-                                      mat_A->data_type,
-                                      mat_B->data_type,
-                                      mat_C->data_type));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmm_template_find(&spmm_function,
+                                                            compute_type,
+                                                            rocsparse::determine_I_indextype(mat_A),
+                                                            rocsparse::determine_J_indextype(mat_A),
+                                                            mat_A->data_type,
+                                                            mat_B->data_type,
+                                                            mat_C->data_type));
 
     RETURN_IF_ROCSPARSE_ERROR(spmm_function(handle,
                                             trans_A,

@@ -23,10 +23,10 @@
  * ************************************************************************ */
 
 #include "internal/generic/rocsparse_axpby.h"
-#include "control.h"
 #include "rocsparse_axpyi.hpp"
 #include "rocsparse_common.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {

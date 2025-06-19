@@ -1,0 +1,61 @@
+name: Synchronize Release Staging Subtrees
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '0 * * * *'
+
+env:
+  MONOREPO_URL: github.com/ROCm/rocm-libraries.git
+  MONOREPO_BRANCH: release-staging/rocm-rel-7.0
+
+jobs:
+  synchronize-subtrees:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout the Monorepo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # needed for git subtree pull/push
+          token: ${{ steps.generate-token.outputs.token }}
+          ref: ${{ env.MONOREPO_BRANCH }}
+
+      - name: Set up Git user
+        run: |
+          git config user.name "assistant-librarian[bot]"
+          git config user.email "assistant-librarian[bot]@users.noreply.github.com"
+
+      - name: Update Repositories in the Monorepo
+        run: |
+          has_errors=false
+          for repo in $(cat .github/repos-config.json | jq -r '.repositories[].name'); do
+            repo_name=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .reponame")
+            url=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .url")
+            branch=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .branch")
+            category=$(cat .github/repos-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .category")
+
+            git subtree pull --prefix "${category}/${repo}" https://github.com/${url}.git $branch || {
+              has_errors=true
+            }
+
+            # Uncomment to enable pushing back to remote
+            # git subtree push --prefix "${category}/${repo}" https://github.com/${url}.git $branch || {
+            #   has_errors=true
+            # }
+          done
+
+          if [ "$has_errors" = true ]; then
+            echo "One or more errors occurred during the repository update."
+            exit 1
+          else
+            git push https://${{ env.MONOREPO_URL }} ${{ env.MONOREPO_BRANCH }}
+            echo "All repositories updated successfully!"
+          fi

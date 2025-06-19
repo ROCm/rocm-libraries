@@ -265,9 +265,9 @@ namespace rocRoller
             return std::make_shared<Expression>(MagicShifts{a});
         }
 
-        inline ExpressionPtr magicSign(ExpressionPtr a)
+        inline ExpressionPtr magicShiftAndSign(ExpressionPtr a)
         {
-            return std::make_shared<Expression>(MagicSign{a});
+            return std::make_shared<Expression>(MagicShiftAndSign{a});
         }
 
         inline static bool convertibleTo(DataType dt)
@@ -416,7 +416,7 @@ namespace rocRoller
 
         EXPRESSION_INFO(MagicMultiple);
         EXPRESSION_INFO(MagicShifts);
-        EXPRESSION_INFO(MagicSign);
+        EXPRESSION_INFO(MagicShiftAndSign);
 
         EXPRESSION_INFO(Negate);
 

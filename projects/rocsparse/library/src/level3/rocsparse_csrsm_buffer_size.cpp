@@ -25,10 +25,10 @@
 #include "internal/level3/rocsparse_csrsm.h"
 #include "rocsparse_csrsm.hpp"
 
-#include "common.h"
-#include "control.h"
-#include "rocsparse_primitives.h"
-#include "utility.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_control.hpp"
+#include "rocsparse_primitives.hpp"
+#include "rocsparse_utility.hpp"
 
 template <typename I, typename J, typename T>
 rocsparse_status rocsparse::csrsm_buffer_size_core(rocsparse_handle          handle,

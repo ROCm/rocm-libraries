@@ -66,7 +66,7 @@ TEST_CASE("Simplify ExpressionTransformation works", "[expression][expression-tr
     // negate
     SECTION("Negate")
     {
-        CHECK_THAT(simplify(-(one + one)), IdenticalTo(-literal(2)));
+        CHECK_THAT(simplify(-(one + one)), IdenticalTo(literal(-2)));
     }
 
     SECTION("Multiply")
@@ -350,6 +350,16 @@ TEST_CASE("FuseTernary ExpressionTransformation works", "[expression][expression
         CHECK_THAT(fuseTernary((b << v) + a), IdenticalTo((b << v) + a));
     }
 
+    SECTION("ShiftLAddShiftL")
+    {
+        //
+        // Original: ShiftL(Add(ShiftL(v0:I, 1:I)I, 33:I)I, 1:I)I
+        // Expected: ShiftL(ShiftLAdd(v0:I, 1:I, 33:I)I, 1:I)I
+        //
+        CHECK_THAT(fuseTernary(((v << one) + a) << one),
+                   IdenticalTo((shiftLAdd(v, one, a)) << one));
+    }
+
     SECTION("FMA")
     {
         CHECK_THAT(fuseTernary((b * one) + a), IdenticalTo(multiplyAdd(b, one, a)));
@@ -437,6 +447,8 @@ TEST_CASE("launchTimeSubExpressions works", "[expression][expression-transformat
         auto argPtr = std::make_shared<AssemblyKernelArgument>(arg);
         return std::make_shared<Expression::Expression>(argPtr);
     }();
+
+    auto arg1e2 = launchTimeSubExpressions(arg1e, context.get());
 
     CHECK_THAT(ex1_launch, IdenticalTo(argExpr));
 

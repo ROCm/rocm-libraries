@@ -23,28 +23,51 @@
  * ************************************************************************ */
 
 #include "rocsparse_csritilu0_buffer_size.hpp"
-#include "common.h"
 #include "internal/precond/rocsparse_csritilu0.h"
+#include "rocsparse_common.hpp"
 #include "rocsparse_csritilu0_driver.hpp"
+#include "rocsparse_enum_utils.hpp"
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_itilu0_alg value)
+{
+
+    switch(value)
+    {
+#define CASE(C) \
+    case C:     \
+        return #C
+        CASE(rocsparse_itilu0_alg_default);
+        CASE(rocsparse_itilu0_alg_async_inplace);
+        CASE(rocsparse_itilu0_alg_async_split);
+        CASE(rocsparse_itilu0_alg_sync_split);
+        CASE(rocsparse_itilu0_alg_sync_split_fusion);
+#undef CASE
+    }
+    // LCOV_EXCL_START
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
+};
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_itilu0_alg value)
+{
+    switch(value)
+    {
+    case rocsparse_itilu0_alg_default:
+    case rocsparse_itilu0_alg_async_inplace:
+    case rocsparse_itilu0_alg_async_split:
+    case rocsparse_itilu0_alg_sync_split:
+    case rocsparse_itilu0_alg_sync_split_fusion:
+    {
+        return false;
+    }
+    }
+    return true;
+}
 
 namespace rocsparse
 {
-    template <>
-    bool enum_utils::is_invalid(rocsparse_itilu0_alg value)
-    {
-        switch(value)
-        {
-        case rocsparse_itilu0_alg_default:
-        case rocsparse_itilu0_alg_async_inplace:
-        case rocsparse_itilu0_alg_async_split:
-        case rocsparse_itilu0_alg_sync_split:
-        case rocsparse_itilu0_alg_sync_split_fusion:
-        {
-            return false;
-        }
-        }
-        return true;
-    }
 
     template <typename I, typename J, typename... P>
     static rocsparse_status buffer_size_dispatch(rocsparse_itilu0_alg alg_, P&&... parameters)
@@ -73,6 +96,7 @@ namespace rocsparse
                     rocsparse_itilu0_alg_sync_split>::buffer_size<I, J>::run(parameters...)));
             return rocsparse_status_success;
         }
+
         case rocsparse_itilu0_alg_sync_split_fusion:
         {
             RETURN_IF_ROCSPARSE_ERROR(

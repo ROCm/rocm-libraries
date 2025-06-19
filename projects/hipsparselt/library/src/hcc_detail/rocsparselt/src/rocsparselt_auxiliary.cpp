@@ -178,7 +178,7 @@ rocsparselt_status rocsparselt_dense_descr_init(const rocsparselt_handle* handle
                     "alignment[in]",
                     alignment,
                     "valueType[in]",
-                    hipDataType_to_string(valueType),
+                    hip_datatype_to_string(valueType),
                     "order[in]",
                     rocsparselt_order_to_string(order));
         }
@@ -269,7 +269,7 @@ rocsparselt_status rocsparselt_structured_descr_init(const rocsparselt_handle* h
                     "alignment[in]",
                     alignment,
                     "valueType[in]",
-                    hipDataType_to_string(valueType),
+                    hip_datatype_to_string(valueType),
                     "order[in]",
                     rocsparselt_order_to_string(order),
                     "sparsity[in]",

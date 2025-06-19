@@ -22,9 +22,9 @@
  * ************************************************************************ */
 
 #include "rocsparse_gell2csr.hpp"
-#include "control.h"
-#include "handle.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_ell2csr.hpp"
+#include "rocsparse_handle.hpp"
 
 rocsparse_status rocsparse::gell2csr_nnz(rocsparse_handle          handle,
                                          int64_t                   m,

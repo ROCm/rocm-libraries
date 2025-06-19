@@ -24,7 +24,7 @@
 
 #pragma once
 
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {

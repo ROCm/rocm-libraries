@@ -29,8 +29,8 @@
 
 #include "../level2/rocsparse_csrsv.hpp"
 #include "bsrilu0_device.h"
-#include "control.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 #define LAUNCH_BSRILU28()                                                   \
     THROW_IF_HIPLAUNCHKERNELGGL_ERROR(                                      \

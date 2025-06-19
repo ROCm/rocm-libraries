@@ -125,10 +125,21 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
             std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 1, 100, seed_value);
             std::vector<F> flags = test_utils::get_random_data_wrapped<F>(size, 0, 1, seed_value);
 
-            common::device_ptr<T>            d_input(input);
-            common::device_ptr<F>            d_flags(flags);
-            common::device_ptr<U>            d_output(input.size());
-            common::device_ptr<unsigned int> d_selected_count_output(1);
+            common::device_ptr<T>            d_input;
+            common::device_ptr<F>            d_flags;
+            common::device_ptr<U>            d_output;
+            common::device_ptr<unsigned int> d_selected_count_output;
+
+            if(!d_input.resize_with_memory_check(size) || !d_flags.resize_with_memory_check(size)
+               || !d_output.resize_with_memory_check(size)
+               || !d_selected_count_output.resize_with_memory_check(1))
+            {
+                std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                break;
+            }
+
+            d_input.store(input);
+            d_flags.store(flags);
 
             // Calculate expected results on host
             std::vector<U> expected;
@@ -161,7 +172,13 @@ TYPED_TEST(RocprimDeviceSelectTests, Flagged)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+            common::device_ptr<void> d_temp_storage;
+
+            if(!d_temp_storage.resize_with_memory_check(temp_storage_size_bytes))
+            {
+                std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                break;
+            }
 
             test_utils::GraphHelper gHelper;
             if(TestFixture::use_graphs)
@@ -251,9 +268,18 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
             // Generate data
             std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 0, 100, seed_value);
 
-            common::device_ptr<T>            d_input(input);
-            common::device_ptr<U>            d_output(input.size());
-            common::device_ptr<unsigned int> d_selected_count_output(1);
+            common::device_ptr<T>            d_input;
+            common::device_ptr<U>            d_output;
+            common::device_ptr<unsigned int> d_selected_count_output;
+
+            if(!d_input.resize_with_memory_check(size) || !d_output.resize_with_memory_check(size)
+               || !d_selected_count_output.resize_with_memory_check(1))
+            {
+                std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                break;
+            }
+
+            d_input.store(input);
 
             // Calculate expected results on host
             std::vector<U> expected;
@@ -286,7 +312,13 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectOp)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+            common::device_ptr<void> d_temp_storage;
+
+            if(!d_temp_storage.resize_with_memory_check(temp_storage_size_bytes))
+            {
+                std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                break;
+            }
 
             test_utils::GraphHelper gHelper;
             if(TestFixture::use_graphs)
@@ -366,10 +398,21 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectFlagged)
             std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 1, 100, seed_value);
             std::vector<F> flags = test_utils::get_random_data_wrapped<F>(size, 0, 1, seed_value);
 
-            common::device_ptr<T>            d_input(input);
-            common::device_ptr<F>            d_flags(flags);
-            common::device_ptr<U>            d_output(input.size());
-            common::device_ptr<unsigned int> d_selected_count_output(1);
+            common::device_ptr<T>            d_input;
+            common::device_ptr<F>            d_flags;
+            common::device_ptr<U>            d_output;
+            common::device_ptr<unsigned int> d_selected_count_output;
+
+            if(!d_input.resize_with_memory_check(size) || !d_flags.resize_with_memory_check(size)
+               || !d_output.resize_with_memory_check(size)
+               || !d_selected_count_output.resize_with_memory_check(1))
+            {
+                std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                break;
+            }
+
+            d_input.store(input);
+            d_flags.store(flags);
 
             // Calculate expected results on host
             std::vector<U> expected;
@@ -403,7 +446,13 @@ TYPED_TEST(RocprimDeviceSelectTests, SelectFlagged)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+            common::device_ptr<void> d_temp_storage;
+
+            if(!d_temp_storage.resize_with_memory_check(temp_storage_size_bytes))
+            {
+                std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                break;
+            }
 
             test_utils::GraphHelper gHelper;
             if(TestFixture::use_graphs)
@@ -502,9 +551,19 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
                 }
 
                 // Allocate and copy to device
-                common::device_ptr<T>            d_input(input);
-                common::device_ptr<U>            d_output(input.size());
-                common::device_ptr<unsigned int> d_selected_count_output(1);
+                common::device_ptr<T>            d_input;
+                common::device_ptr<U>            d_output;
+                common::device_ptr<unsigned int> d_selected_count_output;
+
+                if(!d_input.resize_with_memory_check(size)
+                   || !d_output.resize_with_memory_check(size)
+                   || !d_selected_count_output.resize_with_memory_check(1))
+                {
+                    std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                    break;
+                }
+
+                d_input.store(input);
 
                 // Calculate expected results on host
                 std::vector<U> expected;
@@ -541,7 +600,13 @@ TYPED_TEST(RocprimDeviceSelectTests, Unique)
                 ASSERT_GT(temp_storage_size_bytes, 0);
 
                 // allocate temporary storage
-                common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+                common::device_ptr<void> d_temp_storage;
+
+                if(!d_temp_storage.resize_with_memory_check(temp_storage_size_bytes))
+                {
+                    std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                    break;
+                }
 
                 test_utils::GraphHelper gHelper;
                 if(TestFixture::use_graphs)
@@ -864,11 +929,24 @@ TYPED_TEST(RocprimDeviceUniqueByKeyTests, UniqueByKey)
                                                                       seed_value);
 
                 // Allocate and copy to device
-                common::device_ptr<key_type>          d_keys_input(input_keys);
-                common::device_ptr<value_type>        d_values_input(input_values);
-                common::device_ptr<output_key_type>   d_keys_output(input_keys.size());
-                common::device_ptr<output_value_type> d_values_output(input_values.size());
-                common::device_ptr<unsigned int>      d_selected_count_output(1);
+                common::device_ptr<key_type>          d_keys_input;
+                common::device_ptr<value_type>        d_values_input;
+                common::device_ptr<output_key_type>   d_keys_output;
+                common::device_ptr<output_value_type> d_values_output;
+                common::device_ptr<unsigned int>      d_selected_count_output;
+
+                if(!d_keys_input.resize_with_memory_check(size)
+                   || !d_values_input.resize_with_memory_check(size)
+                   || !d_keys_output.resize_with_memory_check(size)
+                   || !d_values_output.resize_with_memory_check(size)
+                   || !d_selected_count_output.resize_with_memory_check(1))
+                {
+                    std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                    break;
+                }
+
+                d_keys_input.store(input_keys);
+                d_values_input.store(input_values);
 
                 // Calculate expected results on host
                 std::vector<output_key_type>   expected_keys;
@@ -913,7 +991,13 @@ TYPED_TEST(RocprimDeviceUniqueByKeyTests, UniqueByKey)
                 ASSERT_GT(temp_storage_size_bytes, 0);
 
                 // allocate temporary storage
-                common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+                common::device_ptr<void> d_temp_storage;
+
+                if(!d_temp_storage.resize_with_memory_check(temp_storage_size_bytes))
+                {
+                    std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                    break;
+                }
 
                 test_utils::GraphHelper gHelper;
                 if(TestFixture::use_graphs)
@@ -1027,9 +1111,20 @@ TYPED_TEST(RocprimDeviceUniqueByKeyTests, UniqueByKeyAlias)
                                                                       seed_value);
 
                 // Allocate and copy to device
-                common::device_ptr<key_type>     d_keys_input(input_keys);
-                common::device_ptr<value_type>   d_values_input(input_values);
-                common::device_ptr<unsigned int> d_selected_count_output(1);
+                common::device_ptr<key_type>     d_keys_input;
+                common::device_ptr<value_type>   d_values_input;
+                common::device_ptr<unsigned int> d_selected_count_output;
+
+                if(!d_keys_input.resize_with_memory_check(size)
+                   || !d_values_input.resize_with_memory_check(size)
+                   || !d_selected_count_output.resize_with_memory_check(1))
+                {
+                    std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                    break;
+                }
+
+                d_keys_input.store(input_keys);
+                d_values_input.store(input_values);
 
                 // Calculate expected results on host
                 std::vector<output_key_type>   expected_keys;
@@ -1074,7 +1169,13 @@ TYPED_TEST(RocprimDeviceUniqueByKeyTests, UniqueByKeyAlias)
                 ASSERT_GT(temp_storage_size_bytes, 0);
 
                 // allocate temporary storage
-                common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+                common::device_ptr<void> d_temp_storage;
+
+                if(!d_temp_storage.resize_with_memory_check(temp_storage_size_bytes))
+                {
+                    std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                    break;
+                }
 
                 test_utils::GraphHelper gHelper;
                 if(TestFixture::use_graphs)

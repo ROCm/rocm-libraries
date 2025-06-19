@@ -613,7 +613,7 @@ rocsparselt_status rocsparselt_smfmac_prune_impl(const _rocsparselt_handle*    h
         log_error(handle,
                   "rocsparselt_smfmac_prune",
                   "datatype",
-                  hipDataType_to_string(type),
+                  hip_datatype_to_string(type),
                   "is not supported");
         return rocsparselt_status_not_implemented;
     }
@@ -669,7 +669,7 @@ rocsparselt_status rocsparselt_smfmac_prune_check_impl(const _rocsparselt_handle
         log_error(handle,
                   "rocsparselt_smfmac_prune_check",
                   "datatype",
-                  hipDataType_to_string(type),
+                  hip_datatype_to_string(type),
                   "is not supported");
         return rocsparselt_status_not_implemented;
     }

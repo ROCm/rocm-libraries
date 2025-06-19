@@ -1,5 +1,6 @@
 /*
  *  Copyright 2024 NVIDIA Corporation
+ *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -39,6 +40,15 @@ namespace detail
 {
 namespace functional
 {
+
+// If we have libstdc++ >= 10, we can use the __decay_t
+// builtin to reduce compilation time.
+template<typename T>
+#if defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE < 10
+using decay_t = std::decay_t<T>;
+#else
+using decay_t = std::__decay_t<T>;
+#endif
 
 // An actor is a node in an expression template
 template <typename Eval>
@@ -197,7 +207,7 @@ struct value
 };
 
 template <typename T>
-THRUST_HOST_DEVICE auto make_actor(T&& x) -> actor<value<std::__decay_t<T>>>
+THRUST_HOST_DEVICE auto make_actor(T&& x) -> actor<value<thrust::detail::functional::decay_t<T>>>
 {
   return {{THRUST_FWD(x)}};
 }

@@ -28,11 +28,12 @@
 #include "../conversion/rocsparse_csr2coo.hpp"
 #include "../conversion/rocsparse_identity.hpp"
 #include "../level1/rocsparse_gthr.hpp"
-#include "control.h"
 #include "csrsv_device.h"
+#include "rocsparse_assign_async.hpp"
 #include "rocsparse_common.h"
-#include "rocsparse_primitives.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_primitives.hpp"
+#include "rocsparse_utility.hpp"
 
 template <typename I, typename J, typename T>
 rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
@@ -182,7 +183,7 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
     RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync((void**)&info->row_map, sizeof(J) * m, stream));
 
     // Initialize zero pivot
-    RETURN_IF_HIP_ERROR(
+    RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::assign_async(*zero_pivot, std::numeric_limits<J>::max(), stream));
 
     // Determine archid and ASIC revision

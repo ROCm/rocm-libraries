@@ -23,7 +23,7 @@
 #include "rocsparse_gcsr2coo_aos.hpp"
 #include "rocsparse_convert_array.hpp"
 #include "rocsparse_gcsr2coo.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 rocsparse_status rocsparse::gcsr2coo_aos_buffer_size(rocsparse_handle     handle,
                                                      int64_t              m,

@@ -23,11 +23,11 @@
 * ************************************************************************ */
 #include "internal/level3/rocsparse_csrmm.h"
 #include "../conversion/rocsparse_csr2coo.hpp"
-#include "common.h"
-#include "control.h"
 #include "rocsparse_common.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csrmm.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 #include <algorithm>
 
 namespace rocsparse

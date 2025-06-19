@@ -223,12 +223,13 @@ namespace rocRoller::KernelGraph
             {
                 auto waveTile = rv.coordinates.get<WaveTile>(waveTileTag);
 
-                auto elements = waveTile.value().elements();
-                uint wfs      = m_context->kernel()->wavefront_size();
+                auto elements          = waveTile.value().elements();
+                auto [_, lane]         = rv.getDimension<Lane>(node);
+                auto activeLanesInWave = getUnsignedInt(evaluate(lane.size));
 
-                AssertFatal(elements % wfs == 0);
+                AssertFatal(elements % activeLanesInWave == 0);
 
-                auto elementsPerThread = elements / wfs;
+                auto elementsPerThread = elements / activeLanesInWave;
                 if(elementsPerThread < packedInfo.packing)
                 {
                     Log::debug(

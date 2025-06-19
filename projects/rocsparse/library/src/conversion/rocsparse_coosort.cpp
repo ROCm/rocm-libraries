@@ -25,13 +25,13 @@
 #include "internal/conversion/rocsparse_coosort.h"
 #include "internal/conversion/rocsparse_inverse_permutation.h"
 
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
-#include "control.h"
 #include "coosort_device.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_coosort.hpp"
 #include "rocsparse_identity.hpp"
-#include "rocsparse_primitives.h"
+#include "rocsparse_primitives.hpp"
 
 namespace rocsparse
 {

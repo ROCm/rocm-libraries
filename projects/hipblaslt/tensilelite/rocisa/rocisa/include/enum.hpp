@@ -58,6 +58,53 @@ namespace rocisa
         None = Count
     };
 
+    inline int dataTypeToBytes(DataType type)
+    {
+        switch(type)
+        {
+        case DataType::Float:
+            return 4;
+        case DataType::Double:
+            return 8;
+        case DataType::ComplexFloat:
+            return 8;
+        case DataType::ComplexDouble:
+            return 16;
+        case DataType::Half:
+            return 2;
+        case DataType::Int8x4:
+            return 4;
+        case DataType::Int32:
+            return 4;
+        case DataType::BFloat16:
+            return 2;
+        case DataType::Int8:
+            return 1;
+        case DataType::Int64:
+            return 8;
+        case DataType::XFloat32:
+            return 4;
+        case DataType::Float8_fnuz:
+            return 1;
+        case DataType::BFloat8_fnuz:
+            return 1;
+        case DataType::Float8BFloat8_fnuz:
+            return 1;
+        case DataType::BFloat8Float8_fnuz:
+            return 1;
+        case DataType::Float8:
+            return 1;
+        case DataType::BFloat8:
+            return 1;
+        case DataType::Float8BFloat8:
+            return 1;
+        case DataType::BFloat8Float8:
+            return 1;
+        default:
+            return -1; // Invalid type
+        }
+    }
+
     inline std::string toString(DataType type)
     {
         switch(type)

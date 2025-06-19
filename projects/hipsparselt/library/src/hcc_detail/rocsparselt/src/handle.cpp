@@ -137,7 +137,7 @@ std::ostream& operator<<(std::ostream& stream, const _rocsparselt_mat_descr& t)
     stream << "{"
            << "ptr=" << (&t) << ", format=" << rocsparselt_matrix_type_to_string(t.m_type)
            << ", row=" << t.m << ", col=" << t.n << ", ld=" << t.ld << ", alignment=" << t.alignment
-           << ", datatype=" << hipDataType_to_string(t.type)
+           << ", datatype=" << hip_datatype_to_string(t.type)
            << ", order=" << rocsparselt_order_to_string(t.order);
     if(t.m_type == rocsparselt_matrix_type_structured)
         stream << ", sparsity=" << rocsparselt_sparsity_to_string(t.sparsity);
@@ -163,7 +163,7 @@ std::ostream& operator<<(std::ostream& stream, const _rocsparselt_matmul_descr& 
            << ", activation_tanh_beta=" << t.activation_tanh_beta
            << ", activation_gelu_scaling=" << t.activation_gelu_scaling
            << ", bias_pointer=" << t.bias_pointer << ", bias_stride=" << t.bias_stride
-           << ", bias_type=" << hipDataType_to_string(t.bias_type) << ", m=" << t.m << ", n=" << t.n
+           << ", bias_type=" << hip_datatype_to_string(t.bias_type) << ", m=" << t.m << ", n=" << t.n
            << ", k=" << t.k << ", is_sparse_a=" << t.is_sparse_a << "}";
     return stream;
 }

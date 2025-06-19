@@ -426,8 +426,9 @@ namespace ExpressionTest
 
             CHECK_THROWS(context.get()->schedule(
                 Expression::generate(result, Expression::magicShifts(reg), context.get())));
+
             CHECK_THROWS(context.get()->schedule(
-                Expression::generate(result, Expression::magicSign(reg), context.get())));
+                Expression::generate(result, Expression::magicShiftAndSign(reg), context.get())));
         }
 
         SECTION("CommandArgument needs the user args")
@@ -1048,8 +1049,7 @@ namespace ExpressionTest
             auto op = GENERATE_COPY(
                 from_range(std::to_array({Expression::operator-, // cppcheck-suppress syntaxError
                                           Expression::operator~,
-                                          Expression::magicMultiple,
-                                          Expression::magicSign})));
+                                          Expression::magicMultiple})));
 
             CAPTURE(op(vgprFloat));
             CHECK(rVgprFloat == resultType(op(vgprFloat)));
@@ -1095,6 +1095,30 @@ namespace ExpressionTest
             CHECK(rSgprInt32 == resultType(op(sgprHalf)));
             CHECK(rSgprInt32 == resultType(op(sgprHalfx2)));
             CHECK(rSgprInt32 == resultType(op(sgprBool32)));
+        }
+
+        SECTION("Magic shiftAndSign")
+        {
+            auto op = Expression::magicShiftAndSign;
+            CHECK(rVgprUInt32 == resultType(op(vgprFloat)));
+            CHECK(rVgprUInt32 == resultType(op(vgprDouble)));
+            CHECK(rVgprUInt32 == resultType(op(vgprInt32)));
+            CHECK(rVgprUInt32 == resultType(op(vgprInt64)));
+            CHECK(rVgprUInt32 == resultType(op(vgprUInt32)));
+            CHECK(rVgprUInt32 == resultType(op(vgprUInt64)));
+            CHECK(rVgprUInt32 == resultType(op(vgprHalf)));
+            CHECK(rVgprUInt32 == resultType(op(vgprHalfx2)));
+            CHECK(rVgprUInt32 == resultType(op(vgprBool32)));
+
+            CHECK(rSgprUInt32 == resultType(op(sgprFloat)));
+            CHECK(rSgprUInt32 == resultType(op(sgprDouble)));
+            CHECK(rSgprUInt32 == resultType(op(sgprInt32)));
+            CHECK(rSgprUInt32 == resultType(op(sgprInt64)));
+            CHECK(rSgprUInt32 == resultType(op(sgprUInt32)));
+            CHECK(rSgprUInt32 == resultType(op(sgprUInt64)));
+            CHECK(rSgprUInt32 == resultType(op(sgprHalf)));
+            CHECK(rSgprUInt32 == resultType(op(sgprHalfx2)));
+            CHECK(rSgprUInt32 == resultType(op(sgprBool32)));
         }
 
         SECTION("Comparisons")

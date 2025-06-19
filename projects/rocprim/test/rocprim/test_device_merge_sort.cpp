@@ -148,9 +148,17 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
                 100,
                 seed_value); // float16 can't exceed 65504
 
-            common::device_ptr<key_type> d_input(input);
+            common::device_ptr<key_type> d_input;
             common::device_ptr<key_type> d_output_alloc;
-            d_output_alloc.resize(in_place ? 0 : size);
+
+            if(!d_input.resize_with_memory_check(size)
+               || !d_output_alloc.resize_with_memory_check(in_place ? 0 : size))
+            {
+                std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                break;
+            }
+
+            d_input.store(input);
             common::device_ptr<key_type>& d_output = in_place ? d_input : d_output_alloc;
 
             // compare function
@@ -175,7 +183,13 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+            common::device_ptr<void> d_temp_storage;
+
+            if(!d_temp_storage.resize_with_memory_check(temp_storage_size_bytes))
+            {
+                std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                break;
+            }
 
             test_utils::GraphHelper gHelper;
             if(TestFixture::use_graphs)
@@ -258,15 +272,25 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             std::vector<value_type> values_input(size);
             test_utils::iota(values_input.begin(), values_input.end(), 0);
 
-            common::device_ptr<key_type> d_keys_input(keys_input);
-            common::device_ptr<key_type> d_keys_output_alloc;
-            d_keys_output_alloc.resize(in_place ? 0 : size);
+            common::device_ptr<key_type>   d_keys_input;
+            common::device_ptr<key_type>   d_keys_output_alloc;
+            common::device_ptr<value_type> d_values_input;
+            common::device_ptr<value_type> d_values_output_alloc;
+
+            if(!d_keys_input.resize_with_memory_check(size)
+               || !d_keys_output_alloc.resize_with_memory_check(in_place ? 0 : size)
+               || !d_values_input.resize_with_memory_check(size)
+               || !d_values_output_alloc.resize_with_memory_check(in_place ? 0 : size))
+            {
+                std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                break;
+            }
+
+            d_keys_input.store(keys_input);
+            d_values_input.store(values_input);
+
             common::device_ptr<key_type>& d_keys_output
                 = in_place ? d_keys_input : d_keys_output_alloc;
-
-            common::device_ptr<value_type> d_values_input(values_input);
-            common::device_ptr<value_type> d_values_output_alloc;
-            d_values_output_alloc.resize(in_place ? 0 : size);
             common::device_ptr<value_type>& d_values_output
                 = in_place ? d_values_input : d_values_output_alloc;
 
@@ -302,7 +326,13 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             ASSERT_GT(temp_storage_size_bytes, 0);
 
             // allocate temporary storage
-            common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
+            common::device_ptr<void> d_temp_storage;
+
+            if(!d_temp_storage.resize_with_memory_check(temp_storage_size_bytes))
+            {
+                std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
+                break;
+            }
 
             test_utils::GraphHelper gHelper;
             if(TestFixture::use_graphs)

@@ -28,6 +28,7 @@ target_sources(rocroller-tests-catch
     PRIVATE
         "${_CMAKE_CURRENT_SOURCE_DIR}/CustomAssertions.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/TestKernels.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/AddPrefetchTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/AliasDataFlowTagsTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/AnnotateInstructionsTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/BinaryExpressionTest.cpp"
@@ -45,6 +46,7 @@ target_sources(rocroller-tests-catch
         "${_CMAKE_CURRENT_SOURCE_DIR}/ExpressionToStringTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/ExpressionTransformationTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/FastArithmeticTest.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/FastDivisionTransformationTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/GlobalLoadStoreTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/HazardObserverTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/HypergraphTest.cpp"
@@ -76,4 +78,5 @@ target_sources(rocroller-tests-catch
         "${_CMAKE_CURRENT_SOURCE_DIR}/WMMAObserverUnitTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/WidenAddrExprTo64bitTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/mxDataGeneratorTest.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/ScaleUtilsTest.cpp"
 )

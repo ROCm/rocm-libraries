@@ -66,7 +66,7 @@ TEST_CASE("FastArithmetic ExpressionTransformation works",
 
     SECTION("Negate")
     {
-        CHECK_THAT(fast(-(one + one)), IdenticalTo(-literal(2)));
+        CHECK_THAT(fast(-(one + one)), IdenticalTo(literal(-2)));
     }
 
     SECTION("Multiply")
@@ -129,7 +129,7 @@ TEST_CASE("FastArithmetic ExpressionTransformation works",
         CHECK_THAT(fast(one & b), IdenticalTo(zero));
         CHECK_THAT(fast(v & (a + b << one)), IdenticalTo(v & literal(266)));
         CHECK_THAT(fast(v & (zero + zero)), IdenticalTo(zero));
-        CHECK_THAT(fast(v & -one), IdenticalTo(v & -one));
+        CHECK_THAT(fast(v & -one), IdenticalTo(v & literal(-1)));
         CHECK_THAT(fast(v & one), EquivalentTo(v & one));
         CHECK_THAT(fast(v & v2), IdenticalTo(v & v2));
         CHECK_THAT(fast(v & zero), IdenticalTo(zero));
@@ -236,7 +236,7 @@ TEST_CASE("FastArithmetic ExpressionTransformation works",
     SECTION("Bitwise Or")
     {
         CHECK_THAT(fast(v | (a + b << one)), IdenticalTo(v | literal(266)));
-        CHECK_THAT(fast(v | -one), IdenticalTo(v | -one));
+        CHECK_THAT(fast(v | -one), IdenticalTo(v | literal(-1)));
         CHECK_THAT(fast(v | one), EquivalentTo(v | one));
         CHECK_THAT(fast((v | one) | a), EquivalentTo(v | a));
         CHECK_THAT(fast(fast((one | a) | v)), EquivalentTo(v | a));

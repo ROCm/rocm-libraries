@@ -29,8 +29,8 @@
 
 #include "csrgemm_numeric_device.h"
 
-#include "control.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {
@@ -437,7 +437,7 @@ namespace rocsparse
 #undef CSRGEMM_DIM
         }
 
-        ROCSPARSE_RETURN_STATUS(success);
+        return rocsparse_status_success;
     }
 }
 
@@ -914,7 +914,7 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
 #undef CSRGEMM_NUMERIC_LAUNCHER
     }
 
-    ROCSPARSE_RETURN_STATUS(success);
+    return rocsparse_status_success;
 }
 
 #define INSTANTIATE(I, J, T)                                            \

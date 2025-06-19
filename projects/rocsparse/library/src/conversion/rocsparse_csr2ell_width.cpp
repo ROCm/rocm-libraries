@@ -22,12 +22,12 @@
  *
  * ************************************************************************ */
 
-#include "common.h"
-#include "control.h"
 #include "csr2ell_device.h"
 #include "internal/conversion/rocsparse_csr2ell.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csr2ell.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 template <typename J>
 rocsparse_status rocsparse::csr2ell_width_quickreturn(rocsparse_handle          handle,

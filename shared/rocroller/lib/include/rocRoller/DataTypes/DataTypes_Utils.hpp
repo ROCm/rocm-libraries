@@ -56,6 +56,12 @@ namespace rocRoller
         typedef FP4x8 type;
     };
 
+    template <>
+    struct PackedTypeOf<E8M0>
+    {
+        typedef E8M0x4 type;
+    };
+
     template <typename T>
     struct SegmentedTypeOf
     {
@@ -117,5 +123,18 @@ namespace rocRoller
 
     uint packingFactorForDataType(DataType type);
 
-    bool isScaleType(DataType type);
+    uint8_t floatToScale(DataType scaleType, float value);
+    float   scaleToFloat(DataType scaleType, uint8_t scale);
+
+    inline constexpr bool isScaleType(DataType type)
+    {
+        switch(type)
+        {
+        case DataType::E8M0:
+        case DataType::E8M0x4:
+            return true;
+        default:
+            return false;
+        };
+    }
 }

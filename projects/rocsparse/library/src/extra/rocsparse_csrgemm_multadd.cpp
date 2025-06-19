@@ -24,13 +24,13 @@
 
 #include "rocsparse_csrgemm_multadd.hpp"
 #include "../conversion/rocsparse_identity.hpp"
-#include "control.h"
 #include "csrgemm_device.h"
 #include "internal/extra/rocsparse_csrgemm.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm_calc.hpp"
 #include "rocsparse_csrgemm_mult.hpp"
 #include "rocsparse_csrgemm_scal.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 rocsparse_status rocsparse::csrgemm_multadd_quickreturn(rocsparse_handle          handle,
                                                         rocsparse_operation       trans_A,

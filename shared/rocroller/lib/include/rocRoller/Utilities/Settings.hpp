@@ -207,10 +207,10 @@ namespace rocRoller
             -1};
 
         static inline const SettingsOption<AssemblerType> KernelAssembler{
-            "ROCROLLER_ASSEMBLER", "Which assembler method to use", AssemblerType::Subprocess, -1};
+            "ROCROLLER_ASSEMBLER", "Which assembler method to use", AssemblerType::InProcess, -1};
 
         static inline const SettingsOption<std::string> SubprocessAssemblerPath{
-            "ROCROLLER_SUBPROCESS_ASSEMBLER_PATH", "Path to subprocess assembler", "", -1};
+            "ROCROLLER_DEBUG_ASSEMBLER_PATH", "Path to subprocess assembler", "", -1};
 
         static inline const std::string BitfieldName = "ROCROLLER_DEBUG";
 

@@ -23,15 +23,15 @@
 * ************************************************************************ */
 
 #include "internal/conversion/rocsparse_prune_dense2csr_by_percentage.h"
-#include "control.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_prune_dense2csr_by_percentage.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include "csr2csr_compress_device.h"
 #include "prune_dense2csr_by_percentage_device.h"
 #include "prune_dense2csr_device.h"
 #include "rocsparse_common.h"
-#include "rocsparse_primitives.h"
+#include "rocsparse_primitives.hpp"
 
 namespace rocsparse
 {

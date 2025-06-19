@@ -23,7 +23,7 @@
 
 #include "rocsparse_extract.hpp"
 #include "rocsparse_extract_alg_default.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 extern "C" rocsparse_status rocsparse_create_extract_descr(rocsparse_extract_descr*    descr,
                                                            rocsparse_const_spmat_descr source,

@@ -21,11 +21,11 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "common.h"
-#include "control.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csxsldu.hpp"
-#include "rocsparse_primitives.h"
-#include "utility.h"
+#include "rocsparse_primitives.hpp"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {

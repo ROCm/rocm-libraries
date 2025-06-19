@@ -24,8 +24,8 @@
 #include "internal/util/rocsparse_check_matrix_csc.h"
 #include "rocsparse_check_matrix_csc.hpp"
 #include "rocsparse_check_matrix_csr.hpp"
-#include "to_string.hpp"
-#include "utility.h"
+#include "rocsparse_enum_utils.hpp"
+#include "rocsparse_utility.hpp"
 
 template <typename T, typename I, typename J>
 rocsparse_status rocsparse::check_matrix_csc_core(rocsparse_handle       handle,
@@ -120,7 +120,7 @@ rocsparse_status rocsparse::check_matrix_csc_checkarg(rocsparse_handle       han
         {
             rocsparse::log_debug(handle,
                                  ("Matrix was specified to be "
-                                  + std::string(rocsparse::to_string(matrix_type))
+                                  + std::string(rocsparse::enum_utils::to_string(matrix_type))
                                   + " but m != n"));
         }
     }

@@ -23,9 +23,9 @@
 
 #include "gebsrmv_device.h"
 
-#include "handle.h"
+#include "rocsparse_handle.hpp"
 
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include <hip/hip_runtime.h>
 

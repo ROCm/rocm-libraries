@@ -22,10 +22,10 @@
  *
  * ************************************************************************ */
 
-#include "control.h"
 #include "rocsparse_common.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_coomv_aos.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include "coomv_device.h"
 

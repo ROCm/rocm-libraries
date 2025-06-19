@@ -24,14 +24,49 @@
 #include <map>
 #include <sstream>
 
-#include "common.h"
-#include "control.h"
-#include "handle.h"
 #include "internal/generic/rocsparse_sddmm.h"
-#include "to_string.hpp"
-#include "utility.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_control.hpp"
+#include "rocsparse_determine_indextype.hpp"
+#include "rocsparse_enum_utils.hpp"
+#include "rocsparse_handle.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "rocsparse_sddmm.hpp"
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_sddmm_alg value_)
+{
+#define CASE(C) \
+    case C:     \
+        return #C
+    switch(value_)
+    {
+        CASE(rocsparse_sddmm_alg_default);
+        CASE(rocsparse_sddmm_alg_dense);
+#undef CASE
+    }
+    // LCOV_EXCL_START
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_sddmm_alg value_)
+{
+    switch(value_)
+    {
+    case rocsparse_sddmm_alg_default:
+    {
+        return false;
+    }
+    case rocsparse_sddmm_alg_dense:
+    {
+        return false;
+    }
+    }
+    return true;
+}
 
 namespace rocsparse
 {
@@ -313,12 +348,12 @@ namespace rocsparse
         {
             std::stringstream sstr;
             sstr << "invalid precision configuration: "
-                 << "compute_type: " << rocsparse::to_string(compute_type_)
-                 << ", i_type: " << rocsparse::to_string(i_type_)
-                 << ", j_type: " << rocsparse::to_string(j_type_)
-                 << ", a_type: " << rocsparse::to_string(a_type_)
-                 << ", b_type: " << rocsparse::to_string(b_type_)
-                 << ", c_type: " << rocsparse::to_string(c_type_);
+                 << "compute_type: " << rocsparse::enum_utils::to_string(compute_type_)
+                 << ", i_type: " << rocsparse::enum_utils::to_string(i_type_)
+                 << ", j_type: " << rocsparse::enum_utils::to_string(j_type_)
+                 << ", a_type: " << rocsparse::enum_utils::to_string(a_type_)
+                 << ", b_type: " << rocsparse::enum_utils::to_string(b_type_)
+                 << ", c_type: " << rocsparse::enum_utils::to_string(c_type_);
 
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                    sstr.str().c_str());
@@ -391,8 +426,8 @@ try
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::sddmm_buffer_size_template_find(&sddmm_buffer_size_function,
                                                    compute_type,
-                                                   rocsparse::determine_I_index_type(mat_C),
-                                                   rocsparse::determine_J_index_type(mat_C),
+                                                   rocsparse::determine_I_indextype(mat_C),
+                                                   rocsparse::determine_J_indextype(mat_C),
                                                    mat_A->data_type,
                                                    mat_B->data_type,
                                                    mat_C->data_type));
@@ -702,12 +737,12 @@ namespace rocsparse
         {
             std::stringstream sstr;
             sstr << "invalid precision configuration: "
-                 << "compute_type: " << rocsparse::to_string(compute_type_)
-                 << ", i_type: " << rocsparse::to_string(i_type_)
-                 << ", j_type: " << rocsparse::to_string(j_type_)
-                 << ", a_type: " << rocsparse::to_string(a_type_)
-                 << ", b_type: " << rocsparse::to_string(b_type_)
-                 << ", c_type: " << rocsparse::to_string(c_type_);
+                 << "compute_type: " << rocsparse::enum_utils::to_string(compute_type_)
+                 << ", i_type: " << rocsparse::enum_utils::to_string(i_type_)
+                 << ", j_type: " << rocsparse::enum_utils::to_string(j_type_)
+                 << ", a_type: " << rocsparse::enum_utils::to_string(a_type_)
+                 << ", b_type: " << rocsparse::enum_utils::to_string(b_type_)
+                 << ", c_type: " << rocsparse::enum_utils::to_string(c_type_);
 
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                    sstr.str().c_str());
@@ -782,8 +817,8 @@ try
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::sddmm_preprocess_template_find(&sddmm_preprocess_function,
                                                   compute_type,
-                                                  rocsparse::determine_I_index_type(mat_C),
-                                                  rocsparse::determine_J_index_type(mat_C),
+                                                  rocsparse::determine_I_indextype(mat_C),
+                                                  rocsparse::determine_J_indextype(mat_C),
                                                   mat_A->data_type,
                                                   mat_B->data_type,
                                                   mat_C->data_type));
@@ -1091,12 +1126,12 @@ namespace rocsparse
         {
             std::stringstream sstr;
             sstr << "invalid precision configuration: "
-                 << "compute_type: " << rocsparse::to_string(compute_type_)
-                 << ", i_type: " << rocsparse::to_string(i_type_)
-                 << ", j_type: " << rocsparse::to_string(j_type_)
-                 << ", a_type: " << rocsparse::to_string(a_type_)
-                 << ", b_type: " << rocsparse::to_string(b_type_)
-                 << ", c_type: " << rocsparse::to_string(c_type_);
+                 << "compute_type: " << rocsparse::enum_utils::to_string(compute_type_)
+                 << ", i_type: " << rocsparse::enum_utils::to_string(i_type_)
+                 << ", j_type: " << rocsparse::enum_utils::to_string(j_type_)
+                 << ", a_type: " << rocsparse::enum_utils::to_string(a_type_)
+                 << ", b_type: " << rocsparse::enum_utils::to_string(b_type_)
+                 << ", c_type: " << rocsparse::enum_utils::to_string(c_type_);
 
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                    sstr.str().c_str());
@@ -1172,8 +1207,8 @@ try
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::sddmm_template_find(&sddmm_function,
                                        compute_type,
-                                       rocsparse::determine_I_index_type(mat_C),
-                                       rocsparse::determine_J_index_type(mat_C),
+                                       rocsparse::determine_I_indextype(mat_C),
+                                       rocsparse::determine_J_indextype(mat_C),
                                        mat_A->data_type,
                                        mat_B->data_type,
                                        mat_C->data_type));

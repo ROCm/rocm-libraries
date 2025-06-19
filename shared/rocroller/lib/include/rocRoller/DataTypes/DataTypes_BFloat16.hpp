@@ -37,9 +37,9 @@ namespace rocRoller
      * @{
      */
     /**
-    *  @brief Floating point 8-bit type in E5M2 format
-    *
-    */
+     *  @brief Floating point 16-bit type in brain-float format
+     *
+     */
     struct BFloat16
     {
         constexpr BFloat16()

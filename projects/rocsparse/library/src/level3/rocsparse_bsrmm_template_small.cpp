@@ -23,7 +23,7 @@
  * ************************************************************************ */
 
 #include "bsrmm_device_small.h"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {

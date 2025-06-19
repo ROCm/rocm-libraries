@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
 #include <string>
 
@@ -100,6 +101,9 @@ struct GEMMProblem
 
     rocRoller::Operations::ScaleMode scaleAMode = rocRoller::Operations::ScaleMode::None;
     rocRoller::Operations::ScaleMode scaleBMode = rocRoller::Operations::ScaleMode::None;
+
+    rocRoller::DataType scaleTypeA = rocRoller::DataType::None;
+    rocRoller::DataType scaleTypeB = rocRoller::DataType::None;
 
     int scaleBlockSize = -1;
 

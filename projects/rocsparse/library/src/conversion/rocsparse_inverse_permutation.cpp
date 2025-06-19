@@ -23,7 +23,7 @@
  * ************************************************************************ */
 #include "internal/conversion/rocsparse_inverse_permutation.h"
 #include "rocsparse_inverse_permutation.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {

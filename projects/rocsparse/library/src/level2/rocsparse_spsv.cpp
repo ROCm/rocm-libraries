@@ -24,14 +24,77 @@
 #include <map>
 #include <sstream>
 
-#include "control.h"
-#include "handle.h"
 #include "internal/generic/rocsparse_spsv.h"
-#include "to_string.hpp"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_enum_utils.hpp"
+#include "rocsparse_handle.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "rocsparse_coosv.hpp"
 #include "rocsparse_csrsv.hpp"
+#include "rocsparse_determine_indextype.hpp"
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_spsv_alg value_)
+{
+#define CASE(C) \
+    case C:     \
+        return #C
+    switch(value_)
+    {
+        CASE(rocsparse_spsv_alg_default);
+#undef CASE
+    }
+    // LCOV_EXCL_START
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
+}
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_spsv_stage value_)
+{
+#define CASE(C) \
+    case C:     \
+        return #C
+    switch(value_)
+    {
+        CASE(rocsparse_spsv_stage_buffer_size);
+        CASE(rocsparse_spsv_stage_preprocess);
+        CASE(rocsparse_spsv_stage_compute);
+#undef CASE
+    }
+    // LCOV_EXCL_START
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_spsv_alg value_)
+{
+    switch(value_)
+    {
+    case rocsparse_spsv_alg_default:
+    {
+        return false;
+    }
+    }
+    return true;
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_spsv_stage value_)
+{
+    switch(value_)
+    {
+    case rocsparse_spsv_stage_buffer_size:
+    case rocsparse_spsv_stage_preprocess:
+    case rocsparse_spsv_stage_compute:
+    {
+        return false;
+    }
+    }
+    return true;
+}
 
 namespace rocsparse
 {
@@ -277,9 +340,9 @@ namespace rocsparse
         {
             std::stringstream sstr;
             sstr << "invalid precision configuration: "
-                 << "compute_type: " << rocsparse::to_string(compute_type_)
-                 << ", i_type: " << rocsparse::to_string(i_type_)
-                 << ", j_type: " << rocsparse::to_string(j_type_);
+                 << "compute_type: " << rocsparse::enum_utils::to_string(compute_type_)
+                 << ", i_type: " << rocsparse::enum_utils::to_string(i_type_)
+                 << ", j_type: " << rocsparse::enum_utils::to_string(j_type_);
 
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                    sstr.str().c_str());
@@ -357,11 +420,10 @@ try
     ROCSPARSE_CHECKARG(5, y, (y->data_type != compute_type), rocsparse_status_not_implemented);
 
     rocsparse::spsv_template_t spsv_function;
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::spsv_template_find(&spsv_function,
-                                      compute_type,
-                                      rocsparse::determine_I_index_type(mat),
-                                      rocsparse::determine_J_index_type(mat)));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::spsv_template_find(&spsv_function,
+                                                            compute_type,
+                                                            rocsparse::determine_I_indextype(mat),
+                                                            rocsparse::determine_J_indextype(mat)));
 
     RETURN_IF_ROCSPARSE_ERROR(
         spsv_function(handle, trans, alpha, mat, x, y, alg, stage, buffer_size, temp_buffer));

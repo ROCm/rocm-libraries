@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2024-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -265,7 +265,8 @@ namespace amd_detail
 #pragma unroll
                 for(uint32_t i = 0; i < VectorWidth; ++i)
                 {
-                    cData.data[i] = static_cast<DType>(alpha * aData[i] + beta * bData[i]);
+                    HIPBLASLT_HIPVEC_ACCESS(cData)
+                    [i] = static_cast<DType>(alpha * aData[i] + beta * bData[i]);
                 }
 
                 if(!vectorShift)
@@ -273,14 +274,14 @@ namespace amd_detail
 #pragma unroll
                     for(uint32_t i = 0; i < VectorWidth; ++i)
                     {
-                        c[cOffset + i] = cData.data[i];
+                        c[cOffset + i] = HIPBLASLT_HIPVEC_ACCESS(cData)[i];
                     }
                 }
                 else
                 {
                     for(uint32_t i = vectorShift; i < VectorWidth; ++i)
                     {
-                        c[cOffset + i] = cData.data[i];
+                        c[cOffset + i] = HIPBLASLT_HIPVEC_ACCESS(cData)[i];
                     }
                 }
             }

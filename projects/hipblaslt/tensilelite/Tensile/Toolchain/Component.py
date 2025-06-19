@@ -24,7 +24,6 @@
 ################################################################################
 from os import name as os_name
 from os import environ
-from os import sysconf
 from pathlib import Path
 from re import search, IGNORECASE
 from shlex import split
@@ -368,7 +367,8 @@ class Linker(Component):
         On Unix: check against system argument length limit
         """
         if os_name == "nt":
-            return True  
+            return True
+        from os import sysconf
         line_length = sum(len(arg) for arg in args) + len(args) - 1
         return line_length >= sysconf("SC_ARG_MAX")
 
