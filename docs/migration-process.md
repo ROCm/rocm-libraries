@@ -17,7 +17,7 @@ To ensure consistency and maintainability during the migration, the following pr
 
 3. **Pause Merges:**
    - There are GitHub Actions that automatically synchronize changes from the individual repos to the monorepo.
-   - These automated actions need to be paused by selecting to disable the workflow on the GitHub UI.
+   - These automated actions need to be paused by disabling the workflow on the GitHub UI.
    - develop branch workflow: https://github.com/ROCm/rocm-libraries/actions/workflows/update-subtrees.yml 
    - release-staging branch workflow: https://github.com/ROCm/rocm-libraries/actions/workflows/update-release-staging-subtree.yml
    - Announce the pause to key stakeholders, and ask to propagate the news.
