@@ -7,7 +7,7 @@ This document outlines the process for migrating from a single library repositor
 To ensure consistency and maintainability during the migration, the following pre-conditions must be satisfied:  
 
 1. **Identify Next Repo to Migrate:**
-   - Please refer to the main [README.md](README.md) on the order of repositories being migrated.
+   - Please refer to the main [README.md](/README.md) on the order of repositories being migrated.
    - This is usually discussed in advance in meetings with the technical leads of that project.
 
 2. **Identify Branches and Pull Requests:**  
@@ -134,15 +134,15 @@ git push origin develop
    - Continue daily meetings and active written communications to offer support for any issues that arise. 
   
 2. **Automated Patching of Original Repos:**
-   - During the migration period, when a pull request is merged on the monorepo, the contents of the pull request will be split into patches to be pushed onto the original repos.
-   - This supports potential pull requests that touch multiple projects.
-   - Example pull request on the monorepo: https://github.com/ROCm/rocm-libraries/pull/230
-   - Corresponding patches on the original repos:
-   https://github.com/ROCm/hipCUB/commit/50438ec4971def627729ea3d9dc1485e52b09e48
-   https://github.com/ROCm/hipRAND/commit/74afe303def580290a8e5b149ea13ae739bc4c61
-https://github.com/ROCm/rocPRIM/commit/0514a7bfdd44b324654b53f885dec928af61279a
-https://github.com/ROCm/rocRAND/commit/39fe7d9dca493765573c3c8be275328547ea2abe
-https://github.com/ROCm/rocThrust/commit/cdcc666a4c42770fcb7d9fde7c71c243b53c476e
+    - During the migration period, when a pull request is merged on the monorepo, the contents of the pull request will be split into patches to be pushed onto the original repos.
+    - This supports potential pull requests that touch multiple projects.
+    - Example pull request on the monorepo: https://github.com/ROCm/rocm-libraries/pull/230
+    - Corresponding patches on the original repos:
+        - https://github.com/ROCm/hipCUB/commit/50438ec4971def627729ea3d9dc1485e52b09e48
+        - https://github.com/ROCm/hipRAND/commit/74afe303def580290a8e5b149ea13ae739bc4c61
+        - https://github.com/ROCm/rocPRIM/commit/0514a7bfdd44b324654b53f885dec928af61279a
+        - https://github.com/ROCm/rocRAND/commit/39fe7d9dca493765573c3c8be275328547ea2abe
+        - https://github.com/ROCm/rocThrust/commit/cdcc666a4c42770fcb7d9fde7c71c243b53c476e
 
 3. **Monitoring:**  
    - Monitor the monorepo for any issues or discrepancies.
