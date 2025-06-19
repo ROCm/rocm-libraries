@@ -12,6 +12,9 @@ This document is to detail the various continuous integration (CI) systems that 
 
 The Azure Pipelines CI is a public-facing CI system that builds and tests against latest public source code. It encompasses a majority of the ROCm stack, typically pulling source from the `develop`/`amd-staging` branch on a component's GitHub repository. Its main source is publically available at [ROCm/ROCm/.azuredevops](https://github.com/ROCm/ROCm/tree/develop/.azuredevops).
 
+> [!IMPORTANT]
+> Azure CI checks are currently a **hard requirement**; they must be successful for PRs to be merged.
+
 ### Overview
 
 Each component in the monorepo has a corresponding pipeline, see the [Azure monorepo dashboard](https://dev.azure.com/ROCm-CI/ROCm-CI/_build?definitionScope=%5Cmonorepo) for a full list. These pipelines are set to run for PRs and commits that make changes to a component's subfolder, and the conditions for each component are defined in the trigger files under [/.azuredevops](https://github.com/ROCm/rocm-libraries/tree/develop/.azuredevops).
