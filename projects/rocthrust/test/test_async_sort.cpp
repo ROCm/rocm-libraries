@@ -35,6 +35,8 @@
 
 TESTS_DEFINE(AsyncSortTests, NumericalTestsParams);
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
+
 enum wait_policy
 {
   wait_for_futures,
@@ -99,6 +101,7 @@ DEFINE_SORT_OP_INVOKER(sort_invoker_custom_greater_device, custom_greater, thrus
 
 TYPED_TEST(AsyncSortTests, AsyncSortInstance)
 {
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
   using T = typename TestFixture::input_type;
   for (auto size : get_sizes())
   {
@@ -126,6 +129,7 @@ TYPED_TEST(AsyncSortTests, AsyncSortInstance)
 
 TYPED_TEST(AsyncSortTests, AsyncSortWithPolicyInstance)
 {
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
   using T = typename TestFixture::input_type;
   for (auto size : get_sizes())
   {
