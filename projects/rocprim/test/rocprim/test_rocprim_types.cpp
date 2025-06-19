@@ -49,7 +49,7 @@ inline T get_random_full_range(unsigned int seed = std::rand())
                                            seed);
 }
 
-template <typename T>
+template<typename T>
 class DoubleBufferTest : public ::testing::Test
 {
 protected:
@@ -80,12 +80,12 @@ TYPED_TEST(DoubleBufferTest, TestDoubleBuffer)
     EXPECT_EQ(this->db.alternate(), &this->value1);
 }
 
-template <typename T>
+template<typename T>
 class FutureValueTest : public ::testing::Test
 {
 protected:
     T value{};
-    
+
     rocprim::future_value<T> fv{&value};
 };
 
@@ -102,7 +102,7 @@ TYPED_TEST(FutureValueTest, TestFutureValue)
     // Test value access
     this->value = get_random_full_range<T>();
     EXPECT_EQ(static_cast<TypeParam>(this->fv), this->value);
- 
+
     // Test plain input value
     T val = get_random_full_range<T>();
     EXPECT_EQ(rocprim::detail::get_input_value(val), val);
@@ -118,14 +118,12 @@ struct kv_tag
     using value_type = V;
 };
 
-using TestPairs = ::testing::Types<
-    kv_tag<char, int>,
-//  __half breaks down currently
-//  kv_tag<int, rocprim::half>,
-    kv_tag<unsigned int, double>,
-    kv_tag<long long, float>,
-    kv_tag<unsigned long long, rocprim::uint128_t>
->;
+using TestPairs = ::testing::Types<kv_tag<char, int>,
+                                   //  __half breaks down currently
+                                   //  kv_tag<int, rocprim::half>,
+                                   kv_tag<unsigned int, double>,
+                                   kv_tag<long long, float>,
+                                   kv_tag<unsigned long long, rocprim::uint128_t>>;
 
 template<class Pair>
 class KeyValuePairTest : public ::testing::Test
@@ -139,8 +137,8 @@ TYPED_TEST_SUITE(KeyValuePairTest, TestPairs);
 
 TYPED_TEST(KeyValuePairTest, TestKeyValuePair)
 {
-    using K = typename TestFixture::key_type;
-    using V = typename TestFixture::value_type;
+    using K       = typename TestFixture::key_type;
+    using V       = typename TestFixture::value_type;
     using kv_type = typename TestFixture::kv_type;
 
     K k = get_random_full_range<K>();
@@ -159,25 +157,27 @@ TYPED_TEST(KeyValuePairTest, TestKeyValuePair)
     do
     {
         k_diff = get_random_full_range<K>();
-    } while(k_diff == k);
-    
+    }
+    while(k_diff == k);
+
     do
     {
         v_diff = get_random_full_range<V>();
-    } while(v_diff == v);
+    }
+    while(v_diff == v);
 
     kv_type kv_diff_key{k_diff, v};
     kv_type kv_diff_val{k, v_diff};
 
     // Test operator == and !=
-    EXPECT_TRUE (kv1 == kv2);
+    EXPECT_TRUE(kv1 == kv2);
     EXPECT_FALSE(kv1 != kv2);
 
     EXPECT_FALSE(kv1 == kv_diff_key);
-    EXPECT_TRUE (kv1 != kv_diff_key);
+    EXPECT_TRUE(kv1 != kv_diff_key);
 
     EXPECT_FALSE(kv1 == kv_diff_val);
-    EXPECT_TRUE (kv1 != kv_diff_val);
+    EXPECT_TRUE(kv1 != kv_diff_val);
 }
 
 template<class T>
@@ -185,7 +185,7 @@ class UninitializedArrayTest : public ::testing::Test
 {
 protected:
     static constexpr unsigned int Count = 10;
-    using ua_type = rocprim::uninitialized_array<T, Count>;
+    using ua_type                       = rocprim::uninitialized_array<T, Count>;
 
     ua_type ua;
 };
@@ -204,9 +204,9 @@ TYPED_TEST(UninitializedArrayTest, EmplaceConstructsCorrectValue)
     using V = TypeParam;
     for(unsigned int i = 0; i < TestFixture::Count; ++i)
     {
-        V val = get_random_full_range<V>();
-        V& ref = this->ua.emplace(i, val);              // Emplace construction
-        EXPECT_EQ(ref, val);                            // Same value by reference
+        V  val = get_random_full_range<V>();
+        V& ref = this->ua.emplace(i, val); // Emplace construction
+        EXPECT_EQ(ref, val); // Same value by reference
         EXPECT_EQ(this->ua.get_unsafe_array()[i], val); // Same value in array
     }
 
@@ -216,7 +216,7 @@ TYPED_TEST(UninitializedArrayTest, EmplaceConstructsCorrectValue)
 
     auto& arr = this->ua.get_unsafe_array();
     EXPECT_EQ(&arr[0], &this->ua.get_unsafe_array()[0]); // Same address
-    EXPECT_EQ(arr[0],  v0);                              // Same content
+    EXPECT_EQ(arr[0], v0); // Same content
 
     for(unsigned int i = 0; i < TestFixture::Count; ++i)
     {
@@ -225,7 +225,7 @@ TYPED_TEST(UninitializedArrayTest, EmplaceConstructsCorrectValue)
 
     // Test move construction
     typename TestFixture::ua_type moved{std::move(this->ua)};
-    auto& arr_moved = moved.get_unsafe_array();
+    auto&                         arr_moved = moved.get_unsafe_array();
     for(unsigned int i = 0; i < TestFixture::Count; ++i)
     {
         EXPECT_EQ(arr_moved[i], V(i + 1));

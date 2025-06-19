@@ -522,8 +522,8 @@ TYPED_TEST(RocprimDevicePartitionTests, PartitionTwoWayPredicate)
             // Calculate expected_selected and expected_rejected results on host
             std::vector<U> expected_selected;
             std::vector<U> expected_rejected;
-            expected_selected.reserve(input.size()/2);
-            expected_rejected.reserve(input.size()/2);
+            expected_selected.reserve(input.size() / 2);
+            expected_rejected.reserve(input.size() / 2);
             for(size_t i = 0; i < input.size(); i++)
             {
                 if(select_op(input[i]))
@@ -720,18 +720,16 @@ TYPED_TEST(RocprimDevicePartitionTests, PartitionTwoWayFlag)
 
             // Run
             HIP_CHECK(rocprim::partition_two_way<config>(
-                        d_temp_storage.get(),
-                        temp_storage_size_bytes,
-                        d_input.get(),
-                        d_flags.get(),
-                        test_utils::wrap_in_identity_iterator<use_identity_iterator>(
-                            d_selected.get()),
-                        test_utils::wrap_in_identity_iterator<use_identity_iterator>(
-                            d_rejected.get()),
-                        d_selected_count_output.get(),
-                        input.size(),
-                        stream,
-                        debug_synchronous));
+                d_temp_storage.get(),
+                temp_storage_size_bytes,
+                d_input.get(),
+                d_flags.get(),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_selected.get()),
+                test_utils::wrap_in_identity_iterator<use_identity_iterator>(d_rejected.get()),
+                d_selected_count_output.get(),
+                input.size(),
+                stream,
+                debug_synchronous));
 
             if(TestFixture::use_graphs)
             {

@@ -302,7 +302,7 @@ template<class Type, int32_t Length>
 __global__
 void thread_reduce_kernel_array_prefix(Type* const device_input, Type* device_output, Type prefix)
 {
-    size_t index        = (blockIdx.x * blockDim.x + threadIdx.x) * Length;
+    size_t index = (blockIdx.x * blockDim.x + threadIdx.x) * Length;
 
     Type device_input_array[Length];
     for(int32_t i = 0; i < Length; i++)
@@ -389,7 +389,9 @@ void thread_scan_inclusive_kernel(Type* const device_input, Type* device_output)
 
 template<class Type, int32_t Length>
 __global__
-void thread_scan_inclusive_kernel_array_prefix(Type* const device_input, Type* device_output, Type prefix)
+void thread_scan_inclusive_kernel_array_prefix(Type* const device_input,
+                                               Type*       device_output,
+                                               Type        prefix)
 {
     size_t index = (blockIdx.x * blockDim.x + threadIdx.x) * Length;
 

@@ -190,14 +190,14 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
 
             // Get size of d_temp_storage
             size_t temp_storage_size_bytes;
-            HIP_CHECK(rocprim::merge_sort(nullptr,
-                                          temp_storage_size_bytes,
-                                          input_it,
-                                          d_output.get(),
-                                          input.size(),
-                                          compare_op,
-                                          stream,
-                                          debug_synchronous));
+            HIP_CHECK(rocprim::merge_sort<config>(nullptr,
+                                                  temp_storage_size_bytes,
+                                                  input_it,
+                                                  d_output.get(),
+                                                  input.size(),
+                                                  compare_op,
+                                                  stream,
+                                                  debug_synchronous));
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
@@ -218,14 +218,14 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
             }
 
             // Run
-            HIP_CHECK(rocprim::merge_sort(d_temp_storage.get(),
-                                          temp_storage_size_bytes,
-                                          input_it,
-                                          d_output.get(),
-                                          input.size(),
-                                          compare_op,
-                                          stream,
-                                          debug_synchronous));
+            HIP_CHECK(rocprim::merge_sort<config>(d_temp_storage.get(),
+                                                  temp_storage_size_bytes,
+                                                  input_it,
+                                                  d_output.get(),
+                                                  input.size(),
+                                                  compare_op,
+                                                  stream,
+                                                  debug_synchronous));
 
             if(TestFixture::use_graphs)
             {
@@ -339,20 +339,19 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
             // Get size of d_temp_storage
             size_t temp_storage_size_bytes;
-            HIP_CHECK(rocprim::merge_sort(nullptr,
-                                          temp_storage_size_bytes,
-                                          input_keys_it,
-                                          d_keys_output.get(),
-                                          d_values_input.get(),
-                                          input_values_it,
-                                          keys_input.size(),
-                                          compare_op,
-                                          stream,
-                                          debug_synchronous));
+            HIP_CHECK(rocprim::merge_sort<config>(nullptr,
+                                                  temp_storage_size_bytes,
+                                                  input_keys_it,
+                                                  d_keys_output.get(),
+                                                  d_values_input.get(),
+                                                  input_values_it,
+                                                  keys_input.size(),
+                                                  compare_op,
+                                                  stream,
+                                                  debug_synchronous));
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
-
 
             // allocate temporary storage
             common::device_ptr<void> d_temp_storage;
@@ -370,16 +369,16 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             }
 
             // Run
-            HIP_CHECK(rocprim::merge_sort(d_temp_storage.get(),
-                                          temp_storage_size_bytes,
-                                          input_keys_it,
-                                          d_keys_output.get(),
-                                          input_values_it,
-                                          d_values_output.get(),
-                                          keys_input.size(),
-                                          compare_op,
-                                          stream,
-                                          debug_synchronous));
+            HIP_CHECK(rocprim::merge_sort<config>(d_temp_storage.get(),
+                                                  temp_storage_size_bytes,
+                                                  input_keys_it,
+                                                  d_keys_output.get(),
+                                                  input_values_it,
+                                                  d_values_output.get(),
+                                                  keys_input.size(),
+                                                  compare_op,
+                                                  stream,
+                                                  debug_synchronous));
 
             if(TestFixture::use_graphs)
             {
