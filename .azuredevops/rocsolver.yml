@@ -49,7 +49,6 @@ pr:
     - projects/rocsolver/docs
     - projects/rocsolver/.*.y*ml
     - projects/rocsolver/*.md
-  drafts: false
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/rocSOLVER.yml@pipelines_repo

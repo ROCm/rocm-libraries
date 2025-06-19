@@ -57,7 +57,6 @@ pr:
     - projects/hipcub/*.md
     - projects/hipcub/LICENSE.txt
     - projects/hipcub/NOTICES.txt
-  drafts: false
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/hipCUB.yml@pipelines_repo

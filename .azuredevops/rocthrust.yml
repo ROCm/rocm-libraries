@@ -57,7 +57,6 @@ pr:
     - projects/rocthrust/*.md
     - projects/rocthrust/LICENSE
     - projects/rocthrust/NOTICES.txt
-  drafts: false
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/rocThrust.yml@pipelines_repo

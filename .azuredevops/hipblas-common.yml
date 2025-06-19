@@ -41,7 +41,6 @@ pr:
     - projects/hipblas-common
     exclude:
     - projects/hipblas-common/*.md
-  drafts: false
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/hipBLAS-common.yml@pipelines_repo

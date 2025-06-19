@@ -51,7 +51,6 @@ pr:
     - projects/rocfft/docs
     - projects/rocfft/.*.y*ml
     - projects/rocfft/*.md
-  drafts: false
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/rocFFT.yml@pipelines_repo

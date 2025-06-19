@@ -51,7 +51,6 @@ pr:
     - projects/hipblaslt/CODEOWNERS
     - projects/hipblaslt/.*.y*ml
     - projects/hipblaslt/*.md
-  drafts: false
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/hipBLASLt.yml@pipelines_repo
