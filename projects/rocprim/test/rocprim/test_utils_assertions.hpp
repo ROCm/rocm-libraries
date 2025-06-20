@@ -68,12 +68,11 @@ namespace {
 // for printing 128 bit types. As a result, there may be linker errors
 // if you use ASSERT_EQ with these types. In some situations, we may also
 // want to avoid printing other types on Windows.
-// The function below will avoid ASSERT_EQ when use_assert_true is set to true.
-// It does this by performing the comparison beforehand, storing it in a bool,
-// and then passing that to ASSERT_TRUE. This way, if the values are not equal,
+// The functions below will avoid ASSERT_EQ when is_printable is true.
+// Instead, they perform the comparison beforehand, storing it in a bool,
+// and then pass that to ASSERT_TRUE. This way, if the values are not equal,
 // only the bool will be printed.
 
-// These are for convenience when constructing a bool at runtime to pass in for use_assert_true.
 #if defined(_WIN32)
 constexpr bool is_win32 = true;
 #else
@@ -87,24 +86,33 @@ constexpr bool is_printable = !is_win32 || (
     !test_utils::is_double_custom_type<T>::value);
 
 template <class T, bool UseGTestAssert = is_printable<T>>
-void inline protected_assert_eq(T val, T expected, size_t index=-1)
+void inline protected_assert_eq(T val, T expected, size_t index)
 {
     if constexpr (UseGTestAssert)
     {
         const bool result = (val == expected);
-        if (index > -1)
-            ASSERT_TRUE(result) << "where index = " << index;
-        else
-            ASSERT_TRUE(result);
+        ASSERT_TRUE(result) << "where index = " << index;
     }
     else
     {
-        if (index > -1)
-            ASSERT_EQ(val, expected) << "where index = " << index;
-        else
-            ASSERT_EQ(val, expected);
+        ASSERT_EQ(val, expected) << "where index = " << index;
     }
 }
+
+template <class T, bool UseGTestAssert = is_printable<T>>
+void inline protected_assert_eq(T val, T expected)
+{
+    if constexpr (UseGTestAssert)
+    {
+        const bool result = (val == expected);
+        ASSERT_TRUE(result);
+    }
+    else
+    {
+        ASSERT_EQ(val, expected);
+    }
+}
+
 } // end anonymous namespace
 
 // begin assert_eq
