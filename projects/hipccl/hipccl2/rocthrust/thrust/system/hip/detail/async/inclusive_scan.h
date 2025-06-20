@@ -188,7 +188,7 @@ template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typenam
 auto async_inclusive_scan(
   execution_policy<DerivedPolicy>& policy, ForwardIt first, Sentinel&& last, OutputIt&& out, BinaryOp&& op)
   THRUST_RETURNS(thrust::system::hip::detail::async_inclusive_scan_n(
-    policy, first, distance(first, THRUST_FWD(last)), THRUST_FWD(out), THRUST_FWD(op)))
+    policy, first, thrust::distance(first, THRUST_FWD(last)), THRUST_FWD(out), THRUST_FWD(op)))
 
   // ADL entry point.
   template <typename DerivedPolicy,
@@ -205,7 +205,7 @@ auto async_inclusive_scan(
     InitialValueType&& init,
     BinaryOp&& op)
     THRUST_RETURNS(thrust::system::hip::detail::async_inclusive_scan_n(
-      policy, first, distance(first, THRUST_FWD(last)), THRUST_FWD(out), THRUST_FWD(init), THRUST_FWD(op)))
+      policy, first, thrust::distance(first, THRUST_FWD(last)), THRUST_FWD(out), THRUST_FWD(init), THRUST_FWD(op)))
 
 } // namespace hip_rocprim
 

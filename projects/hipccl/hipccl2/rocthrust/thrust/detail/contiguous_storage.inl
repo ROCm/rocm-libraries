@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright© 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@
 #include <thrust/detail/swap.h>
 #include <thrust/detail/allocator/allocator_traits.h>
 #include <thrust/detail/allocator/copy_construct_range.h>
-#include <thrust/detail/allocator/default_construct_range.h>
+#include <thrust/detail/allocator/value_initialize_range.h>
 #include <thrust/detail/allocator/destroy_range.h>
 #include <thrust/detail/allocator/fill_construct_range.h>
 
@@ -221,7 +221,7 @@ THRUST_HOST_DEVICE
 template<typename T, typename Alloc>
 THRUST_HOST_DEVICE
   void contiguous_storage<T,Alloc>
-    ::deallocate()
+    ::deallocate() noexcept
 {
   if(size() > 0)
   {
@@ -252,10 +252,10 @@ THRUST_HOST_DEVICE
 template<typename T, typename Alloc>
 THRUST_HOST_DEVICE
   void contiguous_storage<T,Alloc>
-    ::default_construct_n(iterator first, size_type n)
+    ::value_initialize_n(iterator first, size_type n)
 {
-  default_construct_range(m_allocator, first.base(), n);
-} // end contiguous_storage::default_construct_n()
+  value_initialize_range(m_allocator, first.base(), n);
+} // end contiguous_storage::value_initialize_n()
 
 template<typename T, typename Alloc>
 THRUST_HOST_DEVICE
@@ -314,7 +314,7 @@ template<typename T, typename Alloc>
 template<typename T, typename Alloc>
 THRUST_HOST_DEVICE
   void contiguous_storage<T,Alloc>
-    ::destroy(iterator first, iterator last)
+    ::destroy(iterator first, iterator last) noexcept
 {
   destroy_range(m_allocator, first.base(), last - first);
 } // end contiguous_storage::destroy()
@@ -322,7 +322,7 @@ THRUST_HOST_DEVICE
 template<typename T, typename Alloc>
 THRUST_HOST_DEVICE
   void contiguous_storage<T,Alloc>
-    ::deallocate_on_allocator_mismatch(const contiguous_storage &other)
+    ::deallocate_on_allocator_mismatch(const contiguous_storage &other) noexcept
 {
   integral_constant<
     bool,
@@ -336,7 +336,7 @@ template<typename T, typename Alloc>
 THRUST_HOST_DEVICE
   void contiguous_storage<T,Alloc>
     ::destroy_on_allocator_mismatch(const contiguous_storage &other,
-        iterator first, iterator last)
+        iterator first, iterator last) noexcept
 {
   integral_constant<
     bool,
@@ -466,7 +466,7 @@ THRUST_EXEC_CHECK_DISABLE
 template<typename T, typename Alloc>
 THRUST_HOST_DEVICE
   void contiguous_storage<T,Alloc>
-    ::deallocate_on_allocator_mismatch_dispatch(true_type, const contiguous_storage &other)
+    ::deallocate_on_allocator_mismatch_dispatch(true_type, const contiguous_storage &other) noexcept
 {
   if (m_allocator != other.m_allocator)
   {
@@ -477,7 +477,7 @@ THRUST_HOST_DEVICE
 template<typename T, typename Alloc>
 THRUST_HOST_DEVICE
   void contiguous_storage<T,Alloc>
-    ::deallocate_on_allocator_mismatch_dispatch(false_type, const contiguous_storage &)
+    ::deallocate_on_allocator_mismatch_dispatch(false_type, const contiguous_storage &) noexcept
 {
 } // end contiguous_storage::deallocate_on_allocator_mismatch()
 
@@ -486,7 +486,7 @@ template<typename T, typename Alloc>
 THRUST_HOST_DEVICE
   void contiguous_storage<T,Alloc>
     ::destroy_on_allocator_mismatch_dispatch(true_type, const contiguous_storage &other,
-        iterator first, iterator last)
+        iterator first, iterator last) noexcept
 {
   if (m_allocator != other.m_allocator)
   {
@@ -498,7 +498,7 @@ template<typename T, typename Alloc>
 THRUST_HOST_DEVICE
   void contiguous_storage<T,Alloc>
     ::destroy_on_allocator_mismatch_dispatch(false_type, const contiguous_storage &,
-        iterator, iterator)
+        iterator, iterator) noexcept
 {
 } // end contiguous_storage::destroy_on_allocator_mismatch()
 

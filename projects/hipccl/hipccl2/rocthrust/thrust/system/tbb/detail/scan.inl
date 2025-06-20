@@ -23,10 +23,15 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/detail/function.h>
 #include <thrust/detail/type_traits.h>
-#include <thrust/detail/type_traits/function_traits.h>
 #include <thrust/detail/type_traits/iterator/is_output_iterator.h>
 
-#include <cuda/std/__functional/invoke.h>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/__functional/invoke.h>
+#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+#  include <rocprim/type_traits_functions.hpp>
+#endif
+
+#include <iterator>
 
 #include <tbb/blocked_range.h>
 #include <tbb/parallel_scan.h>
@@ -50,12 +55,12 @@ struct inclusive_body
   ValueType sum;
   bool first_call;
 
-  inclusive_body(InputIterator input, OutputIterator output, BinaryFunction binary_op, ValueType init)
-    : input(input), output(output), binary_op(binary_op), sum(init), first_call(true)
+  inclusive_body(InputIterator input, OutputIterator output, BinaryFunction binary_op, ValueType dummy)
+    : input(input), output(output), binary_op{binary_op}, sum(dummy), first_call(true)
   {}
 
   inclusive_body(inclusive_body& b, ::tbb::split)
-    : input(b.input), output(b.output), binary_op(b.binary_op), sum(b.sum), first_call(true)
+    : input(b.input), output(b.output), binary_op{b.binary_op}, sum(b.sum), first_call(true)
   {}
 
   template<typename Size>
@@ -138,11 +143,11 @@ struct exclusive_body
   bool first_call;
 
   exclusive_body(InputIterator input, OutputIterator output, BinaryFunction binary_op, ValueType init)
-    : input(input), output(output), binary_op(binary_op), sum(init), first_call(true)
+    : input(input), output(output), binary_op{binary_op}, sum(init), first_call(true)
   {}
 
   exclusive_body(exclusive_body& b, ::tbb::split)
-    : input(b.input), output(b.output), binary_op(b.binary_op), sum(b.sum), first_call(true)
+    : input(b.input), output(b.output), binary_op{b.binary_op}, sum(b.sum), first_call(true)
   {}
 
   template<typename Size>
@@ -235,8 +240,15 @@ OutputIterator inclusive_scan(
   using namespace thrust::detail;
 
   // Use the input iterator's value type and the initial value type per wg21.link/p2322
-  using ValueType = typename ::cuda::std::
-    __accumulator_t<BinaryFunction, typename ::cuda::std::iterator_traits<InputIterator>::value_type, InitialValueType>;
+  #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    using ValueType = typename ::cuda::std::
+      __accumulator_t<BinaryFunction, typename ::cuda::std::iterator_traits<InputIterator>::value_type, InitialValueType>;
+  #elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+    using ValueType = ::rocprim::
+      accumulator_t<BinaryFunction, typename ::std::iterator_traits<InputIterator>::value_type, InitialValueType>;
+  #else
+    using ValueType = typename std::iterator_traits<InputIterator>::value_type;
+  #endif
 
   using Size = typename thrust::iterator_difference<InputIterator>::type;
   Size n     = thrust::distance(first, last);

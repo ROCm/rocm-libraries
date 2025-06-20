@@ -20,6 +20,12 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/unique.h>
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/array>
+#else
+#  include <array>
+#endif
+
 #include <unittest/unittest.h>
 
 template <typename ForwardIterator>
@@ -341,3 +347,39 @@ struct TestUniqueCount
   }
 };
 VariableUnitTest<TestUniqueCount, IntegralTypes> TestUniqueCountInstance;
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+template <typename T, std::size_t N>
+using DeviceArray = cuda::std::array<T, N>;
+#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+template <typename T, std::size_t N>
+struct DeviceArray
+{
+  T data[N];
+
+  // Host and device-compatible equality operator
+  __host__ __device__ bool operator==(const DeviceArray& other) const
+  {
+    for (std::size_t i = 0; i < N; ++i)
+    {
+      if (data[i] != other.data[i])
+      {
+        return false;
+      }
+    }
+    return true;
+  }
+};
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+
+template <typename T>
+struct TestUniqueMemoryAccess
+{
+  void operator()(void)
+  {
+    thrust::device_vector<DeviceArray<T, 100>> v(10);
+    thrust::unique(v.begin(), v.end());
+  }
+};
+
+SimpleUnitTest<TestUniqueMemoryAccess, unittest::type_list<int>> TestUniqueMemoryAccessInstance;

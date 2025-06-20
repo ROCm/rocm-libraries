@@ -18,7 +18,7 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#ifdef _CCCL_CUDA_COMPILER
 #  include <thrust/system/cuda/config.h>
 
 #  include <thrust/detail/raw_pointer_cast.h>

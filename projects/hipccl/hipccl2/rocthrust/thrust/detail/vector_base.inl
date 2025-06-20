@@ -1,5 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
+ *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -28,7 +29,9 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/detail/temporary_array.h>
 
+#include <iterator>
 #include <stdexcept>
+#include <type_traits>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -59,7 +62,7 @@ template<typename T, typename Alloc>
       :m_storage(),
        m_size(0)
 {
-  default_init(n);
+  value_init(n);
 } // end vector_base::vector_base()
 
 template<typename T, typename Alloc>
@@ -68,7 +71,7 @@ template<typename T, typename Alloc>
       :m_storage(alloc),
        m_size(0)
 {
-  default_init(n);
+  value_init(n);
 } // end vector_base::vector_base()
 
 template<typename T, typename Alloc>
@@ -229,18 +232,17 @@ template<typename T, typename Alloc>
   fill_init(n,value);
 } // end vector_base::init_dispatch()
 
-template<typename T, typename Alloc>
-  void vector_base<T,Alloc>
-    ::default_init(size_type n)
+template <typename T, typename Alloc>
+void vector_base<T, Alloc>::value_init(size_type n)
 {
   if(n > 0)
   {
     m_storage.allocate(n);
     m_size = n;
 
-    m_storage.default_construct_n(begin(), size());
+    m_storage.value_initialize_n(begin(), size());
   } // end if
-} // end vector_base::default_init()
+} // end vector_base::value_init()
 
 template<typename T, typename Alloc>
   void vector_base<T,Alloc>
@@ -299,13 +301,14 @@ template<typename T, typename Alloc>
   m_size    = new_size;
 } // end vector_base::range_init()
 
-template<typename T, typename Alloc>
-  template<typename InputIterator>
-    vector_base<T,Alloc>
-      ::vector_base(InputIterator first,
-                    InputIterator last)
-        :m_storage(),
-         m_size(0)
+template <typename T, typename Alloc>
+template <typename InputIterator,
+          std::enable_if_t<std::is_convertible<typename std::iterator_traits<InputIterator>::iterator_category,
+                                               std::input_iterator_tag>::value,
+                           int>>
+vector_base<T, Alloc>::vector_base(InputIterator first, InputIterator last)
+    : m_storage()
+    , m_size(0)
 {
   // check the type of InputIterator: if it's an integral type,
   // we need to interpret this call as (size_type, value_type)
@@ -314,14 +317,14 @@ template<typename T, typename Alloc>
   init_dispatch(first, last, Integer());
 } // end vector_base::vector_base()
 
-template<typename T, typename Alloc>
-  template<typename InputIterator>
-    vector_base<T,Alloc>
-      ::vector_base(InputIterator first,
-                    InputIterator last,
-                    const Alloc &alloc)
-        :m_storage(alloc),
-         m_size(0)
+template <typename T, typename Alloc>
+template <typename InputIterator,
+          std::enable_if_t<std::is_convertible<typename std::iterator_traits<InputIterator>::iterator_category,
+                                               std::input_iterator_tag>::value,
+                           int>>
+vector_base<T, Alloc>::vector_base(InputIterator first, InputIterator last, const Alloc& alloc)
+    : m_storage(alloc)
+    , m_size(0)
 {
   // check the type of InputIterator: if it's an integral type,
   // we need to interpret this call as (size_type, value_type)
@@ -922,7 +925,7 @@ template<typename T, typename Alloc>
       // we've got room for all of them
 
       // default construct new elements at the end of the vector
-      m_storage.default_construct_n(end(), n);
+      m_storage.value_initialize_n(end(), n);
 
       // extend the size
       m_size += n;
@@ -952,7 +955,7 @@ template<typename T, typename Alloc>
         new_end = m_storage.uninitialized_copy(begin(), end(), new_storage.begin());
 
         // construct new elements to insert
-        new_storage.default_construct_n(new_end, n);
+        new_storage.value_initialize_n(new_end, n);
         new_end += n;
       } // end try
       catch(...)

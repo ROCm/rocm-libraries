@@ -32,30 +32,31 @@ template <class UnaryFunction, class Iterator, class Reference, class Value>
 namespace detail
 {
 
-// Compute the iterator_adaptor instantiation to be used for transform_iterator
+// Type function to compute the iterator_adaptor instantiation to be used for transform_iterator
 template <class UnaryFunc, class Iterator, class Reference, class Value>
-struct transform_iterator_base
+struct make_transform_iterator_base
 {
 private:
   // By default, dereferencing the iterator yields the same as the function.
-  using reference = typename thrust::detail::ia_dflt_help<
-    Reference,
-    thrust::detail::result_of_adaptable_function<UnaryFunc(typename thrust::iterator_value<Iterator>::type)>>::type;
+  // FIXME(bgruber): the next line should be correct, but thrust::identity<T> lies and advertises a ::return_type of T,
+  // while its operator() returns const T& (which __invoke_of correctly detects), which causes transform_iterator to
+  // crash during dereferencing.
+  // using wrapped_func_ret_t = ::cuda::std::__invoke_of<UnaryFunc, iterator_value_t<Iterator>>;
+  using wrapped_func_ret_t = result_of_adaptable_function<UnaryFunc(iterator_value_t<Iterator>)>;
 
-    // To get the default for Value: remove any reference on the
-    using value_type =
-      typename thrust::detail::ia_dflt_help<Value, thrust::remove_cvref<reference>>::type;
+  // By default, dereferencing the iterator yields the same as the function.
+  using reference  = typename ia_dflt_help<Reference, wrapped_func_ret_t>::type;
+  using value_type = typename ia_dflt_help<Value, remove_cvref<reference>>::type;
 
 public:
   using type =
-    thrust::iterator_adaptor<transform_iterator<UnaryFunc, Iterator, Reference, Value>,
-                             Iterator,
-                             value_type,
-                             thrust::use_default,
-                             typename thrust::iterator_traits<Iterator>::iterator_category,
-                             reference>;
+    iterator_adaptor<transform_iterator<UnaryFunc, Iterator, Reference, Value>,
+                     Iterator,
+                     value_type,
+                     use_default,
+                     typename iterator_traits<Iterator>::iterator_category,
+                     reference>;
 };
-
 
 } // end detail
 THRUST_NAMESPACE_END

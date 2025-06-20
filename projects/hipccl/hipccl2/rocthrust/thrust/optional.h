@@ -276,15 +276,6 @@ invoke(Fn&& f, Args&&... args) noexcept(noexcept(std::forward<Fn>(f)(std::forwar
 }
 #endif
 
-// std::void_t from C++17
-template <class...>
-struct voider
-{
-  using type = void;
-};
-template <class... Ts>
-using void_t = typename voider<Ts...>::type;
-
 // Trait for checking if a type is a thrust::optional
 template <class T>
 struct is_optional_impl : std::false_type
@@ -306,7 +297,7 @@ using get_map_return = optional<fixup_void<invoke_result_t<F, U>>>;
 template <class F, class = void, class... U>
 struct returns_void_impl;
 template <class F, class... U>
-struct returns_void_impl<F, void_t<invoke_result_t<F, U...>>, U...> : std::is_void<invoke_result_t<F, U...>>
+struct returns_void_impl<F, std::void_t<invoke_result_t<F, U...>>, U...> : std::is_void<invoke_result_t<F, U...>>
 {};
 template <class F, class... U>
 using returns_void = returns_void_impl<F, void, U...>;
@@ -847,7 +838,7 @@ struct nullopt_t
 /// void foo (thrust::optional<int>);
 /// foo(thrust::nullopt); //pass an empty optional
 /// ```
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) && defined(_LIBCUDACXX_CONSTEXPR_GLOBAL)
 THRUST_DEVICE static _LIBCUDACXX_CONSTEXPR_GLOBAL
 #elif defined(__HIP_DEVICE_COMPILE__)
 THRUST_DEVICE static constexpr

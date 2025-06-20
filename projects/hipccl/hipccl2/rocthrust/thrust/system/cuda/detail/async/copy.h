@@ -35,7 +35,7 @@
 
 #if THRUST_CPP_DIALECT >= 2017
 
-#  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#  ifdef _CCCL_CUDA_COMPILER
 
 #    include <thrust/system/cuda/config.h>
 
@@ -323,7 +323,8 @@ auto async_copy(thrust::cuda::execution_policy<FromPolicy>& from_exec,
                 ForwardIt first,
                 Sentinel last,
                 OutputIt output)
-  THRUST_RETURNS(thrust::system::cuda::detail::async_copy_n(from_exec, to_exec, first, distance(first, last), output))
+  THRUST_RETURNS(
+    thrust::system::cuda::detail::async_copy_n(from_exec, to_exec, first, thrust::distance(first, last), output))
 
   // ADL entry point.
   template <typename FromPolicy, typename ToPolicy, typename ForwardIt, typename Sentinel, typename OutputIt>
@@ -332,7 +333,8 @@ auto async_copy(thrust::cuda::execution_policy<FromPolicy>& from_exec,
                   ForwardIt first,
                   Sentinel last,
                   OutputIt output)
-    THRUST_RETURNS(thrust::system::cuda::detail::async_copy_n(from_exec, to_exec, first, distance(first, last), output))
+    THRUST_RETURNS(
+      thrust::system::cuda::detail::async_copy_n(from_exec, to_exec, first, thrust::distance(first, last), output))
 
   // ADL entry point.
   template <typename FromPolicy, typename ToPolicy, typename ForwardIt, typename Sentinel, typename OutputIt>
@@ -341,12 +343,13 @@ auto async_copy(thrust::cuda::execution_policy<FromPolicy>& from_exec,
                   ForwardIt first,
                   Sentinel last,
                   OutputIt output)
-    THRUST_RETURNS(thrust::system::cuda::detail::async_copy_n(from_exec, to_exec, first, distance(first, last), output))
+    THRUST_RETURNS(
+      thrust::system::cuda::detail::async_copy_n(from_exec, to_exec, first, thrust::distance(first, last), output))
 
 } // namespace cuda_cub
 
 THRUST_NAMESPACE_END
 
-#  endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#  endif // _CCCL_CUDA_COMPILER
 
 #endif

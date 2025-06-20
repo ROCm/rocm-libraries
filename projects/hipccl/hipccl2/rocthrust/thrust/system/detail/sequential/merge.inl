@@ -50,7 +50,7 @@ OutputIterator merge(sequential::execution_policy<DerivedPolicy> &exec,
   thrust::detail::wrapped_function<
     StrictWeakOrdering,
     bool
-  > wrapped_comp(comp);
+  > wrapped_comp{comp};
 
   while(first1 != last1 && first2 != last2)
   {
@@ -98,7 +98,7 @@ thrust::pair<OutputIterator1,OutputIterator2>
   thrust::detail::wrapped_function<
     StrictWeakOrdering,
     bool
-  > wrapped_comp(comp);
+  > wrapped_comp{comp};
 
   while(keys_first1 != keys_last1 && keys_first2 != keys_last2)
   {

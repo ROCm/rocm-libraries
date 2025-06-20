@@ -76,7 +76,7 @@ THRUST_HOST_DEVICE
       typename pointer_element<Pointer>::type
     >::value
   >::type
-    default_construct_range(Allocator &a, Pointer p, Size n)
+    value_initialize_range(Allocator &a, Pointer p, Size n)
 {
   thrust::for_each_n(allocator_system<Allocator>::get(a), p, n, construct1_via_allocator<Allocator>(a));
 }
@@ -90,7 +90,7 @@ THRUST_HOST_DEVICE
       typename pointer_element<Pointer>::type
     >::value
   >::type
-    default_construct_range(Allocator &a, Pointer p, Size n)
+    value_initialize_range(Allocator &a, Pointer p, Size n)
 {
   thrust::uninitialized_fill_n(allocator_system<Allocator>::get(a), p, n, typename pointer_element<Pointer>::type());
 }
@@ -101,9 +101,9 @@ THRUST_HOST_DEVICE
 
 template<typename Allocator, typename Pointer, typename Size>
 THRUST_HOST_DEVICE
-  void default_construct_range(Allocator &a, Pointer p, Size n)
+  void value_initialize_range(Allocator &a, Pointer p, Size n)
 {
-  return allocator_traits_detail::default_construct_range(a,p,n);
+  return allocator_traits_detail::value_initialize_range(a,p,n);
 }
 
 
