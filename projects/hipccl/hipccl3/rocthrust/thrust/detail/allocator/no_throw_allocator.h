@@ -42,7 +42,7 @@ public:
     using other = no_throw_allocator<typename super_t::template rebind<U>::other>;
   }; // end rebind
 
-  THRUST_HOST_DEVICE void deallocate(typename super_t::pointer p, typename super_t::size_type n)
+  THRUST_HOST_DEVICE void deallocate(typename super_t::pointer p, typename super_t::size_type n) noexcept
   {
     NV_IF_TARGET(
       NV_IS_HOST,

@@ -24,6 +24,8 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/universal_vector.h>
 
+#include <utility>
+
 #include <unittest/exceptions.h>
 #include <unittest/util.h>
 
@@ -404,6 +406,17 @@ public:
 ////
 // check sequences
 
+inline int promote_char(char c)
+{
+  return c;
+}
+
+template <typename T>
+T&& promote_char(T&& t)
+{
+  return std::forward<T>(t);
+}
+
 template <typename ForwardIterator1, typename ForwardIterator2, typename BinaryPredicate>
 void assert_equal(
   ForwardIterator1 first1,
@@ -453,16 +466,7 @@ void assert_equal(
 
       if (mismatches <= MAX_OUTPUT_LINES)
       {
-        THRUST_IF_CONSTEXPR (sizeof(InputType) == 1)
-        {
-          f << "  [" << i << "] " << *first1 + InputType() << "  " << *first2 + InputType() << "\n"; // unprintable
-                                                                                                     // chars are a
-                                                                                                     // problem
-        }
-        else
-        {
-          f << "  [" << i << "] " << *first1 << "  " << *first2 << "\n";
-        }
+        f << "  [" << i << "] " << promote_char(*first1) << "  " << promote_char(*first2) << "\n";
       }
     }
 

@@ -54,7 +54,7 @@ typename thrust::detail::disable_if<
   construct_values(TemporaryArray &a,
                    Size n)
 {
-  a.default_construct_n(a.begin(), n);
+  a.value_initialize_n(a.begin(), n);
 } // end construct_values()
 
 

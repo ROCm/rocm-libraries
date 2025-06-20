@@ -33,7 +33,7 @@
 
 #if THRUST_CPP_DIALECT >= 2017
 
-#  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#  ifdef _CCCL_CUDA_COMPILER
 
 #    include <thrust/system/cuda/config.h>
 
@@ -218,7 +218,7 @@ template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typenam
 auto async_inclusive_scan(
   execution_policy<DerivedPolicy>& policy, ForwardIt first, Sentinel&& last, OutputIt&& out, BinaryOp&& op)
   THRUST_RETURNS(thrust::system::cuda::detail::async_inclusive_scan_n(
-    policy, first, distance(first, THRUST_FWD(last)), THRUST_FWD(out), THRUST_FWD(op)))
+    policy, first, thrust::distance(first, THRUST_FWD(last)), THRUST_FWD(out), THRUST_FWD(op)))
 
   // ADL entry point.
   template <typename DerivedPolicy,
@@ -241,6 +241,6 @@ auto async_inclusive_scan(
 
 THRUST_NAMESPACE_END
 
-#  endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#  endif // _CCCL_CUDA_COMPILER
 
 #endif // C++14

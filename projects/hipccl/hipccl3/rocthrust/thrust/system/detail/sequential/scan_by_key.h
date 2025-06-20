@@ -54,7 +54,7 @@ THRUST_HOST_DEVICE OutputIterator inclusive_scan_by_key(
   using ValueType = typename thrust::iterator_traits<InputIterator2>::value_type;
 
   // wrap binary_op
-  thrust::detail::wrapped_function<BinaryFunction, ValueType> wrapped_binary_op(binary_op);
+  thrust::detail::wrapped_function<BinaryFunction, ValueType> wrapped_binary_op{binary_op};
 
   if (first1 != last1)
   {
@@ -63,7 +63,7 @@ THRUST_HOST_DEVICE OutputIterator inclusive_scan_by_key(
 
     *result = prev_value;
 
-    for (++first1, ++first2, ++result; first1 != last1; ++first1, ++first2, ++result)
+    for (++first1, ++first2, ++result; first1 != last1; ++first1, (void) ++first2, (void) ++result)
     {
       KeyType key = *first1;
 
@@ -116,7 +116,7 @@ THRUST_HOST_DEVICE OutputIterator exclusive_scan_by_key(
 
     next = binary_op(next, temp_value);
 
-    for (++first1, ++first2, ++result; first1 != last1; ++first1, ++first2, ++result)
+    for (++first1, ++first2, ++result; first1 != last1; ++first1, (void) ++first2, (void) ++result)
     {
       KeyType key = *first1;
 
