@@ -49,6 +49,7 @@ Azure runs can have the following statuses: `Success`, `Failed`, or `Warning`. T
 | ✅ Success | ✅ Succeeded | The job was successful. |
 | ⚠️ Warning | ✅ Succeeded with issues | An allowed failure occurred and the job continued on without further issue. |
 | ❌ Failed | ❌ Failing | The job failed. |
+| Did not run | ⬛ Neutral | The job did not run, likely due to not fulfilling the trigger requirements. |
 
 Warnings can occur if a step fails but was marked as being allowed to fail, so a job will continue running in the event of a warning.
 
