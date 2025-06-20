@@ -25,19 +25,24 @@ template <class Vector>
 void TestAllOf()
 {
   using T = typename Vector::value_type;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using ::cuda::std::identity;
+#else
+  using ::internal::identity;
+#endif
 
   Vector v(3, T{1});
 
-  ASSERT_EQUAL(thrust::all_of(v.begin(), v.end(), thrust::identity<T>()), true);
+  ASSERT_EQUAL(thrust::all_of(v.begin(), v.end(), identity{}), true);
 
   v[1] = T{0};
 
-  ASSERT_EQUAL(thrust::all_of(v.begin(), v.end(), thrust::identity<T>()), false);
+  ASSERT_EQUAL(thrust::all_of(v.begin(), v.end(), identity{}), false);
 
-  ASSERT_EQUAL(thrust::all_of(v.begin() + 0, v.begin() + 0, thrust::identity<T>()), true);
-  ASSERT_EQUAL(thrust::all_of(v.begin() + 0, v.begin() + 1, thrust::identity<T>()), true);
-  ASSERT_EQUAL(thrust::all_of(v.begin() + 0, v.begin() + 2, thrust::identity<T>()), false);
-  ASSERT_EQUAL(thrust::all_of(v.begin() + 1, v.begin() + 2, thrust::identity<T>()), false);
+  ASSERT_EQUAL(thrust::all_of(v.begin() + 0, v.begin() + 0, identity{}), true);
+  ASSERT_EQUAL(thrust::all_of(v.begin() + 0, v.begin() + 1, identity{}), true);
+  ASSERT_EQUAL(thrust::all_of(v.begin() + 0, v.begin() + 2, identity{}), false);
+  ASSERT_EQUAL(thrust::all_of(v.begin() + 1, v.begin() + 2, identity{}), false);
 }
 DECLARE_VECTOR_UNITTEST(TestAllOf);
 
@@ -80,19 +85,24 @@ template <class Vector>
 void TestAnyOf()
 {
   using T = typename Vector::value_type;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using ::cuda::std::identity;
+#else
+  using ::internal::identity;
+#endif
 
   Vector v(3, T{1});
 
-  ASSERT_EQUAL(thrust::any_of(v.begin(), v.end(), thrust::identity<T>()), true);
+  ASSERT_EQUAL(thrust::any_of(v.begin(), v.end(), identity{}), true);
 
   v[1] = 0;
 
-  ASSERT_EQUAL(thrust::any_of(v.begin(), v.end(), thrust::identity<T>()), true);
+  ASSERT_EQUAL(thrust::any_of(v.begin(), v.end(), identity{}), true);
 
-  ASSERT_EQUAL(thrust::any_of(v.begin() + 0, v.begin() + 0, thrust::identity<T>()), false);
-  ASSERT_EQUAL(thrust::any_of(v.begin() + 0, v.begin() + 1, thrust::identity<T>()), true);
-  ASSERT_EQUAL(thrust::any_of(v.begin() + 0, v.begin() + 2, thrust::identity<T>()), true);
-  ASSERT_EQUAL(thrust::any_of(v.begin() + 1, v.begin() + 2, thrust::identity<T>()), false);
+  ASSERT_EQUAL(thrust::any_of(v.begin() + 0, v.begin() + 0, identity{}), false);
+  ASSERT_EQUAL(thrust::any_of(v.begin() + 0, v.begin() + 1, identity{}), true);
+  ASSERT_EQUAL(thrust::any_of(v.begin() + 0, v.begin() + 2, identity{}), true);
+  ASSERT_EQUAL(thrust::any_of(v.begin() + 1, v.begin() + 2, identity{}), false);
 }
 DECLARE_VECTOR_UNITTEST(TestAnyOf);
 
@@ -135,19 +145,24 @@ template <class Vector>
 void TestNoneOf()
 {
   using T = typename Vector::value_type;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using ::cuda::std::identity;
+#else
+  using ::internal::identity;
+#endif
 
   Vector v(3, T{1});
 
-  ASSERT_EQUAL(thrust::none_of(v.begin(), v.end(), thrust::identity<T>()), false);
+  ASSERT_EQUAL(thrust::none_of(v.begin(), v.end(), identity{}), false);
 
   v[1] = 0;
 
-  ASSERT_EQUAL(thrust::none_of(v.begin(), v.end(), thrust::identity<T>()), false);
+  ASSERT_EQUAL(thrust::none_of(v.begin(), v.end(), identity{}), false);
 
-  ASSERT_EQUAL(thrust::none_of(v.begin() + 0, v.begin() + 0, thrust::identity<T>()), true);
-  ASSERT_EQUAL(thrust::none_of(v.begin() + 0, v.begin() + 1, thrust::identity<T>()), false);
-  ASSERT_EQUAL(thrust::none_of(v.begin() + 0, v.begin() + 2, thrust::identity<T>()), false);
-  ASSERT_EQUAL(thrust::none_of(v.begin() + 1, v.begin() + 2, thrust::identity<T>()), true);
+  ASSERT_EQUAL(thrust::none_of(v.begin() + 0, v.begin() + 0, identity{}), true);
+  ASSERT_EQUAL(thrust::none_of(v.begin() + 0, v.begin() + 1, identity{}), false);
+  ASSERT_EQUAL(thrust::none_of(v.begin() + 0, v.begin() + 2, identity{}), false);
+  ASSERT_EQUAL(thrust::none_of(v.begin() + 1, v.begin() + 2, identity{}), true);
 }
 DECLARE_VECTOR_UNITTEST(TestNoneOf);
 

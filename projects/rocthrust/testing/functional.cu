@@ -216,6 +216,7 @@ typename ::std::add_const<_Tp>::type& as_const(_Tp& __t) noexcept
 // Ad-hoc testing for other functionals
 THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestIdentityFunctional()
 {
+  THRUST_SUPPRESS_DEPRECATED_PUSH
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
   using ::cuda::std::is_same;
 #else
@@ -257,16 +258,20 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestIdentityFunctional()
   static_assert(is_same<decltype(thrust::identity<int>{}(::std::move(d))), int&&>::value, "");
 #endif
   static_assert(is_same<decltype(thrust::identity<int>{}(static_cast<const double&&>(d))), int&&>::value, "");
+  THRUST_SUPPRESS_DEPRECATED_POP
 }
 DECLARE_UNITTEST(TestIdentityFunctional);
 
 template <class Vector>
 THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestIdentityFunctionalVector()
 {
-  using T = typename Vector::value_type;
   Vector input{0, 1, 2, 3};
   Vector output(4);
-  thrust::transform(input.begin(), input.end(), output.begin(), thrust::identity<T>());
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  thrust::transform(input.begin(), input.end(), output.begin(), ::cuda::std::identity{});
+#else
+  thrust::transform(input.begin(), input.end(), output.begin(), ::internal::identity{});
+#endif
   ASSERT_EQUAL(input, output);
 }
 DECLARE_VECTOR_UNITTEST(TestIdentityFunctionalVector);
@@ -340,13 +345,15 @@ DECLARE_VECTOR_UNITTEST(TestMinimumFunctional);
 template <class Vector>
 THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestNot1()
 {
-  using T = typename Vector::value_type;
-
   Vector input{1, 0, 1, 1, 0};
 
   Vector output(5);
 
-  thrust::transform(input.begin(), input.end(), output.begin(), thrust::not_fn(thrust::identity<T>()));
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  thrust::transform(input.begin(), input.end(), output.begin(), thrust::not_fn(::cuda::std::identity{}));
+#else
+  thrust::transform(input.begin(), input.end(), output.begin(), thrust::not_fn(::internal::identity{}));
+#endif
 
   Vector ref{0, 1, 0, 0, 1};
   ASSERT_EQUAL(output, ref);

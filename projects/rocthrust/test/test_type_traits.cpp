@@ -15,6 +15,8 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/config.h>
+
 #include <thrust/detail/type_traits.h>
 #include <thrust/device_ptr.h>
 #include <thrust/iterator/constant_iterator.h>
@@ -39,7 +41,10 @@
 #  include <cuda/std/utility>
 #elif defined(__has_include)
 #  if __has_include(<cuda/std/complex>)
-#    include <cuda/std/complex>
+#    if defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
+// This header pulls in an unsuppressable warning on GCC 6
+#      include <cuda/std/complex>
+#    endif // defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
 #  endif // __has_include(<cuda/std/complex>)
 #  if __has_include(<cuda/std/tuple>)
 #    include <cuda/std/tuple>
@@ -51,6 +56,8 @@
 #    include <cuda/std/utility>
 #  endif // __has_include(<cuda/std/utility>)
 #else
+#  include <thrust/functional.h>
+
 #  include <complex>
 #  include <tuple>
 #  include <type_traits>
@@ -79,14 +86,27 @@ TEST(TypeTraitsTests, TestIsContiguousIterator)
 
   using HostIteratorTuple = thrust::tuple<HostVector::iterator, HostVector::iterator>;
 
-  using ConstantIterator  = thrust::constant_iterator<int>;
-  using CountingIterator  = thrust::counting_iterator<int>;
-  using TransformIterator = thrust::transform_iterator<thrust::identity<int>, HostVector::iterator>;
-  using ZipIterator       = thrust::zip_iterator<HostIteratorTuple>;
+  using ConstantIterator = thrust::constant_iterator<int>;
+  using CountingIterator = thrust::counting_iterator<int>;
+  THRUST_SUPPRESS_DEPRECATED_PUSH
+  using TransformIterator1 = thrust::transform_iterator<thrust::identity<int>, HostVector::iterator>;
+  THRUST_SUPPRESS_DEPRECATED_POP
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using TransformIterator2 = thrust::transform_iterator<cuda::std::identity, HostVector::iterator>;
+#else
+  using TransformIterator2 = thrust::transform_iterator<::internal::identity, HostVector::iterator>;
+#endif
+  using ZipIterator = thrust::zip_iterator<HostIteratorTuple>;
 
   ASSERT_EQ((bool) thrust::is_contiguous_iterator<ConstantIterator>::value, false);
   ASSERT_EQ((bool) thrust::is_contiguous_iterator<CountingIterator>::value, false);
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<TransformIterator>::value, false);
+#if !defined(__NVCOMPILER)
+  // thrust::identity creates a deprecated warning that could not be worked around
+  THRUST_SUPPRESS_DEPRECATED_PUSH
+  ASSERT_EQ((bool) thrust::is_contiguous_iterator<TransformIterator1>::value, false);
+  THRUST_SUPPRESS_DEPRECATED_POP
+#endif // !defined(__NVCOMPILER)
+  ASSERT_EQ((bool) thrust::is_contiguous_iterator<TransformIterator2>::value, false);
   ASSERT_EQ((bool) thrust::is_contiguous_iterator<ZipIterator>::value, false);
 }
 

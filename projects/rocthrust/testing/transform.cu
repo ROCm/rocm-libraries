@@ -25,6 +25,10 @@
 
 #include <unittest/unittest.h>
 
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <thrust/functional.h>
+#endif
+
 // There is a unfortunate miscompilation of the gcc-11 vectorizer leading to OOB writes
 // Adding this attribute suffices that this miscompilation does not appear anymore
 #if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && __GNUC__ >= 11
@@ -98,7 +102,11 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformIfUnaryNoStencilSimple()
   Vector output{-1, -2, -3};
   Vector result{-1, 2, -3};
 
-  iter = thrust::transform_if(input.begin(), input.end(), output.begin(), thrust::negate<T>(), thrust::identity<T>());
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  iter = thrust::transform_if(input.begin(), input.end(), output.begin(), thrust::negate<T>(), ::cuda::std::identity{});
+#else
+  iter = thrust::transform_if(input.begin(), input.end(), output.begin(), thrust::negate<T>(), ::internal::identity{});
+#endif
 
   ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQUAL(output, result);
@@ -159,7 +167,11 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformIfUnarySimple()
   Vector result{-1, 2, -3};
 
   iter = thrust::transform_if(
-    input.begin(), input.end(), stencil.begin(), output.begin(), thrust::negate<T>(), thrust::identity<T>());
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    input.begin(), input.end(), stencil.begin(), output.begin(), thrust::negate<T>(), ::cuda::std::identity{});
+#else
+    input.begin(), input.end(), stencil.begin(), output.begin(), thrust::negate<T>(), ::internal::identity{});
+#endif
 
   ASSERT_EQUAL(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQUAL(output, result);
@@ -287,7 +299,11 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformIfBinarySimple()
   Vector output{1, 2, 3};
   Vector result{5, 2, -3};
 
-  thrust::identity<T> identity;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  ::cuda::std::identity identity;
+#else
+  ::internal::identity identity;
+#endif
 
   iter = thrust::transform_if(
     input1.begin(),
@@ -692,8 +708,13 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestTransformUnaryCountingIterator()
   thrust::host_vector<T> h_result(n);
   thrust::device_vector<T> d_result(n);
 
-  thrust::transform(h_first, h_first + n, h_result.begin(), thrust::identity<T>());
-  thrust::transform(d_first, d_first + n, d_result.begin(), thrust::identity<T>());
+#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  thrust::transform(h_first, h_first + n, h_result.begin(), ::cuda::std::identity{});
+  thrust::transform(d_first, d_first + n, d_result.begin(), ::cuda::std::identity{});
+#  else
+  thrust::transform(h_first, h_first + n, h_result.begin(), ::internal::identity{});
+  thrust::transform(d_first, d_first + n, d_result.begin(), ::internal::identity{});
+#  endif
 
   ASSERT_EQUAL(h_result, d_result);
 }

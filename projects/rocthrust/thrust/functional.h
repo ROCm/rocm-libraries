@@ -1259,7 +1259,7 @@ struct bit_xor : public ::std::bit_xor<T>
  */
 // TODO(bgruber): this version can also act as a functor casting to T making it not equivalent to ::cuda::std::identity
 template <typename T = void>
-struct identity
+struct THRUST_DEPRECATED_BECAUSE("use cuda::std::identity instead") identity
 {
   /*! \typedef argument_type
    *  \brief The type of the function object's first argument.
@@ -1303,9 +1303,11 @@ struct identity
   }
 };
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
 template <>
-struct identity<void> : ::internal::identity
+struct THRUST_DEPRECATED_BECAUSE("use cuda::std::identity instead") identity<void> : ::internal::identity
 {};
+THRUST_SUPPRESS_DEPRECATED_POP
 
 /*! \p maximum is a function object that takes two arguments and returns the greater
  *  of the two. Specifically, it is an Adaptable Binary Function. If \c f is an

@@ -80,8 +80,13 @@ void TestDeviceDereferenceTransformIterator()
   thrust::device_vector<int> input = unittest::random_integers<int>(100);
   thrust::device_vector<int> output(input.size(), 0);
 
-  simple_copy(thrust::make_transform_iterator(input.begin(), thrust::identity<int>()),
-              thrust::make_transform_iterator(input.end(), thrust::identity<int>()),
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  simple_copy(thrust::make_transform_iterator(input.begin(), ::cuda::std::identity{}),
+              thrust::make_transform_iterator(input.end(), ::cuda::std::identity{}),
+#else
+  simple_copy(thrust::make_transform_iterator(input.begin(), ::internal::identity{}),
+              thrust::make_transform_iterator(input.end(), ::internal::identity{}),
+#endif
               output.begin());
 
   ASSERT_EQUAL(input, output);
@@ -93,8 +98,13 @@ void TestDeviceDereferenceTransformIteratorInputConversion()
   thrust::device_vector<int> input = unittest::random_integers<int>(100);
   thrust::device_vector<double> output(input.size(), 0);
 
-  simple_copy(thrust::make_transform_iterator(input.begin(), thrust::identity<double>()),
-              thrust::make_transform_iterator(input.end(), thrust::identity<double>()),
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  simple_copy(thrust::make_transform_iterator(input.begin(), ::cuda::std::identity{}),
+              thrust::make_transform_iterator(input.end(), ::cuda::std::identity{}),
+#else
+  simple_copy(thrust::make_transform_iterator(input.begin(), ::internal::identity{}),
+              thrust::make_transform_iterator(input.end(), ::internal::identity{}),
+#endif
               output.begin());
 
   ASSERT_EQUAL(input == output, true);
@@ -106,8 +116,13 @@ void TestDeviceDereferenceTransformIteratorOutputConversion()
   thrust::device_vector<int> input = unittest::random_integers<int>(100);
   thrust::device_vector<double> output(input.size(), 0);
 
-  simple_copy(thrust::make_transform_iterator(input.begin(), thrust::identity<int>()),
-              thrust::make_transform_iterator(input.end(), thrust::identity<int>()),
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  simple_copy(thrust::make_transform_iterator(input.begin(), ::cuda::std::identity{}),
+              thrust::make_transform_iterator(input.end(), ::cuda::std::identity{}),
+#else
+  simple_copy(thrust::make_transform_iterator(input.begin(), ::internal::identity{}),
+              thrust::make_transform_iterator(input.end(), ::internal::identity{}),
+#endif
               output.begin());
 
   ASSERT_EQUAL(input == output, true);

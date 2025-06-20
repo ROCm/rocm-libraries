@@ -157,8 +157,13 @@ TYPED_TEST(TransformInputOutputIteratorVariableUnitTests, TestTransformInputOutp
 
     // run on host (uses forward iterator negate)
     thrust::inclusive_scan(
-      thrust::make_transform_input_output_iterator(h_data.begin(), thrust::negate<T>(), thrust::identity<T>()),
-      thrust::make_transform_input_output_iterator(h_data.end(), thrust::negate<T>(), thrust::identity<T>()),
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+      thrust::make_transform_input_output_iterator(h_data.begin(), thrust::negate<T>(), ::cuda::std::identity{}),
+      thrust::make_transform_input_output_iterator(h_data.end(), thrust::negate<T>(), ::cuda::std::identity{}),
+#else
+      thrust::make_transform_input_output_iterator(h_data.begin(), thrust::negate<T>(), ::internal::identity{}),
+      thrust::make_transform_input_output_iterator(h_data.end(), thrust::negate<T>(), ::internal::identity{}),
+#endif
       h_result.begin());
     // run on device (uses reverse iterator negate)
     thrust::inclusive_scan(

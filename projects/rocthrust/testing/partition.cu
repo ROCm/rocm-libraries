@@ -24,6 +24,10 @@
 
 #include <unittest/unittest.h>
 
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <thrust/functional.h>
+#endif
+
 #if defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 110000 && THRUST_GCC_VERSION < 120000
 #  define WAIVE_GCC11_FAILURES
 #endif
@@ -156,14 +160,17 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestStablePartitionSimple);
 template <typename Vector>
 void TestStablePartitionStencilSimple()
 {
-  using T        = typename Vector::value_type;
   using Iterator = typename Vector::iterator;
 
   Vector data{1, 2, 1, 3, 2};
 
   Vector stencil{0, 1, 0, 0, 1};
 
-  Iterator iter = thrust::stable_partition(data.begin(), data.end(), stencil.begin(), thrust::identity<T>());
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  Iterator iter = thrust::stable_partition(data.begin(), data.end(), stencil.begin(), ::cuda::std::identity{});
+#else
+  Iterator iter = thrust::stable_partition(data.begin(), data.end(), stencil.begin(), ::internal::identity{});
+#endif
 
   Vector ref{2, 2, 1, 1, 3};
 
@@ -199,17 +206,18 @@ DECLARE_INTEGRAL_VECTOR_UNITTEST(TestStablePartitionCopySimple);
 template <typename Vector>
 void TestStablePartitionCopyStencilSimple()
 {
-  using T = typename Vector::value_type;
-
   Vector data{1, 2, 1, 1, 2};
-
   Vector stencil{false, true, false, false, true};
 
   Vector true_results(2);
   Vector false_results(3);
 
   thrust::pair<typename Vector::iterator, typename Vector::iterator> ends = thrust::stable_partition_copy(
-    data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), thrust::identity<T>());
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), ::cuda::std::identity{});
+#else
+    data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), ::internal::identity{});
+#endif
 
   Vector true_ref(2, 2);
 
