@@ -5,5 +5,6 @@ monorepo_map = {
     "projects/rocprim": {
         "cmake_options": "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF",
         "project_to_test": "test_rocprim",
+        "subtree_checkout": "projects/rocprim\nprojects/hipcub\nprojects/rocthrust",
     }
 }
