@@ -40,6 +40,7 @@ namespace rocRoller
                 if(scaleA != rocRoller::Operations::ScaleMode::None)
                 {
                     rv << "_mx" << typeA;
+                    rv << "_st" << scaleTypeA;
                     if(scaleA == rocRoller::Operations::ScaleMode::Separate)
                         rv << "_bs" << scaleBlockSize;
                 }
@@ -51,6 +52,7 @@ namespace rocRoller
                 if(scaleB != rocRoller::Operations::ScaleMode::None)
                 {
                     rv << "_mx" << typeB;
+                    rv << "_st" << scaleTypeB;
                     if(scaleB == rocRoller::Operations::ScaleMode::Separate)
                         rv << "_bs" << scaleBlockSize;
                 }
@@ -164,7 +166,8 @@ namespace rocRoller
                 s << "Tiling:    " << x.macM << "x" << x.macN << "x" << x.macK << std::endl;
                 s << "MI:        " << x.waveM << "x" << x.waveN << "x" << x.waveK << "x" << x.waveB
                   << std::endl;
-                s << "Scaling:   A:" << x.scaleA << " B:" << x.scaleB;
+                s << "Scaling:   A:" << x.scaleA << "(" << x.scaleTypeA << ")";
+                s << " B:" << x.scaleB << "(" << x.scaleTypeB << ")";
                 if(x.scaleA == rocRoller::Operations::ScaleMode::Separate
                    or x.scaleB == rocRoller::Operations::ScaleMode::Separate)
                 {

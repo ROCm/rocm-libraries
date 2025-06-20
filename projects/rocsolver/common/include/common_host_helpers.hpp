@@ -102,6 +102,12 @@ double get_time_us_sync(hipStream_t stream);
 double get_time_us_no_sync();
 
 /* =============================================================================================== */
+/* Device query functions.                                                                         */
+
+/*! \brief Get warp size of the current device */
+int get_device_warp_size();
+
+/* =============================================================================================== */
 /* Print functions.                                                                                */
 inline void pairs_to_string(std::string& str, const char* sep)
 {

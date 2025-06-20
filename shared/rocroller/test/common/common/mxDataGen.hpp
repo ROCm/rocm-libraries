@@ -169,7 +169,7 @@ namespace rocRoller
                                                               const DataPattern pattern = Bounded)
     {
         if(hasScale)
-            AssertFatal(blockScaling == 32, "Block scaling size must be 32.");
+            AssertFatal(blockScaling == 32, "Invalid scale block size: ", ShowValue(blockScaling));
         auto dgen = getDataGenerator<rrDT>(desc, min, max, seed, blockScaling, pattern);
         return getRandomVector<rrDT>(dgen, hasScale);
     }
@@ -184,15 +184,16 @@ namespace rocRoller
                    TensorDescriptor&     descC,
                    std::vector<uint8_t>& hostScaleA,
                    std::vector<uint8_t>& hostScaleB,
-                   bool                  hasScaleA = false,
-                   bool                  hasScaleB = false,
-                   float                 min       = -1.f,
-                   float                 max       = 1.f
+                   bool                  hasScaleA      = false,
+                   bool                  hasScaleB      = false,
+                   float                 min            = -1.f,
+                   float                 max            = 1.f,
+                   const uint            scaleBlockSize = 32
 
     )
     {
-        auto blockScalingA = (hasScaleA) ? 32 : 1;
-        auto blockScalingB = (hasScaleB) ? 32 : 1;
+        auto blockScalingA = (hasScaleA) ? scaleBlockSize : 1;
+        auto blockScalingB = (hasScaleB) ? scaleBlockSize : 1;
         using STA          = typename SegmentedTypeOf<TA>::type;
         using STB          = typename SegmentedTypeOf<TB>::type;
 

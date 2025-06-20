@@ -173,5 +173,20 @@ struct TestRadixSortDispatch
   void operator()() const {}
 };
 
-SimpleUnitTest<TestRadixSortDispatch, IntegralTypes> TestRadixSortDispatchIntegralInstance;
-SimpleUnitTest<TestRadixSortDispatch, FloatingPointTypes> TestRadixSortDispatchFPInstance;
+SimpleUnitTest<TestRadixSortDispatch,
+               unittest::concat<IntegralTypes,
+                                FloatingPointTypes
+#ifndef _LIBCUDACXX_HAS_NO_INT128
+                                ,
+                                unittest::type_list<__int128_t, __uint128_t>
+#endif // _LIBCUDACXX_HAS_NO_INT128
+#ifdef _CCCL_HAS_NVFP16
+                                ,
+                                unittest::type_list<__half>
+#endif // _CCCL_HAS_NVFP16
+#ifdef _CCCL_HAS_NVBF16
+                                ,
+                                unittest::type_list<__nv_bfloat16>
+#endif // _CCCL_HAS_NVBF16
+                                >>
+  TestRadixSortDispatchInstance;

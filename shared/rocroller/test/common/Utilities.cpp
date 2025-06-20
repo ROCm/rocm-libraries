@@ -104,7 +104,9 @@ namespace rocRoller
                      float                       beta,
                      bool                        transA,
                      bool                        transB,
-                     const uint                  scaleBlockSize)
+                     const uint                  scaleBlockSize,
+                     const DataType              scaleTypeA,
+                     const DataType              scaleTypeB)
     {
         auto scaledA = floatA;
         auto scaledB = floatB;
@@ -126,7 +128,7 @@ namespace rocRoller
                     auto  m      = mk / K;
                     auto  k      = mk % K;
                     auto  idx    = m * (K / scaleBlockSize) + (k / scaleBlockSize);
-                    float aScale = scaleToFloat(AX[idx]);
+                    float aScale = scaleToFloat(scaleTypeA, AX[idx]);
                     scaledA[mk] *= aScale;
                 }
             }
@@ -138,14 +140,14 @@ namespace rocRoller
                     auto  m      = mk % M;
                     auto  k      = mk / M;
                     auto  idx    = (k / scaleBlockSize) * M + m;
-                    float aScale = scaleToFloat(AX[idx]);
+                    float aScale = scaleToFloat(scaleTypeA, AX[idx]);
                     scaledA[mk] *= aScale;
                 }
             }
         }
         else if(AX.size() == 1)
         {
-            float aScale = scaleToFloat(AX[0]);
+            float aScale = scaleToFloat(scaleTypeA, AX[0]);
 #pragma omp parallel for
             for(size_t mk = 0; mk < M * K; ++mk)
             {
@@ -174,7 +176,7 @@ namespace rocRoller
                     auto  k      = kn / N;
                     auto  n      = kn % N;
                     auto  idx    = (k / scaleBlockSize) * N + n;
-                    float bScale = scaleToFloat(BX[idx]);
+                    float bScale = scaleToFloat(scaleTypeB, BX[idx]);
                     scaledB[kn] *= bScale;
                 }
             }
@@ -186,14 +188,14 @@ namespace rocRoller
                     auto  k      = kn % K;
                     auto  n      = kn / K;
                     auto  idx    = n * (K / scaleBlockSize) + (k / scaleBlockSize);
-                    float bScale = scaleToFloat(BX[idx]);
+                    float bScale = scaleToFloat(scaleTypeB, BX[idx]);
                     scaledB[kn] *= bScale;
                 }
             }
         }
         else if(BX.size() == 1)
         {
-            float bScale = scaleToFloat(BX[0]);
+            float bScale = scaleToFloat(scaleTypeB, BX[0]);
 #pragma omp parallel for
             for(size_t kn = 0; kn < K * N; ++kn)
             {

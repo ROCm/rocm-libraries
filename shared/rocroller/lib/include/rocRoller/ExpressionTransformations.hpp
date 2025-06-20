@@ -67,6 +67,16 @@ namespace rocRoller
         void enableDivideBy(ExpressionPtr expr, ContextPtr context);
 
         /**
+         * Gets expressions which can be used to compute magic division of denominator.
+         * 
+         * Returns [magicMultiple, magicShift, magicSign]
+         * 
+         * If denominator is unsigned, magicSign will be nullptr.
+         */
+        std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr>
+            getMagicMultipleShiftAndSign(ExpressionPtr denominator, ContextPtr context);
+
+        /**
          * @brief Attempt to replace multiplication operations found within an expression with faster operations.
          *
          * @param expr Input expression

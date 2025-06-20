@@ -86,7 +86,6 @@ set(rocroller_src
 
     source/Assemblers/Assembler.cpp
     source/Assemblers/InProcessAssembler.cpp
-    source/Assemblers/InProcessAssembler_assemble.cpp
     source/Assemblers/SubprocessAssembler.cpp
 
     source/CodeGen/AddInstruction.cpp
@@ -275,9 +274,23 @@ set_target_properties(
         SOVERSION ${ROCROLLER_SOVERSION}
 )
 
+if(ROCROLLER_USE_LLD)
+    find_package(
+        LLD
+        REQUIRED
+        CONFIG
+        HINTS
+        ${LLVM_DIR}/../lld/
+    )
+    target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_LLD)
+endif()
+
+
+find_package(amd_comgr REQUIRED)
 target_link_libraries(rocroller
     PRIVATE
     spdlog::spdlog_header_only
+    amd_comgr
     PUBLIC
     fmt::fmt-header-only
 )

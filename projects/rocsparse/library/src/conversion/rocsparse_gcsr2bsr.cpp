@@ -180,18 +180,10 @@ rocsparse_status rocsparse::gcsr2bsr(rocsparse_handle          handle,
     switch(csr_val_datatype)
     {
     case rocsparse_datatype_i8_r:
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-    }
     case rocsparse_datatype_u8_r:
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-    }
     case rocsparse_datatype_u32_r:
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-    }
     case rocsparse_datatype_f16_r:
+    case rocsparse_datatype_bf16_r:
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }

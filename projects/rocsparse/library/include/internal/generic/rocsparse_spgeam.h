@@ -114,6 +114,7 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *  \p rocsparse_spgeam. Once the computation is complete and the SpGEAM descriptor is no longer needed, the user must call
 *  \ref rocsparse_destroy_spgeam_descr. See full code example below.
 *
+*  The stage \ref rocsparse_spgeam_stage_compute computes the symbolic part and the numeric of the resulting matrix C. If the user wants to perform multiple operations involving matrices of same sparsity patterns but with different numerical values, then the stages \ref rocsparse_spgeam_stage_symbolic_compute and \ref rocsparse_spgeam_stage_numeric_compute can be used to separate the symbolic calculation from the numeric calculation. Note that the stage \ref rocsparse_spgeam_stage_compute cannot be mixed with the stages \ref rocsparse_spgeam_stage_symbolic_compute and \ref rocsparse_spgeam_stage_numeric_compute.
 *  \p rocsparse_spgeam supports multiple combinations of index types, data types, and compute types. The tables below indicate
 *  the currently supported different index and data types that can be used for the sparse matrices \f$op(A)\f$, \f$op(B)\f$, and
 *  \f$C\f$, and the compute type for \f$\alpha\f$ and \f$\beta\f$. The advantage of using different index and data types is to save on
@@ -196,7 +197,7 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *  \retval rocsparse_status_invalid_pointer \p alpha and \p beta are invalid,
 *          \p mat_A, \p mat_B, \p mat_C, \p descr or \p buffer_size pointer is invalid.
 *
-*  \par Example
+*  \par First Example
 *  \code{.c}
 *   // A - m x n
 *   // B - m x n
@@ -362,6 +363,191 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *   hipFree(dcsr_col_ind_C);
 *   hipFree(dcsr_val_C);
 *  \endcode
+*
+*
+*  \par Second Example
+*  \code{.c}
+*   // A - m x n
+*   // B - m x n
+*   // C - m x n
+*   int m = 4;
+*   int n = 6;
+*
+*   // 1 2 0 0 3 7
+*   // 0 0 1 4 6 8
+*   // 0 2 0 4 0 0
+*   // 9 8 0 0 2 0
+*   std::vector<int> hcsr_row_ptr_A = {0, 4, 8, 10, 13}; // host A m x n matrix
+*   std::vector<int> hcsr_col_ind_A = {0, 1, 4, 5, 2, 3, 4, 5, 1, 3, 0, 1, 4}; // host A m x n matrix
+*   std::vector<float> hcsr_val_A = {1, 2, 3, 7, 1, 4, 6, 8, 2, 4, 9, 8, 2};   // host A m x n matrix
+*
+*   // 0 2 1 0 0 5
+*   // 0 1 1 3 0 2
+*   // 0 0 0 0 0 0
+*   // 1 2 3 4 5 6
+*   std::vector<int> hcsr_row_ptr_B = {0, 3, 7, 7, 13}; // host B m x n matrix
+*   std::vector<int> hcsr_col_ind_B = {1, 2, 5, 1, 2, 3, 5, 0, 1, 2, 3, 4, 5}; // host B m x n matrix
+*   std::vector<float> hcsr_val_B = {2, 1, 5, 1, 1, 3, 2, 1, 2, 3, 4, 5, 6};   // host B m x n matrix
+*
+*   int nnz_A = hcsr_val_A.size();
+*   int nnz_B = hcsr_val_B.size();
+*
+*   float alpha            = 1.0f;
+*   float beta             = 1.0f;
+*
+*   int* dcsr_row_ptr_A = nullptr;
+*   int* dcsr_col_ind_A = nullptr;
+*   float* dcsr_val_A = nullptr;
+*
+*   int* dcsr_row_ptr_B = nullptr;
+*   int* dcsr_col_ind_B = nullptr;
+*   float* dcsr_val_B = nullptr;
+*
+*   hipMalloc((void**)&dcsr_row_ptr_A, (m + 1) * sizeof(int));
+*   hipMalloc((void**)&dcsr_col_ind_A, nnz_A * sizeof(int));
+*   hipMalloc((void**)&dcsr_val_A, nnz_A * sizeof(float));
+*
+*   hipMalloc((void**)&dcsr_row_ptr_B, (m + 1) * sizeof(int));
+*   hipMalloc((void**)&dcsr_col_ind_B, nnz_B * sizeof(int));
+*   hipMalloc((void**)&dcsr_val_B, nnz_B * sizeof(float));
+*
+*   hipMemcpy(dcsr_row_ptr_A, hcsr_row_ptr_A.data(), (m + 1) * sizeof(int), hipMemcpyHostToDevice);
+*   hipMemcpy(dcsr_col_ind_A, hcsr_col_ind_A.data(), nnz_A * sizeof(int), hipMemcpyHostToDevice);
+*   hipMemcpy(dcsr_val_A, hcsr_val_A.data(), nnz_A * sizeof(float), hipMemcpyHostToDevice);
+*
+*   hipMemcpy(dcsr_row_ptr_B, hcsr_row_ptr_B.data(), (m + 1) * sizeof(int), hipMemcpyHostToDevice);
+*   hipMemcpy(dcsr_col_ind_B, hcsr_col_ind_B.data(), nnz_B * sizeof(int), hipMemcpyHostToDevice);
+*   hipMemcpy(dcsr_val_B, hcsr_val_B.data(), nnz_B * sizeof(float), hipMemcpyHostToDevice);
+*
+*   rocsparse_handle     handle;
+*   rocsparse_error      p_error[1] = {};
+*   rocsparse_spmat_descr matA, matB, matC;
+*   rocsparse_index_base index_base = rocsparse_index_base_zero;
+*   rocsparse_indextype itype = rocsparse_indextype_i32;
+*   rocsparse_indextype jtype = rocsparse_indextype_i32;
+*   rocsparse_datatype  ttype = rocsparse_datatype_f32_r;
+*
+*   rocsparse_create_handle(&handle);
+*
+*   hipStream_t stream;
+*   rocsparse_get_stream(handle, &stream);
+*
+*   // Create sparse matrix A in CSR format
+*   rocsparse_create_csr_descr(&matA, m, n, nnz_A,
+*                       dcsr_row_ptr_A, dcsr_col_ind_A, dcsr_val_A,
+*                       itype, jtype,
+*                       index_base, ttype);
+*
+*   // Create sparse matrix B in CSR format
+*   rocsparse_create_csr_descr(&matB, m, n, nnz_B,
+*                       dcsr_row_ptr_B, dcsr_col_ind_B, dcsr_val_B,
+*                       itype, jtype,
+*                       index_base, ttype);
+*
+*   // Create SpGEAM descriptor.
+*   rocsparse_spgeam_descr descr;
+*   rocsparse_create_spgeam_descr(&descr);
+*
+*   // Set the algorithm on the descriptor
+*   const rocsparse_spgeam_alg alg = rocsparse_spgeam_alg_default;
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_alg, &alg, sizeof(alg), p_error);
+*
+*   // Set the transpose operation for sparses matrix A and B on the descriptor
+*   const rocsparse_operation trans_A = rocsparse_operation_none;
+*   const rocsparse_operation trans_B = rocsparse_operation_none;
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_operation_A, &trans_A, sizeof(trans_A), p_error);
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_operation_B, &trans_B, sizeof(trans_B), p_error);
+*
+*   // Set the scalar type on the descriptor
+*   const rocsparse_datatype scalar_datatype = rocsparse_datatype_f32_r;
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_scalar_datatype, &scalar_datatype, sizeof(scalar_datatype), p_error);
+*
+*   // Set the compute type on the descriptor
+*   const rocsparse_datatype compute_datatype = rocsparse_datatype_f32_r;
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_compute_datatype, &compute_datatype, sizeof(compute_datatype), p_error);
+*
+*   // Calculate NNZ phase
+*   size_t buffer_size_in_bytes;
+*   void * buffer;
+*   rocsparse_spgeam_buffer_size(handle, descr, matA, matB, nullptr, rocsparse_spgeam_stage_analysis, &buffer_size_in_bytes, p_error);
+*
+*   hipMalloc(&buffer, buffer_size_in_bytes);
+*   rocsparse_spgeam(handle, descr, &alpha, matA, &beta, matB, nullptr, rocsparse_spgeam_stage_analysis, buffer_size_in_bytes, buffer, p_error);
+*   hipFree(buffer);
+*
+*   // Ensure analysis stage is complete before grabbing C non-zero count
+*   hipStreamSynchronize(stream);
+*
+*   int64_t nnz_C;
+*   rocsparse_spgeam_get_output(handle, descr, rocsparse_spgeam_output_nnz, &nnz_C, sizeof(int64_t), p_error);
+*
+*   // Compute column indices and values of C
+*   int* dcsr_row_ptr_C = nullptr;
+*   int* dcsr_col_ind_C = nullptr;
+*   float* dcsr_val_C = nullptr;
+*   hipMalloc((void**)&dcsr_row_ptr_C, (m + 1) * sizeof(int));
+*   hipMalloc((void**)&dcsr_col_ind_C, sizeof(int32_t) * nnz_C);
+*   hipMalloc((void**)&dcsr_val_C, sizeof(float) * nnz_C);
+*
+*   // Create sparse matrix C in CSR format
+*   rocsparse_create_csr_descr(&matC, m, n, nnz_C,
+*                       dcsr_row_ptr_C, dcsr_col_ind_C, dcsr_val_C,
+*                       itype, jtype,
+*                       index_base, ttype);
+*
+*   // Symbolic compute phase
+*   rocsparse_spgeam_buffer_size(handle, descr, matA, matB, matC, rocsparse_spgeam_stage_symbolic_compute, &buffer_size_in_bytes, p_error);
+*
+*   hipMalloc(&buffer, buffer_size_in_bytes);
+*   rocsparse_spgeam(handle, descr, &alpha, matA, &beta, matB, matC, rocsparse_spgeam_stage_symbolic_compute, buffer_size_in_bytes, buffer, p_error);
+*   hipFree(buffer);
+*
+*   // First Numeric compute phase
+*   rocsparse_spgeam_buffer_size(handle, descr, matA, matB, matC, rocsparse_spgeam_stage_numeric_compute, &buffer_size_in_bytes, p_error);
+*
+*   hipMalloc(&buffer, buffer_size_in_bytes);
+*   rocsparse_spgeam(handle, descr, &alpha, matA, &beta, matB, matC, rocsparse_spgeam_stage_numeric_compute, buffer_size_in_bytes, buffer, p_error);
+*   hipFree(buffer);
+*
+*
+*   // Second numeric compute phase
+*   hcsr_val_B[0] += 0.125;
+*   hcsr_val_B[1] += 0.5;
+*   hipMemcpy(dcsr_val_B, hcsr_val_B.data(), nnz_B * sizeof(float), hipMemcpyHostToDevice);
+*   hipMalloc(&buffer, buffer_size_in_bytes);
+*   rocsparse_spgeam(handle, descr, &alpha, matA, &beta, matB, matC, rocsparse_spgeam_stage_numeric_compute, buffer_size_in_bytes, buffer, p_error);
+*   hipFree(buffer);
+*
+*   // Copy C matrix result back to host
+*   std::vector<int> hcsr_row_ptr_C(m + 1);
+*   std::vector<int> hcsr_col_ind_C(nnz_C);
+*   std::vector<float>  hcsr_val_C(nnz_C);
+*
+*   hipMemcpy(hcsr_row_ptr_C.data(), dcsr_row_ptr_C, sizeof(int) * (m + 1), hipMemcpyDeviceToHost);
+*   hipMemcpy(hcsr_col_ind_C.data(), dcsr_col_ind_C, sizeof(int) * nnz_C, hipMemcpyDeviceToHost);
+*   hipMemcpy(hcsr_val_C.data(), dcsr_val_C, sizeof(float) * nnz_C, hipMemcpyDeviceToHost);
+*
+*   // Destroy matrix descriptors
+*   rocsparse_destroy_spmat_descr(matA);
+*   rocsparse_destroy_spmat_descr(matB);
+*   rocsparse_destroy_spmat_descr(matC);
+*   rocsparse_destroy_handle(handle);
+*   rocsparse_destroy_error(p_error[0]);
+*
+*   // Free device arrays
+*   hipFree(dcsr_row_ptr_A);
+*   hipFree(dcsr_col_ind_A);
+*   hipFree(dcsr_val_A);
+*
+*   hipFree(dcsr_row_ptr_B);
+*   hipFree(dcsr_col_ind_B);
+*   hipFree(dcsr_val_B);
+*
+*   hipFree(dcsr_row_ptr_C);
+*   hipFree(dcsr_col_ind_C);
+*   hipFree(dcsr_val_C);
+*  \endcode
+*
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spgeam(rocsparse_handle            handle,

@@ -51,7 +51,6 @@ pr:
     - projects/hipfft/docs
     - projects/hipfft/.*.y*ml
     - projects/hipfft/*.md
-  drafts: false
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/hipFFT.yml@pipelines_repo

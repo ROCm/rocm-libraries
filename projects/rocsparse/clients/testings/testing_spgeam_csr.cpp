@@ -75,14 +75,14 @@ void testing_spgeam_csr_bad_arg(const Arguments& arg)
     size_t buffer_size = 0;
     void*  temp_buffer = nullptr;
 
-    int       nargs_to_exclude_buffer_size   = 3;
-    const int args_to_exclude_buffer_size[3] = {4, 6, 7};
+    int32_t       nargs_to_exclude_buffer_size   = 3;
+    const int32_t args_to_exclude_buffer_size[3] = {4, 6, 7};
 
-    int       nargs_to_exclude_analysis   = 6;
-    const int args_to_exclude_analysis[6] = {2, 4, 6, 8, 9, 10};
+    int32_t       nargs_to_exclude_analysis   = 6;
+    const int32_t args_to_exclude_analysis[6] = {2, 4, 6, 8, 9, 10};
 
-    int       nargs_to_exclude_compute   = 5;
-    const int args_to_exclude_compute[5] = {2, 4, 8, 9, 10};
+    int32_t       nargs_to_exclude_compute   = 5;
+    const int32_t args_to_exclude_compute[5] = {2, 4, 8, 9, 10};
 
     rocsparse_spgeam_stage stage = rocsparse_spgeam_stage_analysis;
     rocsparse_error*       p_error{};
@@ -314,7 +314,7 @@ void testing_spgeam_csr(const Arguments& arg)
 
         // Compute C on host multiple times.
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-        for(int i = 0; i < 2; i++)
+        for(int32_t i = 0; i < 2; i++)
         {
             CHECK_ROCSPARSE_ERROR(rocsparse_spgeam(handle,
                                                    descr,
@@ -337,7 +337,7 @@ void testing_spgeam_csr(const Arguments& arg)
 
         // Compute C on device multiple times.
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
-        for(int i = 0; i < 2; i++)
+        for(int32_t i = 0; i < 2; i++)
         {
             CHECK_ROCSPARSE_ERROR(rocsparse_spgeam(handle,
                                                    descr,
@@ -361,13 +361,13 @@ void testing_spgeam_csr(const Arguments& arg)
 
     if(arg.timing)
     {
-        int number_cold_calls = 2;
-        int number_hot_calls  = arg.iters;
+        int32_t number_cold_calls = 2;
+        int32_t number_hot_calls  = arg.iters;
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
         // Warm up
-        for(int iter = 0; iter < number_cold_calls; ++iter)
+        for(int32_t iter = 0; iter < number_cold_calls; ++iter)
         {
             CHECK_ROCSPARSE_ERROR(rocsparse_spgeam(handle,
                                                    descr,
@@ -385,7 +385,7 @@ void testing_spgeam_csr(const Arguments& arg)
         double gpu_solve_time_used = get_time_us();
 
         // Performance run
-        for(int iter = 0; iter < number_hot_calls; ++iter)
+        for(int32_t iter = 0; iter < number_hot_calls; ++iter)
         {
             CHECK_ROCSPARSE_ERROR(rocsparse_spgeam(handle,
                                                    descr,
@@ -457,24 +457,26 @@ INSTANTIATE(int64_t, int64_t, float);
 INSTANTIATE(int64_t, int64_t, double);
 INSTANTIATE(int64_t, int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
-void testing_spgeam_csr_extra(const Arguments& arg)
+
+//
+// This test expects an overflow from the calculation of the number of non-zeros
+// when int32_t is used as the index type for the ptr array of the csr format.
+//
+static void testing_spgeam_csr_extra_expected_overflow(const Arguments& arg)
 {
-    int m     = 50000;
-    int n     = 50000;
-    int nnz_A = (m / 2) * n;
-    int nnz_B = (m / 2) * n;
-
-    float h_alpha = 1.0f;
-    float h_beta  = 1.0f;
-
-    rocsparse_index_base base_A  = arg.baseA;
-    rocsparse_index_base base_B  = arg.baseB;
-    rocsparse_index_base base_C  = arg.baseC;
-    rocsparse_operation  trans_A = arg.transA;
-    rocsparse_operation  trans_B = arg.transB;
-    rocsparse_spgeam_alg alg     = arg.spgeam_alg;
-
-    rocsparse_datatype ttype = get_datatype<float>();
+    const int32_t              m       = 50000;
+    const int32_t              n       = 50000;
+    const int32_t              nnz_A   = (m / 2) * n;
+    const int32_t              nnz_B   = (m / 2) * n;
+    const float                h_alpha = 1.0f;
+    const float                h_beta  = 1.0f;
+    const rocsparse_index_base base_A  = arg.baseA;
+    const rocsparse_index_base base_B  = arg.baseB;
+    const rocsparse_index_base base_C  = arg.baseC;
+    const rocsparse_operation  trans_A = arg.transA;
+    const rocsparse_operation  trans_B = arg.transB;
+    const rocsparse_spgeam_alg alg     = arg.spgeam_alg;
+    const rocsparse_datatype   ttype   = get_datatype<float>();
 
     // Create rocsparse handle
     rocsparse_local_handle handle;
@@ -483,11 +485,11 @@ void testing_spgeam_csr_extra(const Arguments& arg)
     hipStream_t stream = handle.get_stream();
 
     // Declare host matrices.
-    host_csr_matrix<float, int, int> hA(m, n, nnz_A, base_A);
-    host_csr_matrix<float, int, int> hB(m, n, nnz_B, base_B);
+    host_csr_matrix<float> hA(m, n, nnz_A, base_A);
+    host_csr_matrix<float> hB(m, n, nnz_B, base_B);
 
     hA.ptr[0] = base_A;
-    for(int i = 0; i < m; i++)
+    for(int32_t i = 0; i < m; i++)
     {
         if(i < (m / 2))
         {
@@ -499,12 +501,12 @@ void testing_spgeam_csr_extra(const Arguments& arg)
         }
     }
 
-    for(int i = 0; i < m; i++)
+    for(int32_t i = 0; i < m; i++)
     {
-        int start = hA.ptr[i] - base_A;
-        int end   = hA.ptr[i + 1] - base_A;
+        int32_t start = hA.ptr[i] - base_A;
+        int32_t end   = hA.ptr[i + 1] - base_A;
 
-        for(int j = start; j < end; j++)
+        for(int32_t j = start; j < end; j++)
         {
             hA.ind[j] = j - start + base_A;
             hA.val[j] = 1.0f;
@@ -512,7 +514,7 @@ void testing_spgeam_csr_extra(const Arguments& arg)
     }
 
     hB.ptr[0] = base_B;
-    for(int i = 0; i < m; i++)
+    for(int32_t i = 0; i < m; i++)
     {
         if(i < (m / 2))
         {
@@ -524,12 +526,12 @@ void testing_spgeam_csr_extra(const Arguments& arg)
         }
     }
 
-    for(int i = 0; i < m; i++)
+    for(int32_t i = 0; i < m; i++)
     {
-        int start = hB.ptr[i] - base_B;
-        int end   = hB.ptr[i + 1] - base_B;
+        int32_t start = hB.ptr[i] - base_B;
+        int32_t end   = hB.ptr[i + 1] - base_B;
 
-        for(int j = start; j < end; j++)
+        for(int32_t j = start; j < end; j++)
         {
             hB.ind[j] = j - start + base_B;
             hB.val[j] = 1.0f;
@@ -537,11 +539,11 @@ void testing_spgeam_csr_extra(const Arguments& arg)
     }
 
     // Declare device matrices.
-    device_csr_matrix<float, int, int> dA(hA);
-    device_csr_matrix<float, int, int> dB(hB);
+    device_csr_matrix<float> dA(hA);
+    device_csr_matrix<float> dB(hB);
 
     // Allocate and set up C
-    device_csr_matrix<float, int, int> dC(m, n, 0, base_C);
+    device_csr_matrix<float> dC(m, n, 0, base_C);
 
     // Declare local spmat.
     rocsparse_local_spmat A(dA), B(dB), C(dC);
@@ -591,4 +593,153 @@ void testing_spgeam_csr_extra(const Arguments& arg)
     EXPECT_ROCSPARSE_STATUS((nnz_C == -1) ? rocsparse_status_success
                                           : rocsparse_status_internal_error,
                             rocsparse_status_success);
+}
+
+//
+// This test messes up stages and checks that invalid status is returned.
+//
+static void testing_spgeam_csr_extra_wrong_stages(const Arguments& arg)
+{
+    const int32_t              m       = 2;
+    const int32_t              n       = 2;
+    const int32_t              nnz_A   = 2;
+    const int32_t              nnz_B   = 2;
+    const int32_t              nnz_C   = 2;
+    const float                h_alpha = 1.0f;
+    const float                h_beta  = 1.0f;
+    const rocsparse_index_base base_A  = rocsparse_index_base_zero;
+    const rocsparse_index_base base_B  = rocsparse_index_base_zero;
+    const rocsparse_index_base base_C  = rocsparse_index_base_zero;
+    const rocsparse_operation  trans_A = rocsparse_operation_none;
+    const rocsparse_operation  trans_B = rocsparse_operation_none;
+    const rocsparse_spgeam_alg alg     = rocsparse_spgeam_alg_default;
+    const rocsparse_datatype   ttype   = rocsparse_datatype_f32_r;
+    // Create rocsparse handle
+    rocsparse_local_handle handle;
+    // Declare host matrices.
+    host_csr_matrix<float> hA(m, n, nnz_A, base_A);
+    host_csr_matrix<float> hB(m, n, nnz_B, base_B);
+    host_csr_matrix<float> hC(m, n, nnz_C, base_C);
+    hA.ptr[0] = 0;
+    hA.ptr[1] = 1;
+    hA.ptr[2] = 2;
+    hA.ind[0] = 0;
+    hA.ind[1] = 1;
+    hA.val[0] = 1;
+    hA.val[1] = 1;
+
+    hB.ptr[0] = 0;
+    hB.ptr[1] = 1;
+    hB.ptr[2] = 2;
+    hB.ind[0] = 0;
+    hB.ind[1] = 1;
+    hB.val[0] = 1;
+    hB.val[1] = 1;
+
+    hC.ptr[0] = 0;
+    hC.ptr[1] = 1;
+    hC.ptr[2] = 2;
+    hC.ind[0] = 0;
+    hC.ind[1] = 1;
+    hC.val[0] = 2;
+    hC.val[1] = 2;
+
+    device_csr_matrix<float> dA(hA), dB(hB), dC(hC);
+    rocsparse_local_spmat    A(dA), B(dB), C(dC);
+
+    rocsparse_spgeam_descr descr;
+    CHECK_ROCSPARSE_ERROR(rocsparse_create_spgeam_descr(&descr));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr, rocsparse_spgeam_input_alg, &alg, sizeof(alg), nullptr));
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr, rocsparse_spgeam_input_operation_A, &trans_A, sizeof(trans_A), nullptr));
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr, rocsparse_spgeam_input_operation_B, &trans_B, sizeof(trans_B), nullptr));
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr, rocsparse_spgeam_input_scalar_datatype, &ttype, sizeof(ttype), nullptr));
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
+        handle, descr, rocsparse_spgeam_input_compute_datatype, &ttype, sizeof(ttype), nullptr));
+
+    // Calculate NNZ phase
+    const size_t              buffer_size_in_bytes = 64;
+    device_dense_vector<char> buffer(buffer_size_in_bytes);
+
+#define PARAMS(stage) \
+    handle, descr, &h_alpha, A, &h_beta, B, C, stage, buffer_size_in_bytes, buffer, nullptr
+
+    //
+    // Expect an invalid status when calling compute before analysis
+    //
+    {
+        ROCSPARSE_DEBUG_VERBOSE_OFF;
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spgeam(PARAMS(rocsparse_spgeam_stage_compute)),
+                                rocsparse_status_invalid_value);
+        ROCSPARSE_DEBUG_VERBOSE_ON;
+    }
+
+    //
+    // Call analysis
+    //
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam(PARAMS(rocsparse_spgeam_stage_analysis)));
+
+    //
+    // Expect an invalid status when calling analysis twice
+    //
+    {
+        ROCSPARSE_DEBUG_VERBOSE_OFF;
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spgeam(PARAMS(rocsparse_spgeam_stage_analysis)),
+                                rocsparse_status_invalid_value);
+        ROCSPARSE_DEBUG_VERBOSE_ON;
+    }
+
+    //
+    // Call compute.
+    //
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam(PARAMS(rocsparse_spgeam_stage_compute)));
+
+    //
+    // Call compute twice.
+    //
+    CHECK_ROCSPARSE_ERROR(rocsparse_spgeam(PARAMS(rocsparse_spgeam_stage_compute)));
+
+    {
+        ROCSPARSE_DEBUG_VERBOSE_OFF;
+
+        //
+        // Expect an invalid status when calling analysis after compute
+        //
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spgeam(PARAMS(rocsparse_spgeam_stage_analysis)),
+                                rocsparse_status_invalid_value);
+
+        //
+        // Expect an invalid status when calling symbolic_compute after compute
+        //
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spgeam(PARAMS(rocsparse_spgeam_stage_symbolic_compute)),
+                                rocsparse_status_invalid_value);
+
+        //
+        // Expect an invalid status when calling numeric_compute after compute
+        //
+        EXPECT_ROCSPARSE_STATUS(rocsparse_spgeam(PARAMS(rocsparse_spgeam_stage_numeric_compute)),
+                                rocsparse_status_invalid_value);
+
+        ROCSPARSE_DEBUG_VERBOSE_ON;
+    }
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_destroy_spgeam_descr(descr));
+#undef PARAMS
+}
+
+void testing_spgeam_csr_extra(const Arguments& arg)
+{
+    if(rocsparse_clients::current_arch_from(rocsparse_clients::archnames::gfx90a))
+    {
+        testing_spgeam_csr_extra_expected_overflow(arg);
+    }
+
+    testing_spgeam_csr_extra_wrong_stages(arg);
 }

@@ -29,6 +29,7 @@
 #define ROCSPARSE_TYPES_H
 
 #include "rocsparse-complex-types.h"
+#include "rocsparse_bfloat16.h"
 
 #include <float.h>
 #include <stddef.h>
@@ -526,15 +527,16 @@ typedef enum rocsparse_indextype_
  */
 typedef enum rocsparse_datatype_
 {
-    rocsparse_datatype_f16_r = 150, /**< 16 bit floating point, real. */
-    rocsparse_datatype_f32_r = 151, /**< 32 bit floating point, real. */
-    rocsparse_datatype_f64_r = 152, /**< 64 bit floating point, real. */
-    rocsparse_datatype_f32_c = 154, /**< 32 bit floating point, complex. */
-    rocsparse_datatype_f64_c = 155, /**< 64 bit floating point, complex. */
-    rocsparse_datatype_i8_r  = 160, /**<  8-bit signed integer, real */
-    rocsparse_datatype_u8_r  = 161, /**<  8-bit unsigned integer, real */
-    rocsparse_datatype_i32_r = 162, /**< 32-bit signed integer, real */
-    rocsparse_datatype_u32_r = 163 /**< 32-bit unsigned integer, real */
+    rocsparse_datatype_f16_r  = 150, /**< 16 bit floating point, real. */
+    rocsparse_datatype_f32_r  = 151, /**< 32 bit floating point, real. */
+    rocsparse_datatype_f64_r  = 152, /**< 64 bit floating point, real. */
+    rocsparse_datatype_f32_c  = 154, /**< 32 bit floating point, complex. */
+    rocsparse_datatype_f64_c  = 155, /**< 64 bit floating point, complex. */
+    rocsparse_datatype_i8_r   = 160, /**<  8-bit signed integer, real */
+    rocsparse_datatype_u8_r   = 161, /**<  8-bit unsigned integer, real */
+    rocsparse_datatype_i32_r  = 162, /**< 32-bit signed integer, real */
+    rocsparse_datatype_u32_r  = 163, /**< 32-bit unsigned integer, real */
+    rocsparse_datatype_bf16_r = 168 /**< 16-bit bfloat, real */
 } rocsparse_datatype;
 
 /*! \ingroup types_module
@@ -952,9 +954,9 @@ typedef enum rocsparse_spgeam_stage_
 {
     rocsparse_spgeam_stage_analysis = 1, /**< Computes number of non-zero entries. */
     rocsparse_spgeam_stage_compute  = 2, /**< Performs the actual SpGEAM computation. */
-    rocsparse_spgeam_stage_symbolic
+    rocsparse_spgeam_stage_symbolic_compute
     = 3, /**< Performs only the symbolic SpGEAM computation to fill the column indices array. */
-    rocsparse_spgeam_stage_numeric
+    rocsparse_spgeam_stage_numeric_compute
     = 4 /**< Performs only the numeric SpGEAM computation to fill the values array. */
 } rocsparse_spgeam_stage;
 

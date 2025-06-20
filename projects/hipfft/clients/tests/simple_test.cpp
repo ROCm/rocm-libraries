@@ -33,16 +33,17 @@ DISABLE_WARNING_RETURN_TYPE
 #include <hip/hip_runtime_api.h>
 DISABLE_WARNING_POP
 
-// Function to return maximum error for float and double types.
+// Function to return maximum error for float and double types for
+// the simple tests below
 template <typename Tfloat>
-inline double type_epsilon();
+inline double type_epsilon_simple();
 template <>
-inline double type_epsilon<float>()
+inline double type_epsilon_simple<float>()
 {
     return 1e-6;
 }
 template <>
-inline double type_epsilon<double>()
+inline double type_epsilon_simple<double>()
 {
     return 1e-7;
 }
@@ -562,7 +563,7 @@ TEST(hipfftTest, RunR2C)
     nrmse = sqrt(nrmse);
     nrmse /= maxv;
 
-    EXPECT_TRUE(nrmse < type_epsilon<double>());
+    EXPECT_LT(nrmse, type_epsilon_simple<double>());
     fftw_destroy_plan(ref_p);
     fftw_free(ref_out);
 }
@@ -640,7 +641,7 @@ TEST(hipfftTest, OutplaceOnly)
     nrmse = sqrt(nrmse);
     nrmse /= maxv;
 
-    ASSERT_TRUE(nrmse < type_epsilon<double>());
+    ASSERT_LT(nrmse, type_epsilon_simple<double>());
     fftw_destroy_plan(ref_p);
     fftw_free(ref_out);
 }

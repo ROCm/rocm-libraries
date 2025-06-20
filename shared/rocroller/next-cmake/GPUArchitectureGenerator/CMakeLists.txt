@@ -59,7 +59,7 @@ else()
 endif()
 
 target_include_directories(GPUArchitectureGenerator
-    PRIVATE 
+    PRIVATE
         "${ROCROLLER_LIB_DIR}/../GPUArchitectureGenerator/include"
         "${ROCROLLER_LIB_DIR}/include"
         "${ROCROLLER_GPUARCH_DIR}/isa_spec_manager"
@@ -109,6 +109,7 @@ if(ROCROLLER_EMBED_ARCH_DEF)
     cmrc_add_resource_library(
         GPUArchitecture_def_library
         ALIAS rocroller::GPUArchitecture_def
+        TYPE OBJECT
         NAMESPACE rocRoller
         WHENCE ${CMAKE_CURRENT_BINARY_DIR}
         PREFIX resources

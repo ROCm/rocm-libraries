@@ -25,7 +25,6 @@ function display_help()
   echo "    [--address-sanitizer] build with address sanitizer enabled. Uses hip-clang to compile"
   echo "    [--matrices-dir] existing client matrices directory"
   echo "    [--matrices-dir-install] install client matrices directory"
-  echo "    [--rm-legacy-include-dir] Remove legacy include dir Packaging added for file/folder reorg backward compatibility."
 }
 
 # This function is helpful for dockerfiles that do not have sudo installed, but the default user is root
@@ -277,7 +276,6 @@ install_prefix=hipsparse-install
 rocm_path=/opt/rocm
 build_relocatable=false
 build_address_sanitizer=false
-build_freorg_bkwdcomp=false
 compiler=${CXX}
 
 # #################################################
@@ -340,9 +338,6 @@ while true; do
     --address-sanitizer)
         build_address_sanitizer=true
         compiler=amdclang++
-        shift ;;
-    --rm-legacy-include-dir)
-        build_freorg_bkwdcomp=false
         shift ;;
     --matrices-dir)
         matrices_dir=${2}
@@ -495,13 +490,6 @@ pushd .
     cmake_common_options="$cmake_common_options -DBUILD_ADDRESS_SANITIZER=ON"
   fi
 
-  # freorg backward compatible support enable
-  if [[ "${build_freorg_bkwdcomp}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=ON"
-  else
-    cmake_common_options="${cmake_common_options} -DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=OFF"
-  fi
- 
   # library type
   if [[ "${build_static}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DBUILD_SHARED_LIBS=OFF"

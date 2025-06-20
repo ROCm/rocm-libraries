@@ -49,11 +49,11 @@ struct body
   Size sum;
 
   body(InputIterator1 first, InputIterator2 stencil, OutputIterator result, Predicate pred)
-    : first(first), stencil(stencil), result(result), pred(pred), sum(0)
+    : first(first), stencil(stencil), result(result), pred{pred}, sum(0)
   {}
 
   body(body& b, ::tbb::split)
-    : first(b.first), stencil(b.stencil), result(b.result), pred(b.pred), sum(0)
+    : first(b.first), stencil(b.stencil), result(b.result), pred{b.pred}, sum(0)
   {}
 
   void operator()(const ::tbb::blocked_range<Size>& r, ::tbb::pre_scan_tag)

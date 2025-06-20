@@ -415,10 +415,15 @@ if (NOT WIN32)
 endif()
 
 if (NOT WIN32)
-  if(BUILD_WITH_ROCTX)
-    find_package(roctx REQUIRED)
-    target_link_libraries(rocsparse-test PRIVATE roctx::roctx)
-    target_compile_definitions( rocsparse-test PRIVATE ROCSPARSE_CLIENTS_WITH_ROCTX )
+  if (BUILD_WITH_ROCTX)
+    if(ROCTRACER_INCLUDE_DIR AND ROCTX_LIBRARY)
+      # Add the include directory
+      target_include_directories(rocsparse-test PRIVATE ${ROCTRACER_INCLUDE_DIR})
+
+      # Link the rocTx lib
+      target_link_libraries(rocsparse-test PRIVATE ${ROCTX_LIBRARY})
+      target_compile_definitions( rocsparse-test PRIVATE ROCSPARSE_CLIENTS_WITH_ROCTX )
+    endif()
   endif()
 endif()
 

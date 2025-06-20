@@ -67,33 +67,24 @@ endif()
 # ROCm
 find_package( ROCmCMakeBuildTools CONFIG PATHS /opt/rocm )
 if(NOT ROCmCMakeBuildTools_FOUND)
-  set( rocm_cmake_tag "develop" CACHE STRING "rocm-cmake tag to download" )
   set( PROJECT_EXTERN_DIR "${CMAKE_CURRENT_BINARY_DIR}/extern" )
-  file( DOWNLOAD https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip
-      ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag}.zip STATUS status LOG log)
 
-  list(GET status 0 status_code)
-  list(GET status 1 status_string)
+  include( FetchContent )
 
-  if(NOT status_code EQUAL 0)
-    message(WARNING "error: downloading
-    'https://github.com/RadeonOpenCompute/rocm-cmake/archive/${rocm_cmake_tag}.zip' failed
-    status_code: ${status_code}
-    status_string: ${status_string}
-    log: ${log}
-    ")
-  else()
-    message(STATUS "downloading... done")
+  FetchContent_Declare( rocm_cmake_local
+    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake-build-tools
+    GIT_TAG rocm-6.4.1
+    GIT_SHALLOW ON
+  )
 
-    execute_process( COMMAND ${CMAKE_COMMAND} -E tar xzvf ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag}.zip
-      WORKING_DIRECTORY ${PROJECT_EXTERN_DIR} )
-    execute_process( COMMAND ${CMAKE_COMMAND} -DCMAKE_INSTALL_PREFIX=${PROJECT_EXTERN_DIR}/rocm-cmake .
-      WORKING_DIRECTORY ${PROJECT_EXTERN_DIR}/rocm-cmake-${rocm_cmake_tag} )
-    execute_process( COMMAND ${CMAKE_COMMAND} --build rocm-cmake-${rocm_cmake_tag} --target install
-      WORKING_DIRECTORY ${PROJECT_EXTERN_DIR})
+  FetchContent_MakeAvailable( rocm_cmake_local )
 
-    find_package( ROCmCMakeBuildTools CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake )
-  endif()
+  execute_process( COMMAND ${CMAKE_COMMAND} -DCMAKE_INSTALL_PREFIX=${PROJECT_EXTERN_DIR}/rocm-cmake .
+    WORKING_DIRECTORY ${rocm_cmake_local_SOURCE_DIR} )
+  execute_process( COMMAND ${CMAKE_COMMAND} --build ${rocm_cmake_local_SOURCE_DIR} --target install
+    WORKING_DIRECTORY ${rocm_cmake_local_SOURCE_DIR} )
+
+  find_package( ROCmCMakeBuildTools REQUIRED CONFIG PATHS ${PROJECT_EXTERN_DIR}/rocm-cmake )
 endif()
 if( ROCmCMakeBuildTools_FOUND )
   message(STATUS "Found ROCm")

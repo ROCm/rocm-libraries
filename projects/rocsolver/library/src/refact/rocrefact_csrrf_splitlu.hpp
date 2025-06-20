@@ -31,6 +31,7 @@
 #include <iostream>
 #include <rocprim/rocprim.hpp>
 
+#include "common_host_helpers.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 
@@ -70,12 +71,18 @@ __host__ __device__ static I cal_wave_size(I avg_nnzM)
 
     const auto ifactor = 2;
 
-    const auto wave_size = ((avg_nnzM >= ifactor * warpSize)              ? warpSize
-                                : (avg_nnzM >= ifactor * (warpSize / 2))  ? (warpSize / 2)
-                                : (avg_nnzM >= ifactor * (warpSize / 4))  ? (warpSize / 4)
-                                : (avg_nnzM >= ifactor * (warpSize / 8))  ? (warpSize / 8)
-                                : (avg_nnzM >= ifactor * (warpSize / 16)) ? (warpSize / 16)
-                                                                          : 1);
+#if defined(__HIP_DEVICE_COMPILE__)
+    const int warp_size = warpSize;
+#else
+    const int warp_size = get_device_warp_size();
+#endif
+
+    const auto wave_size = ((avg_nnzM >= ifactor * warp_size)              ? warp_size
+                                : (avg_nnzM >= ifactor * (warp_size / 2))  ? (warp_size / 2)
+                                : (avg_nnzM >= ifactor * (warp_size / 4))  ? (warp_size / 4)
+                                : (avg_nnzM >= ifactor * (warp_size / 8))  ? (warp_size / 8)
+                                : (avg_nnzM >= ifactor * (warp_size / 16)) ? (warp_size / 16)
+                                                                           : 1);
     return wave_size;
 }
 

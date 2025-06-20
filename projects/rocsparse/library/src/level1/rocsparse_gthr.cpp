@@ -22,131 +22,107 @@
  *
  * ************************************************************************ */
 
-#include "internal/level1/rocsparse_gthr.h"
-#include "rocsparse_gthr.hpp"
+#include <map>
+#include <sstream>
 
+#include "rocsparse_gthr.hpp"
 #include "rocsparse_utility.hpp"
 
-#include "gthr_device.h"
-
-template <typename I, typename T>
-rocsparse_status rocsparse::gthr_template(rocsparse_handle     handle,
-                                          I                    nnz,
-                                          const T*             y,
-                                          T*                   x_val,
-                                          const I*             x_ind,
-                                          rocsparse_index_base idx_base)
+namespace rocsparse
 {
-    ROCSPARSE_ROUTINE_TRACE;
+    typedef rocsparse_status (*gthr_t)(rocsparse_handle     handle,
+                                       int64_t              nnz,
+                                       const void*          y,
+                                       void*                x_val,
+                                       const void*          x_ind,
+                                       rocsparse_index_base idx_base);
 
-    // Check for valid handle
-    ROCSPARSE_CHECKARG_HANDLE(0, handle);
+    using gthr_tuple = std::tuple<rocsparse_indextype, rocsparse_datatype>;
 
-    // Logging
-    rocsparse::log_trace(handle,
-                         rocsparse::replaceX<T>("rocsparse_Xgthr"),
-                         nnz,
-                         (const void*&)y,
-                         (const void*&)x_val,
-                         (const void*&)x_ind,
-                         idx_base);
+    // clang-format off
+#define GTHR_CONFIG(I, T)                                        \
+    {gthr_tuple(I, T),                                           \
+     gthr_template<typename rocsparse::indextype_traits<I>::type_t, typename rocsparse::datatype_traits<T>::type_t>}
+    // clang-format on
 
-    // Check index base
-    ROCSPARSE_CHECKARG_ENUM(5, idx_base);
+    static const std::map<gthr_tuple, gthr_t> s_gthr_dispatch{
+        {GTHR_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_i8_r),
+         GTHR_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f16_r),
+         GTHR_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_bf16_r),
+         GTHR_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f32_r),
+         GTHR_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f32_r),
+         GTHR_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f64_r),
+         GTHR_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f32_c),
+         GTHR_CONFIG(rocsparse_indextype_i32, rocsparse_datatype_f64_c),
 
-    // Check size
-    ROCSPARSE_CHECKARG_SIZE(1, nnz);
+         GTHR_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_i8_r),
+         GTHR_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f16_r),
+         GTHR_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_bf16_r),
+         GTHR_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f32_r),
+         GTHR_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f64_r),
+         GTHR_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f32_c),
+         GTHR_CONFIG(rocsparse_indextype_i64, rocsparse_datatype_f64_c)}};
 
-    // Quick return if possible
-    if(nnz == 0)
+    static rocsparse_status
+        gthr_find(gthr_t* function_, rocsparse_indextype i_type_, rocsparse_datatype t_type_)
     {
+
+        const auto& it = rocsparse::s_gthr_dispatch.find(rocsparse::gthr_tuple(i_type_, t_type_));
+
+        if(it != rocsparse::s_gthr_dispatch.end())
+        {
+            function_[0] = it->second;
+        }
+        // LCOV_EXCL_START
+        else
+        {
+#ifndef NDEBUG
+            std::cout << "invalid precision configuration: "
+                      << "t_type: " << rocsparse::enum_utils::to_string(t_type_) << std::endl
+                      << ", i_type: " << rocsparse::enum_utils::to_string(i_type_) << std::endl;
+
+            std::cout << "available configuration are: " << std::endl;
+            for(const auto& p : rocsparse::s_gthr_dispatch)
+            {
+                const auto& t      = p.first;
+                const auto  i_type = std::get<0>(t);
+                const auto  t_type = std::get<1>(t);
+                std::cout << std::endl
+                          << std::endl
+                          << "t_type: " << rocsparse::enum_utils::to_string(t_type) << std::endl
+                          << ", i_type: " << rocsparse::enum_utils::to_string(i_type) << std::endl;
+            }
+#endif
+
+            std::stringstream sstr;
+            sstr << "invalid precision configuration: "
+                 << "t_type: " << rocsparse::enum_utils::to_string(t_type_)
+                 << ", i_type: " << rocsparse::enum_utils::to_string(i_type_);
+
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                                   sstr.str().c_str());
+        }
+        // LCOV_EXCL_STOP
+
         return rocsparse_status_success;
     }
-
-    // Check pointer arguments
-    ROCSPARSE_CHECKARG_POINTER(2, y);
-    ROCSPARSE_CHECKARG_POINTER(3, x_val);
-    ROCSPARSE_CHECKARG_POINTER(4, x_ind);
-
-    // Stream
-    hipStream_t stream = handle->stream;
-
-#define GTHR_DIM 512
-    dim3 gthr_blocks((nnz - 1) / GTHR_DIM + 1);
-    dim3 gthr_threads(GTHR_DIM);
-
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::gthr_kernel<GTHR_DIM>),
-                                       gthr_blocks,
-                                       gthr_threads,
-                                       0,
-                                       stream,
-                                       nnz,
-                                       y,
-                                       x_val,
-                                       x_ind,
-                                       idx_base);
-#undef GTHR_DIM
-    return rocsparse_status_success;
 }
 
-#define INSTANTIATE(ITYPE, TTYPE)                                     \
-    template rocsparse_status rocsparse::gthr_template<ITYPE, TTYPE>( \
-        rocsparse_handle     handle,                                  \
-        ITYPE                nnz,                                     \
-        const TTYPE*         y,                                       \
-        TTYPE*               x_val,                                   \
-        const ITYPE*         x_ind,                                   \
-        rocsparse_index_base idx_base);
+rocsparse_status rocsparse::gthr(rocsparse_handle     handle,
+                                 int64_t              nnz,
+                                 rocsparse_datatype   y_datatype,
+                                 const void*          y,
+                                 rocsparse_datatype   x_datatype,
+                                 void*                x_val,
+                                 rocsparse_indextype  x_indextype,
+                                 const void*          x_ind,
+                                 rocsparse_index_base idx_base)
+{
+    ROCSPARSE_ROUTINE_TRACE;
+    rocsparse::gthr_t f;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::gthr_find(&f, x_indextype, x_datatype));
 
-INSTANTIATE(int32_t, uint8_t)
-INSTANTIATE(int32_t, uint32_t)
-INSTANTIATE(int32_t, int8_t)
-INSTANTIATE(int32_t, int32_t)
-INSTANTIATE(int32_t, _Float16)
-INSTANTIATE(int32_t, float)
-INSTANTIATE(int32_t, double)
-INSTANTIATE(int32_t, rocsparse_float_complex)
-INSTANTIATE(int32_t, rocsparse_double_complex)
+    RETURN_IF_ROCSPARSE_ERROR(f(handle, nnz, y, x_val, x_ind, idx_base));
 
-INSTANTIATE(int64_t, int8_t)
-INSTANTIATE(int64_t, int32_t)
-INSTANTIATE(int64_t, uint8_t)
-INSTANTIATE(int64_t, uint32_t)
-INSTANTIATE(int64_t, int64_t)
-INSTANTIATE(int64_t, _Float16)
-INSTANTIATE(int64_t, float)
-INSTANTIATE(int64_t, double)
-INSTANTIATE(int64_t, rocsparse_float_complex)
-INSTANTIATE(int64_t, rocsparse_double_complex)
-#undef INSTANTIATE
-
-/*
- * ===========================================================================
- *    C wrapper
- * ===========================================================================
- */
-
-#define C_IMPL(NAME, TYPE)                                                     \
-    extern "C" rocsparse_status NAME(rocsparse_handle     handle,              \
-                                     rocsparse_int        nnz,                 \
-                                     const TYPE*          y,                   \
-                                     TYPE*                x_val,               \
-                                     const rocsparse_int* x_ind,               \
-                                     rocsparse_index_base idx_base)            \
-    try                                                                        \
-    {                                                                          \
-        ROCSPARSE_ROUTINE_TRACE;                                               \
-        RETURN_IF_ROCSPARSE_ERROR(                                             \
-            rocsparse::gthr_template(handle, nnz, y, x_val, x_ind, idx_base)); \
-        return rocsparse_status_success;                                       \
-    }                                                                          \
-    catch(...)                                                                 \
-    {                                                                          \
-        RETURN_ROCSPARSE_EXCEPTION();                                          \
-    }
-
-C_IMPL(rocsparse_sgthr, float);
-C_IMPL(rocsparse_dgthr, double);
-C_IMPL(rocsparse_cgthr, rocsparse_float_complex);
-C_IMPL(rocsparse_zgthr, rocsparse_double_complex);
-#undef C_IMPL
+    return rocsparse_status_success;
+}

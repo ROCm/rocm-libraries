@@ -71,11 +71,15 @@ def runTestCommand (platform, project)
     String testExclude = platform.jenkinsLabel.contains('compile') ? '-LE GPU' : ''
 
     def command = """#!/usr/bin/env bash
-                set -x
-                cd ${project.paths.project_build_prefix}/build/
+                set -ex
+                cd ${project.paths.project_build_prefix}
 
+                pushd build
                 echo Using `nproc` threads for testing.
                 OMP_NUM_THREADS=8 ctest -j `nproc` --output-on-failure ${testExclude}
+
+                popd
+                scripts/rrperf generate --suite generate_gfx950 --arch gfx950
             """
 
     try
@@ -345,7 +349,7 @@ def runPerformanceCommand (platform, project)
             def ARCHIVE_LIMIT = "101"
 
             def command = """#!/usr/bin/env bash
-                        set -x
+                        set -ex
                         cd ${project.paths.project_build_prefix}/
 
                         ${sshBlock}

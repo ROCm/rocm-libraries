@@ -96,6 +96,12 @@ inline rocsparse_datatype get_datatype<_Float16>(void)
 }
 
 template <>
+inline rocsparse_datatype get_datatype<rocsparse_bfloat16>(void)
+{
+    return rocsparse_datatype_bf16_r;
+}
+
+template <>
 inline rocsparse_datatype get_datatype<float>(void)
 {
     return rocsparse_datatype_f32_r;
@@ -146,6 +152,10 @@ inline constexpr size_t rocsparse_datatype_sizeof(rocsparse_datatype datatype_)
     case rocsparse_datatype_f16_r:
     {
         return sizeof(_Float16);
+    }
+    case rocsparse_datatype_bf16_r:
+    {
+        return sizeof(rocsparse_bfloat16);
     }
     case rocsparse_datatype_f32_r:
     {

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -46,7 +46,7 @@ extern "C" {
 *      }
 *  \endcode
 *
-*  \p rocsparse_gather supports the following uniform precision data types for the sparse and dense vectors x and 
+*  \p rocsparse_gather supports the following uniform precision data types for the sparse and dense vectors x and
 *  y.
 *
 *  \par Uniform Precisions:
@@ -55,6 +55,7 @@ extern "C" {
 *  <tr><th>X / Y
 *  <tr><td>rocsparse_datatype_i8_r
 *  <tr><td>rocsparse_datatype_f16_r
+*  <tr><td>rocsparse_datatype_bf16_r
 *  <tr><td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f64_r
 *  <tr><td>rocsparse_datatype_f32_c

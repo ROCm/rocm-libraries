@@ -220,3 +220,7 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   spgeam_alg: [rocsparse_spgeam_alg_default]
   filename: [Chevron4]
+
+- name: spgeam_reuse_csr_extra
+  category: pre_checkin
+  function: spgeam_reuse_csr_extra

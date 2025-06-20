@@ -1192,7 +1192,7 @@ public:
             ++pos;
         }
 
-        if(pos < vals.size() && vals[pos] == "multiGPU")
+        if(pos < vals.size() && vals[pos] == "multigpu")
         {
             ++pos;
             multiGPU = std::stoull(vals[pos++]);

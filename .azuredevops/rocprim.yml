@@ -57,7 +57,6 @@ pr:
     - projects/rocprim/*.md
     - projects/rocprim/LICENSE.txt
     - projects/rocprim/NOTICES.txt
-  drafts: false
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/rocPRIM.yml@pipelines_repo

@@ -241,6 +241,7 @@ namespace TensileLite
                 size_t MI_M = std::get<3>(mt);
                 size_t MI_N = std::get<4>(mt);
                 size_t MI_K = std::get<5>(mt);
+                size_t occupancy = std::get<6>(mt);
 
                 if(debug)
                 {
@@ -274,7 +275,7 @@ namespace TensileLite
                                                                  mx_block_size,
                                                                  debug);
 
-                    valid_results.emplace_back(Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K);
+                    valid_results.emplace_back(Total_latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, occupancy);
                 }
                 else if(debug)
                 {

@@ -33,6 +33,7 @@
 #pragma once
 
 #include "auxiliary/rocauxiliary_lacgv.hpp"
+#include "common_host_helpers.hpp"
 #include "lapack_device_functions.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
@@ -237,9 +238,9 @@ rocblas_status rocsolver_sygs2_hegs2_template(rocblas_handle handle,
     rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
 
     rocblas_int blocks_batch = (batch_count - 1) / BS1 + 1;
-    rocblas_int waves_batch = (batch_count - 1) / warpSize + 1;
+    rocblas_int waves_batch = (batch_count - 1) / get_device_warp_size() + 1;
     dim3 blocks(blocks_batch, 1, 1);
-    dim3 threads(std::min(BS1, warpSize * waves_batch), 1, 1);
+    dim3 threads(std::min(BS1, get_device_warp_size() * waves_batch), 1, 1);
 
     if(itype == rocblas_eform_ax)
     {

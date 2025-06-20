@@ -141,6 +141,7 @@ namespace rocRoller
 
             HasBlockScaling32,
             DefaultScaleBlockSize,
+            HasE8M0Scale,
 
             HasXnack,
 

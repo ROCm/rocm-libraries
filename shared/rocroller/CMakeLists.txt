@@ -104,6 +104,7 @@ rocm_setup_version(VERSION ${ROCROLLER_VERSION})
 
 option(ROCROLLER_ENABLE_TIMERS "Enable rocRoller timer code." OFF)
 option(ROCROLLER_USE_HIP "Use HIP within the rocRoller." ON)
+option(ROCROLLER_USE_LLD "Use LLD within the rocRoller." ON)
 option(ROCROLLER_EMBED_ARCH_DEF
        "Embed the generated GPU architecture msgpack in the library" ON
 )
@@ -176,13 +177,6 @@ if(ROCROLLER_USE_HIP)
     endif()
 
     llvm_map_components_to_libnames(llvm_libs mc support)
-    find_package(
-        LLD
-        REQUIRED
-        CONFIG
-        HINTS
-        ${LLVM_DIR}/../lld/
-    )
 endif()
 
 # does not show up in headers, no system package required
@@ -241,7 +235,6 @@ configure_file(
 
 add_subdirectory(GPUArchitectureGenerator)
 add_subdirectory(lib)
-
 
 if(BUILD_CLIENTS OR BUILD_TESTING)
     add_subdirectory(test/common)

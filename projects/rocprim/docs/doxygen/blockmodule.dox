@@ -19,3 +19,13 @@
  * \defgroup blockmodule_warp_store_functions Store Functions
  * \ingroup blockmodule
  */
+
+/**
+ * \defgroup blockmodule_cast_load_functions Load Functions
+ * \ingroup blockmodule
+ */
+
+/**
+ * \defgroup blockmodule_cast_store_functions Store Functions
+ * \ingroup blockmodule
+ */

@@ -306,7 +306,6 @@ namespace rocRoller
                                    (void*)dep.reg->allocation().get(),
                                    (void*)reg->allocation().get());
 
-                        tree.pop_back();
                         tree.back().reg = reg;
                     }
                 }

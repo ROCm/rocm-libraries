@@ -1,3 +1,20 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+target_link_libraries(rocroller-tests
+    PRIVATE
+        rocroller::common-test-utilities
+        ${BLAS_LIBRARIES}
+        GTest::gtest_main
+        GTest::gmock
+        libdivide::libdivide
+        ${llvm_libs}
+        ${llvm_yaml_libs}
+)
+
+if(ROCROLLER_ENABLE_LLD)
+    target_link_libraries(rocroller-tests PRIVATE lldELF)
+endif()
 
 set(_CMAKE_CURRENT_SOURCE_DIR "${ROCROLLER_TEST_DIR}/unit")
 

@@ -46,7 +46,7 @@ RandomAccessIterator lower_bound_n(RandomAccessIterator first,
   thrust::detail::wrapped_function<
     BinaryPredicate,
     bool
-  > wrapped_comp(comp);
+  > wrapped_comp{comp};
 
   Size start = 0, i;
   while(start < n)
@@ -88,7 +88,7 @@ RandomAccessIterator upper_bound_n(RandomAccessIterator first,
   thrust::detail::wrapped_function<
     BinaryPredicate,
     bool
-  > wrapped_comp(comp);
+  > wrapped_comp{comp};
 
   Size start = 0, i;
   while(start < n)
@@ -139,7 +139,7 @@ bool binary_search(RandomAccessIterator first, RandomAccessIterator last, const 
   thrust::detail::wrapped_function<
     Compare,
     bool
-  > wrapped_comp(comp);
+  > wrapped_comp{comp};
 
   return iter != last && !wrapped_comp(value,*iter);
 }

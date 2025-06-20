@@ -245,8 +245,14 @@ int main(int argc, char* argv[])
         &C, m, n, nnz_C, dcsr_row_ptr_C, dcsr_col_ind_C, dcsr_val_C, itype, jtype, base, ttype));
 
     // Symbolic compute phase
-    ROCSPARSE_CHECK(rocsparse_spgeam_buffer_size(
-        handle, descr, A, B, C, rocsparse_spgeam_stage_symbolic, &buffer_size_in_bytes, nullptr));
+    ROCSPARSE_CHECK(rocsparse_spgeam_buffer_size(handle,
+                                                 descr,
+                                                 A,
+                                                 B,
+                                                 C,
+                                                 rocsparse_spgeam_stage_symbolic_compute,
+                                                 &buffer_size_in_bytes,
+                                                 nullptr));
 
     HIP_CHECK(hipMalloc(&buffer, buffer_size_in_bytes));
     ROCSPARSE_CHECK(rocsparse_spgeam(handle,
@@ -256,15 +262,21 @@ int main(int argc, char* argv[])
                                      &beta,
                                      B,
                                      C,
-                                     rocsparse_spgeam_stage_symbolic,
+                                     rocsparse_spgeam_stage_symbolic_compute,
                                      buffer_size_in_bytes,
                                      buffer,
                                      nullptr));
     HIP_CHECK(hipFree(buffer));
 
     // Numerical compute phase
-    ROCSPARSE_CHECK(rocsparse_spgeam_buffer_size(
-        handle, descr, A, B, C, rocsparse_spgeam_stage_numeric, &buffer_size_in_bytes, nullptr));
+    ROCSPARSE_CHECK(rocsparse_spgeam_buffer_size(handle,
+                                                 descr,
+                                                 A,
+                                                 B,
+                                                 C,
+                                                 rocsparse_spgeam_stage_numeric_compute,
+                                                 &buffer_size_in_bytes,
+                                                 nullptr));
 
     HIP_CHECK(hipMalloc(&buffer, buffer_size_in_bytes));
     ROCSPARSE_CHECK(rocsparse_spgeam(handle,
@@ -274,7 +286,7 @@ int main(int argc, char* argv[])
                                      &beta,
                                      B,
                                      C,
-                                     rocsparse_spgeam_stage_numeric,
+                                     rocsparse_spgeam_stage_numeric_compute,
                                      buffer_size_in_bytes,
                                      buffer,
                                      nullptr));
@@ -324,8 +336,14 @@ int main(int argc, char* argv[])
     ROCSPARSE_CHECK(rocsparse_csr_set_pointers(A, dcsr_row_ptr_A, dcsr_col_ind_A, dcsr_val_A));
     ROCSPARSE_CHECK(rocsparse_csr_set_pointers(B, dcsr_row_ptr_B, dcsr_col_ind_B, dcsr_val_B));
 
-    ROCSPARSE_CHECK(rocsparse_spgeam_buffer_size(
-        handle, descr, A, B, C, rocsparse_spgeam_stage_numeric, &buffer_size_in_bytes, nullptr));
+    ROCSPARSE_CHECK(rocsparse_spgeam_buffer_size(handle,
+                                                 descr,
+                                                 A,
+                                                 B,
+                                                 C,
+                                                 rocsparse_spgeam_stage_numeric_compute,
+                                                 &buffer_size_in_bytes,
+                                                 nullptr));
 
     // Numerical compute phase
     HIP_CHECK(hipMalloc(&buffer, buffer_size_in_bytes));
@@ -336,7 +354,7 @@ int main(int argc, char* argv[])
                                      &beta,
                                      B,
                                      C,
-                                     rocsparse_spgeam_stage_numeric,
+                                     rocsparse_spgeam_stage_numeric_compute,
                                      buffer_size_in_bytes,
                                      buffer,
                                      nullptr));

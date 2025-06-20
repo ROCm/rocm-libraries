@@ -28,6 +28,7 @@ from dataclasses import dataclass, field, fields, asdict
 from typing import List
 import yaml
 
+
 repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
 
@@ -49,7 +50,7 @@ def convert_class_params(cls, obj):
         if f.type == bool:
             setattr(obj, f.name, to_bool(getattr(obj, f.name)))
         else:
-            setattr(obj, f.name, f.type(getattr(obj, f.name)))
+            setattr(obj, f.name, getattr(obj, f.name))
 
 
 @dataclass
@@ -139,6 +140,9 @@ class GEMMSolution:
 
     scale_A: str = "None"
     scale_B: str = "None"
+
+    scaleType_A: str = "None"
+    scaleType_B: str = "None"
 
     # If scale_A or scale_B is Separate, scaleBlockSize
     # needs to be set to a valid block size (e.g. 32)
@@ -233,7 +237,10 @@ class GEMMRun(GEMM):
     def set_output(self, path: pathlib.Path):
         self.output = path
 
-    def command(self, **extra_args) -> List[str]:
+    def command(
+        self, generate_only=False, architecture=None, **extra_args
+    ) -> List[str]:
+
         specialNames = {
             "output": "yaml",
             "numWarmUp": "num_warmup",
@@ -251,13 +258,27 @@ class GEMMRun(GEMM):
         arg_dict = {argName(key): value for key, value in asdict(self).items()}
         for key, value in extra_args.items():
             arg_dict[key] = value
+
+        if generate_only:
+            for attr in ["yaml", "num_warmup", "num_inner", "num_outer"]:
+                arg_dict.pop(attr)
+
         args = [
-            f"--{key}={','.join(map(str, value))}" if isinstance(value, tuple) else f"--{key}={value}"
+            (
+                f"--{key}={','.join(map(str, value))}"
+                if isinstance(value, tuple)
+                else f"--{key}={value}"
+            )
             for key, value in arg_dict.items()
         ]
-        retval = [command] + args
 
-        return retval
+        if generate_only:
+            args.append("generate")
+
+        if architecture is not None:
+            args.extend(["--arch", architecture])
+
+        return [command] + args
 
 
 @dataclass

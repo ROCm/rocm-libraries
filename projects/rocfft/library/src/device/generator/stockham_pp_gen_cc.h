@@ -46,15 +46,14 @@
 // is implemented.
 struct StockhamPartialPassKernelCC : public StockhamKernelCC
 {
-    explicit StockhamPartialPassKernelCC(const StockhamGeneratorSpecs& specs,
-                                         bool                       largeTwdBatchIsTransformCount,
-                                         const std::vector<size_t>& ppFactors)
+    explicit StockhamPartialPassKernelCC(const StockhamGeneratorSpecs&    specs,
+                                         const StockhamPartialPassParams& params,
+                                         bool largeTwdBatchIsTransformCount)
         : StockhamKernelCC(specs, largeTwdBatchIsTransformCount, false)
-        , factors_pp(ppFactors)
+        , params(params)
 
     {
-        large_twiddle_steps.decl_default = 3;
-        large_twiddle_base.decl_default  = 8;
+        factors_pp = params.factors_off_dim;
 
         max_factor_pp = *std::max_element(factors_pp.begin(), factors_pp.end());
 
@@ -64,9 +63,12 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         workgroup_size *= max_factor_pp;
     }
 
-    unsigned int        transforms_per_block_pp;
-    unsigned int        max_factor_pp;
-    std::vector<size_t> factors_pp;
+    StockhamPartialPassParams params;
+
+    unsigned int transforms_per_block_pp;
+    unsigned int max_factor_pp;
+
+    std::vector<unsigned int> factors_pp;
 
     Variable thread_lds{"thread_lds", "unsigned int"};
     Variable stride_lds_pp{"stride_lds_pp", "unsigned int"};
@@ -86,6 +88,21 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
     Variable global_idx{"global_idx", "unsigned int"};
     Variable transpose_idx{"transpose_idx", "unsigned int"};
+
+    std::vector<unsigned int> launcher_lengths() override
+    {
+        return params.parent_length;
+    }
+
+    unsigned int launcher_workgroup_size() override
+    {
+        return workgroup_size / max_factor_pp;
+    }
+
+    unsigned int launcher_transforms_per_block() override
+    {
+        return transforms_per_block / max_factor_pp;
+    }
 
     StatementList load_global_generator(unsigned int h,
                                         unsigned int hr,

@@ -47,7 +47,7 @@ import rrperf.args as args
 
 def priority_problems():
     """Load priority problem args from rrsuites.py."""
-    return rrperf.run.load_suite("priority_problems")
+    return rrperf.utils.load_suite("priority_problems")
 
 
 @dataclass

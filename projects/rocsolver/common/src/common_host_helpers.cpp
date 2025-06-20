@@ -76,6 +76,30 @@ double get_time_us_sync(hipStream_t stream)
     return get_time_us_no_sync();
 }
 
+/*! \brief Get warp size of the current device */
+int get_device_warp_size()
+{
+    int warp_size;
+    int device_id;
+    hipError_t err;
+
+    err = hipGetDevice(&device_id);
+
+    if(err != hipSuccess)
+    {
+        return 0;
+    }
+
+    err = hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, device_id);
+
+    if(err != hipSuccess)
+    {
+        return 0;
+    }
+
+    return warp_size;
+}
+
 #ifdef ROCSOLVER_LIBRARY
 ROCSOLVER_END_NAMESPACE
 #endif

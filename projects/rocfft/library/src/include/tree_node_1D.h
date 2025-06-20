@@ -103,6 +103,26 @@ public:
 };
 
 /*****************************************************
+ * CS_KERNEL_STOCKHAM_PP  *
+ *****************************************************/
+class StockhamPP1DNode : public Stockham1DNode
+{
+    friend class NodeFactory;
+
+protected:
+    StockhamPP1DNode(TreeNode* p, ComputeScheme s)
+        : Stockham1DNode(p, s)
+    {
+    }
+
+    void SetupGridParam_internal(GridParam& gp) override;
+
+public:
+    bool                CreateDeviceResources() override;
+    std::vector<size_t> CollapsibleDims() override;
+};
+
+/*****************************************************
  * SBCC  *
  *****************************************************/
 class SBCCNode : public LeafNode
@@ -142,6 +162,25 @@ public:
     {
         return true;
     }
+    std::vector<size_t> CollapsibleDims() override;
+};
+
+/*****************************************************
+ * SBCC Partial-Pass *
+ *****************************************************/
+class SBCCPPNode : public SBCCNode
+{
+    friend class NodeFactory;
+
+protected:
+    SBCCPPNode(TreeNode* p, ComputeScheme s)
+        : SBCCNode(p, s)
+    {
+    }
+
+    void SetupGridParam_internal(GridParam& gp) override;
+
+public:
     std::vector<size_t> CollapsibleDims() override;
 };
 

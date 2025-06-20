@@ -322,6 +322,8 @@ Additionally, there are tests that run against guidepost kernels that have been 
    - You can also set a breakpoint at the constructor of an exception class (e.g. `b std::bad_variant_access::bad_variant_access()` ), and GDB will more reliably break there than on `catch throw`.
 - Setting `ROCROLLER_ARCHITECTURE_FILE` will overwrite the default GPU architecture file generated at `source/rocRoller/GPUArchitecture_def.msgpack`. Currently supported file formats are YAML and Msgpack.
 - STL exceptions will not be affected by this.  Sometimes a better stack trace can be obtained by placing a breakpoint in the constructor of the particular exception that is being thrown.
+- Setting `AMD_COMGR_SAVE_TEMPS=1` `AMD_COMGR_EMIT_VERBOSE_LOGS=1` `AMD_COMGR_REDIRECT_LOGS=stdout` can help provide more assembler debug output.
+- Set `ROCROLLER_ASSEMBLER=Subprocess` and `ROCROLLER_DEBUG_ASSEMBLER_PATH=<assembler like amdclang>` to use an external assembler.
 
 
 To explicitly enable/disable some of the mentioned environment variables, `ROCROLLER_DEBUG` can be set accordingly. `ROCROLLER_DEBUG` is a bit field that aggregates options together. The following options are covered by `ROCROLLER_DEBUG`:
