@@ -26,7 +26,7 @@ jobs:
   setup:
     name: "Setup"
     # TODO(geomin12): Enable TheRock CI for forked PRs
-    if: ${{ github.repository == 'ROCm/rocm-libraries' }}
+    if: ${{ !github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-24.04
     outputs:
       projects: ${{ steps.projects.outputs.projects }}
