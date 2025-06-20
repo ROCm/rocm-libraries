@@ -5,10 +5,7 @@
 #define HIP_HOST __host__
 #define HIP_DEVICE __device__
 
-// TODO: remove defined after solving the compilation failed
-#if !defined(__gfx1250__)
 #include <hip/hip_ext_ocp.h>
-#endif
 
 struct HIPBLASLT_EXPORT hipblaslt_f4x2
 {
@@ -33,7 +30,6 @@ struct HIPBLASLT_EXPORT hipblaslt_f4x2
                                             = hip_f4_rounding_mode::standard,
                                             uint32_t rng = 0)
     {
-#if !defined(__gfx1250__)
         __amd_fp16x2_storage_t f16x2;
         f16x2[0] = v0;
         f16x2[1] = v1;
@@ -45,9 +41,6 @@ struct HIPBLASLT_EXPORT hipblaslt_f4x2
         {
             __x = __amd_cvt_fp16x2_to_fp4x2_sr_scale(f16x2, __AMD_OCP_E2M1, rng, 0);
         }
-#else
-        __x = 0x00;
-#endif
     }
 
     explicit HIP_HOST_DEVICE hipblaslt_f4x2(float                v0,
@@ -56,7 +49,6 @@ struct HIPBLASLT_EXPORT hipblaslt_f4x2
                                             = hip_f4_rounding_mode::standard,
                                             uint32_t rng = 0)
     {
-#if !defined(__gfx1250__)
         __amd_floatx2_storage_t f32x2;
         f32x2[0] = v0;
         f32x2[1] = v1;
@@ -68,9 +60,6 @@ struct HIPBLASLT_EXPORT hipblaslt_f4x2
         {
             __x = __amd_cvt_floatx2_to_fp4x2_sr_scale(f32x2, __AMD_OCP_E2M1, rng, 0);
         }
-#else
-        __x = 0x00;
-#endif
     }
 
     explicit HIP_HOST_DEVICE hipblaslt_f4x2(double               v0,

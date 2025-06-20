@@ -38,9 +38,7 @@
 #define HIP_HOST __host__
 #define HIP_DEVICE __device__
 
-#if !defined(__gfx1250__)
 #include <hip/hip_ext_ocp.h>
-#endif
 
 namespace TensileLite
 {
@@ -53,9 +51,7 @@ namespace TensileLite
     // data type
     struct Float4x2
     {
-#if !defined(__gfx1250__)
         __amd_fp4x2_storage_t data;
-#endif
 
         // default constructor
         HIP_HOST_DEVICE Float4x2() = default;
@@ -66,7 +62,6 @@ namespace TensileLite
                                           hip_f4_rounding_mode rm  = hip_f4_rounding_mode::standard,
                                           uint32_t             rng = 0)
         {
-#if !defined(__gfx1250__)
             __amd_floatx2_storage_t f32x2;
             f32x2[0] = v0;
             f32x2[1] = v1;
@@ -76,7 +71,6 @@ namespace TensileLite
             else {
                 data = __amd_cvt_floatx2_to_fp4x2_sr_scale(f32x2, __AMD_OCP_E2M1, rng, 0);
             }
-#endif
         }
 
         explicit HIP_HOST_DEVICE Float4x2(double               v0,
@@ -104,7 +98,6 @@ namespace TensileLite
 
         inline HIP_HOST_DEVICE float getElement(size_t idx) const
         {
-#if !defined(__gfx1250__)
             __amd_floatx2_storage_t fp32x2 = __amd_cvt_fp4x2_to_floatx2_scale(data, __AMD_OCP_E2M1, 0);
             switch(idx)
             {
@@ -115,19 +108,12 @@ namespace TensileLite
             default:
                 return 0.0;
             }
-#else
-	    return 0.0;
-#endif
         }
 
         // check for zero
         inline HIP_HOST_DEVICE bool is_zero() const
         {
-#if !defined(__gfx1250__)
             return data == 0x00;
-#else
-	    return false;
-#endif
         }
 
         // check for nan
@@ -148,22 +134,14 @@ namespace std
 {
     inline std::string to_string(const TensileLite::Float4x2& a)
     {
-#if !defined(__gfx1250__)
         auto result = __amd_cvt_fp4x2_to_floatx2_scale(a.data, __AMD_OCP_E2M1, 0);
         return std::to_string(static_cast<float>(result[0])) + " " + std::to_string(static_cast<float>(result[1]));
-#else
-	return "";
-#endif
     }
 
     inline ostream& operator<<(ostream& stream, const TensileLite::Float4x2 a)
     {
-#if !defined(__gfx1250__)
         auto result = __amd_cvt_fp4x2_to_floatx2_scale(a.data, __AMD_OCP_E2M1, 0);
         return stream << static_cast<float>(result[0]) << " " << static_cast<float>(result[1]);
-#else
-	return stream;
-#endif
     }
 } // namespace std
 

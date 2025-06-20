@@ -38,9 +38,7 @@
 #define HIP_HOST __host__
 #define HIP_DEVICE __device__
 
-#if !defined(__gfx1250__)
 #include <hip/hip_ext_ocp.h>
-#endif
 
 #include <cstdint>
 
@@ -100,7 +98,6 @@ namespace TensileLite
                                            hip_f6_rounding_mode rm  = hip_f6_rounding_mode::standard,
                                            uint32_t             rng = 0)
         {
-#if !defined(__gfx1250__)
             union {
                 Float6x32_Storage real;
                 __amd_fp6x32_storage_t tmp;    
@@ -117,7 +114,6 @@ namespace TensileLite
                 cvt.tmp = __amd_cvt_floatx32_to_fp6x32_sr_scale(f32x32, __AMD_OCP_E2M3, rng, 0);
                 data = cvt.real;
             }
-#endif
         }
 
         // constructor from float
@@ -156,7 +152,6 @@ namespace TensileLite
                                            hip_f6_rounding_mode rm  = hip_f6_rounding_mode::standard,
                                            uint32_t             rng = 0)
         {
-#if !defined(__gfx1250__)
             union {
                 Float6x32_Storage real;
                 __amd_fp6x32_storage_t tmp;    
@@ -204,12 +199,10 @@ namespace TensileLite
                 cvt.tmp = __amd_cvt_floatx32_to_fp6x32_sr_scale(f32x32, __AMD_OCP_E2M3, rng, 0);
                 data = cvt.real;
             }
-#endif
         }
 
         inline HIP_HOST_DEVICE float getElement(size_t idx) const
         {
-#if !defined(__gfx1250__)
             union {
                 Float6x32_Storage real;
                 __amd_fp6x32_storage_t tmp;
@@ -222,9 +215,6 @@ namespace TensileLite
                 return fp32x32[idx];
             else
                 return 0.0;
-#else
-	    return 0.0;
-#endif
         }
 
         // check for zero
@@ -282,7 +272,6 @@ namespace std
 {
     inline std::string to_string(const TensileLite::Float6x32& a)
     {
-#if !defined(__gfx1250__)
         union {
             TensileLite::Float6x32_Storage real;
             __amd_fp6x32_storage_t tmp;
@@ -298,18 +287,11 @@ namespace std
           str = str + " " + std::to_string(static_cast<float>(result[i]));
 
         return str;
-#else
-        return "";
-#endif
     }
 
     inline ostream& operator<<(ostream& stream, const TensileLite::Float6x32 a)
     {
-#if !defined(__gfx1250__)
         return stream << to_string(a);
-#else
-        return stream;
-#endif
     }
 } // namespace std
 
