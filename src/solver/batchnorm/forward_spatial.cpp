@@ -300,7 +300,7 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
 
     {
         auto use_hip = variant == 1;
-        auto kernel = KernelInfo{};
+        auto kernel  = KernelInfo{};
 
         auto build_params = KernelBuildParameters{
             {"MIOPEN_USE_FP16", static_cast<int>(bfp16parm)},
@@ -340,8 +340,8 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             build_params.Define("MIO_BN_NCHW", in_nchw);
         }
 
-        kernel.kernel_file      = use_hip ? "MIOpenBatchNormFwdTrainSpatialHIP.cpp"
-                                          : "MIOpenBatchNormFwdTrainSpatial.cl";
+        kernel.kernel_file =
+            use_hip ? "MIOpenBatchNormFwdTrainSpatialHIP.cpp" : "MIOpenBatchNormFwdTrainSpatial.cl";
         std::string kernel_name = "MIOpenBatchNormFwdTrainSpatial";
         if(use_hip)
         {
