@@ -7,13 +7,20 @@ This document is to detail the various continuous integration (CI) systems that 
 
 ## Table of Contents
 1. [Azure Pipelines](#azure-pipelines)
+    1. [Overview](#az-overview)
+    2. PR Workflow(#az-workflow)
+    3. Interpreting Results(#az-results)
+    4. Build and Test Coverage(#az-coverage)
+    5. Downstream Job Triggers(#az-downstream)
+2. [Math CI](#math-ci)
+    1. [Overview](#math-overview)
 
 ## Azure Pipelines
 
 > [!IMPORTANT]
 > Azure CI checks are currently a **hard requirement** for PRs to be approved and merged.
 
-### Overview
+### Overview <a id="az-overview"></a>
 
 The Azure Pipelines CI is a public-facing CI system that builds and tests against latest public source code. It encompasses almost all of the ROCm stack, typically pulling source code from the `develop` or `amd-staging` branch on a component's GitHub repository. The CI's main source is publically available at [ROCm/ROCm/.azuredevops](https://github.com/ROCm/ROCm/tree/develop/.azuredevops).
 
@@ -21,7 +28,7 @@ Each component in the monorepo has a corresponding pipeline, see the [Azure mono
 
 When running a job, Azure CI will dynamically pull the latest passing build from each individual ROCm component's pipeline. The result is that each run will have a ROCm stack that represents the current state of public source code.
 
-### PR Workflow
+### PR Workflow <a id="az-workflow"></a>
 
 1. PR is submitted
 2. Azure scans the PR contents to decide which pipelines to run
@@ -31,7 +38,7 @@ When running a job, Azure CI will dynamically pull the latest passing build from
 4. The final check status is posted on the PR
 5. To see details on a specific check, click into the check, then click `View more details on Azure Pipelines`
 
-### Interpreting Status Results
+### Interpreting Results <a id="az-results"></a>
 
 Any errors or warnings during a run will be highlighted on the run's main page on Azure, and clicking on those will bring you directly to the offending logs.
 
@@ -47,7 +54,7 @@ Warnings can occur if a step fails but was marked as being allowed to fail, so a
 
 In particular, steps are allowed to fail if they have the property `continueOnError: true` ([reference](https://learn.microsoft.com/en-us/azure/devops/pipelines/process/tasks?view=azure-devops&tabs=yaml#task-control-options)).
 
-### Build and Test Coverage
+### Build and Test Coverage <a id="az-coverage"></a>
 
 Azure CI builds and tests primarily on Ubuntu 22.04 LTS and for `gfx942` and `gfx90a` architectures, and adding build support for more architectures and operating systems is in progress. Each architecture and OS combination will have its own build and test jobs, all of which will appear as separate checks.
 
@@ -59,7 +66,7 @@ For example, a hipCUB PR may see the following checks, and the naming scheme is 
 
 The majority of component tests are run by running `ctest` or `gtest`. Component-specific details such as build flags and test configurations can be viewed in a component's main pipeline file in [ROCm/ROCm/.azuredevops/components](https://github.com/ROCm/ROCm/tree/develop/.azuredevops/components).
 
-### Downstream Job Triggers
+### Downstream Job Triggers <a id="az-downstream"></a>
 
 Azure CI runs for a component will trigger runs for downstream components (provided that they are fully migrated onto the monorepo). The end goal is to catch upstream breaking changes before they are merged and to ensure the monorepo is always in a valid state.
 
@@ -73,3 +80,7 @@ graph TD;
   rocPRIM-->rocThrust;
   rocRAND-->hipRAND;
 ```
+
+## Math CI
+
+### Overview <a id="math-overview"></a>
