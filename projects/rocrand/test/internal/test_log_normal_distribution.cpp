@@ -26,7 +26,34 @@
 #include <rng/distribution/log_normal.hpp>
 #include <rocrand/rocrand_mtgp32_11213.h>
 
-#define HIP_CHECK(state) ASSERT_EQ(state, hipSuccess)
+#define HIP_CHECK(cmd)                                                                         \
+    do                                                                                         \
+    {                                                                                          \
+        auto error = (cmd);                                                                    \
+        if(error != hipSuccess)                                                                \
+        {                                                                                      \
+            std::cerr << "Encountered HIP error (" << hipGetErrorString(error) << ") at line " \
+                      << __LINE__ << " in file " << __FILE__ << "\n";                          \
+            exit(-1);                                                                          \
+        }                                                                                      \
+    }                                                                                          \
+    while(0)
+
+#define ROCRAND_CHECK(cmd)                                                                \
+    do                                                                                    \
+    {                                                                                     \
+        auto status = cmd;                                                                \
+        if(status != 0)                                                                   \
+        {                                                                                 \
+            std::cerr << "Encountered ROCRAND error: " << status << "at line" << __LINE__ \
+                      << " in file " << __FILE__ << "\n";                                 \
+            exit(-1);                                                                     \
+        }                                                                                 \
+    }                                                                                     \
+    while(0)
+
+// If x is small then get withing 0.001 otherwise 5%
+#define GET_EPS(x) x < 0.01 ? 0.001 : x * 0.05
 
 using namespace rocrand_impl::host;
 
@@ -182,7 +209,7 @@ TYPED_TEST(mrg_log_normal_distribution_tests, float_test)
 
     const size_t                                                              size = 4000;
     float                                                                     val[size];
-    mrg_engine_log_normal_distribution<float, typename TestFixture::mrg_type> u(0.2f, 0.5f);
+mrg_engine_log_normal_distribution<float, typename TestFixture::mrg_type> u(0.2f, 0.5f);
 
     // Calculate mean
     float mean = 0.0f;
@@ -406,15 +433,14 @@ TYPED_TEST(sobol_log_normal_distribution_tests, half_test)
         std += std::pow(__half2float(val[i]) - mean, 2);
     }
     std = std::sqrt(std / size);
-    
+
     float expected_mean = std::exp(0.2f + 0.5f * 0.5f / 2);
     float expected_std
     = std::sqrt((std::exp(0.5f * 0.5f) - 1.0) * std::exp(2 * 0.2f + 0.5f * 0.5f));
-    
+
     EXPECT_NEAR(expected_mean, mean, expected_mean * 0.1f);
     EXPECT_NEAR(expected_std, std, expected_std * 0.1f);
 }
-
 
 template <typename OutType>
 struct StatesLND{
@@ -425,27 +451,27 @@ struct StatesLND{
 
         float * output = new float [testSize];
         OutType out;
-    
+
         double mean = 0;
-    
+
         for(size_t i = 0; i <= testSize; i += 4){
             f(out, iMean, iStd);
-    
+
             output[i] = out.w;
             output[i + 1] = out.x;
             output[i + 2] = out.y;
             output[i + 3] = out.z;
             mean += out.w + out.x + out.y + out.z;
         }
-    
+
         mean /= testSize;
-    
+
         double std = 0.0;
         for(size_t i = 0; i < testSize; i++)
             std += std::pow(output[i] - mean, 2);
-    
+
         std = std::sqrt(std / testSize);
-    
+
         double eMean = std::exp(iMean + (iStd * iStd) / 2);
         double eStd = std::sqrt(std::log(1 + (iStd * iStd)/(iMean * iMean)));
         ASSERT_NEAR(mean, eMean, eMean * 0.1) << "Expected Mean: " << eMean << " Actual Mean: " << mean << " Eps: " << eMean * 0.1;
@@ -474,7 +500,7 @@ TEST(log_normal_distribution_tests, philox4x32_10_test){
                     rocrand_log_normal_double(&states, mean, std), rocrand_log_normal_double(&states, mean, std),
                     rocrand_log_normal_double(&states, mean, std), rocrand_log_normal_double(&states, mean, std)
                 };
-            } 
+            }
         )
     #endif // ROCRAND_DETAIL_BM_NOT_IN_STATE
 
@@ -532,7 +558,7 @@ TEST(log_normal_distribution_tests, mrg31k3p_test){
                     rocrand_log_normal_double(&states, mean, std), rocrand_log_normal_double(&states, mean, std),
                     rocrand_log_normal_double(&states, mean, std), rocrand_log_normal_double(&states, mean, std)
                 };
-            } 
+            }
         )
     #endif // ROCRAND_DETAIL_BM_NOT_IN_STATE
 
@@ -578,7 +604,7 @@ TEST(log_normal_distribution_tests, mrg32k3a_test){
                     rocrand_log_normal_double(&states, mean, std), rocrand_log_normal_double(&states, mean, std),
                     rocrand_log_normal_double(&states, mean, std), rocrand_log_normal_double(&states, mean, std)
                 };
-            } 
+            }
         )
     #endif // ROCRAND_DETAIL_BM_NOT_IN_STATE
 
@@ -624,7 +650,7 @@ TEST(log_normal_distribution_tests, xorwow_test){
                     rocrand_log_normal_double(&states, mean, std), rocrand_log_normal_double(&states, mean, std),
                     rocrand_log_normal_double(&states, mean, std), rocrand_log_normal_double(&states, mean, std)
                 };
-            } 
+            }
         )
     #endif // ROCRAND_DETAIL_BM_NOT_IN_STATE
 
@@ -652,7 +678,7 @@ TEST(log_normal_distribution_tests, xorwow_test){
 TEST(log_normal_distribution_tests, sobol32_test){
     rocrand_state_sobol32 states;
     const unsigned int* directions;
-    HIP_CHECK(rocrand_get_direction_vectors32(&directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
+    ROCRAND_CHECK(rocrand_get_direction_vectors32(&directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
     rocrand_init(directions, 0, &states);
 
     StatesLND<float4> testFloat;
@@ -681,7 +707,7 @@ TEST(log_normal_distribution_tests, sobol32_test){
 TEST(log_normal_distribution_tests, scrambled_sobol32_test){
     rocrand_state_scrambled_sobol32 states;
     const unsigned int* directions;
-    HIP_CHECK(rocrand_get_direction_vectors32(&directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
+    ROCRAND_CHECK(rocrand_get_direction_vectors32(&directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
     rocrand_init(directions, 123456, 0, &states);
 
     StatesLND<float4> testFloat;
@@ -710,7 +736,7 @@ TEST(log_normal_distribution_tests, scrambled_sobol32_test){
 TEST(log_normal_distribution_tests, sobol64_test){
     rocrand_state_sobol64 states;
     const unsigned long long* directions;
-    HIP_CHECK(rocrand_get_direction_vectors64(&directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
+    ROCRAND_CHECK(rocrand_get_direction_vectors64(&directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
     rocrand_init(directions, 0, &states);
 
     StatesLND<float4> testFloat;
@@ -739,7 +765,7 @@ TEST(log_normal_distribution_tests, sobol64_test){
 TEST(log_normal_distribution_tests, scrambled_sobol64_test){
     rocrand_state_scrambled_sobol64 states;
     const unsigned long long* directions;
-    HIP_CHECK(rocrand_get_direction_vectors64(&directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
+    ROCRAND_CHECK(rocrand_get_direction_vectors64(&directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
     rocrand_init(directions, 123456, 0, &states);
 
     StatesLND<float4> testFloat;
@@ -1005,7 +1031,7 @@ __global__ void mtgp32_kernel (rocrand_state_mtgp32 * states, T * output, const 
     const unsigned int state_id  = blockIdx.x;
     const unsigned int thread_id = threadIdx.x;
     unsigned int       index     = blockIdx.x * blockDim.x + threadIdx.x;
-    
+
     if(index >= N)
         return;
 
@@ -1017,7 +1043,7 @@ __global__ void mtgp32_kernel (rocrand_state_mtgp32 * states, T * output, const 
     output[index] = f(&state, mean, std);
 
     if(thread_id == 0)
-        states[state_id] = state; 
+        states[state_id] = state;
 }
 
 TEST(log_normal_distribution_tests, float_mtgp32_test){
@@ -1037,7 +1063,6 @@ TEST(log_normal_distribution_tests, float_mtgp32_test){
     float * dOut;
     HIP_CHECK(hipMalloc(&dOut, sizeof(float) * testSize));
     HIP_CHECK(hipDeviceSynchronize());
-
 
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(mtgp32_kernel<float, float>),
@@ -1061,7 +1086,6 @@ TEST(log_normal_distribution_tests, float_mtgp32_test){
     double mean = 0.0;
     for(size_t i = 0; i < testSize; i++)
         mean += hOut[i];
-    
 
     mean /= testSize;
 
@@ -1101,7 +1125,6 @@ TEST(log_normal_distribution_tests, float2_mtgp32_test){
     HIP_CHECK(hipMalloc(&dOut, sizeof(float2) * testSize));
     HIP_CHECK(hipDeviceSynchronize());
 
-
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(mtgp32_kernel<float2, float>),
         dim3(blocks),
@@ -1125,7 +1148,6 @@ TEST(log_normal_distribution_tests, float2_mtgp32_test){
         mean += hOut[i].x;
         mean += hOut[i].y;
     }
-    
 
     mean /= (testSize * 2);
 
@@ -1167,7 +1189,6 @@ TEST(log_normal_distribution_tests, double_mtgp32_test){
     HIP_CHECK(hipMalloc(&dOut, sizeof(double) * testSize));
     HIP_CHECK(hipDeviceSynchronize());
 
-
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(mtgp32_kernel<double, double>),
         dim3(blocks),
@@ -1190,7 +1211,6 @@ TEST(log_normal_distribution_tests, double_mtgp32_test){
     double mean = 0.0;
     for(size_t i = 0; i < testSize; i++)
         mean += hOut[i];
-    
 
     mean /= testSize;
 
@@ -1230,7 +1250,6 @@ TEST(log_normal_distribution_tests, double2_mtgp32_test){
     HIP_CHECK(hipMalloc(&dOut, sizeof(double2) * testSize));
     HIP_CHECK(hipDeviceSynchronize());
 
-
     hipLaunchKernelGGL(
         HIP_KERNEL_NAME(mtgp32_kernel<double2, double>),
         dim3(blocks),
@@ -1254,7 +1273,6 @@ TEST(log_normal_distribution_tests, double2_mtgp32_test){
         mean += hOut[i].x;
         mean += hOut[i].y;
     }
-    
 
     mean /= (testSize * 2);
 
@@ -1276,4 +1294,245 @@ TEST(log_normal_distribution_tests, double2_mtgp32_test){
     HIP_CHECK(hipFree(dOut));
 
     delete [] hOut;
+}
+
+/* #################################################
+
+                TEST HOST SIDE
+
+   ###############################################*/
+
+template<class RocrandPRNGType>
+inline void GetRocrandState(RocrandPRNGType* host_state)
+{
+
+    if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_sobol32>)
+    {
+        const unsigned int* directions;
+        ROCRAND_CHECK(
+            rocrand_get_direction_vectors32(&directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
+        rocrand_init(directions, 123456, host_state);
+    }
+    // scrambled sobol32 case
+    else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_scrambled_sobol32>)
+    {
+        const unsigned int* directions;
+        ROCRAND_CHECK(
+            rocrand_get_direction_vectors32(&directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
+        rocrand_init(directions, 123456, 654321, host_state);
+    }
+    // sobol64 case
+    else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_sobol64>)
+    {
+        const unsigned long long* directions;
+        ROCRAND_CHECK(
+            rocrand_get_direction_vectors64(&directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
+        rocrand_init(directions, 123456, host_state);
+    }
+    // scrambled sobol64 case
+    else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_scrambled_sobol64>)
+    {
+        const unsigned long long* directions;
+        ROCRAND_CHECK(
+            rocrand_get_direction_vectors64(&directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
+        rocrand_init(directions, 123456, 654321, host_state);
+    }
+    // lfsr113 case
+    else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_lfsr113>)
+    {
+        rocrand_init({0xabcd, 0xdabc, 0xcdab, 0xbcda}, 0, 0, host_state);
+    }
+    else
+    {
+        rocrand_init(123456, 654321, 0, host_state);
+    }
+}
+
+template<typename OutputType, class RocrandPRNGType, size_t OutSize>
+struct HostParams
+{
+    using out_type                   = OutputType;
+    using rng                        = RocrandPRNGType;
+    static constexpr size_t out_size = OutSize;
+};
+
+using logNormalParams = ::testing::Types<HostParams<float, rocrand_state_sobol32, 1>,
+                                         HostParams<float, rocrand_state_scrambled_sobol32, 1>,
+                                         HostParams<float, rocrand_state_sobol64, 1>,
+                                         HostParams<float, rocrand_state_scrambled_sobol64, 1>,
+                                         HostParams<float, rocrand_state_lfsr113, 1>,
+                                         HostParams<float, rocrand_state_threefry2x32_20, 1>,
+                                         HostParams<float, rocrand_state_threefry2x64_20, 1>,
+                                         HostParams<float, rocrand_state_threefry4x32_20, 1>,
+                                         HostParams<float, rocrand_state_threefry4x64_20, 1>,
+                                         HostParams<double, rocrand_state_sobol32, 1>,
+                                         HostParams<double, rocrand_state_scrambled_sobol32, 1>,
+                                         HostParams<double, rocrand_state_sobol64, 1>,
+                                         HostParams<double, rocrand_state_scrambled_sobol64, 1>,
+                                         HostParams<double, rocrand_state_lfsr113, 1>,
+                                         HostParams<double, rocrand_state_threefry2x32_20, 1>,
+                                         HostParams<double, rocrand_state_threefry2x64_20, 1>,
+                                         HostParams<double, rocrand_state_threefry4x32_20, 1>,
+                                         HostParams<double, rocrand_state_threefry4x64_20, 1>,
+                                         HostParams<float2, rocrand_state_philox4x32_10, 2>,
+                                         HostParams<float2, rocrand_state_mrg31k3p, 2>,
+                                         HostParams<float2, rocrand_state_mrg32k3a, 2>,
+                                         HostParams<float2, rocrand_state_xorwow, 2>,
+                                         HostParams<float2, rocrand_state_lfsr113, 2>,
+                                         HostParams<float2, rocrand_state_threefry2x32_20, 2>,
+                                         HostParams<float2, rocrand_state_threefry2x64_20, 2>,
+                                         HostParams<float2, rocrand_state_threefry4x32_20, 2>,
+                                         HostParams<float2, rocrand_state_threefry4x64_20, 2>,
+                                         HostParams<double2, rocrand_state_philox4x32_10, 2>,
+                                         HostParams<double2, rocrand_state_mrg31k3p, 2>,
+                                         HostParams<double2, rocrand_state_mrg32k3a, 2>,
+                                         HostParams<double2, rocrand_state_xorwow, 2>,
+                                         HostParams<double2, rocrand_state_lfsr113, 2>,
+                                         HostParams<double2, rocrand_state_threefry2x32_20, 2>,
+                                         HostParams<double2, rocrand_state_threefry2x64_20, 2>,
+                                         HostParams<double2, rocrand_state_threefry4x32_20, 2>,
+                                         HostParams<double2, rocrand_state_threefry4x64_20, 2>,
+                                         HostParams<float4, rocrand_state_philox4x32_10, 4>,
+                                         HostParams<double4, rocrand_state_philox4x32_10, 4>>;
+
+template<typename OutputType,
+         typename T,
+         size_t OutSize,
+         class RocrandPRNGType,
+         class LogNormalFunc,
+         class ReadMeanFunc,
+         class ReadStdFunc>
+void run_host_test(const LogNormalFunc& lnf, const ReadMeanFunc& rmf, ReadStdFunc& rsf)
+{
+    constexpr size_t test_size     = 50000;
+    constexpr T      input_mean    = 0.5;
+    constexpr T      input_std_dev = 1.0;
+
+    const T dev2 = std::powf(input_std_dev, 2);
+
+    const T expected_mean    = std::exp(input_mean + dev2 / 2);
+    const T expected_std_dev = std::sqrt((std::exp(dev2) - 1) * std::exp(2 * input_mean + dev2));
+
+    RocrandPRNGType generator;
+    GetRocrandState(&generator);
+
+    std::vector<OutputType> output(test_size);
+
+    for(size_t i = 0; i < test_size; i++)
+    {
+        output[i] = lnf(&generator, input_mean, input_std_dev);
+    }
+
+    T actual_mean = std::accumulate(output.begin(),
+                                    output.end(),
+                                    (T)0,
+                                    [=](T acc, OutputType x) { return acc + rmf(x); })
+                    / static_cast<T>(test_size * OutSize);
+
+    T actual_std_dev
+        = std::accumulate(output.begin(),
+                          output.end(),
+                          (T)0,
+                          [=](T acc, OutputType x) { return acc + rsf(x, actual_mean); });
+    actual_std_dev = std::sqrt(actual_std_dev / static_cast<T>(test_size * OutSize - 1));
+
+    T mean_eps    = GET_EPS(expected_mean);
+    T std_dev_eps = GET_EPS(expected_std_dev);
+
+    ASSERT_NEAR(expected_mean, actual_mean, mean_eps);
+    ASSERT_NEAR(expected_std_dev, actual_std_dev, std_dev_eps);
+}
+
+template<class HostParams>
+class LogNormalHostTest : public ::testing::Test
+{
+public:
+    using out_type                   = typename HostParams::out_type;
+    using prng_type                  = typename HostParams::rng;
+    static constexpr size_t out_size = HostParams::out_size;
+};
+
+TYPED_TEST_SUITE(LogNormalHostTest, logNormalParams);
+TYPED_TEST(LogNormalHostTest, log_normal_host)
+{
+    using out_type            = typename TestFixture::out_type;
+    using rocrand_state       = typename TestFixture::prng_type;
+    constexpr size_t out_size = TestFixture::out_size;
+    using T
+        = std::conditional_t<(std::is_same_v<out_type, float> || std::is_same_v<out_type, float2>
+                              || std::is_same_v<out_type, float4>),
+                             float,
+                             double>;
+
+    if constexpr(out_size == 1)
+    {
+        auto mean_func = [](out_type x) { return x; };
+        auto std_dev_func
+            = [](out_type x, out_type actual_mean) { return std::powf(x - actual_mean, 2); };
+        if constexpr(std::is_same_v<out_type, float>)
+        {
+            run_host_test<out_type, T, out_size, rocrand_state>(
+                [=](rocrand_state* state, float input_mean, float input_std_dev)
+                { return rocrand_log_normal(state, input_mean, input_std_dev); },
+                mean_func,
+                std_dev_func);
+        }
+        else
+        {
+            run_host_test<out_type, T, out_size, rocrand_state>(
+                [=](rocrand_state* state, double input_mean, double input_std_dev)
+                { return rocrand_log_normal_double(state, input_mean, input_std_dev); },
+                mean_func,
+                std_dev_func);
+        }
+    }
+    else if constexpr(out_size == 2)
+    {
+        auto mean_func    = [](out_type x) { return x.x + x.y; };
+        auto std_dev_func = [](out_type x, T actual_mean)
+        { return std::powf(x.x - actual_mean, 2) + std::powf(x.y - actual_mean, 2); };
+
+        if constexpr(std::is_same_v<out_type, float2>)
+        {
+            run_host_test<out_type, T, out_size, rocrand_state>(
+                [=](rocrand_state* state, float input_mean, float input_std_dev)
+                { return rocrand_log_normal2(state, input_mean, input_std_dev); },
+                mean_func,
+                std_dev_func);
+        }
+        else
+        {
+            run_host_test<out_type, T, out_size, rocrand_state>(
+                [=](rocrand_state* state, double input_mean, double input_std_dev)
+                { return rocrand_log_normal_double2(state, input_mean, input_std_dev); },
+                mean_func,
+                std_dev_func);
+        }
+    }
+    else
+    {
+        auto mean_func    = [](out_type x) { return x.x + x.y + x.w + x.z; };
+        auto std_dev_func = [](out_type x, T actual_mean)
+        {
+            return std::powf(x.x - actual_mean, 2) + std::powf(x.y - actual_mean, 2)
+                   + std::powf(x.w - actual_mean, 2) + std::powf(x.z - actual_mean, 2);
+        };
+
+        if constexpr(std::is_same_v<out_type, float4>)
+        {
+            run_host_test<out_type, T, out_size, rocrand_state>(
+                [=](rocrand_state* state, float input_mean, float input_std_dev)
+                { return rocrand_log_normal4(state, input_mean, input_std_dev); },
+                mean_func,
+                std_dev_func);
+        }
+        else
+        {
+            run_host_test<out_type, T, out_size, rocrand_state>(
+                [=](rocrand_state* state, double input_mean, double input_std_dev)
+                { return rocrand_log_normal_double4(state, input_mean, input_std_dev); },
+                mean_func,
+                std_dev_func);
+        }
+    }
 }
