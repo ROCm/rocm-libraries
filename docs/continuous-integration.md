@@ -8,10 +8,10 @@ This document is to detail the various continuous integration (CI) systems that 
 ## Table of Contents
 1. [Azure Pipelines](#azure-pipelines)
     1. [Overview](#az-overview)
-    2. PR Workflow(#az-workflow)
-    3. Interpreting Results(#az-results)
-    4. Build and Test Coverage(#az-coverage)
-    5. Downstream Job Triggers(#az-downstream)
+    2. [PR Workflow](#az-workflow)
+    3. [Interpreting Results](#az-results)
+    4. [Build and Test Coverage](#az-coverage)
+    5. [Downstream Job Triggers](#az-downstream)
 2. [Math CI](#math-ci)
     1. [Overview](#math-overview)
 
