@@ -33,7 +33,7 @@ void TestTabulateDispatchExplicit()
   thrust::device_vector<int> vec(1);
 
   my_system sys(0);
-  thrust::tabulate(sys, vec.begin(), vec.end(), thrust::identity<int>());
+  thrust::tabulate(sys, vec.begin(), vec.end(), ::internal::identity{});
 
   ASSERT_EQUAL(true, sys.is_valid());
 }
@@ -49,43 +49,33 @@ void TestTabulateDispatchImplicit()
 {
   thrust::device_vector<int> vec(1);
 
-  thrust::tabulate(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), thrust::identity<int>());
+  thrust::tabulate(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), ::internal::identity{});
 
   ASSERT_EQUAL(13, vec.front());
 }
 DECLARE_UNITTEST(TestTabulateDispatchImplicit);
 
 template <class Vector>
-void TestTabulateSimple(void)
+void TestTabulateSimple()
 {
   using namespace thrust::placeholders;
-  using T = typename Vector::value_type;
 
   Vector v(5);
 
-  thrust::tabulate(v.begin(), v.end(), thrust::identity<T>());
+  thrust::tabulate(v.begin(), v.end(), ::internal::identity{});
 
-  ASSERT_EQUAL(v[0], 0);
-  ASSERT_EQUAL(v[1], 1);
-  ASSERT_EQUAL(v[2], 2);
-  ASSERT_EQUAL(v[3], 3);
-  ASSERT_EQUAL(v[4], 4);
+  Vector ref{0, 1, 2, 3, 4};
+  ASSERT_EQUAL(v, ref);
 
   thrust::tabulate(v.begin(), v.end(), -_1);
 
-  ASSERT_EQUAL(v[0], 0);
-  ASSERT_EQUAL(v[1], -1);
-  ASSERT_EQUAL(v[2], -2);
-  ASSERT_EQUAL(v[3], -3);
-  ASSERT_EQUAL(v[4], -4);
+  ref = {0, -1, -2, -3, -4};
+  ASSERT_EQUAL(v, ref);
 
   thrust::tabulate(v.begin(), v.end(), _1 * _1 * _1);
 
-  ASSERT_EQUAL(v[0], 0);
-  ASSERT_EQUAL(v[1], 1);
-  ASSERT_EQUAL(v[2], 8);
-  ASSERT_EQUAL(v[3], 27);
-  ASSERT_EQUAL(v[4], 64);
+  ref = {0, 1, 8, 27, 64};
+  ASSERT_EQUAL(v, ref);
 }
 DECLARE_VECTOR_UNITTEST(TestTabulateSimple);
 
@@ -114,7 +104,7 @@ void TestTabulateToDiscardIterator(size_t n)
 {
   thrust::tabulate(thrust::discard_iterator<thrust::device_system_tag>(),
                    thrust::discard_iterator<thrust::device_system_tag>(n),
-                   thrust::identity<int>());
+                   ::internal::identity{});
 
   // nothing to check -- just make sure it compiles
 }

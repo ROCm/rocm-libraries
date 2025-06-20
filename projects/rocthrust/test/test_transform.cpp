@@ -15,6 +15,7 @@
  *  limitations under the License.
  */
 
+#include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
@@ -212,7 +213,7 @@ TYPED_TEST(TransformVectorTests, TestTransformIfUnaryNoStencilSimple) THRUST_DIS
   Vector output{-1, -2, -3};
   Vector result{-1, 2, -3};
 
-  iter = thrust::transform_if(input.begin(), input.end(), output.begin(), thrust::negate<T>(), thrust::identity<T>());
+  iter = thrust::transform_if(input.begin(), input.end(), output.begin(), thrust::negate<T>(), ::internal::identity{});
 
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(output, result);
@@ -276,7 +277,7 @@ TYPED_TEST(TransformVectorTests, TestTransformIfUnarySimple) THRUST_DISABLE_BROK
   Vector result{-1, 2, -3};
 
   iter = thrust::transform_if(
-    input.begin(), input.end(), stencil.begin(), output.begin(), thrust::negate<T>(), thrust::identity<T>());
+    input.begin(), input.end(), stencil.begin(), output.begin(), thrust::negate<T>(), ::internal::identity{});
 
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(output, result);
@@ -410,7 +411,7 @@ TYPED_TEST(TransformVectorTests, TestTransformIfBinarySimple) THRUST_DISABLE_BRO
   Vector output{1, 2, 3};
   Vector result{5, 2, -3};
 
-  thrust::identity<T> identity;
+  ::internal::identity identity;
 
   iter = thrust::transform_if(
     input1.begin(),
@@ -956,18 +957,18 @@ TYPED_TEST(TransformInOutTests, TestTransformUnaryCountingIterator) THRUST_DISAB
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  size_t const size = 15 * sizeof(T);
+  size_t const n = 15 * sizeof(T);
 
-  ASSERT_LE(T(size), truncate_to_max_representable<T>(size));
+  ASSERT_LE(T(n), truncate_to_max_representable<T>(n));
 
   thrust::counting_iterator<T, thrust::host_system_tag> h_first   = thrust::make_counting_iterator<T>(0);
   thrust::counting_iterator<T, thrust::device_system_tag> d_first = thrust::make_counting_iterator<T>(0);
 
-  thrust::host_vector<U> h_result(size);
-  thrust::device_vector<U> d_result(size);
+  thrust::host_vector<U> h_result(n);
+  thrust::device_vector<U> d_result(n);
 
-  thrust::transform(h_first, h_first + size, h_result.begin(), thrust::identity<T>());
-  thrust::transform(d_first, d_first + size, d_result.begin(), thrust::identity<T>());
+  thrust::transform(h_first, h_first + n, h_result.begin(), ::internal::identity{});
+  thrust::transform(d_first, d_first + n, d_result.begin(), ::internal::identity{});
 
   ASSERT_EQ(h_result, d_result);
 }

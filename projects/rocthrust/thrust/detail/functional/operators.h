@@ -35,7 +35,6 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/type_traits.h>
-#include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #include <thrust/functional.h>
 #include <thrust/tuple.h>
 
