@@ -41,10 +41,10 @@ namespace detail
 namespace functional
 {
 
-// If we have libstdc++ >= 10, we can use the __decay_t
+// If we're not on Windows and we have libstdc++ >= 10, we can use the __decay_t
 // builtin to reduce compilation time.
 template<typename T>
-#if defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE < 10
+#if defined(_WIN32) || (defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE < 10)
 using decay_t = std::decay_t<T>;
 #else
 using decay_t = std::__decay_t<T>;

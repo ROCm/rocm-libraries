@@ -35,6 +35,7 @@ target_link_libraries(common-test-utilities
         roc::mxDataGenerator
         hip::host
         OpenMP::OpenMP_CXX
+        ${CBLAS_LIBRARIES}
 )
 
 target_include_directories(common-test-utilities

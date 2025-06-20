@@ -149,10 +149,18 @@ class Weights:
     vmcnt: float = field(default_factory=random_inv_exp())
     lgkmcnt: float = field(default_factory=random_inv_exp())
 
-    vmemCycles: int = field(default_factory=random_int(max=500), metadata={"isCoefficient": False})
-    vmemQueueSize: int = field(default_factory=random_int(max=20), metadata={"isCoefficient": False})
-    dsmemCycles: int = field(default_factory=random_int(max=100), metadata={"isCoefficient": False})
-    dsmemQueueSize: int = field(default_factory=random_int(max=20), metadata={"isCoefficient": False})
+    vmemCycles: int = field(
+        default_factory=random_int(max=500), metadata={"isCoefficient": False}
+    )
+    vmemQueueSize: int = field(
+        default_factory=random_int(max=20), metadata={"isCoefficient": False}
+    )
+    dsmemCycles: int = field(
+        default_factory=random_int(max=100), metadata={"isCoefficient": False}
+    )
+    dsmemQueueSize: int = field(
+        default_factory=random_int(max=20), metadata={"isCoefficient": False}
+    )
 
     vmQueueLen: int = field(
         default_factory=random_int(), metadata={"isCoefficient": False}
