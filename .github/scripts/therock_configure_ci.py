@@ -6,7 +6,7 @@ Required environment variables:
 """
 
 import json
-from therock_matrix import monorepo_map
+from therock_matrix import subtree_to_project_map, project_map
 from typing import Mapping
 import os
 
@@ -28,11 +28,20 @@ def set_github_output(d: Mapping[str, str]):
 
 def run():
     subtrees = SUBTREES.split("\n")
-    projects = []
+    projects = set()
+    # collect the associated subtree to project
     for subtree in subtrees:
-        if subtree in monorepo_map:
-            projects.append(monorepo_map.get(subtree))
-    set_github_output({"projects": json.dumps(projects)})
+        if subtree in subtree_to_project_map:
+            projects.add(subtree_to_project_map.get(subtree))
+    
+    # retrieve the subtrees to checkout, cmake options to build, and projects to test 
+    project_to_run = []
+    for project in projects:
+        if project in project_map:
+            project_to_run.append(project_map.get(project))
+        
+
+    set_github_output({"projects": json.dumps(project_to_run)})
 
 
 if __name__ == "__main__":

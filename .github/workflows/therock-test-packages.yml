@@ -19,7 +19,7 @@ jobs:
   # BLAS tests
   test_hipblaslt:
     name: "hipBLASLt math-lib"
-    if: ${{ inputs.project_to_test == 'test_hipblaslt' }}
+    if: ${{ contains(inputs.project_to_test, 'test_hipblaslt') }}
     uses: ROCm/TheRock/.github/workflows/test_hipblaslt.yml@866f163742246445138d7addff8a4010e86bddee
     with:
       artifact_run_id: "${{ github.run_id }}"
@@ -29,7 +29,7 @@ jobs:
 
   test_rocblas:
     name: "rocBLAS math-lib"
-    if: ${{ inputs.project_to_test == 'test_rocblas' }}
+    if: ${{ contains(inputs.project_to_test, 'test_rocblas') }}
     uses: ROCm/TheRock/.github/workflows/test_rocblas.yml@866f163742246445138d7addff8a4010e86bddee
     with:
       artifact_run_id: "${{ github.run_id }}"
@@ -40,7 +40,7 @@ jobs:
   # PRIM tests
   test_rocprim:
     name: "rocPRIM math-lib"
-    if: ${{ inputs.project_to_test == 'test_rocprim' }}
+    if: ${{ contains(inputs.project_to_test, 'test_rocprim') }}
     uses: ROCm/TheRock/.github/workflows/test_rocprim.yml@866f163742246445138d7addff8a4010e86bddee
     with:
       artifact_run_id: "${{ github.run_id }}"
@@ -50,7 +50,7 @@ jobs:
 
   test_rocthrust:
     name: "rocTHRUST math-lib"
-    if: ${{ inputs.project_to_test == 'test_rocthrust' }}
+    if:  ${{ contains(inputs.project_to_test, 'test_rocthrust') }}
     uses: ROCm/TheRock/.github/workflows/test_rocthrust.yml@866f163742246445138d7addff8a4010e86bddee
     with:
       artifact_run_id: "${{ github.run_id }}"
@@ -60,7 +60,7 @@ jobs:
 
   test_hipcub:
     name: "hipCUB math-lib"
-    if: ${{ inputs.project_to_test == 'test_hipcub' }}
+    if: ${{ contains(inputs.project_to_test, 'test_hipcub') }}
     uses: ROCm/TheRock/.github/workflows/test_hipcub.yml@866f163742246445138d7addff8a4010e86bddee
     with:
       artifact_run_id: "${{ github.run_id }}"
