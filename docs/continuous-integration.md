@@ -10,12 +10,12 @@ This document is to detail the various continuous integration (CI) systems that 
 
 ## Azure Pipelines
 
-The Azure Pipelines CI is a public-facing CI system that builds and tests against latest public source code. It encompasses a majority of the ROCm stack, typically pulling source from the `develop`/`amd-staging` branch on a component's GitHub repository. Its main source is publically available at [ROCm/ROCm/.azuredevops](https://github.com/ROCm/ROCm/tree/develop/.azuredevops).
-
 > [!IMPORTANT]
-> Azure CI checks are currently a **hard requirement**; they must be successful for PRs to be merged.
+> Azure CI checks are currently a **hard requirement** for PRs to be approved and merged.
 
 ### Overview
+
+The Azure Pipelines CI is a public-facing CI system that builds and tests against latest public source code. It encompasses almost all of the ROCm stack, typically pulling source code from the `develop` or `amd-staging` branch on a component's GitHub repository. The CI's main source is publically available at [ROCm/ROCm/.azuredevops](https://github.com/ROCm/ROCm/tree/develop/.azuredevops).
 
 Each component in the monorepo has a corresponding pipeline, see the [Azure monorepo dashboard](https://dev.azure.com/ROCm-CI/ROCm-CI/_build?definitionScope=%5Cmonorepo) for a full list. These pipelines are set to run for PRs and commits that make changes to a component's subfolder, and the conditions for each component are defined in the trigger files under [/.azuredevops](https://github.com/ROCm/rocm-libraries/tree/develop/.azuredevops).
 
@@ -25,11 +25,27 @@ When running a job, Azure CI will dynamically pull the latest passing build from
 
 1. PR is submitted
 2. Azure scans the PR contents to decide which pipelines to run
-    1. If a pipeline matches, a job will be kicked off
+    1. If a pipeline matches, a run will be kicked off
     2. If a pipeline does not match, the check will be skipped and reported as neutral
 3. The PR is built and tested against latest public source
-4. The final success/failure status is posted on the PR's checks
+4. The final check status is posted on the PR
 5. To see details on a specific check, click into the check, then click `View more details on Azure Pipelines`
+
+### Interpreting Status Results
+
+Any errors or warnings during a run will be highlighted on the run's main page on Azure, and clicking on those will bring you directly to the offending logs.
+
+Azure runs can have the following statuses: `Success`, `Failed`, or `Warning`. This corresponds to GitHub status checks as follows:
+
+| Azure Status | GitHub PR Status | Explanation |
+|-|-|-|
+| ✅ Success | ✅ Succeeded | The job was successful. |
+| ⚠️ Warning | ✅ Succeeded with issues | An allowed failure occurred and the job continued on without further issue. |
+| ❌ Failed | ❌ Failing | The job failed. |
+
+Warnings can occur if a step fails but was marked as being allowed to fail, so a job will continue running in the event of a warning.
+
+In particular, steps are allowed to fail if they have the property `continueOnError: true` ([reference](https://learn.microsoft.com/en-us/azure/devops/pipelines/process/tasks?view=azure-devops&tabs=yaml#task-control-options)).
 
 ### Build and Test Coverage
 
@@ -41,7 +57,7 @@ For example, a hipCUB PR may see the following checks, and the naming scheme is 
 - `hipCUB_test_ubuntu2204_gfx942`
 - `hipCUB_test_ubuntu2204_gfx90a`
 
-Component-specific details such as build flags and test configurations can be viewed in the main pipeline files in [ROCm/ROCm/.azuredevops](https://github.com/ROCm/ROCm/tree/develop/.azuredevops).
+The majority of component tests are run by running `ctest` or `gtest`. Component-specific details such as build flags and test configurations can be viewed in a component's main pipeline file in [ROCm/ROCm/.azuredevops/components](https://github.com/ROCm/ROCm/tree/develop/.azuredevops/components).
 
 ### Downstream Job Triggers
 
