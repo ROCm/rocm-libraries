@@ -16,12 +16,17 @@ cd rocm-libraries
 To limit your local checkout to only the project(s) you work on and improve performance with a large codebase, you can configure sparse-checkout prior to cloning:
 
 ```bash
-git clone --no-checkout https://github.com/ROCm/rocm-libraries.git
+git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
 cd rocm-libraries
 git sparse-checkout init --cone
 git sparse-checkout set projects/rocblas shared/tensile
 git checkout develop # or the branch you are starting from
 ```
+
+This uses Git’s partial clone feature (`--filter=blob:none`) to reduce how much data is downloaded, and sparse-checkout to limit what is checked out to disk. For more background, including guidance on tree-less clones (`--filter=tree:0`) and shallow clones (`--depth=1`), see GitHub’s [blog post on partial and shallow clones](https://github.blog/open-source/git/get-up-to-speed-with-partial-clone-and-shallow-clone).
+
+With the source tree as of June 19th, 2025, the clone command lasted 4 seconds in one test run.
+The checkout command of the two projects lasted less than 90 seconds.
 
 ## Working on Multiple Projects
 
@@ -75,11 +80,24 @@ Avoid using git merge to keep history clean and maintain a linear progression.
 
 ---
 
+## New Product Introduction (NPI) and New Technology Introduction (NTI) Development
+
+A mirror of this monorepo will be on GitHub Enterprise Managed User (EMU) and available only on the AMD intranet.
+Please reach out within the AMD intranet if you need the link and permissions.
+
+A primary development branch will be created for a new product or new technology.
+Treat the branch similarly to `develop` in the public version of `rocm-libraries`.
+It will have a subset of CI/CD in place, relative to the public repo.
+There will be automation setup to regularly rebase the branch with latest `develop`.
+
+---
+
 ## Branching Model
 
-We are transitioning to trunk-based development.
+We are transitioning to trunk-based development, with the tentative plan happening after the next major version release (7.0).
 Until the switch is fully implemented, we will continue to sync changes to individual repositories following their existing development model (e.g., `develop` -> `staging` -> `mainline` -> `release`).
-However, once trunk-based development is in place, feature branches will be created directly from the default branch, develop.
+However, once trunk-based development is in place, feature branches will be created directly from the default branch, `develop`.
+During this period, a high priority will be placed on keeping the `develop` branch healthy.
 
 ## Pull Request Guidelines
 
@@ -103,18 +121,35 @@ git push origin branch-name-like-above
 
 The monorepo uses automation to assign labels and reviewers based on the changed files. Reviewers are designated via the top-level CODEOWNERS file.
 
-### 4. Fanout to Subrepos
+### 4. Tests and CI
 
-To streamline the transition to the monorepo, existing checks will be leveraged. If your PR in the monorepo modifies files from a previously standalone repository, the system will automatically create or update child PRs in those repositories. The results from these child PR checks will be reflected back into the monorepo PR.
+Existing testing and CI infrastructure will be updated to directly point to the monorepo.
+Specific checks will become mandatory for pull requests before merging. Initially, these will be limited to compilation, but will expand to correctness tests and eventually performance tests.
+Hardware and operating system coverage will also expand for these checks over time.
+Please refer to [this documentation](/docs/continuous-integration.md) for further details on the current signals that will be provided through CI for pull requests and commits.
 
-Automated jobs will handle synchronization and tracking tasks during this transition period.
+---
 
-You don’t need to maintain the individual repositories once you’re onboarded to the monorepo—just focus on the monorepo PR.
+## Gardener Rotation
 
-### 5. Tests and CI
+In order to achieve the goal of keeping the `develop` branch healthy, a team of ROCm engineers will be dedicated towards monitoring and triaging issues that arise.
+This team will collaborate to identify offending commits to isolate what changes need to be reverted.
+There may be occassions where bulk reverts may need to occur for more complex issues.
 
-Eventually, existing infrastructure will be updated to directly point to the monorepo, and references to the old repositories will be removed. Until that point, the fanout sequence will be deployed.
+---
 
+## Developer Communications
+
+As this monorepo continues to evolve, weekly office hour sessions with a wide audience of ROCm engineers and managers will occur.
+Focused meetings with smaller project teams will be also be scheduled regularly.
+These discussions can go over any topic of the monorepo important to the different teams.
+If you want to be looped into these syncs, please reach out to project leadership.
+
+---
+
+## Integration with TheRock
+
+In parallel to the efforts with the monorepo, [TheRock project](https://github.com/ROCm/TheRock) is... insert blurb here.
 
 ---
 
