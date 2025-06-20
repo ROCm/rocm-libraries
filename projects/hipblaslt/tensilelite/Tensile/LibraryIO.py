@@ -26,7 +26,7 @@ from .CustomKernels import getCustomKernelConfig
 from . import SolutionLibrary
 from .CustomYamlLoader import load_yaml_stream
 from Tensile import __version__
-from Tensile.Common import printExit, printWarning, print2, \
+from Tensile.Common import printExit, printWarning, print2, print1, \
                            versionIsCompatible, IsaInfo
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.SolutionStructs import Solution, ProblemSizes
@@ -317,6 +317,13 @@ def parseLibraryLogicData(
     if isinstance(data, List):
         data = parseLibraryLogicList(data, srcFile)
 
+    if "DeviceNames" in data:
+        pattern = re.compile(r'([A-Fa-f0-9]{4})$')
+        invalid = [d for d in data["DeviceNames"] if not pattern.search(d)]
+        if invalid:
+            raise ValueError(f"Invalid PCI device IDs: {', '.join(invalid)} (must be hexadecimal)")
+        data["PCIDeviceIDs"] = [pattern.search(d).group(1) for d in data["DeviceNames"]]
+
     if "CUCount" not in data:
         data["CUCount"] = None
 
@@ -332,6 +339,7 @@ def parseLibraryLogicData(
         if solutionState["KernelLanguage"] == "Assembly":
             solutionState["ISA"] = gfxToIsa(data["ArchitectureName"])
         solutionState["CUCount"] = data["CUCount"]
+        solutionState["PCIDeviceIDs"] = data["PCIDeviceIDs"]
         # force redo the deriving of parameters, make sure old version logic yamls can be validated
         solutionState["AssignedProblemIndependentDerivedParameters"] = False
         solutionState["AssignedDerivedParameters"] = False

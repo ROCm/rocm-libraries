@@ -85,7 +85,9 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         type=str,
         action="store",
         default="all",
-        help="Supported archs: " + " ".join(architectureMap.keys()),
+        help="Supported archs: " + " ".join(architectureMap.keys()) + "You may also "
+        "specify an arch variant to build, enclosed within square brackets, all "
+        "non-matching variants will be filtered out. Example: 'gfx950[id=75a0]'",
     )
     argParser.add_argument(
         "--no-compress",
