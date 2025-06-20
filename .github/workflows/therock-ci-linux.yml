@@ -75,6 +75,7 @@ jobs:
       - name: Install python deps
         run: |
           pip install -r TheRock/requirements.txt
+          pip freeze
 
       - name: Configure Projects
         env:
@@ -122,7 +123,6 @@ jobs:
             --amdgpu-family=${{ env.AMDGPU_FAMILIES }}
 
       - name: Upload artifacts
-        if: always()
         run: |
           python TheRock/build_tools/github_actions/upload_build_artifacts.py \
             --run-id ${{ github.run_id }} \
