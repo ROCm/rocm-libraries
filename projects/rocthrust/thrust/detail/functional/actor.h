@@ -37,7 +37,6 @@
 #endif // no system header
 #include <thrust/detail/type_deduction.h>
 #include <thrust/detail/type_traits.h>
-#include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #include <thrust/tuple.h>
 
 #if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
@@ -226,11 +225,5 @@ THRUST_HOST_DEVICE auto compose(Eval e, const SubExpr1& subexpr1, const SubExpr2
     {{::internal::move(e)}, make_actor(subexpr1), make_actor(subexpr2)}};
 }
 } // namespace functional
-
-template <typename Eval, typename... Args>
-struct result_of_adaptable_function<functional::actor<Eval>(Args...)>
-{
-  using type = decltype(::internal::declval<functional::actor<Eval>>()(::internal::declval<Args>()...));
-};
 } // namespace detail
 THRUST_NAMESPACE_END
