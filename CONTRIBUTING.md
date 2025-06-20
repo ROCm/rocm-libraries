@@ -107,7 +107,7 @@ When creating a branch for your work, use the following convention to make branc
 
 Try to keep branch names descriptive yet concise to reflect the purpose of the branch. For example, referencing the GitHub Issue number if the pull request is related.
 
-The build and test infrastructure has some tasks where pull requests from forks have fewer privileges than pull requests from branches within this repo. Thus, branches in this repo are encouraged but you are welcome to use forks and their potential gaps.
+The build and test infrastructure has some tasks where pull requests from forks have fewer privileges than pull requests from branches within this repo. Thus, branches in this repo are encouraged but you are welcome to use forks and their potential gaps. We are actively working towards achieving feature parity between pull requests from branches and pull requests from forks. Please stay tuned.
 
 ### 2. Opening the PR
 
@@ -149,7 +149,9 @@ If you want to be looped into these syncs, please reach out to project leadershi
 
 ## Integration with TheRock
 
-In parallel to the efforts with the monorepo, [TheRock project](https://github.com/ROCm/TheRock) is... insert blurb here.
+[TheRock](https://github.com/rocm/therock) is our new open-source build system for ROCm. It is designed to significantly enhance our support and scalability for ROCm 7.0 and beyond, and it is actively welcoming community contributions. TheRock currently supports a subset of AMD GPU targets, with ongoing efforts from our team and the community to expand this further, as detailed in TheRock [roadmap](https://github.com/ROCm/TheRock/blob/main/ROADMAP.md).
+
+As part of this mono-repo, TheRock is leveraged to extend our CI to add faster support for more testing and more targets with faster builds speeds. While some of these improvements will be seen with the existing CI, some will be exclusive with the TheRock CI targets given the changes in the high-level CMake system and specific patches that still remain within TheRock. Post ROCm 7.0, our goal is to unify our build system to one to ensure all of our CI has the benefits of the new build system.
 
 ---
 
