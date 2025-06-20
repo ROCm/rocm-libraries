@@ -86,9 +86,9 @@ A mirror of this monorepo will be on GitHub Enterprise Managed User (EMU) and av
 Please reach out within the AMD intranet if you need the link and permissions.
 
 A primary development branch will be created for a new product or new technology.
-Treat the branch similarly to `develop` in the public version of `rocm-libraries`.
+This branch will remain private until it is cleared to be shared to the public, where it be pushed to the public repo and merged with `develop`.
 It will have a subset of CI/CD in place, relative to the public repo.
-There will be automation setup to regularly rebase the branch with latest `develop`.
+There will be automation setup to regularly to rebase the branch in the EMU repo with latest `develop` from the public repo.
 
 ---
 
