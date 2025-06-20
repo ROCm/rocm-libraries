@@ -57,6 +57,24 @@ In particular, steps are allowed to fail if they have the property `continueOnEr
 
 ### Build and Test Coverage <a id="az-coverage"></a>
 
+Build coverage:
+| | Ubuntu 22.04 | Almalinux 8 |
+|-|-|-|
+| **gfx942** | ✅ Supported | ✅ Supported |
+| **gfx90a** | ✅ Supported | ✅ Supported |
+| **gfx1201** | 🚧 In progress | 🚧 In progress |
+| **gfx1100** | 🚧 In progress | 🚧 In progress |
+| **gfx1030** | 🚧 In progress | 🚧 In progress |
+
+Test coverage:
+| | Ubuntu 22.04 | Almalinux 8 |
+|-|-|-|
+| **gfx942** | ✅ Supported | ❌ Unsupported |
+| **gfx90a** | ✅ Supported | ❌ Unsupported |
+| **gfx1201** | ❌ Unsupported | ❌ Unsupported |
+| **gfx1100** | ❌ Unsupported | ❌ Unsupported |
+| **gfx1030** | ❌ Unsupported | ❌ Unsupported |
+
 Azure CI builds and tests primarily on Ubuntu 22.04 LTS and for `gfx942` and `gfx90a` architectures, and adding build support for more architectures and operating systems is in progress. Each architecture and OS combination will have its own build and test jobs, all of which will appear as separate checks.
 
 For example, a hipCUB PR may see the following checks, and the naming scheme is hopefully self-explanatory:
