@@ -274,6 +274,18 @@ set_target_properties(
         SOVERSION ${ROCROLLER_SOVERSION}
 )
 
+if(ROCROLLER_USE_LLD)
+    find_package(
+        LLD
+        REQUIRED
+        CONFIG
+        HINTS
+        ${LLVM_DIR}/../lld/
+    )
+    target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_LLD)
+endif()
+
+
 find_package(amd_comgr REQUIRED)
 target_link_libraries(rocroller
     PRIVATE

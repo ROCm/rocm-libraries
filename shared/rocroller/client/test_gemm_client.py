@@ -176,7 +176,7 @@ class Scale:
     lds: bool  # load through LDS
     value: float  # for SingleScale, the value
     blockSize: int  # for scale block size
-    scaleType: str # data type of the scale values
+    scaleType: str  # data type of the scale values
 
     def client_arguments(self):
         params = []
@@ -353,9 +353,16 @@ def scale_configurations(argument):
     rv = []
     for mode in modes:
         if mode is not None and mode == "Separate":
-            rv.extend([Scale(argument, mode, lds, None, blockSize, scaleType) for lds in ldss])
+            rv.extend(
+                [Scale(argument, mode, lds, None, blockSize, scaleType) for lds in ldss]
+            )
         elif mode is not None and mode == "SingleScale":
-            rv.extend([Scale(argument, mode, False, value, None, scaleType) for value in values])
+            rv.extend(
+                [
+                    Scale(argument, mode, False, value, None, scaleType)
+                    for value in values
+                ]
+            )
         else:
             rv.append(Scale(argument, mode, False, None, None, None))
     return rv

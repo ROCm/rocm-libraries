@@ -25,20 +25,6 @@
 
 include(CTest)
 
-find_package(Catch2)
-if(NOT Catch2_FOUND)
-    if(ROCROLLER_ENABLE_FETCH)
-        FetchContent_Declare(
-            Catch2
-            GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-            GIT_TAG devel
-        )
-        FetchContent_MakeAvailable(Catch2)
-    else()
-        message(FATAL_ERROR "Failed to find Catch2")
-    endif()
-endif()
-
 find_package(GTest)
 if(NOT GTest_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
@@ -67,34 +53,20 @@ if(NOT mxDataGenerator_FOUND)
 endif()
 
 add_executable(rocroller-tests)
-add_executable(rocroller-tests-catch)
+if(ROCROLLER_ENABLE_CATCH AND (ROCROLLER_BUILD_TESTING OR BUILD_TESTING))
+    add_executable(rocroller-tests-catch)
+endif()
 
 find_package(BLAS REQUIRED)
+find_package(cblas REQUIRED)
 find_package(OpenMP REQUIRED)
 
 if(ROCROLLER_ENABLE_YAML_CPP)
     target_compile_definitions(rocroller-tests PUBLIC ROCROLLER_TESTS_USE_YAML_CPP)
 endif()
 
+if(ROCROLLER_ENABLE_CATCH)
+    add_subdirectory(catch)
+endif()
 add_subdirectory(common)
-add_subdirectory(catch)
 add_subdirectory(unit)
-
-target_link_libraries(rocroller-tests
-    PRIVATE
-        rocroller::common-test-utilities
-        ${BLAS_LIBRARIES}
-        GTest::gtest_main
-        GTest::gmock
-        libdivide::libdivide
-        ${llvm_libs}
-        ${llvm_yaml_libs}
-        lldELF
-)
-
-target_link_libraries(rocroller-tests-catch
-    PRIVATE
-        rocroller::common-test-utilities
-        Catch2::Catch2WithMain
-        ${BLAS_LIBRARIES}
-)

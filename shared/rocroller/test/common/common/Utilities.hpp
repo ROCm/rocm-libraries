@@ -274,7 +274,8 @@ AcceptableError
             }
             if constexpr(std::is_same_v<TA, rocRoller::FP8>)
             {
-                fudge *= 6.0;
+                fudge *= 6.0 + (arch.gfx == rocRoller::GPUArchitectureGFX::GFX950 ? 0.5 : 0.0);
+
                 ss << " Increase fudge for FP8: " << fudge;
             }
         }

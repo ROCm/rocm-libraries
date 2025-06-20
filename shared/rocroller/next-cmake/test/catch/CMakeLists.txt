@@ -23,6 +23,27 @@
 #
 ################################################################################
 
+find_package(Catch2)
+if(NOT Catch2_FOUND)
+    if(ROCROLLER_ENABLE_FETCH)
+        FetchContent_Declare(
+            Catch2
+            GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+            GIT_TAG devel
+        )
+        FetchContent_MakeAvailable(Catch2)
+    else()
+        message(FATAL_ERROR "Failed to find Catch2")
+    endif()
+endif()
+
+target_link_libraries(rocroller-tests-catch
+    PRIVATE
+        rocroller::common-test-utilities
+        Catch2::Catch2WithMain
+        ${BLAS_LIBRARIES}
+)
+
 set(_CMAKE_CURRENT_SOURCE_DIR "${ROCROLLER_TEST_DIR}/catch")
 target_sources(rocroller-tests-catch
     PRIVATE
