@@ -139,13 +139,13 @@ jobs:
       - name: Create Logs index Files
         if: always()
         run: |
-          python3 build_tools/github_actions/create_log_index.py \
+          python3 TheRock/build_tools/github_actions/create_log_index.py \
             --build-dir=${{ env.BUILD_DIR }} \
             --amdgpu-family=${{ env.AMDGPU_FAMILIES }}
 
       - name: Upload artifacts
         run: |
-          python build_tools/github_actions/upload_build_artifacts.py \
+          python TheRock/build_tools/github_actions/upload_build_artifacts.py \
             --run-id ${{ github.run_id }} \
             --amdgpu-family ${{ env.AMDGPU_FAMILIES }} \
             --build-dir ${{ env.BUILD_DIR }}
@@ -153,7 +153,7 @@ jobs:
       - name: Upload Logs
         if: always()
         run: |
-          python3 build_tools/github_actions/upload_build_logs_to_s3.py \
+          python3 TheRock/build_tools/github_actions/upload_build_logs_to_s3.py \
             --build-dir=${{ env.BUILD_DIR }} \
             --run-id ${{ github.run_id }} \
             --amdgpu-family ${{ env.AMDGPU_FAMILIES }}
@@ -161,7 +161,7 @@ jobs:
       - name: Add Links to Job Summary
         if: always()
         run: |
-          python build_tools/github_actions/upload_build_summary.py \
+          python TheRock/build_tools/github_actions/upload_build_summary.py \
             --run-id ${{ github.run_id }} \
             --amdgpu-family ${{ env.AMDGPU_FAMILIES }} \
             --build-dir ${{ env.BUILD_DIR }}
