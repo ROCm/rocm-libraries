@@ -166,4 +166,3 @@ MIOpenBatchNormActivBwdPerActivation(const __global _FLOAT* __restrict x_in,
 #pragma clang diagnostic pop
 #pragma clang diagnostic pop
 #endif
-
