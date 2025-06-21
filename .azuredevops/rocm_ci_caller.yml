@@ -38,7 +38,9 @@ jobs:
   - script: |
           set -e  
           echo "Calling jenkins_api.py for PR #$(PR_NUM)"
+          ls -la
           cd $(repo_name)
+          echo $PWD
           docker run \
             -v "$PWD:/src" \
             -w /src \
