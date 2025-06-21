@@ -30,7 +30,7 @@ jobs:
 - job: Trigger_Pipeline 
   displayName: 'Trigger Pipeline'
   pool: rocm-ci-caller
-  condition: ne(variables['System.PullRequest.IsFork'], true)
+  # condition: ne(variables['System.PullRequest.IsFork'], true)
   steps:
   - checkout: none
   - script: |
