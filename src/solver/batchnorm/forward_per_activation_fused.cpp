@@ -250,4 +250,3 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
 } // namespace solver
 
 } // namespace miopen
-
