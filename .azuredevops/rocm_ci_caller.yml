@@ -30,6 +30,7 @@ jobs:
 - job: Trigger_Pipeline 
   displayName: 'Trigger Pipeline'
   pool: rocm-ci-caller
+  allowSecrets: true
   # condition: ne(variables['System.PullRequest.IsFork'], true)
   steps:
   - checkout: none
