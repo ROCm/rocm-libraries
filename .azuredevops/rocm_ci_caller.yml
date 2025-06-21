@@ -2,10 +2,10 @@ trigger: none
 pr:  
   branches:
     include:
-      - develop
       - release-staging/rocm-rel-*
   paths:  
-    include:  
+    include:
+      - .azuredevops/rocm_ci_caller.yml
       - projects/*
       - shared/*
   
@@ -29,7 +29,6 @@ jobs:
 - job: Trigger_Pipeline 
   displayName: 'Trigger Pipeline'
   pool: rocm-ci-caller
-  # condition: ne(variables['System.PullRequest.IsFork'], true)
   steps:
   - checkout: none
   - script: |
