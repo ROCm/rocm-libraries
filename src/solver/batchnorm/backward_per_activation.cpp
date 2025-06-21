@@ -189,4 +189,3 @@ BnBwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
 } // namespace solver
 
 } // namespace miopen
-
