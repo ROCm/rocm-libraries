@@ -779,11 +779,6 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "DirectToLds is for MatrixInstruction only for now (tentative)")
       return False
 
-    # so far, DirectToLds does not work with StreamK (TODO: enable StreamK case)
-    if state["StreamK"]:
-      reject(state, printRejectionReason, "DirectToLds does not support StreamK (tentative)")
-      return False
-
     # ToDo: Review def of lrvw and this check
     # DTL + LocalReadVectorWidth > MIInputPerThread does not work
     # Need support for TailLoop
