@@ -13,6 +13,9 @@ on:
 permissions:
   contents: read
 
+env:
+  AMDGPU_FAMILIES: "gfx110X-dgpu"
+
 jobs:
   therock-build-windows:
     name: Build Windows Packages
@@ -27,7 +30,6 @@ jobs:
       BUILD_DIR: B:\build
       CCACHE_DIR: "${{ github.workspace }}/.container-cache/ccache"
       CCACHE_MAXSIZE: "700M"
-      AMDGPU_FAMILIES: "gfx110X-dgpu"
     steps:
       - name: Generate a token for rocm-libraries
         id: generate-token
@@ -134,7 +136,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
         with:
           aws-region: us-east-2
-          role-to-assume: arn:aws:iam::692859939525:role/therock-artifacts
+          role-to-assume: arn:aws:iam::692859939525:role/therock-artifacts-external
 
       - name: Create Logs index Files
         if: always()
@@ -172,6 +174,6 @@ jobs:
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       project_to_test: ${{ inputs.project_to_test }}
-      amdgpu_families: "gfx110X-dgpu"
+      amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
       test_runs_on: ""
       platform: "windows"
