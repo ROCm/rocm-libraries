@@ -74,7 +74,7 @@ template <class Derived>
 struct execution_policy : thrust::execution_policy<Derived>
 {
   using tag_type = tag;
-  operator tag() const
+  THRUST_HOST_DEVICE operator tag() const
   {
     return tag();
   }

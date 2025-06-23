@@ -348,7 +348,7 @@ struct THRUST_DEPRECATED_BECAUSE("Use thrust::transform_iterator") transform_inp
   using value_type        = ValueType;
   using pointer           = void;
   using reference         = value_type;
-  using iterator_category = std::random_access_iterator_tag;
+  using iterator_category = _THRUST_STD::random_access_iterator_tag;
 
   InputIt input;
   mutable UnaryOp op;
@@ -459,7 +459,7 @@ struct THRUST_DEPRECATED_BECAUSE("Use thrust::transform_iterator of a thrust::zi
   using value_type        = ValueType;
   using pointer           = void;
   using reference         = value_type;
-  using iterator_category = std::random_access_iterator_tag;
+  using iterator_category = _THRUST_STD::random_access_iterator_tag;
 
   InputIt1 input1;
   InputIt2 input2;
@@ -592,7 +592,7 @@ struct THRUST_DEPRECATED_BECAUSE("Use thrust::counting_iterator") counting_itera
   using value_type        = T;
   using pointer           = void;
   using reference         = T;
-  using iterator_category = std::random_access_iterator_tag;
+  using iterator_category = _THRUST_STD::random_access_iterator_tag;
 
   T count;
 
