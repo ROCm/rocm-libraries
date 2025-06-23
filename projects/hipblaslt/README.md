@@ -3,7 +3,7 @@
 hipBLASLt is a library that provides general matrix-matrix operations. It has a flexible API that extends
 functionalities beyond a traditional BLAS library, such as adding flexibility to matrix data layouts, input
 types, compute types, and algorithmic implementations and heuristics.
-
+   
 > [!NOTE]
 > The published hipBLASLt documentation is available at [hipBLASLt](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the hipBLASLt/docs folder of this repository. As with all ROCm projects, the documentation is open source. For more information, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
