@@ -3192,6 +3192,9 @@ namespace TensileLite
                     }
                 }
             }
+
+            if (tiles % skGrid != 0 && partialTileSize(skGrid) > problem.workspaceSize())
+                skGrid = tiles;
             return skGrid;
         }
         // Limit the CUs Stream-K is launched on either max or the specified,
