@@ -47,7 +47,7 @@
         {                                                                                 \
             std::cerr << "Encountered ROCRAND error: " << status << "at line" << __LINE__ \
                       << " in file " << __FILE__ << "\n";                                 \
-            exit(-1);                                                                     \
+            exit(status);                                                                 \
         }                                                                                 \
     }                                                                                     \
     while(0)
@@ -209,7 +209,7 @@ TYPED_TEST(mrg_log_normal_distribution_tests, float_test)
 
     const size_t                                                              size = 4000;
     float                                                                     val[size];
-mrg_engine_log_normal_distribution<float, typename TestFixture::mrg_type> u(0.2f, 0.5f);
+    mrg_engine_log_normal_distribution<float, typename TestFixture::mrg_type> u(0.2f, 0.5f);
 
     // Calculate mean
     float mean = 0.0f;

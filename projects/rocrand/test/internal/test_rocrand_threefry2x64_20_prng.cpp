@@ -72,7 +72,8 @@ class threefry2x64_engine_type_test : public threefry2x64_20_generator::engine_t
 public:
     __host__ threefry2x64_engine_type_test() : threefry2x64_20_generator::engine_type(0, 0, 0) {}
 
-    __host__ state_type& internal_state_ref()
+    __host__
+    state_type& internal_state_ref()
     {
         return m_state;
     }
@@ -178,10 +179,11 @@ TEST(threefry_additional_tests, rocrand_test)
     rocrand_init(0, 0, 0, &state);
     size_t testSize = 40000;
 
-    unsigned long long * output = new unsigned long long[testSize];
+    unsigned long long* output = new unsigned long long[testSize];
 
     double mean = 0;
-    for(size_t i = 0; i < testSize; i++){
+    for(size_t i = 0; i < testSize; i++)
+    {
         output[i] = rocrand(&state);
         mean += static_cast<double>(output[i]);
     }
@@ -193,14 +195,14 @@ TEST(threefry_additional_tests, rocrand_test)
 
     std = std::sqrt(std / testSize);
 
-    double maxi = (double) std::numeric_limits<unsigned long long>::max();
+    double maxi  = (double)std::numeric_limits<unsigned long long>::max();
     double eMean = 0.5 * (maxi); // 0.5(a + b)
-    double eStd = (maxi) / (2 * std::sqrt(3)); // (b - a) / (2*3^0.5)
+    double eStd  = (maxi) / (2 * std::sqrt(3)); // (b - a) / (2*3^0.5)
 
     ASSERT_NEAR(mean, eMean, eMean * 0.1);
     ASSERT_NEAR(std, eStd, eStd * 0.1);
 
-    delete [] output;
+    delete[] output;
 }
 
 TEST(threefry_additional_tests, rocrand2_test)
@@ -211,14 +213,15 @@ TEST(threefry_additional_tests, rocrand2_test)
     rocrand_init(0, 0, 0, &state);
     size_t testSize = 40000;
 
-    unsigned long long * output = new unsigned long long[testSize];
+    unsigned long long* output = new unsigned long long[testSize];
 
     double mean = 0;
-    for(size_t i = 0; i < testSize; i += 2){
-        ulonglong2 t = rocrand2(&state);
-        output[i] = t.x;
+    for(size_t i = 0; i < testSize; i += 2)
+    {
+        ulonglong2 t  = rocrand2(&state);
+        output[i]     = t.x;
         output[i + 1] = t.y;
-        mean += static_cast<double>(output[i]); 
+        mean += static_cast<double>(output[i]);
         mean += static_cast<double>(output[i + 1]);
     }
     mean /= testSize;
@@ -229,13 +232,13 @@ TEST(threefry_additional_tests, rocrand2_test)
 
     std = std::sqrt(std / testSize);
 
-    double maxi = (double) std::numeric_limits<unsigned long long>::max();
+    double maxi = (double)std::numeric_limits<unsigned long long>::max();
     // min val is 0
     double eMean = 0.5 * (maxi); // 0.5(a + b)
-    double eStd = (maxi) / (2 * std::sqrt(3)); // (b - a) / (2*3^0.5)
+    double eStd  = (maxi) / (2 * std::sqrt(3)); // (b - a) / (2*3^0.5)
 
     ASSERT_NEAR(mean, eMean, eMean * 0.1);
-    ASSERT_NEAR(std, eStd, eStd * 0.1);\
+    ASSERT_NEAR(std, eStd, eStd * 0.1);
 
-    delete [] output;
+    delete[] output;
 }

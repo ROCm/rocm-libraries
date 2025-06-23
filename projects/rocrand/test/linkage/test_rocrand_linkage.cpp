@@ -18,14 +18,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <stdio.h>
 #include <gtest/gtest.h>
+#include <stdio.h>
 
 #include <hip/hip_runtime.h>
 
 #include <rocrand/rocrand.h>
-#include <rocrand/rocrand_kernel.h>
 #include <rocrand/rocrand.hpp>
+#include <rocrand/rocrand_kernel.h>
 
 #include "get_rocrand_version.hpp"
 

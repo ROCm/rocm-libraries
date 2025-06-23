@@ -66,7 +66,8 @@ class philox4x32_10_engine_type_test : public philox4x32_10_generator::engine_ty
 public:
     __host__ philox4x32_10_engine_type_test() : philox4x32_10_generator::engine_type(0, 0, 0) {}
 
-    __host__ state_type& internal_state_ref()
+    __host__
+    state_type& internal_state_ref()
     {
         return m_state;
     }

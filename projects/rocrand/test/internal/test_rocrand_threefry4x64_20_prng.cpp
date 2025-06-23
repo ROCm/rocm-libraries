@@ -72,7 +72,8 @@ class threefry4x64_engine_type_test : public threefry4x64_20_generator::engine_t
 public:
     __host__ threefry4x64_engine_type_test() : threefry4x64_20_generator::engine_type(0, 0, 0) {}
 
-    __host__ state_type& internal_state_ref()
+    __host__
+    state_type& internal_state_ref()
     {
         return m_state;
     }
@@ -269,11 +270,12 @@ TEST(threefry_additional_tests, rocrand_init_test)
 
     using ull = unsigned long long;
 
-    ull seeds[] = {0, 123, 321, 123456, 654321};
+    ull seeds[]        = {0, 123, 321, 123456, 654321};
     ull subsequences[] = {0xf, 0xff, 0x1f, 0x1ff, 0x1f1};
-    ull offsets[] = {0, 1, 2, 3, 4};
+    ull offsets[]      = {0, 1, 2, 3, 4};
 
-    for(int i = 0; i < 5; i++){
+    for(int i = 0; i < 5; i++)
+    {
         rocrand_init(seeds[i], subsequences[i], offsets[i], &state1);
         rocrand_init(seeds[i], subsequences[i], offsets[i], &state2);
 
@@ -290,10 +292,11 @@ TEST(threefry_additional_tests, rocrand_test)
     rocrand_init(0, 0, 0, &state);
     size_t testSize = 40000;
 
-    unsigned long long * output = new unsigned long long[testSize];
+    unsigned long long* output = new unsigned long long[testSize];
 
     double mean = 0;
-    for(size_t i = 0; i < testSize; i++){
+    for(size_t i = 0; i < testSize; i++)
+    {
         output[i] = rocrand(&state);
         mean += static_cast<double>(output[i]);
     }
@@ -305,14 +308,14 @@ TEST(threefry_additional_tests, rocrand_test)
 
     std = std::sqrt(std / testSize);
 
-    double maxi = (double) std::numeric_limits<unsigned long long>::max();
+    double maxi  = (double)std::numeric_limits<unsigned long long>::max();
     double eMean = 0.5 * (maxi); // 0.5(a + b)
-    double eStd = (maxi) / (2 * std::sqrt(3)); // (b - a) / (2*3^0.5)
+    double eStd  = (maxi) / (2 * std::sqrt(3)); // (b - a) / (2*3^0.5)
 
     ASSERT_NEAR(mean, eMean, eMean * 0.1);
     ASSERT_NEAR(std, eStd, eStd * 0.1);
 
-    delete [] output;
+    delete[] output;
 }
 
 TEST(threefry_additional_tests, rocrand4_test)
@@ -323,16 +326,17 @@ TEST(threefry_additional_tests, rocrand4_test)
     rocrand_init(0, 0, 0, &state);
     size_t testSize = 40000;
 
-    unsigned long long * output = new unsigned long long[testSize];
+    unsigned long long* output = new unsigned long long[testSize];
 
     double mean = 0;
-    for(size_t i = 0; i < testSize; i += 4){
-        ulonglong4 t = rocrand4(&state);
-        output[i] = t.w;
+    for(size_t i = 0; i < testSize; i += 4)
+    {
+        ulonglong4 t  = rocrand4(&state);
+        output[i]     = t.w;
         output[i + 1] = t.x;
         output[i + 2] = t.y;
         output[i + 3] = t.z;
-        mean += static_cast<double>(output[i]); 
+        mean += static_cast<double>(output[i]);
         mean += static_cast<double>(output[i + 1]);
         mean += static_cast<double>(output[i + 2]);
         mean += static_cast<double>(output[i + 3]);
@@ -345,13 +349,13 @@ TEST(threefry_additional_tests, rocrand4_test)
 
     std = std::sqrt(std / testSize);
 
-    double maxi = (double) std::numeric_limits<unsigned long long>::max();
+    double maxi = (double)std::numeric_limits<unsigned long long>::max();
     // min val is 0
     double eMean = 0.5 * (maxi); // 0.5(a + b)
-    double eStd = (maxi) / (2 * std::sqrt(3)); // (b - a) / (2*3^0.5)
+    double eStd  = (maxi) / (2 * std::sqrt(3)); // (b - a) / (2*3^0.5)
 
     ASSERT_NEAR(mean, eMean, eMean * 0.1);
     ASSERT_NEAR(std, eStd, eStd * 0.1);
 
-    delete [] output;
+    delete[] output;
 }

@@ -54,96 +54,118 @@
     }                                                                                     \
     while(0)
 
-struct GlobalSizes {
+struct GlobalSizes
+{
     static constexpr size_t items_per_thread = 10000;
-    static constexpr size_t block_size = 8;
-    static constexpr size_t items_per_block = items_per_thread * block_size;
-    static constexpr size_t grid_size = 8;
-    static constexpr size_t size = grid_size * items_per_block;
+    static constexpr size_t block_size       = 8;
+    static constexpr size_t items_per_block  = items_per_thread * block_size;
+    static constexpr size_t grid_size        = 8;
+    static constexpr size_t size             = grid_size * items_per_block;
 };
 
 //get the rocrand state (device_state should be allocated)
 template<class RocrandPRNGType>
-inline void GetRocrandState(RocrandPRNGType * device_state){
+inline void GetRocrandState(RocrandPRNGType* device_state)
+{
 
-    RocrandPRNGType * host_state = new RocrandPRNGType[GlobalSizes::block_size * GlobalSizes::grid_size];
+    RocrandPRNGType* host_state
+        = new RocrandPRNGType[GlobalSizes::block_size * GlobalSizes::grid_size];
 
-    for(size_t i = 0; i < GlobalSizes::block_size * GlobalSizes::grid_size; i++){
-        if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_sobol32>){
+    for(size_t i = 0; i < GlobalSizes::block_size * GlobalSizes::grid_size; i++)
+    {
+        if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_sobol32>)
+        {
             const unsigned int* directions;
-            ROCRAND_CHECK(rocrand_get_direction_vectors32(&directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
+            ROCRAND_CHECK(
+                rocrand_get_direction_vectors32(&directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
             rocrand_init(directions, 123456 ^ i, host_state + i);
         }
         // scrambled sobol32 case
-        else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_scrambled_sobol32>){
+        else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_scrambled_sobol32>)
+        {
             const unsigned int* directions;
-            ROCRAND_CHECK(rocrand_get_direction_vectors32(&directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
+            ROCRAND_CHECK(
+                rocrand_get_direction_vectors32(&directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
             rocrand_init(directions, 123456 ^ i, 654321 ^ i, host_state + i);
         }
         // sobol64 case
-        else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_sobol64>){
+        else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_sobol64>)
+        {
             const unsigned long long* directions;
-            ROCRAND_CHECK(rocrand_get_direction_vectors64(&directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
+            ROCRAND_CHECK(
+                rocrand_get_direction_vectors64(&directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
             rocrand_init(directions, 123456 ^ i, host_state + i);
         }
         // scrambled sobol64 case
-        else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_scrambled_sobol64>){
+        else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_scrambled_sobol64>)
+        {
             const unsigned long long* directions;
-            ROCRAND_CHECK(rocrand_get_direction_vectors64(&directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
+            ROCRAND_CHECK(
+                rocrand_get_direction_vectors64(&directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
             rocrand_init(directions, 123456 ^ i, 654321 ^ i, host_state + i);
         }
         // lfsr113 case
-        else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_lfsr113>){
+        else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_lfsr113>)
+        {
             rocrand_init({0xabcd, 0xdabc, 0xcdab, 0xbcda}, 0, 0, host_state + i);
         }
-        else{
+        else
+        {
             rocrand_init(123456 ^ i, 654321 ^ i, 0, host_state + i);
         }
         HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipMemcpy(device_state + i, host_state + i, sizeof(RocrandPRNGType), hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(device_state + i,
+                            host_state + i,
+                            sizeof(RocrandPRNGType),
+                            hipMemcpyHostToDevice));
     }
 
-    delete [] host_state;
+    delete[] host_state;
 }
 
 // Declaring typed test parameters
 
 template<class RocrandPRNGType>
-struct PoissonParameterHolder{
+struct PoissonParameterHolder
+{
     using prng_state = RocrandPRNGType;
-
 };
 
-using rocRANDStates = ::testing::Types<
-    rocrand_state_philox4x32_10,
-    rocrand_state_mrg31k3p,
-    rocrand_state_mrg32k3a,
-    rocrand_state_xorwow,
-    rocrand_state_lfsr113,
-    rocrand_state_sobol32,
-    rocrand_state_scrambled_sobol32,
-    rocrand_state_sobol64,
-    rocrand_state_scrambled_sobol64,
-    rocrand_state_threefry2x32_20,
-    rocrand_state_threefry2x64_20,
-    rocrand_state_threefry4x32_20,
-    rocrand_state_threefry4x64_20
->;
+using rocRANDStates = ::testing::Types<rocrand_state_philox4x32_10,
+                                       rocrand_state_mrg31k3p,
+                                       rocrand_state_mrg32k3a,
+                                       rocrand_state_xorwow,
+                                       rocrand_state_lfsr113,
+                                       rocrand_state_sobol32,
+                                       rocrand_state_scrambled_sobol32,
+                                       rocrand_state_sobol64,
+                                       rocrand_state_scrambled_sobol64,
+                                       rocrand_state_threefry2x32_20,
+                                       rocrand_state_threefry2x64_20,
+                                       rocrand_state_threefry4x32_20,
+                                       rocrand_state_threefry4x64_20>;
 
 template<class RocrandPRNGType>
-class PoissonTest : public ::testing::Test{
-    public:
-        using prng_type = RocrandPRNGType;
-        std::vector<double> small_poisson_lambdas = {1, 2, 4, 8, 16, 32, 64};
-        std::vector<double> large_poisson_lambdas = {128, 256, 512, 1024, 2048};
-        std::vector<double> massive_poisson_lambdas = {4096, 8192, 16384, 32768};
+class PoissonTest : public ::testing::Test
+{
+public:
+    using prng_type                             = RocrandPRNGType;
+    std::vector<double> small_poisson_lambdas   = {1, 2, 4, 8, 16, 32, 64};
+    std::vector<double> large_poisson_lambdas   = {128, 256, 512, 1024, 2048};
+    std::vector<double> massive_poisson_lambdas = {4096, 8192, 16384, 32768};
 };
 
 TYPED_TEST_SUITE(PoissonTest, rocRANDStates);
 
 template<typename ReturnType, class RocRandPrngType, class PoissonFunc>
-__global__ void poisson_kernel(RocRandPrngType * states, ReturnType * device_output, const double lambda, const PoissonFunc & f){
-    const size_t offset = (GlobalSizes::items_per_block * blockIdx.x) + (GlobalSizes::items_per_thread * threadIdx.x);
+__global__
+void poisson_kernel(RocRandPrngType*   states,
+                    ReturnType*        device_output,
+                    const double       lambda,
+                    const PoissonFunc& f)
+{
+    const size_t offset = (GlobalSizes::items_per_block * blockIdx.x)
+                          + (GlobalSizes::items_per_thread * threadIdx.x);
     const size_t state_offset = (GlobalSizes::block_size * blockIdx.x) + threadIdx.x;
 
     auto state = states + state_offset;

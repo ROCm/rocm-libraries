@@ -47,7 +47,7 @@
         {                                                                                 \
             std::cerr << "Encountered ROCRAND error: " << status << "at line" << __LINE__ \
                       << " in file " << __FILE__ << "\n";                                 \
-            exit(-1);                                                                     \
+            exit(status);                                                                 \
         }                                                                                 \
     }                                                                                     \
     while(0)
@@ -442,6 +442,8 @@ struct NumericUD{
 
         ASSERT_NEAR(mean, eMean, eMean * 0.1) << "Expected Mean: " << eMean << " Actual Mean: " << mean << " Eps: " << eMean * 0.1;
         ASSERT_NEAR(std, eStd, eStd * 0.1) << "Expected Std: " << eStd << " Actual Std: " << std << " Eps: " << eStd * 0.1;
+
+        delete [] output;
     }
 
 };
@@ -615,6 +617,8 @@ struct StatesUD{
 
         ASSERT_NEAR(mean, eMean, eMean * 0.1) << "Expected Mean: " << eMean << " Actual Mean: " << mean << " Eps: " << eMean * 0.1;
         ASSERT_NEAR(std, eStd, eStd * 0.1) << "Expected Std: " << eStd << " Actual Std: " << std << " Eps: " << eStd * 0.1;
+
+        delete [] output;
     }
 };
 
