@@ -27,13 +27,17 @@
 #  define THRUST_HOST        __host__
 #  define THRUST_DEVICE      __device__
 #  define THRUST_HOST_DEVICE __host__ __device__
-#  define THRUST_FORCEINLINE __forceinline__
 #else // ^^^ (CUDA_COMPILATION || HIP_COMPILATION) ^^^ / vvv !(CUDA_COMPILATION || HIP_COMPILATION) vvv
 #  define THRUST_HOST
 #  define THRUST_DEVICE
 #  define THRUST_HOST_DEVICE
-#  define THRUST_FORCEINLINE
 #endif // !(CUDA_COMPILATION || HIP_COMPILATION)
+
+#if defined(_MSC_VER) || (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP)
+#  define THRUST_FORCEINLINE __forceinline__
+#else
+#  define THRUST_FORCEINLINE __inline__ __attribute__((__always_inline__))
+#endif
 
 #if !defined(__HIP__)
 #  if !defined(THRUST_EXEC_CHECK_DISABLE)
