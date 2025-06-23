@@ -63,20 +63,12 @@ using conjunction_value THRUST_DEPRECATED_BECAUSE("Use: cuda::std::bool_constant
 #endif
 
 template <bool... Bs>
-constexpr bool
-  conjunction_value_v THRUST_DEPRECATED_BECAUSE("Use a fold expression: Bs && ...") = conjunction_value<Bs...>::value;
-
-template <bool... Bs>
 using disjunction_value THRUST_DEPRECATED_BECAUSE("Use: cuda::std::bool_constant<(Bs || ...)>") =
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
   disjunction<::cuda::std::bool_constant<Bs>...>;
 #else
   disjunction<::std::bool_constant<Bs>...>;
 #endif
-
-template <bool... Bs>
-constexpr bool
-  disjunction_value_v THRUST_DEPRECATED_BECAUSE("Use a fold expression: Bs || ...") = disjunction_value<Bs...>::value;
 
 template <bool B>
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
@@ -85,7 +77,17 @@ using negation_value THRUST_DEPRECATED_BECAUSE("Use cuda::std::bool_constant<!B>
 using negation_value THRUST_DEPRECATED_BECAUSE("Use cuda::std::bool_constant<!B>") = ::std::bool_constant<!B>;
 #endif
 
+THRUST_SUPPRESS_DEPRECATED_PUSH
+template <bool... Bs>
+constexpr bool
+  conjunction_value_v THRUST_DEPRECATED_BECAUSE("Use a fold expression: Bs && ...") = conjunction_value<Bs...>::value;
+
+template <bool... Bs>
+constexpr bool
+  disjunction_value_v THRUST_DEPRECATED_BECAUSE("Use a fold expression: Bs || ...") = disjunction_value<Bs...>::value;
+
 template <bool B>
 constexpr bool negation_value_v THRUST_DEPRECATED_BECAUSE("Use a plain negation !B") = negation_value<B>::value;
+THRUST_SUPPRESS_DEPRECATED_POP
 
 THRUST_NAMESPACE_END
