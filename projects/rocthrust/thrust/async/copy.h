@@ -58,11 +58,11 @@ namespace unimplemented
 THRUST_SUPPRESS_DEPRECATED_PUSH
 template <typename FromPolicy, typename ToPolicy, typename ForwardIt, typename Sentinel, typename OutputIt>
 THRUST_DEPRECATED THRUST_HOST event<FromPolicy> async_copy(
-  thrust::execution_policy<FromPolicy>& from_exec,
-  thrust::execution_policy<ToPolicy>& to_exec,
-  ForwardIt first,
-  Sentinel last,
-  OutputIt output)
+  thrust::execution_policy<FromPolicy>& /*from_exec*/,
+  thrust::execution_policy<ToPolicy>& /*to_exec*/,
+  ForwardIt /*first*/,
+  Sentinel /*last*/,
+  OutputIt /*output*/)
 {
   THRUST_STATIC_ASSERT_MSG((thrust::detail::depend_on_instantiation<ForwardIt, false>::value),
                            "this algorithm is not implemented for the specified system");
