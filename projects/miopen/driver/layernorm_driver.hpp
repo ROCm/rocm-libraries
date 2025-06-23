@@ -445,7 +445,7 @@ int LayerNormDriver<Tgpu, Tref>::AddCmdLineArgs()
     inflags.AddInputFlag("in_d", 'D', "0", "Input depth (Default=0)", "int");
 
     inflags.AddInputFlag("eps", 'e', "0.00001", "Alpha (Default=0.00001)", "double");
-    inflags.AddInputFlag("normalized_dim", 'o', "3", "Normalized Dim (Default=3)", "int");
+    inflags.AddInputFlag("normalized_dim", 'o', "3", "Normalized Dim, given in NCDHW/NCHW/NW regardless of specified layout (Default=3)", "int");
     inflags.AddInputFlag(
         "mode", 'm', "0", "elemwise affine mode (0), weight and bias mode (1) (Default=0)", "int");
 
@@ -921,6 +921,23 @@ void LayerNormDriver<Tgpu, Tref>::ValidateLayout()
     else if((in_d != 0 || in_c != 0 || in_h != 0) && layout_value == "NW")
     {
         std::cerr << "The input depth (in_d), channels (in_c) and height (in_h) be zero for layout NW" << std::endl;
+        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+    }
+
+    int normalized_dim = inflags.GetValueInt("normalized_dim");
+    if(normalized_dim >= 5 && (layout_value == "NCDHW" || layout_value == "NDHWC"))
+    {
+        std::cerr << "The normalized dimension (normalized_dim) must be less than 5 for layouts NCDHW and NDHWC" << std::endl;
+        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+    }
+    else if(normalized_dim >= 4 && (layout_value == "NCHW" || layout_value == "NHWC"))
+    {
+        std::cerr << "The normalized dimension (normalized_dim) must be less than 4 for layouts NCHW and NHWC" << std::endl;
+        exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
+    }
+    else if(normalized_dim >= 2 && layout_value == "NW")
+    {
+        std::cerr << "The normalized dimension (normalized_dim) must be less than 2 for layout NW" << std::endl;
         exit(EXIT_FAILURE); // NOLINT (concurrency-mt-unsafe)
     }
 }
