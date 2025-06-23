@@ -1388,7 +1388,7 @@ class StreamK(Component):
         # AccVgpr write
         # if kernel.enabledSetPrioSplitLDS:
         #     kStr += inst("s_setprio", "0", "")
-        if codeAccVgprWrite is not None:
+        if codeAccVgprWrite is not None and kernel["LocalSplitU"] == 1:
             regsPerScalar = writer.states.bpeCinternal // writer.states.bpr # register per scalar
             # loop over store instructions within one batch
             for elementIdx in range(0, len(batchElements)):
