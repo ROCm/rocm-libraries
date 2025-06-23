@@ -24,149 +24,128 @@
  *
  *******************************************************************************/
 
-#include <lld/Common/Driver.h>
-#include <llvm/MC/MCAsmBackend.h>
-#include <llvm/MC/MCAsmInfo.h>
-#include <llvm/MC/MCCodeEmitter.h>
-#include <llvm/MC/MCContext.h>
-#include <llvm/MC/MCInstrInfo.h>
-#include <llvm/MC/MCObjectFileInfo.h>
-#include <llvm/MC/MCObjectWriter.h>
-#include <llvm/MC/MCParser/MCAsmParser.h>
-#include <llvm/MC/MCParser/MCTargetAsmParser.h>
-#include <llvm/MC/MCRegisterInfo.h>
-#include <llvm/MC/MCStreamer.h>
-#include <llvm/MC/MCSubtargetInfo.h>
-#include <llvm/MC/MCTargetOptions.h>
-#include <llvm/MC/TargetRegistry.h>
-#include <llvm/Option/Option.h>
-#include <llvm/Support/FileSystem.h>
-#include <llvm/Support/InitLLVM.h>
-#include <llvm/Support/MemoryBuffer.h>
-#include <llvm/Support/Path.h>
-#include <llvm/Support/SourceMgr.h>
-#include <llvm/Support/TargetSelect.h>
-
-#include <cstdio>
-#include <filesystem>
-#include <iostream>
 #include <vector>
 
-#include <rocRoller/Assemblers/InProcessAssembler.hpp>
+#include <amd_comgr/amd_comgr.h>
+#include <fmt/core.h>
 
-#include <llvm/Config/llvm-config.h>
-#if LLVM_VERSION_MAJOR >= 18
-LLD_HAS_DRIVER(elf)
-#endif
+#include <rocRoller/Assemblers/InProcessAssembler.hpp>
+#include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
+#include <rocRoller/Utilities/Component.hpp>
+#include <rocRoller/Utilities/Timer.hpp>
+
+// Helper macro to check for amd_comgr errors
+#define COMGR_CHECK(cmd)                                                                      \
+    do                                                                                        \
+    {                                                                                         \
+        amd_comgr_status_t e = cmd;                                                           \
+        if(e != amd_comgr_status_t::AMD_COMGR_STATUS_SUCCESS)                                 \
+        {                                                                                     \
+            std::ostringstream msg;                                                           \
+            char const*        statusMsg;                                                     \
+            amd_comgr_status_string(e, &statusMsg);                                           \
+            msg << "amd comgr failure at line " << __LINE__ << ": " << std::string(statusMsg) \
+                << std::endl;                                                                 \
+            Log::error(msg.str());                                                            \
+            AssertFatal(false, msg.str());                                                    \
+        }                                                                                     \
+    } while(0)
 
 namespace rocRoller
 {
 
-    InProcessAssembler::InProcessAssembler()
-    {
-        LLVMInitializeAMDGPUTarget();
-        LLVMInitializeAMDGPUTargetInfo();
-        LLVMInitializeAMDGPUTargetMC();
-        LLVMInitializeAMDGPUDisassembler();
-        LLVMInitializeAMDGPUAsmParser();
-        LLVMInitializeAMDGPUAsmPrinter();
-    }
+    InProcessAssembler::InProcessAssembler() {}
 
     InProcessAssembler::~InProcessAssembler() {}
 
-    void InProcessAssembler::assemble(const char* machineCode,
-                                      const char* target,
-                                      const char* featureString,
-                                      const char* output)
+    RegisterComponent(InProcessAssembler);
+    static_assert(Component::Component<InProcessAssembler>);
+
+    bool InProcessAssembler::Match(Argument arg)
     {
-        const std::string triple = "amdgcn-amd-amdhsa";
-
-        // Create a Source Manager with the machine_code string
-        std::unique_ptr<llvm::MemoryBuffer> Buffer
-            = llvm::MemoryBuffer::getMemBuffer(llvm::StringRef(machineCode), "Input Assembly");
-        llvm::SourceMgr SrcMgr;
-        SrcMgr.AddNewSourceBuffer(std::move(Buffer), llvm::SMLoc());
-
-        // Get the target for an AMD GPU
-        std::string         error;
-        const llvm::Target* TheTarget = llvm::TargetRegistry::lookupTarget(triple, error);
-        if(!TheTarget)
-            throw std::runtime_error("Error creating a target for " + triple);
-
-        // Create a Machine Code Register Info instance
-        std::unique_ptr<llvm::MCRegisterInfo> MRI(TheTarget->createMCRegInfo(triple));
-
-        // Create a Machine Code Assembly Info instance
-        llvm::MCTargetOptions            mcOptions;
-        std::unique_ptr<llvm::MCAsmInfo> MAI(TheTarget->createMCAsmInfo(*MRI, triple, mcOptions));
-
-        // Create an output stream
-        std::error_code EC;
-        auto FDOS = std::make_unique<llvm::raw_fd_ostream>(output, EC, llvm::sys::fs::OF_None);
-
-        // Create a Machine Code Object File Info instance
-        std::unique_ptr<llvm::MCObjectFileInfo> MOFI(new llvm::MCObjectFileInfo());
-
-        // Create a Machine Code Target Info instance
-        std::unique_ptr<llvm::MCSubtargetInfo> STI(TheTarget->createMCSubtargetInfo(
-            triple, std::string(target), std::string(featureString)));
-
-        // Create a Context
-        llvm::MCContext Ctx(llvm::Triple(triple), MAI.get(), MRI.get(), STI.get(), &SrcMgr);
-        Ctx.setObjectFileInfo(MOFI.get());
-        MOFI->initMCObjectFileInfo(Ctx, true);
-
-        // Create a Machine Code Streamer instance
-        std::unique_ptr<llvm::MCStreamer>  Str;
-        std::unique_ptr<llvm::MCInstrInfo> MCII(TheTarget->createMCInstrInfo());
-
-        auto                     BOS = std::make_unique<llvm::buffer_ostream>(*FDOS);
-        llvm::raw_pwrite_stream* Out = BOS.get();
-
-        llvm::MCCodeEmitter*  CE = TheTarget->createMCCodeEmitter(*MCII, Ctx);
-        llvm::MCTargetOptions Backend_Options;
-        llvm::MCAsmBackend*   MAB = TheTarget->createMCAsmBackend(*STI, *MRI, Backend_Options);
-        Str.reset(TheTarget->createMCObjectStreamer(llvm::Triple(triple),
-                                                    Ctx,
-                                                    std::unique_ptr<llvm::MCAsmBackend>(MAB),
-                                                    MAB->createObjectWriter(*Out),
-                                                    std::unique_ptr<llvm::MCCodeEmitter>(CE),
-                                                    *STI
-#if LLVM_VERSION_MAJOR < 19
-                                                    ,
-                                                    true,
-                                                    true,
-                                                    true
-#endif
-                                                    ));
-
-        // Create a Parser instance
-        std::unique_ptr<llvm::MCAsmParser> Parser(createMCAsmParser(SrcMgr, Ctx, *Str.get(), *MAI));
-
-        llvm::MCTargetOptions                    Options;
-        std::unique_ptr<llvm::MCTargetAsmParser> TAP(
-            TheTarget->createMCAsmParser(*STI, *Parser, *MCII, Options));
-        Parser->setTargetParser(*TAP.get());
-
-        // Run the parser, which will generate machine code to the output stream.
-        bool result = Parser->Run(true);
-        if(result)
-            throw std::runtime_error("Error assembling machine code");
+        return arg == AssemblerType::InProcess;
     }
 
-    void InProcessAssembler::link(const char* input, const char* output)
+    AssemblerPtr InProcessAssembler::Build(Argument arg)
     {
-        llvm::opt::ArgStringList LLDArgs;
-        LLDArgs.push_back("lld");
-        LLDArgs.push_back(input);
-        LLDArgs.push_back("--threads=1");
-        LLDArgs.push_back("-shared");
-        LLDArgs.push_back("-o");
-        LLDArgs.push_back(output);
+        if(!Match(arg))
+            return nullptr;
 
-        bool linkResult = lld::elf::link(LLDArgs, llvm::outs(), llvm::outs(), false, false);
-        if(!linkResult)
-            throw std::runtime_error("Error linking");
+        return std::make_shared<InProcessAssembler>();
     }
 
+    std::string InProcessAssembler::name() const
+    {
+        return Name;
+    }
+
+    std::vector<char> InProcessAssembler::assembleMachineCode(const std::string& machineCode,
+                                                              const GPUArchitectureTarget& target)
+    {
+        return assembleMachineCode(machineCode, target, defaultKernelName);
+    }
+
+    std::vector<char> InProcessAssembler::assembleMachineCode(const std::string& machineCode,
+                                                              const GPUArchitectureTarget& target,
+                                                              const std::string& kernelName)
+    {
+        // Time assembleMachineCode function
+        TIMER(t, "Assembler::assembleMachineCode");
+
+        std::vector<char> result;
+        size_t            dataOutSize   = 0;
+        auto const        arch          = GPUArchitectureLibrary::getInstance()->GetArch(target);
+        auto const        wavefrontSize = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
+        std::string const targetID      = fmt::format("amdgcn-amd-amdhsa--{}", target.toString());
+
+        std::string dataName = kernelName.empty() ? defaultKernelName : kernelName;
+        AssertFatal(!dataName.empty(), "InProcessAssembler needs a kernel name");
+
+        amd_comgr_data_t        DataIn1, DataOut;
+        amd_comgr_data_set_t    DataSetIn, DataSetOut, DataSetExec;
+        amd_comgr_action_info_t DataAction;
+        amd_comgr_status_t      Status;
+
+        const char* CodeGenOptions[]
+            = {"-mcode-object-version=5",
+               (wavefrontSize == 64) ? "-mwavefrontsize64" : "-mno-wavefrontsize64"};
+        size_t CodeGenOptionsCount = sizeof(CodeGenOptions) / sizeof(CodeGenOptions[0]);
+
+        COMGR_CHECK(amd_comgr_create_data_set(&DataSetIn));
+        COMGR_CHECK(amd_comgr_create_data(AMD_COMGR_DATA_KIND_SOURCE, &DataIn1));
+
+        COMGR_CHECK(amd_comgr_set_data(DataIn1, machineCode.size(), machineCode.c_str()));
+        COMGR_CHECK(amd_comgr_set_data_name(DataIn1, dataName.c_str()));
+        COMGR_CHECK(amd_comgr_data_set_add(DataSetIn, DataIn1));
+
+        COMGR_CHECK(amd_comgr_create_data_set(&DataSetOut));
+        COMGR_CHECK(amd_comgr_create_data_set(&DataSetExec));
+
+        COMGR_CHECK(amd_comgr_create_action_info(&DataAction));
+        COMGR_CHECK(amd_comgr_action_info_set_isa_name(DataAction, targetID.c_str()));
+        COMGR_CHECK(
+            amd_comgr_action_info_set_option_list(DataAction, CodeGenOptions, CodeGenOptionsCount));
+
+        COMGR_CHECK(amd_comgr_do_action(
+            AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE, DataAction, DataSetIn, DataSetOut));
+
+        COMGR_CHECK(amd_comgr_do_action(
+            AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE, DataAction, DataSetOut, DataSetExec));
+
+        COMGR_CHECK(amd_comgr_action_data_get_data(
+            DataSetExec, AMD_COMGR_DATA_KIND_EXECUTABLE, 0, &DataOut));
+
+        COMGR_CHECK(amd_comgr_get_data(DataOut, &dataOutSize, nullptr));
+        AssertFatal(dataOutSize > 0, "No compiled kernel data");
+        result.resize(dataOutSize);
+        COMGR_CHECK(amd_comgr_get_data(DataOut, &dataOutSize, result.data()));
+
+        COMGR_CHECK(amd_comgr_destroy_data_set(DataSetIn));
+        COMGR_CHECK(amd_comgr_destroy_data_set(DataSetOut));
+        COMGR_CHECK(amd_comgr_destroy_data_set(DataSetExec));
+        COMGR_CHECK(amd_comgr_destroy_action_info(DataAction));
+        COMGR_CHECK(amd_comgr_release_data(DataIn1));
+
+        return result;
+    }
 }

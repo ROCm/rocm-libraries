@@ -433,6 +433,8 @@ namespace
         inputs.c = reinterpret_cast<const void*>(prob.C);
         inputs.d = reinterpret_cast<void*>(prob.D);
 
+        inputs.compressed = prob.sparseA ? inputs.a : inputs.b;
+
         inputs.batchA = reinterpret_cast<void const* const*>(prob.batch_A);
         inputs.batchB = reinterpret_cast<void const* const*>(prob.batch_B);
         inputs.batchC = reinterpret_cast<void const* const*>(prob.batch_C);

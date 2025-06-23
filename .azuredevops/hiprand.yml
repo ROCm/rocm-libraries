@@ -23,6 +23,7 @@ trigger:
   branches:
     include:
     - develop
+    - release-staging/rocm-rel-7.*
   paths:
     include:
     - projects/hiprand
@@ -31,8 +32,8 @@ trigger:
     - projects/hiprand/.github
     - projects/hiprand/.jenkins
     - projects/hiprand/docs
-    - projects/hiprand/'.*.y*ml'
-    - projects/hiprand/'*.md'
+    - projects/hiprand/.*.y*ml
+    - projects/hiprand/*.md
     - projects/hiprand/LICENSE.txt
 
 pr:
@@ -40,6 +41,7 @@ pr:
   branches:
     include:
     - develop
+    - release-staging/rocm-rel-7.*
   paths:
     include:
     - projects/hiprand
@@ -48,8 +50,8 @@ pr:
     - projects/hiprand/.github
     - projects/hiprand/.jenkins
     - projects/hiprand/docs
-    - projects/hiprand/'.*.y*ml'
-    - projects/hiprand/'*.md'
+    - projects/hiprand/.*.y*ml
+    - projects/hiprand/*.md
     - projects/hiprand/LICENSE.txt
   drafts: false
 

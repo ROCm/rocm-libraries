@@ -37,6 +37,7 @@
 #include "TestContext.hpp"
 #include "common/SourceMatcher.hpp"
 #include <common/CommonGraphs.hpp>
+#include <common/Utilities.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
 #include <rocRoller/KernelGraph/Transforms/AliasDataFlowTags_detail.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
@@ -55,15 +56,6 @@ namespace std
 }
 namespace AliasDataFlowTagsTest
 {
-
-    template <typename Transform, typename... Args>
-    rocRoller::KernelGraph::KernelGraph transform(rocRoller::KernelGraph::KernelGraph& graph,
-                                                  Args... args)
-    {
-        auto xform = std::make_shared<Transform>(std::forward<Args>(args)...);
-        return graph.transform(xform);
-    }
-
     TEST_CASE("AliasDataFlowTags transformation works.", "[kernel-graph][graph-transforms]")
     {
         using namespace rocRoller::KernelGraph;

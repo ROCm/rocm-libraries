@@ -1613,6 +1613,7 @@ namespace KernelGraphTest
         auto kgraph1 = kgraph0.transform(lowerLinearTransform);
 
         auto user0   = 1;
+        auto subdim0 = 3;
         auto block0  = 17;
         auto thread0 = 18;
 
@@ -1625,6 +1626,9 @@ namespace KernelGraphTest
         EXPECT_EQ(sexpr,
                   "{Split: Multiply({Tile: Add(Multiply(2:I, 64:U32)U32, 33:I)U32}, "
                   "CommandArgument(Tensor_0_stride_0)I64)I64}");
+
+        auto stride = getStride(kgraph1.coordinates.getNode(subdim0));
+        auto fa     = fastArith(stride);
 
         exprs = kgraph1.coordinates.reverse({block_id, thread_id}, {user0}, {block0, thread0});
         sexpr = Expression::toString(fastArith(exprs[0]));

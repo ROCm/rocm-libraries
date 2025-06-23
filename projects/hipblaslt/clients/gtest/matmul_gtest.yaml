@@ -1894,6 +1894,20 @@ Tests:
   beta: 2.0
   unit_check: 1
 
+- name: matmul_heuristic_all_solutions_no_workspace
+  category: nightly
+  function:
+    matmul: *real_precisions
+  matrix_size:
+    - { M:  128,   N:  128,    K:  2048 }
+  algo_method: [0,1]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: 1
+  requested_solution_num: -1
+  user_allocated_workspace: [0]
+  unit_check: 1
+
 - name: matmul_heuristic_all_solutions
   category: nightly
   function:

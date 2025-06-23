@@ -24,6 +24,7 @@
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/variant.h>
@@ -31,8 +32,73 @@
 
 namespace nb = nanobind;
 
+namespace rocisa
+{
+    DataType instTypeToDataType(InstType instType)
+    {
+        switch(instType)
+        {
+        case InstType::INST_F16:
+            return DataType::Half;
+        case InstType::INST_F32:
+            return DataType::Float;
+        case InstType::INST_F64:
+            return DataType::Double;
+        case InstType::INST_BF16:
+            return DataType::BFloat16;
+        case InstType::INST_I8:
+            return DataType::Int8;
+        case InstType::INST_U8:
+            return DataType::Int8;
+        case InstType::INST_I32:
+            return DataType::Int32;
+        case InstType::INST_XF32:
+            return DataType::XFloat32;
+        case InstType::INST_F8:
+            return DataType::Float8;
+        case InstType::INST_BF8:
+            return DataType::BFloat8;
+        case InstType::INST_F8_BF8:
+            return DataType::Float8BFloat8;
+        case InstType::INST_BF8_F8:
+            return DataType::BFloat8Float8;
+        default:
+            throw std::runtime_error("Unknown instruction type");
+        }
+    }
+
+    bool is8bitFloat(DataType value)
+    {
+        switch(value)
+        {
+        case DataType::Float8:
+        case DataType::BFloat8:
+        case DataType::Float8BFloat8:
+        case DataType::BFloat8Float8:
+        case DataType::Float8_fnuz:
+        case DataType::BFloat8_fnuz:
+        case DataType::Float8BFloat8_fnuz:
+        case DataType::BFloat8Float8_fnuz:
+            return true;
+        default:
+            return false;
+        }
+    }
+} // namespace rocisa
+
 void mfma_inst(nb::module_ m_mfma)
 {
+    m_mfma
+        .def("getMFMAIssueLatency",
+             &rocisa::getMFMAIssueLatency<false>,
+             nb::arg("dataType"),
+             nb::arg("miM"),
+             nb::arg("miB"))
+        .def("getSMFMAIssueLatency",
+             &rocisa::getMFMAIssueLatency<true>,
+             nb::arg("dataType"),
+             nb::arg("miM"),
+             nb::arg("miB"));
     nb::class_<rocisa::MFMAInstruction, rocisa::Instruction>(m_mfma, "MFMAInstruction")
         .def(nb::init<rocisa::InstType,
                       rocisa::InstType,
@@ -59,6 +125,7 @@ void mfma_inst(nb::module_ m_mfma)
         .def_rw("acc", &rocisa::MFMAInstruction::acc)
         .def_rw("acc2", &rocisa::MFMAInstruction::acc2)
         .def("getParams", &rocisa::MFMAInstruction::getParams)
+        .def("getIssueLatency", &rocisa::MFMAInstruction::getIssueLatency)
         .def("__str__", &rocisa::MFMAInstruction::toString)
         .def("__deepcopy__", [](const rocisa::MFMAInstruction& self, const nb::dict&) {
             return new rocisa::MFMAInstruction(self);
@@ -88,6 +155,7 @@ void mfma_inst(nb::module_ m_mfma)
         .def_rw("acc", &rocisa::SMFMAInstruction::acc)
         .def_rw("metadata", &rocisa::SMFMAInstruction::metadata)
         .def("getParams", &rocisa::SMFMAInstruction::getParams)
+        .def("getIssueLatency", &rocisa::SMFMAInstruction::getIssueLatency)
         .def("__str__", &rocisa::SMFMAInstruction::toString)
         .def("__deepcopy__", [](const rocisa::SMFMAInstruction& self, const nb::dict&) {
             return new rocisa::SMFMAInstruction(self);

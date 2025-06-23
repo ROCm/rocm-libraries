@@ -24,13 +24,13 @@
 
 #include "internal/extra/rocsparse_csrgemm.h"
 #include "../conversion/rocsparse_identity.hpp"
-#include "control.h"
 #include "csrgemm_device.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm.hpp"
 #include "rocsparse_csrgemm_mult.hpp"
 #include "rocsparse_csrgemm_multadd.hpp"
 #include "rocsparse_csrgemm_scal.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {

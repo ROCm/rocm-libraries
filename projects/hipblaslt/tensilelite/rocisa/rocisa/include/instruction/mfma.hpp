@@ -21,10 +21,56 @@
  *
  * ************************************************************************ */
 #pragma once
+#include "enum.hpp"
 #include "instruction/instruction.hpp"
 
 namespace rocisa
 {
+    DataType instTypeToDataType(InstType instType);
+
+    bool is8bitFloat(DataType value);
+
+    template <bool isSparse>
+    auto getMFMAIssueLatency(DataType dataType, int matrixInstM, int matrixInstB)
+    {
+        auto numBytes       = dataTypeToBytes(dataType);
+        int  mi_divisor     = 2;
+        int  miIssueLatency = 2;
+        auto isaVersion     = rocIsa::getInstance().getKernel().isaVersion;
+        if((isaVersion == std::array<int, 3>{9, 4, 0} || isaVersion == std::array<int, 3>{9, 4, 1}
+            || isaVersion == std::array<int, 3>{9, 4, 2}
+            || isaVersion == std::array<int, 3>{9, 5, 0})
+           && matrixInstB == 1)
+        {
+            if(dataType == DataType::Half || dataType == DataType::BFloat16
+               || dataType == DataType::Int8 || is8bitFloat(dataType))
+            {
+                mi_divisor     = 4;
+                miIssueLatency = 1;
+            }
+        }
+
+        if(isaVersion == std::array<int, 3>{9, 5, 0} && numBytes == 2)
+        {
+            mi_divisor     = 2;
+            miIssueLatency = 2;
+        }
+
+        // need some way to distinguish between sparse and non-sparse
+        // for F32Xdl we can use InstType::XFloat32
+        if(isSparse || dataType == DataType::XFloat32)
+        {
+            mi_divisor = 4;
+        }
+
+        // special checking : F8 MFMA takes 2x more cycles and computes 4xK in gfx950
+        if(isaVersion == std::array<int, 3>{9, 5, 0} && is8bitFloat(dataType))
+        {
+            mi_divisor = 2;
+        }
+        return std::make_pair(matrixInstM / mi_divisor, miIssueLatency);
+    }
+
     struct MFMAInstruction : public Instruction
     {
         InstType                           accType;
@@ -172,6 +218,14 @@ namespace rocisa
             std::string kStr       = newInstStr + " " + getArgStr();
             return formatWithComment(kStr);
         }
+
+        int getIssueLatency() const
+        {
+            auto dataType = instTypeToDataType(instType);
+            auto [issueLatency, miLatency]
+                = getMFMAIssueLatency<false>(dataType, variant[0], variant[3]);
+            return issueLatency;
+        }
     };
 
     struct SMFMAInstruction : public Instruction
@@ -281,6 +335,14 @@ namespace rocisa
             auto        newInstStr = preStr();
             std::string kStr       = newInstStr + " " + getArgStr();
             return formatWithComment(kStr);
+        }
+
+        int getIssueLatency() const
+        {
+            auto dataType = instTypeToDataType(instType);
+            auto [issueLatency, miLatency]
+                = getMFMAIssueLatency<true>(dataType, variant[0], variant[3]);
+            return issueLatency;
         }
     };
 } // namespace rocisa

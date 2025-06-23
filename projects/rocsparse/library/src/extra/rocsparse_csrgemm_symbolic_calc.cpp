@@ -28,11 +28,11 @@
 #include "internal/extra/rocsparse_csrgemm.h"
 #include "rocsparse_csrgemm.hpp"
 
-#include "control.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "csrgemm_symbolic_device.h"
-#include "rocsparse_primitives.h"
+#include "rocsparse_primitives.hpp"
 
 namespace rocsparse
 {
@@ -335,7 +335,7 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_preprocess_template(rocsparse_
     RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
 
     // Compute columns and accumulate values for each group
-    ROCSPARSE_RETURN_STATUS(success);
+    return rocsparse_status_success;
 }
 
 template <typename I, typename J>
@@ -751,7 +751,7 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
 #undef CSRGEMM_SYMBOLIC_FILL_BLOCK_PER_ROW_2
 #undef CSRGEMM_SYMBOLIC_FILL_BLOCK_PER_ROW_MULTIPASS
     }
-    ROCSPARSE_RETURN_STATUS(success);
+    return rocsparse_status_success;
 }
 
 #define INSTANTIATE(I, J)                                                               \

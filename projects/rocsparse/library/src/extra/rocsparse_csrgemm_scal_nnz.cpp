@@ -22,12 +22,12 @@
  *
  * ************************************************************************ */
 
-#include "control.h"
 #include "csrgemm_device.h"
 #include "rocsparse_common.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm_nnz_calc.hpp"
 #include "rocsparse_csrgemm_scal.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 template <typename I>
 rocsparse_status rocsparse::csrgemm_scal_nnz_quickreturn(rocsparse_handle          handle,

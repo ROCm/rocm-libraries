@@ -25,14 +25,14 @@
 #include "rocsparse_bsrgemm_calc.hpp"
 #include "../conversion/rocsparse_identity.hpp"
 #include "bsrgemm_device.h"
-#include "control.h"
 #include "csrgemm_device.h"
 #include "internal/extra/rocsparse_bsrgemm.h"
 #include "rocsparse_bsrgemm.hpp"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csrgemm.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
-#include "rocsparse_primitives.h"
+#include "rocsparse_primitives.hpp"
 
 #define BSRGEMM_MAXGROUPS 8
 #define BSRGEMM_NNZ_HASH 79

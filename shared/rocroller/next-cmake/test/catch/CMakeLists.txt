@@ -23,11 +23,33 @@
 #
 ################################################################################
 
+find_package(Catch2)
+if(NOT Catch2_FOUND)
+    if(ROCROLLER_ENABLE_FETCH)
+        FetchContent_Declare(
+            Catch2
+            GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+            GIT_TAG devel
+        )
+        FetchContent_MakeAvailable(Catch2)
+    else()
+        message(FATAL_ERROR "Failed to find Catch2")
+    endif()
+endif()
+
+target_link_libraries(rocroller-tests-catch
+    PRIVATE
+        rocroller::common-test-utilities
+        Catch2::Catch2WithMain
+        ${BLAS_LIBRARIES}
+)
+
 set(_CMAKE_CURRENT_SOURCE_DIR "${ROCROLLER_TEST_DIR}/catch")
 target_sources(rocroller-tests-catch
     PRIVATE
         "${_CMAKE_CURRENT_SOURCE_DIR}/CustomAssertions.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/TestKernels.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/AddPrefetchTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/AliasDataFlowTagsTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/AnnotateInstructionsTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/BinaryExpressionTest.cpp"
@@ -45,6 +67,7 @@ target_sources(rocroller-tests-catch
         "${_CMAKE_CURRENT_SOURCE_DIR}/ExpressionToStringTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/ExpressionTransformationTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/FastArithmeticTest.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/FastDivisionTransformationTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/GlobalLoadStoreTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/HazardObserverTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/HypergraphTest.cpp"
@@ -76,4 +99,5 @@ target_sources(rocroller-tests-catch
         "${_CMAKE_CURRENT_SOURCE_DIR}/WMMAObserverUnitTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/WidenAddrExprTo64bitTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/mxDataGeneratorTest.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/ScaleUtilsTest.cpp"
 )

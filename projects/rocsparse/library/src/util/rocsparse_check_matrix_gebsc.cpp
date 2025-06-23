@@ -24,8 +24,8 @@
 #include "internal/util/rocsparse_check_matrix_gebsc.h"
 #include "rocsparse_check_matrix_gebsc.hpp"
 #include "rocsparse_check_matrix_gebsr.hpp"
-#include "to_string.hpp"
-#include "utility.h"
+#include "rocsparse_enum_utils.hpp"
+#include "rocsparse_utility.hpp"
 
 template <typename T, typename I, typename J>
 rocsparse_status rocsparse::check_matrix_gebsc_core(rocsparse_handle       handle,
@@ -140,7 +140,7 @@ rocsparse_status rocsparse::check_matrix_gebsc_checkarg(rocsparse_handle       h
         {
             rocsparse::log_debug(handle,
                                  ("Matrix was specified to be "
-                                  + std::string(rocsparse::to_string(matrix_type))
+                                  + std::string(rocsparse::enum_utils::to_string(matrix_type))
                                   + " but (row_block_dim != col_block_dim || mb != nb)"));
         }
     }

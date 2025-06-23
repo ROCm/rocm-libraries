@@ -57,6 +57,8 @@ option(ROCROLLER_BUILD_TESTING "Build rocRoller testing." ON)
 option(ROCROLLER_EMBED_ARCH_DEF "Embed msgpack architecture data in library." ON)
 option(ROCROLLER_BUILD_SHARED_LIBS "Build rocRoller as a shared library." ON)
 option(ROCROLLER_ENABLE_FETCH "Enable fetch content for dependencies if find_package fails." OFF)
+option(ROCROLLER_ENABLE_CATCH "Build rocRoller catch unit tests" ON)
+option(ROCROLLER_ENABLE_LLD "Build rocroller functionality requiring LLD" OFF)
 
 find_package(fmt 11.1.3)
 if(NOT fmt_FOUND)
@@ -133,13 +135,21 @@ if(NOT Boost_FOUND)
 endif()
 
 find_package(hip REQUIRED)
-find_package(LLVM REQUIRED)
-find_package(LLD REQUIRED)
+find_package(amd_comgr REQUIRED)
+if(ROCROLLER_ENABLE_LLVM)
+    find_package(LLVM REQUIRED)
+endif()
+
+if(ROCROLLER_ENABLE_LLD)
+    find_package(LLD REQUIRED)
+    target_include_directories(rocroller PRIVATE "${LLD_INCLUDES}")
+    target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_LLD)
+endif()
 
 if(ROCROLLER_BUILD_SHARED_LIBS)
     add_library(rocroller SHARED)
 else()
-    add_library(rocroller)
+    add_library(rocroller STATIC)
     set_target_properties(rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
 add_library(roc::rocroller ALIAS rocroller)
@@ -166,16 +176,15 @@ if(ROCROLLER_ENABLE_YAML_CPP)
 endif()
 
 target_compile_definitions(rocroller
-    PUBLIC 
+    PUBLIC
         ROCROLLER_USE_HIP
         __HIP_PLATFORM_AMD__
 )
 
 if(ROCROLLER_ENABLE_LLVM)
     llvm_map_components_to_libnames(llvm_yaml_libs objectyaml)
+    llvm_map_components_to_libnames(llvm_libs mc support)
 endif()
-
-llvm_map_components_to_libnames(llvm_libs mc support)
 
 target_link_libraries(rocroller
     PUBLIC
@@ -183,8 +192,8 @@ target_link_libraries(rocroller
        hip::host
     PRIVATE
         ${msgpack_libs}
+        amd_comgr
 )
-target_include_directories(rocroller PUBLIC "${LLD_INCLUDE_DIRS}")
 
 if(ROCROLLER_ENABLE_LLVM)
     # ROCROLLER_USE_LLVM enables the llvm yaml API
@@ -195,8 +204,8 @@ target_link_libraries(rocroller
     PUBLIC
         fmt::fmt-header-only
     PRIVATE
-        spdlog::spdlog_header_only
-        libdivide::libdivide
+        $<BUILD_INTERFACE:spdlog::spdlog_header_only>
+        $<BUILD_INTERFACE:libdivide::libdivide>
         ${llvm_yaml_libs}
         ${llvm_libs}
 )
@@ -211,7 +220,8 @@ configure_file(
 )
 target_sources(rocroller PRIVATE "${PROJECT_BINARY_DIR}/rocRoller/src/Version.cpp")
 
-add_subdirectory(host-library)
+add_subdirectory(src)
+add_subdirectory(include)
 add_subdirectory(GPUArchitectureGenerator)
 
 if(ROCROLLER_EMBED_ARCH_DEF)
@@ -231,8 +241,21 @@ rocm_install(
     TARGETS rocroller
     EXPORT rocroller-targets
     INCLUDE
-        ${ROCROLLER_LIB_DIR}/include
+        "${ROCROLLER_LIB_DIR}/include"
 )
+
+if(ROCROLLER_BUILD_TESTING OR BUILD_TESTING)
+    rocm_install(
+        TARGETS rocroller-tests
+        COMPONENT tests
+    )
+    if(ROCROLLER_ENABLE_CATCH)
+        rocm_install(
+            TARGETS rocroller-tests-catch
+            COMPONENT tests
+        )
+    endif()
+endif()
 
 rocm_export_targets(
     TARGETS roc::rocroller

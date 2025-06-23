@@ -1387,12 +1387,7 @@ class GSUOn(GSU):
 
             # TODO: Minimum elems for StoreRemap
             # TODO: Which of DataType or DestDataType is in a better sense? 0114: Check Using DestDataType + HSS
-            minElements = 1
-            if kernel["ProblemType"]["DataType"].isHalf() or kernel["ProblemType"]["DataType"].isBFloat16():
-                minElements = 2
-            elif kernel["ProblemType"]["DataType"].is8bitFloat():
-                minElements = 4
-
+            minElements = int(4 / kernel["ProblemType"]["ComputeDataType"].numBytes())
             minNeeded = minElements * ss.numVgprsPerElement
 
             gsuDebug = 0
@@ -1484,8 +1479,6 @@ class GSUOn(GSU):
             #  #print "  NumVectorsPerBatch", numVectorsPerBatch
             #  numElementsPerBatch = numVectorsPerBatch * kernel["GlobalWriteVectorWidth"]
             numBatches = max(1, ceilDivide(len(elements[edgeI]),numElementsPerBatch))
-            totalNeededVgpr = ss.numVgprsPerElement * numElementsPerBatch
-
             numSgprs = ss.cfg.numTempSgprPerBatch + ss.cfg.numMaskSgprPerBatch + ss.cfg.numMaskSgprPerElement * numElementsPerBatch
 
             if writer.db["PrintStoreRegisterDb"]:

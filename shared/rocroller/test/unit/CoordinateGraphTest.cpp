@@ -465,9 +465,9 @@ namespace rocRollerTest
                            {u},
                            {wg, thread, unroll});
         sexpr = Expression::toString(fastArith(exprs[0]));
-        EXPECT_EQ(sexpr,
-                  "{Split: ShiftL({Tile: Add(ShiftL(Convert(v0:I)U32, 2:U32)U32, "
-                  "514:I)U32}, 1:U32)U32}");
+        EXPECT_EQ(
+            sexpr,
+            "{Split: ShiftL({Tile: ShiftLAdd(Convert(v0:I)U32, 2:U32, 514:I)U32}, 1:U32)U32}");
     }
 
     TEST_F(CoordinateGraphTest, TensorTile2DLoadStore01)

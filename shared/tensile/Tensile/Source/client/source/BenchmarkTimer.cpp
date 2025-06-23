@@ -34,6 +34,7 @@
 
 #include <csignal>
 #include <cstddef>
+#include <thread>
 
 namespace Tensile
 {

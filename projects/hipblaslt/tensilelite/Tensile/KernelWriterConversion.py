@@ -947,7 +947,7 @@ class KernelWriterConversion(KernelWriterBase):
         kStr += defineStr + self.endLine
         kStr += space + "    \"v_pk_add_f32 %0, %2, %0 \\n\\t\"" + self.endLine
         kStr += space + "    \"v_pk_add_f32 %1, %3, %1 \\n\\t\"" + self.endLine
-        kStr += space + "    : \"+v\"(accumVec), \"+v\"(accumVec2): \"v\"(%smake_float2(temp[%d].x,temp[%d].y)), \"v\"(%smake_float2(temp[%d].data.z,temp[%d].data.w))"% (castToIntermidate, gsuIdx, gsuIdx, castToIntermidate, gsuIdx, gsuIdx) + self.endLine
+        kStr += space + "    : \"+v\"(accumVec), \"+v\"(accumVec2): \"v\"(%smake_float2(temp[%d].x,temp[%d].y)), \"v\"(%smake_float2(temp[%d].z,temp[%d].w))"% (castToIntermidate, gsuIdx, gsuIdx, castToIntermidate, gsuIdx, gsuIdx) + self.endLine
         kStr += "#else" + self.endLine
         kStr += space + "    \"v_add_f32 %0, %4, %0 \\n\\t\"" + self.endLine
         kStr += space + "    \"v_add_f32 %1, %5, %1 \\n\\t\"" + self.endLine

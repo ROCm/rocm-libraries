@@ -23,10 +23,10 @@
  * ************************************************************************ */
 
 #include "internal/level1/rocsparse_doti.h"
-#include "control.h"
 #include "doti_device.h"
+#include "rocsparse_control.hpp"
 #include "rocsparse_doti.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 template <typename T, typename I, typename X, typename Y>
 rocsparse_status rocsparse::doti_template(rocsparse_handle     handle,

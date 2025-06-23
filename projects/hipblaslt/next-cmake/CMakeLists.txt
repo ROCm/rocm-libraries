@@ -195,12 +195,33 @@ if(HIPBLASLT_ENABLE_DEVICE)
     endif()
 endif()
 
+if(HIPBLASLT_ENABLE_ROCROLLER AND NOT TARGET roc::rocroller)
+    find_package(rocroller REQUIRED)
+    option(YAML_CPP_INSTALL "" ON)
+    if(NOT rocroller_FOUND)
+        set(ROCROLLER_ENABLE_FETCH ON)
+        set(ROCROLLER_BUILD_TESTING OFF)
+        set(ROCROLLER_ENABLE_CLIENT OFF)
+        FetchContent_Declare(
+            rocRoller
+            GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
+            GIT_TAG main
+            SOURCE_SUBDIR next-cmake
+        )
+        FetchContent_MakeAvailable(rocRoller)
+    endif()
+endif()
+
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_BUILD_SHARED_LIBS)
         add_library(hipblaslt SHARED)
     else()
         add_library(hipblaslt STATIC)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_STATIC_LIB)
+    endif()
+    if(HIPBLASLT_ENABLE_ROCROLLER)
+        target_link_libraries(hipblaslt PRIVATE roc::rocroller)
+        target_compile_definitions(hipblaslt PUBLIC HIPBLASLT_USE_ROCROLLER)
     endif()
     rocm_set_soversion(hipblaslt ${hipblaslt_SOVERSION})
     add_library(roc::hipblaslt ALIAS hipblaslt)
@@ -274,11 +295,6 @@ if(HIPBLASLT_ENABLE_HOST)
 
     add_subdirectory(rocisa/rocisa-cpp)
     add_subdirectory(host-library)
-endif()
-
-if(HIPBLASLT_ENABLE_ROCROLLER)
-    target_link_libraries(hipblaslt PRIVATE roc::rocroller)
-    target_compile_definitions(hipblaslt PUBLIC HIPBLASLT_USE_ROCROLLER)
 endif()
 
 if(HIPBLASLT_ENABLE_DEVICE)

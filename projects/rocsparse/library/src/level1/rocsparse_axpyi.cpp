@@ -25,7 +25,7 @@
 #include "internal/level1/rocsparse_axpyi.h"
 #include "axpyi_device.h"
 #include "rocsparse_axpyi.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {

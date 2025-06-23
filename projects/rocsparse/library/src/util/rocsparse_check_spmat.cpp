@@ -22,15 +22,74 @@
  * ************************************************************************ */
 
 #include "internal/generic/rocsparse_check_spmat.h"
-#include "control.h"
-#include "handle.h"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_handle.hpp"
+#include "rocsparse_utility.hpp"
 
 #include "rocsparse_check_matrix_coo.hpp"
 #include "rocsparse_check_matrix_csc.hpp"
 #include "rocsparse_check_matrix_csr.hpp"
 #include "rocsparse_check_matrix_ell.hpp"
 #include "rocsparse_check_matrix_gebsr.hpp"
+#include "rocsparse_determine_indextype.hpp"
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_check_spmat_stage value_)
+{
+#define CASE(C) \
+    case C:     \
+        return #C
+    switch(value_)
+    {
+        CASE(rocsparse_check_spmat_stage_buffer_size);
+        CASE(rocsparse_check_spmat_stage_compute);
+#undef CASE
+    }
+    // LCOV_EXCL_START
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
+}
+
+template <>
+const char* rocsparse::enum_utils::to_string(rocsparse_data_status data_status)
+{
+    switch(data_status)
+    {
+    case rocsparse_data_status_success:
+        return "No errors in data detected";
+    case rocsparse_data_status_inf:
+        return "An inf value was found in the values array.";
+    case rocsparse_data_status_nan:
+        return "An nan value was found in the values array.";
+    case rocsparse_data_status_invalid_offset_ptr:
+        return "An invalid offset pointer was detected.";
+    case rocsparse_data_status_invalid_index:
+        return "An invalid index was detected.";
+    case rocsparse_data_status_duplicate_entry:
+        return "A duplicate entry was detected.";
+    case rocsparse_data_status_invalid_sorting:
+        return "Sorting mode was detected to be invalid.";
+    case rocsparse_data_status_invalid_fill:
+        return "Fill mode was detected to be invalid.";
+    }
+    // LCOV_EXCL_START
+    THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+    // LCOV_EXCL_STOP
+}
+
+template <>
+bool rocsparse::enum_utils::is_invalid(rocsparse_check_spmat_stage value_)
+{
+    switch(value_)
+    {
+    case rocsparse_check_spmat_stage_buffer_size:
+    case rocsparse_check_spmat_stage_compute:
+    {
+        return false;
+    }
+    }
+    return true;
+}
 
 namespace rocsparse
 {
@@ -398,8 +457,8 @@ try
     ROCSPARSE_CHECKARG(1, mat, (mat->init == false), rocsparse_status_not_initialized);
 
     RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::check_spmat_dynamic_dispatch(rocsparse::determine_I_index_type(mat),
-                                                rocsparse::determine_J_index_type(mat),
+        rocsparse::check_spmat_dynamic_dispatch(rocsparse::determine_I_indextype(mat),
+                                                rocsparse::determine_J_indextype(mat),
                                                 mat->data_type,
                                                 mat->format,
                                                 handle,

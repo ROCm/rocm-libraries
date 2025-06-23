@@ -29,7 +29,7 @@
 #include "rocsparse_csrgemm_numeric_mult.hpp"
 #include "rocsparse_csrgemm_numeric_multadd.hpp"
 #include "rocsparse_csrgemm_numeric_scal.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 template <typename I, typename J, typename T>
 rocsparse_status rocsparse::csrgemm_numeric_core(rocsparse_handle          handle,

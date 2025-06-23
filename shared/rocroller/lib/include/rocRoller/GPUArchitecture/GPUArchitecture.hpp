@@ -108,6 +108,7 @@ namespace rocRoller
         std::map<std::string, GPUInstructionInfo> const& getAllIntructionInfo() const;
 
         bool isSupportedScaleBlockSize(int size) const;
+        bool isSupportedScaleType(DataType type) const;
 
     private:
         GPUArchitectureTarget                     m_archTarget;

@@ -764,7 +764,7 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
         if u == localWriteEndIter:
             itemPerIter = itemsLWToSchedLength # schedule all remaining activity
         else:
-            itemPerIter = numLocalWriteModPerIter
+            itemPerIter = itemsLWToSchedIndexLast + numLocalWriteModPerIter - 1
             # if localwrite is not multiple of numLocalWriteModPerIter, fill last iteration first.
             # make sure numLocalWriteModPerIter is enough to schedule localwrite
             # TODO: if numLocalWriteModPerIter is not enough to schedule localwrite, need smarter way to distribute localWrite
@@ -797,7 +797,9 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
         perIterLocalWriteCodeNGLLCounter = 0
 
         itemsLWToSchedLengthLeft = itemsLWToSchedLength - itemsLWToSchedIndexLast
+        itemsLWToSchedIndexForSplitDS = 0
         for itemsLWToSchedIndex, item in itemsLWToSched[:itemPerIter]:
+            tmp = itemsLWToSchedIndexLast + numLocalWriteModPerIter
             for gapIndex in range(itemsLWToSchedIndexLast, itemsLWToSchedIndex + 1):
                 imodList = []
                 imodNGLLList = []
@@ -812,18 +814,18 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                             if kernel["ProblemType"]["Sparse"] and not writesPerItem:
                                 writesPerItem = item.name.startswith("MetadataWrite") and countVMovB32(item)
                             # Split into several dsStore32
-                            syncEndExpandedNumIndex = itemsLWToSchedLengthLeft
+                            syncEndExpandedNumIndex = itemsLWToSchedIndexForSplitDS
 
                             if writer.states.numMfmaPerIter and u == (writer.states.lwEndMfmaIndex // writer.states.numMfmaPerIter):
                                 syncEndExpandedNumIndex = numLocalWriteModPerIter
                                 syncEndExpandedNumIndex *= ((writer.states.syncPlrMfmaIndex % writer.states.numMfmaPerIter) / writer.states.numMfmaPerIter)
                                 syncEndExpandedNumIndex = roundUp(syncEndExpandedNumIndex)
 
-                            itemNew, numItemNew, globalReadInstOffset = splitDSInstructionIntoSmaller(writer, kernel, item, numLocalWritesPerSched, syncEndExpandedNumIndex, itemsLWToSchedIndex) if writer.do["AutoSplitDsWrite"] else (None, 0, 0)
-                            if itemsLWToSchedIndex + globalReadInstOffset <= itemsLWToSchedLengthLeft:
+                            itemNew, numItemNew, globalReadInstOffset = splitDSInstructionIntoSmaller(writer, kernel, item, numLocalWritesPerSched, syncEndExpandedNumIndex, itemsLWToSchedIndexForSplitDS) if writer.do["AutoSplitDsWrite"] else (None, 0, 0)
+                            if itemsLWToSchedIndexForSplitDS + globalReadInstOffset <= itemsLWToSchedLengthLeft:
                                 additionalIndexList.clear()
                                 for i in range(numItemNew):
-                                    additionalIndexList[int(i * numLocalWritesPerSched + itemsLWToSchedIndex)] = itemNew[i]
+                                    additionalIndexList[int(i * numLocalWritesPerSched + itemsLWToSchedIndexForSplitDS)] = itemNew[i]
                             else:
                                 globalReadInstOffset = 0
 
@@ -851,9 +853,9 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                                     readsToWaitAdjust = len(list(writer.codes.globalReadA.middle.items())) + len(list(writer.codes.globalReadB.middle.items()))
                                 for wc in wcList:
                                     replaceHolder(wc, (readsToWaitAdjust))
-                if gapIndex in additionalIndexList:
-                    imodList.append(additionalIndexList[gapIndex])
-                    additionalIndexList.pop(gapIndex)
+                if itemsLWToSchedIndexForSplitDS in additionalIndexList:
+                    imodList.append(additionalIndexList[itemsLWToSchedIndexForSplitDS])
+                    additionalIndexList.pop(itemsLWToSchedIndexForSplitDS)
                 elif gapIndex < itemsLWToSchedIndex or (not item):
                     pass
                 else:
@@ -928,6 +930,7 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                         imodNGLL.addItems(imodNGLLList)
                         writer.codes.perIterLocalWriteCodeNGLL[u][0].append(perIterLocalWriteCodeNGLLCounter)
                         writer.codes.perIterLocalWriteCodeNGLL[u][1].add(imodNGLL)
+                itemsLWToSchedIndexForSplitDS += 1
             itemsLWToSchedIndexLast = itemsLWToSchedIndex + 1
         if writer.codes.perIterLocalWrite[u][0] and writer.codes.perIterLocalWrite[u][0][-1] != perIterLocalWriteCodeCounter:
             writer.codes.perIterLocalWrite[u][0].append(perIterLocalWriteCodeCounter)

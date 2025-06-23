@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -74,6 +74,30 @@ double get_time_us_sync(hipStream_t stream)
     THROW_IF_HIP_ERROR(status);
 #endif
     return get_time_us_no_sync();
+}
+
+/*! \brief Get warp size of the current device */
+int get_device_warp_size()
+{
+    int warp_size;
+    int device_id;
+    hipError_t err;
+
+    err = hipGetDevice(&device_id);
+
+    if(err != hipSuccess)
+    {
+        return 0;
+    }
+
+    err = hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, device_id);
+
+    if(err != hipSuccess)
+    {
+        return 0;
+    }
+
+    return warp_size;
 }
 
 #ifdef ROCSOLVER_LIBRARY

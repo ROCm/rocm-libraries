@@ -23,10 +23,10 @@
  * ************************************************************************ */
 #include "internal/util/rocsparse_check_matrix_hyb.h"
 
-#include "control.h"
 #include "rocsparse_check_matrix_coo.hpp"
 #include "rocsparse_check_matrix_ell.hpp"
-#include "utility.h"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {

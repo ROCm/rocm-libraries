@@ -25,7 +25,7 @@
 #pragma once
 
 #include "rocsparse-types.h"
-#include "to_string.hpp"
+#include "rocsparse_enum_utils.hpp"
 
 namespace rocsparse
 {
@@ -68,8 +68,8 @@ namespace rocsparse
         {
             std::stringstream sstr;
             sstr << "invalid precision configuration: "
-                 << "source_datatype: " << rocsparse::to_string(source_datatype)
-                 << "target_datatype: " << rocsparse::to_string(target_datatype);
+                 << "source_datatype: " << rocsparse::enum_utils::to_string(source_datatype)
+                 << "target_datatype: " << rocsparse::enum_utils::to_string(target_datatype);
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                    sstr.str().c_str());
         }
@@ -129,8 +129,8 @@ namespace rocsparse
         {
             std::stringstream sstr;
             sstr << "invalid precision configuration: "
-                 << "source_datatype: " << rocsparse::to_string(source_datatype)
-                 << "target_datatype: " << rocsparse::to_string(target_datatype);
+                 << "source_datatype: " << rocsparse::enum_utils::to_string(source_datatype)
+                 << "target_datatype: " << rocsparse::enum_utils::to_string(target_datatype);
             RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                    sstr.str().c_str());
         }

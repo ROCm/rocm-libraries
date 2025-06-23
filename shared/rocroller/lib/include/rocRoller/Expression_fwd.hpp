@@ -75,7 +75,7 @@ namespace rocRoller
 
         struct MagicMultiple;
         struct MagicShifts;
-        struct MagicSign;
+        struct MagicShiftAndSign;
         struct Negate;
 
         struct RandomNumber;
@@ -122,7 +122,7 @@ namespace rocRoller
             // --- Unary Operations ---
             MagicMultiple,
             MagicShifts,
-            MagicSign,
+            MagicShiftAndSign,
             Negate,
             BitwiseNegate,
             LogicalNot,

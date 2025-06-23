@@ -69,10 +69,6 @@ namespace rocRoller
                                               const GPUArchitectureTarget& target) override;
 
     private:
-        static void assemble(const char* machineCode,
-                             const char* target,
-                             const char* featureString,
-                             const char* output);
-        static void link(const char* input, const char* output);
+        std::string const defaultKernelName = "rocroller_kernel";
     };
 }

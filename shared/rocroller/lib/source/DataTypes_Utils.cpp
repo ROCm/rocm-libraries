@@ -479,15 +479,40 @@ namespace rocRoller
         return packing;
     }
 
-    bool isScaleType(DataType type)
+    uint8_t floatToScale(DataType scaleType, float value)
     {
-        switch(type)
+        AssertFatal(isScaleType(scaleType));
+
+        uint8_t scale = 0;
+        switch(scaleType)
         {
         case DataType::E8M0:
-        case DataType::E8M0x4:
-            return true;
+            scale = static_cast<uint8_t>(floatToScale<E8M0>(value));
+            break;
         default:
-            return false;
-        };
+            AssertFatal(
+                false, "floatToScale is unimplemented for scale type: ", ShowValue(scaleType));
+        }
+
+        return scale;
     }
+
+    float scaleToFloat(DataType scaleType, uint8_t scale)
+    {
+        AssertFatal(isScaleType(scaleType));
+
+        float value = 0;
+        switch(scaleType)
+        {
+        case DataType::E8M0:
+            value = scaleToFloat<E8M0>(static_cast<E8M0>(scale));
+            break;
+        default:
+            AssertFatal(
+                false, "scaleToFloat is unimplemented for scale type: ", ShowValue(scaleType));
+        }
+
+        return value;
+    }
+
 };

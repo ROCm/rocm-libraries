@@ -24,7 +24,7 @@
 
 #include "internal/extra/rocsparse_bsrgeam.h"
 #include "rocsparse_csrgeam.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include "bsrgeam_device.h"
 

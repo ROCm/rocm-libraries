@@ -202,9 +202,7 @@ All of the instructions scheduled by a `Context`, including those that came from
 
 In order to execute the kernel, the assembly instructions that are stored within a `Context`'s scheduled instructions must be converted into object code. This is performed by the `Assembler` class.
 
-The `Assembler` class uses LLVM's API to assemble the instructions without having to write an assembly file to disk.
-
-After the file has been assembled, the results need to be passed to the linker. The `Assembler` class uses LLD's API to link the program and generate object data.
+The `Assembler` class uses AMD comgr's API to assemble the instructions without having to write an assembly file to disk.
 
 ### Executable Kernel
 

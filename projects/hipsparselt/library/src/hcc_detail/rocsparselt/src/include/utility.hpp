@@ -40,7 +40,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-hipsparseLtComputetype_t RocSparseLtComputetypeToHIPComputetype(rocsparselt_compute_type_ type);
 hipsparseOperation_t     HCCOperationToHIPOperation(rocsparselt_operation_ op);
 #ifdef __cplusplus
 }
@@ -49,18 +48,6 @@ hipsparseOperation_t     HCCOperationToHIPOperation(rocsparselt_operation_ op);
 inline bool isAligned(const void* pointer, size_t byte_count)
 {
     return reinterpret_cast<uintptr_t>(pointer) % byte_count == 0;
-}
-
-// return precision string for hipDataType
-constexpr const char* hipDataType_string(hipDataType type)
-{
-    return hip_datatype_to_string(type);
-}
-
-// return precision string for rocsparselt_compute_type
-constexpr const char* rocsparselt_compute_type_string(rocsparselt_compute_type type)
-{
-    return hipsparselt_computetype_to_string(RocSparseLtComputetypeToHIPComputetype(type));
 }
 
 constexpr const char* rocsparselt_transpose_letter(rocsparselt_operation op)
@@ -92,8 +79,6 @@ template <>
 static constexpr char rocsparselt_precision_string<__hip_fp8_e5m2>[] = "bf8_r";
 
 std::string prefix(const char* layer, const char* caller);
-
-const char* hipDataType_to_string(hipDataType type);
 
 const char* rocsparselt_compute_type_to_string(rocsparselt_compute_type type);
 

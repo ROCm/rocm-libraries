@@ -22,12 +22,12 @@
  *
  * ************************************************************************ */
 
-#include "common.h"
-#include "control.h"
 #include "internal/level2/rocsparse_csritsv.h"
 #include "rocsparse_common.h"
+#include "rocsparse_common.hpp"
+#include "rocsparse_control.hpp"
 #include "rocsparse_csritsv.hpp"
-#include "utility.h"
+#include "rocsparse_utility.hpp"
 
 #include "rocsparse_csrmv.hpp"
 
