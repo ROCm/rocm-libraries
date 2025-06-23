@@ -31,12 +31,22 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/iterator/detail/device_system_tag.h>
 #include <thrust/iterator/detail/iterator_category_with_system_and_traversal.h>
 #include <thrust/iterator/detail/iterator_traversal_tags.h>
 
-// #include this for stl's iterator tags
-#include <iterator>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/iterator>
+#else
+#  include <iterator>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -60,9 +70,13 @@ THRUST_NAMESPACE_BEGIN
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
 struct input_device_iterator_tag
-    : thrust::detail::iterator_category_with_system_and_traversal<std::input_iterator_tag,
-                                                                  thrust::device_system_tag,
-                                                                  thrust::single_pass_traversal_tag>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    : detail::iterator_category_with_system_and_traversal<::cuda::std::input_iterator_tag,
+#else
+    : detail::iterator_category_with_system_and_traversal<::std::input_iterator_tag,
+#endif
+                                                          device_system_tag,
+                                                          single_pass_traversal_tag>
 {};
 
 /*! \p output_device_iterator_tag is an empty class: it has no member functions,
@@ -77,9 +91,13 @@ struct input_device_iterator_tag
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
 struct output_device_iterator_tag
-    : thrust::detail::iterator_category_with_system_and_traversal<std::output_iterator_tag,
-                                                                  thrust::device_system_tag,
-                                                                  thrust::single_pass_traversal_tag>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    : detail::iterator_category_with_system_and_traversal<::cuda::std::output_iterator_tag,
+#else
+    : detail::iterator_category_with_system_and_traversal<::std::output_iterator_tag,
+#endif
+                                                          device_system_tag,
+                                                          single_pass_traversal_tag>
 {};
 
 /*! \p forward_device_iterator_tag is an empty class: it has no member functions,
@@ -94,9 +112,13 @@ struct output_device_iterator_tag
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
 struct forward_device_iterator_tag
-    : thrust::detail::iterator_category_with_system_and_traversal<std::forward_iterator_tag,
-                                                                  thrust::device_system_tag,
-                                                                  thrust::forward_traversal_tag>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    : detail::iterator_category_with_system_and_traversal<::cuda::std::forward_iterator_tag,
+#else
+    : detail::iterator_category_with_system_and_traversal<::std::forward_iterator_tag,
+#endif
+                                                          device_system_tag,
+                                                          forward_traversal_tag>
 {};
 
 /*! \p bidirectional_device_iterator_tag is an empty class: it has no member
@@ -111,9 +133,13 @@ struct forward_device_iterator_tag
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
 struct bidirectional_device_iterator_tag
-    : thrust::detail::iterator_category_with_system_and_traversal<std::bidirectional_iterator_tag,
-                                                                  thrust::device_system_tag,
-                                                                  thrust::bidirectional_traversal_tag>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    : detail::iterator_category_with_system_and_traversal<::cuda::std::bidirectional_iterator_tag,
+#else
+    : detail::iterator_category_with_system_and_traversal<::std::bidirectional_iterator_tag,
+#endif
+                                                          device_system_tag,
+                                                          bidirectional_traversal_tag>
 {};
 
 /*! \p random_access_device_iterator_tag is an empty class: it has no member
@@ -128,9 +154,13 @@ struct bidirectional_device_iterator_tag
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
 struct random_access_device_iterator_tag
-    : thrust::detail::iterator_category_with_system_and_traversal<std::random_access_iterator_tag,
-                                                                  thrust::device_system_tag,
-                                                                  thrust::random_access_traversal_tag>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    : detail::iterator_category_with_system_and_traversal<::cuda::std::random_access_iterator_tag,
+#else
+    : detail::iterator_category_with_system_and_traversal<::std::random_access_iterator_tag,
+#endif
+                                                          device_system_tag,
+                                                          random_access_traversal_tag>
 {};
 
 /*! \p input_host_iterator_tag is an empty class: it has no member
@@ -145,7 +175,11 @@ struct random_access_device_iterator_tag
  *  output_host_iterator_tag, forward_host_iterator_tag,
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
-using input_host_iterator_tag = std::input_iterator_tag;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+using input_host_iterator_tag = ::cuda::std::input_iterator_tag;
+#else
+using input_host_iterator_tag = ::std::input_iterator_tag;
+#endif
 
 /*! \p output_host_iterator_tag is an empty class: it has no member
  *  functions, member variables, or nested types. It is used solely as a "tag": a
@@ -159,7 +193,11 @@ using input_host_iterator_tag = std::input_iterator_tag;
  *  input_host_iterator_tag, forward_host_iterator_tag,
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
-using output_host_iterator_tag = std::output_iterator_tag;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+using output_host_iterator_tag = ::cuda::std::output_iterator_tag;
+#else
+using output_host_iterator_tag = ::std::output_iterator_tag;
+#endif
 
 /*! \p forward_host_iterator_tag is an empty class: it has no member
  *  functions, member variables, or nested types. It is used solely as a "tag": a
@@ -173,7 +211,11 @@ using output_host_iterator_tag = std::output_iterator_tag;
  *  input_host_iterator_tag, output_host_iterator_tag,
  *  bidirectional_host_iterator_tag, random_access_host_iterator_tag
  */
-using forward_host_iterator_tag = std::forward_iterator_tag;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+using forward_host_iterator_tag = ::cuda::std::forward_iterator_tag;
+#else
+using forward_host_iterator_tag = ::std::forward_iterator_tag;
+#endif
 
 /*! \p bidirectional_host_iterator_tag is an empty class: it has no member
  *  functions, member variables, or nested types. It is used solely as a "tag": a
@@ -187,7 +229,11 @@ using forward_host_iterator_tag = std::forward_iterator_tag;
  *  input_host_iterator_tag, output_host_iterator_tag,
  *  forward_host_iterator_tag, random_access_host_iterator_tag
  */
-using bidirectional_host_iterator_tag = std::bidirectional_iterator_tag;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+using bidirectional_host_iterator_tag = ::cuda::std::bidirectional_iterator_tag;
+#else
+using bidirectional_host_iterator_tag = ::std::bidirectional_iterator_tag;
+#endif
 
 /*! \p random_access_host_iterator_tag is an empty class: it has no member
  *  functions, member variables, or nested types. It is used solely as a "tag": a
@@ -201,7 +247,11 @@ using bidirectional_host_iterator_tag = std::bidirectional_iterator_tag;
  *  input_host_iterator_tag, output_host_iterator_tag,
  *  forward_host_iterator_tag, bidirectional_host_iterator_tag
  */
-using random_access_host_iterator_tag = std::random_access_iterator_tag;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+using random_access_host_iterator_tag = ::cuda::std::random_access_iterator_tag;
+#else
+using random_access_host_iterator_tag = ::std::random_access_iterator_tag;
+#endif
 
 /*! \} // end iterator_tag_classes
  */
