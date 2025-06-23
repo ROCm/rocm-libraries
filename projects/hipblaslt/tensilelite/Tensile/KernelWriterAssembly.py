@@ -11081,27 +11081,26 @@ class KernelWriterAssembly(KernelWriter):
             multiBiasTypeLabel.append(Label(name, ""))
           multiBiasTypeLabel.append(loadBiasEndLabel)
           offsetVgpr  = self.vgprPool.checkOut(1)
-          with self.allocTmpSgpr(4, 1) as tmpSgprRes:
-            if len(kernel["ProblemType"]["BiasDataTypeList"]) == 1:
-              vectorDataTypes.bias(d).dataType = kernel["ProblemType"]["BiasDataTypeList"][0]
-              module.add(self.readVectorToLDS(vectorDataTypes, kernel, 1, offsetVgpr, tmpSgprRes.idx, tmpVgprRes, factorDims[d]))
-              if len(factorDims) == 2:
-                if d == 0:
-                  module.add(SBranch(labelName=loadBiasEndLabel.getLabelName(), comment="Branch to load bias end"))
-                else:
-                  module.add(loadBiasEndLabel)
-            else:
-              for i, label in enumerate(multiBiasTypeLabel[1:]):
-                typeValue = kernel["ProblemType"]["BiasDataTypeList"][i].value
-                module.add(multiBiasTypeLabel[i])
-                #module.add(SCmpKLGU32(sgpr("BiasType"), typeValue, "BiasType != %u"%typeValue))
-                module.add(self.getSCMPKInstruction("LGU32", "BiasType", typeValue, comment="BiasType != %u"%typeValue))
-                module.add(SCBranchSCC1(label.getLabelName(), "Branch if true"))
-                vectorDataTypes.bias(d).dataType = kernel["ProblemType"]["BiasDataTypeList"][i]
-                module.add(self.readVectorToLDS(vectorDataTypes, kernel, 1, offsetVgpr, tmpSgprRes.idx, tmpVgprRes, factorDims[d]))
+          if len(kernel["ProblemType"]["BiasDataTypeList"]) == 1:
+            vectorDataTypes.bias(d).dataType = kernel["ProblemType"]["BiasDataTypeList"][0]
+            module.add(self.readVectorToLDS(vectorDataTypes, kernel, 1, offsetVgpr, tmpVgprRes, factorDims[d]))
+            if len(factorDims) == 2:
+              if d == 0:
                 module.add(SBranch(labelName=loadBiasEndLabel.getLabelName(), comment="Branch to load bias end"))
-              if d == len(factorDims) -1:
+              else:
                 module.add(loadBiasEndLabel)
+          else:
+            for i, label in enumerate(multiBiasTypeLabel[1:]):
+              typeValue = kernel["ProblemType"]["BiasDataTypeList"][i].value
+              module.add(multiBiasTypeLabel[i])
+              #module.add(SCmpKLGU32(sgpr("BiasType"), typeValue, "BiasType != %u"%typeValue))
+              module.add(self.getSCMPKInstruction("LGU32", "BiasType", typeValue, comment="BiasType != %u"%typeValue))
+              module.add(SCBranchSCC1(label.getLabelName(), "Branch if true"))
+              vectorDataTypes.bias(d).dataType = kernel["ProblemType"]["BiasDataTypeList"][i]
+              module.add(self.readVectorToLDS(vectorDataTypes, kernel, 1, offsetVgpr, tmpVgprRes, factorDims[d]))
+              module.add(SBranch(labelName=loadBiasEndLabel.getLabelName(), comment="Branch to load bias end"))
+            if d == len(factorDims) -1:
+              module.add(loadBiasEndLabel)
           isLdsLoaded = True
           self.vgprPool.checkIn(offsetVgpr)
           self.vgprPool.checkIn(tmpVgpr)
@@ -11182,12 +11181,11 @@ class KernelWriterAssembly(KernelWriter):
           tmpVgpr      = self.vgprPool.checkOutAligned(totalTmpVgpr, 2, "store tmps")
           tmpVgprRes   = ContinuousRegister(idx=tmpVgpr, size=4)
           offsetVgpr  = self.vgprPool.checkOut(1)
-          with self.allocTmpSgpr(3, 1) as tmpSgprRes:
-            if d == 1:
-              module.add(factorDim1Label)
-            module.add(self.readVectorToLDS(vectorDataTypes, kernel, 1, offsetVgpr, tmpSgprRes.idx, tmpVgprRes, factorDims[d]))
-            if self.states.FactorDim == 3 and d == 0:
-              module.add(SBranch(labelName=labelDimEnd.getLabelName(), comment="Branch to load end"))
+          if d == 1:
+            module.add(factorDim1Label)
+          module.add(self.readVectorToLDS(vectorDataTypes, kernel, 1, offsetVgpr, tmpVgprRes, factorDims[d]))
+          if self.states.FactorDim == 3 and d == 0:
+            module.add(SBranch(labelName=labelDimEnd.getLabelName(), comment="Branch to load end"))
           self.vgprPool.checkIn(offsetVgpr)
           self.vgprPool.checkIn(tmpVgpr)
         if len(factorDims) > 1:
@@ -12500,14 +12498,28 @@ class KernelWriterAssembly(KernelWriter):
   ########################################
   def calculateVectorGlobalOffset(self, kernel, offsetVgpr, tmpSgpr, dim):
     module = Module("")
-    module.add(SMulI32(dst=sgpr(tmpSgpr), src0=kernel["MacroTile%d"%dim], src1=sgpr("WorkGroup%d"%dim), comment="wgp%d * MT%d"%(dim, dim)))
-    module.add(VAddU32(dst=vgpr(offsetVgpr), src0=sgpr(tmpSgpr), src1=vgpr("Serial"), comment="coord %d = wgp%d * MT%d + thread offset"%(dim, dim, dim)))
+    def calculateVectorGlobalOffsetCommon(s):
+      module.add(SMulI32(dst=sgpr(s), src0=kernel["MacroTile%d"%dim], src1=sgpr("WorkGroup%d"%dim), comment="wgp%d * MT%d"%(dim, dim)))
+      module.add(VAddU32(dst=vgpr(offsetVgpr), src0=sgpr(s), src1=vgpr("Serial"), comment=f"coord {dim} = wgp{dim} * MT{dim} + thread offset"))
+    if tmpSgpr:
+      calculateVectorGlobalOffsetCommon(tmpSgpr)
+    else:
+      with self.allocTmpSgpr(1) as tmpSgprInfo:
+        tmpSgpr = tmpSgprInfo.idx
+        calculateVectorGlobalOffsetCommon(tmpSgpr)
     return module
 
   def calculateVectorGlobalStride(self, offsetInVgpr, offsetOutVgpr, tmpSgpr, dim, strideName:str):
     module = Module("")
-    module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(strideName), src1=sgpr("WorkGroup2"), comment="Stride * WG"))
-    module.add(VAddU32(dst=vgpr(offsetOutVgpr), src0=sgpr(tmpSgpr), src1=vgpr(offsetInVgpr), comment="coord %d = wgp%d * MT%d + thread offset + Stride * WG"%(dim, dim, dim)))
+    def calculateVectorGlobalStrideCommon(s):
+      module.add(SMulI32(dst=sgpr(s), src0=sgpr(strideName), src1=sgpr("WorkGroup2"), comment="Stride * WG"))
+      module.add(VAddU32(dst=vgpr(offsetOutVgpr), src0=sgpr(s), src1=vgpr(offsetInVgpr), comment=f"coord {dim} = wgp{dim} * MT{dim} + thread offset + Stride * WG"))
+    if tmpSgpr:
+      calculateVectorGlobalStrideCommon(tmpSgpr)
+    else:
+      with self.allocTmpSgpr(1) as tmpSgprInfo:
+        tmpSgpr = tmpSgprInfo.idx
+        calculateVectorGlobalStrideCommon(tmpSgpr)
     return module
 
   def getGlobalShiftOffset(self, kernel, dataType, gwvw):
@@ -12648,7 +12660,7 @@ class KernelWriterAssembly(KernelWriter):
         tmpVgprNum = tmpVgprNum + 1
     return totalReg + tmpVgprNum
 
-  def readVectorToLDS(self, vectorDataTypes: VectorDataTypes, kernel, gwvw, offsetVgpr, tmpSgpr, tmpVgpr1Res: ContinuousRegister, dim):
+  def readVectorToLDS(self, vectorDataTypes: VectorDataTypes, kernel, gwvw, offsetVgpr, tmpVgpr1Res: ContinuousRegister, dim, tmpSgpr = None):
     assert gwvw == 1
     # Params
     biasDataType         = vectorDataTypes.bias(dim).dataType
