@@ -31,8 +31,10 @@
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
 
-#include <cstddef>
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/cstddef>
+#else
+#  include <cstddef>
 #  include <type_traits>
 #endif
 
@@ -73,7 +75,11 @@ struct counting_iterator_base
                             thrust::detail::eval_if<::std::is_integral<Incrementable>::value,
 #endif
                                                     thrust::detail::numeric_difference<Incrementable>,
-                                                    thrust::detail::identity_<std::ptrdiff_t>>,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+                                                    thrust::detail::identity_<::cuda::std::ptrdiff_t>>,
+#else
+                                                    thrust::detail::identity_<::std::ptrdiff_t>>,
+#endif
                             thrust::iterator_difference<Incrementable>>>::type;
 
   // our implementation departs from Boost's in that counting_iterator::dereference

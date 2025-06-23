@@ -46,11 +46,12 @@ TEST(CountingIteratorTests, TestIteratorTraits)
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using It = cuda::std::iterator_traits<thrust::counting_iterator<int>>;
+  using It       = cuda::std::iterator_traits<thrust::counting_iterator<int>>;
+  using category = thrust::detail::iterator_category_with_system_and_traversal<::cuda::std::random_access_iterator_tag,
 #else
-  using It = ::std::iterator_traits<thrust::counting_iterator<int>>;
+  using It       = ::std::iterator_traits<thrust::counting_iterator<int>>;
+  using category = thrust::detail::iterator_category_with_system_and_traversal<::std::random_access_iterator_tag,
 #endif
-  using category = thrust::detail::iterator_category_with_system_and_traversal<std::random_access_iterator_tag,
                                                                                thrust::any_system_tag,
                                                                                thrust::random_access_traversal_tag>;
 

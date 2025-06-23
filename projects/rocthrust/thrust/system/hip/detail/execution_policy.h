@@ -41,10 +41,13 @@
 #include <thrust/system/hip/config.h>
 
 #include <thrust/detail/allocator_aware_execution_policy.h>
-#include <thrust/detail/dependencies_aware_execution_policy.h>
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/detail/any_system_tag.h>
 #include <thrust/version.h>
+
+#if !defined(__CUDACC_RTC__)
+#  include <thrust/detail/dependencies_aware_execution_policy.h>
+#endif // !defined(__CUDACC_RTC__)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -66,7 +69,9 @@ THRUST_SUPPRESS_DEPRECATED_PUSH
 struct tag
     : execution_policy<tag>
     , thrust::detail::allocator_aware_execution_policy<hip_rocprim::execution_policy>
+#if !defined(__CUDACC_RTC__)
     , thrust::detail::dependencies_aware_execution_policy<hip_rocprim::execution_policy>
+#endif // !defined(__CUDACC_RTC__)
 {};
 THRUST_SUPPRESS_DEPRECATED_POP
 
@@ -74,7 +79,7 @@ template <class Derived>
 struct execution_policy : thrust::execution_policy<Derived>
 {
   using tag_type = tag;
-  operator tag() const
+  THRUST_HOST_DEVICE operator tag() const
   {
     return tag();
   }

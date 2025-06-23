@@ -45,6 +45,7 @@
 #include <thrust/iterator/detail/iterator_facade_category.h>
 
 #if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <cstddef>
 #  include <type_traits>
 #endif
 
@@ -314,7 +315,11 @@ template <typename Derived,
           typename System,
           typename Traversal,
           typename Reference,
-          typename Difference = std::ptrdiff_t>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+          typename Difference = ::cuda::std::ptrdiff_t>
+#else
+          typename Difference = ::std::ptrdiff_t>
+#endif
 class iterator_facade
 {
 private:

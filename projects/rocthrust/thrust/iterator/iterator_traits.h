@@ -31,7 +31,19 @@
 
 #include <thrust/detail/config.h>
 
-#include <iterator>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
+#if defined(__CUDACC_RTC__)
+#  include <cuda/std/iterator>
+#else // defined(__CUDACC_RTC__)
+#  include <iterator>
+#endif // defined(__CUDACC_RTC__)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -39,7 +51,12 @@ THRUST_NAMESPACE_BEGIN
  *  interface for querying the properties of iterators at compile-time.
  */
 template <typename T>
-struct iterator_traits : std::iterator_traits<T>
+struct iterator_traits
+    :
+#if defined(__CUDACC_RTC__)
+    ::cuda
+#endif // defined(__CUDACC_RTC__)
+    ::std::iterator_traits<T>
 {};
 
 template <typename Iterator>

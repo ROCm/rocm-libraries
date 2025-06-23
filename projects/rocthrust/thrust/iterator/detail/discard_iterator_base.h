@@ -18,11 +18,22 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/detail/any_assign.h>
 #include <thrust/iterator/iterator_adaptor.h>
 
-#include <cstddef> // for std::ptrdiff_t
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/cstddef> // for std::ptrdiff_t
+#else
+#  include <cstddef> // for std::ptrdiff_t
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -40,7 +51,11 @@ struct discard_iterator_base
   //     but this interferes with zip_iterator<discard_iterator>
   using value_type    = any_assign;
   using reference     = any_assign&;
-  using incrementable = std::ptrdiff_t;
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using incrementable = ::cuda::std::ptrdiff_t;
+#else
+  using incrementable = ::std::ptrdiff_t;
+#endif
 
   using base_iterator = typename thrust::counting_iterator<incrementable, System, thrust::random_access_traversal_tag>;
 

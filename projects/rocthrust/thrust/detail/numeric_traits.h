@@ -18,9 +18,24 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits.h>
 
-#include <limits>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/limits>
+#  include <cuda/std/type_traits>
+#else
+#  include <limits>
+#  include <type_traits>
+#endif
+
+// #include <stdint.h> // for intmax_t (not provided on MSVS 2005)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -31,16 +46,29 @@ namespace detail
 using intmax_t = long long;
 
 template <typename Number>
-struct is_signed : integral_constant<bool, std::numeric_limits<Number>::is_signed>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+struct is_signed : integral_constant<bool, ::cuda::std::numeric_limits<Number>::is_signed>
+#else
+struct is_signed : integral_constant<bool, ::std::numeric_limits<Number>::is_signed>
+#endif
 {}; // end is_signed
 
 template <typename T>
 struct num_digits
-    : eval_if<
-        std::numeric_limits<T>::is_specialized,
-        integral_constant<int, std::numeric_limits<T>::digits>,
-        integral_constant<int,
-                          sizeof(T) * std::numeric_limits<unsigned char>::digits - (is_signed<T>::value ? 1 : 0)>>::type
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    : eval_if<::cuda::std::numeric_limits<T>::is_specialized,
+              integral_constant<int, ::cuda::std::numeric_limits<T>::digits>,
+#else
+    : eval_if<::std::numeric_limits<T>::is_specialized,
+              integral_constant<int, ::std::numeric_limits<T>::digits>,
+#endif
+              integral_constant<int,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+                                sizeof(T) * ::cuda::std::numeric_limits<unsigned char>::digits
+#else
+                                sizeof(T) * ::std::numeric_limits<unsigned char>::digits
+#endif
+                                  - (is_signed<T>::value ? 1 : 0)>>::type
 {}; // end num_digits
 
 template <typename Integer>
@@ -75,21 +103,39 @@ private:
   };
 
 public:
-  using type =
-    typename eval_if<and_<std::numeric_limits<Integer>::is_signed,
-                          // digits is the number of no-sign bits
-                          (!std::numeric_limits<Integer>::is_bounded
-                           || (int(std::numeric_limits<Integer>::digits) + 1 >= num_digits<intmax_t>::value))>::value,
-                     identity_<Integer>,
-                     eval_if<int(std::numeric_limits<Integer>::digits) + 1 < num_digits<signed int>::value,
-                             identity_<signed int>,
-                             eval_if<int(std::numeric_limits<Integer>::digits) + 1 < num_digits<signed long>::value,
-                                     identity_<signed long>,
-                                     identity_<intmax_t>>>>::type;
+  using type = typename eval_if<
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    and_<::cuda::std::numeric_limits<Integer>::is_signed,
+         (!::cuda::std::numeric_limits<Integer>::is_bounded
+          || (int(::cuda::std::numeric_limits<Integer>::digits) + 1 >= num_digits<intmax_t>::value))>::value,
+#else
+    and_<::std::numeric_limits<Integer>::is_signed,
+         (!::std::numeric_limits<Integer>::is_bounded
+          || (int(::std::numeric_limits<Integer>::digits) + 1 >= num_digits<intmax_t>::value))>::value,
+#endif
+    identity_<Integer>,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    eval_if<int(::cuda::std::numeric_limits<Integer>::digits) + 1 < num_digits<int>::value,
+#else
+    eval_if<int(::std::numeric_limits<Integer>::digits) + 1 < num_digits<int>::value,
+#endif
+            identity_<int>,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+            eval_if<int(::cuda::std::numeric_limits<Integer>::digits) + 1 < num_digits<long>::value,
+#else
+            eval_if<int(::std::numeric_limits<Integer>::digits) + 1 < num_digits<long>::value,
+#endif
+                    identity_<long>,
+                    identity_<intmax_t>>>>::type;
 }; // end integer_difference
 
 template <typename Number>
-struct numeric_difference : eval_if<is_integral<Number>::value, integer_difference<Number>, identity_<Number>>
+struct numeric_difference
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+    : eval_if<::cuda::std::is_integral<Number>::value, integer_difference<Number>, identity_<Number>>
+#else
+    : eval_if<::std::is_integral<Number>::value, integer_difference<Number>, identity_<Number>>
+#endif
 {}; // end numeric_difference
 
 template <typename Number>

@@ -18,6 +18,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/any_system_tag.h>
 #include <thrust/iterator/detail/device_system_tag.h>
@@ -27,6 +34,13 @@
 #include <thrust/iterator/detail/iterator_category_with_system_and_traversal.h>
 #include <thrust/iterator/detail/iterator_traversal_tags.h>
 #include <thrust/iterator/iterator_categories.h>
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/iterator>
+#else
+#  include <iterator>
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -91,16 +105,33 @@ struct iterator_facade_default_category;
 template <typename Traversal, typename ValueParam, typename Reference>
 struct iterator_facade_default_category_std
     : thrust::detail::eval_if<
-        thrust::detail::is_convertible<Traversal, thrust::forward_traversal_tag>::value,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+        ::cuda::std::is_convertible<Traversal, thrust::forward_traversal_tag>::value,
+#else
+        ::std::is_convertible<Traversal, thrust::forward_traversal_tag>::value,
+#endif
         thrust::detail::eval_if<
-          thrust::detail::is_convertible<Traversal, thrust::random_access_traversal_tag>::value,
-          thrust::detail::identity_<std::random_access_iterator_tag>,
-          thrust::detail::eval_if<thrust::detail::is_convertible<Traversal, thrust::bidirectional_traversal_tag>::value,
-                                  thrust::detail::identity_<std::bidirectional_iterator_tag>,
-                                  thrust::detail::identity_<std::forward_iterator_tag>>>,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+          ::cuda::std::is_convertible<Traversal, thrust::random_access_traversal_tag>::value,
+          thrust::detail::identity_<::cuda::std::random_access_iterator_tag>,
+          thrust::detail::eval_if<::cuda::std::is_convertible<Traversal, thrust::bidirectional_traversal_tag>::value,
+                                  thrust::detail::identity_<::cuda::std::bidirectional_iterator_tag>,
+                                  thrust::detail::identity_<::cuda::std::forward_iterator_tag>>>,
+#else
+          ::std::is_convertible<Traversal, thrust::random_access_traversal_tag>::value,
+          thrust::detail::identity_<::std::random_access_iterator_tag>,
+          thrust::detail::eval_if<::std::is_convertible<Traversal, thrust::bidirectional_traversal_tag>::value,
+                                  thrust::detail::identity_<::std::bidirectional_iterator_tag>,
+                                  thrust::detail::identity_<::std::forward_iterator_tag>>>,
+#endif
         thrust::detail::eval_if< // XXX note we differ from Boost here
-          thrust::detail::is_convertible<Traversal, thrust::single_pass_traversal_tag>::value,
-          thrust::detail::identity_<std::input_iterator_tag>,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+          ::cuda::std::is_convertible<Traversal, thrust::single_pass_traversal_tag>::value,
+          thrust::detail::identity_<::cuda::std::input_iterator_tag>,
+#else
+          ::std::is_convertible<Traversal, thrust::single_pass_traversal_tag>::value,
+          thrust::detail::identity_<::std::input_iterator_tag>,
+#endif
           thrust::detail::identity_<Traversal>>>
 {}; // end iterator_facade_default_category_std
 
@@ -108,15 +139,31 @@ struct iterator_facade_default_category_std
 template <typename Traversal, typename ValueParam, typename Reference>
 struct iterator_facade_default_category_host
     : thrust::detail::eval_if<
-        thrust::detail::is_convertible<Traversal, thrust::forward_traversal_tag>::value,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+        ::cuda::std::is_convertible<Traversal, thrust::forward_traversal_tag>::value,
+#else
+        ::std::is_convertible<Traversal, thrust::forward_traversal_tag>::value,
+#endif
         thrust::detail::eval_if<
-          thrust::detail::is_convertible<Traversal, thrust::random_access_traversal_tag>::value,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+          ::cuda::std::is_convertible<Traversal, thrust::random_access_traversal_tag>::value,
+#else
+          ::std::is_convertible<Traversal, thrust::random_access_traversal_tag>::value,
+#endif
           thrust::detail::identity_<thrust::random_access_host_iterator_tag>,
-          thrust::detail::eval_if<thrust::detail::is_convertible<Traversal, thrust::bidirectional_traversal_tag>::value,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+          thrust::detail::eval_if<::cuda::std::is_convertible<Traversal, thrust::bidirectional_traversal_tag>::value,
+#else
+          thrust::detail::eval_if<::std::is_convertible<Traversal, thrust::bidirectional_traversal_tag>::value,
+#endif
                                   thrust::detail::identity_<thrust::bidirectional_host_iterator_tag>,
                                   thrust::detail::identity_<thrust::forward_host_iterator_tag>>>,
         thrust::detail::eval_if< // XXX note we differ from Boost here
-          thrust::detail::is_convertible<Traversal, thrust::single_pass_traversal_tag>::value,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+          ::cuda::std::is_convertible<Traversal, thrust::single_pass_traversal_tag>::value,
+#else
+          ::std::is_convertible<Traversal, thrust::single_pass_traversal_tag>::value,
+#endif
           thrust::detail::identity_<thrust::input_host_iterator_tag>,
           thrust::detail::identity_<Traversal>>>
 {}; // end iterator_facade_default_category_host
@@ -125,16 +172,32 @@ struct iterator_facade_default_category_host
 template <typename Traversal, typename ValueParam, typename Reference>
 struct iterator_facade_default_category_device
     : thrust::detail::eval_if<
-        thrust::detail::is_convertible<Traversal, thrust::forward_traversal_tag>::value,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+        ::cuda::std::is_convertible<Traversal, thrust::forward_traversal_tag>::value,
+#else
+        ::std::is_convertible<Traversal, thrust::forward_traversal_tag>::value,
+#endif
         thrust::detail::eval_if<
-          thrust::detail::is_convertible<Traversal, thrust::random_access_traversal_tag>::value,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+          ::cuda::std::is_convertible<Traversal, thrust::random_access_traversal_tag>::value,
+#else
+          ::std::is_convertible<Traversal, thrust::random_access_traversal_tag>::value,
+#endif
           thrust::detail::identity_<thrust::random_access_device_iterator_tag>,
-          thrust::detail::eval_if<thrust::detail::is_convertible<Traversal, thrust::bidirectional_traversal_tag>::value,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+          thrust::detail::eval_if<::cuda::std::is_convertible<Traversal, thrust::bidirectional_traversal_tag>::value,
+#else
+          thrust::detail::eval_if<::std::is_convertible<Traversal, thrust::bidirectional_traversal_tag>::value,
+#endif
                                   thrust::detail::identity_<thrust::bidirectional_device_iterator_tag>,
                                   thrust::detail::identity_<thrust::forward_device_iterator_tag>>>,
         thrust::detail::eval_if<
-          thrust::detail::is_convertible<Traversal, thrust::single_pass_traversal_tag>::value, // XXX note we differ
-                                                                                               // from Boost here
+// XXX note we differ from Boost here
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+          ::cuda::std::is_convertible<Traversal, thrust::single_pass_traversal_tag>::value,
+#else
+          ::std::is_convertible<Traversal, thrust::single_pass_traversal_tag>::value,
+#endif
           thrust::detail::identity_<thrust::input_device_iterator_tag>,
           thrust::detail::identity_<Traversal>>>
 {}; // end iterator_facade_default_category_device
@@ -153,16 +216,28 @@ template <typename System, typename Traversal, typename ValueParam, typename Ref
 struct iterator_facade_default_category
     // check for any system
     : thrust::detail::eval_if<
-        thrust::detail::is_convertible<System, thrust::any_system_tag>::value,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+        ::cuda::std::is_convertible<System, thrust::any_system_tag>::value,
+#else
+        ::std::is_convertible<System, thrust::any_system_tag>::value,
+#endif
         iterator_facade_default_category_any<Traversal, ValueParam, Reference>,
 
         // check for host system
         thrust::detail::eval_if<
-          thrust::detail::is_convertible<System, thrust::host_system_tag>::value,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+          ::cuda::std::is_convertible<System, thrust::host_system_tag>::value,
+#else
+          ::std::is_convertible<System, thrust::host_system_tag>::value,
+#endif
           iterator_facade_default_category_host<Traversal, ValueParam, Reference>,
 
-          // check for device system
-          thrust::detail::eval_if<thrust::detail::is_convertible<System, thrust::device_system_tag>::value,
+// check for device system
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+          thrust::detail::eval_if<::cuda::std::is_convertible<System, thrust::device_system_tag>::value,
+#else
+          thrust::detail::eval_if<::std::is_convertible<System, thrust::device_system_tag>::value,
+#endif
                                   iterator_facade_default_category_device<Traversal, ValueParam, Reference>,
 
                                   // if we don't recognize the system, get a standard iterator category
@@ -179,11 +254,16 @@ struct iterator_facade_category_impl
   using category = typename iterator_facade_default_category<System, Traversal, ValueParam, Reference>::type;
 
   // we must be able to deduce both Traversal & System from category
-  // otherwise, munge them
+  // otherwise, munge them all together
   using type = typename thrust::detail::eval_if<
-    thrust::detail::and_<
-      thrust::detail::is_same<Traversal, typename thrust::detail::iterator_category_to_traversal<category>::type>,
-      thrust::detail::is_same<System, typename thrust::detail::iterator_category_to_system<category>::type>>::value,
+    ::internal::_And<
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+      ::cuda::std::is_same<Traversal, typename thrust::detail::iterator_category_to_traversal<category>::type>,
+      ::cuda::std::is_same<System, typename thrust::detail::iterator_category_to_system<category>::type>>::value,
+#else
+      ::std::is_same<Traversal, typename thrust::detail::iterator_category_to_traversal<category>::type>,
+      ::std::is_same<System, typename thrust::detail::iterator_category_to_system<category>::type>>::value,
+#endif
     thrust::detail::identity_<category>,
     thrust::detail::identity_<
       thrust::detail::iterator_category_with_system_and_traversal<category, System, Traversal>>>::type;

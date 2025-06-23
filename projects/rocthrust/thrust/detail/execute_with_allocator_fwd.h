@@ -26,8 +26,10 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/execute_with_dependencies.h>
 #include <thrust/detail/type_traits.h>
+#if !defined(__CUDACC_RTC__)
+#  include <thrust/detail/execute_with_dependencies.h>
+#endif // !defined(__CUDACC_RTC__)
 
 #if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
 #  include <type_traits>
@@ -58,14 +60,15 @@ public:
   {}
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  ::cuda::std::remove_reference_t<Allocator>& get_allocator()
+  THRUST_HOST_DEVICE ::cuda::std::remove_reference_t<Allocator>& get_allocator()
 #else
-  ::std::remove_reference_t<Allocator>& get_allocator()
+  THRUST_HOST_DEVICE ::std::remove_reference_t<Allocator>& get_allocator()
 #endif
   {
     return alloc;
   }
 
+#if !defined(__CUDACC_RTC__)
   template <typename... Dependencies>
   THRUST_DEPRECATED THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
   after(Dependencies&&... dependencies) const
@@ -105,6 +108,7 @@ public:
   {
     return {alloc, capture_as_dependency(std::move(dependencies))};
   }
+#endif // !defined(__CUDACC_RTC__)
 };
 
 THRUST_SUPPRESS_DEPRECATED_POP

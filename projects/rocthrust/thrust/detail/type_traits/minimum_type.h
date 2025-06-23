@@ -18,7 +18,19 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/type_traits.h>
+
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#  include <type_traits>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -56,10 +68,12 @@ struct minimum_type_impl<T1, T2, true, true>
 
 template <typename T1, typename T2>
 struct primitive_minimum_type
-    : minimum_type_detail::minimum_type_impl<T1,
-                                             T2,
-                                             THRUST_NS_QUALIFIER::detail::is_convertible<T1, T2>::value,
-                                             THRUST_NS_QUALIFIER::detail::is_convertible<T2, T1>::value>
+    : minimum_type_detail::
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+        minimum_type_impl<T1, T2, ::cuda::std::is_convertible<T1, T2>::value, ::cuda::std::is_convertible<T2, T1>::value>
+#else
+        minimum_type_impl<T1, T2, ::std::is_convertible<T1, T2>::value, ::std::is_convertible<T2, T1>::value>
+#endif
 {}; // end primitive_minimum_type
 
 // because some types are not convertible (even to themselves)
@@ -74,7 +88,7 @@ struct primitive_minimum_type<T, T>
 struct any_conversion
 {
   template <typename T>
-  operator T(void);
+  THRUST_HOST_DEVICE operator T();
 };
 
 } // namespace minimum_type_detail

@@ -31,11 +31,10 @@
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  include <cuda/cmath>
+#  include <cuda/std/cstddef> // For `std::size_t` and `std::max_align_t`.
 #  include <cuda/std/type_traits>
-#endif
-
-#include <cstddef> // For `std::size_t` and `std::max_align_t`.
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#else
+#  include <cstddef> // For `std::size_t` and `std::max_align_t`.
 #  include <type_traits> // For `std::alignment_of`.
 #endif
 
@@ -58,7 +57,11 @@ using alignment_of = ::std::alignment_of<T>;
 /// type whose alignment requirement is a divisor of `Align`.
 ///
 /// The behavior is undefined if `Align` is not a power of 2.
-template <std::size_t Align>
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+template <::cuda::std::size_t Align>
+#else
+template <::std::size_t Align>
+#endif
 struct aligned_type
 {
   struct alignas(Align) type
@@ -87,7 +90,11 @@ THRUST_HOST_DEVICE T aligned_reinterpret_cast(U u)
   return reinterpret_cast<T>(reinterpret_cast<void*>(u));
 }
 
-THRUST_HOST_DEVICE inline std::size_t aligned_storage_size(std::size_t n, std::size_t align)
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+THRUST_HOST_DEVICE inline ::cuda::std::size_t aligned_storage_size(::cuda::std::size_t n, ::cuda::std::size_t align)
+#else
+THRUST_HOST_DEVICE inline ::std::size_t aligned_storage_size(::std::size_t n, ::std::size_t align)
+#endif
 {
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
   return ::cuda::ceil_div(n, align) * align;
