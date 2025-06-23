@@ -568,8 +568,6 @@ TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueCopyByKeyLargeInput)
 
 TYPED_TEST(UniqueByKeyIntegralTests, TestUniqueCopyByKeyLargeOutCount)
 {
-  using K = typename TestFixture::input_type;
-
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   constexpr std::size_t num_items = 4400000000ULL;

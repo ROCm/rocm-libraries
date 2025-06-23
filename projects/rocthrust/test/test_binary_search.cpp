@@ -19,6 +19,7 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
+#include <thrust/universal_vector.h>
 
 #include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
@@ -484,7 +485,22 @@ TYPED_TEST(VectorTests, BinarySearchWithCustomComp)
     });
 }
 
+using VectorTestsParams = ::testing::Types<
+  Params<thrust::host_vector<signed char>>,
+  Params<thrust::host_vector<short>>,
+  Params<thrust::host_vector<int>>,
+  Params<thrust::host_vector<float>>,
+  Params<thrust::host_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::host_memory_resource>>>,
+  Params<thrust::device_vector<signed char>>,
+  Params<thrust::device_vector<short>>,
+  Params<thrust::device_vector<int>>,
+  Params<thrust::device_vector<float>>,
+  Params<thrust::device_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::device_memory_resource>>>,
+  Params<thrust::universal_vector<int>>,
+  Params<thrust::universal_host_pinned_vector<int>>>;
+
 TESTS_DEFINE(BinarySearchTests, FullTestsParams);
+TESTS_DEFINE(BinarySearchVectorTests, VectorTestsParams);
 
 THRUST_DIAG_PUSH
 THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
@@ -841,7 +857,7 @@ TEST(BinarySearchTests, TestScalarBinarySearchDispatchImplicit)
   ASSERT_EQ(13, vec.front());
 }
 
-TYPED_TEST(BinarySearchTests, TestScalarEqualRangeSimple)
+TYPED_TEST(BinarySearchVectorTests, TestScalarEqualRangeSimple)
 {
   using Vector = typename TestFixture::input_type;
 

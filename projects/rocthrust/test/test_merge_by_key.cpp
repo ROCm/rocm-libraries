@@ -501,7 +501,6 @@ TEST(MergeByKeyTests, TestMergeByKeyDevice)
       thrust::host_vector<T> h_values_result(h_values_a.size() + h_values_b.size());
       thrust::device_vector<T> d_values_result(d_values_a.size() + d_values_b.size());
 
-      typename thrust::host_vector<T>::iterator h_end;
       typename thrust::device_vector<T>::iterator d_end;
 
       thrust::merge_by_key(
