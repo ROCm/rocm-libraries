@@ -18,11 +18,17 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+#include <thrust/detail/type_traits.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/detail/any_assign.h>
 #include <thrust/iterator/iterator_adaptor.h>
-
-#include <cstddef> // for std::ptrdiff_t
 
 THRUST_NAMESPACE_BEGIN
 
@@ -40,7 +46,7 @@ struct discard_iterator_base
   //     but this interferes with zip_iterator<discard_iterator>
   using value_type    = any_assign;
   using reference     = any_assign&;
-  using incrementable = std::ptrdiff_t;
+  using incrementable = ::internal::ptrdiff_t;
 
   using base_iterator = typename thrust::counting_iterator<incrementable, System, thrust::random_access_traversal_tag>;
 

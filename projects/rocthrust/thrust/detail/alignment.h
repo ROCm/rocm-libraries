@@ -37,8 +37,6 @@
 #  include <rocprim/detail/various.hpp>
 #endif
 
-#include <cstddef> // For `std::size_t`
-
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
@@ -54,7 +52,7 @@ using alignment_of = ::internal::alignment_of<T>;
 /// type whose alignment requirement is a divisor of `Align`.
 ///
 /// The behavior is undefined if `Align` is not a power of 2.
-template <std::size_t Align>
+template <::internal::size_t Align>
 struct aligned_type
 {
   struct alignas(Align) type
@@ -79,7 +77,7 @@ THRUST_HOST_DEVICE T aligned_reinterpret_cast(U u)
   return reinterpret_cast<T>(reinterpret_cast<void*>(u));
 }
 
-THRUST_HOST_DEVICE inline std::size_t aligned_storage_size(std::size_t n, std::size_t align)
+THRUST_HOST_DEVICE inline ::internal::size_t aligned_storage_size(::internal::size_t n, ::internal::size_t align)
 {
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
   return ::cuda::ceil_div(n, align) * align;

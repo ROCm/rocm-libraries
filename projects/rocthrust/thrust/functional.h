@@ -49,8 +49,6 @@
 #  include <utility>
 #endif
 
-#include <functional>
-
 /*! \cond
  */
 namespace internal

@@ -35,6 +35,12 @@
 #include <thrust/iterator/detail/iterator_traversal_tags.h>
 #include <thrust/iterator/iterator_categories.h>
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/iterator>
+#else
+#  include <iterator>
+#endif
+
 THRUST_NAMESPACE_BEGIN
 
 namespace detail
@@ -101,13 +107,26 @@ struct iterator_facade_default_category_std
         ::internal::is_convertible<Traversal, thrust::forward_traversal_tag>::value,
         thrust::detail::eval_if<
           ::internal::is_convertible<Traversal, thrust::random_access_traversal_tag>::value,
-          thrust::detail::identity_<std::random_access_iterator_tag>,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+          thrust::detail::identity_<::cuda::std::random_access_iterator_tag>,
+#else
+          thrust::detail::identity_<::std::random_access_iterator_tag>,
+#endif
           thrust::detail::eval_if<::internal::is_convertible<Traversal, thrust::bidirectional_traversal_tag>::value,
-                                  thrust::detail::identity_<std::bidirectional_iterator_tag>,
-                                  thrust::detail::identity_<std::forward_iterator_tag>>>,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+                                  thrust::detail::identity_<::cuda::std::bidirectional_iterator_tag>,
+                                  thrust::detail::identity_<::cuda::std::forward_iterator_tag>>>,
+#else
+                                  thrust::detail::identity_<::std::bidirectional_iterator_tag>,
+                                  thrust::detail::identity_<::std::forward_iterator_tag>>>,
+#endif
         thrust::detail::eval_if< // XXX note we differ from Boost here
           ::internal::is_convertible<Traversal, thrust::single_pass_traversal_tag>::value,
-          thrust::detail::identity_<std::input_iterator_tag>,
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+          thrust::detail::identity_<::cuda::std::input_iterator_tag>,
+#else
+          thrust::detail::identity_<::std::input_iterator_tag>,
+#endif
           thrust::detail::identity_<Traversal>>>
 {}; // end iterator_facade_default_category_std
 
