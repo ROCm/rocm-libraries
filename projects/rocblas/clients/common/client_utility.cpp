@@ -35,6 +35,9 @@
 #include <stdexcept>
 #include <stdlib.h>
 #include <thread>
+#ifdef BUILD_WITH_HIPBLASLT
+#include <hipblaslt/hipblaslt-ext.hpp>
+#endif
 
 #ifdef WIN32
 #define strcasecmp(A, B) _stricmp(A, B)
@@ -90,11 +93,11 @@ void print_rocblas_version_string()
     print_rocblas_client_commit_hashes();
 }
 
-void print_reference_lib_warning()
-{
 #define TOSTR2(s) #s
 #define TOSTR(s) TOSTR2(s)
 
+void print_reference_lib_warning()
+{
 #ifdef ROCBLAS_REFERENCE_LIB
     rocblas_cout << "rocBLAS info: Using reference library '" << TOSTR(ROCBLAS_REFERENCE_LIB) << "'"
                  << std::endl;
@@ -105,9 +108,6 @@ void print_reference_lib_warning()
                     "If running a test suite, please use "
                  << "--gtest_filter=-*stress* to avoid 64-bit test failures.\n";
 #endif
-
-#undef TOSTR
-#undef TOSTR2
 }
 
 // Print rocBLAS and Tensile commit hashes
@@ -120,6 +120,13 @@ void print_rocblas_client_commit_hashes()
     rocblas_cout << "Tensile-commit-hash: " << rocblas_tensile_commit_hash[1] << std::endl;
 #else
     rocblas_cout << "Tensile-commit-hash: N/A, as rocBLAS was built without Tensile" << std::endl;
+#endif
+#ifdef BUILD_WITH_HIPBLASLT
+    rocblas_cout << "hipBLASLt version: " << TOSTR(HIPBLASLT_VERSION_MAJOR) << "."
+                 << TOSTR(HIPBLASLT_VERSION_MINOR) << "." << TOSTR(HIPBLASLT_VERSION_PATCH)
+                 << " commit-hash: " << TOSTR(HIPBLASLT_VERSION_TWEAK) << std::endl;
+#else
+    rocblas_cout << "hipBLASLt: N/A, as rocBLAS was built without hipBLASLt" << std::endl;
 #endif
 
     size_t size;
@@ -135,6 +142,9 @@ void print_rocblas_client_commit_hashes()
             << hash << std::endl;
     }
 }
+
+#undef TOSTR
+#undef TOSTR2
 
 bool rocblas_file_exists(const char* path)
 {

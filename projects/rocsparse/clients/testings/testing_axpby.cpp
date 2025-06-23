@@ -151,11 +151,13 @@ void testing_axpby(const Arguments& arg)
     template void testing_axpby_bad_arg<ITYPE, XTYPE, YTYPE, TTYPE>(const Arguments& arg); \
     template void testing_axpby<ITYPE, XTYPE, YTYPE, TTYPE>(const Arguments& arg)
 
+INSTANTIATE(int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE(int32_t, _Float16, _Float16, float);
 INSTANTIATE(int32_t, float, float, float);
 INSTANTIATE(int32_t, double, double, double);
 INSTANTIATE(int32_t, rocsparse_float_complex, rocsparse_float_complex, rocsparse_float_complex);
 INSTANTIATE(int32_t, rocsparse_double_complex, rocsparse_double_complex, rocsparse_double_complex);
+INSTANTIATE(int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE(int64_t, _Float16, _Float16, float);
 INSTANTIATE(int64_t, float, float, float);
 INSTANTIATE(int64_t, double, double, double);

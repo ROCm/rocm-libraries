@@ -4673,6 +4673,25 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("Beta", numSgprBeta, numSgprBeta)
       self.states.numSgprBeta = numSgprBeta
 
+    if kernel["StreamK"]:
+      # StreamK args
+      self.defineSgpr("MagicNumberProblemNumGroupTiles0", 1) # Magic number to use for division
+      self.defineSgpr("MagicShiftProblemNumGroupTiles0", 1) # Magic shift/abit to use for division alg 2
+      self.defineSgpr("ItersPerTile", 1)
+      self.defineSgpr("MagicNumberItersPerTile", 1)
+      self.defineSgpr("MagicShiftItersPerTile", 1)
+      self.defineSgpr("MagicNumProblemNumGroupTiles0By1", 1)  # for PKAB, use for Magic Div Alg 2 by (nwg0*nwg1)
+      self.defineSgpr("MagicShiftProblemNumGroupTiles0By1", 1)  # for PKAB, use for Magic Div Alg 2 by (nwg0*nwg1)
+      self.defineSgpr("TotalIters", 1)
+      self.defineSgpr("SKItersPerWG", 1)
+      self.states.numSgprStreamK += 9
+      if kernel["StreamK"] >= 2: # Two-tile SK
+        self.defineSgpr("skGrid", 1)
+        self.defineSgpr("skTiles", 1)
+        self.defineSgpr("skExtraIters", 1)
+        # self.defineSgpr("dpTilesPerWG", 1, kernarg=True)
+        self.states.numSgprStreamK += 3
+
     if kernel["LocalWriteUseSgprA"]:
         self.defineSgpr("LocalWriteAddrA", 1)
     if kernel["LocalWriteUseSgprB"]:
@@ -4695,25 +4714,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.numSgprAddressGSUSync += 2
       self.defineSgpr("GSUSync", 1)
       self.states.numSgprAddressGSUSync += 1
-
-    if kernel["StreamK"]:
-      # StreamK args
-      self.defineSgpr("MagicNumberProblemNumGroupTiles0", 1) # Magic number to use for division
-      self.defineSgpr("MagicShiftProblemNumGroupTiles0", 1) # Magic shift/abit to use for division alg 2
-      self.defineSgpr("ItersPerTile", 1)
-      self.defineSgpr("MagicNumberItersPerTile", 1)
-      self.defineSgpr("MagicShiftItersPerTile", 1)
-      self.defineSgpr("MagicNumProblemNumGroupTiles0By1", 1)  # for PKAB, use for Magic Div Alg 2 by (nwg0*nwg1)
-      self.defineSgpr("MagicShiftProblemNumGroupTiles0By1", 1)  # for PKAB, use for Magic Div Alg 2 by (nwg0*nwg1)
-      self.defineSgpr("TotalIters", 1)
-      self.defineSgpr("SKItersPerWG", 1)
-      self.states.numSgprStreamK += 9
-      if kernel["StreamK"] >= 2: # Two-tile SK
-        self.defineSgpr("skGrid", 1)
-        self.defineSgpr("skTiles", 1)
-        self.defineSgpr("skExtraIters", 1)
-        # self.defineSgpr("dpTilesPerWG", 1, kernarg=True)
-        self.states.numSgprStreamK += 3
 
     if kernel["GlobalSplitU"] != 0:
       self.defineSgpr("GSU", 1)  # Can't move to the front because of the preload arguments

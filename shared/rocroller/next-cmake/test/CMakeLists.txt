@@ -70,3 +70,32 @@ if(ROCROLLER_ENABLE_CATCH)
 endif()
 add_subdirectory(common)
 add_subdirectory(unit)
+
+# Component stand-alone test
+add_executable(component-test "${ROCROLLER_TEST_DIR}/standalone/ComponentTest.cpp")
+target_link_libraries(component-test PRIVATE roc::rocroller ${msgpack_libs})
+
+if(ROCROLLER_ENABLE_ARCH_GEN_TEST)
+    find_package(Pytest REQUIRED) # requires pip install -r requirements.txt
+    pytest_discover_tests(
+        GEMMClientTests
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../../client"
+        ENVIRONMENT "ROCROLLER_BUILD_DIR=${PROJECT_BINARY_DIR}"
+    )
+    add_executable(arch-gen-tests "${ROCROLLER_TEST_DIR}/unit/GPUArchitectureGeneratorTest.cpp")
+    target_include_directories(
+        arch-gen-tests
+            PRIVATE
+                "${ROCROLLER_GPUARCH_DIR}/include"
+    )
+    target_link_libraries(
+        arch-gen-tests
+            PRIVATE
+                roc::rocroller
+                rocroller::common-test-utilities
+                rocroller::isa-spec-manager
+                GTest::gtest_main
+                GTest::gmock
+                ${BLAS_LIBRARIES}
+    )
+endif()
