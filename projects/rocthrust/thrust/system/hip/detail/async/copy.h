@@ -80,9 +80,6 @@ auto async_copy_n(FromPolicy& from_exec, ToPolicy& to_exec, ForwardIt first, Siz
 
   auto const device_alloc = get_async_device_allocator(select_device_system(from_exec, to_exec));
 
-  using pointer =
-    typename thrust::detail::allocator_traits<decltype(device_alloc)>::template rebind_traits<void>::pointer;
-
   unique_eager_event e;
 
   // Set up stream with dependencies.
@@ -146,7 +143,7 @@ void async_copy_n_compile_failure_no_hip_to_non_contiguous_output()
 // TriviallyRelocatable value type
 // Device to host, host to device
 template <typename FromPolicy, typename ToPolicy, typename ForwardIt, typename OutputIt, typename Size>
-auto async_copy_n(FromPolicy& from_exec, ToPolicy& to_exec, ForwardIt first, Size n, OutputIt output) ->
+auto async_copy_n(FromPolicy& from_exec, ToPolicy& to_exec, ForwardIt /*first*/, Size /*n*/, OutputIt /*output*/) ->
   typename std::enable_if<conjunction<negation<is_contiguous_iterator<OutputIt>>,
                                       is_trivially_relocatable_to<typename iterator_traits<ForwardIt>::value_type,
                                                                   typename iterator_traits<OutputIt>::value_type>,
@@ -298,7 +295,7 @@ void async_copy_n_compile_failure_non_trivially_relocatable_elements()
 // Non-TriviallyRelocatable value type
 // Host to device, device to host
 template <typename FromPolicy, typename ToPolicy, typename ForwardIt, typename OutputIt, typename Size>
-auto async_copy_n(FromPolicy& from_exec, ToPolicy& to_exec, ForwardIt first, Size n, OutputIt output) ->
+auto async_copy_n(FromPolicy& from_exec, ToPolicy& to_exec, ForwardIt /*first*/, Size /*n*/, OutputIt /*output*/) ->
   typename std::enable_if<
     conjunction<negation<is_trivially_relocatable_to<typename iterator_traits<ForwardIt>::value_type,
                                                      typename iterator_traits<OutputIt>::value_type>>,
