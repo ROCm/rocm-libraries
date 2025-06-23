@@ -17,14 +17,30 @@
 
 #include <thrust/count.h>
 #include <thrust/iterator/retag.h>
+#include <thrust/universal_vector.h>
 
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
+using VectorTestsParams = ::testing::Types<
+  Params<thrust::host_vector<signed char>>,
+  Params<thrust::host_vector<short>>,
+  Params<thrust::host_vector<int>>,
+  Params<thrust::host_vector<float>>,
+  Params<thrust::host_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::host_memory_resource>>>,
+  Params<thrust::device_vector<signed char>>,
+  Params<thrust::device_vector<short>>,
+  Params<thrust::device_vector<int>>,
+  Params<thrust::device_vector<float>>,
+  Params<thrust::device_vector<int, thrust::mr::stateless_resource_allocator<int, thrust::device_memory_resource>>>,
+  Params<thrust::universal_vector<int>>,
+  Params<thrust::universal_host_pinned_vector<int>>>;
+
 TESTS_DEFINE(CountTests, FullTestsParams);
 TESTS_DEFINE(CountPrimitiveTests, NumericalTestsParams);
+TESTS_DEFINE(CountVectorTests, VectorTestsParams);
 
-TYPED_TEST(CountTests, TestCountSimple)
+TYPED_TEST(CountVectorTests, TestCountSimple)
 {
   using Vector = typename TestFixture::input_type;
 
@@ -111,7 +127,7 @@ TYPED_TEST(CountTests, TestCountIf)
   }
 }
 
-TYPED_TEST(CountTests, TestCountFromConstIteratorSimple)
+TYPED_TEST(CountVectorTests, TestCountFromConstIteratorSimple)
 {
   using Vector = typename TestFixture::input_type;
 
