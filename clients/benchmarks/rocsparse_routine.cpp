@@ -54,7 +54,7 @@ rocsparse_routine::rocsparse_routine(const char* function)
 //
 //
 rocsparse_routine::rocsparse_routine()
-    : value((value_type)-1){};
+    : value((value_type)-1) {};
 
 //
 //
@@ -502,7 +502,7 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
     switch(FNAME)
     {
         DEFINE_CASE_T(axpyi);
-        DEFINE_CASE_IT_X(bellmm, testing_spmm_bell);
+        DEFINE_CASE_IABCT_X(bellmm, testing_spmm_bell);
         DEFINE_CASE_IT_X(bellmm_batched, testing_spmm_batched_bell);
         DEFINE_CASE_T(bsrgeam);
         DEFINE_CASE_T(bsric0);
