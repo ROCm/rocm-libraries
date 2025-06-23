@@ -138,7 +138,7 @@ class iterator_adaptor
   /*! \cond
    */
 
-  friend class thrust::iterator_core_access;
+  friend class iterator_core_access;
 
 protected:
   using super_t =

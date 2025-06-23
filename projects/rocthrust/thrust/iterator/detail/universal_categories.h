@@ -27,6 +27,7 @@
 #endif // no system header
 #include <thrust/iterator/iterator_categories.h>
 
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
 THRUST_SUPPRESS_DEPRECATED_PUSH
 THRUST_NAMESPACE_BEGIN
 
@@ -121,3 +122,4 @@ struct THRUST_DEPRECATED random_access_universal_iterator_tag
 
 THRUST_SUPPRESS_DEPRECATED_POP
 THRUST_NAMESPACE_END
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC

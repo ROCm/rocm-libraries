@@ -186,6 +186,7 @@ THRUST_NAMESPACE_END
 #endif
 
 // structured bindings support
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
 namespace std
 {
 
@@ -196,11 +197,12 @@ struct tuple_size<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts..
 
 template <size_t Id, class... Ts>
 struct tuple_element<Id, THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>>
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  if _THRUST_HAS_DEVICE_SYSTEM_STD
     : _THRUST_STD::tuple_element<Id, _THRUST_STD::tuple<Ts...>>
-#else
+#  else
     : ::thrust::tuple_element<Id, ::thrust::tuple<Ts...>>
-#endif
+#  endif
 {};
 
 } // namespace std
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
