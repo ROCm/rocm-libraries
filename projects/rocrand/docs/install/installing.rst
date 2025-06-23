@@ -88,7 +88,7 @@ The rocRAND source code can be cloned in two different ways.
 
 .. note::
 
-   For both methods, replace all occurences of "x.y" in the commands with the version number matching your ROCm installation.
+   For both methods, replace all occurrences of "x.y" in the commands with the version number matching your ROCm installation.
    For example, if you have ROCm 7.0 installed, clone the ``release/rocm-rel-7.0`` branch.
 
 *  Clone the entire `rocm-libraries <https://github.com/ROCm/rocm-libraries>`_ repository.
