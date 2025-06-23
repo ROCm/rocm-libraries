@@ -135,13 +135,13 @@ __device__ void layernormfwdstride(const TI* __restrict__ x,
      * Each group works on a single channel.
      * Example)
      * x dim = {N, C, L}, normalized shape = {C, L}
-     * outer_size = N, inner_size = C * L
+     * outer_size = N, inner_size = C * L, stride = 1
      *
      * Example2)
      * x dim = {N, C, L}, normalized shape = {L}
-     * outer_size = N * C, inner_size = L
+     * outer_size = N, inner_size = L, stride = C
      *
-     * => gws = {outer_size * LOCAL_SIZE}, lws = {LOCAL_SIZE}
+     * => gws = {outer_size * stride * LOCAL_SIZE}, lws = {LOCAL_SIZE}
      */
 
     /*
