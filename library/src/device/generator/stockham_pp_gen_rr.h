@@ -48,7 +48,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         , params(params)
     {
         length_pp  = params.parent_length[params.off_dim];
-        factors_pp = params.factors_off_dim;
+        factors_pp = params.pp_factors_curr;
 
         max_factor_pp = *std::max_element(factors_pp.begin(), factors_pp.end());
 

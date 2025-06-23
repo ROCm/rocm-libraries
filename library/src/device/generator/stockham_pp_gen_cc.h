@@ -51,16 +51,21 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                                          bool largeTwdBatchIsTransformCount)
         : StockhamKernelCC(specs, largeTwdBatchIsTransformCount, false)
         , params(params)
+        , factors_pp_curr(params.pp_factors_curr)
+        , factors_pp_other(params.pp_factors_other)
 
     {
-        factors_pp = params.factors_off_dim;
-
-        max_factor_pp = *std::max_element(factors_pp.begin(), factors_pp.end());
+        max_factor_pp = *std::max_element(factors_pp_curr.begin(), factors_pp_curr.end());
 
         transforms_per_block_pp = transforms_per_block;
 
         transforms_per_block *= max_factor_pp;
         workgroup_size *= max_factor_pp;
+
+        pp_factors_curr_prod = std::accumulate(
+            factors_pp_curr.begin(), factors_pp_curr.end(), 1, std::multiplies<unsigned int>());
+        pp_factors_other_prod = std::accumulate(
+            factors_pp_other.begin(), factors_pp_other.end(), 1, std::multiplies<unsigned int>());
     }
 
     StockhamPartialPassParams params;
@@ -68,7 +73,11 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
     unsigned int transforms_per_block_pp;
     unsigned int max_factor_pp;
 
-    std::vector<unsigned int> factors_pp;
+    std::vector<unsigned int> factors_pp_curr;
+    unsigned int              pp_factors_curr_prod;
+
+    std::vector<unsigned int> factors_pp_other;
+    unsigned int              pp_factors_other_prod;
 
     Variable thread_lds{"thread_lds", "unsigned int"};
     Variable stride_lds_pp{"stride_lds_pp", "unsigned int"};
@@ -255,6 +264,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         stmts += Assign{plength, num_of_tiles};
         stmts += Assign{tile_index, block_id % num_of_tiles};
 
+        // TODO: factor 128
         stmts += Assign{remaining, (block_id % 128) / num_of_tiles};
         stmts += Assign{offset, tile_index * transforms_per_block_pp * stride[1]};
         stmts += For{d,
@@ -287,6 +297,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         stmts += Declaration{thread_lds, thread_id / transforms_per_block_pp};
         stmts += Declaration{tid_hor_lds, thread_id % transforms_per_block_pp};
 
+        // TODO: length
         stmts += Declaration(
             tid_hor_pp, thread_id % transforms_per_block_pp + length * (thread % max_factor_pp));
         stmts += Declaration(thread_new, thread_id / (transforms_per_block_pp * max_factor_pp));
@@ -295,6 +306,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         stmts += Declaration(thread_idx, thread_id);
         stmts += Declaration(block_idx, block_id);
 
+        // TODO: length and TODO: Literal{192}
         stmts += Declaration(
             offset_pp, offset + Parens(offset / length) * Literal{192} + batch_new * stride[dim]);
         stmts += Declaration(offset_tid_hor, offset_pp + tid_hor_pp * stride[1]);
@@ -439,7 +451,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
             tmp_stmts += StoreGlobal{
                 buf,
                 CallExpr{"local_transpose_pp_length" + std::to_string(length) + "_device",
-                         {offset_tile_wbuf(i)}},
+                         {offset_tile_wbuf(i), lengths}},
                 lds_complex[offset_tile_rlds(i)]};
 
         stmts += CommentLines{
@@ -659,30 +671,43 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
             = "local_transpose_pp_length" + std::to_string(length) + "_device";
 
         Function f{function_name};
-        f.arguments   = ArgumentList{global_idx};
+        f.arguments   = ArgumentList{global_idx, lengths};
         f.return_type = "unsigned int";
         f.qualifier   = "__device__";
 
         StatementList& body = f.body;
 
-        auto factor_transpose_1 = (length * length) / max_factor_pp;
-        auto factor_transpose_2 = length * max_factor_pp;
-        auto factor_transpose_3 = length * length;
-        auto factor_transpose_4 = length * length - length;
-        auto factor_transpose_5 = length * length * length;
+        auto len_1     = lengths[2];
+        auto len_2     = lengths[1];
+        auto len_3     = lengths[0];
+        auto len_1_2   = len_1 * len_2;
+        auto len_1_2_3 = len_1 * len_2 * len_3;
 
-        body += Declaration{transpose_idx, global_idx % factor_transpose_5};
-        body += Assign{transpose_idx,
-                       Parens((transpose_idx % length)
-                              + Parens(Parens(transpose_idx % factor_transpose_1) / length)
-                                    * factor_transpose_1)
-                               % factor_transpose_4
-                           + (Parens(transpose_idx / factor_transpose_1) * factor_transpose_2)
-                           + Parens(transpose_idx / factor_transpose_3)
-                                 * (factor_transpose_3 - factor_transpose_1)};
+        auto pp_factor_1 = pp_factors_curr_prod;
+        auto pp_factor_2 = pp_factors_other_prod;
 
-        body += Assign{transpose_idx,
-                       transpose_idx + global_idx / factor_transpose_5 * factor_transpose_5};
+        auto pp_factor_len = pp_factor_1 * len_2;
+
+        body += Declaration{transpose_idx, global_idx % len_1_2_3};
+
+        Variable idx_1{"idx_1", "unsigned int"};
+        body += Declaration{idx_1, transpose_idx % len_2};
+
+        Variable idx_2{"idx_2", "unsigned int"};
+        body += Declaration{idx_2, transpose_idx % pp_factor_len};
+        body += Assign{idx_2, idx_2 / len_2};
+        body += Assign{idx_2, idx_2 * pp_factor_2 * len_2};
+
+        Variable idx_3{"idx_3", "unsigned int"};
+        body += Declaration{idx_3, transpose_idx % len_1_2};
+        body += Assign{idx_3, Parens{idx_3 / pp_factor_len} * len_2};
+
+        Variable idx_4{"idx_4", "unsigned int"};
+        body += Declaration{idx_4, Parens{transpose_idx / len_1_2} * len_1_2};
+
+        body += Assign{transpose_idx, idx_1 + idx_2 + idx_3 + idx_4};
+
+        body += Assign{transpose_idx, transpose_idx + Parens{global_idx / len_1_2_3} * len_1_2_3};
 
         body += ReturnExpr(transpose_idx);
 
@@ -706,9 +731,9 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                         pre_post_lds_args};
         stmts += preLoad;
 
-        for(unsigned int npass = 0; npass < factors_pp.size(); ++npass)
+        for(unsigned int npass = 0; npass < factors_pp_curr.size(); ++npass)
         {
-            unsigned int width  = factors_pp[npass];
+            unsigned int width  = factors_pp_curr[npass];
             unsigned int height = threads_per_transform / max_factor_pp;
 
             auto butterfly = std::mem_fn(&StockhamKernel::butterfly_generator);

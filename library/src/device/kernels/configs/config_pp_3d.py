@@ -22,4 +22,6 @@ from kernels.configs import config_lds
 from types import SimpleNamespace as NS
 
 # yapf: disable
-
+pp_3d_kernels = [
+        NS(length=[64,64,64], dims=[0,2], factors=[[8,8],[4,4,4]], factors_pp=[[4],[16]], threads_per_transform=[8,16], workgroup_size=[64,256], direct_to_from_reg=[False,False]),
+]

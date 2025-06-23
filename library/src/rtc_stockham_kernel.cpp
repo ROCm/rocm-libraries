@@ -88,8 +88,11 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         {
             pp_params.off_dim         = node.ppOffDim;
             pp_params.current_dim     = node.ppCurrDim;
-            pp_params.factors_off_dim = std::vector<unsigned int>(
-                kernel->pp_params.factors_off_dim.begin(), kernel->pp_params.factors_off_dim.end());
+            pp_params.pp_factors_curr = std::vector<unsigned int>(
+                kernel->pp_params.pp_factors_curr.begin(), kernel->pp_params.pp_factors_curr.end());
+            pp_params.pp_factors_other
+                = std::vector<unsigned int>(kernel->pp_params.pp_factors_other.begin(),
+                                            kernel->pp_params.pp_factors_other.end());
             pp_params.parent_length
                 = std::vector<unsigned int>(node.length.begin(), node.length.end());
         }
