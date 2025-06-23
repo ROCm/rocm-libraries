@@ -598,6 +598,13 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysValues)
                                                       std::numeric_limits<value_type>::max(),
                                                       seed_value + seed_value_addition);
 
+        // Set some keys to be the same, but have different values to test stability
+        for(size_t i = 0; i < 10; i++)
+        {
+            keys_output[i]   = static_cast<key_type>(0);
+            values_output[i] = static_cast<value_type>(i);
+        }
+
         using key_value = std::pair<key_type, value_type>;
 
         // Calculate expected results on host

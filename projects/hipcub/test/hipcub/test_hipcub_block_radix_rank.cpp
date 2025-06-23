@@ -645,22 +645,12 @@ void test_radix_rank_with_prefix_sum_output()
 
             // Generate data
             std::vector<key_type> keys_input;
-            if(test_utils::is_floating_point<key_type>::value)
-            {
-                keys_input = test_utils::get_random_data<key_type>(
-                    size,
-                    test_utils::convert_to_device<key_type>(-1000),
-                    test_utils::convert_to_device<key_type>(+1000),
-                    seed_value);
-            }
-            else
-            {
-                keys_input = test_utils::get_random_data<key_type>(
-                    size,
-                    test_utils::numeric_limits<key_type>::min(),
-                    test_utils::numeric_limits<key_type>::max(),
-                    seed_value);
-            }
+
+            keys_input = test_utils::get_random_data<key_type>(
+                size,
+                test_utils::numeric_limits<key_type>::min(),
+                test_utils::numeric_limits<key_type>::max(),
+                seed_value);
 
             test_utils::add_special_values(keys_input, seed_value);
 
@@ -716,13 +706,6 @@ void test_radix_rank_with_prefix_sum_output()
                                     histogram.end(),
                                     pfs_expected.begin() + pfs_offset,
                                     0);
-            }
-
-            if constexpr(std::is_same_v<key_type, int>)
-            {
-                for(const auto& x : pfs_expected)
-                    std::cout << x << " ";
-                std::cout << std::endl;
             }
 
             // Preparing device
@@ -795,16 +778,5 @@ TYPED_TEST(HipcubBlockRadixRank, BlockRadixRankMemoizeWithPrefixSumOutput)
 
 TYPED_TEST(HipcubBlockRadixRank, BlockRadixRankMatchWithPrefixSumOutput)
 {
-#ifdef __HIP_PLATFORM_NVIDIA__
-    constexpr unsigned int block_size = TestFixture::params::block_size;
-    if(block_size % HIPCUB_DEVICE_WARP_THREADS != 0)
-    {
-        // The CUB implementation of BlockRadixRankMatch is currently broken when
-        // the warp size does not divide the block size exactly, see
-        // https://github.com/NVIDIA/cub/issues/552.
-        GTEST_SKIP();
-    }
-#endif
-
     test_radix_rank_with_prefix_sum_output<TestFixture, RadixRankAlgorithm::RADIX_RANK_MATCH>();
 }

@@ -50,7 +50,8 @@ struct dummy
 
 #ifdef HIPCUB_ROCPRIM_API
     HIPCUB_HOST_DEVICE
-#endif dummy() = default;
+#endif
+    dummy() = default;
 
     template<class U>
     HIPCUB_HOST_DEVICE dummy(U a) : x(a + 1), y(a * 2)
@@ -166,6 +167,7 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToStriped)
     HIP_CHECK(
         hipMemcpy(device_input, input.data(), input.size() * sizeof(type), hipMemcpyHostToDevice));
 
+    HIP_CHECK(hipPeekAtLastError());
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
     hipLaunchKernelGGL(
