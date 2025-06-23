@@ -2,7 +2,6 @@ trigger: none
 pr:  
   branches:
     include:
-      - develop
       - release-staging/rocm-rel-*
   paths:  
     include:  
@@ -29,7 +28,6 @@ jobs:
 - job: Trigger_Pipeline 
   displayName: 'Trigger Pipeline'
   pool: rocm-ci-caller
-  condition: ne(variables['System.PullRequest.IsFork'], true)
   steps:
   - checkout: none
   - script: |
@@ -58,8 +56,16 @@ jobs:
               -ghprt \"\$TITLE\" \
               -ghpat '$(GH_PAT)' \
               -br   '$(BASE_REF)' \
-              -et   '$(EVENT_TYPE)'" > /dev/null 2>&1
-
+              -et   '$(EVENT_TYPE)'" | tee jenkins_api_log.txt
+          # > /dev/null 2>&1
     displayName: Invoke jenkins_api.py in Docker  
     env:  
       svc_acc_org_secret: $(svc_acc_org_secret)
+
+  - task: PublishBuildArtifacts@1
+    displayName: Upload jenkins_api_log.txt as artifact
+    condition: always()
+    inputs:
+      PathtoPublish: '$(repo_name)/jenkins_api_log.txt'
+      ArtifactName: 'docker-logs'
+      publishLocation: 'Container'
