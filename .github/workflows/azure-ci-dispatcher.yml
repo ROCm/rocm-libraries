@@ -15,21 +15,26 @@
 name: Dispatch Azure CI
 
 on:
-  workflow_dispatch:
-  pull_request:
+  pull_request_target:
     types:
       - opened
       - synchronize
       - reopened
       - ready_for_review
+      - labeled
     branches:
       - develop
       - staging
       - main
       - release-staging/rocm-rel-7.*
 
+concurrency:
+  group: azure-ci-dispatcher-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   dispatch-azure-ci:
+    if: ${{ github.event.action != 'labeled' || github.event.label.name == 'ci:azure' }}
     name: Dispatch Azure CI
     runs-on: ubuntu-latest
     steps:
@@ -193,3 +198,17 @@ jobs:
         if [[ $exit_status -ne 0 ]] then
           exit $exit_status
         fi
+
+    - name: Cancel Azure CI runs
+      if: ${{ cancelled() }}
+      run: |
+        run_ids=(${{ steps.dispatch.outputs.run_ids }})
+        echo "Cancelling runs: ${run_ids[*]}"
+
+        for run_id in "${run_ids[@]}"; do
+          response=$(curl -sSX PATCH https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds/$run_id?api-version=7.1 \
+            -u ":${{ secrets.AZ_PAT }}" \
+            -H "Content-Type: application/json" \
+            -d '{"status": "cancelling"}')
+          echo $response | jq -r '.status' || echo "Failed to cancel run $run_id"
+        done
