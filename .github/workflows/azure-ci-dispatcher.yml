@@ -12,6 +12,7 @@
 # Requires an Azure Personal Access Token with permissions to manage builds.
 # The token should be stored in the repository secrets as `AZ_PAT`.
 
+
 name: Dispatch Azure CI
 
 on:
