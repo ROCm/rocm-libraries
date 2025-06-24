@@ -1,0 +1,195 @@
+# Azure CI Dispatcher
+# ------------------
+# This workflow allows Azure CI to be centralized in a single PR check.
+# It detects which subtrees (from a monorepo structure) were changed in a
+# pull request, and automatically requests Azure CI runs for the corresponding
+# subtrees.
+#
+# For any given subtree, if an upstream subtree is also included in the PR,
+# it will not run CI for the downstream subtree.
+# Eg. A PR that touches rocprim and rocthrust will only trigger rocprim CI.
+#
+# Requires an Azure Personal Access Token with permissions to manage builds.
+# The token should be stored in the repository secrets as `AZ_PAT`.
+
+name: Dispatch Azure CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+    branches:
+      - develop
+      - staging
+      - main
+      - release-staging/rocm-rel-7.*
+
+jobs:
+  dispatch-azure-ci:
+    name: Dispatch Azure CI
+    runs-on: ubuntu-latest
+    steps:
+    - name: Generate a token
+      id: generate-token
+      uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+      with:
+        app-id: ${{ secrets.APP_ID }}
+        private-key: ${{ secrets.APP_PRIVATE_KEY }}
+        owner: ${{ github.repository_owner }}
+
+    - name: Checkout code
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        ref: refs/pull/${{ github.event.pull_request.number }}/merge
+        sparse-checkout: .github
+        sparse-checkout-cone-mode: true
+        token: token: ${{ steps.generate-token.outputs.token }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r .github/requirements.txt
+
+    - name: Detect changed subtrees
+      id: detect
+      env:
+        GH_TOKEN: token: ${{ steps.generate-token.outputs.token }}
+      run: |
+        python .github/scripts/pr_detect_changed_subtrees.py \
+          --repo "${{ github.repository }}" \
+          --pr "${{ github.event.pull_request.number }}" \
+          --config ".github/repos-config.json" \
+          --require-auto-push
+
+    - name: Dispatch Azure CI runs
+      id: dispatch
+      if: steps.detect.outputs.subtrees
+      env:
+        GH_TOKEN: token: ${{ steps.generate-token.outputs.token }}
+      run: |
+        echo "${{ steps.detect.outputs.subtrees }}" > changed_subtrees.txt
+
+        python .github/scripts/azure_resolve_subtree_deps.py \
+          --subtree-file changed_subtrees.txt \
+          > resolved_subtrees.txt
+
+        run_ids=()
+
+        while IFS= read -r line; do
+          IFS='=' read -r project_name definition_id <<< "$line"
+          echo "Requesting run for $project_name with definition ID $definition_id"
+
+          max_attempts=3
+          retry_delay=5
+          attempt=1
+          success=false
+
+          while [ $attempt -le $max_attempts ]; do
+            response=$(curl -sSX POST https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/pipelines/$definition_id/runs?api-version=7.1 \
+              -u ":${{ secrets.AZ_PAT }}" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "resources": {
+                  "repositories": {
+                    "self": {
+                      "refName": "${{ github.ref }}"
+                    }
+                  }
+                }
+              }')
+
+            if [ $? -eq 0 ]; then
+              success=true
+              break
+            fi
+
+            echo "Attempt $attempt failed. Retrying in $retry_delay seconds..."
+            sleep $retry_delay
+            attempt=$((attempt + 1))
+          done
+
+          if [ "$success" = true ]; then
+            run_id=$(echo "$response" | jq -r '.id' || echo "null")
+            if [ "$run_id" != "null" ]; then
+              echo "Run ID for $project_name: $run_id"
+              echo "https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
+              run_ids+=("$run_id")
+            else
+              echo "Failed to request run for $project_name"
+            fi
+          else
+            echo "Failed to request run for $project_name after $max_attempts attempts"
+          fi
+
+          echo ""
+        done < resolved_subtrees.txt
+
+        echo "run_ids=${run_ids[*]}" >> $GITHUB_OUTPUT
+
+    - name: Wait for and report Azure CI status
+      if: steps.dispatch.outputs.run_ids
+      run: |
+        run_ids=(${{ steps.dispatch.outputs.run_ids }})
+        echo "Waiting on runs: ${run_ids[*]}"
+
+        all_finished=0
+        exit_status=0
+
+        while [[ $all_finished -eq 0 ]]; do
+          sleep 120
+          all_finished=1
+          echo "=================================================================="
+
+          for run_id in "${run_ids[@]}"; do
+            max_attempts=3
+            retry_delay=5
+            attempt=1
+            success=false
+
+            while [ $attempt -le $max_attempts ]; do
+              response=$(curl -sSX GET https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds/$run_id?api-version=7.1 \
+                -u ":${{ secrets.AZ_PAT }}" \
+                -H "Content-Type: application/json")
+
+              if [[ $? -eq 0 ]]; then
+                success=true
+                break
+              fi
+
+              echo "Attempt $attempt failed. Retrying in $retry_delay seconds..."
+              sleep $retry_delay
+              attempt=$((attempt + 1))
+            done
+
+            if [[ "$success" == true ]]; then
+              pipeline_name=$(echo "$response" | jq -r '.definition.name')
+              status=$(echo "$response" | jq -r '.status')
+              result=$(echo "$response" | jq -r '.result')
+
+              if [[ "$status" == "completed" ]]; then
+                echo "$pipeline_name - run $run_id is finished with result: $result"
+                echo "https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
+                if [[ "$result" != "succeeded" ]]; then
+                  exit_status=1
+                fi
+              else
+                all_finished=0
+                echo "$pipeline_name - run $run_id is in progress..."
+                echo "https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
+              fi
+            else
+              echo "Failed to fetch status for run $run_id after $max_attempts attempts"
+              echo "https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
+              exit_status=1
+              continue
+            fi
+          done
+        done
+
+        if [[ $exit_status -ne 0 ]] then
+          exit $exit_status
+        fi

@@ -53,6 +53,7 @@ struct last_cpu_fft_cache
     fft_transform_type  transform_type = fft_transform_type_complex_forward;
     bool                run_callbacks  = false;
     fft_precision       precision      = fft_precision_single;
+    double              scale_factor   = 1.0;
 
     // FFTW input/output
     std::vector<hostbuf> cpu_input;
@@ -849,7 +850,8 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     std::unique_ptr<StoreCPUDataToCache> store_to_cache;
     if(fftw_compare && last_cpu_fft_data.length == params.length
        && last_cpu_fft_data.transform_type == params.transform_type
-       && last_cpu_fft_data.run_callbacks == params.run_callbacks)
+       && last_cpu_fft_data.run_callbacks == params.run_callbacks
+       && last_cpu_fft_data.scale_factor == params.scale_factor)
     {
         if(last_cpu_fft_data.nbatch >= params.nbatch)
         {
@@ -1376,6 +1378,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
           || last_cpu_fft_data.transform_type != params.transform_type
           || last_cpu_fft_data.run_callbacks != params.run_callbacks
           || last_cpu_fft_data.precision != params.precision
+          || last_cpu_fft_data.scale_factor != params.scale_factor
           || params.nbatch > last_cpu_fft_data.nbatch;
 
     // store cpu output in cache
@@ -1386,6 +1389,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         last_cpu_fft_data.transform_type = params.transform_type;
         last_cpu_fft_data.run_callbacks  = params.run_callbacks;
         last_cpu_fft_data.precision      = params.precision;
+        last_cpu_fft_data.scale_factor   = params.scale_factor;
     }
 
     if(compare_output.valid())
@@ -1462,13 +1466,14 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         EXPECT_TRUE(diff.l_inf <= linf_cutoff)
             << "Linf test failed.  Linf:" << diff.l_inf
             << "\tnormalized Linf: " << diff.l_inf / cpu_output_norm.l_inf
-            << "\tcutoff: " << linf_cutoff << params.str();
+            << "\tcutoff: " << linf_cutoff << "\n"
+            << params.str();
 
         EXPECT_TRUE(diff.l_2 / cpu_output_norm.l_2
                     <= sqrt(log2(total_length)) * type_epsilon(params.precision))
             << "L2 test failed. L2: " << diff.l_2
             << "\tnormalized L2: " << diff.l_2 / cpu_output_norm.l_2
-            << "\tepsilon: " << sqrt(log2(total_length)) * type_epsilon(params.precision)
+            << "\tepsilon: " << sqrt(log2(total_length)) * type_epsilon(params.precision) << "\n"
             << params.str();
     }
 
