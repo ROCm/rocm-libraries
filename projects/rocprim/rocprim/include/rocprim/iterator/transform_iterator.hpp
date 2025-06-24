@@ -61,18 +61,18 @@ private:
         T value_;
 
     public:
-        ROCPRIM_HOST_DEVICE
-        inline proxy_pointer(const T& value)
-            : value_(value)
-        {}
+        ROCPRIM_HOST_DEVICE inline proxy_pointer(const T& value) : value_(value) {}
 
         ROCPRIM_HOST_DEVICE
-        const T* operator->() const
+        const T*
+            operator->() const
         {
             return &value_;
         }
 
-        ROCPRIM_HOST_DEVICE const T& operator*() const
+        ROCPRIM_HOST_DEVICE
+        const T&
+            operator*() const
         {
             return value_;
         }
@@ -150,12 +150,16 @@ public:
         return transform_(*iterator_);
     }
 
-    ROCPRIM_HOST_DEVICE inline pointer operator->() const
+    ROCPRIM_HOST_DEVICE
+    inline pointer
+        operator->() const
     {
         return pointer(transform_(*iterator_));
     }
 
-    ROCPRIM_HOST_DEVICE inline value_type operator[](difference_type distance) const
+    ROCPRIM_HOST_DEVICE
+    inline value_type
+        operator[](difference_type distance) const
     {
         transform_iterator i = (*this) + distance;
         return *i;

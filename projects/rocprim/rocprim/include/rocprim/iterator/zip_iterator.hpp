@@ -198,13 +198,15 @@ public:
     [[deprecated("This operator is no longer supported and will be removed in the next major "
                  "release.")]]
     ROCPRIM_HOST_DEVICE
-    inline pointer operator->() const
+    inline pointer
+        operator->() const
     {
         return &(*(*this));
     }
 
     ROCPRIM_HOST_DEVICE
-    inline reference operator[](difference_type distance) const
+    inline reference
+        operator[](difference_type distance) const
     {
         zip_iterator i = (*this) + distance;
         return *i;

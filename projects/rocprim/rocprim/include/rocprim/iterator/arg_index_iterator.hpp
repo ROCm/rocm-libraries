@@ -64,18 +64,18 @@ private:
         T value_;
 
     public:
-        ROCPRIM_HOST_DEVICE
-        inline proxy_pointer(const T& value)
-            : value_(value)
-        {}
+        ROCPRIM_HOST_DEVICE inline proxy_pointer(const T& value) : value_(value) {}
 
         ROCPRIM_HOST_DEVICE
-        const T* operator->() const
+        const T*
+            operator->() const
         {
             return &value_;
         }
 
-        ROCPRIM_HOST_DEVICE const T& operator*() const
+        ROCPRIM_HOST_DEVICE
+        const T&
+            operator*() const
         {
             return value_;
         }

@@ -139,18 +139,18 @@ private:
         V value_;
 
     public:
-        ROCPRIM_HOST_DEVICE
-        inline proxy_pointer(const V& value)
-            : value_(value)
-        {}
+        ROCPRIM_HOST_DEVICE inline proxy_pointer(const V& value) : value_(value) {}
 
         ROCPRIM_HOST_DEVICE
-        const V* operator->() const
+        const V*
+            operator->() const
         {
             return &value_;
         }
 
-        ROCPRIM_HOST_DEVICE const V& operator*() const
+        ROCPRIM_HOST_DEVICE
+        const V&
+            operator*() const
         {
             return value_;
         }
@@ -261,7 +261,8 @@ public:
     }
 
     ROCPRIM_HOST_DEVICE
-    inline pointer operator->() const
+    inline pointer
+        operator->() const
     {
         return pointer(*(*this));
     }

@@ -246,7 +246,7 @@ TYPED_TEST(RocprimTextureCacheIteratorTests, DeviceIteratorOps)
         std::vector<T> input = test_utils::get_random_data_wrapped<T>(10, 1, 200, seed_value);
 
         std::vector<Wrapper<T>> input_wrapped(input.size());
-        for (size_t i = 0; i < input.size(); i++)
+        for(size_t i = 0; i < input.size(); i++)
         {
             input_wrapped[i].value = input[i];
         }
