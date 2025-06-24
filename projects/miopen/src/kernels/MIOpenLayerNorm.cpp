@@ -49,7 +49,7 @@ __device__ void layernormfwd(const TI* __restrict__ x,
      *
      * Example2)
      * x dim = {N, C, L}, normalized shape = {L}, layout = NCHW
-     * outer_size = N, inner_size = L, stride = 1
+     * outer_size = N * C, inner_size = L, stride = 1
      *
      * Example3)
      * x dim = {N, C, L}, normalized shape = {L}, layout = NHWC
