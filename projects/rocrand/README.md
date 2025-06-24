@@ -64,6 +64,13 @@ dependencies, rather than using the system-installed libraries.
 
 ## Build and install
 
+> [!NOTE]
+> The following clone command downloads all components in the [rocm-libraries](https://github.com/ROCm/rocm-libraries) GitHub repository.
+This is recommended for working with multiple library components, but can take a very long time to
+download. For a shorter download process that only clones the rocRAND library, see the
+[rocRAND installation documentation](https://rocm.docs.amd.com/projects/rocRAND/en/latest/index.html)
+for version 7.0 or later.
+
 ```shell
 git clone https://github.com/ROCm/rocm-libraries.git
 
