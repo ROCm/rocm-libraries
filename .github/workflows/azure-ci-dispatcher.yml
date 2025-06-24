@@ -27,6 +27,10 @@ on:
       - staging
       - main
       - release-staging/rocm-rel-7.*
+    paths-ignore:
+      - '.github/**'
+      - 'docs/**'
+      - '*.md'
 
 concurrency:
   group: azure-ci-dispatcher-${{ github.event.pull_request.number || github.ref }}
