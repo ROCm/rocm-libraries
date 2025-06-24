@@ -157,3 +157,41 @@ TEST(UniquePtrAllocDeallocTests, TestUniquePtrCmpNullptr)
         ASSERT_GE(nullptr, p);
     }
 }
+TYPED_TEST(UniquePtrAllocDeallocTests, TestMakeUniqueArray)
+{
+    using T = typename TestFixture::input_type;
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    thrust::unique_ptr<T[]> p = thrust::make_unique<T[]>(5);
+
+    for(int i = 0; i < 5; ++i)
+    {
+        thrust::device_reference<T> ref = p[i];
+        ASSERT_EQ(p[i], ref);
+        ASSERT_EQ(&p[i], &ref);
+        p[i] = T(7);
+        ASSERT_EQ(p[i], ref);
+    }
+}
+
+TEST(UniquePtrAllocDeallocTests, TestMakeUniqueArrayUserType)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    thrust::unique_ptr<A[]> p = thrust::make_unique<A[]>(7);
+
+    for(int i = 0; i < 7; ++i)
+    {
+        A host_p;
+        host_p.val_a = 2;
+        thrust::device_reference<A> ref = p[i];
+        ref = host_p;
+    }
+
+    for (int i = 0; i < 7; ++i)
+    {
+        thrust::device_reference<A> ref = p[i];
+        A host_p = ref;
+        ASSERT_EQ(host_p.val_a, 2);
+    }
+}
