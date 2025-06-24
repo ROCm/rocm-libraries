@@ -1375,7 +1375,6 @@ TEST(UniformHostTest, double4_out_ulonglong4_in)
 template<class RocrandPRNGType>
 inline void GetRocrandState(RocrandPRNGType* host_state)
 {
-
     if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_sobol32>)
     {
         const unsigned int* directions;

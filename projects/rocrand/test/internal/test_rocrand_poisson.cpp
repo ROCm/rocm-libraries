@@ -25,7 +25,6 @@
 #include <random>
 #include <vector>
 
-#include <rocrand/rocrand_mtgp32_11213.h>
 #include <rocrand/rocrand_poisson.h>
 
 #define HIP_CHECK(cmd)                                                                         \
@@ -49,10 +48,239 @@
         {                                                                                 \
             std::cerr << "Encountered ROCRAND error: " << status << "at line" << __LINE__ \
                       << " in file " << __FILE__ << "\n";                                 \
-            exit(-1);                                                                     \
+            exit(status);                                                                 \
         }                                                                                 \
     }                                                                                     \
     while(0)
+
+// If x is small then get withing 0.001 otherwise 5%
+#define GET_EPS(x) x < 0.01 ? 0.01 : x * 0.05
+
+// If x is small then get withing 0.001 otherwise 20%
+#define GET_EPS_DEVICE(x) x < 0.01 ? 0.01 : x * 0.2
+
+#define IS_SOBOL(x)                                                                       \
+    (std::is_same_v<x, rocrand_state_sobol32> || std::is_same_v<x, rocrand_state_sobol64> \
+     || std::is_same_v<x, rocrand_state_scrambled_sobol32>                                \
+     || std::is_same_v<x, rocrand_state_scrambled_sobol64>)
+
+/* #################################################
+
+                TEST HOST SIDE
+
+   ###############################################*/
+
+template<class RocrandPRNGType>
+inline void GetHostRocrandState(RocrandPRNGType* host_state)
+{
+
+    if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_sobol32>)
+    {
+        const unsigned int* directions;
+        ROCRAND_CHECK(
+            rocrand_get_direction_vectors32(&directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
+        rocrand_init(directions, 123456, host_state);
+    }
+    // scrambled sobol32 case
+    else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_scrambled_sobol32>)
+    {
+        const unsigned int* directions;
+        ROCRAND_CHECK(
+            rocrand_get_direction_vectors32(&directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
+        rocrand_init(directions, 123456, 654321, host_state);
+    }
+    // sobol64 case
+    else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_sobol64>)
+    {
+        const unsigned long long* directions;
+        ROCRAND_CHECK(
+            rocrand_get_direction_vectors64(&directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
+        rocrand_init(directions, 123456, host_state);
+    }
+    // scrambled sobol64 case
+    else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_scrambled_sobol64>)
+    {
+        const unsigned long long* directions;
+        ROCRAND_CHECK(
+            rocrand_get_direction_vectors64(&directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
+        rocrand_init(directions, 123456, 654321, host_state);
+    }
+    // lfsr113 case
+    else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_lfsr113>)
+    {
+        rocrand_init({0xabcd, 0xdabc, 0xcdab, 0xbcda}, 0, 0, host_state);
+    }
+    else
+    {
+        rocrand_init(123456, 654321, 0, host_state);
+    }
+}
+
+using PoissonParams = ::testing::Types<rocrand_state_philox4x32_10,
+                                       rocrand_state_mrg31k3p,
+                                       rocrand_state_mrg32k3a,
+                                       rocrand_state_xorwow,
+                                       rocrand_state_sobol32,
+                                       rocrand_state_scrambled_sobol32,
+                                       rocrand_state_sobol64,
+                                       rocrand_state_scrambled_sobol64,
+                                       rocrand_state_lfsr113,
+                                       rocrand_state_threefry2x32_20,
+                                       rocrand_state_threefry2x64_20,
+                                       rocrand_state_threefry4x32_20,
+                                       rocrand_state_threefry4x64_20>;
+
+template<typename T>
+class PoissonTest : public ::testing::Test
+{
+public:
+    using rocrand_prng_type = T;
+    std::vector<double> small_poisson_lambdas   = {1, 2, 4, 8, 16, 32, 64};
+    std::vector<double> large_poisson_lambdas   = {128, 256, 512, 1024, 2048};
+    std::vector<double> massive_poisson_lambdas = {4096, 8192, 16384, 32768};
+};
+
+TYPED_TEST_SUITE(PoissonTest, PoissonParams);
+
+template<typename OutputType, typename PrngState, class PoissonFunc>
+void run_device_poisson_test(const PoissonFunc& pf, std::vector<double>& all_lambdas)
+{
+    constexpr size_t test_size = 100000;
+
+    PrngState state;
+    GetHostRocrandState(&state);
+
+    std::vector<OutputType> output(test_size);
+
+    for(const double& lambda : all_lambdas)
+    {
+        double expected_mean    = lambda;
+        double expected_std_dev = std::sqrt(lambda);
+
+        for(size_t i = 0; i < test_size; i++)
+        {
+            output[i] = pf(&state, lambda);
+        }
+        double actual_mean = std::accumulate(output.begin(),
+                                             output.end(),
+                                             (double)0,
+                                             [=](double acc, OutputType x)
+                                             { return acc + static_cast<double>(x); })
+                             / static_cast<double>(test_size);
+        double actual_std_dev
+            = std::accumulate(output.begin(),
+                              output.end(),
+                              (double)0,
+                              [=](double acc, OutputType x)
+                              { return acc + std::pow(static_cast<double>(x) - actual_mean, 2); });
+        actual_std_dev = std::sqrt(actual_std_dev / static_cast<double>(test_size - 1));
+
+        double mean_eps    = expected_mean * 0.05;
+        double std_dev_eps = expected_std_dev * 0.05;
+
+        ASSERT_NEAR(expected_mean, actual_mean, mean_eps);
+        ASSERT_NEAR(expected_std_dev, actual_std_dev, std_dev_eps);
+    }
+}
+
+TYPED_TEST(PoissonTest, test_host_small_lambda)
+{
+    using PrngState = typename TestFixture::rocrand_prng_type;
+
+    // Since Sobol uses the inv funciton
+    if(!IS_SOBOL(PrngState))
+    {
+        std::vector<double> small_lambdas = {1, 2, 4, 8, 16, 32, 64};
+
+        run_device_poisson_test<unsigned int, PrngState>(
+            [=](PrngState* state, double lambda)
+            { return rocrand_device::detail::poisson_distribution_small(state, lambda); },
+            small_lambdas);
+    }
+}
+
+TYPED_TEST(PoissonTest, test_host_large_lambda)
+{
+    using PrngState = typename TestFixture::rocrand_prng_type;
+
+    // Since Sobol uses the inv funciton
+    if(!IS_SOBOL(PrngState))
+    {
+        std::vector<double> large_lambdas = {128, 256, 512, 1024, 2048};
+
+        run_device_poisson_test<unsigned int, PrngState>(
+            [=](PrngState* state, double lambda)
+            { return rocrand_device::detail::poisson_distribution_large(state, lambda); },
+            large_lambdas);
+    }
+}
+
+TYPED_TEST(PoissonTest, test_host_huge_lambda)
+{
+    using PrngState = typename TestFixture::rocrand_prng_type;
+
+    // Since Sobol uses the inv funciton
+    if(!IS_SOBOL(PrngState))
+    {
+        std::vector<double> huge_lambdas = {4096, 8192};
+
+        run_device_poisson_test<unsigned int, PrngState>(
+            [=](PrngState* state, double lambda)
+            { return rocrand_device::detail::poisson_distribution_huge(state, lambda); },
+            huge_lambdas);
+    }
+}
+
+TYPED_TEST(PoissonTest, test_host_all_lambda)
+{
+    using PrngState = typename TestFixture::rocrand_prng_type;
+
+    // Since Sobol uses the inv funciton
+    if(!IS_SOBOL(PrngState))
+    {
+        std::vector<double> all_lambdas = {64, 2048, 4096};
+
+        run_device_poisson_test<unsigned int, PrngState>(
+            [=](PrngState* state, double lambda)
+            { return rocrand_device::detail::poisson_distribution(state, lambda); },
+            all_lambdas);
+    }
+}
+
+TYPED_TEST(PoissonTest, test_host_inv)
+{
+    using PrngState = typename TestFixture::rocrand_prng_type;
+
+    std::vector<double> all_lambdas = {1, 2, 4, 1024, 2048};
+
+    run_device_poisson_test<unsigned int, PrngState>(
+        [=](PrngState* state, double lambda)
+        { return rocrand_device::detail::poisson_distribution_inv(state, lambda); },
+        all_lambdas);
+}
+
+TYPED_TEST(PoissonTest, test_host_rocrand_poisson)
+{
+    using PrngState = typename TestFixture::rocrand_prng_type;
+
+    std::vector<double> all_lambdas = {
+        32,
+        64,
+        1024,
+        2048,
+        4096,
+    };
+
+    run_device_poisson_test<unsigned int, PrngState>([=](PrngState* state, double lambda)
+                                                     { return rocrand_poisson(state, lambda); },
+                                                     all_lambdas);
+}
+
+/* #################################################
+
+                TEST DEVICE SIDE
+
+   ###############################################*/
 
 struct GlobalSizes
 {
@@ -124,38 +352,6 @@ inline void GetRocrandState(RocrandPRNGType* device_state)
 }
 
 // Declaring typed test parameters
-
-template<class RocrandPRNGType>
-struct PoissonParameterHolder
-{
-    using prng_state = RocrandPRNGType;
-};
-
-using rocRANDStates = ::testing::Types<rocrand_state_philox4x32_10,
-                                       rocrand_state_mrg31k3p,
-                                       rocrand_state_mrg32k3a,
-                                       rocrand_state_xorwow,
-                                       rocrand_state_lfsr113,
-                                       rocrand_state_sobol32,
-                                       rocrand_state_scrambled_sobol32,
-                                       rocrand_state_sobol64,
-                                       rocrand_state_scrambled_sobol64,
-                                       rocrand_state_threefry2x32_20,
-                                       rocrand_state_threefry2x64_20,
-                                       rocrand_state_threefry4x32_20,
-                                       rocrand_state_threefry4x64_20>;
-
-template<class RocrandPRNGType>
-class PoissonTest : public ::testing::Test
-{
-public:
-    using prng_type                             = RocrandPRNGType;
-    std::vector<double> small_poisson_lambdas   = {1, 2, 4, 8, 16, 32, 64};
-    std::vector<double> large_poisson_lambdas   = {128, 256, 512, 1024, 2048};
-    std::vector<double> massive_poisson_lambdas = {4096, 8192, 16384, 32768};
-};
-
-TYPED_TEST_SUITE(PoissonTest, rocRANDStates);
 
 template<typename ReturnType, class RocRandPrngType, class PoissonFunc>
 __global__
@@ -242,7 +438,7 @@ void run_poisson_test(
 }
 
 TYPED_TEST(PoissonTest, poisson_distribution_small_lambda_test){
-    using type = typename TestFixture::prng_type;
+    using type = typename TestFixture::rocrand_prng_type;
     run_poisson_test<type, unsigned int>(
         TestFixture::small_poisson_lambdas,
         [=] __host__ __device__ (type * state, const double lambda){
@@ -255,7 +451,7 @@ TYPED_TEST(PoissonTest, poisson_distribution_small_lambda_test){
 }
 
 TYPED_TEST(PoissonTest, poisson_distribution_large_lambda_test){
-    using type = typename TestFixture::prng_type;
+    using type = typename TestFixture::rocrand_prng_type;
     run_poisson_test<type, unsigned int>(
         TestFixture::large_poisson_lambdas,
         [=] __host__ __device__ (type * state, const double lambda){
@@ -268,7 +464,7 @@ TYPED_TEST(PoissonTest, poisson_distribution_large_lambda_test){
 }
 
 TYPED_TEST(PoissonTest, poisson_distribution_huge_lambda_test){
-    using type = typename TestFixture::prng_type;
+    using type = typename TestFixture::rocrand_prng_type;
     run_poisson_test<type, unsigned int>(
         TestFixture::massive_poisson_lambdas,
         [=] __host__ __device__ (type * state, const double lambda){
@@ -281,7 +477,7 @@ TYPED_TEST(PoissonTest, poisson_distribution_huge_lambda_test){
 }
 
 TYPED_TEST(PoissonTest, poisson_distribution_test){
-    using type = typename TestFixture::prng_type;
+    using type = typename TestFixture::rocrand_prng_type;
 
     run_poisson_test<type, unsigned int>(
         TestFixture::small_poisson_lambdas,
@@ -315,7 +511,7 @@ TYPED_TEST(PoissonTest, poisson_distribution_test){
 }
 
 TYPED_TEST(PoissonTest, poisson_distribution_inv_test){
-    using type = typename TestFixture::prng_type;
+    using type = typename TestFixture::rocrand_prng_type;
 
     run_poisson_test<type, unsigned int>(
         TestFixture::small_poisson_lambdas,
@@ -330,7 +526,7 @@ TYPED_TEST(PoissonTest, poisson_distribution_inv_test){
 
 // External Tests
 TYPED_TEST(PoissonTest, external_rocrand_poisson){
-    using type = typename TestFixture::prng_type;
+    using type = typename TestFixture::rocrand_prng_type;
 
     // TODO: Figure out why higher lambda is hanging
     run_poisson_test<type, unsigned int>(
@@ -358,129 +554,4 @@ TEST(PoissonTest, philox4x32_10_uint4_output){
         },
         4
     );
-}
-
-/* #################################################
-
-                TEST HOST SIDE
-
-   ###############################################*/
-
-template<class RocrandPRNGType>
-inline void GetHostRocrandState(RocrandPRNGType* host_state)
-{
-
-    if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_sobol32>)
-    {
-        const unsigned int* directions;
-        ROCRAND_CHECK(
-            rocrand_get_direction_vectors32(&directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
-        rocrand_init(directions, 123456, host_state);
-    }
-    // scrambled sobol32 case
-    else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_scrambled_sobol32>)
-    {
-        const unsigned int* directions;
-        ROCRAND_CHECK(
-            rocrand_get_direction_vectors32(&directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
-        rocrand_init(directions, 123456, 654321, host_state);
-    }
-    // sobol64 case
-    else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_sobol64>)
-    {
-        const unsigned long long* directions;
-        ROCRAND_CHECK(
-            rocrand_get_direction_vectors64(&directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
-        rocrand_init(directions, 123456, host_state);
-    }
-    // scrambled sobol64 case
-    else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_scrambled_sobol64>)
-    {
-        const unsigned long long* directions;
-        ROCRAND_CHECK(
-            rocrand_get_direction_vectors64(&directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
-        rocrand_init(directions, 123456, 654321, host_state);
-    }
-    // lfsr113 case
-    else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_lfsr113>)
-    {
-        rocrand_init({0xabcd, 0xdabc, 0xcdab, 0xbcda}, 0, 0, host_state);
-    }
-    else
-    {
-        rocrand_init(123456, 654321, 0, host_state);
-    }
-}
-
-using PoissonHostParams = ::testing::Types<rocrand_state_philox4x32_10,
-                                           rocrand_state_mrg31k3p,
-                                           rocrand_state_mrg32k3a,
-                                           rocrand_state_xorwow,
-                                           rocrand_state_sobol32,
-                                           rocrand_state_scrambled_sobol32,
-                                           rocrand_state_sobol64,
-                                           rocrand_state_scrambled_sobol64,
-                                           rocrand_state_lfsr113,
-                                           rocrand_state_threefry2x32_20,
-                                           rocrand_state_threefry2x64_20,
-                                           rocrand_state_threefry4x32_20,
-                                           rocrand_state_threefry4x64_20>;
-
-template<typename T>
-class PoissonHostTest : public ::testing::Test
-{
-public:
-    using rocrand_prng_type = T;
-};
-
-TYPED_TEST_SUITE(PoissonHostTest, PoissonHostParams);
-
-TYPED_TEST(PoissonHostTest, poisson_host)
-{
-    using PrngState = typename TestFixture::rocrand_prng_type;
-
-    constexpr size_t test_size = 50000;
-
-    PrngState state;
-    GetHostRocrandState(&state);
-
-    std::vector<double> all_lambdas = {
-        32,
-        64,
-        1024,
-        2048,
-        4096,
-    };
-
-    std::vector<unsigned int> output(test_size);
-
-    for(const double& lambda : all_lambdas)
-    {
-        double expected_mean    = lambda;
-        double expected_std_dev = std::sqrt(lambda);
-
-        for(size_t i = 0; i < test_size; i++)
-        {
-            output[i] = rocrand_poisson(&state, lambda);
-        }
-        double actual_mean = std::accumulate(output.begin(),
-                                             output.end(),
-                                             (double)0,
-                                             [=](double acc, unsigned int x)
-                                             { return acc + static_cast<double>(x); })
-                             / static_cast<double>(test_size);
-        double actual_std_dev
-            = std::accumulate(output.begin(),
-                              output.end(),
-                              (double)0,
-                              [=](double acc, unsigned int x)
-                              { return acc + std::pow(static_cast<double>(x) - actual_mean, 2); });
-        actual_std_dev = std::sqrt(actual_std_dev / static_cast<double>(test_size - 1));
-
-        double mean_eps    = expected_mean * 0.05;
-        double std_dev_eps = expected_std_dev * 0.05;
-
-        ASSERT_NEAR(expected_mean, actual_mean, mean_eps);
-        ASSERT_NEAR(expected_std_dev, actual_std_dev, std_dev_eps);
-    }
 }
