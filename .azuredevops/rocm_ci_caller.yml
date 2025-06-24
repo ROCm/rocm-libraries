@@ -24,7 +24,11 @@ variables:
   - name: EVENT_TYPE
     value: 'pull_request'
   - name: GH_PAT
-    value: '$(svc_acc_org_secret)'  
+    value: '$(svc_acc_org_secret)'
+  - name: REPO_NAME
+    value: '$(repo_name)'
+  - name: GH_REPO
+    value: '$(gh_repo)'
 jobs:  
 - job: Trigger_Pipeline 
   displayName: 'Trigger Pipeline'
@@ -32,8 +36,8 @@ jobs:
   steps:
   - checkout: none
   - script: |
-          rm -rf $(repo_name)
-          git clone $(gh_repo)
+          rm -rf $(REPO_NAME)
+          git clone $(GH_REPO)
     displayName: Checkout Code
   - script: |
           set -e  
