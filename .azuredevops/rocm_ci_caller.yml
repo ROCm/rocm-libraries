@@ -25,10 +25,6 @@ variables:
     value: 'pull_request'
   - name: GH_PAT
     value: '$(svc_acc_org_secret)'
-  - name: REPO_NAME
-    value: '$(repo_name)'
-  - name: GH_REPO
-    value: '$(gh_repo)'
 jobs:  
 - job: Trigger_Pipeline 
   displayName: 'Trigger Pipeline'
@@ -36,8 +32,8 @@ jobs:
   steps:
   - checkout: none
   - script: |
-          rm -rf $(REPO_NAME)
-          git clone $(GH_REPO)
+          rm -rf $(repo_name)
+          git clone $(gh_repo)
     displayName: Checkout Code
   - script: |
           set -e  
