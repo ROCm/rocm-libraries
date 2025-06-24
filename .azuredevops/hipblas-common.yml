@@ -30,17 +30,7 @@ trigger:
     exclude:
     - projects/hipblas-common/*.md
 
-pr:
-  autoCancel: true
-  branches:
-    include:
-    - develop
-    - release-staging/rocm-rel-7.*
-  paths:
-    include:
-    - projects/hipblas-common
-    exclude:
-    - projects/hipblas-common/*.md
+pr: none
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/hipBLAS-common.yml@pipelines_repo

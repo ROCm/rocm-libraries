@@ -38,25 +38,7 @@ trigger:
     - projects/rocthrust/LICENSE
     - projects/rocthrust/NOTICES.txt
 
-pr:
-  autoCancel: true
-  branches:
-    include:
-    - develop
-    - release-staging/rocm-rel-7.*
-  paths:
-    include:
-    - projects/rocthrust
-    exclude:
-    - projects/rocthrust/.githooks
-    - projects/rocthrust/.github
-    - projects/rocthrust/.jenkins
-    - projects/rocthrust/doc
-    - projects/rocthrust/docs
-    - projects/rocthrust/.*.y*ml
-    - projects/rocthrust/*.md
-    - projects/rocthrust/LICENSE
-    - projects/rocthrust/NOTICES.txt
+pr: none
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/rocThrust.yml@pipelines_repo
