@@ -58,26 +58,25 @@
 #define ROCSPARSE_HIP_SOURCE_TAG(msg_) __FILE__ " " ROCSPARSE_HIP_SOURCE_MSG(msg_)
 
 #define rocsparse_hipMalloc(p_, nbytes_) \
-    rocsparse_hip_malloc((void**)(p_), (nbytes_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
+    rocsparse_hip_malloc((p_), (nbytes_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
 
-#define rocsparse_hipFree(p_) rocsparse_hip_free((void**)(p_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
+#define rocsparse_hipFree(p_) rocsparse_hip_free((p_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
 
 #define rocsparse_hipMallocAsync(p_, nbytes_, stream_) \
-    rocsparse_hip_malloc_async((void**)(p_), (nbytes_), stream_, ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
+    rocsparse_hip_malloc_async((p_), (nbytes_), stream_, ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
 
 #define rocsparse_hipFreeAsync(p_, stream_) \
-    rocsparse_hip_free_async((void**)(p_), stream_, ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
+    rocsparse_hip_free_async((p_), stream_, ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
 
 #define rocsparse_hipHostMalloc(p_, nbytes_) \
-    rocsparse_hip_host_malloc((void**)(p_), (nbytes_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
+    rocsparse_hip_host_malloc((p_), (nbytes_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
 
-#define rocsparse_hipHostFree(p_) \
-    rocsparse_hip_host_free((void**)(p_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
+#define rocsparse_hipHostFree(p_) rocsparse_hip_host_free((p_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
 
 #define rocsparse_hipMallocManaged(p_, nbytes_) \
-    rocsparse_hip_malloc_managed((void**)(p_), (nbytes_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
+    rocsparse_hip_malloc_managed((p_), (nbytes_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
 
 #define rocsparse_hipFreeManaged(p_) \
-    rocsparse_hip_free_managed((void**)(p_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
+    rocsparse_hip_free_managed((p_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
 
 #endif

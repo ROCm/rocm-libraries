@@ -524,47 +524,47 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
     CSRGEMM_SYMBOLIC_FILL_BLOCK_PER_ROW(                                                 \
         GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE)
 
-#define CSRGEMM_SYMBOLIC_FILL_BLOCK_PER_ROW_MULTIPASS(                                          \
-    GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE)                \
-    I* workspace_B = nullptr;                                                                   \
-                                                                                                \
-    if(info_C->csrgemm_info->mul == true)                                                       \
-    {                                                                                           \
-        RETURN_IF_HIP_ERROR(                                                                    \
-            rocsparse_hipMallocAsync((void**)&workspace_B, sizeof(I) * nnz_A, handle->stream)); \
-    }                                                                                           \
-                                                                                                \
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                         \
-        (rocsparse::csrgemm_symbolic_fill_block_per_row_multipass<CSRGEMM_DIM,                  \
-                                                                  CSRGEMM_SUB,                  \
-                                                                  CSRGEMM_CHUNKSIZE,            \
-                                                                  CSRGEMM_WARPSIZE>),           \
-        dim3(h_group_size[GROUP_SIZE_ID]),                                                      \
-        dim3(CSRGEMM_DIM),                                                                      \
-        0,                                                                                      \
-        stream,                                                                                 \
-        n,                                                                                      \
-        &d_group_offset[GROUP_SIZE_ID],                                                         \
-        d_perm,                                                                                 \
-        csr_row_ptr_A,                                                                          \
-        csr_col_ind_A,                                                                          \
-        csr_row_ptr_B,                                                                          \
-        csr_col_ind_B,                                                                          \
-        csr_row_ptr_D,                                                                          \
-        csr_col_ind_D,                                                                          \
-        csr_row_ptr_C,                                                                          \
-        csr_col_ind_C,                                                                          \
-        workspace_B,                                                                            \
-        base_A,                                                                                 \
-        base_B,                                                                                 \
-        descr_C->base,                                                                          \
-        base_D,                                                                                 \
-        info_C->csrgemm_info->mul,                                                              \
-        info_C->csrgemm_info->add);                                                             \
-                                                                                                \
-    if(info_C->csrgemm_info->mul == true)                                                       \
-    {                                                                                           \
-        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(workspace_B, handle->stream));               \
+#define CSRGEMM_SYMBOLIC_FILL_BLOCK_PER_ROW_MULTIPASS(                                  \
+    GROUP_SIZE_ID, CSRGEMM_DIM, CSRGEMM_SUB, CSRGEMM_HASHSIZE, CSRGEMM_WARPSIZE)        \
+    I* workspace_B = nullptr;                                                           \
+                                                                                        \
+    if(info_C->csrgemm_info->mul == true)                                               \
+    {                                                                                   \
+        RETURN_IF_HIP_ERROR(                                                            \
+            rocsparse_hipMallocAsync(&workspace_B, sizeof(I) * nnz_A, handle->stream)); \
+    }                                                                                   \
+                                                                                        \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                 \
+        (rocsparse::csrgemm_symbolic_fill_block_per_row_multipass<CSRGEMM_DIM,          \
+                                                                  CSRGEMM_SUB,          \
+                                                                  CSRGEMM_CHUNKSIZE,    \
+                                                                  CSRGEMM_WARPSIZE>),   \
+        dim3(h_group_size[GROUP_SIZE_ID]),                                              \
+        dim3(CSRGEMM_DIM),                                                              \
+        0,                                                                              \
+        stream,                                                                         \
+        n,                                                                              \
+        &d_group_offset[GROUP_SIZE_ID],                                                 \
+        d_perm,                                                                         \
+        csr_row_ptr_A,                                                                  \
+        csr_col_ind_A,                                                                  \
+        csr_row_ptr_B,                                                                  \
+        csr_col_ind_B,                                                                  \
+        csr_row_ptr_D,                                                                  \
+        csr_col_ind_D,                                                                  \
+        csr_row_ptr_C,                                                                  \
+        csr_col_ind_C,                                                                  \
+        workspace_B,                                                                    \
+        base_A,                                                                         \
+        base_B,                                                                         \
+        descr_C->base,                                                                  \
+        base_D,                                                                         \
+        info_C->csrgemm_info->mul,                                                      \
+        info_C->csrgemm_info->add);                                                     \
+                                                                                        \
+    if(info_C->csrgemm_info->mul == true)                                               \
+    {                                                                                   \
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(workspace_B, handle->stream));       \
     }
 
     // Group 2: 33 - 256 non-zeros per row

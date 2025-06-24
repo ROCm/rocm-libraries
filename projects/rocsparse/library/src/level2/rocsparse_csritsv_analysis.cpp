@@ -160,8 +160,8 @@ namespace rocsparse
         // Allocate buffer to hold zero pivot
         if(zero_pivot[0] == nullptr)
         {
-            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-                (void**)zero_pivot, sizeof(rocsparse_int), handle->stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMallocAsync(zero_pivot, sizeof(rocsparse_int), handle->stream));
         }
 
         // Initialize zero pivot

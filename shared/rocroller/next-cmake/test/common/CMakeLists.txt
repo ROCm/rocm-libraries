@@ -38,6 +38,11 @@ target_link_libraries(common-test-utilities
         ${CBLAS_LIBRARIES}
 )
 
+if(ROCROLLER_ENABLE_TIMERS)
+    target_compile_definitions(common-test-utilities PUBLIC ROCROLLER_ENABLE_TIMERS)
+    target_compile_options(common-test-utilities PUBLIC -pg -fno-omit-frame-pointer)
+endif()
+
 target_include_directories(common-test-utilities
     PUBLIC
         $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}>
