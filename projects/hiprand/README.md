@@ -52,6 +52,9 @@ supported platforms):
   [hipRAND build wiki](https://github.com/ROCm/hipRAND/wiki/Build) has helpful
   information on how to configure CMake and build manually.
 
+  For information on cloning and building the hipRAND library, see the
+  [hipRAND installation documentation](https://rocm.docs.amd.com/projects/hipRAND/en/latest/install/installation.html) for version 7.0 or later.
+
 ### Supported functions
 
 You can find a list of
