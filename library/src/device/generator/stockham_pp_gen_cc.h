@@ -22,13 +22,10 @@
 #include "stockham_gen_cc.h"
 
 // TODO: Once partial pass is fully configurable in kernel-generator.py:
-//      - Test with factors_pp.size() > 1.
+//      - Support transforms with factors_pp.size() > 1.
 //      - Revisit all usages of transforms_per_block_pp and threads_per_transform.
 //      - Different input/output strides.
-//      - Revisit mod 128 usage in calculate_offsets() with different input lengths,
-//        (logic is required to work with nbatch > 1)
 //      - Revisit factor 192 logic in calculate_offsets() with different input lengths
-//      - Revisit and test local transpose logic for different input lengths
 
 // Variation of StockhamKernelCC that implements the partial pass
 // method. Similarities of StockhamPartialPassKernelCC with
@@ -66,9 +63,29 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
             factors_pp_curr.begin(), factors_pp_curr.end(), 1, std::multiplies<unsigned int>());
         pp_factors_other_prod = std::accumulate(
             factors_pp_other.begin(), factors_pp_other.end(), 1, std::multiplies<unsigned int>());
+
+        switch(params.off_dim)
+        {
+        case 0:
+            throw std::runtime_error(
+                "StockhamPartialPassKernelCC:: partial-passes along x not currently supported");
+            break;
+        case 1:
+            num_blocks_per_batch = ((params.parent_length[1]) - 1) / transforms_per_block + 1;
+            num_blocks_per_batch *= params.parent_length[2];
+            break;
+        case 2:
+            throw std::runtime_error(
+                "StockhamPartialPassKernelCC:: partial-passes along z not currently supported");
+            break;
+        default:
+            throw std::runtime_error("StockhamPartialPassKernelCC:: Unexpected off_dim value");
+        }
     }
 
     StockhamPartialPassParams params;
+
+    unsigned int num_blocks_per_batch;
 
     unsigned int transforms_per_block_pp;
     unsigned int max_factor_pp;
@@ -264,8 +281,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         stmts += Assign{plength, num_of_tiles};
         stmts += Assign{tile_index, block_id % num_of_tiles};
 
-        // TODO: factor 128
-        stmts += Assign{remaining, (block_id % 128) / num_of_tiles};
+        stmts += Assign{remaining, (block_id % num_blocks_per_batch) / num_of_tiles};
         stmts += Assign{offset, tile_index * transforms_per_block_pp * stride[1]};
         stmts += For{d,
                      2,
