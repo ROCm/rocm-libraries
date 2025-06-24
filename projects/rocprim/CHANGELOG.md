@@ -106,7 +106,7 @@ when the input or inital type was smaller than the output type.
 * Fixed constness of equality operators (`==` and `!=`) in `rocprim::key_value_pair`.
 * Fixed an issue for the comparison operators in `arg_index_iterator` and `texture_cache_iterator`, where `<` and `>` comparators were swapped.
 * Fixed an issue for the `rocprim::thread_reduce` not working correctly with a prefix value.
-* Fixed the `->` operator for the `transform_iterator`, the `texture_cache_iterrator` and the `arg_index_iterator`, by now returning a proxy pointer.
+* Fixed the `->` operator for the `transform_iterator`, the `texture_cache_iterator` and the `arg_index_iterator`, by now returning a proxy pointer.
   * The `arg_index_iterator` also now only returns the internal iterator for the `->`.
 
 ### Known issues
