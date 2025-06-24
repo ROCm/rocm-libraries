@@ -93,7 +93,7 @@ public:
         /// \return The referenced value or the default-constructed value.
         ROCPRIM_HOST_DEVICE ROCPRIM_INLINE operator value_type() const
         {
-            return keep_ ? underlying_ : value_type{};
+            return keep_ ? static_cast<value_type>(underlying_) : value_type{};
         }
 
     private:
