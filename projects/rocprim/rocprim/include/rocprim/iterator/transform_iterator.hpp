@@ -56,23 +56,6 @@ class transform_iterator
 {
 private:
     template<typename T>
-    class proxy_ref
-    {
-        T value_;
-
-    public:
-        ROCPRIM_HOST_DEVICE
-        inline proxy_ref(const T& value)
-            : value_(value)
-        {}
-
-        ROCPRIM_HOST_DEVICE operator const T&() const
-        {
-            return value_;
-        }
-    };
-
-    template<typename T>
     class proxy_pointer
     {
         T value_;
@@ -100,7 +83,7 @@ public:
     using value_type = ValueType;
     /// \brief A reference type of the type iterated over (\p value_type).
     /// It's `const` since transform_iterator is a read-only iterator.
-    using reference = const proxy_ref<std::remove_reference_t<value_type>>;
+    using reference = const std::remove_reference_t<value_type>&;
     /// \brief A pointer type of the type iterated over (\p value_type).
     /// It's `const` since transform_iterator is a read-only iterator.
     using pointer = const proxy_pointer<std::remove_reference_t<value_type>>;
@@ -162,9 +145,9 @@ public:
     }
 
     ROCPRIM_HOST_DEVICE inline
-    reference operator*() const
+    value_type operator*() const
     {
-        return reference(transform_(*iterator_));
+        return transform_(*iterator_);
     }
 
     ROCPRIM_HOST_DEVICE inline pointer operator->() const

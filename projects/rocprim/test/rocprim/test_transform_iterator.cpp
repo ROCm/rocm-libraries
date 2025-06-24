@@ -194,6 +194,7 @@ TYPED_TEST(RocprimTransformIteratorTests, Basic)
         auto test_transform_wrap = rocprim::make_transform_iterator(input.data(), transform_wrap);
 
         ASSERT_EQ(test_transform_wrap->value, transform(input[0]));
+        ASSERT_EQ((*test_transform_wrap).value, transform(input[0]));
         ASSERT_EQ((++test_transform_wrap)->value, transform(input[1]));
 
         struct WrapperPointer
@@ -218,7 +219,8 @@ TYPED_TEST(RocprimTransformIteratorTests, Basic)
 
         auto test_transform_wrap_ref = rocprim::make_transform_iterator(input_test.data(), func);
 
-        ASSERT_EQ(*(test_transform_wrap_ref->a), transform(input[0]));
+        ASSERT_EQ(*((*test_transform_wrap_ref).a), transform(input[0]));
+        ASSERT_EQ(*(test_transform_wrap_ref->a), transform(transform(input[0])));
         ASSERT_EQ(*((++test_transform_wrap_ref)->a), transform(input[1]));
 
         for(auto& wp : input_test)
