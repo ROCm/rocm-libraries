@@ -41,6 +41,8 @@ subtrees:
       title: Supported functions
     - file: reference/data-type-support.rst
       title: Data type support
+    - file: reference/env-variables.rst
+      title: Environment variables
     - file: doxygen/html/index
       title: API library
 

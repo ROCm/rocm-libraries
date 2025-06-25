@@ -42,6 +42,7 @@ The hipSPARSELt public repository is located at `<https://github.com/ROCm/hipSPA
 
     * :doc:`Supported functions <./reference/supported-functions>`
     * :doc:`Data type support <./reference/data-type-support>`
+    * :doc:`Environment variables <./reference/env-variables>`
     * :doc:`API library <../doxygen/html/index>`
 
 To contribute to the documentation, see `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
