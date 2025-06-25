@@ -25,7 +25,7 @@ name: Merged PR to Patch Subrepos
 on:
   push:
     branches:
-      - 'release-staging/rocm-rel-7.0'
+      - 'develop'
 
 concurrency:
   group: pr-merge-sync-patch-${{ github.sha }}
@@ -73,7 +73,6 @@ jobs:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
           token: ${{ steps.generate-token.outputs.token }}
-          ref: ${{ github.ref }}
 
       - name: Set up Python
         if: steps.pr-check.outputs.skip != 'true'
@@ -114,7 +113,6 @@ jobs:
             ${{ steps.detect.outputs.subtrees }}
           token: ${{ steps.generate-token.outputs.token }}
           fetch-depth: 0
-          ref: ${{ github.ref }}
 
       - name: Generate and apply patches
         if: steps.detect.outputs.subtrees
