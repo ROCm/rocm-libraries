@@ -64,13 +64,13 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
 
       // inclusive_scan (tuple output)
       thrust::inclusive_scan(
-        make_zip_iterator(make_tuple(h_data0.begin(), h_data1.begin())),
-        make_zip_iterator(make_tuple(h_data0.end(), h_data1.end())),
+        make_zip_iterator(h_data0.begin(), h_data1.begin()),
+        make_zip_iterator(h_data0.end(), h_data1.end()),
         h_result.begin(),
         TuplePlus<Tuple>());
       thrust::inclusive_scan(
-        make_zip_iterator(make_tuple(d_data0.begin(), d_data1.begin())),
-        make_zip_iterator(make_tuple(d_data0.end(), d_data1.end())),
+        make_zip_iterator(d_data0.begin(), d_data1.begin()),
+        make_zip_iterator(d_data0.end(), d_data1.end()),
         d_result.begin(),
         TuplePlus<Tuple>());
       host_vector<Tuple> h_result_d(d_result);
@@ -82,14 +82,14 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
 
       // exclusive_scan (tuple output)
       thrust::exclusive_scan(
-        make_zip_iterator(make_tuple(h_data0.begin(), h_data1.begin())),
-        make_zip_iterator(make_tuple(h_data0.end(), h_data1.end())),
+        make_zip_iterator(h_data0.begin(), h_data1.begin()),
+        make_zip_iterator(h_data0.end(), h_data1.end()),
         h_result.begin(),
         make_tuple<T, T>(0, 0),
         TuplePlus<Tuple>());
       thrust::exclusive_scan(
-        make_zip_iterator(make_tuple(d_data0.begin(), d_data1.begin())),
-        make_zip_iterator(make_tuple(d_data0.end(), d_data1.end())),
+        make_zip_iterator(d_data0.begin(), d_data1.begin()),
+        make_zip_iterator(d_data0.end(), d_data1.end()),
         d_result.begin(),
         make_tuple<T, T>(0, 0),
         TuplePlus<Tuple>());
@@ -107,29 +107,29 @@ TYPED_TEST(ZipIteratorScanVariablesTests, TestZipIteratorScan)
 
       // inclusive_scan (zip_iterator output)
       thrust::inclusive_scan(
-        make_zip_iterator(make_tuple(h_data0.begin(), h_data1.begin())),
-        make_zip_iterator(make_tuple(h_data0.end(), h_data1.end())),
-        make_zip_iterator(make_tuple(h_result0.begin(), h_result1.begin())),
+        make_zip_iterator(h_data0.begin(), h_data1.begin()),
+        make_zip_iterator(h_data0.end(), h_data1.end()),
+        make_zip_iterator(h_result0.begin(), h_result1.begin()),
         TuplePlus<Tuple>());
       thrust::inclusive_scan(
-        make_zip_iterator(make_tuple(d_data0.begin(), d_data1.begin())),
-        make_zip_iterator(make_tuple(d_data0.end(), d_data1.end())),
-        make_zip_iterator(make_tuple(d_result0.begin(), d_result1.begin())),
+        make_zip_iterator(d_data0.begin(), d_data1.begin()),
+        make_zip_iterator(d_data0.end(), d_data1.end()),
+        make_zip_iterator(d_result0.begin(), d_result1.begin()),
         TuplePlus<Tuple>());
       test_equality_scan(h_result0, d_result0);
       test_equality_scan(h_result1, d_result1);
 
       // exclusive_scan (zip_iterator output)
       thrust::exclusive_scan(
-        make_zip_iterator(make_tuple(h_data0.begin(), h_data1.begin())),
-        make_zip_iterator(make_tuple(h_data0.end(), h_data1.end())),
-        make_zip_iterator(make_tuple(h_result0.begin(), h_result1.begin())),
+        make_zip_iterator(h_data0.begin(), h_data1.begin()),
+        make_zip_iterator(h_data0.end(), h_data1.end()),
+        make_zip_iterator(h_result0.begin(), h_result1.begin()),
         make_tuple<T, T>(0, 0),
         TuplePlus<Tuple>());
       thrust::exclusive_scan(
-        make_zip_iterator(make_tuple(d_data0.begin(), d_data1.begin())),
-        make_zip_iterator(make_tuple(d_data0.end(), d_data1.end())),
-        make_zip_iterator(make_tuple(d_result0.begin(), d_result1.begin())),
+        make_zip_iterator(d_data0.begin(), d_data1.begin()),
+        make_zip_iterator(d_data0.end(), d_data1.end()),
+        make_zip_iterator(d_result0.begin(), d_result1.begin()),
         make_tuple<T, T>(0, 0),
         TuplePlus<Tuple>());
       test_equality_scan(h_result0, d_result0);
