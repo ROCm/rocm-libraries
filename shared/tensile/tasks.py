@@ -57,7 +57,7 @@ def hostlibtest(c, clean=False, configure=False, build=False, run=False, coverag
         "build": "Compile the tensile-client executable.",
     }
 )
-def build_client(c, clean=True, configure=True, build=True):
+def build_client(c, clean=False, configure=True, build=True, build_type="Release", gpu_targets="all"):
     client_build_dir = "build/client"
 
     if clean and os.path.exists(client_build_dir):
@@ -72,15 +72,14 @@ def build_client(c, clean=True, configure=True, build=True):
             "-B", client_build_dir,
             "-DCMAKE_PREFIX_PATH=/opt/rocm",
             "-DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++",
-            "-DCMAKE_BUILD_TYPE=Release",
+            f"-DCMAKE_BUILD_TYPE={build_type}",
             "-DTENSILE_ENABLE_CLIENT=ON",
             "-DTENSILE_ENABLE_HOST=ON",
             "-DTENSILE_ENABLE_DEVICE=OFF",
-            # "-DGPU_TARGETS=gfx1201"
+            f"-DGPU_TARGETS={gpu_targets}"
         ]
 
         c.run(" ".join(cmake_cmd))
 
     if build:
         c.run(f"cmake --build {client_build_dir} --parallel")
-
