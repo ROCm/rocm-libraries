@@ -55,6 +55,8 @@ def hostlibtest(c, clean=False, configure=False, build=False, run=False, coverag
         "clean": "Remove the client build directory before building.",
         "configure": "Run CMake configuration for the client.",
         "build": "Compile the tensile-client executable.",
+        "build_type": "CMake build type (e.g. Release, Debug).",
+        "gpu_targets": "Comma-separated list of GPU targets (e.g. gfx90a,gfx1101)."
     }
 )
 def build_client(c, clean=False, configure=True, build=True, build_type="Release", gpu_targets="all"):
