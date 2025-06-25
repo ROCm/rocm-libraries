@@ -11489,8 +11489,6 @@ class KernelWriterAssembly(KernelWriter):
         module.add(gsuComponent.reductionBranches(self, kernel, tPB, vectorWidths_1, elements_1, tmpVgpr, cvtVgprStruct, \
           vectorDataTypes, factorDims, endLabel))
         module.add(reductionEndLabel)
-        module.add(self.undefineSgpr("GSUStartWGIdx"))
-        module.addSpaceLine()
 
 
       betaModules = Module("Betas")
