@@ -406,7 +406,7 @@ struct NumericUD{
 
         double mean = 0;
 
-        for(size_t i = 0; i <= testSize; i += 4){
+        for(size_t i = 0; i < testSize; i += 4){
             input = {dis(gen), dis(gen), dis(gen), dis(gen)};
 
             f(input, out);
@@ -583,7 +583,7 @@ struct StatesUD{
 
         double mean = 0;
 
-        for(size_t i = 0; i <= testSize; i += 4){
+        for(size_t i = 0; i < testSize; i += 4){
             f(out);
 
             output[i] = out.w;
