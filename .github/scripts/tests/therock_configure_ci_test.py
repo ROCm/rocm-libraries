@@ -43,10 +43,19 @@ class ConfigureCITest(unittest.TestCase):
         project_to_run = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
         
+    def test_workflow_dispatch_all(self):
+        args = {
+            "is_workflow_dispatch": True,
+            "input_projects": "all"
+        }
+        
+        project_to_run = therock_configure_ci.retrieve_projects(args)
+        self.assertGreaterEqual(len(project_to_run), 1)
+        
     def test_workflow_dispatch_empty(self):
         args = {
-            "is_pull_request": True,
-            "input_subtrees": ""
+            "is_workflow_dispatch": True,
+            "input_projects": ""
         }
         
         project_to_run = therock_configure_ci.retrieve_projects(args)

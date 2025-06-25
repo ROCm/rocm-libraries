@@ -29,7 +29,10 @@ def retrieve_projects(args):
         subtrees = args.get("input_subtrees").split("\n")
     
     if args.get("is_workflow_dispatch"):
-        subtrees = args.get("input_projects").split()
+        if args.get("input_projects") == "all":
+            subtrees = list(subtree_to_project_map.keys())
+        else:
+            subtrees = args.get("input_projects").split()
     
     # If a push event to develop happens, we run tests on all subtrees
     if args.get("is_push"):

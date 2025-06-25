@@ -17,7 +17,7 @@ on:
     inputs:
       projects:
         type: string
-        description: "Insert space-separated list of projects to test. ex: 'projects/rocprim projects/hipcub'"
+        description: "Insert space-separated list of projects to test or 'all' to test all projects. ex: 'projects/rocprim projects/hipcub'"
 
 permissions:
   contents: read
