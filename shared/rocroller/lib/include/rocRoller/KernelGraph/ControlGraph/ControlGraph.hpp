@@ -54,6 +54,15 @@ namespace rocRoller
      * Each node of the graph, when traversed, will help generate assembly code.
      * It relies on coordinate transform graph expressions.
      *
+     * The control graph should begin with a single Kernel node.
+     *
+     * There are two main categories of edges: Sequence edges and Body-like edges.
+     *
+     * From a given node, each kind of Body-like edge denodes a separate body
+     * of that node.
+     * For example, a Conditional node may have Body edges and Else edges.
+     * The nodes downstream of the Body edges represent the true case, and the
+     * nodes downstream of the Else edges represent the false case.
      */
     namespace KernelGraph::ControlGraph
     {

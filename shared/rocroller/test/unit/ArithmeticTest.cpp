@@ -35,6 +35,7 @@
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/KernelArguments.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
@@ -71,6 +72,8 @@ namespace ArithmeticTest
         template <typename T>
         void testBody()
         {
+            setKernelOptions({{.enableFullDivision = true}});
+
             auto dataType = TypeInfo<T>::Var.dataType;
             auto regType  = std::get<1>(GetParam());
 
@@ -84,7 +87,6 @@ namespace ArithmeticTest
 
             auto numBoolRegs = k->wavefront_size() / 32;
 
-            k->setKernelName("IntegralArithmeticTest");
             k->setKernelDimensions(1);
 
             auto command = std::make_shared<Command>();
@@ -513,7 +515,6 @@ namespace ArithmeticTest
     {
         auto k = m_context->kernel();
 
-        k->setKernelName("ArithFloat");
         k->setKernelDimensions(1);
 
         auto command = std::make_shared<Command>();
@@ -789,7 +790,6 @@ namespace ArithmeticTest
     {
         auto k = m_context->kernel();
 
-        k->setKernelName("ArithUnaryFloat");
         k->setKernelDimensions(1);
 
         auto command = std::make_shared<Command>();
@@ -901,7 +901,6 @@ namespace ArithmeticTest
     {
         auto k = m_context->kernel();
 
-        k->setKernelName("ArithFMAMixed");
         k->setKernelDimensions(1);
 
         auto command = std::make_shared<Command>();
@@ -1126,7 +1125,6 @@ namespace ArithmeticTest
     {
         auto k = m_context->kernel();
 
-        k->setKernelName("ArithDouble");
         k->setKernelDimensions(1);
 
         auto command = std::make_shared<Command>();

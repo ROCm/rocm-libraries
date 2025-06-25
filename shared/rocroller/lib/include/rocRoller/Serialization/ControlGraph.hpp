@@ -288,6 +288,25 @@ namespace rocRoller
             }
         };
 
+        template <typename IO, typename Context>
+        struct MappingTraits<KernelGraph::ControlGraph::Deallocate, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+            static void mapping(IO& io, KernelGraph::ControlGraph::Deallocate& op, Context&)
+            {
+                if(!iot::outputting(io) || !op.arguments.empty())
+                    iot::mapOptional(io, "arguments", op.arguments);
+            }
+
+            static void mapping(IO& io, KernelGraph::ControlGraph::Deallocate& op)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, op, ctx);
+            }
+        };
+
         template <typename Op, typename IO, typename Context>
         requires(
             CIsAnyOf<Op,

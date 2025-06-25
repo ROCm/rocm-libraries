@@ -1153,7 +1153,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
     {
-        if(!m_context->targetArchitecture().target().isCDNA2GPU())
+        if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
@@ -1206,7 +1206,8 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamKSmall)
     {
-        if(!m_context->targetArchitecture().target().isCDNA2GPU())
+        // TODO: Update this when the bug is fixed.
+        if(m_context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize) == 1 << 16)
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }

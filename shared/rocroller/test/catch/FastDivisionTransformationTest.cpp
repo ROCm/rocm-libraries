@@ -29,6 +29,7 @@
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
 #include "CustomMatchers.hpp"
@@ -58,7 +59,7 @@ namespace FastDivisionTest
         using namespace rocRoller;
         namespace Ex = Expression;
 
-        auto context = TestContext::ForDefaultTarget({.minLaunchTimeExpressionComplexity = 49});
+        auto context = TestContext::ForDefaultTarget({{.minLaunchTimeExpressionComplexity = 49}});
 
         auto command = std::make_shared<Command>();
 
@@ -132,7 +133,7 @@ namespace FastDivisionTest
         using namespace rocRoller;
         namespace Ex = Expression;
 
-        auto context = TestContext::ForDefaultTarget({.minLaunchTimeExpressionComplexity = 49});
+        auto context = TestContext::ForDefaultTarget({{.minLaunchTimeExpressionComplexity = 49}});
 
         auto command = std::make_shared<rocRoller::Command>();
 
@@ -198,7 +199,7 @@ namespace FastDivisionTest
         using namespace rocRoller;
         namespace Ex = Expression;
 
-        auto context = TestContext::ForDefaultTarget({.minLaunchTimeExpressionComplexity = 49});
+        auto context = TestContext::ForDefaultTarget({{.minLaunchTimeExpressionComplexity = 49}});
 
         auto command = std::make_shared<Command>();
 
@@ -266,7 +267,7 @@ namespace FastDivisionTest
         using namespace rocRoller;
         namespace Ex = Expression;
 
-        auto context = TestContext::ForDefaultTarget({.minLaunchTimeExpressionComplexity = 49});
+        auto context = TestContext::ForDefaultTarget({{.minLaunchTimeExpressionComplexity = 49}});
 
         auto command = std::make_shared<Command>();
 

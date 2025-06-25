@@ -62,6 +62,9 @@ namespace rocRoller
         Register::ValuePtr rhs,
         Expression::Modulo const&)
     {
+        AssertFatal(m_context->kernelOptions()->enableFullDivision,
+                    "Full integer modulo not enabled by default.");
+
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
@@ -133,6 +136,9 @@ namespace rocRoller
         Register::ValuePtr rhs,
         Expression::Modulo const&)
     {
+        AssertFatal(m_context->kernelOptions()->enableFullDivision,
+                    "Full integer modulo not enabled by default.");
+
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
@@ -205,6 +211,9 @@ namespace rocRoller
         Register::ValuePtr rhs,
         Expression::Modulo const&)
     {
+        AssertFatal(m_context->kernelOptions()->enableFullDivision,
+                    "Full integer modulo not enabled by default.");
+
         auto const& architecture  = m_context->targetArchitecture();
         auto const  wavefrontSize = architecture.GetCapability(GPUCapability::DefaultWavefrontSize);
         AssertFatal(wavefrontSize == 32 || wavefrontSize == 64,
@@ -528,6 +537,9 @@ namespace rocRoller
         Register::ValuePtr rhs,
         Expression::Modulo const&)
     {
+        AssertFatal(m_context->kernelOptions()->enableFullDivision,
+                    "Full integer modulo not enabled by default.");
+
         auto const& architecture  = m_context->targetArchitecture();
         auto const  wavefrontSize = architecture.GetCapability(GPUCapability::DefaultWavefrontSize);
         AssertFatal(wavefrontSize == 32 || wavefrontSize == 64,

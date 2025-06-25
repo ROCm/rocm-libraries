@@ -27,16 +27,16 @@
 set(_CMAKE_CURRENT_SOURCE_DIR "${ROCROLLER_LIB_DIR}/source")
 target_sources(rocroller
     PRIVATE
-        "${_CMAKE_CURRENT_SOURCE_DIR}/AssemblyKernelArgument.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/AssemblyKernel.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/AssemblyKernelArgument.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/AssemblyKernel_serialization.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/AssertOpKinds.cpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Command_serialization.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/CommandSolution.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/Command_serialization.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/CommonSubexpressionElim.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/Context.cpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/DataTypes_BF16_Utils.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/DataTypes.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/DataTypes_BF16_Utils.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/DataTypes_F6_Utils.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/DataTypes_F8_Utils.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/DataTypes_Utils.cpp"
@@ -45,6 +45,7 @@ target_sources(rocroller
         "${_CMAKE_CURRENT_SOURCE_DIR}/Expression.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/Expression_evaluate.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/Expression_generate.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/Expression_referencedKernelArguments.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/Expression_resultType.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/Expression_serialization.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/Expression_toString.cpp"

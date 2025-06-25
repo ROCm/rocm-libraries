@@ -32,6 +32,7 @@
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
@@ -168,6 +169,13 @@ namespace rocRoller
                                                     Register::ValuePtr& value)
     {
         auto realName = m_kernel->findArgument(argName).name;
+
+        if(Settings::Get(Settings::AuditControlTracers))
+        {
+            auto inst = Instruction::Comment("Get arg " + realName);
+            inst.setReferencedArg(realName);
+            co_yield inst;
+        }
 
         auto iter = m_loadedValues.find(realName);
         if(iter == m_loadedValues.end())

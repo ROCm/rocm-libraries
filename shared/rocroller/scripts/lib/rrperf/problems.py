@@ -332,7 +332,7 @@ class CodeGen:
     """CodeGen base problem description."""
 
     instCount: int = 0
-    instructions: str = "simple_mfma"
+    instructions: str = "simple_mi"
 
     numWarmUp: int = 2
     numRuns: int = 10

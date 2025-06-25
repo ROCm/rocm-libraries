@@ -32,6 +32,7 @@
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/Serialization/Variant.hpp>
 
 using namespace rocRoller;
@@ -1128,6 +1129,42 @@ namespace rocRollerTest
         coords.setCoordinate(j, Expression::literal(8));
         EXPECT_TRUE(coords.hasPath({u}, false));
         EXPECT_FALSE(coords.hasPath({i}, true));
+    }
+
+    TEST_F(CoordinateGraphTest, IncludeEdgeNeighbours)
+    {
+        auto ct = CoordinateGraph();
+
+        auto size  = Expression::literal(1024u);
+        auto sizeI = Expression::literal(512u);
+        auto sizeJ = Expression::literal(2u);
+
+        auto tileNumber       = ct.addElement(MacroTileNumber(0, sizeI, nullptr));
+        auto tileNumberIgnore = ct.addElement(MacroTileNumber(0, sizeJ, nullptr));
+        auto tileNumberI      = ct.addElement(MacroTileNumber(0, sizeI, nullptr));
+        auto tileNumberJ      = ct.addElement(MacroTileNumber(1, sizeJ, nullptr));
+        auto tileNumberF      = ct.addElement(MacroTileNumber(0, size, nullptr));
+        auto linear           = ct.addElement(Linear(size, nullptr));
+
+        ct.addElement(PassThrough(), {tileNumber}, {tileNumberI});
+        ct.addElement(PassThrough(), {tileNumberIgnore}, {tileNumberJ});
+        ct.addElement(Flatten(), {tileNumberI, tileNumberJ}, {tileNumberF});
+        ct.addElement(PassThrough(), {tileNumberF}, {linear});
+
+        auto path0 = ct.path<Graph::Direction::Upstream>(std::vector<int>{linear},
+                                                         std::vector<int>{tileNumber})
+                         .to<std::unordered_set>();
+
+        // We should never get tileNumberIgnore
+        EXPECT_FALSE(path0.contains(tileNumberIgnore));
+        // We should not yet get tileNumberJ
+        EXPECT_FALSE(path0.contains(tileNumberJ));
+
+        auto path1
+            = rocRoller::KernelGraph::includeEdgeNeighbours(ct, Graph::Direction::Upstream, path0);
+        // We should now get tileNumberJ
+        EXPECT_TRUE(path1.contains(tileNumberJ));
+        EXPECT_TRUE(path0.size() == path1.size() - 1);
     }
 
     class ARCH_CoordinateGraphTest : public GPUContextFixture

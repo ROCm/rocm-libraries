@@ -98,6 +98,8 @@ namespace SettingsTest
 
         SECTION("Default values")
         {
+            if(std::getenv(Settings::SaveAssembly.name.c_str()))
+                SKIP("Skipping due to environment variable being set.");
 
             auto settings = Settings::getInstance();
 

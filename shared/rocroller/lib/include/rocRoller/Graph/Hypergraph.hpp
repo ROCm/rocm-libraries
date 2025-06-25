@@ -410,7 +410,16 @@ namespace rocRoller
              */
             template <typename T>
             requires(std::constructible_from<Edge, T>) std::set<int> followEdges(
-                std::set<int> const& candidates);
+                std::set<int> const& candidates)
+            const;
+
+            int nextIndex() const;
+
+            /**
+             * If an edge exists that goes from tail to head, return it,
+             * otherwise nullopt.
+             */
+            std::optional<int> findEdge(int tail, int head) const;
 
             // clang-format off
         private:

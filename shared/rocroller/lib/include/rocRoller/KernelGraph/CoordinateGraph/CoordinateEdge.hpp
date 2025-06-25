@@ -28,8 +28,9 @@
 
 #include <string>
 
-#include <rocRoller/Expression_fwd.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateEdge_fwd.hpp>
+
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/StructUtils.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
@@ -275,12 +276,12 @@ namespace rocRoller
 
             PiecewiseAffineJoin() = default;
 
-            PiecewiseAffineJoin(ExpressionPtr                  condition,
-                                ExpressionPtrVectorPair const& strides,
-                                ExpressionPtrPair const&       initialValues)
-                : condition(condition)
-                , strides(strides)
-                , initialValues(initialValues)
+            PiecewiseAffineJoin(ExpressionPtr           condition,
+                                ExpressionPtrVectorPair strides,
+                                ExpressionPtrPair       initialValues)
+                : condition(std::move(condition))
+                , strides(std::move(strides))
+                , initialValues(std::move(initialValues))
             {
                 AssertFatal(strides.first.size() == strides.second.size());
             }
