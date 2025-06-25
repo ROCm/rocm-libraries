@@ -36,7 +36,24 @@ trigger:
     - projects/rocblas/*.md
     - projects/rocblas/*.rst
 
-pr: none
+pr:
+  autoCancel: true
+  branches:
+    include:
+    - develop
+    - mainline
+  paths:
+    include:
+    - projects/rocblas
+    exclude:
+    - projects/rocblas/.githooks
+    - projects/rocblas/.github
+    - projects/rocblas/.jenkins
+    - projects/rocblas/docs
+    - projects/rocblas/.*.y*ml
+    - projects/rocblas/*.md
+    - projects/rocblas/*.rst
+  drafts: false
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/rocBLAS.yml@pipelines_repo

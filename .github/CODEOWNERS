@@ -5,11 +5,6 @@
 **/docs/ @ROCm/rocm-documentation
 **/library/include/ @ROCm/rocm-documentation
 
-# Build ownership
-**/next-cmake/ @ROCm/rocm-math-lib-build-infra
-**/*.cmake @ROCm/rocm-math-lib-build-infra
-**/CMakeLists.txt @ROCm/rocm-math-lib-build-infra
-
 # CI ownership
 /.azuredevops/ @ROCm/external-ci
 
