@@ -63,8 +63,8 @@
  * \return Log-normally distributed \p float value
  */
 #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
-__forceinline__ __device__ __host__ float
-    rocrand_log_normal(rocrand_state_philox4x32_10* state, float mean, float stddev)
+__forceinline__ __device__ __host__
+float rocrand_log_normal(rocrand_state_philox4x32_10* state, float mean, float stddev)
 {
     typedef rocrand_device::detail::engine_boxmuller_helper<rocrand_state_philox4x32_10> bm_helper;
 
@@ -103,10 +103,7 @@ float2 rocrand_log_normal2(rocrand_state_philox4x32_10* state, float mean, float
     auto state2 = rocrand(state);
 
     float2 r = rocrand_device::detail::normal_distribution2(state1, state2);
-    return float2 {
-        expf(mean + (stddev * r.x)),
-        expf(mean + (stddev * r.y))
-    };
+    return float2{expf(mean + (stddev * r.x)), expf(mean + (stddev * r.y))};
 }
 
 /**
@@ -127,12 +124,10 @@ __forceinline__ __device__ __host__
 float4 rocrand_log_normal4(rocrand_state_philox4x32_10* state, float mean, float stddev)
 {
     float4 r = rocrand_device::detail::normal_distribution4(rocrand4(state));
-    return float4 {
-        expf(mean + (stddev * r.x)),
-        expf(mean + (stddev * r.y)),
-        expf(mean + (stddev * r.z)),
-        expf(mean + (stddev * r.w))
-    };
+    return float4{expf(mean + (stddev * r.x)),
+                  expf(mean + (stddev * r.y)),
+                  expf(mean + (stddev * r.z)),
+                  expf(mean + (stddev * r.w))};
 }
 
 /**
@@ -151,8 +146,8 @@ float4 rocrand_log_normal4(rocrand_state_philox4x32_10* state, float mean, float
  * \return Log-normally distributed \p double value
  */
 #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
-__forceinline__ __device__ __host__ double
-    rocrand_log_normal_double(rocrand_state_philox4x32_10* state, double mean, double stddev)
+__forceinline__ __device__ __host__
+double rocrand_log_normal_double(rocrand_state_philox4x32_10* state, double mean, double stddev)
 {
     typedef rocrand_device::detail::engine_boxmuller_helper<rocrand_state_philox4x32_10> bm_helper;
 
@@ -184,10 +179,7 @@ __forceinline__ __device__ __host__
 double2 rocrand_log_normal_double2(rocrand_state_philox4x32_10* state, double mean, double stddev)
 {
     double2 r = rocrand_device::detail::normal_distribution_double2(rocrand4(state));
-    return double2 {
-        exp(mean + (stddev * r.x)),
-        exp(mean + (stddev * r.y))
-    };
+    return double2{exp(mean + (stddev * r.x)), exp(mean + (stddev * r.y))};
 }
 
 /**
@@ -210,9 +202,7 @@ double4 rocrand_log_normal_double4(rocrand_state_philox4x32_10* state, double me
     double2 r1, r2;
     r1 = rocrand_log_normal_double2(state, mean, stddev);
     r2 = rocrand_log_normal_double2(state, mean, stddev);
-    return double4 {
-        r1.x, r1.y, r2.x, r2.y
-    };
+    return double4{r1.x, r1.y, r2.x, r2.y};
 }
 
 /**
@@ -231,8 +221,8 @@ double4 rocrand_log_normal_double4(rocrand_state_philox4x32_10* state, double me
  * \return Log-normally distributed \p float value
  */
 #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
-__forceinline__ __device__ __host__ float
-    rocrand_log_normal(rocrand_state_mrg31k3p* state, float mean, float stddev)
+__forceinline__ __device__ __host__
+float rocrand_log_normal(rocrand_state_mrg31k3p* state, float mean, float stddev)
 {
     typedef rocrand_device::detail::engine_boxmuller_helper<rocrand_state_mrg31k3p> bm_helper;
 
@@ -292,8 +282,8 @@ float2 rocrand_log_normal2(rocrand_state_mrg31k3p* state, float mean, float stdd
  * \return Log-normally distributed \p double value
  */
 #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
-__forceinline__ __device__ __host__ double
-    rocrand_log_normal_double(rocrand_state_mrg31k3p* state, double mean, double stddev)
+__forceinline__ __device__ __host__
+double rocrand_log_normal_double(rocrand_state_mrg31k3p* state, double mean, double stddev)
 {
     typedef rocrand_device::detail::engine_boxmuller_helper<rocrand_state_mrg31k3p> bm_helper;
 
@@ -355,8 +345,8 @@ double2 rocrand_log_normal_double2(rocrand_state_mrg31k3p* state, double mean, d
  * \return Log-normally distributed \p float value
  */
 #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
-__forceinline__ __device__ __host__ float
-    rocrand_log_normal(rocrand_state_mrg32k3a* state, float mean, float stddev)
+__forceinline__ __device__ __host__
+float rocrand_log_normal(rocrand_state_mrg32k3a* state, float mean, float stddev)
 {
     typedef rocrand_device::detail::engine_boxmuller_helper<rocrand_state_mrg32k3a> bm_helper;
 
@@ -397,10 +387,7 @@ float2 rocrand_log_normal2(rocrand_state_mrg32k3a* state, float mean, float stdd
 
     float2 r
         = rocrand_device::detail::mrg_normal_distribution2<rocrand_state_mrg32k3a>(state1, state2);
-    return float2 {
-        expf(mean + (stddev * r.x)),
-        expf(mean + (stddev * r.y))
-    };
+    return float2{expf(mean + (stddev * r.x)), expf(mean + (stddev * r.y))};
 }
 
 /**
@@ -419,8 +406,8 @@ float2 rocrand_log_normal2(rocrand_state_mrg32k3a* state, float mean, float stdd
  * \return Log-normally distributed \p double value
  */
 #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
-__forceinline__ __device__ __host__ double
-    rocrand_log_normal_double(rocrand_state_mrg32k3a* state, double mean, double stddev)
+__forceinline__ __device__ __host__
+double rocrand_log_normal_double(rocrand_state_mrg32k3a* state, double mean, double stddev)
 {
     typedef rocrand_device::detail::engine_boxmuller_helper<rocrand_state_mrg32k3a> bm_helper;
 
@@ -463,10 +450,7 @@ double2 rocrand_log_normal_double2(rocrand_state_mrg32k3a* state, double mean, d
     double2 r
         = rocrand_device::detail::mrg_normal_distribution_double2<rocrand_state_mrg32k3a>(state1,
                                                                                           state2);
-    return double2 {
-        exp(mean + (stddev * r.x)),
-        exp(mean + (stddev * r.y))
-    };
+    return double2{exp(mean + (stddev * r.x)), exp(mean + (stddev * r.y))};
 }
 
 /**
@@ -485,8 +469,8 @@ double2 rocrand_log_normal_double2(rocrand_state_mrg32k3a* state, double mean, d
  * \return Log-normally distributed \p float value
  */
 #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
-__forceinline__ __device__ __host__ float
-    rocrand_log_normal(rocrand_state_xorwow* state, float mean, float stddev)
+__forceinline__ __device__ __host__
+float rocrand_log_normal(rocrand_state_xorwow* state, float mean, float stddev)
 {
     typedef rocrand_device::detail::engine_boxmuller_helper<rocrand_state_xorwow> bm_helper;
 
@@ -525,10 +509,7 @@ float2 rocrand_log_normal2(rocrand_state_xorwow* state, float mean, float stddev
     auto state2 = rocrand(state);
 
     float2 r = rocrand_device::detail::normal_distribution2(state1, state2);
-    return float2 {
-        expf(mean + (stddev * r.x)),
-        expf(mean + (stddev * r.y))
-    };
+    return float2{expf(mean + (stddev * r.x)), expf(mean + (stddev * r.y))};
 }
 
 /**
@@ -547,8 +528,8 @@ float2 rocrand_log_normal2(rocrand_state_xorwow* state, float mean, float stddev
  * \return Log-normally distributed \p double value
  */
 #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
-__forceinline__ __device__ __host__ double
-    rocrand_log_normal_double(rocrand_state_xorwow* state, double mean, double stddev)
+__forceinline__ __device__ __host__
+double rocrand_log_normal_double(rocrand_state_xorwow* state, double mean, double stddev)
 {
     typedef rocrand_device::detail::engine_boxmuller_helper<rocrand_state_xorwow> bm_helper;
 
@@ -563,8 +544,7 @@ __forceinline__ __device__ __host__ double
     auto state4 = rocrand(state);
 
     double2 r = rocrand_device::detail::normal_distribution_double2(
-        uint4 { state1, state2, state3, state4 }
-    );
+        uint4{state1, state2, state3, state4});
     bm_helper::save_double(state, r.y);
     return exp(mean + (stddev * r.x));
 }
@@ -593,12 +573,8 @@ double2 rocrand_log_normal_double2(rocrand_state_xorwow* state, double mean, dou
     auto state4 = rocrand(state);
 
     double2 r = rocrand_device::detail::normal_distribution_double2(
-        uint4 { state1, state2, state3, state4 }
-    );
-    return double2 {
-        exp(mean + (stddev * r.x)),
-        exp(mean + (stddev * r.y))
-    };
+        uint4{state1, state2, state3, state4});
+    return double2{exp(mean + (stddev * r.x)), exp(mean + (stddev * r.y))};
 }
 
 /**
