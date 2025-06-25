@@ -1900,7 +1900,7 @@ Tests:
     matmul: *real_precisions
   matrix_size:
     - { M:  128,   N:  128,    K:  2048 }
-  algo_method: [0,1]
+  algo_method: [0] # algo_method 1 does not accept max workspace as input
   transA_transB: *transA_transB_range
   alpha: 1
   beta: 1
