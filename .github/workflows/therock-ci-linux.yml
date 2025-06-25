@@ -1,4 +1,4 @@
-name: TheRock CI
+name: TheRock CI Linux
 
 on:
   workflow_call:
@@ -40,6 +40,16 @@ jobs:
           owner: ${{ github.repository_owner }}
 
       - name: "Checking out repository for rocm-libraries"
+        if: github.event_name != 'pull_request'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          sparse-checkout: |
+            .github
+            ${{ inputs.subtree_checkout }}
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: "Checking out repository for rocm-libraries"
+        if: github.event_name == 'pull_request'
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
