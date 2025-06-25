@@ -1210,7 +1210,7 @@ namespace rocRoller
 
                 auto packedVariableType = DataTypeInfo::Get(exchange.varType).packedVariableType();
 
-                if(packedVariableType)
+                /*if(packedVariableType)
                 {
                     auto allocOptions = Register::AllocationOptions::FullyContiguous();
                     auto temp         = Register::Value::Placeholder(
@@ -1222,13 +1222,15 @@ namespace rocRoller
                             Expression::BitFieldExtract{
                                 {}, exchange.varType.dataType, index * 8, 8});
                     vgpr = temp;
-                }
+                }*/
 
                 auto oMacTileTag = m_graph->mapper.get(tag, NaryArgument::DEST);
-                AssertFatal(!m_context->registerTagManager()->hasRegister(oMacTileTag));
-                m_context->registerTagManager()->addRegister(oMacTileTag, vgpr);
-                AssertFatal(vgpr->registerCount() == numVgpr);
+                AssertFatal(m_context->registerTagManager()->hasRegister(oMacTileTag));
+                //AssertFatal(!m_context->registerTagManager()->hasRegister(oMacTileTag));
+                //m_context->registerTagManager()->addRegister(oMacTileTag, vgpr);
+                //AssertFatal(vgpr->registerCount() == numVgpr);
 
+		/*
                 if(Expression::identical(vgprIndex.size, Expression::literal(4u)))
                 {
                     for(uint32_t i = 0; i < numVgpr; i += 2)
@@ -1261,6 +1263,9 @@ namespace rocRoller
                 }
                 else
                     Throw<FatalError>("Exchange for the given vgprIndex size not supported.");
+		*/
+
+		co_return;
             }
 
             Generator<Instruction> operator()(int tag, SeedPRNG const& seedPRNG, Transformer coords)

@@ -58,8 +58,19 @@ namespace rocRoller
             auto [dst, index] = *merge;
             AssertFatal(hasRegister(dst), ShowValue(dst));
 
-            auto target = m_registers.at(dst);
-            return target->subset({index});
+            auto target = getRegister(dst);
+            //return target->subset({index});
+            return target->element({index});
+        }
+
+        auto segment = getSegment(tag);
+        if(segment)
+        {
+            auto [dst, index] = *segment;
+            AssertFatal(hasRegister(dst), ShowValue(dst));
+
+            auto target = getRegister(dst);
+            return target->segment({index});
         }
 
         AssertFatal(hasRegister(tag), ShowValue(tag));
@@ -226,6 +237,17 @@ namespace rocRoller
     {
         auto iter = m_indexes.find(tag);
         if(iter != m_indexes.end())
+        {
+            return iter->second;
+        }
+
+        return std::nullopt;
+    }
+
+    inline std::optional<std::pair<int, int>> RegisterTagManager::getSegment(int tag) const
+    {
+        auto iter = m_segments.find(tag);
+        if(iter != m_segments.end())
         {
             return iter->second;
         }

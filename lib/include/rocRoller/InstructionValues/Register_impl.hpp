@@ -960,7 +960,7 @@ namespace rocRoller
             AssertFatal(!this->isBitfield());
 
             AssertFatal(bitWidth != 0);
-            AssertFatal(bitWidth < bitsPerRegister);
+            AssertFatal(bitWidth < bitsPerRegister, ShowValue(bitWidth), ShowValue(bitsPerRegister));
 
             AssertFatal(bitOffset < registerCount() * bitsPerRegister,
                         "bitOffset is greater than number of bits in this value.");
@@ -988,7 +988,7 @@ namespace rocRoller
             auto const info = DataTypeInfo::Get(m_varType);
 
             AssertFatal(info.packing > 1,
-                        "bitfield access by index is only supported for packed types.");
+                        "bitfield access by index is only supported for packed types.", ShowValue(m_varType));
 
             auto isContiguousRange = [](T v) -> bool {
                 return std::adjacent_find(
