@@ -65,15 +65,22 @@ auto generate_casting(T* output, StateT& state, U min, V max, unsigned int globa
 
 template<typename T, class StateT, typename U, typename V>
 __global__
-void generate_random_kernel(
-    T* output, U min, V max, const unsigned long long seed = 0, const unsigned long long offset = 0)
+void generate_random_kernel(T*                       output,
+                            U                        min,
+                            V                        max,
+                            const unsigned long long size,
+                            const unsigned long long seed   = 0,
+                            const unsigned long long offset = 0)
 {
     const unsigned int flat_id = blockIdx.x * blockDim.x + threadIdx.x;
 
-    StateT             state;
-    const unsigned int subsequence = flat_id;
-    rocrand_init(seed, subsequence, offset, &state);
-    generate_casting(output, state, min, max, flat_id);
+    if(flat_id < size)
+    {
+        StateT             state;
+        const unsigned int subsequence = flat_id;
+        rocrand_init(seed, subsequence, offset, &state);
+        generate_casting(output, state, min, max, flat_id);
+    }
 }
 
 template<class OutputIter, class U, class V>
@@ -94,7 +101,7 @@ inline auto
     int           blocksPerGrid   = (size + threadsPerBlock - 1) / threadsPerBlock;
 
     generate_random_kernel<T, state_t, U, V>
-        <<<blocksPerGrid, threadsPerBlock>>>(d_random_data.get(), min, max, seed_value, 0);
+        <<<blocksPerGrid, threadsPerBlock>>>(d_random_data.get(), min, max, size, seed_value, 0);
     HIP_CHECK(hipGetLastError());
 
     HIP_CHECK(hipMemcpy(it.data(), d_random_data.get(), size * sizeof(T), hipMemcpyDeviceToHost));
