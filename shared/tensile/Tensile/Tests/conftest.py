@@ -106,10 +106,8 @@ def tensile_args(pytestconfig, builddir, worker_lock_path):
         rv += extraOptions.split(",")
     if pytestconfig.getoption("--global-parameters"):
         rv += ["--global-parameters", pytestconfig.getoption("--global-parameters")]
-    if not pytestconfig.getoption("--no-common-build"):
-        rv += ["--client-build-path", builddir]
-        if pytestconfig.getoption("--prebuilt-client"):
-            rv += ["--prebuilt-client", pytestconfig.getoption("--prebuilt-client")]
+    if pytestconfig.getoption("--prebuilt-client"):
+        rv += ["--prebuilt-client", pytestconfig.getoption("--prebuilt-client")]
     if pytestconfig.getoption("--asm-cache"):
         rv += ["--asm-cache", pytestconfig.getoption("--asm-cache")]
 
