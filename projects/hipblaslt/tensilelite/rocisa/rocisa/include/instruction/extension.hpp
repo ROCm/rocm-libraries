@@ -381,14 +381,23 @@ namespace rocisa
         auto& instance = rocIsa::getInstance();
         if(instance.getAsmCaps()["HasBF16CVT"])
         {
-            auto select_bit = SelectBit::WORD_0;
-            if(vi % 2 == 1)
+            if(instance.getAsmCaps()["NoSDWA"])
             {
-                select_bit = SelectBit::WORD_1;
+                auto vop3     = VOP3PModifiers();
+                vop3.op_sel[0] = vi % 2;
+                return std::make_shared<PVCvtBF16toFP32>(dst, src, std::nullopt, vop3, "cvt bf16 to f32");
             }
-            auto sdwa     = SDWAModifiers();
-            sdwa.src0_sel = select_bit;
-            return std::make_shared<PVCvtBF16toFP32>(dst, src, sdwa, "cvt bf16 to f32");
+            else
+            {
+                auto select_bit = SelectBit::WORD_0;
+                if(vi % 2 == 1)
+                {
+                    select_bit = SelectBit::WORD_1;
+                }
+                auto sdwa     = SDWAModifiers();
+                sdwa.src0_sel = select_bit;
+                return std::make_shared<PVCvtBF16toFP32>(dst, src, sdwa, std::nullopt, "cvt bf16 to f32");
+            }
         }
         else
         {

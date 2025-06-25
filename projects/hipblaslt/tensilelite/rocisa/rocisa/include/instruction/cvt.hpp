@@ -590,8 +590,9 @@ namespace rocisa
         PVCvtBF16toFP32(const std::shared_ptr<RegisterContainer>& dst,
                         const std::shared_ptr<Container>&         src,
                         std::optional<SDWAModifiers>              sdwa    = std::nullopt,
+                        std::optional<VOP3PModifiers>             vop3    = std::nullopt,
                         const std::string&                        comment = "")
-            : VCvtInstruction(CvtType::CVT_BF16_to_F32, dst, {src}, sdwa, std::nullopt, comment)
+            : VCvtInstruction(CvtType::CVT_BF16_to_F32, dst, {src}, sdwa, vop3, comment)
         {
             setInst("v_cvt_f32_bf16");
         }
