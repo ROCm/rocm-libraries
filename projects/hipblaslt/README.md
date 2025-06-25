@@ -125,6 +125,6 @@ To build and run TensileLite Host Library Tests, use the following commands:
 ## Contribute
 
 If you want to submit an issue, you can do so on
-[GitHub](https://github.com/ROCm/rocm-libraries/issuess).
+[GitHub](https://github.com/ROCm/rocm-libraries/issues).
 
 To contribute to our repository, you can create a GitHub pull request.
