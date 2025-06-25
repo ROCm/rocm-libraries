@@ -1,4 +1,4 @@
-name: TheRock CI
+name: TheRock CI Linux
 
 on:
   workflow_call:
