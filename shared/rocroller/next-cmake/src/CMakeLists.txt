@@ -27,16 +27,16 @@
 set(_CMAKE_CURRENT_SOURCE_DIR "${ROCROLLER_LIB_DIR}/source")
 target_sources(rocroller
     PRIVATE
-        "${_CMAKE_CURRENT_SOURCE_DIR}/AssemblyKernelArgument.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/AssemblyKernel.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/AssemblyKernelArgument.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/AssemblyKernel_serialization.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/AssertOpKinds.cpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Command_serialization.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/CommandSolution.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/Command_serialization.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/CommonSubexpressionElim.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/Context.cpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/DataTypes_BF16_Utils.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/DataTypes.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/DataTypes_BF16_Utils.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/DataTypes_F6_Utils.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/DataTypes_F8_Utils.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/DataTypes_Utils.cpp"
@@ -45,6 +45,7 @@ target_sources(rocroller
         "${_CMAKE_CURRENT_SOURCE_DIR}/Expression.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/Expression_evaluate.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/Expression_generate.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/Expression_referencedKernelArguments.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/Expression_resultType.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/Expression_serialization.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/Expression_toString.cpp"
@@ -80,7 +81,10 @@ add_library(rocroller-no-rtti
         "${_CMAKE_CURRENT_SOURCE_DIR}/Assemblers/InProcessAssembler.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/ExpressionTransformations/FastDivision.cpp"
 )
-
+if(ROCROLLER_ENABLE_LLD)
+    target_compile_definitions(rocroller-no-rtti PRIVATE ROCROLLER_ENABLE_LLD)
+    target_link_libraries(rocroller-no-rtti PRIVATE lldELF)
+endif()
 target_compile_options(rocroller-no-rtti PRIVATE -fno-rtti)
 target_compile_features(rocroller-no-rtti PRIVATE cxx_std_20)
 target_compile_definitions(rocroller-no-rtti
@@ -96,9 +100,9 @@ target_include_directories(rocroller-no-rtti
 target_link_libraries(rocroller-no-rtti
     PRIVATE
         hip::host
-        spdlog::spdlog_header_only
+        $<BUILD_INTERFACE:spdlog::spdlog_header_only>
         fmt::fmt-header-only
-        lldELF
+        Boost::headers
 )
 
 target_link_libraries(rocroller PRIVATE $<BUILD_INTERFACE:rocroller-no-rtti>)

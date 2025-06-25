@@ -59,7 +59,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) latrd_dot_scale_axpy(const I n
     T* tau = load_ptr_batch<T>(tauA, bid, 0, strideP);
 
     // shared variables
-    __shared__ T sval[MAX_THDS / warpSize];
+    __shared__ T sval[MAX_THDS / WarpSize];
     __shared__ T sh_A[MAX_THDS];
     __shared__ T sh_W[MAX_THDS];
 

@@ -82,7 +82,9 @@ namespace rocRoller
                 TransposeType transB;
 
                 Operations::ScaleMode scaleA;
+                DataType              scaleTypeA;
                 Operations::ScaleMode scaleB;
+                DataType              scaleTypeB;
 
                 // When scaleA/B is ScaleMode::SingleScale
                 float scaleValueA, scaleValueB;

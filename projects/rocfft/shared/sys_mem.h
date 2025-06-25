@@ -111,11 +111,42 @@ private:
         total_bytes = info.ullTotalPhys;
         free_bytes  = info.ullAvailPhys;
 #else
-        struct sysinfo info;
-        if(sysinfo(&info) != 0)
-            return;
-        total_bytes = info.totalram * info.mem_unit;
-        free_bytes  = (info.freeram + info.bufferram) * info.mem_unit;
+
+        // /proc/meminfo can tell us "available" memory (i.e. free +
+        // buffers + cache)
+        total_bytes = 0;
+        free_bytes  = 0;
+        try
+        {
+            std::ifstream proc_meminfo("/proc/meminfo");
+            std::string   proc_line;
+            while(std::getline(proc_meminfo, proc_line))
+            {
+                // meminfo counts in KiB
+                if(proc_line.compare(0, 9, "MemTotal:") == 0)
+                    total_bytes = std::stoull(proc_line.substr(9)) * 1024;
+                else if(proc_line.compare(0, 13, "MemAvailable:") == 0)
+                    free_bytes = std::stoull(proc_line.substr(13)) * 1024;
+                if(total_bytes && free_bytes)
+                    break;
+            }
+        }
+        catch(std::exception&)
+        {
+            // If there was a problem, we'll fall back to sysinfo
+        }
+
+        if(total_bytes == 0)
+        {
+            // Either something couldn't be parsed or proc is not
+            // mounted.  Fall back to sysinfo which can tell total +
+            // free, but not "available".
+            struct sysinfo info;
+            if(sysinfo(&info) != 0)
+                return;
+            total_bytes = info.totalram * info.mem_unit;
+            free_bytes  = (info.freeram + info.bufferram) * info.mem_unit;
+        }
 
         // Adjust memory numbers for APU
         try

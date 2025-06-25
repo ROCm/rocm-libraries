@@ -852,7 +852,6 @@ namespace rocRoller
             Generator<Instruction> operator()(Register::ValuePtr& dest, MatrixMultiply expr)
             {
                 Register::ValuePtr lhs, r1hs, r2hs;
-                int                M, N, K, B;
 
                 AssertFatal(std::holds_alternative<WaveTilePtr>(*expr.lhs)
                                 && std::holds_alternative<WaveTilePtr>(*expr.r1hs),
@@ -867,10 +866,8 @@ namespace rocRoller
                             ShowValue(atile.sizes[1]),
                             ShowValue(btile.sizes[0]));
 
-                M    = atile.sizes[0];
-                N    = btile.sizes[1];
-                K    = atile.sizes[1];
-                B    = 1;
+                InstructionGenerators::MatrixMultiplySizes mi{
+                    .m = atile.sizes[0], .n = btile.sizes[1], .k = atile.sizes[1], .b = 1};
                 lhs  = atile.vgpr;
                 r1hs = btile.vgpr;
 
@@ -883,7 +880,8 @@ namespace rocRoller
 
                 if(dest == nullptr)
                 {
-                    auto const accRegCount = M * N * B / m_context->kernel()->wavefront_size();
+                    auto const accRegCount
+                        = mi.m * mi.n * mi.b / m_context->kernel()->wavefront_size();
 
                     auto const& arch    = m_context->targetArchitecture();
                     auto const  regType = arch.HasCapability(GPUCapability::HasAccCD)
@@ -902,7 +900,7 @@ namespace rocRoller
                     = Component::Get<rocRoller::InstructionGenerators::MatrixMultiply>(m_context);
 
                 r2hs = std::get<Register::ValuePtr>(*expr.r2hs);
-                co_yield mm->mul(dest, lhs, r1hs, r2hs, M, N, K, B);
+                co_yield mm->mul(dest, lhs, r1hs, r2hs, mi);
             }
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, BitFieldExtract const& expr)
@@ -928,9 +926,8 @@ namespace rocRoller
                             ShowValue(atile.sizes[1]),
                             ShowValue(btile.sizes[0]));
 
-                auto M  = atile.sizes[0];
-                auto N  = btile.sizes[1];
-                auto K  = atile.sizes[1];
+                InstructionGenerators::MatrixMultiplySizes mi{
+                    .m = atile.sizes[0], .n = btile.sizes[1], .k = atile.sizes[1], .b = 1};
                 auto rA = atile.vgpr;
                 auto rB = btile.vgpr;
 
@@ -955,7 +952,7 @@ namespace rocRoller
 
                 if(dest == nullptr)
                 {
-                    auto const accRegCount = M * N / m_context->kernel()->wavefront_size();
+                    auto const accRegCount = mi.m * mi.n / m_context->kernel()->wavefront_size();
 
                     dest = Register::Value::Placeholder(
                         m_context,
@@ -974,7 +971,7 @@ namespace rocRoller
                     auto idx                   = 1;
                     auto computeScaleBlockSize = rocRoller::overloaded{
                         [&](WaveTilePtr const& tile) -> std::optional<uint> {
-                            return K / tile->sizes[idx];
+                            return mi.k / tile->sizes[idx];
                         },
                         [&](Register::ValuePtr const& reg) -> std::optional<uint> {
                             return std::nullopt;
@@ -1004,7 +1001,7 @@ namespace rocRoller
                                             arch.target().toString()));
                 }
 
-                co_yield smm->mul(dest, rA, rB, rC, rScaleA, rScaleB, M, N, K, maybeScaleBlockSize);
+                co_yield smm->mul(dest, rA, rB, rC, rScaleA, rScaleB, mi, maybeScaleBlockSize);
             }
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, WaveTilePtr const& expr)
@@ -1185,6 +1182,7 @@ namespace rocRoller
             }
 
             expr = lowerBitfieldValues(expr);
+
             // Replace kernel args with registers.
             co_yield replaceKernelArgs(context, expr, expr);
 

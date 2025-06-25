@@ -36,6 +36,12 @@
 #include "rocsolver/rocsolver.h"
 #include "rocsolver_run_specialized_kernels.hpp"
 
+#if defined(__GFX9__)
+__device__ static constexpr int WarpSize = 64;
+#else
+__device__ static constexpr int WarpSize = 32;
+#endif
+
 ROCSOLVER_BEGIN_NAMESPACE
 
 template <typename T, typename S, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>

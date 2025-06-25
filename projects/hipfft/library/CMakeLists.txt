@@ -148,14 +148,6 @@ include( GenerateExportHeader )
 generate_export_header( hipfft EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/hipfft/hipfft-export.h )
 
 execute_process(COMMAND ${CMAKE_COMMAND} -E copy_directory ${PROJECT_SOURCE_DIR}/library/include ${PROJECT_BINARY_DIR}/include)
-if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_wrap_header_file(
-    hipfft-version.h hipfft-export.h
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS ${CMAKE_INSTALL_INCLUDEDIR} hipfft/${CMAKE_INSTALL_INCLUDEDIR}
-    ORIGINAL_FILES ${PROJECT_BINARY_DIR}/include/hipfft/hipfft-version.h
-  )
-endif( )
 
 if( ROCmCMakeBuildTools_FOUND )
 
@@ -163,15 +155,6 @@ if( ROCmCMakeBuildTools_FOUND )
     INCLUDE
     ${CMAKE_BINARY_DIR}/include
   )
-
-  if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-    rocm_install(
-    DIRECTORY
-       "${PROJECT_BINARY_DIR}/hipfft"
-        DESTINATION "." )
-    message( STATUS "Backward Compatible Sym Link Created for include directories" )
-  endif()
-
 
   rocm_export_targets( TARGETS hip::hipfft
     DEPENDS PACKAGE hip

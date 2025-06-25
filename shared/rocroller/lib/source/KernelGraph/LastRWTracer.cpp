@@ -68,7 +68,10 @@
 #include <vector>
 
 #include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
+
+#include <rocRoller/KernelGraph/ControlGraph/ControlFlowArgumentTracer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller::KernelGraph
@@ -82,32 +85,75 @@ namespace rocRoller::KernelGraph
         return std::min(a.size(), b.size()) - 1;
     }
 
-    std::deque<int> LastRWTracer::controlStack(int control) const
+    std::unordered_map<std::string, std::set<int>>
+        LastRWTracer::lastArgLocations(ControlFlowArgumentTracer const& argTracer) const
     {
-        std::deque<int> rv = {control};
-        while(m_bodyParent.contains(control))
+        std::unordered_map<std::string, std::vector<std::deque<int>>> controlStacks;
+
+        std::string theOne = "Tensor_4_extent_4";
+
+        for(auto const& [controlNode, args] : argTracer.referencedArguments())
         {
-            control = m_bodyParent.at(control);
-            rv.push_front(control);
+            bool debug = args.contains(theOne);
+            auto stack = rocRoller::KernelGraph::controlStack(controlNode, m_graph);
+            for(auto const& arg : args)
+            {
+                controlStacks[arg].push_back(stack);
+            }
         }
-        return rv;
+
+        if(controlStacks.contains(theOne))
+        {
+            std::ofstream f(fmt::format("data_{}.txt", theOne));
+            for(auto const& stack : controlStacks[theOne])
+            {
+                f << "Stack: ";
+                streamJoin(f, stack, ", ");
+                f << std::endl;
+            }
+
+            auto rv = getLastLocationsFromControlStacks(controlStacks);
+            f << ShowValue(rv[theOne]);
+        }
+
+        return getLastLocationsFromControlStacks(controlStacks);
     }
 
-    std::map<int, std::set<int>> LastRWTracer::lastRWLocations() const
+    std::unordered_map<int, std::set<int>> LastRWTracer::lastRWLocations() const
     {
+        TIMER(t, "lastRWLocations");
+
         // Precompute all stacks
-        std::map<int, std::vector<std::deque<int>>> controlStacks;
+        std::unordered_map<int, std::vector<std::deque<int>>> controlStacksByCoord;
+
+        std::unordered_map<int, std::deque<int>> controlStacksByControl;
+
         for(auto const& x : m_trace)
         {
-            controlStacks[x.coordinate].push_back(controlStack(x.control));
+            auto iter = controlStacksByControl.find(x.control);
+            if(iter == controlStacksByControl.end())
+            {
+                controlStacksByControl[x.control] = controlStack(x.control, m_graph);
+
+                iter = controlStacksByControl.find(x.control);
+            }
+
+            controlStacksByCoord[x.coordinate].push_back(iter->second);
         }
 
-        std::map<int, std::set<int>> rv;
-        for(auto const& [coordinate, stacks] : controlStacks)
+        return getLastLocationsFromControlStacks(controlStacksByCoord);
+    }
+
+    template <typename Key>
+    std::unordered_map<Key, std::set<int>> LastRWTracer::getLastLocationsFromControlStacks(
+        std::unordered_map<Key, std::vector<ControlStack>> const& controlStacks) const
+    {
+        std::unordered_map<Key, std::set<int>> rv;
+        for(auto const& [key, stacks] : controlStacks)
         {
             if(stacks.size() == 1)
             {
-                rv[coordinate].insert(stacks.back().back());
+                rv[key].insert(stacks.back().back());
                 continue;
             }
 
@@ -130,7 +176,7 @@ namespace rocRoller::KernelGraph
             {
                 AssertFatal(c + 1 < stack.size(),
                             "LastRWTracer::lastRWLocations: Stacks are identical");
-                rv[coordinate].insert(stack.at(c + 1));
+                rv[key].insert(stack.at(c + 1));
             }
         }
 

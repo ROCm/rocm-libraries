@@ -26,8 +26,10 @@
 
 #pragma once
 
-#include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/Expression_fwd.hpp>
+
+#include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/KernelGraph/RegisterTagManager_fwd.hpp>
 
 namespace rocRoller
 {
@@ -67,6 +69,16 @@ namespace rocRoller
         void enableDivideBy(ExpressionPtr expr, ContextPtr context);
 
         /**
+         * Gets expressions which can be used to compute magic division of denominator.
+         *
+         * Returns [magicMultiple, magicShift, magicSign]
+         *
+         * If denominator is unsigned, magicSign will be nullptr.
+         */
+        std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr>
+            getMagicMultipleShiftAndSign(ExpressionPtr denominator, ContextPtr context);
+
+        /**
          * @brief Attempt to replace multiplication operations found within an expression with faster operations.
          *
          * @param expr Input expression
@@ -103,6 +115,9 @@ namespace rocRoller
          * @return ExpressionPtr Transformed expression
          */
         ExpressionPtr fuseAssociative(ExpressionPtr expr);
+
+        ExpressionPtr dataFlowTagPropagation(ExpressionPtr             expr,
+                                             RegisterTagManager const& tagManager);
 
         /**
          * Resolve all DataFlowTags in the given expression.

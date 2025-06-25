@@ -221,26 +221,36 @@ namespace rocRoller::KernelGraph::ControlGraph
         return fmt::format("LoadLDSTile{{{}}}", rocRoller::toString(varType));
     }
 
-    RR_CLASS_NAME_IMPL(SetCoordinate);
-    RR_CLASS_NAME_IMPL(ConditionalOp);
+    std::string Deallocate::toString() const
+    {
+        std::ostringstream msg;
+        msg << "Deallocate{";
+        streamJoin(msg, arguments, ", ");
+        msg << "}";
+        return msg.str();
+    }
+
     RR_CLASS_NAME_IMPL(AssertOp);
+    RR_CLASS_NAME_IMPL(Assign);
+    RR_CLASS_NAME_IMPL(ComputeIndex);
+    RR_CLASS_NAME_IMPL(ConditionalOp);
+    RR_CLASS_NAME_IMPL(Deallocate);
     RR_CLASS_NAME_IMPL(DoWhileOp);
     RR_CLASS_NAME_IMPL(Exchange);
     RR_CLASS_NAME_IMPL(ForLoopOp);
-    RR_CLASS_NAME_IMPL(UnrollOp);
-    RR_CLASS_NAME_IMPL(Assign);
-    RR_CLASS_NAME_IMPL(ComputeIndex);
+    RR_CLASS_NAME_IMPL(LoadLDSTile);
     RR_CLASS_NAME_IMPL(LoadLinear);
+    RR_CLASS_NAME_IMPL(LoadSGPR);
+    RR_CLASS_NAME_IMPL(LoadTileDirect2LDS);
     RR_CLASS_NAME_IMPL(LoadTiled);
     RR_CLASS_NAME_IMPL(LoadVGPR);
-    RR_CLASS_NAME_IMPL(LoadSGPR);
-    RR_CLASS_NAME_IMPL(LoadLDSTile);
     RR_CLASS_NAME_IMPL(Multiply);
-    RR_CLASS_NAME_IMPL(LoadTileDirect2LDS);
-    RR_CLASS_NAME_IMPL(StoreTiled);
-    RR_CLASS_NAME_IMPL(StoreSGPR);
-    RR_CLASS_NAME_IMPL(StoreLDSTile);
     RR_CLASS_NAME_IMPL(SeedPRNG);
+    RR_CLASS_NAME_IMPL(SetCoordinate);
+    RR_CLASS_NAME_IMPL(StoreLDSTile);
+    RR_CLASS_NAME_IMPL(StoreSGPR);
+    RR_CLASS_NAME_IMPL(StoreTiled);
     RR_CLASS_NAME_IMPL(TensorContraction);
+    RR_CLASS_NAME_IMPL(UnrollOp);
 
 }

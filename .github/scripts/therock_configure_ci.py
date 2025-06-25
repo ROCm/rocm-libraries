@@ -6,11 +6,9 @@ Required environment variables:
 """
 
 import json
-from therock_matrix import monorepo_map
+from therock_matrix import subtree_to_project_map, project_map
 from typing import Mapping
 import os
-
-SUBTREES = os.getenv("SUBTREES", "")
 
 
 def set_github_output(d: Mapping[str, str]):
@@ -24,16 +22,54 @@ def set_github_output(d: Mapping[str, str]):
         return
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
-
-
-def run():
-    subtrees = SUBTREES.split("\n")
-    projects = []
+        
+        
+def retrieve_projects(args):
+    if args.get("is_pull_request"):
+        subtrees = args.get("input_subtrees").split("\n")
+    
+    if args.get("is_workflow_dispatch"):
+        if args.get("input_projects") == "all":
+            subtrees = list(subtree_to_project_map.keys())
+        else:
+            subtrees = args.get("input_projects").split()
+    
+    # If a push event to develop happens, we run tests on all subtrees
+    if args.get("is_push"):
+        subtrees = list(subtree_to_project_map.keys())
+    
+    projects = set()
+    # collect the associated subtree to project
     for subtree in subtrees:
-        if subtree in monorepo_map:
-            projects.append(monorepo_map.get(subtree))
-    set_github_output({"projects": json.dumps(projects)})
+        if subtree in subtree_to_project_map:
+            projects.add(subtree_to_project_map.get(subtree))
+            
+    
+    # retrieve the subtrees to checkout, cmake options to build, and projects to test 
+    project_to_run = []
+    for project in projects:
+        if project in project_map:
+            project_to_run.append(project_map.get(project))
+        
+    return project_to_run
+
+
+def run(args):
+    project_to_run = retrieve_projects(args)
+    set_github_output({"projects": json.dumps(project_to_run)})
 
 
 if __name__ == "__main__":
-    run()
+    github_event_name = os.getenv("GITHUB_EVENT_NAME")
+    args = {}
+    args["is_pull_request"] = github_event_name == "pull_request"
+    args["is_push"] = github_event_name == "push"
+    args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
+    
+    input_subtrees = os.getenv("SUBTREES", "")
+    args["input_subtrees"] = input_subtrees
+    
+    input_projects = os.getenv("PROJECTS", "")
+    args["input_projects"] = input_projects
+
+    run(args)

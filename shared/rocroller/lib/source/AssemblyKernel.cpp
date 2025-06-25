@@ -28,7 +28,9 @@
 
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
+#include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 
 namespace rocRoller
 {
@@ -127,9 +129,9 @@ namespace rocRoller
     {
         auto ctx = m_context.lock();
 
-        co_yield Instruction::Comment(ctx->kernelOptions().toString());
+        co_yield Instruction::Comment(ctx->kernelOptions()->toString());
 
-        if(ctx->kernelOptions().preloadKernelArguments)
+        if(ctx->kernelOptions()->preloadKernelArguments)
             co_yield ctx->argLoader()->loadAllArguments();
 
         if(ctx->targetArchitecture().HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
@@ -181,7 +183,7 @@ namespace rocRoller
 
             // No more need for packed value.
             m_packedWorkitemIndex.reset();
-            if(ctx->kernelOptions().preloadKernelArguments)
+            if(ctx->kernelOptions()->preloadKernelArguments)
                 m_argumentPointer.reset();
             else
                 m_argumentPointer->setReadOnly();
@@ -225,7 +227,7 @@ namespace rocRoller
         co_yield Instruction::Comment("Resource limits");
 
         auto const& kernelOpts = m_context.lock()->kernelOptions();
-        int nextFreeVGPR = kernelOpts.setNextFreeVGPRToMax ? kernelOpts.maxVGPRs : total_vgprs();
+        int nextFreeVGPR = kernelOpts->setNextFreeVGPRToMax ? kernelOpts->maxVGPRs : total_vgprs();
 
         co_yield Instruction::Directive(concatenate("  .amdhsa_next_free_vgpr ", nextFreeVGPR));
         co_yield Instruction::Directive("  .amdhsa_next_free_sgpr .amdgcn.next_free_sgpr");
@@ -276,15 +278,33 @@ namespace rocRoller
         AssemblyKernel::findArgumentForExpression(Expression::ExpressionPtr exp,
                                                   ptrdiff_t&                idx) const
     {
-        idx             = -1;
-        auto simplified = simplify(exp);
+        idx                     = -1;
+        auto simplified         = simplify(exp);
+        auto restored           = restoreCommandArguments(exp);
+        auto restoredSimplified = simplify(restored);
 
-        auto match = [exp, simplified](auto const& arg) {
-            if(equivalent(arg.expression, exp) || equivalent(arg.expression, simplified))
+        auto match = [exp, simplified, restored, restoredSimplified](auto const& arg) {
+            auto equivalentToAny = [exp, simplified, restored, restoredSimplified](
+                                       Expression::ExpressionPtr const& anExpression) {
+                return equivalent(anExpression, exp) || equivalent(anExpression, simplified)
+                       || equivalent(anExpression, restored)
+                       || equivalent(anExpression, restoredSimplified);
+            };
+
+            if(equivalentToAny(arg.expression))
                 return true;
 
             auto simpleArg = simplify(arg.expression);
-            if(equivalent(simpleArg, exp) || equivalent(simpleArg, simplified))
+            if(equivalentToAny(simpleArg))
+                return true;
+
+            auto restoredArg = restoreCommandArguments(arg.expression);
+
+            if(equivalentToAny(restoredArg))
+                return true;
+
+            auto restoredSimplifiedArg = simplify(restoredArg);
+            if(equivalentToAny(restoredSimplifiedArg))
                 return true;
 
             return false;
@@ -316,7 +336,7 @@ namespace rocRoller
                         ShowValue(arg.variableType),
                         ShowValue(arg));
 
-        if(arg.expression && m_context.lock()->kernelOptions().deduplicateArguments)
+        if(arg.expression && m_context.lock()->kernelOptions()->deduplicateArguments)
         {
             ptrdiff_t idx;
             auto      existingArg = findArgumentForExpression(arg.expression, idx);
@@ -328,9 +348,11 @@ namespace rocRoller
         }
 
         auto typeInfo = DataTypeInfo::Get(arg.variableType);
-        if(arg.variableType == DataType::E8M0)
+        if(isScaleType(typeInfo.variableType.dataType))
         {
-            typeInfo = DataTypeInfo::Get(DataType::E8M0x4);
+            auto packedVarType = typeInfo.packedVariableType();
+            AssertFatal(packedVarType, "Scale types must have a packed variable type.");
+            typeInfo = DataTypeInfo::Get(packedVarType.value());
         }
         if(arg.offset == -1)
         {

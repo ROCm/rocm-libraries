@@ -37,7 +37,7 @@ namespace ExpressionTest
 {
     struct CommonSubexpressionElimTest : public GenericContextFixture
     {
-        std::string toString(Expression::ExpressionTree tree)
+        std::string treeToString(Expression::ExpressionTree tree)
         {
             std::stringstream ss;
             int               i = 0;
@@ -226,7 +226,7 @@ namespace ExpressionTest
             EXPECT_TRUE(
                 identical(results.at(3).expr,
                           results.at(2).reg->expression() * results.at(2).reg->expression()));
-            EXPECT_EQ(getConsolidationCount(results), 1) << toString(results);
+            EXPECT_EQ(getConsolidationCount(results), 1) << treeToString(results);
 
             EXPECT_TRUE(identical((a + b) * (a + b), rebuildExpression(results)));
         }
@@ -238,7 +238,7 @@ namespace ExpressionTest
             auto results = consolidateSubExpressions(expr2, m_context);
 
             EXPECT_EQ(results.size(), 2 + 2);
-            EXPECT_EQ(getConsolidationCount(results), 0) << toString(results);
+            EXPECT_EQ(getConsolidationCount(results), 0) << treeToString(results);
 
             EXPECT_TRUE(identical(expr2, rebuildExpression(results)));
         }
@@ -263,8 +263,8 @@ namespace ExpressionTest
             EXPECT_EQ(results.size(), 3 + 4);
             EXPECT_EQ(results.at(2).deps, (std::set<int>{0, 1}));
             EXPECT_EQ(results.at(3).deps, (std::set<int>{2}));
-            EXPECT_EQ(results.at(5).deps, (std::set<int>{3, 4})) << toString(results);
-            EXPECT_EQ(getConsolidationCount(results), 4) << toString(results);
+            EXPECT_EQ(results.at(5).deps, (std::set<int>{3, 4})) << treeToString(results);
+            EXPECT_EQ(getConsolidationCount(results), 4) << treeToString(results);
 
             EXPECT_TRUE(identical(expr, rebuildExpression(results)));
         }
@@ -277,7 +277,7 @@ namespace ExpressionTest
             EXPECT_EQ(results.at(3).deps, (std::set<int>{1, 2}));
             EXPECT_EQ(results.at(4).deps, (std::set<int>{2, 3}));
             EXPECT_EQ(results.at(5).deps, (std::set<int>{0, 4}));
-            EXPECT_EQ(getConsolidationCount(results), 1) << toString(results);
+            EXPECT_EQ(getConsolidationCount(results), 1) << treeToString(results);
 
             EXPECT_TRUE(identical(expr, rebuildExpression(results)));
         }
@@ -298,11 +298,12 @@ namespace ExpressionTest
         {
             auto expr    = Expression::fastDivision(a / b, m_context);
             auto results = consolidateSubExpressions(expr, m_context);
-            EXPECT_GT(results.size(), 3) << rocRoller::Expression::toString(a / b) << "\n"
-                                         << rocRoller::Expression::toString(expr);
-            EXPECT_GE(getConsolidationCount(results), 1) << toString(results);
+            EXPECT_GT(results.size(), 3) << toString(a / b) << "\n" << toString(expr);
+            EXPECT_GE(getConsolidationCount(results), 1) << treeToString(results);
 
-            EXPECT_TRUE(identical(expr, rebuildExpression(results)));
+            EXPECT_TRUE(identical(expr, rebuildExpression(results)))
+                << toString(expr) << "\n"
+                << toString(rebuildExpression(results));
         }
     }
 

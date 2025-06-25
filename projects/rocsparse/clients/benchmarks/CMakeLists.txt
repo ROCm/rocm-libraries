@@ -232,8 +232,15 @@ endif()
 
 if (NOT WIN32)
   if (BUILD_WITH_ROCTX)
-    target_link_libraries(rocsparse-bench PRIVATE -lroctx64)
-    target_compile_definitions( rocsparse-bench PRIVATE ROCSPARSE_CLIENTS_WITH_ROCTX )
+
+    if(ROCTRACER_INCLUDE_DIR AND ROCTX_LIBRARY)
+      # Add the include directory
+      target_include_directories(rocsparse-bench PRIVATE ${ROCTRACER_INCLUDE_DIR})
+
+      # Link the rocTx lib
+      target_link_libraries(rocsparse-bench PRIVATE ${ROCTX_LIBRARY})
+      target_compile_definitions( rocsparse-bench PRIVATE ROCSPARSE_CLIENTS_WITH_ROCTX )
+    endif()
   endif()
 endif()
 

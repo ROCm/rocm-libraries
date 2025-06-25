@@ -257,40 +257,6 @@ rocm_install(FILES "include/rocblas_module.f90"
 	DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/rocblas/"
 )
 
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_wrap_header_dir(
-    ${CMAKE_SOURCE_DIR}/library/include
-    PATTERNS "*.h"
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS ${CMAKE_INSTALL_INCLUDEDIR}
-  )
-  rocm_wrap_header_file(
-    internal/rocblas-version.h internal/rocblas-export.h internal/rocblas-exported-proto.hpp internal/rocblas_device_malloc.hpp
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS ${CMAKE_INSTALL_INCLUDEDIR} rocblas/${CMAKE_INSTALL_INCLUDEDIR}
-    ORIGINAL_FILES ${PROJECT_BINARY_DIR}/include/rocblas/internal/rocblas-version.h
-  )
-
-  rocm_install(
-    DIRECTORY
-       "${PROJECT_BINARY_DIR}/rocblas"
-        DESTINATION "." )
-
-    #Create SymLink for Fortran Object Module for backward compatibility
-    rocm_install(
-      CODE "
-        set(PREFIX \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX})
-        set(INPUT_FILE \${PREFIX}/include/rocblas/rocblas_module.f90)
-        set(SYMLINK_LOCATIONS \${PREFIX}/rocblas/include \${PREFIX}/include)
-        foreach(LOCATION IN LISTS SYMLINK_LOCATIONS)
-          file(MAKE_DIRECTORY \${LOCATION})
-          execute_process(COMMAND ln -sfr \${INPUT_FILE} \${LOCATION})
-          message(STATUS \"Created symlink in \${LOCATION} to \${INPUT_FILE}.\")
-        endforeach()
-        "
-    )
-endif()
-
 ############################################################
 # Packaging
 

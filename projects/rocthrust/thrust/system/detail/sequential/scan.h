@@ -24,7 +24,6 @@
 
 #include <thrust/detail/function.h>
 #include <thrust/detail/type_traits.h>
-#include <thrust/detail/type_traits/function_traits.h>
 #include <thrust/detail/type_traits/iterator/is_output_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
@@ -60,7 +59,7 @@ THRUST_HOST_DEVICE OutputIterator inclusive_scan(
   using ValueType = typename thrust::iterator_value<InputIterator>::type;
 
   // wrap binary_op
-  thrust::detail::wrapped_function<BinaryFunction, ValueType> wrapped_binary_op(binary_op);
+  thrust::detail::wrapped_function<BinaryFunction, ValueType> wrapped_binary_op{binary_op};
 
   if (first != last)
   {
@@ -68,7 +67,7 @@ THRUST_HOST_DEVICE OutputIterator inclusive_scan(
 
     *result = *first;
 
-    for (++first, ++result; first != last; ++first, ++result)
+    for (++first, ++result; first != last; ++first, (void) ++result)
     {
       *result = sum = wrapped_binary_op(sum, *first);
     }
@@ -99,6 +98,8 @@ THRUST_HOST_DEVICE OutputIterator inclusive_scan(
 #elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
   using ValueType = ::rocprim::
     accumulator_t<BinaryFunction, typename ::std::iterator_traits<InputIterator>::value_type, InitialValueType>;
+#else
+  using ValueType = typename std::iterator_traits<InputIterator>::value_type;
 #endif
 
   // wrap binary_op
@@ -149,7 +150,7 @@ THRUST_HOST_DEVICE OutputIterator exclusive_scan(
     *result = sum;
     sum     = binary_op(sum, tmp);
 
-    for (++first, ++result; first != last; ++first, ++result)
+    for (++first, ++result; first != last; ++first, (void) ++result)
     {
       tmp     = *first;
       *result = sum;

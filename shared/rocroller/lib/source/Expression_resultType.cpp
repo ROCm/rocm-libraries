@@ -124,6 +124,8 @@ namespace rocRoller
 
                 if constexpr(std::same_as<T, MagicShifts>)
                     return {argVal.regType, DataType::Int32};
+                else if constexpr(std::same_as<T, MagicShiftAndSign>)
+                    return {argVal.regType, DataType::UInt32};
 
                 return argVal;
             }

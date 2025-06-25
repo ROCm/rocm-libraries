@@ -24,6 +24,12 @@
  *
  *******************************************************************************/
 
+#pragma once
+
+#include <rocRoller/CodeGen/MemoryInstructions.hpp>
+
+#include <rocRoller/KernelOptions_detail.hpp>
+
 #include <algorithm>
 #include <ranges>
 
@@ -285,7 +291,7 @@ namespace rocRoller
             while(count < numWords)
             {
                 auto width = chooseWidth(
-                    numWords - count, potentialWords, ctx->kernelOptions().loadGlobalWidth);
+                    numWords - count, potentialWords, ctx->kernelOptions()->loadGlobalWidth);
                 auto offsetModifier = genOffsetModifier(offset + count * m_wordSize);
                 co_yield_(Instruction(
                     concatenate("global_load_dword", width == 1 ? "" : "x" + std::to_string(width)),
@@ -297,7 +303,7 @@ namespace rocRoller
             }
         }
 
-        if(ctx->kernelOptions().alwaysWaitAfterLoad)
+        if(ctx->kernelOptions()->alwaysWaitAfterLoad)
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after load"));
     }
@@ -356,7 +362,7 @@ namespace rocRoller
             while(count < numWords)
             {
                 auto width = chooseWidth(
-                    numWords - count, potentialWords, ctx->kernelOptions().storeGlobalWidth);
+                    numWords - count, potentialWords, ctx->kernelOptions()->storeGlobalWidth);
                 // Find the largest store instruction that can be used
                 auto offsetModifier = genOffsetModifier(offset + count * m_wordSize);
                 co_yield_(Instruction(concatenate("global_store_dword",
@@ -369,7 +375,7 @@ namespace rocRoller
             }
         }
 
-        if(ctx->kernelOptions().alwaysWaitAfterStore)
+        if(ctx->kernelOptions()->alwaysWaitAfterStore)
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after store"));
     }
@@ -396,7 +402,7 @@ namespace rocRoller
             instruction_string, {dest}, {base, offsetLiteral}, {modifier}, "Load scalar value"));
 
         auto ctx = m_context.lock();
-        if(ctx->kernelOptions().alwaysWaitAfterLoad)
+        if(ctx->kernelOptions()->alwaysWaitAfterLoad)
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after load"));
     }
@@ -423,7 +429,7 @@ namespace rocRoller
             instruction_string, {}, {data, addr, offsetLiteral}, {modifier}, "Store scalar value"));
 
         auto ctx = m_context.lock();
-        if(ctx->kernelOptions().alwaysWaitAfterStore)
+        if(ctx->kernelOptions()->alwaysWaitAfterStore)
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after store"));
     }
@@ -486,7 +492,7 @@ namespace rocRoller
             while(count < numWords)
             {
                 auto width = chooseWidth(
-                    numWords - count, potentialWords, ctx->kernelOptions().loadLocalWidth);
+                    numWords - count, potentialWords, ctx->kernelOptions()->loadLocalWidth);
                 auto offsetModifier = genOffsetModifier(offset + count * m_wordSize);
                 co_yield_(
                     Instruction(concatenate("ds_read_b", std::to_string(width * m_wordSize * 8)),
@@ -498,7 +504,7 @@ namespace rocRoller
             }
         }
 
-        if(ctx->kernelOptions().alwaysWaitAfterLoad)
+        if(ctx->kernelOptions()->alwaysWaitAfterLoad)
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after load"));
     }
@@ -547,7 +553,7 @@ namespace rocRoller
             {
                 // Find the largest store instruction that can be used
                 auto width = chooseWidth(
-                    numWords - count, potentialWords, ctx->kernelOptions().storeLocalWidth);
+                    numWords - count, potentialWords, ctx->kernelOptions()->storeLocalWidth);
                 auto               offsetModifier = genOffsetModifier(offset + count * m_wordSize);
                 Register::ValuePtr vgprs;
                 if(valuesPerWord > 1)
@@ -576,7 +582,7 @@ namespace rocRoller
             }
         }
 
-        if(ctx->kernelOptions().alwaysWaitAfterStore)
+        if(ctx->kernelOptions()->alwaysWaitAfterStore)
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after store"));
     }
@@ -669,7 +675,7 @@ namespace rocRoller
             while(count < numWords)
             {
                 auto width = chooseWidth(
-                    numWords - count, potentialWords, ctx->kernelOptions().loadGlobalWidth);
+                    numWords - count, potentialWords, ctx->kernelOptions()->loadGlobalWidth);
                 auto       offsetModifier = genOffsetModifier(offset + count * m_wordSize);
                 const auto soffset        = gpu.isGFX12GPU() ? Register::Value::NullLiteral()
                                                              : Register::Value::Literal(0);
@@ -683,7 +689,7 @@ namespace rocRoller
             }
         }
 
-        if(ctx->kernelOptions().alwaysWaitAfterLoad)
+        if(ctx->kernelOptions()->alwaysWaitAfterLoad)
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after load"));
     }
@@ -761,7 +767,7 @@ namespace rocRoller
                               {"offen", offsetModifier, glc, slc, lds},
                               "Load value direct to lds"));
 
-        if(ctx->kernelOptions().alwaysWaitAfterLoad)
+        if(ctx->kernelOptions()->alwaysWaitAfterLoad)
             co_yield Instruction::Wait(WaitCount::Zero(
                 ctx->targetArchitecture(), "DEBUG: Wait after direct buffer load to lds"));
     }
@@ -861,7 +867,7 @@ namespace rocRoller
             while(count < numWords)
             {
                 auto width = chooseWidth(
-                    numWords - count, potentialWords, ctx->kernelOptions().storeGlobalWidth);
+                    numWords - count, potentialWords, ctx->kernelOptions()->storeGlobalWidth);
                 auto offsetModifier = genOffsetModifier(offset + count * m_wordSize);
 
                 auto valuesPerWord = m_wordSize / data->variableType().getElementSize();
@@ -890,7 +896,7 @@ namespace rocRoller
             }
         }
 
-        if(ctx->kernelOptions().alwaysWaitAfterStore)
+        if(ctx->kernelOptions()->alwaysWaitAfterStore)
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after store"));
     }

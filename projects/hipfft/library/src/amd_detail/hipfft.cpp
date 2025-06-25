@@ -32,8 +32,6 @@
 #include "hipfft/hipfftMp.h"
 #endif
 
-#include "../../../shared/arithmetic.h"
-#include "../../../shared/gpubuf.h"
 #include "../../../shared/ptrdiff.h"
 #include "../../../shared/rocfft_hip.h"
 

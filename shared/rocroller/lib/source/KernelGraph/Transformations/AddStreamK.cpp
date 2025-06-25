@@ -483,16 +483,7 @@ namespace rocRoller
             graph.mapper.connect(assignFlagTag, flagRegister, NaryArgument::DEST);
 
             // TODO: Improve setting of arch-specific buffer options
-            BufferInstructionOptions bufOpts;
-            if(context->targetArchitecture().target().isCDNA1GPU()
-               || context->targetArchitecture().target().isCDNA2GPU())
-            {
-                bufOpts = {.glc = true};
-            }
-            else
-            {
-                bufOpts = {.sc1 = true};
-            }
+            BufferInstructionOptions bufOpts{.glc = true};
             auto storeFlagTag = graph.control.addElement(StoreSGPR(DataType::UInt32, bufOpts));
             graph.mapper.connect<User>(storeFlagTag, flagsScratchTag);
             graph.mapper.connect<VGPR>(storeFlagTag, flagRegister);
@@ -563,18 +554,9 @@ namespace rocRoller
             graph.coordinates.addElement(Split(), {nextWorkgroupTag}, {workgroup, plusOneTag});
 
             // TODO: Improve setting of arch-specific buffer options
-            BufferInstructionOptions bufOpts;
-            if(context->targetArchitecture().target().isCDNA1GPU()
-               || context->targetArchitecture().target().isCDNA2GPU())
-            {
-                bufOpts = {.glc = true};
-            }
-            else
-            {
-                bufOpts = {.sc1 = true};
-            }
-            auto flagRegister = graph.coordinates.addElement(VGPR());
-            auto loadFlagTag  = graph.control.addElement(LoadSGPR(DataType::UInt32, bufOpts));
+            BufferInstructionOptions bufOpts{.glc = true};
+            auto                     flagRegister = graph.coordinates.addElement(VGPR());
+            auto loadFlagTag = graph.control.addElement(LoadSGPR(DataType::UInt32, bufOpts));
 
             auto numScratch     = argInfo.numWGs;
             auto boundsCheckTag = graph.control.addElement(

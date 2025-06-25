@@ -428,7 +428,9 @@ namespace MatrixMultiplyTest
                                            0.0,
                                            transA == "T",
                                            transB == "T",
-                                           scaleBlockSize);
+                                           scaleBlockSize,
+                                           scaleTypeA,
+                                           scaleTypeB);
                 }
                 else
                 {

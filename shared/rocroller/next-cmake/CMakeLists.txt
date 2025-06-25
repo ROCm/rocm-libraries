@@ -54,9 +54,16 @@ option(ROCROLLER_ENABLE_CLIENT "Build the rocRoller client." ON)
 option(ROCROLLER_ENABLE_YAML_CPP "Enable yaml-cpp backend." ON)
 cmake_dependent_option(ROCROLLER_ENABLE_LLVM "Enable llvm yaml backend." ON "NOT ROCROLLER_ENABLE_YAML_CPP" OFF)
 option(ROCROLLER_BUILD_TESTING "Build rocRoller testing." ON)
+option(ROCROLLER_ENABLE_CATCH "Build rocRoller catch unit tests" ON)
+option(ROCROLLER_ENABLE_ARCH_GEN_TEST "Build rocRoller architecture generator test" ON)
+option(ROCROLLER_ENABLE_TEST_DISCOVERY "Use gtest and catch2 test discovery functions." ON)
+option(ROCROLLER_ENABLE_COVERAGE "Build code coverage." OFF)
+cmake_dependent_option(ROCROLLER_TESTS_SKIP_SLOW "Disable slow running tests." ON "ROCROLLER_ENABLE_COVERAGE" OFF)
 option(ROCROLLER_EMBED_ARCH_DEF "Embed msgpack architecture data in library." ON)
 option(ROCROLLER_BUILD_SHARED_LIBS "Build rocRoller as a shared library." ON)
 option(ROCROLLER_ENABLE_FETCH "Enable fetch content for dependencies if find_package fails." OFF)
+option(ROCROLLER_ENABLE_LLD "Build rocroller functionality requiring LLD" OFF)
+option(ROCROLLER_ENABLE_TIMERS "Enable rocRoller timer code." OFF)
 
 find_package(fmt 11.1.3)
 if(NOT fmt_FOUND)
@@ -133,16 +140,38 @@ if(NOT Boost_FOUND)
 endif()
 
 find_package(hip REQUIRED)
-find_package(LLVM REQUIRED)
-find_package(LLD REQUIRED)
+find_package(amd_comgr REQUIRED)
+if(ROCROLLER_ENABLE_LLVM)
+    find_package(LLVM REQUIRED)
+endif()
+
+if(ROCROLLER_ENABLE_LLD)
+    find_package(LLD REQUIRED)
+    target_include_directories(rocroller PRIVATE "${LLD_INCLUDES}")
+    target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_LLD)
+endif()
 
 if(ROCROLLER_BUILD_SHARED_LIBS)
     add_library(rocroller SHARED)
 else()
-    add_library(rocroller)
+    add_library(rocroller STATIC)
     set_target_properties(rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
 add_library(roc::rocroller ALIAS rocroller)
+
+add_library(rocroller-interface INTERFACE)
+add_library(roc::rocroller-interface ALIAS rocroller-interface)
+
+if(ROCROLLER_BUILD_SHARED_LIBS)
+    target_link_libraries(rocroller-interface INTERFACE roc::rocroller)
+else()
+    target_link_libraries(rocroller-interface INTERFACE $<LINK_LIBRARY:WHOLE_ARCHIVE,roc::rocroller>)
+endif()
+
+if(ROCROLLER_ENABLE_TIMERS)
+    target_compile_definitions(rocroller PUBLIC ROCROLLER_ENABLE_TIMERS)
+    target_compile_options(rocroller PRIVATE -pg -fno-omit-frame-pointer)
+endif()
 
 if(ROCROLLER_ENABLE_YAML_CPP)
     find_package(yaml-cpp 0.8.0)
@@ -173,9 +202,8 @@ target_compile_definitions(rocroller
 
 if(ROCROLLER_ENABLE_LLVM)
     llvm_map_components_to_libnames(llvm_yaml_libs objectyaml)
+    llvm_map_components_to_libnames(llvm_libs mc support)
 endif()
-
-llvm_map_components_to_libnames(llvm_libs mc support)
 
 target_link_libraries(rocroller
     PUBLIC
@@ -183,8 +211,8 @@ target_link_libraries(rocroller
        hip::host
     PRIVATE
         ${msgpack_libs}
+        amd_comgr
 )
-target_include_directories(rocroller PUBLIC "${LLD_INCLUDE_DIRS}")
 
 if(ROCROLLER_ENABLE_LLVM)
     # ROCROLLER_USE_LLVM enables the llvm yaml API
@@ -195,8 +223,8 @@ target_link_libraries(rocroller
     PUBLIC
         fmt::fmt-header-only
     PRIVATE
-        spdlog::spdlog_header_only
-        libdivide::libdivide
+        $<BUILD_INTERFACE:spdlog::spdlog_header_only>
+        $<BUILD_INTERFACE:libdivide::libdivide>
         ${llvm_yaml_libs}
         ${llvm_libs}
 )
@@ -229,14 +257,27 @@ if(ROCROLLER_ENABLE_CLIENT)
 endif()
 
 rocm_install(
-    TARGETS rocroller
+    TARGETS rocroller rocroller-interface
     EXPORT rocroller-targets
     INCLUDE
-        ${ROCROLLER_LIB_DIR}/include
+        "${ROCROLLER_LIB_DIR}/include"
 )
 
+if(ROCROLLER_BUILD_TESTING OR BUILD_TESTING)
+    rocm_install(
+        TARGETS rocroller-tests
+        COMPONENT tests
+    )
+    if(ROCROLLER_ENABLE_CATCH)
+        rocm_install(
+            TARGETS rocroller-tests-catch
+            COMPONENT tests
+        )
+    endif()
+endif()
+
 rocm_export_targets(
-    TARGETS roc::rocroller
+    TARGETS roc::rocroller roc::rocroller-interface
     NAMESPACE roc::
     EXPORT rocroller-targets
     DEPENDS PACKAGE yaml-cpp

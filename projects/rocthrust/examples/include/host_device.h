@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2009 NVIDIA Corporation
- *  Modifications Copyright© 2024 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 
 #pragma once
 
-#if THRUST_DEVICE_COMPILER != THRUST_DEVICE_COMPILER_NVCC
+#ifndef _CCCL_CUDA_COMPILER
 
 #  ifndef __host__
 #    define __host__

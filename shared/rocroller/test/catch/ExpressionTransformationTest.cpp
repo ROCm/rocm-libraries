@@ -350,6 +350,16 @@ TEST_CASE("FuseTernary ExpressionTransformation works", "[expression][expression
         CHECK_THAT(fuseTernary((b << v) + a), IdenticalTo((b << v) + a));
     }
 
+    SECTION("ShiftLAddShiftL")
+    {
+        //
+        // Original: ShiftL(Add(ShiftL(v0:I, 1:I)I, 33:I)I, 1:I)I
+        // Expected: ShiftL(ShiftLAdd(v0:I, 1:I, 33:I)I, 1:I)I
+        //
+        CHECK_THAT(fuseTernary(((v << one) + a) << one),
+                   IdenticalTo((shiftLAdd(v, one, a)) << one));
+    }
+
     SECTION("FMA")
     {
         CHECK_THAT(fuseTernary((b * one) + a), IdenticalTo(multiplyAdd(b, one, a)));

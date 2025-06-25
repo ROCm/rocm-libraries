@@ -426,8 +426,9 @@ namespace ExpressionTest
 
             CHECK_THROWS(context.get()->schedule(
                 Expression::generate(result, Expression::magicShifts(reg), context.get())));
+
             CHECK_THROWS(context.get()->schedule(
-                Expression::generate(result, Expression::magicSign(reg), context.get())));
+                Expression::generate(result, Expression::magicShiftAndSign(reg), context.get())));
         }
 
         SECTION("CommandArgument needs the user args")
@@ -1048,8 +1049,7 @@ namespace ExpressionTest
             auto op = GENERATE_COPY(
                 from_range(std::to_array({Expression::operator-, // cppcheck-suppress syntaxError
                                           Expression::operator~,
-                                          Expression::magicMultiple,
-                                          Expression::magicSign})));
+                                          Expression::magicMultiple})));
 
             CAPTURE(op(vgprFloat));
             CHECK(rVgprFloat == resultType(op(vgprFloat)));
@@ -1095,6 +1095,30 @@ namespace ExpressionTest
             CHECK(rSgprInt32 == resultType(op(sgprHalf)));
             CHECK(rSgprInt32 == resultType(op(sgprHalfx2)));
             CHECK(rSgprInt32 == resultType(op(sgprBool32)));
+        }
+
+        SECTION("Magic shiftAndSign")
+        {
+            auto op = Expression::magicShiftAndSign;
+            CHECK(rVgprUInt32 == resultType(op(vgprFloat)));
+            CHECK(rVgprUInt32 == resultType(op(vgprDouble)));
+            CHECK(rVgprUInt32 == resultType(op(vgprInt32)));
+            CHECK(rVgprUInt32 == resultType(op(vgprInt64)));
+            CHECK(rVgprUInt32 == resultType(op(vgprUInt32)));
+            CHECK(rVgprUInt32 == resultType(op(vgprUInt64)));
+            CHECK(rVgprUInt32 == resultType(op(vgprHalf)));
+            CHECK(rVgprUInt32 == resultType(op(vgprHalfx2)));
+            CHECK(rVgprUInt32 == resultType(op(vgprBool32)));
+
+            CHECK(rSgprUInt32 == resultType(op(sgprFloat)));
+            CHECK(rSgprUInt32 == resultType(op(sgprDouble)));
+            CHECK(rSgprUInt32 == resultType(op(sgprInt32)));
+            CHECK(rSgprUInt32 == resultType(op(sgprInt64)));
+            CHECK(rSgprUInt32 == resultType(op(sgprUInt32)));
+            CHECK(rSgprUInt32 == resultType(op(sgprUInt64)));
+            CHECK(rSgprUInt32 == resultType(op(sgprHalf)));
+            CHECK(rSgprUInt32 == resultType(op(sgprHalfx2)));
+            CHECK(rSgprUInt32 == resultType(op(sgprBool32)));
         }
 
         SECTION("Comparisons")
@@ -2314,4 +2338,71 @@ namespace ExpressionTest
         CHECK(Expression::complexity(intExpr / intExpr)
               > Expression::complexity(intExpr + intExpr));
     }
+
+    TEST_CASE("Expression kernel arguments", "[expression][utility]")
+    {
+        namespace XP  = Expression;
+        using strings = std::unordered_set<std::string>;
+
+        auto karg0 = std::make_shared<AssemblyKernelArgument>("KernelArg0", DataType::Int32);
+        auto karg1 = std::make_shared<AssemblyKernelArgument>("KernelArg1", DataType::Int32);
+        auto karg2 = std::make_shared<AssemblyKernelArgument>("KernelArg2", DataType::Int32);
+
+        auto kargExp0 = std::make_shared<XP::Expression>(karg0);
+        auto kargExp1 = std::make_shared<XP::Expression>(karg1);
+        auto kargExp2 = std::make_shared<XP::Expression>(karg2);
+
+        CHECK(referencedKernelArguments(kargExp0) == strings({"KernelArg0"}));
+
+        CHECK(referencedKernelArguments((kargExp0 + kargExp0) + XP::literal(5))
+              == strings({"KernelArg0"}));
+
+        CHECK(referencedKernelArguments((kargExp0 + kargExp1) + XP::literal(5))
+              == strings({"KernelArg0", "KernelArg1"}));
+
+        CHECK(referencedKernelArguments(
+                  Expression::conditional(kargExp0, kargExp1, (kargExp2 + XP::literal(5))))
+              == strings({"KernelArg0", "KernelArg1", "KernelArg2"}));
+
+        SECTION("a")
+        {
+            auto scaledMM = std::make_shared<XP::Expression>(Expression::ScaledMatrixMultiply{
+                kargExp0, XP::literal(3), XP::literal(2), XP::literal(3), XP::literal(9)});
+
+            CHECK(referencedKernelArguments(scaledMM) == strings({"KernelArg0"}));
+        }
+
+        SECTION("b")
+        {
+            auto scaledMM = std::make_shared<XP::Expression>(Expression::ScaledMatrixMultiply{
+                XP::literal(1), kargExp1, XP::literal(3), XP::literal(2), XP::literal(3)});
+
+            CHECK(referencedKernelArguments(scaledMM) == strings({"KernelArg1"}));
+        }
+
+        SECTION("c")
+        {
+            auto scaledMM = std::make_shared<XP::Expression>(Expression::ScaledMatrixMultiply{
+                XP::literal(3), XP::literal(1), kargExp2, XP::literal(2), XP::literal(3)});
+
+            CHECK(referencedKernelArguments(scaledMM) == strings({"KernelArg2"}));
+        }
+
+        SECTION("sa")
+        {
+            auto scaledMM = std::make_shared<XP::Expression>(Expression::ScaledMatrixMultiply{
+                XP::literal(2), XP::literal(3), XP::literal(1), kargExp0, XP::literal(3)});
+
+            CHECK(referencedKernelArguments(scaledMM) == strings({"KernelArg0"}));
+        }
+
+        SECTION("sb")
+        {
+            auto scaledMM = std::make_shared<XP::Expression>(Expression::ScaledMatrixMultiply{
+                XP::literal(3), XP::literal(2), XP::literal(3), XP::literal(1), kargExp1});
+
+            CHECK(referencedKernelArguments(scaledMM) == strings({"KernelArg1"}));
+        }
+    }
+
 }

@@ -56,7 +56,7 @@ Here is the list of optional arguments for invoking the ``TensileCreateLibrary``
       Supported architectures include: all; gfx000; gfx803; gfx900; gfx900:xnack-; gfx906; gfx906:xnack+; gfx906:xnack-; gfx908; gfx908:xnack+;
       gfx908:xnack-; gfx90a; gfx90a:xnack+; gfx90a:xnack-; gfx940; gfx940:xnack+; gfx940:xnack-; gfx941; gfx941:xnack+;
       gfx941:xnack-; gfx942; gfx942:xnack+; gfx942:xnack-; gfx1010; gfx1011; gfx1012; gfx1030; gfx1031; gfx1032; gfx1034; gfx1035;
-      gfx1100; gfx1101; gfx1102.
+      gfx1100; gfx1101; gfx1102; gfx1103.
 
   * - \-\-build-client
     - Builds Tensile client executable that is used for stand alone benchmarking. This option is set by default.

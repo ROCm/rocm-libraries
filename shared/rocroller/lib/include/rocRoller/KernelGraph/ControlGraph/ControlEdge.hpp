@@ -30,6 +30,7 @@
 
 #include <rocRoller/KernelGraph/ControlGraph/ControlEdge_fwd.hpp>
 #include <rocRoller/KernelGraph/StructUtils.hpp>
+#include <rocRoller/Utilities/Concepts.hpp>
 
 namespace rocRoller
 {
@@ -54,7 +55,7 @@ namespace rocRoller
         RR_EMPTY_STRUCT_WITH_NAME(Body);
 
         /**
-         * Else edge indicates the code that should be emmitted given a false condition.
+         * Else edge indicates the code that should be executed given a false condition.
          */
         RR_EMPTY_STRUCT_WITH_NAME(Else);
 
@@ -84,5 +85,8 @@ namespace rocRoller
         {
             return toString(e);
         }
+
+        template <typename T>
+        concept CIsContainingEdge = CIsAnyOf<T, Body, Else, Initialize, ForLoopIncrement>;
     }
 }

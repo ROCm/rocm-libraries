@@ -109,7 +109,7 @@ namespace rocRoller
             ExpressionPtr operator()(AssemblyKernelArgumentPtr const& expr) const
             {
                 AssertFatal(expr->expression);
-                return expr->expression;
+                return call(expr->expression);
             }
 
             template <CValue Value>

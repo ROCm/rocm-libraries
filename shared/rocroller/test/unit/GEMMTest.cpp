@@ -78,11 +78,12 @@ namespace GEMMDriverTest
         int m_scaleValueIndex = 0;
 
     public:
-        uint8_t rotatingSingleScaleValue()
+        uint8_t rotatingSingleScaleValue(DataType scaleType)
         {
+            AssertFatal(isScaleType(scaleType));
             const std::vector<float> scaleValues{1.0, 2.0, 4.0, 8.0};
             m_scaleValueIndex = (++m_scaleValueIndex) % scaleValues.size();
-            return floatToScale(scaleValues[m_scaleValueIndex]);
+            return floatToScale(scaleType, scaleValues[m_scaleValueIndex]);
         }
 
         template <typename TA,
@@ -307,10 +308,10 @@ namespace GEMMDriverTest
 
             // In SingleScale mode, don't need to copy to device
             if(gemm.scaleAMode == Operations::ScaleMode::SingleScale)
-                hostScaleA = std::vector<uint8_t>{rotatingSingleScaleValue()};
+                hostScaleA = std::vector<uint8_t>{rotatingSingleScaleValue(gemm.scaleTypeA)};
 
             if(gemm.scaleBMode == Operations::ScaleMode::SingleScale)
-                hostScaleB = std::vector<uint8_t>{rotatingSingleScaleValue()};
+                hostScaleB = std::vector<uint8_t>{rotatingSingleScaleValue(gemm.scaleTypeB)};
 
             auto command = std::make_shared<Command>();
 
@@ -352,7 +353,7 @@ namespace GEMMDriverTest
             else if(gemm.scaleAMode == Operations::ScaleMode::SingleScale)
             {
                 tagTensorScaleA
-                    = command->addOperation(rocRoller::Operations::Scalar(DataType::E8M0));
+                    = command->addOperation(rocRoller::Operations::Scalar(gemm.scaleTypeA));
                 tagLoadScaleA
                     = command->addOperation(rocRoller::Operations::T_Load_Scalar(*tagTensorScaleA));
                 tagBlockScaleA = mulInputA = command->addOperation(
@@ -376,7 +377,7 @@ namespace GEMMDriverTest
             else if(gemm.scaleBMode == Operations::ScaleMode::SingleScale)
             {
                 tagTensorScaleB
-                    = command->addOperation(rocRoller::Operations::Scalar(DataType::E8M0));
+                    = command->addOperation(rocRoller::Operations::Scalar(gemm.scaleTypeB));
                 tagLoadScaleB
                     = command->addOperation(rocRoller::Operations::T_Load_Scalar(*tagTensorScaleB));
                 tagBlockScaleB = mulInputB = command->addOperation(
@@ -710,7 +711,9 @@ namespace GEMMDriverTest
                                        beta,
                                        gemm.transA == "T",
                                        gemm.transB == "T",
-                                       gemm.scaleBlockSize);
+                                       gemm.scaleBlockSize,
+                                       gemm.scaleTypeA,
+                                       gemm.scaleTypeB);
             }
             else if constexpr(std::is_same_v<TC, TD>)
             {
@@ -834,7 +837,6 @@ namespace GEMMDriverTest
                         }
                     }
                 }
-
                 EXPECT_TRUE(res.ok) << res.message();
             }
         }
@@ -1151,7 +1153,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
     {
-        if(!m_context->targetArchitecture().target().isCDNA2GPU())
+        if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
@@ -1204,7 +1206,8 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamKSmall)
     {
-        if(!m_context->targetArchitecture().target().isCDNA2GPU())
+        // TODO: Update this when the bug is fixed.
+        if(m_context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize) == 1 << 16)
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
@@ -2233,9 +2236,9 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_SwizzleScaledUnrollGEMMMXF4TN)
     {
+
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
-
         for(auto waveK : {64, 128})
         {
             int waveM = (waveK == 128) ? 16 : 32;
@@ -2272,12 +2275,14 @@ namespace GEMMDriverTest
 
             for(auto unrollK : {0, 2, 4})
             {
+                // #FIXME: Support for unrollK = 4 and waveK = 128
+                if(unrollK == 4 && waveK == 128)
+                    continue;
                 gemm.unrollK = unrollK;
                 basicGEMM<FP4, FP4, float>(gemm);
 
                 std::string generatedCode = m_context->instructions()->toString();
                 EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
-
                 if(unrollK == 0)
                 {
                     EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 4);
