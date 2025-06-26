@@ -11,7 +11,7 @@ Please contact an owner to become a gardener.
 
 ## Communications channel
 
-We will be leveraging a shared teams channel that contains all gardeners as well as core
+We will be leveraging a shared Teams channel that contains all gardeners as well as core
 infrastructure team members. You will be added to this channel once you become a member.
 
 For anyone who wants to reach a gardener please email:
@@ -20,7 +20,8 @@ For anyone who wants to reach a gardener please email:
 ## Mechanics of Gardening
 
 Your primary job is to keep the mono-repo shippable. In order to facilitate this we've made
-status badges for all relevant CI available here: https://github.com/ROCm/rocm-libraries.
+status badges for all relevant CI available here:
+https://github.com/ROCm/rocm-libraries?tab=readme-ov-file#monorepo-status-and-ci-health.
 Effectively your job is to ensure all status badges are green. All of these status
 badges are clickable which will allow you to deep-dive on any failures quickly. If any
 CI is missing, please file an issue leveraging the "gardener" tag, ping on the teams chat,
