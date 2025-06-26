@@ -133,6 +133,11 @@ function(_fetch_composable_kernel VERSION HASH)
     _restore_var(DISABLE_OFFLOAD_COMPRESS)
     _restore_var(ENABLE_CLANG_CPP_CHECKS)
 
+    set(MIOPEN_CK_INCLUDE_DIR ${composable_kernel_SOURCE_DIR}/include CACHE PATH "Path to ck includes")
+    set(MIOPEN_CK_LIBRARY_INCLUDE_DIR ${composable_kernel_SOURCE_DIR}/library/include CACHE PATH "Path to ck library includes")
+    set(MIOPEN_CK_BUILD_INCLUDE_DIR ${composable_kernel_BINARY_DIR}/include CACHE PATH "Path to ck build includes")
+
+
     _exclude_from_all(${composable_kernel_SOURCE_DIR})
     _mark_targets_as_system(${composable_kernel_SOURCE_DIR})
 endfunction()
