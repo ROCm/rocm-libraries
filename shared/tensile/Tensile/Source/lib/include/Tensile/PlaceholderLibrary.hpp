@@ -58,6 +58,7 @@ namespace Tensile
         gfx1101,
         gfx1102,
         gfx1103,
+        gfx1150,
         All
     };
 
