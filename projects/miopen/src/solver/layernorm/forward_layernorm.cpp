@@ -50,6 +50,7 @@ ConvSolution LayernormForward::GetSolution(const ExecutionContext& context,
 
     {
         auto dtype        = problem.GetXDesc().GetType();
+        auto mode         = problem.GetMode();
         auto input_dtype  = miopen::GetDataType(problem.GetXDesc().GetType());
         auto output_dtype = miopen::GetDataType(problem.GetYDesc().GetType());
 
@@ -76,6 +77,7 @@ ConvSolution LayernormForward::GetSolution(const ExecutionContext& context,
             {"STRIDE", problem.stride},
             {"PARALLEL_SIZE", 1},
             {"LOCAL_SIZE", config.local_size},
+            {"MODE", mode},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
             {"MIOPEN_WEIGHT_BIAS", 1},
             {"MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD", 2},
@@ -108,8 +110,7 @@ ConvSolution LayernormForward::GetSolution(const ExecutionContext& context,
                    params.y,
                    params.mean,
                    params.rstd,
-                   params.epsilon,
-                   static_cast<int32_t>(params.mode));
+                   params.epsilon);
         };
     };
 

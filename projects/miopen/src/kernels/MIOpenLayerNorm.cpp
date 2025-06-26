@@ -38,8 +38,7 @@ __device__ void layernormfwd(const TI* __restrict__ x,
                              TO* __restrict__ y,
                              TO* __restrict__ mean,
                              TO* __restrict__ rstd,
-                             const float eps,
-                             const int32_t mode)
+                             const float eps)
 {
     /*
      * Each group works on a single channel.
@@ -114,10 +113,10 @@ __device__ void layernormfwd(const TI* __restrict__ x,
         FLOAT_ACCUM pweight;
         FLOAT_ACCUM pbias;
 
-        pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE) ? CVT_FP32_2ACCUM(1.0f)
+        pweight = (MODE == MIOPEN_ELEMENTWISE_AFFINE) ? CVT_FP32_2ACCUM(1.0f)
                                                       : CVT_FLOAT2ACCUM(weight[i]);
         pbias =
-            (mode == MIOPEN_ELEMENTWISE_AFFINE) ? static_cast<FLOAT>(0) : CVT_FLOAT2ACCUM(bias[i]);
+            (MODE == MIOPEN_ELEMENTWISE_AFFINE) ? static_cast<FLOAT>(0) : CVT_FLOAT2ACCUM(bias[i]);
 
         FLOAT_ACCUM val = (CVT_FLOAT2ACCUM(x[idx]) - pmean) * prstd * pweight + pbias;
         y[idx]          = CVT_ACCUM2FLOAT(val);
@@ -130,8 +129,7 @@ __device__ void layernormbwd(const TI* __restrict__ dy,
                              const TI* __restrict__ weight,
                              const TI* __restrict__ mean,
                              const TI* __restrict__ rstd,
-                             TO* __restrict__ dx,
-                             const int32_t mode)
+                             TO* __restrict__ dx)
 {
     const uint64_t gid = blockIdx.x;
     const uint64_t lid = threadIdx.x;
@@ -151,7 +149,7 @@ __device__ void layernormbwd(const TI* __restrict__ dy,
             size_t x_idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
 
             FLOAT_ACCUM pdy_pweight =
-                CVT_FLOAT2ACCUM(dy[x_idx]) * ((mode == MIOPEN_ELEMENTWISE_AFFINE)
+                CVT_FLOAT2ACCUM(dy[x_idx]) * ((MODE == MIOPEN_ELEMENTWISE_AFFINE)
                                                   ? CVT_FP32_2ACCUM(1.0f)
                                                   : CVT_FLOAT2ACCUM(weight[i]));
 
@@ -187,7 +185,7 @@ __device__ void layernormbwd(const TI* __restrict__ dy,
         size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
 
         FLOAT_ACCUM pdy     = dy ? CVT_FLOAT2ACCUM(dy[idx]) : 0;
-        FLOAT_ACCUM pweight = (mode == MIOPEN_ELEMENTWISE_AFFINE) ? CVT_FP32_2ACCUM(1.0f)
+        FLOAT_ACCUM pweight = (MODE == MIOPEN_ELEMENTWISE_AFFINE) ? CVT_FP32_2ACCUM(1.0f)
                                                                   : CVT_FLOAT2ACCUM(weight[i]);
 
         FLOAT_ACCUM val = prstd * pdy * pweight - a * CVT_FLOAT2ACCUM(x[idx]) - b;
@@ -315,11 +313,10 @@ extern "C" __global__ void LayernormFwd(const INPUT_TYPE* __restrict__ x,
                                         OUTPUT_TYPE* __restrict__ y,
                                         OUTPUT_TYPE* __restrict__ mean,
                                         OUTPUT_TYPE* __restrict__ rstd,
-                                        const float eps,
-                                        const int32_t mode)
+                                        const float eps)
 {
     // instantiate the kernel
-    layernormfwd<INPUT_TYPE, OUTPUT_TYPE>(x, weight, bias, y, mean, rstd, eps, mode);
+    layernormfwd<INPUT_TYPE, OUTPUT_TYPE>(x, weight, bias, y, mean, rstd, eps);
 }
 
 extern "C" __global__ void LayernormBwd(const INPUT_TYPE* __restrict__ dy,
@@ -327,11 +324,10 @@ extern "C" __global__ void LayernormBwd(const INPUT_TYPE* __restrict__ dy,
                                         const INPUT_TYPE* __restrict__ weight,
                                         const INPUT_TYPE* __restrict__ mean,
                                         const INPUT_TYPE* __restrict__ rstd,
-                                        OUTPUT_TYPE* __restrict__ dx,
-                                        const int32_t mode)
+                                        OUTPUT_TYPE* __restrict__ dx)
 {
     // instantiate the kernel
-    layernormbwd<INPUT_TYPE, OUTPUT_TYPE>(dy, x, weight, mean, rstd, dx, mode);
+    layernormbwd<INPUT_TYPE, OUTPUT_TYPE>(dy, x, weight, mean, rstd, dx);
 }
 
 extern "C" __global__ void LayernormBwdWeightBias(const INPUT_TYPE* __restrict__ dy,

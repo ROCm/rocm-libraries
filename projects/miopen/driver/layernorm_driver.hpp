@@ -31,6 +31,7 @@
 #include <../test/cpu_layernorm.hpp>
 #include "InputFlags.hpp"
 #include "driver.hpp"
+#include "miopen/datatype.hpp"
 #include "miopen/miopen.h"
 #include "random.hpp"
 #include "tensor_driver.hpp"
@@ -425,6 +426,14 @@ int LayerNormDriver<T>::RunForwardGPU()
             iter > 1 ? (kernel_total_time - kernel_first_time) / (iter - 1) : kernel_first_time;
         std::cout << "GPU Kernel Time Forward LayerNorm Elapsed: " << kernel_average_time
                   << " ms\n";
+
+        size_t size = inflags.GetValueInt("in_n") * inflags.GetValueInt("in_c") *
+                      inflags.GetValueInt("in_h") * inflags.GetValueInt("in_w") *
+                      miopen::get_data_size(data_type) *
+                      2; // read x and write y (weight and bias usually negligible)
+        std::cout << "Data size: " << size << std::endl;
+        std::cout << "Throughput: " << (size / kernel_average_time * 1000 / 1e9) << " GB/s"
+                  << std::endl;
     }
 
     if(out_dev->FromGPU(GetStream(), out.data.data()) != 0)
@@ -502,6 +511,14 @@ int LayerNormDriver<T>::RunBackwardGPU()
             iter > 1 ? (kernel_total_time - kernel_first_time) / (iter - 1) : kernel_first_time;
         std::cout << "GPU Kernel Time Backward LayerNorm Elapsed: " << kernel_average_time
                   << " ms\n";
+
+        size_t size = inflags.GetValueInt("in_n") * inflags.GetValueInt("in_c") *
+                      inflags.GetValueInt("in_h") * inflags.GetValueInt("in_w") *
+                      miopen::get_data_size(data_type) *
+                      3; // read dy and x, and write dx (weight and bias usually negligible)
+        std::cout << "Data size: " << size << std::endl;
+        std::cout << "Throughput: " << (size / kernel_average_time * 1000 / 1e9) << " GB/s"
+                  << std::endl;
     }
 
     if(dx_dev->FromGPU(GetStream(), dx.data.data()) != 0)

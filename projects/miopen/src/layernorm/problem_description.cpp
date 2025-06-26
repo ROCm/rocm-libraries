@@ -91,6 +91,8 @@ NetworkConfig ProblemDescription::MakeNetworkConfig() const
 
     ss << "stride" << stride;
 
+    ss << "mode" << mode;
+
     return NetworkConfig{ss.str()};
 }
 
