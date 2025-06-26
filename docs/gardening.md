@@ -27,7 +27,7 @@ CI is missing, please file an issue leveraging the "gardener" tag, ping on the t
 or preferably, add it yourself. You'll probably be tagged to review the PR if someone
 else gets to it first.
 
-## Notes on Priviledges
+## Notes on Privileges
 
 Developers will not be able to bypass pre-submit checks in this repository unless an admin or
 gardener pushes it through. This is being done intentionally to ensure we keep the quality of
