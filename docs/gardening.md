@@ -1,8 +1,8 @@
 # ROCm Libraries Gardeners
 
 This documents the mechanics of
-[gardening](https://github.com/ROCm/TheRock/docs/rfcs/RFC0002-MonoRepo-Gardener-Rotations.md)
-for the ROCm Libraries.
+[gardening](https://github.com/ROCm/TheRock/blob/main/docs/rfcs/RFC0002-MonoRepo-Gardener-Rotations.md)
+for the ROCm Libraries. If you haven't read the above doc, please start there.
 
 ## Becoming a member
 
@@ -34,6 +34,7 @@ gardener pushes it through. This is being done intentionally to ensure we keep t
 the tree green. This also means that you will be asked to push changes through without
 additional context. Your duty is to ensure you keep the tree green (or make it greener). Changes
 that are ok:
+
 - Reverts
 - Fast-forward fixes where reverts are unclear
 - Fixes unrelated to code health (docs, etc)
