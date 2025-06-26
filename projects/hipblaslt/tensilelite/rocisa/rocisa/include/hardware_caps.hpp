@@ -305,10 +305,14 @@ inline std::map<std::string, int>
                                        assemblerPath,
                                        "v_cvt_scalef32_pk_fp8_f16 v[0], v[1], 0 op_sel:[0,0,0,0]",
                                        isDebug);
-    rv["Hascvtf16_fp8"] = tryAssembler(isaVersion,
-                                       assemblerPath,
-                                       "v_cvt_scalef32_f16_fp8 v[0], v[1], 0 op_sel:[0,0,0,0]",
-                                       isDebug);
+    rv["Hascvtf16_fp8_sf32"] = tryAssembler(isaVersion,
+                                            assemblerPath,
+                                            "v_cvt_scalef32_f16_fp8 v[0], v[1], 0 op_sel:[0,0,0,0]",
+                                            isDebug);
+    rv["HasCvtFP8toF16"] = tryAssembler(isaVersion,
+                                        assemblerPath,
+                                        "v_cvt_f16_fp8 v[0], v[1] byte_sel:2",
+                                        isDebug);
 
     rv["HasLDSTrB64B16"] = tryAssembler(
         isaVersion, assemblerPath, "ds_read_b64_tr_b16 v[0:1], v0 offset: 0", isDebug);

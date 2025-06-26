@@ -1050,53 +1050,53 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ConvertAfterDS"]:
         if kernel["ProblemType"]["DataTypeA"].isAnyFloat8():
           if kernel["UnrollMajorLDSA"]:
-            if self.states.asmCaps["Hascvtf16_fp8"]:
+            if self.states.asmCaps["Hascvtf16_fp8_sf32"]:
               instPerPackA = 2 * self.states.numReadsIterCoalescedA if(iteration % self.states.numReadsIterCoalescedA == 0) else 0
             else:
               instPerPackA = 6 * self.states.numReadsIterCoalescedA if(iteration % self.states.numReadsIterCoalescedA == 0) else 0
           elif self.states.lrvwTileA == 1:
-            if self.states.asmCaps["Hascvtf16_fp8"]:
+            if self.states.asmCaps["Hascvtf16_fp8_sf32"]:
               instPerPackA = 4
             else:
               instPerPackA = 8
           elif self.states.lrvwTileA == 2:
-            if self.states.asmCaps["Hascvtf16_fp8"]:
+            if self.states.asmCaps["Hascvtf16_fp8_sf32"]:
               instPerPackA = 8
             else:
               instPerPackA = 16
           elif self.states.lrvwTileA == 4:
-            if self.states.asmCaps["Hascvtf16_fp8"]:
+            if self.states.asmCaps["Hascvtf16_fp8_sf32"]:
               instPerPackA = 20
             else:
               instPerPackA = 36
           elif self.states.lrvwTileA == 8:
-            if self.states.asmCaps["Hascvtf16_fp8"]:
+            if self.states.asmCaps["Hascvtf16_fp8_sf32"]:
               instPerPackA = 44
             else:
               instPerPackA = 76
         if kernel["ProblemType"]["DataTypeB"].isAnyFloat8():
           if kernel["UnrollMajorLDSB"]:
-            if self.states.asmCaps["Hascvtf16_fp8"]:
+            if self.states.asmCaps["Hascvtf16_fp8_sf32"]:
               instPerPackB = 2 * self.states.numReadsIterCoalescedB if(iteration % self.states.numReadsIterCoalescedB == 0) else 0
             else:
               instPerPackB = 6 * self.states.numReadsIterCoalescedB if(iteration % self.states.numReadsIterCoalescedB == 0) else 0
           elif self.states.lrvwTileB == 1:
-            if self.states.asmCaps["Hascvtf16_fp8"]:
+            if self.states.asmCaps["Hascvtf16_fp8_sf32"]:
               instPerPackB = 4
             else:
               instPerPackB = 8
           elif self.states.lrvwTileB == 2:
-            if self.states.asmCaps["Hascvtf16_fp8"]:
+            if self.states.asmCaps["Hascvtf16_fp8_sf32"]:
               instPerPackB = 8
             else:
               instPerPackB = 16
           elif self.states.lrvwTileB == 4:
-            if self.states.asmCaps["Hascvtf16_fp8"]:
+            if self.states.asmCaps["Hascvtf16_fp8_sf32"]:
               instPerPackB = 20
             else:
               instPerPackB = 36
           elif self.states.lrvwTileB == 8:
-            if self.states.asmCaps["Hascvtf16_fp8"]:
+            if self.states.asmCaps["Hascvtf16_fp8_sf32"]:
               instPerPackB = 44
             else:
               instPerPackB = 76

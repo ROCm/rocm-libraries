@@ -307,6 +307,21 @@ void cvt_inst(nb::module_ m_inst)
             return new rocisa::VCvtScaleFP8toF16(self);
         });
 
+    nb::class_<rocisa::VCvtFP8toF16, rocisa::VCvtInstruction>(m_inst, "VCvtFP8toF16")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      std::optional<rocisa::SDWAModifiers>,
+                      std::optional<rocisa::VOP3PModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("sdwa")    = std::nullopt,
+             nb::arg("vop3")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VCvtFP8toF16& self, nb::dict&) {
+            return new rocisa::VCvtFP8toF16(self);
+        });
+
     nb::class_<rocisa::VCvtScalePkF16toFP8, rocisa::VCvtInstruction>(m_inst, "VCvtScalePkF16toFP8")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::Container>&,
