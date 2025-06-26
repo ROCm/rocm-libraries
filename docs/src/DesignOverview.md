@@ -202,7 +202,7 @@ All of the instructions scheduled by a `Context`, including those that came from
 
 In order to execute the kernel, the assembly instructions that are stored within a `Context`'s scheduled instructions must be converted into object code. This is performed by the `Assembler` class.
 
-The `Assembler` class uses AMD comgr's API to assemble the instructions without having to write an assembly file to disk.
+The `Assembler` class uses AMD Comgr's API to assemble the instructions without having to write an assembly file to disk.
 
 ### Executable Kernel
 

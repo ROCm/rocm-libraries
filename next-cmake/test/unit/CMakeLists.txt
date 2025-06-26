@@ -10,6 +10,7 @@ target_link_libraries(rocroller-tests
         libdivide::libdivide
         ${llvm_libs}
         ${llvm_yaml_libs}
+        ${msgpack_libs}
 )
 
 if(ROCROLLER_ENABLE_LLD)

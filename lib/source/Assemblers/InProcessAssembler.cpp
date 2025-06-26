@@ -53,11 +53,6 @@
 
 namespace rocRoller
 {
-
-    InProcessAssembler::InProcessAssembler() {}
-
-    InProcessAssembler::~InProcessAssembler() {}
-
     RegisterComponent(InProcessAssembler);
     static_assert(Component::Component<InProcessAssembler>);
 
@@ -98,53 +93,62 @@ namespace rocRoller
         auto const        wavefrontSize = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
         std::string const targetID      = fmt::format("amdgcn-amd-amdhsa--{}", target.toString());
 
+        amd_comgr_data_t        assemblyData, execData;
+        amd_comgr_data_set_t    assemblyDataSet, relocatableDataSet, execDataSet;
+        amd_comgr_action_info_t dataAction;
+
         std::string dataName = kernelName.empty() ? defaultKernelName : kernelName;
         AssertFatal(!dataName.empty(), "InProcessAssembler needs a kernel name");
 
-        amd_comgr_data_t        DataIn1, DataOut;
-        amd_comgr_data_set_t    DataSetIn, DataSetOut, DataSetExec;
-        amd_comgr_action_info_t DataAction;
-        amd_comgr_status_t      Status;
-
-        const char* CodeGenOptions[]
+        const char* codeGenOptions[]
             = {"-mcode-object-version=5",
                (wavefrontSize == 64) ? "-mwavefrontsize64" : "-mno-wavefrontsize64"};
-        size_t CodeGenOptionsCount = sizeof(CodeGenOptions) / sizeof(CodeGenOptions[0]);
+        size_t codeGenOptionsCount = sizeof(codeGenOptions) / sizeof(codeGenOptions[0]);
 
-        COMGR_CHECK(amd_comgr_create_data_set(&DataSetIn));
-        COMGR_CHECK(amd_comgr_create_data(AMD_COMGR_DATA_KIND_SOURCE, &DataIn1));
+        // Initialize Comgr data handles
+        COMGR_CHECK(amd_comgr_create_data_set(&assemblyDataSet));
+        COMGR_CHECK(amd_comgr_create_data(AMD_COMGR_DATA_KIND_SOURCE, &assemblyData));
 
-        COMGR_CHECK(amd_comgr_set_data(DataIn1, machineCode.size(), machineCode.c_str()));
-        COMGR_CHECK(amd_comgr_set_data_name(DataIn1, dataName.c_str()));
-        COMGR_CHECK(amd_comgr_data_set_add(DataSetIn, DataIn1));
+        COMGR_CHECK(amd_comgr_set_data(assemblyData, machineCode.size(), machineCode.c_str()));
+        COMGR_CHECK(amd_comgr_set_data_name(assemblyData, dataName.c_str()));
+        COMGR_CHECK(amd_comgr_data_set_add(assemblyDataSet, assemblyData));
 
-        COMGR_CHECK(amd_comgr_create_data_set(&DataSetOut));
-        COMGR_CHECK(amd_comgr_create_data_set(&DataSetExec));
+        COMGR_CHECK(amd_comgr_create_data_set(&relocatableDataSet));
 
-        COMGR_CHECK(amd_comgr_create_action_info(&DataAction));
-        COMGR_CHECK(amd_comgr_action_info_set_isa_name(DataAction, targetID.c_str()));
+        COMGR_CHECK(amd_comgr_create_data_set(&execDataSet));
+
+        // Initialize Comgr action
+        COMGR_CHECK(amd_comgr_create_action_info(&dataAction));
+        COMGR_CHECK(amd_comgr_action_info_set_isa_name(dataAction, targetID.c_str()));
         COMGR_CHECK(
-            amd_comgr_action_info_set_option_list(DataAction, CodeGenOptions, CodeGenOptionsCount));
+            amd_comgr_action_info_set_option_list(dataAction, codeGenOptions, codeGenOptionsCount));
 
-        COMGR_CHECK(amd_comgr_do_action(
-            AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE, DataAction, DataSetIn, DataSetOut));
+        // Assemble and link with Comgr
+        COMGR_CHECK(amd_comgr_do_action(AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE,
+                                        dataAction,
+                                        assemblyDataSet,
+                                        relocatableDataSet));
 
-        COMGR_CHECK(amd_comgr_do_action(
-            AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE, DataAction, DataSetOut, DataSetExec));
+        COMGR_CHECK(amd_comgr_do_action(AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE,
+                                        dataAction,
+                                        relocatableDataSet,
+                                        execDataSet));
 
+        // Extract data from DataSet handle
         COMGR_CHECK(amd_comgr_action_data_get_data(
-            DataSetExec, AMD_COMGR_DATA_KIND_EXECUTABLE, 0, &DataOut));
+            execDataSet, AMD_COMGR_DATA_KIND_EXECUTABLE, 0, &execData));
 
-        COMGR_CHECK(amd_comgr_get_data(DataOut, &dataOutSize, nullptr));
+        COMGR_CHECK(amd_comgr_get_data(execData, &dataOutSize, nullptr));
         AssertFatal(dataOutSize > 0, "No compiled kernel data");
         result.resize(dataOutSize);
-        COMGR_CHECK(amd_comgr_get_data(DataOut, &dataOutSize, result.data()));
+        COMGR_CHECK(amd_comgr_get_data(execData, &dataOutSize, result.data()));
 
-        COMGR_CHECK(amd_comgr_destroy_data_set(DataSetIn));
-        COMGR_CHECK(amd_comgr_destroy_data_set(DataSetOut));
-        COMGR_CHECK(amd_comgr_destroy_data_set(DataSetExec));
-        COMGR_CHECK(amd_comgr_destroy_action_info(DataAction));
-        COMGR_CHECK(amd_comgr_release_data(DataIn1));
+        // Cleanup
+        COMGR_CHECK(amd_comgr_destroy_data_set(assemblyDataSet));
+        COMGR_CHECK(amd_comgr_destroy_data_set(relocatableDataSet));
+        COMGR_CHECK(amd_comgr_destroy_data_set(execDataSet));
+        COMGR_CHECK(amd_comgr_destroy_action_info(dataAction));
+        COMGR_CHECK(amd_comgr_release_data(assemblyData));
 
         return result;
     }

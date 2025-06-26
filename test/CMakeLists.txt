@@ -134,6 +134,7 @@ target_link_libraries(
     gmock
     OpenMP::OpenMP_CXX
     libdivide
+    msgpackc-cxx
 )
 set_property(
     TARGET rocRollerTests
@@ -217,6 +218,7 @@ target_link_libraries(
     common_test_utilities
     Catch2::Catch2WithMain
     OpenMP::OpenMP_CXX
+    msgpackc-cxx
 )
 set_property(
     TARGET rocRollerTests_catch

@@ -36,9 +36,6 @@ namespace rocRoller
     class InProcessAssembler : public Assembler
     {
     public:
-        InProcessAssembler();
-        ~InProcessAssembler();
-
         using Base = Assembler;
 
         static const std::string Name;
@@ -48,6 +45,7 @@ namespace rocRoller
         static AssemblerPtr Build(Argument arg);
 
         std::string name() const override;
+
         /**
          * @brief Assemble a string of machine code. The resulting object code will be returned
          * as a vector of charaters.
@@ -58,7 +56,7 @@ namespace rocRoller
          *
          * @param machineCode Machine code to assemble
          * @param target The target architecture
-         * @param kernelName The name of the kernel (default is "")
+         * @param kernelName The name of the kernel (default is "rocroller_kernel")
          * @return std::vector<char>
          */
         std::vector<char> assembleMachineCode(const std::string&           machineCode,
