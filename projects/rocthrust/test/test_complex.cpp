@@ -362,7 +362,7 @@ TYPED_TEST(ComplexTests, TestComplexStreamOperators)
 
 TESTS_PAIRS_DEFINE(ComplexPairsTests, PairsTestsParams)
 
-TYPED_TEST(ComplexPairsTests, TestAsignOperator)
+TYPED_TEST(ComplexPairsTests, TestAssignOperator)
 {
   using T = typename TestFixture::first_type;
   using U = typename TestFixture::second_type;
