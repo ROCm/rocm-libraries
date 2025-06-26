@@ -42,6 +42,8 @@ that are ok:
 On a case by case basis you should consider critical customer fixes, but these should be considered
 as a group and likely admins should be approving the majority of those.
 
+As an example to include an admin: *we have a critical feature but develop is broken and it is unrelated to our changes*
+
 ## Rotation
 
 Week | Non-APAC | APAC
