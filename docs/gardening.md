@@ -6,7 +6,7 @@ for the ROCm Libraries. If you haven't read the above doc, please start there.
 
 ## Becoming a member
 
-Gardeners will need to be members of this GitHub [team](https://github.com/orgs/ROCm/teams/compute-library-gardeners).
+Gardeners will need to be members of the [Compute Library Gardeners team](https://github.com/orgs/ROCm/teams/compute-library-gardeners).
 Please contact an owner to become a gardener.
 
 ## Communications channel
@@ -33,10 +33,11 @@ else gets to it first.
 Developers will not be able to bypass pre-submit checks in this repository unless an admin or
 gardener pushes it through. This is being done intentionally to ensure we keep the quality of
 the tree green. This also means that you will be asked to push changes through without
-additional context. Your duty is to ensure you keep the tree green (or make it greener). Changes
+additional context. Your duty is to ensure you keep the tree green (or make it greener) so gardeners will need to understand the context before approving
+any of these changes. Changes
 that are ok:
 
-- Reverts
+- Reverts to fix broken things.
 - Fast-forward fixes where reverts are unclear
 - Fixes unrelated to code health (docs, etc)
 
