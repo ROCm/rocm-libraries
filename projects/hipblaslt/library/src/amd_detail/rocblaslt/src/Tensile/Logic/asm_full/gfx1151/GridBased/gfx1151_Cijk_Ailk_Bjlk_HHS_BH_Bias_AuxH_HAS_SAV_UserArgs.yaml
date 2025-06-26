@@ -1,4 +1,4 @@
-- {MinimumRequiredVersion: 4.33.0}
+- {MinimumRequiredVersion: 5.0.0}
 - gfx1151
 - gfx1151
 - [Device 1536]
@@ -71,7 +71,7 @@
   UseE: true
   UseInitialStridesAB: false
   UseInitialStridesCD: false
-  UseScaleAB: ""
+  UseScaleAB: ''
   UseScaleAlphaVec: 1
   UseScaleCD: false
 - - 1LDSBuffer: 0
@@ -207,79 +207,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -467,79 +394,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -727,79 +581,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -987,79 +768,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -1247,79 +955,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -1507,79 +1142,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -1767,79 +1329,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -2027,79 +1516,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -2287,79 +1703,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -2547,79 +1890,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -2807,79 +2077,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -3067,79 +2264,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -3327,79 +2451,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -3587,79 +2638,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -3847,79 +2825,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -4107,79 +3012,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -4367,79 +3199,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -4627,79 +3386,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -4887,79 +3573,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -5147,79 +3760,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -5407,79 +3947,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -5667,79 +4134,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -5927,79 +4321,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -6187,79 +4508,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -6447,79 +4695,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -6707,79 +4882,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -6967,79 +5069,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -7227,79 +5256,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -7487,79 +5443,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -7747,79 +5630,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -8007,79 +5817,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -8267,79 +6004,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -8527,79 +6191,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -8787,79 +6378,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -9047,79 +6565,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -9307,79 +6752,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -9567,79 +6939,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -9827,79 +7126,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -10087,79 +7313,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -10347,79 +7500,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -10607,79 +7687,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -10867,79 +7874,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -11127,79 +8061,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -11387,79 +8248,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -11647,79 +8435,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -11907,79 +8622,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -12167,79 +8809,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -12427,79 +8996,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -12687,79 +9183,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -12947,79 +9370,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -13207,79 +9557,6 @@
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
     PreloadKernArgs: 0
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationNoGuard: false
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: false
-      BiasDataTypeList: [0, 4]
-      BiasSrc: D
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      DataType: 4
-      DataTypeA: 4
-      DataTypeB: 4
-      DataTypeE: 4
-      DestDataType: 4
-      F32XdlMathOp: 0
-      Gradient: false
-      GroupedGemm: false
-      HighPrecisionAccumulate: true
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [1, 3, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexAssignmentsMetadata: [3, 0, 2]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 1
-      IndexUnrollM: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      MirrorDimsMetadata: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SetConstStrideBias: []
-      SilentHighPrecisionAccumulate: false
-      Sparse: 0
-      StochasticRounding: false
-      StridedBatched: true
-      SupportUserArgs: true
-      TLUA: true
-      TLUB: true
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 1
-      UseBeta: true
-      UseBias: 1
-      UseE: true
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAB: ""
-      UseScaleAlphaVec: 1
-      UseScaleCD: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
@@ -13335,947 +9612,947 @@
     _WorkspaceSizePerElemC: 4
     _staggerStrideShift: 1
 - [2, 3, 0, 1]
-- - - [64, 64, 1, 64, 64, 64, 64, 64]
+- - - [64, 64, 1, 64]
     - [5, 17.5582]
-  - - [192, 64, 1, 64, 192, 192, 192, 64]
+  - - [192, 64, 1, 64]
     - [49, 51.8601]
-  - - [320, 64, 1, 64, 320, 320, 320, 64]
+  - - [320, 64, 1, 64]
     - [28, 88.682]
-  - - [448, 64, 1, 64, 448, 448, 448, 64]
+  - - [448, 64, 1, 64]
     - [4, 126.165]
-  - - [576, 64, 1, 64, 576, 576, 576, 64]
+  - - [576, 64, 1, 64]
     - [4, 171.404]
-  - - [704, 64, 1, 64, 704, 704, 704, 64]
+  - - [704, 64, 1, 64]
     - [27, 211.725]
-  - - [832, 64, 1, 64, 832, 832, 832, 64]
+  - - [832, 64, 1, 64]
     - [4, 238.238]
-  - - [960, 64, 1, 64, 960, 960, 960, 64]
+  - - [960, 64, 1, 64]
     - [49, 286.298]
-  - - [64, 192, 1, 64, 64, 64, 64, 192]
+  - - [64, 192, 1, 64]
     - [4, 53.4461]
-  - - [192, 192, 1, 64, 192, 192, 192, 192]
+  - - [192, 192, 1, 64]
     - [4, 173.548]
-  - - [320, 192, 1, 64, 320, 320, 320, 192]
+  - - [320, 192, 1, 64]
     - [4, 286.183]
-  - - [448, 192, 1, 64, 448, 448, 448, 192]
+  - - [448, 192, 1, 64]
     - [4, 398.64]
-  - - [576, 192, 1, 64, 576, 576, 576, 192]
+  - - [576, 192, 1, 64]
     - [4, 504.321]
-  - - [704, 192, 1, 64, 704, 704, 704, 192]
+  - - [704, 192, 1, 64]
     - [6, 617.911]
-  - - [832, 192, 1, 64, 832, 832, 832, 192]
+  - - [832, 192, 1, 64]
     - [4, 699.553]
-  - - [960, 192, 1, 64, 960, 960, 960, 192]
+  - - [960, 192, 1, 64]
     - [47, 827.272]
-  - - [64, 320, 1, 64, 64, 64, 64, 320]
+  - - [64, 320, 1, 64]
     - [4, 91.0886]
-  - - [192, 320, 1, 64, 192, 192, 192, 320]
+  - - [192, 320, 1, 64]
     - [39, 281.774]
-  - - [320, 320, 1, 64, 320, 320, 320, 320]
+  - - [320, 320, 1, 64]
     - [43, 472.843]
-  - - [448, 320, 1, 64, 448, 448, 448, 320]
+  - - [448, 320, 1, 64]
     - [4, 651.405]
-  - - [576, 320, 1, 64, 576, 576, 576, 320]
+  - - [576, 320, 1, 64]
     - [4, 801.664]
-  - - [704, 320, 1, 64, 704, 704, 704, 320]
+  - - [704, 320, 1, 64]
     - [17, 954.861]
-  - - [832, 320, 1, 64, 832, 832, 832, 320]
+  - - [832, 320, 1, 64]
     - [29, 1146.7]
-  - - [960, 320, 1, 64, 960, 960, 960, 320]
+  - - [960, 320, 1, 64]
     - [15, 1312.03]
-  - - [64, 448, 1, 64, 64, 64, 64, 448]
+  - - [64, 448, 1, 64]
     - [4, 126.165]
-  - - [192, 448, 1, 64, 192, 192, 192, 448]
+  - - [192, 448, 1, 64]
     - [4, 385.25]
-  - - [320, 448, 1, 64, 320, 320, 320, 448]
+  - - [320, 448, 1, 64]
     - [27, 660.312]
-  - - [448, 448, 1, 64, 448, 448, 448, 448]
+  - - [448, 448, 1, 64]
     - [4, 883.459]
-  - - [576, 448, 1, 64, 576, 576, 576, 448]
+  - - [576, 448, 1, 64]
     - [20, 1109.18]
-  - - [704, 448, 1, 64, 704, 704, 704, 448]
+  - - [704, 448, 1, 64]
     - [14, 1260.03]
-  - - [832, 448, 1, 64, 832, 832, 832, 448]
+  - - [832, 448, 1, 64]
     - [16, 1499.43]
-  - - [960, 448, 1, 64, 960, 960, 960, 448]
+  - - [960, 448, 1, 64]
     - [22, 1692.86]
-  - - [64, 576, 1, 64, 64, 64, 64, 576]
+  - - [64, 576, 1, 64]
     - [4, 166.918]
-  - - [192, 576, 1, 64, 192, 192, 192, 576]
+  - - [192, 576, 1, 64]
     - [4, 500.399]
-  - - [320, 576, 1, 64, 320, 320, 320, 576]
+  - - [320, 576, 1, 64]
     - [4, 816.111]
-  - - [448, 576, 1, 64, 448, 448, 448, 576]
+  - - [448, 576, 1, 64]
     - [23, 1113.66]
-  - - [576, 576, 1, 64, 576, 576, 576, 576]
+  - - [576, 576, 1, 64]
     - [35, 1375.73]
-  - - [704, 576, 1, 64, 704, 704, 704, 576]
+  - - [704, 576, 1, 64]
     - [22, 1640.52]
-  - - [832, 576, 1, 64, 832, 832, 832, 576]
+  - - [832, 576, 1, 64]
     - [31, 1900.95]
-  - - [960, 576, 1, 64, 960, 960, 960, 576]
+  - - [960, 576, 1, 64]
     - [16, 2044.51]
-  - - [64, 704, 1, 64, 64, 64, 64, 704]
+  - - [64, 704, 1, 64]
     - [6, 210.796]
-  - - [192, 704, 1, 64, 192, 192, 192, 704]
+  - - [192, 704, 1, 64]
     - [27, 589.911]
-  - - [320, 704, 1, 64, 320, 320, 320, 704]
+  - - [320, 704, 1, 64]
     - [4, 973.888]
-  - - [448, 704, 1, 64, 448, 448, 448, 704]
+  - - [448, 704, 1, 64]
     - [14, 1306.1]
-  - - [576, 704, 1, 64, 576, 576, 576, 704]
+  - - [576, 704, 1, 64]
     - [14, 1605.01]
-  - - [704, 704, 1, 64, 704, 704, 704, 704]
+  - - [704, 704, 1, 64]
     - [31, 1842.6]
-  - - [832, 704, 1, 64, 832, 832, 832, 704]
+  - - [832, 704, 1, 64]
     - [14, 2172.57]
-  - - [960, 704, 1, 64, 960, 960, 960, 704]
+  - - [960, 704, 1, 64]
     - [14, 2419.18]
-  - - [64, 832, 1, 64, 64, 64, 64, 832]
+  - - [64, 832, 1, 64]
     - [4, 246.51]
-  - - [192, 832, 1, 64, 192, 192, 192, 832]
+  - - [192, 832, 1, 64]
     - [11, 690.808]
-  - - [320, 832, 1, 64, 320, 320, 320, 832]
+  - - [320, 832, 1, 64]
     - [4, 1149.41]
-  - - [448, 832, 1, 64, 448, 448, 448, 832]
+  - - [448, 832, 1, 64]
     - [16, 1513.22]
-  - - [576, 832, 1, 64, 576, 576, 576, 832]
+  - - [576, 832, 1, 64]
     - [16, 1861.72]
-  - - [704, 832, 1, 64, 704, 704, 704, 832]
+  - - [704, 832, 1, 64]
     - [14, 2160.05]
-  - - [832, 832, 1, 64, 832, 832, 832, 832]
+  - - [832, 832, 1, 64]
     - [14, 2401.28]
-  - - [960, 832, 1, 64, 960, 960, 960, 832]
+  - - [960, 832, 1, 64]
     - [17, 2794.94]
-  - - [64, 960, 1, 64, 64, 64, 64, 960]
+  - - [64, 960, 1, 64]
     - [4, 281.482]
-  - - [192, 960, 1, 64, 192, 192, 192, 960]
+  - - [192, 960, 1, 64]
     - [4, 815.829]
-  - - [320, 960, 1, 64, 320, 320, 320, 960]
+  - - [320, 960, 1, 64]
     - [16, 1306.37]
-  - - [448, 960, 1, 64, 448, 448, 448, 960]
+  - - [448, 960, 1, 64]
     - [16, 1716.62]
-  - - [576, 960, 1, 64, 576, 576, 576, 960]
+  - - [576, 960, 1, 64]
     - [36, 2015.4]
-  - - [704, 960, 1, 64, 704, 704, 704, 960]
+  - - [704, 960, 1, 64]
     - [36, 2417.83]
-  - - [832, 960, 1, 64, 832, 832, 832, 960]
+  - - [832, 960, 1, 64]
     - [14, 2810.31]
-  - - [960, 960, 1, 64, 960, 960, 960, 960]
+  - - [960, 960, 1, 64]
     - [14, 3108.51]
-  - - [64, 64, 1, 256, 64, 64, 64, 64]
+  - - [64, 64, 1, 256]
     - [1, 68.378]
-  - - [192, 64, 1, 256, 192, 192, 192, 64]
+  - - [192, 64, 1, 256]
     - [10, 200.563]
-  - - [320, 64, 1, 256, 320, 320, 320, 64]
+  - - [320, 64, 1, 256]
     - [5, 343.019]
-  - - [448, 64, 1, 256, 448, 448, 448, 64]
+  - - [448, 64, 1, 256]
     - [44, 470.379]
-  - - [576, 64, 1, 256, 576, 576, 576, 64]
+  - - [576, 64, 1, 256]
     - [4, 655.383]
-  - - [704, 64, 1, 256, 704, 704, 704, 64]
+  - - [704, 64, 1, 256]
     - [40, 790.321]
-  - - [832, 64, 1, 256, 832, 832, 832, 64]
+  - - [832, 64, 1, 256]
     - [43, 940.784]
-  - - [960, 64, 1, 256, 960, 960, 960, 64]
+  - - [960, 64, 1, 256]
     - [39, 1074.4]
-  - - [64, 192, 1, 256, 64, 64, 64, 192]
+  - - [64, 192, 1, 256]
     - [10, 197.726]
-  - - [192, 192, 1, 256, 192, 192, 192, 192]
+  - - [192, 192, 1, 256]
     - [39, 653.115]
-  - - [320, 192, 1, 256, 320, 320, 320, 192]
+  - - [320, 192, 1, 256]
     - [5, 1080.67]
-  - - [448, 192, 1, 256, 448, 448, 448, 192]
+  - - [448, 192, 1, 256]
     - [39, 1447.79]
-  - - [576, 192, 1, 256, 576, 576, 576, 192]
+  - - [576, 192, 1, 256]
     - [47, 1799.33]
-  - - [704, 192, 1, 256, 704, 704, 704, 192]
+  - - [704, 192, 1, 256]
     - [47, 2111.29]
-  - - [832, 192, 1, 256, 832, 832, 832, 192]
+  - - [832, 192, 1, 256]
     - [23, 2512.02]
-  - - [960, 192, 1, 256, 960, 960, 960, 192]
+  - - [960, 192, 1, 256]
     - [22, 2923.63]
-  - - [64, 320, 1, 256, 64, 64, 64, 320]
+  - - [64, 320, 1, 256]
     - [5, 342.347]
-  - - [192, 320, 1, 256, 192, 192, 192, 320]
+  - - [192, 320, 1, 256]
     - [39, 1057.78]
-  - - [320, 320, 1, 256, 320, 320, 320, 320]
+  - - [320, 320, 1, 256]
     - [47, 1664.99]
-  - - [448, 320, 1, 256, 448, 448, 448, 320]
+  - - [448, 320, 1, 256]
     - [4, 2271.12]
-  - - [576, 320, 1, 256, 576, 576, 576, 320]
+  - - [576, 320, 1, 256]
     - [47, 2895.82]
-  - - [704, 320, 1, 256, 704, 704, 704, 320]
+  - - [704, 320, 1, 256]
     - [31, 3377.65]
-  - - [832, 320, 1, 256, 832, 832, 832, 320]
+  - - [832, 320, 1, 256]
     - [19, 3833.48]
-  - - [960, 320, 1, 256, 960, 960, 960, 320]
+  - - [960, 320, 1, 256]
     - [14, 4388.69]
-  - - [64, 448, 1, 256, 64, 64, 64, 448]
+  - - [64, 448, 1, 256]
     - [5, 478.817]
-  - - [192, 448, 1, 256, 192, 192, 192, 448]
+  - - [192, 448, 1, 256]
     - [43, 1431.78]
-  - - [320, 448, 1, 256, 320, 320, 320, 448]
+  - - [320, 448, 1, 256]
     - [10, 2265.51]
-  - - [448, 448, 1, 256, 448, 448, 448, 448]
+  - - [448, 448, 1, 256]
     - [10, 2898.01]
-  - - [576, 448, 1, 256, 576, 576, 576, 448]
+  - - [576, 448, 1, 256]
     - [19, 3721.81]
-  - - [704, 448, 1, 256, 704, 704, 704, 448]
+  - - [704, 448, 1, 256]
     - [14, 4328.2]
-  - - [832, 448, 1, 256, 832, 832, 832, 448]
+  - - [832, 448, 1, 256]
     - [31, 4872.24]
-  - - [960, 448, 1, 256, 960, 960, 960, 448]
+  - - [960, 448, 1, 256]
     - [14, 5517.58]
-  - - [64, 576, 1, 256, 64, 64, 64, 576]
+  - - [64, 576, 1, 256]
     - [43, 620.276]
-  - - [192, 576, 1, 256, 192, 192, 192, 576]
+  - - [192, 576, 1, 256]
     - [31, 1765.11]
-  - - [320, 576, 1, 256, 320, 320, 320, 576]
+  - - [320, 576, 1, 256]
     - [47, 2856.38]
-  - - [448, 576, 1, 256, 448, 448, 448, 576]
+  - - [448, 576, 1, 256]
     - [22, 3716.58]
-  - - [576, 576, 1, 256, 576, 576, 576, 576]
+  - - [576, 576, 1, 256]
     - [36, 4755.71]
-  - - [704, 576, 1, 256, 704, 704, 704, 576]
+  - - [704, 576, 1, 256]
     - [14, 5373.28]
-  - - [832, 576, 1, 256, 832, 832, 832, 576]
+  - - [832, 576, 1, 256]
     - [36, 6227.74]
-  - - [960, 576, 1, 256, 960, 960, 960, 576]
+  - - [960, 576, 1, 256]
     - [36, 7042.85]
-  - - [64, 704, 1, 256, 64, 64, 64, 704]
+  - - [64, 704, 1, 256]
     - [40, 793.31]
-  - - [192, 704, 1, 256, 192, 192, 192, 704]
+  - - [192, 704, 1, 256]
     - [10, 2096.58]
-  - - [320, 704, 1, 256, 320, 320, 320, 704]
+  - - [320, 704, 1, 256]
     - [14, 3332.76]
-  - - [448, 704, 1, 256, 448, 448, 448, 704]
+  - - [448, 704, 1, 256]
     - [14, 4334.01]
-  - - [576, 704, 1, 256, 576, 576, 576, 704]
+  - - [576, 704, 1, 256]
     - [14, 5329.28]
-  - - [704, 704, 1, 256, 704, 704, 704, 704]
+  - - [704, 704, 1, 256]
     - [24, 6183.27]
-  - - [832, 704, 1, 256, 832, 832, 832, 704]
+  - - [832, 704, 1, 256]
     - [31, 6728.73]
-  - - [960, 704, 1, 256, 960, 960, 960, 704]
+  - - [960, 704, 1, 256]
     - [36, 7744.8]
-  - - [64, 832, 1, 256, 64, 64, 64, 832]
+  - - [64, 832, 1, 256]
     - [5, 936.904]
-  - - [192, 832, 1, 256, 192, 192, 192, 832]
+  - - [192, 832, 1, 256]
     - [19, 2520.54]
-  - - [320, 832, 1, 256, 320, 320, 320, 832]
+  - - [320, 832, 1, 256]
     - [22, 3817.38]
-  - - [448, 832, 1, 256, 448, 448, 448, 832]
+  - - [448, 832, 1, 256]
     - [14, 4809.62]
-  - - [576, 832, 1, 256, 576, 576, 576, 832]
+  - - [576, 832, 1, 256]
     - [24, 6012.57]
-  - - [704, 832, 1, 256, 704, 704, 704, 832]
+  - - [704, 832, 1, 256]
     - [14, 6822.1]
-  - - [832, 832, 1, 256, 832, 832, 832, 832]
+  - - [832, 832, 1, 256]
     - [14, 7560.29]
-  - - [960, 832, 1, 256, 960, 960, 960, 832]
+  - - [960, 832, 1, 256]
     - [14, 8387.06]
-  - - [64, 960, 1, 256, 64, 64, 64, 960]
+  - - [64, 960, 1, 256]
     - [39, 1056.36]
-  - - [192, 960, 1, 256, 192, 192, 192, 960]
+  - - [192, 960, 1, 256]
     - [47, 2872.02]
-  - - [320, 960, 1, 256, 320, 320, 320, 960]
+  - - [320, 960, 1, 256]
     - [31, 4479.95]
-  - - [448, 960, 1, 256, 448, 448, 448, 960]
+  - - [448, 960, 1, 256]
     - [22, 5624.69]
-  - - [576, 960, 1, 256, 576, 576, 576, 960]
+  - - [576, 960, 1, 256]
     - [36, 6990.68]
-  - - [704, 960, 1, 256, 704, 704, 704, 960]
+  - - [704, 960, 1, 256]
     - [36, 8260.84]
-  - - [832, 960, 1, 256, 832, 832, 832, 960]
+  - - [832, 960, 1, 256]
     - [14, 8332.38]
-  - - [960, 960, 1, 256, 960, 960, 960, 960]
+  - - [960, 960, 1, 256]
     - [22, 9381.09]
-  - - [64, 64, 1, 512, 64, 64, 64, 64]
+  - - [64, 64, 1, 512]
     - [5, 127.22]
-  - - [192, 64, 1, 512, 192, 192, 192, 64]
+  - - [192, 64, 1, 512]
     - [41, 385.624]
-  - - [320, 64, 1, 512, 320, 320, 320, 64]
+  - - [320, 64, 1, 512]
     - [10, 649.092]
-  - - [448, 64, 1, 512, 448, 448, 448, 64]
+  - - [448, 64, 1, 512]
     - [4, 914.674]
-  - - [576, 64, 1, 512, 576, 576, 576, 64]
+  - - [576, 64, 1, 512]
     - [39, 1173.78]
-  - - [704, 64, 1, 512, 704, 704, 704, 64]
+  - - [704, 64, 1, 512]
     - [39, 1428.44]
-  - - [832, 64, 1, 512, 832, 832, 832, 64]
+  - - [832, 64, 1, 512]
     - [4, 1732.69]
-  - - [960, 64, 1, 512, 960, 960, 960, 64]
+  - - [960, 64, 1, 512]
     - [10, 1999.89]
-  - - [64, 192, 1, 512, 64, 64, 64, 192]
+  - - [64, 192, 1, 512]
     - [13, 376.07]
-  - - [192, 192, 1, 512, 192, 192, 192, 192]
+  - - [192, 192, 1, 512]
     - [43, 1218.53]
-  - - [320, 192, 1, 512, 320, 320, 320, 192]
+  - - [320, 192, 1, 512]
     - [43, 2022.33]
-  - - [448, 192, 1, 512, 448, 448, 448, 192]
+  - - [448, 192, 1, 512]
     - [4, 2624.64]
-  - - [576, 192, 1, 512, 576, 576, 576, 192]
+  - - [576, 192, 1, 512]
     - [47, 3269.33]
-  - - [704, 192, 1, 512, 704, 704, 704, 192]
+  - - [704, 192, 1, 512]
     - [22, 3715.86]
-  - - [832, 192, 1, 512, 832, 832, 832, 192]
+  - - [832, 192, 1, 512]
     - [22, 4343.66]
-  - - [960, 192, 1, 512, 960, 960, 960, 192]
+  - - [960, 192, 1, 512]
     - [22, 5098.56]
-  - - [64, 320, 1, 512, 64, 64, 64, 320]
+  - - [64, 320, 1, 512]
     - [4, 654.767]
-  - - [192, 320, 1, 512, 192, 192, 192, 320]
+  - - [192, 320, 1, 512]
     - [43, 2005.63]
-  - - [320, 320, 1, 512, 320, 320, 320, 320]
+  - - [320, 320, 1, 512]
     - [14, 3047.39]
-  - - [448, 320, 1, 512, 448, 448, 448, 320]
+  - - [448, 320, 1, 512]
     - [10, 3862.26]
-  - - [576, 320, 1, 512, 576, 576, 576, 320]
+  - - [576, 320, 1, 512]
     - [33, 4947.54]
-  - - [704, 320, 1, 512, 704, 704, 704, 320]
+  - - [704, 320, 1, 512]
     - [47, 5556.17]
-  - - [832, 320, 1, 512, 832, 832, 832, 320]
+  - - [832, 320, 1, 512]
     - [33, 6416.48]
-  - - [960, 320, 1, 512, 960, 960, 960, 320]
+  - - [960, 320, 1, 512]
     - [36, 7221.76]
-  - - [64, 448, 1, 512, 64, 64, 64, 448]
+  - - [64, 448, 1, 512]
     - [40, 918.394]
-  - - [192, 448, 1, 512, 192, 192, 192, 448]
+  - - [192, 448, 1, 512]
     - [10, 2634.85]
-  - - [320, 448, 1, 512, 320, 320, 320, 448]
+  - - [320, 448, 1, 512]
     - [47, 3911.76]
-  - - [448, 448, 1, 512, 448, 448, 448, 448]
+  - - [448, 448, 1, 512]
     - [14, 5004.28]
-  - - [576, 448, 1, 512, 576, 576, 576, 448]
+  - - [576, 448, 1, 512]
     - [19, 6156.88]
-  - - [704, 448, 1, 512, 704, 704, 704, 448]
+  - - [704, 448, 1, 512]
     - [24, 7244.7]
-  - - [832, 448, 1, 512, 832, 832, 832, 448]
+  - - [832, 448, 1, 512]
     - [36, 7718.69]
-  - - [960, 448, 1, 512, 960, 960, 960, 448]
+  - - [960, 448, 1, 512]
     - [36, 8863.35]
-  - - [64, 576, 1, 512, 64, 64, 64, 576]
+  - - [64, 576, 1, 512]
     - [39, 1213.43]
-  - - [192, 576, 1, 512, 192, 192, 192, 576]
+  - - [192, 576, 1, 512]
     - [47, 3187.43]
-  - - [320, 576, 1, 512, 320, 320, 320, 576]
+  - - [320, 576, 1, 512]
     - [22, 5071.16]
-  - - [448, 576, 1, 512, 448, 448, 448, 576]
+  - - [448, 576, 1, 512]
     - [22, 6384.33]
-  - - [576, 576, 1, 512, 576, 576, 576, 576]
+  - - [576, 576, 1, 512]
     - [36, 8091.33]
-  - - [704, 576, 1, 512, 704, 704, 704, 576]
+  - - [704, 576, 1, 512]
     - [36, 8760.44]
-  - - [832, 576, 1, 512, 832, 832, 832, 576]
+  - - [832, 576, 1, 512]
     - [36, 10594.9]
-  - - [960, 576, 1, 512, 960, 960, 960, 576]
+  - - [960, 576, 1, 512]
     - [36, 11757.5]
-  - - [64, 704, 1, 512, 64, 64, 64, 704]
+  - - [64, 704, 1, 512]
     - [10, 1482.13]
-  - - [192, 704, 1, 512, 192, 192, 192, 704]
+  - - [192, 704, 1, 512]
     - [19, 3695.03]
-  - - [320, 704, 1, 512, 320, 320, 320, 704]
+  - - [320, 704, 1, 512]
     - [14, 5665.33]
-  - - [448, 704, 1, 512, 448, 448, 448, 704]
+  - - [448, 704, 1, 512]
     - [24, 7460.59]
-  - - [576, 704, 1, 512, 576, 576, 576, 704]
+  - - [576, 704, 1, 512]
     - [14, 8281.86]
-  - - [704, 704, 1, 512, 704, 704, 704, 704]
+  - - [704, 704, 1, 512]
     - [24, 10244.7]
-  - - [832, 704, 1, 512, 832, 832, 832, 704]
+  - - [832, 704, 1, 512]
     - [36, 11060.4]
-  - - [960, 704, 1, 512, 960, 960, 960, 704]
+  - - [960, 704, 1, 512]
     - [36, 12750.3]
-  - - [64, 832, 1, 512, 64, 64, 64, 832]
+  - - [64, 832, 1, 512]
     - [10, 1742.6]
-  - - [192, 832, 1, 512, 192, 192, 192, 832]
+  - - [192, 832, 1, 512]
     - [20, 4373.97]
-  - - [320, 832, 1, 512, 320, 320, 320, 832]
+  - - [320, 832, 1, 512]
     - [22, 6409.09]
-  - - [448, 832, 1, 512, 448, 448, 448, 832]
+  - - [448, 832, 1, 512]
     - [14, 7659.98]
-  - - [576, 832, 1, 512, 576, 576, 576, 832]
+  - - [576, 832, 1, 512]
     - [25, 10077.1]
-  - - [704, 832, 1, 512, 704, 704, 704, 832]
+  - - [704, 832, 1, 512]
     - [33, 10065.4]
-  - - [832, 832, 1, 512, 832, 832, 832, 832]
+  - - [832, 832, 1, 512]
     - [36, 11798.6]
-  - - [960, 832, 1, 512, 960, 960, 960, 832]
+  - - [960, 832, 1, 512]
     - [24, 12355.0]
-  - - [64, 960, 1, 512, 64, 64, 64, 960]
+  - - [64, 960, 1, 512]
     - [4, 2001.8]
-  - - [192, 960, 1, 512, 192, 192, 192, 960]
+  - - [192, 960, 1, 512]
     - [22, 5080.72]
-  - - [320, 960, 1, 512, 320, 320, 320, 960]
+  - - [320, 960, 1, 512]
     - [36, 7250.23]
-  - - [448, 960, 1, 512, 448, 448, 448, 960]
+  - - [448, 960, 1, 512]
     - [36, 9159.96]
-  - - [576, 960, 1, 512, 576, 576, 576, 960]
+  - - [576, 960, 1, 512]
     - [36, 11858.7]
-  - - [704, 960, 1, 512, 704, 704, 704, 960]
+  - - [704, 960, 1, 512]
     - [36, 13073.0]
-  - - [832, 960, 1, 512, 832, 832, 832, 960]
+  - - [832, 960, 1, 512]
     - [22, 12323.7]
-  - - [960, 960, 1, 512, 960, 960, 960, 960]
+  - - [960, 960, 1, 512]
     - [36, 15202.1]
-  - - [64, 64, 1, 1024, 64, 64, 64, 64]
+  - - [64, 64, 1, 1024]
     - [0, 242.459]
-  - - [192, 64, 1, 1024, 192, 192, 192, 64]
+  - - [192, 64, 1, 1024]
     - [42, 744.793]
-  - - [320, 64, 1, 1024, 320, 320, 320, 64]
+  - - [320, 64, 1, 1024]
     - [10, 1194.31]
-  - - [448, 64, 1, 1024, 448, 448, 448, 64]
+  - - [448, 64, 1, 1024]
     - [4, 1676.81]
-  - - [576, 64, 1, 1024, 576, 576, 576, 64]
+  - - [576, 64, 1, 1024]
     - [39, 2024.66]
-  - - [704, 64, 1, 1024, 704, 704, 704, 64]
+  - - [704, 64, 1, 1024]
     - [10, 2556.86]
-  - - [832, 64, 1, 1024, 832, 832, 832, 64]
+  - - [832, 64, 1, 1024]
     - [40, 2988.71]
-  - - [960, 64, 1, 1024, 960, 960, 960, 64]
+  - - [960, 64, 1, 1024]
     - [43, 3408.25]
-  - - [64, 192, 1, 1024, 64, 64, 64, 192]
+  - - [64, 192, 1, 1024]
     - [30, 718.839]
-  - - [192, 192, 1, 1024, 192, 192, 192, 192]
+  - - [192, 192, 1, 1024]
     - [39, 2116.02]
-  - - [320, 192, 1, 1024, 320, 320, 320, 192]
+  - - [320, 192, 1, 1024]
     - [39, 3495.35]
-  - - [448, 192, 1, 1024, 448, 448, 448, 192]
+  - - [448, 192, 1, 1024]
     - [38, 4527.51]
-  - - [576, 192, 1, 1024, 576, 576, 576, 192]
+  - - [576, 192, 1, 1024]
     - [47, 5477.58]
-  - - [704, 192, 1, 1024, 704, 704, 704, 192]
+  - - [704, 192, 1, 1024]
     - [38, 6154.52]
-  - - [832, 192, 1, 1024, 832, 832, 832, 192]
+  - - [832, 192, 1, 1024]
     - [38, 7185.81]
-  - - [960, 192, 1, 1024, 960, 960, 960, 192]
+  - - [960, 192, 1, 1024]
     - [38, 8256.68]
-  - - [64, 320, 1, 1024, 64, 64, 64, 320]
+  - - [64, 320, 1, 1024]
     - [4, 1199.43]
-  - - [192, 320, 1, 1024, 192, 192, 192, 320]
+  - - [192, 320, 1, 1024]
     - [39, 3473.16]
-  - - [320, 320, 1, 1024, 320, 320, 320, 320]
+  - - [320, 320, 1, 1024]
     - [47, 4999.41]
-  - - [448, 320, 1, 1024, 448, 448, 448, 320]
+  - - [448, 320, 1, 1024]
     - [37, 6263.09]
-  - - [576, 320, 1, 1024, 576, 576, 576, 320]
+  - - [576, 320, 1, 1024]
     - [33, 8006.43]
-  - - [704, 320, 1, 1024, 704, 704, 704, 320]
+  - - [704, 320, 1, 1024]
     - [37, 8612.69]
-  - - [832, 320, 1, 1024, 832, 832, 832, 320]
+  - - [832, 320, 1, 1024]
     - [33, 9603.36]
-  - - [960, 320, 1, 1024, 960, 960, 960, 320]
+  - - [960, 320, 1, 1024]
     - [36, 11330.2]
-  - - [64, 448, 1, 1024, 64, 64, 64, 448]
+  - - [64, 448, 1, 1024]
     - [10, 1688.87]
-  - - [192, 448, 1, 1024, 192, 192, 192, 448]
+  - - [192, 448, 1, 1024]
     - [10, 4363.87]
-  - - [320, 448, 1, 1024, 320, 320, 320, 448]
+  - - [320, 448, 1, 1024]
     - [26, 6283.06]
-  - - [448, 448, 1, 1024, 448, 448, 448, 448]
+  - - [448, 448, 1, 1024]
     - [37, 7591.08]
-  - - [576, 448, 1, 1024, 576, 576, 576, 448]
+  - - [576, 448, 1, 1024]
     - [37, 9718.68]
-  - - [704, 448, 1, 1024, 704, 704, 704, 448]
+  - - [704, 448, 1, 1024]
     - [36, 11491.7]
-  - - [832, 448, 1, 1024, 832, 832, 832, 448]
+  - - [832, 448, 1, 1024]
     - [36, 11402.3]
-  - - [960, 448, 1, 1024, 960, 960, 960, 448]
+  - - [960, 448, 1, 1024]
     - [36, 13313.6]
-  - - [64, 576, 1, 1024, 64, 64, 64, 576]
+  - - [64, 576, 1, 1024]
     - [39, 2114.24]
-  - - [192, 576, 1, 1024, 192, 192, 192, 576]
+  - - [192, 576, 1, 1024]
     - [47, 5451.21]
-  - - [320, 576, 1, 1024, 320, 320, 320, 576]
+  - - [320, 576, 1, 1024]
     - [38, 8102.5]
-  - - [448, 576, 1, 1024, 448, 448, 448, 576]
+  - - [448, 576, 1, 1024]
     - [37, 9787.07]
-  - - [576, 576, 1, 1024, 576, 576, 576, 576]
+  - - [576, 576, 1, 1024]
     - [36, 12562.4]
-  - - [704, 576, 1, 1024, 704, 704, 704, 576]
+  - - [704, 576, 1, 1024]
     - [36, 12936.1]
-  - - [832, 576, 1, 1024, 832, 832, 832, 576]
+  - - [832, 576, 1, 1024]
     - [36, 14841.9]
-  - - [960, 576, 1, 1024, 960, 960, 960, 576]
+  - - [960, 576, 1, 1024]
     - [36, 17086.5]
-  - - [64, 704, 1, 1024, 64, 64, 64, 704]
+  - - [64, 704, 1, 1024]
     - [43, 2586.25]
-  - - [192, 704, 1, 1024, 192, 192, 192, 704]
+  - - [192, 704, 1, 1024]
     - [38, 5984.22]
-  - - [320, 704, 1, 1024, 320, 320, 320, 704]
+  - - [320, 704, 1, 1024]
     - [37, 8674.39]
-  - - [448, 704, 1, 1024, 448, 448, 448, 704]
+  - - [448, 704, 1, 1024]
     - [24, 11461.1]
-  - - [576, 704, 1, 1024, 576, 576, 576, 704]
+  - - [576, 704, 1, 1024]
     - [36, 12636.9]
-  - - [704, 704, 1, 1024, 704, 704, 704, 704]
+  - - [704, 704, 1, 1024]
     - [24, 15452.2]
-  - - [832, 704, 1, 1024, 832, 832, 832, 704]
+  - - [832, 704, 1, 1024]
     - [36, 15990.7]
-  - - [960, 704, 1, 1024, 960, 960, 960, 704]
+  - - [960, 704, 1, 1024]
     - [36, 18284.8]
-  - - [64, 832, 1, 1024, 64, 64, 64, 832]
+  - - [64, 832, 1, 1024]
     - [39, 3036.9]
-  - - [192, 832, 1, 1024, 192, 192, 192, 832]
+  - - [192, 832, 1, 1024]
     - [33, 6943.33]
-  - - [320, 832, 1, 1024, 320, 320, 320, 832]
+  - - [320, 832, 1, 1024]
     - [37, 9635.6]
-  - - [448, 832, 1, 1024, 448, 448, 448, 832]
+  - - [448, 832, 1, 1024]
     - [38, 11087.7]
-  - - [576, 832, 1, 1024, 576, 576, 576, 832]
+  - - [576, 832, 1, 1024]
     - [24, 14893.7]
-  - - [704, 832, 1, 1024, 704, 704, 704, 832]
+  - - [704, 832, 1, 1024]
     - [36, 14748.2]
-  - - [832, 832, 1, 1024, 832, 832, 832, 832]
+  - - [832, 832, 1, 1024]
     - [36, 17386.9]
-  - - [960, 832, 1, 1024, 960, 960, 960, 832]
+  - - [960, 832, 1, 1024]
     - [24, 17336.1]
-  - - [64, 960, 1, 1024, 64, 64, 64, 960]
+  - - [64, 960, 1, 1024]
     - [39, 3508.02]
-  - - [192, 960, 1, 1024, 192, 192, 192, 960]
+  - - [192, 960, 1, 1024]
     - [38, 8271.16]
-  - - [320, 960, 1, 1024, 320, 320, 320, 960]
+  - - [320, 960, 1, 1024]
     - [36, 11649.1]
-  - - [448, 960, 1, 1024, 448, 448, 448, 960]
+  - - [448, 960, 1, 1024]
     - [36, 13472.5]
-  - - [576, 960, 1, 1024, 576, 576, 576, 960]
+  - - [576, 960, 1, 1024]
     - [36, 17356.3]
-  - - [704, 960, 1, 1024, 704, 704, 704, 960]
+  - - [704, 960, 1, 1024]
     - [36, 18589.3]
-  - - [832, 960, 1, 1024, 832, 832, 832, 960]
+  - - [832, 960, 1, 1024]
     - [37, 17070.1]
-  - - [960, 960, 1, 1024, 960, 960, 960, 960]
+  - - [960, 960, 1, 1024]
     - [36, 20895.6]
-  - - [64, 64, 1, 2048, 64, 64, 64, 64]
+  - - [64, 64, 1, 2048]
     - [3, 476.504]
-  - - [192, 64, 1, 2048, 192, 192, 192, 64]
+  - - [192, 64, 1, 2048]
     - [41, 1402.43]
-  - - [320, 64, 1, 2048, 320, 320, 320, 64]
+  - - [320, 64, 1, 2048]
     - [7, 2131.9]
-  - - [448, 64, 1, 2048, 448, 448, 448, 64]
+  - - [448, 64, 1, 2048]
     - [18, 2990.67]
-  - - [576, 64, 1, 2048, 576, 576, 576, 64]
+  - - [576, 64, 1, 2048]
     - [34, 3591.87]
-  - - [704, 64, 1, 2048, 704, 704, 704, 64]
+  - - [704, 64, 1, 2048]
     - [34, 4283.98]
-  - - [832, 64, 1, 2048, 832, 832, 832, 64]
+  - - [832, 64, 1, 2048]
     - [38, 4753.89]
-  - - [960, 64, 1, 2048, 960, 960, 960, 64]
+  - - [960, 64, 1, 2048]
     - [43, 5542.16]
-  - - [64, 64, 1, 4096, 64, 64, 64, 64]
+  - - [64, 64, 1, 4096]
     - [8, 873.381]
-  - - [192, 64, 1, 4096, 192, 192, 192, 64]
+  - - [192, 64, 1, 4096]
     - [46, 2391.73]
-  - - [320, 64, 1, 4096, 320, 320, 320, 64]
+  - - [320, 64, 1, 4096]
     - [46, 3716.79]
-  - - [448, 64, 1, 4096, 448, 448, 448, 64]
+  - - [448, 64, 1, 4096]
     - [48, 5079.72]
-  - - [576, 64, 1, 4096, 576, 576, 576, 64]
+  - - [576, 64, 1, 4096]
     - [21, 6026.66]
-  - - [704, 64, 1, 4096, 704, 704, 704, 64]
+  - - [704, 64, 1, 4096]
     - [34, 7174.21]
-  - - [832, 64, 1, 4096, 832, 832, 832, 64]
+  - - [832, 64, 1, 4096]
     - [38, 7620.94]
-  - - [960, 64, 1, 4096, 960, 960, 960, 64]
+  - - [960, 64, 1, 4096]
     - [38, 8791.86]
-  - - [1280, 1280, 1, 64, 1280, 1280, 1280, 1280]
+  - - [1280, 1280, 1, 64]
     - [14, 4493.67]
-  - - [1536, 1280, 1, 64, 1536, 1536, 1536, 1280]
+  - - [1536, 1280, 1, 64]
     - [17, 5036.29]
-  - - [1792, 1280, 1, 64, 1792, 1792, 1792, 1280]
+  - - [1792, 1280, 1, 64]
     - [17, 5587.19]
-  - - [2048, 1280, 1, 64, 2048, 2048, 2048, 1280]
+  - - [2048, 1280, 1, 64]
     - [9, 5650.89]
-  - - [1280, 1536, 1, 64, 1280, 1280, 1280, 1536]
+  - - [1280, 1536, 1, 64]
     - [14, 5175.07]
-  - - [1536, 1536, 1, 64, 1536, 1536, 1536, 1536]
+  - - [1536, 1536, 1, 64]
     - [17, 5557.62]
-  - - [1792, 1536, 1, 64, 1792, 1792, 1792, 1536]
+  - - [1792, 1536, 1, 64]
     - [17, 6091.52]
-  - - [2048, 1536, 1, 64, 2048, 2048, 2048, 1536]
+  - - [2048, 1536, 1, 64]
     - [9, 6164.51]
-  - - [1280, 1792, 1, 64, 1280, 1280, 1280, 1792]
+  - - [1280, 1792, 1, 64]
     - [17, 5486.03]
-  - - [1536, 1792, 1, 64, 1536, 1536, 1536, 1792]
+  - - [1536, 1792, 1, 64]
     - [17, 6001.25]
-  - - [1792, 1792, 1, 64, 1792, 1792, 1792, 1792]
+  - - [1792, 1792, 1, 64]
     - [17, 6680.56]
-  - - [2048, 1792, 1, 64, 2048, 2048, 2048, 1792]
+  - - [2048, 1792, 1, 64]
     - [9, 6682.44]
-  - - [1280, 2048, 1, 64, 1280, 1280, 1280, 2048]
+  - - [1280, 2048, 1, 64]
     - [17, 5994.22]
-  - - [1536, 2048, 1, 64, 1536, 1536, 1536, 2048]
+  - - [1536, 2048, 1, 64]
     - [17, 6535.73]
-  - - [1792, 2048, 1, 64, 1792, 1792, 1792, 2048]
+  - - [1792, 2048, 1, 64]
     - [32, 6992.8]
-  - - [2048, 2048, 1, 64, 2048, 2048, 2048, 2048]
+  - - [2048, 2048, 1, 64]
     - [9, 6878.82]
-  - - [1280, 1280, 1, 256, 1280, 1280, 1280, 1280]
+  - - [1280, 1280, 1, 256]
     - [24, 13138.4]
-  - - [1536, 1280, 1, 256, 1536, 1536, 1536, 1280]
+  - - [1536, 1280, 1, 256]
     - [24, 13636.7]
-  - - [1792, 1280, 1, 256, 1792, 1792, 1792, 1280]
+  - - [1792, 1280, 1, 256]
     - [25, 14623.8]
-  - - [2048, 1280, 1, 256, 2048, 2048, 2048, 1280]
+  - - [2048, 1280, 1, 256]
     - [24, 15603.6]
-  - - [1280, 1536, 1, 256, 1280, 1280, 1280, 1536]
+  - - [1280, 1536, 1, 256]
     - [24, 14561.9]
-  - - [1536, 1536, 1, 256, 1536, 1536, 1536, 1536]
+  - - [1536, 1536, 1, 256]
     - [24, 15275.7]
-  - - [1792, 1536, 1, 256, 1792, 1792, 1792, 1536]
+  - - [1792, 1536, 1, 256]
     - [24, 17105.7]
-  - - [2048, 1536, 1, 256, 2048, 2048, 2048, 1536]
+  - - [2048, 1536, 1, 256]
     - [24, 17185.9]
-  - - [1280, 1792, 1, 256, 1280, 1280, 1280, 1792]
+  - - [1280, 1792, 1, 256]
     - [36, 14825.2]
-  - - [1536, 1792, 1, 256, 1536, 1536, 1536, 1792]
+  - - [1536, 1792, 1, 256]
     - [36, 15895.9]
-  - - [1792, 1792, 1, 256, 1792, 1792, 1792, 1792]
+  - - [1792, 1792, 1, 256]
     - [24, 15776.4]
-  - - [2048, 1792, 1, 256, 2048, 2048, 2048, 1792]
+  - - [2048, 1792, 1, 256]
     - [24, 16947.1]
-  - - [1280, 2048, 1, 256, 1280, 1280, 1280, 2048]
+  - - [1280, 2048, 1, 256]
     - [36, 15504.3]
-  - - [1536, 2048, 1, 256, 1536, 1536, 1536, 2048]
+  - - [1536, 2048, 1, 256]
     - [24, 17000.9]
-  - - [1792, 2048, 1, 256, 1792, 1792, 1792, 2048]
+  - - [1792, 2048, 1, 256]
     - [24, 17154.5]
-  - - [2048, 2048, 1, 256, 2048, 2048, 2048, 2048]
+  - - [2048, 2048, 1, 256]
     - [24, 17302.2]
-  - - [1280, 1280, 1, 512, 1280, 1280, 1280, 1280]
+  - - [1280, 1280, 1, 512]
     - [24, 19623.2]
-  - - [1536, 1280, 1, 512, 1536, 1536, 1536, 1280]
+  - - [1536, 1280, 1, 512]
     - [24, 20777.4]
-  - - [1792, 1280, 1, 512, 1792, 1792, 1792, 1280]
+  - - [1792, 1280, 1, 512]
     - [24, 20878.9]
-  - - [2048, 1280, 1, 512, 2048, 2048, 2048, 1280]
+  - - [2048, 1280, 1, 512]
     - [24, 21417.3]
-  - - [1280, 1536, 1, 512, 1280, 1280, 1280, 1536]
+  - - [1280, 1536, 1, 512]
     - [24, 21146.2]
-  - - [1536, 1536, 1, 512, 1536, 1536, 1536, 1536]
+  - - [1536, 1536, 1, 512]
     - [24, 21685.7]
-  - - [1792, 1536, 1, 512, 1792, 1792, 1792, 1536]
+  - - [1792, 1536, 1, 512]
     - [24, 23009.5]
-  - - [2048, 1536, 1, 512, 2048, 2048, 2048, 1536]
+  - - [2048, 1536, 1, 512]
     - [24, 23190.0]
-  - - [1280, 1792, 1, 512, 1280, 1280, 1280, 1792]
+  - - [1280, 1792, 1, 512]
     - [36, 20517.7]
-  - - [1536, 1792, 1, 512, 1536, 1536, 1536, 1792]
+  - - [1536, 1792, 1, 512]
     - [24, 22194.2]
-  - - [1792, 1792, 1, 512, 1792, 1792, 1792, 1792]
+  - - [1792, 1792, 1, 512]
     - [24, 23050.8]
-  - - [2048, 1792, 1, 512, 2048, 2048, 2048, 1792]
+  - - [2048, 1792, 1, 512]
     - [24, 23348.7]
-  - - [1280, 2048, 1, 512, 1280, 1280, 1280, 2048]
+  - - [1280, 2048, 1, 512]
     - [36, 21300.0]
-  - - [1536, 2048, 1, 512, 1536, 1536, 1536, 2048]
+  - - [1536, 2048, 1, 512]
     - [24, 22898.2]
-  - - [1792, 2048, 1, 512, 1792, 1792, 1792, 2048]
+  - - [1792, 2048, 1, 512]
     - [24, 23688.7]
-  - - [2048, 2048, 1, 512, 2048, 2048, 2048, 2048]
+  - - [2048, 2048, 1, 512]
     - [24, 24402.5]
-  - - [1280, 1280, 1, 1024, 1280, 1280, 1280, 1280]
+  - - [1280, 1280, 1, 1024]
     - [24, 24266.3]
-  - - [1536, 1280, 1, 1024, 1536, 1536, 1536, 1280]
+  - - [1536, 1280, 1, 1024]
     - [24, 25623.0]
-  - - [1792, 1280, 1, 1024, 1792, 1792, 1792, 1280]
+  - - [1792, 1280, 1, 1024]
     - [24, 26121.8]
-  - - [2048, 1280, 1, 1024, 2048, 2048, 2048, 1280]
+  - - [2048, 1280, 1, 1024]
     - [24, 26616.8]
-  - - [1280, 1536, 1, 1024, 1280, 1280, 1280, 1536]
+  - - [1280, 1536, 1, 1024]
     - [24, 25670.4]
-  - - [1536, 1536, 1, 1024, 1536, 1536, 1536, 1536]
+  - - [1536, 1536, 1, 1024]
     - [24, 27103.4]
-  - - [1792, 1536, 1, 1024, 1792, 1792, 1792, 1536]
+  - - [1792, 1536, 1, 1024]
     - [24, 28110.7]
-  - - [2048, 1536, 1, 1024, 2048, 2048, 2048, 1536]
+  - - [2048, 1536, 1, 1024]
     - [24, 27617.8]
-  - - [1280, 1792, 1, 1024, 1280, 1280, 1280, 1792]
+  - - [1280, 1792, 1, 1024]
     - [36, 26158.2]
-  - - [1536, 1792, 1, 1024, 1536, 1536, 1536, 1792]
+  - - [1536, 1792, 1, 1024]
     - [24, 26796.0]
-  - - [1792, 1792, 1, 1024, 1792, 1792, 1792, 1792]
+  - - [1792, 1792, 1, 1024]
     - [24, 28049.9]
-  - - [2048, 1792, 1, 1024, 2048, 2048, 2048, 1792]
+  - - [2048, 1792, 1, 1024]
     - [24, 27992.0]
-  - - [1280, 2048, 1, 1024, 1280, 1280, 1280, 2048]
+  - - [1280, 2048, 1, 1024]
     - [36, 26639.2]
-  - - [1536, 2048, 1, 1024, 1536, 1536, 1536, 2048]
+  - - [1536, 2048, 1, 1024]
     - [24, 27618.8]
-  - - [1792, 2048, 1, 1024, 1792, 1792, 1792, 2048]
+  - - [1792, 2048, 1, 1024]
     - [24, 28418.5]
-  - - [2048, 2048, 1, 1024, 2048, 2048, 2048, 2048]
+  - - [2048, 2048, 1, 1024]
     - [24, 28941.7]
-  - - [1280, 1280, 1, 2048, 1280, 1280, 1280, 1280]
+  - - [1280, 1280, 1, 2048]
     - [24, 28646.8]
-  - - [1536, 1280, 1, 2048, 1536, 1536, 1536, 1280]
+  - - [1536, 1280, 1, 2048]
     - [24, 29209.3]
-  - - [1792, 1280, 1, 2048, 1792, 1792, 1792, 1280]
+  - - [1792, 1280, 1, 2048]
     - [24, 29621.2]
-  - - [2048, 1280, 1, 2048, 2048, 2048, 2048, 1280]
+  - - [2048, 1280, 1, 2048]
     - [24, 29904.3]
-  - - [1280, 1536, 1, 2048, 1280, 1280, 1280, 1536]
+  - - [1280, 1536, 1, 2048]
     - [36, 29522.1]
-  - - [1536, 1536, 1, 2048, 1536, 1536, 1536, 1536]
+  - - [1536, 1536, 1, 2048]
     - [24, 30247.2]
-  - - [1792, 1536, 1, 2048, 1792, 1792, 1792, 1536]
+  - - [1792, 1536, 1, 2048]
     - [24, 30775.6]
-  - - [2048, 1536, 1, 2048, 2048, 2048, 2048, 1536]
+  - - [2048, 1536, 1, 2048]
     - [24, 30372.7]
-  - - [1280, 1792, 1, 2048, 1280, 1280, 1280, 1792]
+  - - [1280, 1792, 1, 2048]
     - [36, 29284.2]
-  - - [1536, 1792, 1, 2048, 1536, 1536, 1536, 1792]
+  - - [1536, 1792, 1, 2048]
     - [24, 29557.3]
-  - - [1792, 1792, 1, 2048, 1792, 1792, 1792, 1792]
+  - - [1792, 1792, 1, 2048]
     - [36, 30891.0]
-  - - [2048, 1792, 1, 2048, 2048, 2048, 2048, 1792]
+  - - [2048, 1792, 1, 2048]
     - [24, 30898.7]
-  - - [1280, 2048, 1, 2048, 1280, 1280, 1280, 2048]
+  - - [1280, 2048, 1, 2048]
     - [24, 29661.5]
-  - - [1536, 2048, 1, 2048, 1536, 1536, 1536, 2048]
+  - - [1536, 2048, 1, 2048]
     - [24, 30340.5]
-  - - [1792, 2048, 1, 2048, 1792, 1792, 1792, 2048]
+  - - [1792, 2048, 1, 2048]
     - [36, 30648.6]
-  - - [2048, 2048, 1, 2048, 2048, 2048, 2048, 2048]
+  - - [2048, 2048, 1, 2048]
     - [36, 29665.9]
-  - - [1280, 1280, 1, 4096, 1280, 1280, 1280, 1280]
+  - - [1280, 1280, 1, 4096]
     - [24, 31109.5]
-  - - [1536, 1280, 1, 4096, 1536, 1536, 1536, 1280]
+  - - [1536, 1280, 1, 4096]
     - [24, 31468.7]
-  - - [1792, 1280, 1, 4096, 1792, 1792, 1792, 1280]
+  - - [1792, 1280, 1, 4096]
     - [24, 31498.5]
-  - - [2048, 1280, 1, 4096, 2048, 2048, 2048, 1280]
+  - - [2048, 1280, 1, 4096]
     - [24, 31586.7]
-  - - [1280, 1536, 1, 4096, 1280, 1280, 1280, 1536]
+  - - [1280, 1536, 1, 4096]
     - [36, 31724.6]
-  - - [1536, 1536, 1, 4096, 1536, 1536, 1536, 1536]
+  - - [1536, 1536, 1, 4096]
     - [24, 32323.7]
-  - - [1792, 1536, 1, 4096, 1792, 1792, 1792, 1536]
+  - - [1792, 1536, 1, 4096]
     - [24, 32652.1]
-  - - [2048, 1536, 1, 4096, 2048, 2048, 2048, 1536]
+  - - [2048, 1536, 1, 4096]
     - [24, 31855.2]
-  - - [1280, 1792, 1, 4096, 1280, 1280, 1280, 1792]
+  - - [1280, 1792, 1, 4096]
     - [24, 31445.2]
-  - - [1536, 1792, 1, 4096, 1536, 1536, 1536, 1792]
+  - - [1536, 1792, 1, 4096]
     - [24, 31406.5]
-  - - [1792, 1792, 1, 4096, 1792, 1792, 1792, 1792]
+  - - [1792, 1792, 1, 4096]
     - [24, 32374.0]
-  - - [2048, 1792, 1, 4096, 2048, 2048, 2048, 1792]
+  - - [2048, 1792, 1, 4096]
     - [24, 32212.0]
-  - - [1280, 2048, 1, 4096, 1280, 1280, 1280, 2048]
+  - - [1280, 2048, 1, 4096]
     - [36, 31623.0]
-  - - [1536, 2048, 1, 4096, 1536, 1536, 1536, 2048]
+  - - [1536, 2048, 1, 4096]
     - [36, 32023.5]
-  - - [1792, 2048, 1, 4096, 1792, 1792, 1792, 2048]
+  - - [1792, 2048, 1, 4096]
     - [36, 30500.3]
-  - - [2048, 2048, 1, 4096, 2048, 2048, 2048, 2048]
+  - - [2048, 2048, 1, 4096]
     - [36, 28975.4]
-  - - [2560, 2560, 1, 64, 2560, 2560, 2560, 2560]
+  - - [2560, 2560, 1, 64]
     - [17, 8282.02]
-  - - [3072, 2560, 1, 64, 3072, 3072, 3072, 2560]
+  - - [3072, 2560, 1, 64]
     - [17, 8652.06]
-  - - [3584, 2560, 1, 64, 3584, 3584, 3584, 2560]
+  - - [3584, 2560, 1, 64]
     - [17, 9057.16]
-  - - [4096, 2560, 1, 64, 4096, 4096, 4096, 2560]
+  - - [4096, 2560, 1, 64]
     - [9, 8999.75]
-  - - [2560, 3072, 1, 64, 2560, 2560, 2560, 3072]
+  - - [2560, 3072, 1, 64]
     - [17, 8805.63]
-  - - [3072, 3072, 1, 64, 3072, 3072, 3072, 3072]
+  - - [3072, 3072, 1, 64]
     - [17, 9212.91]
-  - - [3584, 3072, 1, 64, 3584, 3584, 3584, 3072]
+  - - [3584, 3072, 1, 64]
     - [17, 9489.12]
-  - - [4096, 3072, 1, 64, 4096, 4096, 4096, 3072]
+  - - [4096, 3072, 1, 64]
     - [24, 9541.26]
-  - - [2560, 3584, 1, 64, 2560, 2560, 2560, 3584]
+  - - [2560, 3584, 1, 64]
     - [17, 9206.98]
-  - - [3072, 3584, 1, 64, 3072, 3072, 3072, 3584]
+  - - [3072, 3584, 1, 64]
     - [17, 9556.04]
-  - - [3584, 3584, 1, 64, 3584, 3584, 3584, 3584]
+  - - [3584, 3584, 1, 64]
     - [17, 9894.19]
-  - - [4096, 3584, 1, 64, 4096, 4096, 4096, 3584]
+  - - [4096, 3584, 1, 64]
     - [24, 9679.08]
-  - - [2560, 4096, 1, 64, 2560, 2560, 2560, 4096]
+  - - [2560, 4096, 1, 64]
     - [17, 9513.25]
-  - - [3072, 4096, 1, 64, 3072, 3072, 3072, 4096]
+  - - [3072, 4096, 1, 64]
     - [17, 9642.37]
-  - - [3584, 4096, 1, 64, 3584, 3584, 3584, 4096]
+  - - [3584, 4096, 1, 64]
     - [17, 10132.2]
-  - - [4096, 4096, 1, 64, 4096, 4096, 4096, 4096]
+  - - [4096, 4096, 1, 64]
     - [9, 9782.01]
-  - - [2560, 2560, 1, 256, 2560, 2560, 2560, 2560]
+  - - [2560, 2560, 1, 256]
     - [24, 21066.8]
-  - - [3072, 2560, 1, 256, 3072, 3072, 3072, 2560]
+  - - [3072, 2560, 1, 256]
     - [24, 21755.2]
-  - - [3584, 2560, 1, 256, 3584, 3584, 3584, 2560]
+  - - [3584, 2560, 1, 256]
     - [24, 22651.8]
-  - - [4096, 2560, 1, 256, 4096, 4096, 4096, 2560]
+  - - [4096, 2560, 1, 256]
     - [24, 22818.1]
-  - - [2560, 3072, 1, 256, 2560, 2560, 2560, 3072]
+  - - [2560, 3072, 1, 256]
     - [24, 22258.9]
-  - - [3072, 3072, 1, 256, 3072, 3072, 3072, 3072]
+  - - [3072, 3072, 1, 256]
     - [24, 23235.1]
-  - - [3584, 3072, 1, 256, 3584, 3584, 3584, 3072]
+  - - [3584, 3072, 1, 256]
     - [24, 23746.0]
-  - - [4096, 3072, 1, 256, 4096, 4096, 4096, 3072]
+  - - [4096, 3072, 1, 256]
     - [24, 24035.2]
-  - - [2560, 3584, 1, 256, 2560, 2560, 2560, 3584]
+  - - [2560, 3584, 1, 256]
     - [24, 22934.9]
-  - - [3072, 3584, 1, 256, 3072, 3072, 3072, 3584]
+  - - [3072, 3584, 1, 256]
     - [24, 23600.9]
-  - - [3584, 3584, 1, 256, 3584, 3584, 3584, 3584]
+  - - [3584, 3584, 1, 256]
     - [24, 24201.9]
-  - - [4096, 3584, 1, 256, 4096, 4096, 4096, 3584]
+  - - [4096, 3584, 1, 256]
     - [24, 24344.7]
-  - - [2560, 4096, 1, 256, 2560, 2560, 2560, 4096]
+  - - [2560, 4096, 1, 256]
     - [24, 22940.0]
-  - - [3072, 4096, 1, 256, 3072, 3072, 3072, 4096]
+  - - [3072, 4096, 1, 256]
     - [24, 23539.9]
-  - - [3584, 4096, 1, 256, 3584, 3584, 3584, 4096]
+  - - [3584, 4096, 1, 256]
     - [24, 24188.7]
-  - - [4096, 4096, 1, 256, 4096, 4096, 4096, 4096]
+  - - [4096, 4096, 1, 256]
     - [24, 23354.9]
-  - - [2560, 2560, 1, 512, 2560, 2560, 2560, 2560]
+  - - [2560, 2560, 1, 512]
     - [24, 27647.2]
-  - - [3072, 2560, 1, 512, 3072, 3072, 3072, 2560]
+  - - [3072, 2560, 1, 512]
     - [24, 28008.6]
-  - - [3584, 2560, 1, 512, 3584, 3584, 3584, 2560]
+  - - [3584, 2560, 1, 512]
     - [24, 28598.6]
-  - - [4096, 2560, 1, 512, 4096, 4096, 4096, 2560]
+  - - [4096, 2560, 1, 512]
     - [24, 28934.9]
-  - - [2560, 3072, 1, 512, 2560, 2560, 2560, 3072]
+  - - [2560, 3072, 1, 512]
     - [24, 28520.4]
-  - - [3072, 3072, 1, 512, 3072, 3072, 3072, 3072]
+  - - [3072, 3072, 1, 512]
     - [24, 29238.7]
-  - - [3584, 3072, 1, 512, 3584, 3584, 3584, 3072]
+  - - [3584, 3072, 1, 512]
     - [24, 29758.5]
-  - - [4096, 3072, 1, 512, 4096, 4096, 4096, 3072]
+  - - [4096, 3072, 1, 512]
     - [24, 29620.7]
-  - - [2560, 3584, 1, 512, 2560, 2560, 2560, 3584]
+  - - [2560, 3584, 1, 512]
     - [24, 28977.1]
-  - - [3072, 3584, 1, 512, 3072, 3072, 3072, 3584]
+  - - [3072, 3584, 1, 512]
     - [24, 29688.8]
-  - - [3584, 3584, 1, 512, 3584, 3584, 3584, 3584]
+  - - [3584, 3584, 1, 512]
     - [24, 29973.9]
-  - - [4096, 3584, 1, 512, 4096, 4096, 4096, 3584]
+  - - [4096, 3584, 1, 512]
     - [24, 30014.0]
-  - - [2560, 4096, 1, 512, 2560, 2560, 2560, 4096]
+  - - [2560, 4096, 1, 512]
     - [36, 28881.2]
-  - - [3072, 4096, 1, 512, 3072, 3072, 3072, 4096]
+  - - [3072, 4096, 1, 512]
     - [36, 28958.3]
-  - - [3584, 4096, 1, 512, 3584, 3584, 3584, 4096]
+  - - [3584, 4096, 1, 512]
     - [36, 29783.9]
-  - - [4096, 4096, 1, 512, 4096, 4096, 4096, 4096]
+  - - [4096, 4096, 1, 512]
     - [24, 29254.6]
-  - - [2560, 2560, 1, 1024, 2560, 2560, 2560, 2560]
+  - - [2560, 2560, 1, 1024]
     - [24, 31176.6]
-  - - [3072, 2560, 1, 1024, 3072, 3072, 3072, 2560]
+  - - [3072, 2560, 1, 1024]
     - [24, 31277.4]
-  - - [3584, 2560, 1, 1024, 3584, 3584, 3584, 2560]
+  - - [3584, 2560, 1, 1024]
     - [24, 31868.1]
-  - - [4096, 2560, 1, 1024, 4096, 4096, 4096, 2560]
+  - - [4096, 2560, 1, 1024]
     - [24, 31986.1]
-  - - [2560, 3072, 1, 1024, 2560, 2560, 2560, 3072]
+  - - [2560, 3072, 1, 1024]
     - [36, 31986.7]
-  - - [3072, 3072, 1, 1024, 3072, 3072, 3072, 3072]
+  - - [3072, 3072, 1, 1024]
     - [24, 32234.2]
-  - - [3584, 3072, 1, 1024, 3584, 3584, 3584, 3072]
+  - - [3584, 3072, 1, 1024]
     - [24, 32766.9]
-  - - [4096, 3072, 1, 1024, 4096, 4096, 4096, 3072]
+  - - [4096, 3072, 1, 1024]
     - [24, 32728.7]
-  - - [2560, 3584, 1, 1024, 2560, 2560, 2560, 3584]
+  - - [2560, 3584, 1, 1024]
     - [24, 32203.4]
-  - - [3072, 3584, 1, 1024, 3072, 3072, 3072, 3584]
+  - - [3072, 3584, 1, 1024]
     - [24, 32614.3]
-  - - [3584, 3584, 1, 1024, 3584, 3584, 3584, 3584]
+  - - [3584, 3584, 1, 1024]
     - [24, 32397.1]
-  - - [4096, 3584, 1, 1024, 4096, 4096, 4096, 3584]
+  - - [4096, 3584, 1, 1024]
     - [24, 32825.6]
-  - - [2560, 4096, 1, 1024, 2560, 2560, 2560, 4096]
+  - - [2560, 4096, 1, 1024]
     - [36, 31964.2]
-  - - [3072, 4096, 1, 1024, 3072, 3072, 3072, 4096]
+  - - [3072, 4096, 1, 1024]
     - [36, 31501.7]
-  - - [3584, 4096, 1, 1024, 3584, 3584, 3584, 4096]
+  - - [3584, 4096, 1, 1024]
     - [36, 32309.2]
-  - - [4096, 4096, 1, 1024, 4096, 4096, 4096, 4096]
+  - - [4096, 4096, 1, 1024]
     - [24, 31281.1]
-  - - [2560, 2560, 1, 2048, 2560, 2560, 2560, 2560]
+  - - [2560, 2560, 1, 2048]
     - [24, 32962.1]
-  - - [3072, 2560, 1, 2048, 3072, 3072, 3072, 2560]
+  - - [3072, 2560, 1, 2048]
     - [24, 32916.0]
-  - - [3584, 2560, 1, 2048, 3584, 3584, 3584, 2560]
+  - - [3584, 2560, 1, 2048]
     - [36, 33163.3]
-  - - [4096, 2560, 1, 2048, 4096, 4096, 4096, 2560]
+  - - [4096, 2560, 1, 2048]
     - [24, 33290.7]
-  - - [2560, 3072, 1, 2048, 2560, 2560, 2560, 3072]
+  - - [2560, 3072, 1, 2048]
     - [36, 33432.8]
-  - - [3072, 3072, 1, 2048, 3072, 3072, 3072, 3072]
+  - - [3072, 3072, 1, 2048]
     - [36, 33555.4]
-  - - [3584, 3072, 1, 2048, 3584, 3584, 3584, 3072]
+  - - [3584, 3072, 1, 2048]
     - [24, 33983.0]
-  - - [4096, 3072, 1, 2048, 4096, 4096, 4096, 3072]
+  - - [4096, 3072, 1, 2048]
     - [24, 33975.2]
-  - - [2560, 3584, 1, 2048, 2560, 2560, 2560, 3584]
+  - - [2560, 3584, 1, 2048]
     - [24, 33584.5]
-  - - [3072, 3584, 1, 2048, 3072, 3072, 3072, 3584]
+  - - [3072, 3584, 1, 2048]
     - [24, 33735.4]
-  - - [3584, 3584, 1, 2048, 3584, 3584, 3584, 3584]
+  - - [3584, 3584, 1, 2048]
     - [24, 33857.9]
-  - - [4096, 3584, 1, 2048, 4096, 4096, 4096, 3584]
+  - - [4096, 3584, 1, 2048]
     - [24, 33856.2]
-  - - [2560, 4096, 1, 2048, 2560, 2560, 2560, 4096]
+  - - [2560, 4096, 1, 2048]
     - [36, 32946.1]
-  - - [3072, 4096, 1, 2048, 3072, 3072, 3072, 4096]
+  - - [3072, 4096, 1, 2048]
     - [36, 32804.7]
-  - - [3584, 4096, 1, 2048, 3584, 3584, 3584, 4096]
+  - - [3584, 4096, 1, 2048]
     - [36, 33009.8]
-  - - [4096, 4096, 1, 2048, 4096, 4096, 4096, 4096]
+  - - [4096, 4096, 1, 2048]
     - [36, 30829.2]
-  - - [2560, 2560, 1, 4096, 2560, 2560, 2560, 2560]
+  - - [2560, 2560, 1, 4096]
     - [24, 33900.8]
-  - - [3072, 2560, 1, 4096, 3072, 3072, 3072, 2560]
+  - - [3072, 2560, 1, 4096]
     - [36, 33893.6]
-  - - [3584, 2560, 1, 4096, 3584, 3584, 3584, 2560]
+  - - [3584, 2560, 1, 4096]
     - [24, 34143.3]
-  - - [4096, 2560, 1, 4096, 4096, 4096, 4096, 2560]
+  - - [4096, 2560, 1, 4096]
     - [24, 34272.7]
-  - - [2560, 3072, 1, 4096, 2560, 2560, 2560, 3072]
+  - - [2560, 3072, 1, 4096]
     - [36, 34549.4]
-  - - [3072, 3072, 1, 4096, 3072, 3072, 3072, 3072]
+  - - [3072, 3072, 1, 4096]
     - [36, 34589.0]
-  - - [3584, 3072, 1, 4096, 3584, 3584, 3584, 3072]
+  - - [3584, 3072, 1, 4096]
     - [36, 34869.6]
-  - - [4096, 3072, 1, 4096, 4096, 4096, 4096, 3072]
+  - - [4096, 3072, 1, 4096]
     - [36, 34828.0]
-  - - [2560, 3584, 1, 4096, 2560, 2560, 2560, 3584]
+  - - [2560, 3584, 1, 4096]
     - [24, 34467.9]
-  - - [3072, 3584, 1, 4096, 3072, 3072, 3072, 3584]
+  - - [3072, 3584, 1, 4096]
     - [24, 34580.2]
-  - - [3584, 3584, 1, 4096, 3584, 3584, 3584, 3584]
+  - - [3584, 3584, 1, 4096]
     - [24, 34619.7]
-  - - [4096, 3584, 1, 4096, 4096, 4096, 4096, 3584]
+  - - [4096, 3584, 1, 4096]
     - [24, 34397.9]
-  - - [2560, 4096, 1, 4096, 2560, 2560, 2560, 4096]
+  - - [2560, 4096, 1, 4096]
     - [36, 31968.1]
-  - - [3072, 4096, 1, 4096, 3072, 3072, 3072, 4096]
+  - - [3072, 4096, 1, 4096]
     - [36, 31815.0]
-  - - [3584, 4096, 1, 4096, 3584, 3584, 3584, 4096]
+  - - [3584, 4096, 1, 4096]
     - [36, 31190.4]
-  - - [4096, 4096, 1, 4096, 4096, 4096, 4096, 4096]
+  - - [4096, 4096, 1, 4096]
     - [36, 28933.1]
-  - - [1, 1, 1, 1, 1, 1, 1, 1]
+  - - [1, 1, 1, 1]
     - [50, 6.57484e-05]
-  - - [1, 1, 1, 64, 1, 1, 1, 1]
+  - - [1, 1, 1, 64]
     - [45, 0.00434945]
-  - - [1, 64, 1, 1, 1, 1, 1, 64]
+  - - [1, 64, 1, 1]
     - [12, 0.00421469]
-  - - [64, 1, 1, 1, 64, 64, 64, 1]
+  - - [64, 1, 1, 1]
     - [12, 0.00409875]
-  - - [64, 64, 1, 1, 64, 64, 64, 64]
+  - - [64, 64, 1, 1]
     - [12, 0.275556]
-  - - [64, 1, 1, 64, 64, 64, 64, 1]
+  - - [64, 1, 1, 64]
     - [40, 0.259824]
-  - - [1, 64, 1, 64, 1, 1, 1, 64]
+  - - [1, 64, 1, 64]
     - [2, 0.253316]
 - null
 - null
