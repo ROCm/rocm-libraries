@@ -134,7 +134,7 @@ template<typename T>
 class PoissonTest : public ::testing::Test
 {
 public:
-    using rocrand_prng_type = T;
+    using rocrand_prng_type                     = T;
     std::vector<double> small_poisson_lambdas   = {1, 2, 4, 8, 16, 32, 64};
     std::vector<double> large_poisson_lambdas   = {128, 256, 512, 1024, 2048};
     std::vector<double> massive_poisson_lambdas = {4096, 8192, 16384, 32768};
@@ -293,62 +293,76 @@ struct GlobalSizes
 
 //get the rocrand state (device_state should be allocated)
 template<class RocrandPRNGType>
-inline void GetRocrandState(RocrandPRNGType* device_state)
+inline void GetDeviceRocrandState(RocrandPRNGType* device_prngs)
 {
+    // Initialize for device code rocrand state. Each thread will get 1 "state"
+    // Assumed that device_prngs is already initialized
 
-    RocrandPRNGType* host_state
-        = new RocrandPRNGType[GlobalSizes::block_size * GlobalSizes::grid_size];
+    std::vector<RocrandPRNGType> host_states(GlobalSizes::block_size * GlobalSizes::grid_size);
 
-    for(size_t i = 0; i < GlobalSizes::block_size * GlobalSizes::grid_size; i++)
+    for(size_t bi = 0; bi < GlobalSizes::grid_size; bi++)
     {
-        if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_sobol32>)
+        for(size_t ti = 0; ti < GlobalSizes::block_size; ti++)
         {
-            const unsigned int* directions;
-            ROCRAND_CHECK(
-                rocrand_get_direction_vectors32(&directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
-            rocrand_init(directions, 123456 ^ i, host_state + i);
+            const size_t offset = bi * GlobalSizes::block_size;
+            const size_t prng_offset
+                = (GlobalSizes::items_per_block * bi) + (GlobalSizes::items_per_thread * ti);
+
+            if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_sobol32>)
+            {
+                const unsigned int* directions;
+                ROCRAND_CHECK(
+                    rocrand_get_direction_vectors32(&directions,
+                                                    ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
+
+                rocrand_init(directions, prng_offset, &host_states[offset + ti]);
+            }
+            // scrambled sobol32 case
+            else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_scrambled_sobol32>)
+            {
+                const unsigned int* directions;
+                ROCRAND_CHECK(
+                    rocrand_get_direction_vectors32(&directions,
+                                                    ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
+                rocrand_init(directions, 123456, prng_offset, &host_states[offset + ti]);
+            }
+            // sobol64 case
+            else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_sobol64>)
+            {
+                const unsigned long long* directions;
+                ROCRAND_CHECK(
+                    rocrand_get_direction_vectors64(&directions,
+                                                    ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
+                rocrand_init(directions, prng_offset, &host_states[offset + ti]);
+            }
+            // scrambled sobol64 case
+            else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_scrambled_sobol64>)
+            {
+                const unsigned long long* directions;
+                ROCRAND_CHECK(
+                    rocrand_get_direction_vectors64(&directions,
+                                                    ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
+                rocrand_init(directions, 123456, prng_offset, &host_states[offset + ti]);
+            }
+            // lfsr113 case
+            else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_lfsr113>)
+            {
+                rocrand_init({0xabcd, 0xdabc, 0xcdab, 0xbcda},
+                             0,
+                             prng_offset,
+                             &host_states[offset + ti]);
+            }
+            else
+            {
+                rocrand_init(123456, 654321, prng_offset, &host_states[offset + ti]);
+            }
         }
-        // scrambled sobol32 case
-        else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_scrambled_sobol32>)
-        {
-            const unsigned int* directions;
-            ROCRAND_CHECK(
-                rocrand_get_direction_vectors32(&directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
-            rocrand_init(directions, 123456 ^ i, 654321 ^ i, host_state + i);
-        }
-        // sobol64 case
-        else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_sobol64>)
-        {
-            const unsigned long long* directions;
-            ROCRAND_CHECK(
-                rocrand_get_direction_vectors64(&directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
-            rocrand_init(directions, 123456 ^ i, host_state + i);
-        }
-        // scrambled sobol64 case
-        else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_scrambled_sobol64>)
-        {
-            const unsigned long long* directions;
-            ROCRAND_CHECK(
-                rocrand_get_direction_vectors64(&directions, ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
-            rocrand_init(directions, 123456 ^ i, 654321 ^ i, host_state + i);
-        }
-        // lfsr113 case
-        else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_lfsr113>)
-        {
-            rocrand_init({0xabcd, 0xdabc, 0xcdab, 0xbcda}, 0, 0, host_state + i);
-        }
-        else
-        {
-            rocrand_init(123456 ^ i, 654321 ^ i, 0, host_state + i);
-        }
-        HIP_CHECK(hipDeviceSynchronize());
-        HIP_CHECK(hipMemcpy(device_state + i,
-                            host_state + i,
-                            sizeof(RocrandPRNGType),
-                            hipMemcpyHostToDevice));
     }
 
-    delete[] host_state;
+    HIP_CHECK(hipMemcpy(device_prngs,
+                        host_states.data(),
+                        sizeof(RocrandPRNGType) * GlobalSizes::grid_size * GlobalSizes::block_size,
+                        hipMemcpyHostToDevice));
 }
 
 // Declaring typed test parameters
@@ -374,184 +388,176 @@ void poisson_kernel(RocRandPrngType*   states,
 // read_func is how to interpret the output (needed for special case like uint4)
 // size_multiplier is needed for special cases like uint4 where each element is actually 4
 template<typename RocRandPrngType, typename ReturnType, class PoissonFunc, class ReadFunc>
-void run_poisson_test(
-    std::vector<double> & all_lambdas,
-    const PoissonFunc & f,
-    const ReadFunc & read_func,
-    const size_t size_multiplier = 1)
-    {
-
-    constexpr bool is_sobol  =  std::is_same_v<RocRandPrngType, rocrand_state_sobol32> ||
-                                std::is_same_v<RocRandPrngType, rocrand_state_sobol64> ||
-                                std::is_same_v<RocRandPrngType, rocrand_state_scrambled_sobol32> ||
-                                std::is_same_v<RocRandPrngType, rocrand_state_scrambled_sobol64>;
-
-    ReturnType * host_output = new ReturnType[GlobalSizes::size];
-    ReturnType * device_output;
+void run_poisson_test(std::vector<double>& all_lambdas,
+                      const PoissonFunc&   f,
+                      const ReadFunc&      read_func,
+                      const size_t         size_multiplier = 1)
+{
+    ReturnType* host_output = new ReturnType[GlobalSizes::size];
+    ReturnType* device_output;
     HIP_CHECK(hipMalloc(&device_output, sizeof(ReturnType) * GlobalSizes::size));
 
-    RocRandPrngType * device_state;
-    HIP_CHECK(hipMalloc(&device_state, sizeof(RocRandPrngType) * GlobalSizes::block_size * GlobalSizes::grid_size));
-    GetRocrandState(device_state);
-    for(const double lambda : all_lambdas){
-        double expected_mean = lambda;
-        double expected_std_dev  = std::sqrt(lambda);
-        double mean_tol = expected_mean * 0.05;
-        double std_tol  = expected_std_dev  * 0.05;
+    RocRandPrngType* device_state;
+    HIP_CHECK(
+        hipMalloc(&device_state,
+                  sizeof(RocRandPrngType) * GlobalSizes::block_size * GlobalSizes::grid_size));
+    GetDeviceRocrandState(device_state);
+    for(const double lambda : all_lambdas)
+    {
+        double expected_mean    = lambda;
+        double expected_std_dev = std::sqrt(lambda);
+        double mean_tol         = GET_EPS_DEVICE(expected_mean);
+        double std_tol          = GET_EPS_DEVICE(expected_std_dev);
 
-        hipLaunchKernelGGL(
-            HIP_KERNEL_NAME(poisson_kernel<ReturnType>),
-            dim3(GlobalSizes::grid_size), dim3(GlobalSizes::block_size), 0, 0,
-            device_state, device_output, lambda, f
-        );
-        HIP_CHECK(hipMemcpy(host_output, device_output, sizeof(ReturnType) * GlobalSizes::size, hipMemcpyDeviceToHost));
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(poisson_kernel<ReturnType>),
+                           dim3(GlobalSizes::grid_size),
+                           dim3(GlobalSizes::block_size),
+                           0,
+                           0,
+                           device_state,
+                           device_output,
+                           lambda,
+                           f);
+        HIP_CHECK(hipMemcpy(host_output,
+                            device_output,
+                            sizeof(ReturnType) * GlobalSizes::size,
+                            hipMemcpyDeviceToHost));
 
-        for(size_t block_idx = 0; block_idx < GlobalSizes::grid_size; block_idx++){
-            for(size_t thread_idx = 0; thread_idx < GlobalSizes::block_size; thread_idx++){
+        for(size_t block_idx = 0; block_idx < GlobalSizes::grid_size; block_idx++)
+        {
+            for(size_t thread_idx = 0; thread_idx < GlobalSizes::block_size; thread_idx++)
+            {
 
-                size_t offset = (block_idx * GlobalSizes::items_per_block) + (thread_idx * GlobalSizes::items_per_thread);
+                size_t offset = (block_idx * GlobalSizes::items_per_block)
+                                + (thread_idx * GlobalSizes::items_per_thread);
 
-                double actual_mean = std::accumulate(
-                    host_output + offset, host_output + offset + GlobalSizes::items_per_thread, (double) 0,
-                    [=] (double acc, ReturnType x){
-                        return acc + read_func(x);
-                    }
-                )
-                    / static_cast<double>(GlobalSizes::items_per_thread * size_multiplier);
-                double actual_std_dev = std::accumulate(
-                    host_output + offset, host_output + offset + GlobalSizes::items_per_thread, (double) 0,
-                    [=](double acc, ReturnType x) {
-                        return acc + std::pow(static_cast<double>(read_func(x)) - (actual_mean * size_multiplier), 2);
-                    }
-                );
-                actual_std_dev = std::sqrt(actual_std_dev / static_cast<double>((GlobalSizes::items_per_thread * size_multiplier) - 1));
+                double actual_mean
+                    = std::accumulate(host_output + offset,
+                                      host_output + offset + GlobalSizes::items_per_thread,
+                                      (double)0,
+                                      [=](double acc, ReturnType x) { return acc + read_func(x); })
+                      / static_cast<double>(GlobalSizes::items_per_thread * size_multiplier);
+                double actual_std_dev
+                    = std::accumulate(host_output + offset,
+                                      host_output + offset + GlobalSizes::items_per_thread,
+                                      (double)0,
+                                      [=](double acc, ReturnType x) {
+                                          return acc
+                                                 + std::pow(static_cast<double>(read_func(x))
+                                                                - (actual_mean * size_multiplier),
+                                                            2);
+                                      });
+                actual_std_dev = std::sqrt(
+                    actual_std_dev
+                    / static_cast<double>((GlobalSizes::items_per_thread * size_multiplier) - 1));
 
                 ASSERT_NEAR(expected_mean, actual_mean, mean_tol);
-                if(!is_sobol)
-                    ASSERT_NEAR(expected_std_dev, actual_std_dev, std_tol);
+                ASSERT_NEAR(expected_std_dev, actual_std_dev, std_tol);
             }
         }
     }
-    delete [] host_output;
+    delete[] host_output;
     HIP_CHECK(hipFree(device_output));
     HIP_CHECK(hipFree(device_state));
 }
 
-TYPED_TEST(PoissonTest, poisson_distribution_small_lambda_test){
+TYPED_TEST(PoissonTest, poisson_distribution_small_lambda_test)
+{
     using type = typename TestFixture::rocrand_prng_type;
-    run_poisson_test<type, unsigned int>(
-        TestFixture::small_poisson_lambdas,
-        [=] __host__ __device__ (type * state, const double lambda){
-            return rocrand_device::detail::poisson_distribution_small(state, lambda);
-        },
-        [] (const unsigned int & x){
-            return x;
-        }
-    );
+
+    // Since Sobol uses the inv funciton
+    if(!IS_SOBOL(type))
+    {
+        run_poisson_test<type, unsigned int>(
+            TestFixture::small_poisson_lambdas,
+            [=](type* state, const double lambda)
+            { return rocrand_device::detail::poisson_distribution_small(state, lambda); },
+            [](const unsigned int& x) { return x; });
+    }
 }
 
-TYPED_TEST(PoissonTest, poisson_distribution_large_lambda_test){
+TYPED_TEST(PoissonTest, poisson_distribution_large_lambda_test)
+{
     using type = typename TestFixture::rocrand_prng_type;
-    run_poisson_test<type, unsigned int>(
-        TestFixture::large_poisson_lambdas,
-        [=] __host__ __device__ (type * state, const double lambda){
-            return rocrand_device::detail::poisson_distribution_large(state, lambda);
-        },
-        [] (const unsigned int & x){
-            return x;
-        }
-    );
+
+    // Since Sobol uses the inv funciton
+    if(!IS_SOBOL(type))
+    {
+        run_poisson_test<type, unsigned int>(
+            TestFixture::large_poisson_lambdas,
+            [=](type* state, const double lambda)
+            { return rocrand_device::detail::poisson_distribution_large(state, lambda); },
+            [](const unsigned int& x) { return x; });
+    }
 }
 
-TYPED_TEST(PoissonTest, poisson_distribution_huge_lambda_test){
+TYPED_TEST(PoissonTest, poisson_distribution_huge_lambda_test)
+{
     using type = typename TestFixture::rocrand_prng_type;
     run_poisson_test<type, unsigned int>(
         TestFixture::massive_poisson_lambdas,
-        [=] __host__ __device__ (type * state, const double lambda){
-            return rocrand_device::detail::poisson_distribution_huge(state, lambda);
-        },
-        [] (const unsigned int & x){
-            return x;
-        }
-    );
+        [=](type* state, const double lambda)
+        { return rocrand_device::detail::poisson_distribution_huge(state, lambda); },
+        [](const unsigned int& x) { return x; });
 }
 
-TYPED_TEST(PoissonTest, poisson_distribution_test){
+TYPED_TEST(PoissonTest, poisson_distribution_test)
+{
+    using type = typename TestFixture::rocrand_prng_type;
+
+    if(!IS_SOBOL(type))
+    {
+        run_poisson_test<type, unsigned int>(
+            TestFixture::small_poisson_lambdas,
+            [=](type* state, const double lambda)
+            { return rocrand_device::detail::poisson_distribution(state, lambda); },
+            [](const unsigned int& x) { return x; });
+
+        run_poisson_test<type, unsigned int>(
+            TestFixture::large_poisson_lambdas,
+            [=](type* state, const double lambda)
+            { return rocrand_device::detail::poisson_distribution(state, lambda); },
+            [](const unsigned int& x) { return x; });
+
+        run_poisson_test<type, unsigned int>(
+            TestFixture::massive_poisson_lambdas,
+            [=](type* state, const double lambda)
+            { return rocrand_device::detail::poisson_distribution(state, lambda); },
+            [](const unsigned int& x) { return x; });
+    }
+}
+
+TYPED_TEST(PoissonTest, poisson_distribution_inv_test)
+{
     using type = typename TestFixture::rocrand_prng_type;
 
     run_poisson_test<type, unsigned int>(
         TestFixture::small_poisson_lambdas,
-        [=] __host__ __device__ (type * state, const double lambda){
-            return rocrand_device::detail::poisson_distribution(state, lambda);
-        },
-        [] (const unsigned int & x){
-            return x;
-        }
-    );
-
-    run_poisson_test<type, unsigned int>(
-        TestFixture::large_poisson_lambdas,
-        [=] __host__ __device__ (type * state, const double lambda){
-            return rocrand_device::detail::poisson_distribution(state, lambda);
-        },
-        [] (const unsigned int & x){
-            return x;
-        }
-    );
-
-    run_poisson_test<type, unsigned int>(
-        TestFixture::massive_poisson_lambdas,
-        [=] __host__ __device__ (type * state, const double lambda){
-            return rocrand_device::detail::poisson_distribution(state, lambda);
-        },
-        [] (const unsigned int & x){
-            return x;
-        }
-    );
-}
-
-TYPED_TEST(PoissonTest, poisson_distribution_inv_test){
-    using type = typename TestFixture::rocrand_prng_type;
-
-    run_poisson_test<type, unsigned int>(
-        TestFixture::small_poisson_lambdas,
-        [=] __host__ __device__ (type * state, const double lambda){
-            return rocrand_device::detail::poisson_distribution_inv(state, lambda);
-        },
-        [] (const unsigned int & x){
-            return x;
-        }
-    );
+        [=](type* state, const double lambda)
+        { return rocrand_device::detail::poisson_distribution_inv(state, lambda); },
+        [](const unsigned int& x) { return x; });
 }
 
 // External Tests
-TYPED_TEST(PoissonTest, external_rocrand_poisson){
+TYPED_TEST(PoissonTest, external_rocrand_poisson)
+{
     using type = typename TestFixture::rocrand_prng_type;
 
-    // TODO: Figure out why higher lambda is hanging
     run_poisson_test<type, unsigned int>(
         TestFixture::small_poisson_lambdas,
-        [=] __host__ __device__ (type * state, const double lambda){
-            return rocrand_poisson(state, lambda);
-        },
-        [] (const unsigned int & x){
-            return x;
-        }
-    );
+        [=](type* state, const double lambda) { return rocrand_poisson(state, lambda); },
+        [](const unsigned int& x) { return x; });
 }
 
 // Special Tests
-TEST(PoissonTest, philox4x32_10_uint4_output){
+TEST(PoissonTest, philox4x32_10_uint4_output)
+{
     std::vector<double> small_poisson_lambdas = {1, 2, 4, 8, 16, 32, 64};
 
     run_poisson_test<rocrand_state_philox4x32_10, uint4>(
         small_poisson_lambdas,
-        [=] __host__ __device__ (rocrand_state_philox4x32_10 * state, const double lambda){
-            return rocrand_poisson4(state, lambda);
-        },
-        [] (const uint4 & x){
-            return (x.w + x.x + x.y + x.z);
-        },
-        4
-    );
+        [=](rocrand_state_philox4x32_10* state, const double lambda)
+        { return rocrand_poisson4(state, lambda); },
+        [](const uint4& x) { return (x.w + x.x + x.y + x.z); },
+        4);
 }

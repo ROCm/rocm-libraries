@@ -23,8 +23,8 @@
 
 #include <random>
 
-#include <rng/distribution/normal.hpp>
-#include <rocrand/rocrand_mtgp32_11213.h>
+#undef ROCRAND_DETAIL_BM_NOT_IN_STATE
+#include <rocrand/rocrand_normal.h>
 
 #define HIP_CHECK(cmd)                                                                         \
     do                                                                                         \
@@ -98,7 +98,15 @@ struct StateParams
 };
 
 using NormalDistributionStateParam
-    = ::testing::Types<StateParams<float, rocrand_state_sobol32, 1>,
+    = ::testing::Types<StateParams<float, rocrand_state_philox4x32_10, 1>,
+                       StateParams<double, rocrand_state_philox4x32_10, 1>,
+                       StateParams<float, rocrand_state_mrg31k3p, 1>,
+                       StateParams<double, rocrand_state_mrg31k3p, 1>,
+                       StateParams<float, rocrand_state_mrg32k3a, 1>,
+                       StateParams<double, rocrand_state_mrg32k3a, 1>,
+                       StateParams<float, rocrand_state_xorwow, 1>,
+                       StateParams<double, rocrand_state_xorwow, 1>,
+                       StateParams<float, rocrand_state_sobol32, 1>,
                        StateParams<float, rocrand_state_scrambled_sobol32, 1>,
                        StateParams<float, rocrand_state_sobol64, 1>,
                        StateParams<float, rocrand_state_scrambled_sobol64, 1>,
@@ -357,8 +365,8 @@ TYPED_TEST(NormalDistributionRocRandStateTest, rocrand_host_state_tests)
 
 TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_uint_in_float_out_test)
 {
-    using OutputType = float;
-    using InputType  = unsigned int;
+    using OutputType            = float;
+    using InputType             = unsigned int;
     constexpr size_t OutputSize = 1;
 
     auto mean_func = [](OutputType x) { return x; };
@@ -374,8 +382,8 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_uint_in_float_ou
 
 TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_ullint_in_float_out_test)
 {
-    using OutputType = float;
-    using InputType  = unsigned long long int;
+    using OutputType            = float;
+    using InputType             = unsigned long long int;
     constexpr size_t OutputSize = 1;
 
     auto mean_func = [](OutputType x) { return x; };
@@ -391,8 +399,8 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_ullint_in_float_
 
 TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_2uint_in_float2_out_test)
 {
-    using OutputType = float2;
-    using InputType  = unsigned int;
+    using OutputType            = float2;
+    using InputType             = unsigned int;
     constexpr size_t OutputSize = 2;
 
     auto mean_func    = [](OutputType x) { return x.x + x.y; };
@@ -408,8 +416,8 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_2uint_in_float2_
 
 TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_uint2_in_float2_out_test)
 {
-    using OutputType = float2;
-    using InputType  = unsigned int;
+    using OutputType            = float2;
+    using InputType             = unsigned int;
     constexpr size_t OutputSize = 2;
 
     auto mean_func    = [](OutputType x) { return x.x + x.y; };
@@ -426,8 +434,8 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_uint2_in_float2_
 
 TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_ull_in_float2_out_test)
 {
-    using OutputType = float2;
-    using InputType  = unsigned long long;
+    using OutputType            = float2;
+    using InputType             = unsigned long long;
     constexpr size_t OutputSize = 2;
 
     auto mean_func    = [](OutputType x) { return x.x + x.y; };
@@ -443,8 +451,8 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_ull_in_float2_ou
 
 TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_uint4_in_float4_out_test)
 {
-    using OutputType = float4;
-    using InputType  = unsigned int;
+    using OutputType            = float4;
+    using InputType             = unsigned int;
     constexpr size_t OutputSize = 4;
 
     auto mean_func    = [](OutputType x) { return x.w + x.x + x.y + x.z; };
@@ -466,8 +474,8 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_uint4_in_float4_
 
 TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_longlong2_in_float4_out_test)
 {
-    using OutputType = float4;
-    using InputType  = long long;
+    using OutputType            = float4;
+    using InputType             = long long;
     constexpr size_t OutputSize = 4;
 
     auto mean_func    = [](OutputType x) { return x.w + x.x + x.y + x.z; };
@@ -487,8 +495,8 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_longlong2_in_flo
 
 TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_2ull_in_float4_out_test)
 {
-    using OutputType = float4;
-    using InputType  = unsigned long long;
+    using OutputType            = float4;
+    using InputType             = unsigned long long;
     constexpr size_t OutputSize = 4;
 
     auto mean_func    = [](OutputType x) { return x.w + x.x + x.y + x.z; };
@@ -507,8 +515,8 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_2ull_in_float4_o
 
 TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_uint_in_half2_out_test)
 {
-    using OutputType = __half2;
-    using InputType  = unsigned int;
+    using OutputType            = __half2;
+    using InputType             = unsigned int;
     constexpr size_t OutputSize = 2;
 
     auto mean_func    = [](OutputType x) { return x.x + x.y; };
@@ -529,8 +537,8 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_uint_in_half2_ou
 
 TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_ull_in_half2_out_test)
 {
-    using OutputType = __half2;
-    using InputType  = unsigned long long;
+    using OutputType            = __half2;
+    using InputType             = unsigned long long;
     constexpr size_t OutputSize = 2;
 
     auto mean_func    = [](OutputType x) { return x.x + x.y; };
@@ -558,9 +566,9 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_ull_in_half2_out
 struct GlobalSizes
 {
     static constexpr size_t items_per_thread = 50000;
-    static constexpr size_t block_size       = 8; // Number of threads
+    static constexpr size_t block_size       = 16; // Number of threads
     static constexpr size_t items_per_block  = items_per_thread * block_size;
-    static constexpr size_t grid_size        = 8; // Number of blocks
+    static constexpr size_t grid_size        = 16; // Number of blocks
     static constexpr size_t size             = grid_size * items_per_block;
 };
 
@@ -576,7 +584,9 @@ inline void GetDeviceRocrandState(RocrandPRNGType* device_prngs)
     {
         for(size_t ti = 0; ti < GlobalSizes::block_size; ti++)
         {
-            const size_t offset = bi * GlobalSizes::grid_size;
+            const size_t offset = bi * GlobalSizes::block_size;
+            const size_t prng_offset
+                = (GlobalSizes::items_per_block * bi) + (GlobalSizes::items_per_thread * ti);
 
             if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_sobol32>)
             {
@@ -585,7 +595,7 @@ inline void GetDeviceRocrandState(RocrandPRNGType* device_prngs)
                     rocrand_get_direction_vectors32(&directions,
                                                     ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
 
-                rocrand_init(directions, offset, &host_states[offset + ti]);
+                rocrand_init(directions, prng_offset, &host_states[offset + ti]);
             }
             // scrambled sobol32 case
             else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_scrambled_sobol32>)
@@ -594,7 +604,7 @@ inline void GetDeviceRocrandState(RocrandPRNGType* device_prngs)
                 ROCRAND_CHECK(
                     rocrand_get_direction_vectors32(&directions,
                                                     ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
-                rocrand_init(directions, 123456, offset, &host_states[offset + ti]);
+                rocrand_init(directions, 123456, prng_offset, &host_states[offset + ti]);
             }
             // sobol64 case
             else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_sobol64>)
@@ -603,7 +613,7 @@ inline void GetDeviceRocrandState(RocrandPRNGType* device_prngs)
                 ROCRAND_CHECK(
                     rocrand_get_direction_vectors64(&directions,
                                                     ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
-                rocrand_init(directions, offset, &host_states[offset + ti]);
+                rocrand_init(directions, prng_offset, &host_states[offset + ti]);
             }
             // scrambled sobol64 case
             else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_scrambled_sobol64>)
@@ -612,19 +622,19 @@ inline void GetDeviceRocrandState(RocrandPRNGType* device_prngs)
                 ROCRAND_CHECK(
                     rocrand_get_direction_vectors64(&directions,
                                                     ROCRAND_DIRECTION_VECTORS_64_JOEKUO6));
-                rocrand_init(directions, 123456, offset, &host_states[offset + ti]);
+                rocrand_init(directions, 123456, prng_offset, &host_states[offset + ti]);
             }
             // lfsr113 case
             else if constexpr(std::is_same_v<RocrandPRNGType, rocrand_state_lfsr113>)
             {
                 rocrand_init({0xabcd, 0xdabc, 0xcdab, 0xbcda},
                              0,
-                             offset,
+                             prng_offset,
                              &host_states[offset + ti]);
             }
             else
             {
-                rocrand_init(123456, 654321, offset, &host_states[offset + ti]);
+                rocrand_init(123456, 654321, prng_offset, &host_states[offset + ti]);
             }
         }
     }
@@ -643,8 +653,7 @@ void normal_distribution_kernel(OutType*         device_output,
 {
     const size_t offset = (GlobalSizes::items_per_block * blockIdx.x)
                           + (GlobalSizes::items_per_thread * threadIdx.x);
-    const size_t prng_offset
-        = (GlobalSizes::grid_size * blockIdx.x) + (GlobalSizes::block_size + threadIdx.x);
+    const size_t prng_offset = (GlobalSizes::block_size * blockIdx.x) + threadIdx.x;
 
     auto prng = device_prngs + prng_offset;
     for(size_t i = 0; i < GlobalSizes::items_per_thread; i++)
