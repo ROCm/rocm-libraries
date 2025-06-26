@@ -246,7 +246,7 @@ TYPED_TEST(VariousComplexTest, log1pf)
       return thrust::detail::complex::log1pf(x);
     });
 }
-#  endif // __HIP__
+#  endif
 
 #  if _MSC_VER <= 1500 && !defined(__clang__)
 

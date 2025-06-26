@@ -581,7 +581,7 @@ TYPED_TEST(ComplexPairsTests, TestCompoundDivisionOperator)
     [=](std::complex<T>& lhs, const std::complex<U>& rhs) {
       using type = typename thrust::detail::promoted_numerical_type<T, U>::type;
 
-      // (a + bi) / (c + di) = ((ac + bd) + (bc -ad)i)/ (c^2 + d^2)
+      // (a + bi) / (c + di) = ((ac + bd) + (bc -ad)i) / (c^2 + d^2)
       type a = static_cast<type>(lhs.real());
       type b = static_cast<type>(lhs.imag());
       type c = static_cast<type>(rhs.real());
