@@ -982,7 +982,7 @@ namespace rocRoller
         std::optional<int>
             getExchangeForMultiply(KernelGraph const& graph, int multiplyTag, NaryArgument arg)
         {
-            auto isIndexPredicate    = rocRoller::KernelGraph::CoordinateGraph::isEdge<Index>;
+            auto isSegmentPredicate = rocRoller::KernelGraph::CoordinateGraph::isEdge<Segment>;
             auto isExchangePredicate = [&](int operation) -> bool {
                 auto maybeExchange = graph.control.get<Exchange>(operation);
                 return maybeExchange.has_value();
@@ -992,7 +992,7 @@ namespace rocRoller
             if(scale == -1)
                 return {};
 
-            auto tileTag = only(graph.coordinates.getOutputNodeIndices(scale, isIndexPredicate));
+            auto tileTag = only(graph.coordinates.getOutputNodeIndices(scale, isSegmentPredicate));
             if(not tileTag)
                 return {};
 

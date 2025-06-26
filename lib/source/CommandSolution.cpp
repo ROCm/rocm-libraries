@@ -436,7 +436,7 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::InlineInits>());
         transforms.push_back(std::make_shared<KernelGraph::OrderMultiplyNodes>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
-        transforms.push_back(std::make_shared<KernelGraph::AliasDataFlowTags>());
+        //transforms.push_back(std::make_shared<KernelGraph::AliasDataFlowTags>());
         transforms.push_back(std::make_shared<KernelGraph::CleanArguments>(m_context, m_command));
         transforms.push_back(std::make_shared<KernelGraph::AddDeallocateArguments>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::MergeAdjacentDeallocates>());

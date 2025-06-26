@@ -1206,6 +1206,8 @@ namespace rocRoller
                 // Exchange tile fixed size: 64 x 4
                 const uint numVgpr = 64 * 4 / wfs;
 
+                AssertFatal(m_context->registerTagManager()->hasRegister(macTileTag));
+
                 auto vgpr = m_context->registerTagManager()->getRegister(macTileTag);
 
                 auto packedVariableType = DataTypeInfo::Get(exchange.varType).packedVariableType();

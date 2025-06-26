@@ -56,10 +56,10 @@ namespace rocRoller
         if(merge)
         {
             auto [dst, index] = *merge;
-            AssertFatal(hasRegister(dst), ShowValue(dst));
+
+	    AssertFatal(hasRegister(dst), ShowValue(dst));
 
             auto target = getRegister(dst);
-            //return target->subset({index});
             return target->element({index});
         }
 
@@ -67,7 +67,8 @@ namespace rocRoller
         if(segment)
         {
             auto [dst, index] = *segment;
-            AssertFatal(hasRegister(dst), ShowValue(dst));
+
+	    AssertFatal(hasRegister(dst), ShowValue(dst));
 
             auto target = getRegister(dst);
             return target->segment({index});
@@ -284,6 +285,20 @@ namespace rocRoller
 
     inline bool RegisterTagManager::hasRegister(int tag) const
     {
+        auto merge = getIndex(tag);
+        if(merge)
+        {
+            auto [dst, index] = *merge;
+            return hasRegister(dst);
+        }
+
+        auto segment = getSegment(tag);
+        if(segment)
+        {
+            auto [dst, index] = *segment;
+            return hasRegister(dst);
+        }
+
         return m_registers.contains(tag) && !isBorrowed(tag);
     }
 

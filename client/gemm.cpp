@@ -352,6 +352,9 @@ namespace rocRoller::Client::GEMMClient
                       -1.f,
                       1.f,
                       static_cast<uint>(scaleBlockSize));
+
+	    std::fill(hostScaleA.begin(), hostScaleA.end(), static_cast<uint8_t>(floatToScale<E8M0>(1.0)));
+	    std::fill(hostScaleB.begin(), hostScaleB.end(), static_cast<uint8_t>(floatToScale<E8M0>(1.0)));
         }
         else
         {
