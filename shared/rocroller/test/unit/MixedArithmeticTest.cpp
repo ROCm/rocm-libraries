@@ -33,6 +33,7 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/KernelArguments.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
 #include <rocRoller/Utilities/HipUtils.hpp>
@@ -827,6 +828,7 @@ namespace MixedArithmeticTest
 
     TEST_P(GPU_MixedBinaryArithmeticTest, Divide)
     {
+        setKernelOptions({{.enableFullDivision = true}});
         auto const& param = GetParam();
 
         if(param.resultRegType == Register::Type::Vector
@@ -852,6 +854,7 @@ namespace MixedArithmeticTest
 
     TEST_P(GPU_MixedBinaryArithmeticTest, Modulus)
     {
+        setKernelOptions({{.enableFullDivision = true}});
         auto const& param = GetParam();
 
         if(param.resultRegType == Register::Type::Vector

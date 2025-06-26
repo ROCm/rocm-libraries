@@ -383,7 +383,7 @@ namespace rocRoller::Client::GEMMClient
             deviceScaleB = make_shared_device(hostScaleB);
         }
 
-        std::cout << "Generating lauch parameters and runtime arguments..." << std::endl;
+        std::cout << "Generating launch parameters and runtime arguments..." << std::endl;
 
         commandKernel->loadKernel();
 

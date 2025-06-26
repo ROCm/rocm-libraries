@@ -113,6 +113,24 @@ namespace rocRoller
         return m_controlOps;
     }
 
+    std::optional<int> Instruction::innerControlOp() const
+    {
+        if(!m_controlOps.empty())
+            return m_controlOps.front();
+
+        return std::nullopt;
+    }
+
+    void Instruction::setReferencedArg(std::string arg)
+    {
+        m_referencedArg = std::move(arg);
+    }
+
+    std::string const& Instruction::referencedArg() const
+    {
+        return m_referencedArg;
+    }
+
     std::vector<std::string> const& Instruction::comments() const
     {
         return m_comments;

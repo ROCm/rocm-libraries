@@ -774,7 +774,7 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
         {
             // Allocate additional buffer for C = alpha * A * B
             RETURN_IF_HIP_ERROR(
-                rocsparse_hipMallocAsync((void**)&workspace_B, sizeof(I) * nnz_A, handle->stream));
+                rocsparse_hipMallocAsync(&workspace_B, sizeof(I) * nnz_A, handle->stream));
         }
 
 #define CSRGEMM_DIM 512

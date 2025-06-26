@@ -28,6 +28,8 @@ subtrees:
     title: Use runtime compilation
   - file: how-to/distributed-transforms
     title: Distribute transforms
+  - file: how-to/enabling-logging
+    title: Enable logging
 
 - caption: Samples
   entries:

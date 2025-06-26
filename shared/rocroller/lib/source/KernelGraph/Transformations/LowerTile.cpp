@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include "rocRoller/CodeGen/Arithmetic/MatrixMultiply_fwd.hpp"
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/CommandSolution_fwd.hpp>
@@ -31,6 +32,7 @@
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddTransposeLoadCT.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerTile.hpp>
+#include <rocRoller/KernelGraph/Transforms/LowerTile_details.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -46,6 +48,37 @@ namespace rocRoller
         using namespace CoordinateGraph;
         using namespace Expression;
         using namespace Register;
+
+        namespace LowerTileDetails
+        {
+            bool isTileOfSubDwordTypeWithNonContiguousVGPRBlocks(DataType            type,
+                                                                 MatrixMultiplySizes mi)
+            {
+                if(isF16(type))
+                {
+                    return ((mi.m == 16) && (mi.n == 16) && (mi.k == 32))
+                           || ((mi.m == 32) && (mi.n == 32) && (mi.k == 16));
+                }
+                else if(isF8(type))
+                {
+                    return ((mi.m == 16) && (mi.n == 16) && (mi.k == 128))
+                           || ((mi.m == 32) && (mi.n == 32) && (mi.k == 64));
+                }
+                else if(isF6(type))
+                {
+                    return ((mi.m == 16) && (mi.n == 16) && (mi.k == 128))
+                           || ((mi.m == 32) && (mi.n == 32) && (mi.k == 64));
+                }
+                else if(isF4(type))
+                {
+                    return ((mi.m == 16) && (mi.n == 16) && (mi.k == 128))
+                           || ((mi.m == 32) && (mi.n == 32) && (mi.k == 64));
+                }
+                return false;
+            }
+        }
+
+        using namespace LowerTileDetails;
 
         ConstraintStatus NoConstructDestructMT(const KernelGraph& k)
         {
@@ -169,39 +202,36 @@ namespace rocRoller
 
         /**
          * @brief Add coordinate-transforms for loading a WaveTile
-         * from row/column coordinates `iWaveX` and `iWaveY` for the
-         * v_mfma_*_f8f6f4 instruction.
+         * from row/column coordinates `iWaveX` and `iWaveY` for
+         * MI instructions that need data along fast-moving
+         * dimension non-contiguously across VGPRBlocks.
          *
          * The `lane` and `element` parameters are existing
          * coordinates corresponding to a Lane coordiante and VGPR
          * coordinate (which should be thought of as which
-         * element/item is being addressed).  Each lane loads 32
-         * elements.
+         * element/item is being addressed).
          */
-        void addLoadWaveTileCTF8F6F4(KernelGraph&                     graph,
-                                     std::vector<DeferredConnection>& connections,
-                                     int                              iWaveX,
-                                     int                              iWaveY,
-                                     int                              lane,
-                                     int                              element,
-                                     uint                             K,
-                                     uint                             bitsPerElement,
-                                     int                              wavefrontSize)
+        void addLoadWaveTileViaNonContiguousVGPRBlocksCT(
+            KernelGraph&                     graph,
+            std::vector<DeferredConnection>& connections,
+            int                              iWaveX,
+            int                              iWaveY,
+            int                              lane,
+            int                              element,
+            MatrixMultiplySizes              mi,
+            uint                             bitsPerElement,
+            int                              wavefrontSize)
 
         {
-            AssertFatal((K == 128 || K == 64) && (wavefrontSize == 64 || wavefrontSize == 32));
-
-            uint M = 16 * 128 / K;
-
             uint const lanesPerSIMD = 16;
             uint const simdsPerWave = wavefrontSize / lanesPerSIMD;
 
-            uint const simdsPerSGroup = M / lanesPerSIMD;
+            uint const simdsPerSGroup = mi.m / lanesPerSIMD;
             // We should find a name for this 2x factor between wave32 & wave64.
             uint const numVBlocks = wavefrontSize == 64 ? (bitsPerElement == 8 ? 2 : 1)
                                                         : (bitsPerElement == 8 ? 4 : 2);
 
-            uint const elementsPerVGPRBlock = ((M * K) / wavefrontSize) / numVBlocks;
+            uint const elementsPerVGPRBlock = ((mi.m * mi.k) / wavefrontSize) / numVBlocks;
 
             auto SIMD = graph.coordinates.addElement(Adhoc("SIMD", literal(simdsPerWave), nullptr));
             auto laneInSIMD = graph.coordinates.addElement(Lane(literal(lanesPerSIMD), nullptr));
@@ -333,7 +363,7 @@ namespace rocRoller
                                int                              macTileTag,
                                int                              iMacX,
                                int                              iMacY,
-                               VariableType const&              varType,
+                               DataType const&                  dataType,
                                int                              wavefrontSize,
                                bool                             isFromLDS,
                                std::vector<unsigned int> const& jammedTiles,
@@ -371,10 +401,10 @@ namespace rocRoller
             uint activeLanesInWave = static_cast<uint>(wavefrontSize);
             uint numGPR            = numElements / activeLanesInWave;
 
-            uint M   = macTile.subTileSizes[0];
-            uint N   = macTile.subTileSizes[1];
-            uint K   = macTile.subTileSizes[2];
-            uint K_L = K / (activeLanesInWave / M);
+            const MatrixMultiplySizes mi{.m = macTile.subTileSizes[0],
+                                         .n = macTile.subTileSizes[1],
+                                         .k = macTile.subTileSizes[2]};
+            uint                      K_L = mi.k / (activeLanesInWave / mi.m);
 
             auto activeLanesInWaveLiteral = literal(activeLanesInWave);
 
@@ -387,13 +417,7 @@ namespace rocRoller
             connections.push_back(DC<Lane>(lane));
             connections.push_back(DC<VGPR>(vgpr));
 
-            auto bitsPerElement = DataTypeInfo::Get(varType).elementBits;
-
-            // We might also want to use a GPUCapability check here.
-            auto isF8F6F4 = (isUnpackedF8(varType.dataType) || isUnpackedF6(varType.dataType)
-                             || isUnpackedF4(varType.dataType))
-                            && (((M == 16) && (N == 16) && (K == 128))
-                                || ((M == 32) && (N == 32) && (K == 64)));
+            auto bitsPerElement = DataTypeInfo::Get(dataType).elementBits;
 
             const auto& arch = context->targetArchitecture();
 
@@ -407,30 +431,45 @@ namespace rocRoller
                     JammedWaveTileNumber(0, literal(jammedTiles[0]), literal(1)));
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileX, 0));
 
-                if(isFromLDS && isTransposableTile(arch, macTile, varType.dataType)
-                   && !isTransposeLayout)
+                if(isTileOfSubDwordTypeWithNonContiguousVGPRBlocks(dataType, mi))
                 {
-                    Log::debug("Adding transpose-load CT for A macTileTag {}", macTileTag);
-                    addTransposeLoadWaveTileCT(context,
-                                               connections,
-                                               graph,
-                                               macTileTag,
-                                               iWaveX,
-                                               iWaveY,
-                                               lane,
-                                               vgpr,
-                                               M,
-                                               K,
-                                               bitsPerElement,
-                                               activeLanesInWave);
+                    AssertFatal((wavefrontSize == 64 || wavefrontSize == 32));
+
+                    if(isFromLDS && isTransposableTile(arch, mi, dataType) && !isTransposeLayout)
+                    {
+                        Log::debug("Adding transpose-load CT for A macTileTag {}", macTileTag);
+                        addTransposeLoadWaveTileCT(context,
+                                                   connections,
+                                                   graph,
+                                                   macTileTag,
+                                                   iWaveX,
+                                                   iWaveY,
+                                                   lane,
+                                                   vgpr,
+                                                   mi,
+                                                   bitsPerElement,
+                                                   activeLanesInWave);
+                    }
+                    else
+                    {
+                        addLoadWaveTileViaNonContiguousVGPRBlocksCT(graph,
+                                                                    connections,
+                                                                    iWaveX,
+                                                                    iWaveY,
+                                                                    lane,
+                                                                    vgpr,
+                                                                    mi,
+                                                                    bitsPerElement,
+                                                                    activeLanesInWave);
+                    }
                 }
-                else if(!isF8F6F4)
+                else
                 {
                     AssertFatal(
                         K_L != 0,
                         "Invalid operand: cannot divide by zero to compute the BlockNumber");
-                    auto blockNumber
-                        = graph.coordinates.addElement(VGPRBlockNumber(literal(K / K_L), nullptr));
+                    auto blockNumber = graph.coordinates.addElement(
+                        VGPRBlockNumber(literal(mi.k / K_L), nullptr));
                     auto blockIndex
                         = graph.coordinates.addElement(VGPRBlockIndex(literal(K_L), nullptr));
 
@@ -441,18 +480,6 @@ namespace rocRoller
 
                     graph.coordinates.addElement(Flatten(), {blockNumber, iWaveX}, {lane});
                     graph.coordinates.addElement(PassThrough(), {blockIndex}, {vgpr});
-                }
-                else
-                {
-                    addLoadWaveTileCTF8F6F4(graph,
-                                            connections,
-                                            iWaveX,
-                                            iWaveY,
-                                            lane,
-                                            vgpr,
-                                            K,
-                                            bitsPerElement,
-                                            activeLanesInWave);
                 }
 
                 if(params->swizzleScale)
@@ -468,30 +495,45 @@ namespace rocRoller
                     JammedWaveTileNumber(1, literal(jammedTiles[1]), literal(1)));
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
 
-                if(isFromLDS && isTransposableTile(arch, macTile, varType.dataType)
-                   && isTransposeLayout)
+                if(isTileOfSubDwordTypeWithNonContiguousVGPRBlocks(dataType, mi))
                 {
-                    Log::debug("Adding transpose-load CT for B macTileTag {}", macTileTag);
-                    addTransposeLoadWaveTileCT(context,
-                                               connections,
-                                               graph,
-                                               macTileTag,
-                                               iWaveY,
-                                               iWaveX,
-                                               lane,
-                                               vgpr,
-                                               M,
-                                               K,
-                                               bitsPerElement,
-                                               activeLanesInWave);
+                    AssertFatal((wavefrontSize == 64 || wavefrontSize == 32));
+
+                    if(isFromLDS && isTransposableTile(arch, mi, dataType) && isTransposeLayout)
+                    {
+                        Log::debug("Adding transpose-load CT for B macTileTag {}", macTileTag);
+                        addTransposeLoadWaveTileCT(context,
+                                                   connections,
+                                                   graph,
+                                                   macTileTag,
+                                                   iWaveY,
+                                                   iWaveX,
+                                                   lane,
+                                                   vgpr,
+                                                   mi,
+                                                   bitsPerElement,
+                                                   activeLanesInWave);
+                    }
+                    else
+                    {
+                        addLoadWaveTileViaNonContiguousVGPRBlocksCT(graph,
+                                                                    connections,
+                                                                    iWaveY,
+                                                                    iWaveX,
+                                                                    lane,
+                                                                    vgpr,
+                                                                    mi,
+                                                                    bitsPerElement,
+                                                                    activeLanesInWave);
+                    }
                 }
-                else if(!isF8F6F4)
+                else
                 {
                     AssertFatal(
                         K_L != 0,
                         "Invalid operand: cannot divide by zero to compute the BlockNumber");
-                    auto blockNumber
-                        = graph.coordinates.addElement(VGPRBlockNumber(literal(K / K_L), nullptr));
+                    auto blockNumber = graph.coordinates.addElement(
+                        VGPRBlockNumber(literal(mi.k / K_L), nullptr));
                     auto blockIndex
                         = graph.coordinates.addElement(VGPRBlockIndex(literal(K_L), nullptr));
 
@@ -502,18 +544,6 @@ namespace rocRoller
 
                     graph.coordinates.addElement(Flatten(), {blockNumber, iWaveY}, {lane});
                     graph.coordinates.addElement(PassThrough(), {blockIndex}, {vgpr});
-                }
-                else
-                {
-                    addLoadWaveTileCTF8F6F4(graph,
-                                            connections,
-                                            iWaveY,
-                                            iWaveX,
-                                            lane,
-                                            vgpr,
-                                            K,
-                                            bitsPerElement,
-                                            activeLanesInWave);
                 }
 
                 if(params->swizzleScale)
@@ -1273,8 +1303,8 @@ namespace rocRoller
             if(params->enableLongDwordInstructions && (packed || packFactor <= 1)
                && (!direct2LDS || useWiderDirect2LDS))
             {
-                auto maxWidth = std::min(context->kernelOptions().storeGlobalWidth,
-                                         context->kernelOptions().loadLocalWidth);
+                auto maxWidth = std::min(context->kernelOptions()->storeGlobalWidth,
+                                         context->kernelOptions()->loadLocalWidth);
 
                 auto numDwordsPerElement = DataTypeInfo::Get(varType).registerCount;
                 auto macTileM            = macTile.sizes[0];
@@ -1353,7 +1383,7 @@ namespace rocRoller
                                 int                              userTag,
                                 int                              macTileTag,
                                 std::vector<int> const&          sdim,
-                                VariableType const&              varType,
+                                DataType const&                  dataType,
                                 std::vector<unsigned int> const& jammedTiles,
                                 CommandParametersPtr             params,
                                 ContextPtr                       context)
@@ -1369,7 +1399,7 @@ namespace rocRoller
                               macTileTag,
                               iMacX,
                               iMacY,
-                              varType,
+                              dataType,
                               wavefrontSize,
                               true,
                               jammedTiles,
@@ -1705,7 +1735,7 @@ namespace rocRoller
                                        userTag,
                                        tileTag,
                                        sdims,
-                                       varType,
+                                       varType.dataType,
                                        wavetilesPerWavefront,
                                        m_params,
                                        m_context);
@@ -1787,7 +1817,7 @@ namespace rocRoller
                                       tileTag,
                                       iMacX,
                                       iMacY,
-                                      varType,
+                                      varType.dataType,
                                       wavefrontSize,
                                       true,
                                       jammedTiles,

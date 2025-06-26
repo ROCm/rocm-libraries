@@ -1726,13 +1726,16 @@ class Solution(collections.abc.Mapping):
         if state["UseDotInstruction"]:
           # dot2: LRVW should be equal to NumDotElements * InnerUnroll
           if state["LocalReadVectorWidth"] not in [-1, state["NumDotElements"] * state["InnerUnroll"]]:
-            reject(state, "dot kernel requires LocalReadVectorWidth = NumDotElements(%u) * InnerUnroll(%u)" \
+            reject(state, printRejectionReason, "dot kernel requires LocalReadVectorWidth = NumDotElements(%u) * InnerUnroll(%u)" \
               % (state["NumDotElements"], state["InnerUnroll"]))
             return
           state["LocalReadVectorWidth"] = state["NumDotElements"] * state["InnerUnroll"]
-        else:
+        else: # mac
           if state["LocalReadVectorWidth"] == -1:
-            state["LocalReadVectorWidth"] = 1
+            state["LocalReadVectorWidth"] = state["VectorWidthA"]
+          if state["LocalReadVectorWidth"] != state["VectorWidthA"] or \
+             state["LocalReadVectorWidth"] != state["VectorWidthB"]:
+            reject(state, printRejectionReason, "LocalReadVectorWidth must equal VectorWidthA/B for MAC kernels")
 
       def calcOptGRVW(lrvw: int, unrollMajorLDS: bool, datatype: DataType) -> int:
         # with UnrollMajorLDS, GRVW need to less or equal than LRVW to have conflict free LDS read with padding.
@@ -3095,6 +3098,17 @@ class Solution(collections.abc.Mapping):
       if cont1 and cont2:
         reject(state, printRejectionReason, "MatrixInstN %u %% GlobalReadVectorWidthB %u must be 0" % \
           (state["MatrixInstN"], state["GlobalReadVectorWidthB"]))
+    else: # mac
+      # if not bufferLoad or not state["GuaranteeNoPartialA"]:
+      # Restrict GRVW/VW combos so shift-ptr logic will work
+      if state["GlobalReadVectorWidthA"] > 1 \
+          and state["GlobalReadVectorWidthA"] != state["VectorWidthA"]:
+          reject(state, printRejectionReason, "GlobalReadVectorWidthA %u must be == VectorWidthA %u or == 1" % \
+                  (state["GlobalReadVectorWidthA"], state["VectorWidthA"]))
+      if state["GlobalReadVectorWidthB"] > 1 \
+          and state["GlobalReadVectorWidthB"] != state["VectorWidthB"]:
+          reject(state, printRejectionReason, "GlobalReadVectorWidthB %u must be == VectorWidthB %u or == 1" % \
+                  (state["GlobalReadVectorWidthB"], state["VectorWidthB"]))
 
     # Use SGPR to store an offset from GlobalReadOffsetA+0.
     # (as opposed to using dedicated VGPR for each GRO

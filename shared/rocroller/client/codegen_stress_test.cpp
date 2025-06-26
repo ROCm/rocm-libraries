@@ -110,47 +110,65 @@ Generator<Instruction> comments(ContextPtr m_context)
     co_yield_(Instruction::Comment("Stress Test Comment"));
 }
 
-Generator<Instruction> simple_mfma(ContextPtr m_context)
+Generator<Instruction> simple_mi(ContextPtr m_context)
 {
-    auto v = createRegisters(m_context, Register::Type::Vector, DataType::Float, 3);
-    auto a = createRegisters(m_context, Register::Type::Accumulator, DataType::Float, 1);
+    auto const& arch        = m_context->targetArchitecture();
+    auto        mi_mnemonic = "";
+    if(arch.HasCapability(GPUCapability::HasMFMA))
+    {
+        mi_mnemonic = "v_mfma_f32_32x32x1f32";
+    }
+    else if(arch.HasCapability(GPUCapability::HasWMMA) && arch.target().isRDNA4GPU())
+    {
+        mi_mnemonic = "v_wmma_f32_16x16x16_f16";
+    }
+    else
+    {
+        AssertFatal(false, concatenate("Arch not supported: ", arch.target().toString()));
+    }
+    auto v = createRegisters(m_context, Register::Type::Vector, DataType::Float, 4);
     while(true)
     {
         co_yield_(Instruction("v_or_b32", {v[2]}, {v[0], v[1]}, {}, ""));
-        co_yield_(Instruction("v_mfma_f32_16x16x4f32", {a[0]}, {v[0], v[2], a[0]}, {}, ""));
+        co_yield_(Instruction(mi_mnemonic, {v[3]}, {v[0], v[2], v[3]}, {}, ""));
     }
 }
 
-Generator<Instruction> complex_mfma_with_coop(ContextPtr m_context)
+Generator<Instruction> complex_mi_with_coop(ContextPtr m_context)
 {
-    auto mfma_v = createRegisters(m_context, Register::Type::Vector, DataType::Float, 16);
-    auto or_v   = createRegisters(m_context, Register::Type::Vector, DataType::Float, 4);
+    auto const& arch        = m_context->targetArchitecture();
+    auto        mi_mnemonic = "";
+    if(arch.HasCapability(GPUCapability::HasMFMA))
+    {
+        mi_mnemonic = "v_mfma_f32_32x32x1f32";
+    }
+    else if(arch.HasCapability(GPUCapability::HasWMMA) && arch.target().isRDNA4GPU())
+    {
+        mi_mnemonic = "v_wmma_f32_16x16x16_f16";
+    }
+    else
+    {
+        AssertFatal(false, concatenate("Arch not supported: ", arch.target().toString()));
+    }
+    auto mi_v = createRegisters(m_context, Register::Type::Vector, DataType::Float, 16);
+    auto or_v = createRegisters(m_context, Register::Type::Vector, DataType::Float, 4);
 
     auto generator_one = [&]() -> Generator<Instruction> {
         std::string comment = "stream1";
-        co_yield_(Instruction(
-            "v_mfma_f32_32x32x1f32", {mfma_v[0]}, {mfma_v[1], mfma_v[2], mfma_v[3]}, {}, comment));
-        co_yield_(Instruction(
-            "v_mfma_f32_32x32x1f32", {mfma_v[4]}, {mfma_v[5], mfma_v[6], mfma_v[7]}, {}, comment));
-        co_yield_(Instruction("v_mfma_f32_32x32x1f32",
-                              {mfma_v[8]},
-                              {mfma_v[9], mfma_v[10], mfma_v[11]},
-                              {},
-                              comment));
+        co_yield_(Instruction(mi_mnemonic, {mi_v[0]}, {mi_v[1], mi_v[2], mi_v[3]}, {}, comment));
+        co_yield_(Instruction(mi_mnemonic, {mi_v[4]}, {mi_v[5], mi_v[6], mi_v[7]}, {}, comment));
+        co_yield_(Instruction(mi_mnemonic, {mi_v[8]}, {mi_v[9], mi_v[10], mi_v[11]}, {}, comment));
     };
     auto generator_two = [&]() -> Generator<Instruction> {
         std::string comment = "stream2";
         while(true)
         {
             co_yield_(Instruction("unrelated_op_2", {}, {}, {}, comment));
-            co_yield_(Instruction("v_or_b32", {or_v[0]}, {mfma_v[0], mfma_v[1]}, {}, comment));
+            co_yield_(Instruction("v_or_b32", {or_v[0]}, {mi_v[0], mi_v[1]}, {}, comment));
             co_yield_(Instruction("unrelated_op_3", {}, {}, {}, comment));
-            co_yield_(Instruction("v_or_b32", {or_v[1]}, {mfma_v[8], mfma_v[9]}, {}, comment));
-            co_yield_(Instruction("v_mfma_f32_32x32x1f32",
-                                  {mfma_v[8]},
-                                  {mfma_v[9], mfma_v[10], mfma_v[11]},
-                                  {},
-                                  comment));
+            co_yield_(Instruction("v_or_b32", {or_v[1]}, {mi_v[8], mi_v[9]}, {}, comment));
+            co_yield_(
+                Instruction(mi_mnemonic, {mi_v[8]}, {mi_v[9], mi_v[10], mi_v[11]}, {}, comment));
         }
     };
     auto generator_three = [&]() -> Generator<Instruction> {
@@ -158,14 +176,11 @@ Generator<Instruction> complex_mfma_with_coop(ContextPtr m_context)
         while(true)
         {
             co_yield_(Instruction("unrelated_op_4", {}, {}, {}, comment));
-            co_yield_(Instruction("v_mfma_f32_32x32x1f32",
-                                  {mfma_v[12]},
-                                  {mfma_v[13], mfma_v[14], mfma_v[15]},
-                                  {},
-                                  comment));
-            co_yield_(Instruction("v_or_b32", {or_v[2]}, {mfma_v[4], mfma_v[5]}, {}, comment));
+            co_yield_(
+                Instruction(mi_mnemonic, {mi_v[12]}, {mi_v[13], mi_v[14], mi_v[15]}, {}, comment));
+            co_yield_(Instruction("v_or_b32", {or_v[2]}, {mi_v[4], mi_v[5]}, {}, comment));
             co_yield_(Instruction("unrelated_op_5", {}, {}, {}, comment));
-            co_yield_(Instruction("v_or_b32", {or_v[3]}, {mfma_v[12], mfma_v[13]}, {}, comment));
+            co_yield_(Instruction("v_or_b32", {or_v[3]}, {mi_v[12], mi_v[13]}, {}, comment));
         }
     };
 
@@ -189,29 +204,17 @@ CodeGenResult CodeGen(CodeGenProblem const& prob)
     CodeGenResult result(prob);
     Generator<rocRoller::Instruction> (*generator)(rocRoller::ContextPtr);
 
-    {
-        // TODO: implement codegen stress tests that use WMMAs
-        auto        m_context = Context::ForDefaultHipDevice(prob.name);
-        auto const& arch      = m_context->targetArchitecture();
-        if(!arch.HasCapability(GPUCapability::HasMFMA))
-        {
-            std::cout << "FIXME: codegen stress tests are not supported on "
-                      << arch.target().toString() << std::endl;
-            exit(0);
-        }
-    }
-
     if(prob.instructions == "comments")
     {
         generator = comments;
     }
-    else if(prob.instructions == "simple_mfma")
+    else if(prob.instructions == "simple_mi")
     {
-        generator = simple_mfma;
+        generator = simple_mi;
     }
-    else if(prob.instructions == "complex_mfma_with_coop")
+    else if(prob.instructions == "complex_mi_with_coop")
     {
-        generator = complex_mfma_with_coop;
+        generator = complex_mi_with_coop;
     }
     else
     {
@@ -262,7 +265,7 @@ int main(int argc, const char* argv[])
 
     prob.name         = "CodeGenv00";
     prob.instCount    = 40000;
-    prob.instructions = "simple_mfma";
+    prob.instructions = "simple_mi";
     prob.numWarmUp    = 2;
     prob.numRuns      = 10;
 

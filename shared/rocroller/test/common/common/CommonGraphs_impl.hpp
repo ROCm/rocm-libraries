@@ -217,17 +217,17 @@ namespace rocRollerTest::Graphs
 
         if(m_useScalarLoads)
         {
-            auto aScalarTag = m_command->addOperation(rocRoller::Operations::Scalar(dataType));
-            aLoadTag = m_command->addOperation(rocRoller::Operations::T_Load_Scalar(aScalarTag));
-            auto bScalarTag = m_command->addOperation(rocRoller::Operations::Scalar(dataType));
-            bLoadTag = m_command->addOperation(rocRoller::Operations::T_Load_Scalar(bScalarTag));
+            aTag     = m_command->addOperation(rocRoller::Operations::Scalar(dataType));
+            aLoadTag = m_command->addOperation(rocRoller::Operations::T_Load_Scalar(aTag));
+            bTag     = m_command->addOperation(rocRoller::Operations::Scalar(dataType));
+            bLoadTag = m_command->addOperation(rocRoller::Operations::T_Load_Scalar(bTag));
         }
         else
         {
-            auto aTensorTag = m_command->addOperation(rocRoller::Operations::Tensor(1, dataType));
-            aLoadTag = m_command->addOperation(rocRoller::Operations::T_Load_Linear(aTensorTag));
-            auto bTensorTag = m_command->addOperation(rocRoller::Operations::Tensor(1, dataType));
-            bLoadTag = m_command->addOperation(rocRoller::Operations::T_Load_Linear(bTensorTag));
+            aTag     = m_command->addOperation(rocRoller::Operations::Tensor(1, dataType));
+            aLoadTag = m_command->addOperation(rocRoller::Operations::T_Load_Linear(aTag));
+            bTag     = m_command->addOperation(rocRoller::Operations::Tensor(1, dataType));
+            bLoadTag = m_command->addOperation(rocRoller::Operations::T_Load_Linear(bTag));
         }
 
         Operations::T_Execute execute(m_command->getNextTag());
@@ -238,10 +238,22 @@ namespace rocRollerTest::Graphs
 
         if(!m_useScalarLoads)
         {
-            auto resultTensorTag
-                = m_command->addOperation(rocRoller::Operations::Tensor(1, dataType));
-            m_command->addOperation(Operations::T_Store_Linear(result, resultTensorTag));
+            resultTag = m_command->addOperation(rocRoller::Operations::Tensor(1, dataType));
+            m_command->addOperation(Operations::T_Store_Linear(result, resultTag));
         }
+    }
+
+    template <typename T>
+    CommandParametersPtr VectorAddNegSquare<T>::getCommandParameters() const
+    {
+        using namespace rocRoller::KernelGraph::CoordinateGraph;
+
+        auto params = std::make_shared<CommandParameters>();
+
+        params->setManualKernelDimension(2);
+        params->setManualWorkgroupSize({64, 1, 1});
+
+        return params;
     }
 
     template <typename T>

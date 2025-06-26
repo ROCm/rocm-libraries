@@ -442,7 +442,7 @@ namespace rocRoller
         }
 
         std::map<int, std::vector<std::pair<int, int>>>
-            findMergeableLoads(KernelGraph&                       graph,
+            findMergeableLoads(KernelGraph const&                 graph,
                                std::map<int, int> const&          scaleLoads,
                                std::map<int, std::map<int, int>>& loadUnrollMap,
                                NaryArgument                       arg)
@@ -653,8 +653,8 @@ namespace rocRoller
                 for(auto const merge : load.second)
                 {
                     auto mergeTopOp = getTopSetCoordinate(graph, merge.first);
-                    auto ordering
-                        = graph.control.compareNodes(rocRoller::UpdateCache, topOp, mergeTopOp);
+                    auto ordering   = graph.control.compareNodes(
+                        rocRoller::UseCacheIfAvailable, topOp, mergeTopOp);
                     AssertFatal(ordering == NodeOrdering::LeftFirst);
                     int replaceOp = -1;
                     if(merge.second > 0)

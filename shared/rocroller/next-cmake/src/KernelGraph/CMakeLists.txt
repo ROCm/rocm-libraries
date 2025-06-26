@@ -27,6 +27,7 @@
 set(_CMAKE_CURRENT_SOURCE_DIR "${ROCROLLER_LIB_DIR}/source/KernelGraph")
 target_sources(rocroller
     PRIVATE
+        "${_CMAKE_CURRENT_SOURCE_DIR}/ControlFlowArgumentTracer.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/ControlFlowRWTracer.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/ControlToCoordinateMapper.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/GlobalConstraints.cpp"

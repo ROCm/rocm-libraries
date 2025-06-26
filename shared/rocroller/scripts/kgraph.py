@@ -84,9 +84,13 @@ def extract_asm_dot(path: pathlib.Path):
 
     meta = yaml.load(source[beginPos:endPos], Loader=yaml.CSafeLoader)
     kernel = meta["amdhsa.kernels"][0]
-    if ".kernel_graph_dot" in kernel:
-        return kernel[".name"], kernel[".kernel_graph_dot"], kernel[".kernel_graph"]
-    return kernel[".name"], kernel[".kernel_graph"]
+
+    def try_get(key):
+        if key in kernel:
+            return kernel[key]
+        return None
+
+    return try_get(".name"), try_get(".kernel_graph_dot"), try_get(".kernel_graph")
 
 
 def extract_log_dots(path: pathlib.Path):

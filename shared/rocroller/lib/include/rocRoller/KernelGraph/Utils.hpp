@@ -186,6 +186,16 @@ namespace rocRoller
             findAllRequiredCoordinates(int op, KernelGraph const& graph);
 
         /**
+         * @brief Return an augmented path that includes all
+         * neighbours (in direction `direction`) of edges in the
+         * original path.
+         */
+        std::unordered_set<int> includeEdgeNeighbours(
+            rocRoller::KernelGraph::CoordinateGraph::CoordinateGraph const& coordinates,
+            Graph::Direction                                                direction,
+            std::unordered_set<int> const&                                  path);
+
+        /**
          * @brief Find the operation of type T that contains the
          * candidate load/store operation.
          */
@@ -655,6 +665,9 @@ namespace rocRoller
         *        verifying correctness.
         */
         void removeRedundantBodyEdgesBaselineMethod(KernelGraph& graph);
+
+        std::deque<int> controlStack(int control, KernelGraph const& graph);
+        std::deque<int> controlStack(int control, ControlGraph::ControlGraph const& graph);
     }
 }
 

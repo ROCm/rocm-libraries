@@ -111,7 +111,7 @@ namespace BranchGeneratorTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            auto testCtx = TestContext::ForTarget(arch, {.alwaysWaitBeforeBranch = true});
+            auto testCtx = TestContext::ForTarget(arch, {{.alwaysWaitBeforeBranch = true}});
             auto ctx     = testCtx.get();
             auto k       = ctx->kernel();
 
@@ -157,7 +157,7 @@ namespace BranchGeneratorTest
     {
         SUPPORTED_ARCH_SECTION(arch)
         {
-            auto testCtx = TestContext::ForTarget(arch, {.alwaysWaitBeforeBranch = false});
+            auto testCtx = TestContext::ForTarget(arch, {{.alwaysWaitBeforeBranch = false}});
             auto ctx     = testCtx.get();
             auto k       = ctx->kernel();
 

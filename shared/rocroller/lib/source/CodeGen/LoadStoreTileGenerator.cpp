@@ -44,6 +44,7 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/KernelGraph/ScopeManager.hpp>
+#include <rocRoller/KernelGraph/Transforms/LowerTile_details.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/Scheduling/Scheduler.hpp>
 #include <rocRoller/Utilities/Error.hpp>
@@ -57,6 +58,7 @@ namespace rocRoller
         using namespace ControlGraph;
         using namespace CoordinateGraph;
         using namespace Expression;
+        using namespace LowerTileDetails;
 
         std::string toString(LoadStoreTileGenerator::LoadStoreTileInfo const& info)
         {
@@ -182,13 +184,6 @@ namespace rocRoller
             auto [opTag, op]           = tagAndOp;
             auto [macTileTag, macTile] = tagAndTile;
 
-            const auto M        = macTile.subTileSizes[0];
-            const auto N        = macTile.subTileSizes[1];
-            const auto K        = macTile.subTileSizes[2];
-            const auto isF8F6F4 = (isF8(dataType) || isF6(dataType) || isF4(dataType))
-                                  && (((M == 16) && (N == 16) && (K == 128))
-                                      || ((M == 32) && (N == 32) && (K == 64)));
-
             if(macTile.memoryType == MemoryType::VGPR
                || (macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
                    && macTile.memoryType == MemoryType::WAVE_SPLIT))
@@ -243,12 +238,15 @@ namespace rocRoller
                     elementBlockIndex = elementBlockNumber * getUnsignedInt(evaluate(vgpr.size));
                 }
 
-                if((isF16(dataType) || !isF8F6F4 || isScaleType(dataType)) && !isTransposed)
+                if((!isTileOfSubDwordTypeWithNonContiguousVGPRBlocks(dataType,
+                                                                     {.m = macTile.subTileSizes[0],
+                                                                      .n = macTile.subTileSizes[1],
+                                                                      .k = macTile.subTileSizes[2]})
+                    || isScaleType(dataType))
+                   && !isTransposed)
                 {
-                    // When F8F6F4 instruction is used or when F16 is
-                    // transposed loaded from LDS, VGPRBlockIndex holds
-                    // number of elements per VGPRBlock instead of
-                    // number of VGPR per block.
+                    // For Scales and other kinds of tiles, VGPRBlockIndex holds
+                    // number of VGPR per block and not elements per VGPRBlock.
                     elementBlockIndex *= packingFactorForDataType(dataType);
                 }
             }

@@ -285,7 +285,7 @@ namespace rocsparse
                                            int64_t x_inc,
                                            T* __restrict__ y,
                                            int* __restrict__ done_array,
-                                           J* __restrict__ map,
+                                           const J* __restrict__ map,
                                            int offset,
                                            J* __restrict__ zero_pivot,
                                            rocsparse_index_base idx_base,

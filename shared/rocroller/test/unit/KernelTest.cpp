@@ -138,8 +138,8 @@ namespace rocRollerTest
 
         void SetUp() override
         {
-            m_kernelOptions.maxVGPRs             = 234;
-            m_kernelOptions.setNextFreeVGPRToMax = true;
+            m_kernelOptions->maxVGPRs             = 234;
+            m_kernelOptions->setNextFreeVGPRToMax = true;
 
             GenericContextFixture::SetUp();
         }
