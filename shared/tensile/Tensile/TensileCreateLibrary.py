@@ -42,7 +42,7 @@ from io import TextIOWrapper
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
-from . import ClientExecutable, Common, EmbeddedData, LibraryIO, Utils
+from . import Common, EmbeddedData, LibraryIO, Utils
 from .BuildCommands import AssemblyCommands, SourceCommands
 from .Common import (
     HR,
