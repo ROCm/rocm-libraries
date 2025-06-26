@@ -345,11 +345,8 @@ def parseLibraryLogicData(
 
             if "MatrixInstruction" in customConfig and len(customConfig["MatrixInstruction"]) != 4:
                 raise ValueError(f"Custom kernel MatrixInstruction can only be of length 4, found {customConfig['MatrixInstruction']}")
-
-            # The ActivationType setting in YAML is meaningless in customKernel case.
-            # Therefore, we override the customKernel setting with the ActivationType value from ProblemType to avoid false alarms during subsequent problemType checks.
-            solutionState["ProblemType"]["ActivationType"] = problemType["ActivationType"]
-
+        # overwrite problemType if any
+        solutionState["ProblemType"] = problemType
         solutionObject = Solution(
                              solutionState,
                              splitGSU,
@@ -359,15 +356,6 @@ def parseLibraryLogicData(
                              isaInfoMap,
                              srcFile
                          )
-        solutionProblemType = solutionObject["ProblemType"]
-        if problemType != solutionProblemType:
-            # find the mismatched items in ProblemType
-            results = ""
-            solIdx = solutionObject["SolutionIndex"]
-            for item in problemType:
-                if problemType[item] != solutionProblemType[item]:
-                    results += f"\t{item}: {problemType[item]} != {solutionProblemType[item]}\n"
-            printExit(f"ProblemType in library logic file {srcFile} doesn't match solution(idx={solIdx}): \n{results}")
         return solutionObject
 
     solutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
@@ -534,32 +522,7 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
     solutionList = []
     for solution in solutions:
         solutionState = solution.getAttributes()
-        solutionState["ProblemType"] = solutionState["ProblemType"].state
-        solutionState["ProblemType"]["DataType"] = \
-                solutionState["ProblemType"]["DataType"].value
-        solutionState["ProblemType"]["DataTypeA"] = \
-                solutionState["ProblemType"]["DataTypeA"].value
-        solutionState["ProblemType"]["DataTypeB"] = \
-                solutionState["ProblemType"]["DataTypeB"].value
-        solutionState["ProblemType"]["DataTypeE"] = \
-                solutionState["ProblemType"]["DataTypeE"].value
-        solutionState["ProblemType"]["DataTypeAmaxD"] = \
-                solutionState["ProblemType"]["DataTypeAmaxD"].value
-        solutionState["ProblemType"]["DestDataType"] = \
-                solutionState["ProblemType"]["DestDataType"].value
-        solutionState["ProblemType"]["ComputeDataType"] = \
-                solutionState["ProblemType"]["ComputeDataType"].value
-        solutionState["ProblemType"]["BiasDataTypeList"] = \
-                [btype.value for btype in solutionState["ProblemType"]["BiasDataTypeList"]]
-        solutionState["ProblemType"]["ActivationComputeDataType"] = \
-                solutionState["ProblemType"]["ActivationComputeDataType"].value
-        solutionState["ProblemType"]["ActivationType"] = \
-                solutionState["ProblemType"]["ActivationType"].value
-        solutionState["ProblemType"]["F32XdlMathOp"] = \
-                solutionState["ProblemType"]["F32XdlMathOp"].value
-        if "DataTypeMetadata" in solutionState["ProblemType"]:
-            solutionState["ProblemType"]["DataTypeMetadata"] = \
-                    solutionState["ProblemType"]["DataTypeMetadata"].value
+        del solutionState["ProblemType"]
         isa = solutionState["ISA"]
         solutionState["ISA"] = [isa[0], isa[1], isa[2]]
         solutionList.append(solutionState)
@@ -568,32 +531,7 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
         tileSolutions = logicTuple[5]
         for solution in tileSolutions:
             solutionState = solution.getAttributes()
-            solutionState["ProblemType"] = solutionState["ProblemType"].state
-            solutionState["ProblemType"]["DataType"] = \
-                    solutionState["ProblemType"]["DataType"].value
-            solutionState["ProblemType"]["DataTypeA"] = \
-                    solutionState["ProblemType"]["DataTypeA"].value
-            solutionState["ProblemType"]["DataTypeB"] = \
-                    solutionState["ProblemType"]["DataTypeB"].value
-            solutionState["ProblemType"]["DataTypeE"] = \
-                    solutionState["ProblemType"]["DataTypeE"].value
-            solutionState["ProblemType"]["DataTypeAmaxD"] = \
-                    solutionState["ProblemType"]["DataTypeAmaxD"].value
-            solutionState["ProblemType"]["DestDataType"] = \
-                    solutionState["ProblemType"]["DestDataType"].value
-            solutionState["ProblemType"]["ComputeDataType"] = \
-                    solutionState["ProblemType"]["ComputeDataType"].value
-            solutionState["ProblemType"]["BiasDataTypeList"] = \
-                    [btype.value for btype in solutionState["ProblemType"]["BiasDataTypeList"]]
-            solutionState["ProblemType"]["ActivationComputeDataType"] = \
-                    solutionState["ProblemType"]["ActivationComputeDataType"].value
-            solutionState["ProblemType"]["ActivationType"] = \
-                    solutionState["ProblemType"]["ActivationType"].value
-            solutionState["ProblemType"]["F32XdlMathOp"] = \
-                solutionState["ProblemType"]["F32XdlMathOp"].value
-            if "DataTypeMetadata" in solutionState["ProblemType"]:
-                solutionState["ProblemType"]["DataTypeMetadata"] = \
-                    solutionState["ProblemType"]["DataTypeMetadata"].value
+            del solutionState["ProblemType"]
             solutionList.append(solutionState)
 
     data.append(solutionList)
