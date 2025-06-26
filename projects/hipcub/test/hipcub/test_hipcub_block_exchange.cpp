@@ -167,7 +167,7 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToStriped)
     HIP_CHECK(
         hipMemcpy(device_input, input.data(), input.size() * sizeof(type), hipMemcpyHostToDevice));
 
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     // Running kernel
     constexpr unsigned int grid_size = (size / items_per_block);
     hipLaunchKernelGGL(
@@ -179,7 +179,7 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToStriped)
         0,
         device_input,
         device_output);
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
@@ -284,7 +284,7 @@ TYPED_TEST(HipcubBlockExchangeTests, StripedToBlocked)
         0,
         device_input,
         device_output);
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
@@ -424,7 +424,7 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToWarpStriped)
         0,
         device_input,
         device_output);
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
@@ -564,7 +564,7 @@ TYPED_TEST(HipcubBlockExchangeTests, WarpStripedToBlocked)
         0,
         device_input,
         device_output);
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
@@ -692,7 +692,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToBlocked)
         device_input,
         device_output,
         device_ranks);
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
@@ -822,7 +822,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStriped)
         device_input,
         device_output,
         device_ranks);
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
@@ -1154,7 +1154,7 @@ TYPED_TEST(HipcubBlockExchangeTests, StripedToBlockedOneParam)
         0,
         0,
         device_input);
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
@@ -1247,7 +1247,7 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToStripedOneParam)
         0,
         0,
         device_input);
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
@@ -1373,7 +1373,7 @@ TYPED_TEST(HipcubBlockExchangeTests, WarpStripedToBlockedOneParam)
         0,
         0,
         device_input);
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
@@ -1500,7 +1500,7 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToWarpStripedOneParam)
         0,
         0,
         device_input);
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
@@ -1616,7 +1616,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToBlockedNoOutputParam)
         0,
         device_input,
         device_ranks);
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
@@ -1734,7 +1734,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedNoOutputParam)
         0,
         device_input,
         device_ranks);
-    HIP_CHECK(hipPeekAtLastError());
+    HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
     // Reading results
