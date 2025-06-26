@@ -25,7 +25,6 @@
 //      - Support transforms with factors_pp.size() > 1.
 //      - Revisit all usages of transforms_per_block_pp and threads_per_transform.
 //      - Different input/output strides.
-//      - Revisit factor 192 logic in calculate_offsets() with different input lengths
 
 // Variation of StockhamKernelCC that implements the partial pass
 // method. Similarities of StockhamPartialPassKernelCC with
@@ -300,7 +299,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                         tile_index * transforms_per_block_pp + thread_id / threads_per_transform};
         stmts += Assign{stride_lds, (length + get_lds_padding())};
 
-        stmts += MultiplyAssign(stride_lds, Literal{max_factor_pp});
+        stmts += MultiplyAssign(stride_lds, Literal{pp_factors_curr_prod});
 
         stmts += Declaration{
             in_bound,
@@ -313,23 +312,25 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         stmts += Declaration{thread_lds, thread_id / transforms_per_block_pp};
         stmts += Declaration{tid_hor_lds, thread_id % transforms_per_block_pp};
 
-        // TODO: length
-        stmts += Declaration(
-            tid_hor_pp, thread_id % transforms_per_block_pp + length * (thread % max_factor_pp));
-        stmts += Declaration(thread_new, thread_id / (transforms_per_block_pp * max_factor_pp));
-        stmts += Declaration(batch_new, block_id / (plength / max_factor_pp));
+        stmts += Declaration(tid_hor_pp,
+                             thread_id % transforms_per_block_pp
+                                 + lengths[1] * (thread % pp_factors_curr_prod));
+        stmts += Declaration(thread_new,
+                             thread_id / (transforms_per_block_pp * pp_factors_curr_prod));
+        stmts += Declaration(batch_new, block_id / (plength / pp_factors_curr_prod));
 
         stmts += Declaration(thread_idx, thread_id);
         stmts += Declaration(block_idx, block_id);
 
-        // TODO: length and TODO: Literal{192}
         stmts += Declaration(
-            offset_pp, offset + Parens(offset / length) * Literal{192} + batch_new * stride[dim]);
+            offset_pp,
+            offset + Parens(offset / lengths[1]) * (lengths[1] * pp_factors_curr_prod - lengths[1])
+                + batch_new * stride[dim]);
         stmts += Declaration(offset_tid_hor, offset_pp + tid_hor_pp * stride[1]);
 
         stmts += Assign{transform,
                         tile_index * transforms_per_block_pp
-                            + thread_id / (threads_per_transform * max_factor_pp)};
+                            + thread_id / (threads_per_transform * pp_factors_curr_prod)};
 
         stmts += Assign{offset_lds,
                         Ternary{lds_linear,
