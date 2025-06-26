@@ -144,7 +144,7 @@ class GitHubCLIClient:
 
     def get_changed_files(self, repo: str, pr: int) -> List[str]:
         """Fetch the changed files in a pull request using GitHub API."""
-        url = f"{self.api_url}/repos/{repo}/pulls/{pr}/files?per_page=100"
+        url = f"{self.api_url}/repos/{repo}/pulls/{pr}/files?per_page=50"
         logger.debug(f"Request URL: {url}")
         files_data = self._get_paginated_json(url, f"Failed to fetch files for PR #{pr} in {repo}")
         files = [file["filename"] for file in files_data]

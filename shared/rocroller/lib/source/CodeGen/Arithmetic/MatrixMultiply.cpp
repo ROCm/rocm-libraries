@@ -37,6 +37,11 @@ namespace rocRoller
 
         const std::string MatrixMultiply::Basename = "MatrixMultiply";
 
+        std::string toString(MatrixMultiplySizes mi)
+        {
+            return fmt::format("MI: {}x{}x{} (batch: {})", mi.m, mi.n, mi.k, mi.b);
+        }
+
         std::string typeStr(auto dtype)
         {
             switch(dtype)
@@ -61,14 +66,11 @@ namespace rocRoller
             }
         }
 
-        Generator<Instruction> MatrixMultiplyGenerator::mul(Register::ValuePtr D,
-                                                            Register::ValuePtr A,
-                                                            Register::ValuePtr B,
-                                                            Register::ValuePtr C,
-                                                            int                M,
-                                                            int                N,
-                                                            int                K,
-                                                            int                BATCH)
+        Generator<Instruction> MatrixMultiplyGenerator::mul(Register::ValuePtr  D,
+                                                            Register::ValuePtr  A,
+                                                            Register::ValuePtr  B,
+                                                            Register::ValuePtr  C,
+                                                            MatrixMultiplySizes mi)
         {
             AssertFatal(A != nullptr);
             AssertFatal(B != nullptr);
@@ -87,48 +89,41 @@ namespace rocRoller
             auto const packingB = DataTypeInfo::Get(typeB).packing;
             auto const packingC = DataTypeInfo::Get(typeC).packing;
             auto const packingD = DataTypeInfo::Get(typeD).packing;
-            AssertFatal(M > 0 && N > 0 && K > 0 && BATCH > 0 && lanesPerWavefront > 0,
+            AssertFatal(mi.m > 0 && mi.n > 0 && mi.k > 0 && mi.b > 0 && lanesPerWavefront > 0,
                         "Invalid inputs",
-                        ShowValue(M),
-                        ShowValue(N),
-                        ShowValue(K),
-                        ShowValue(BATCH),
+                        ShowValue(mi),
                         ShowValue(lanesPerWavefront));
-            AssertFatal(A->valueCount() * packingA == (size_t)M * K * BATCH / lanesPerWavefront,
+            AssertFatal(A->valueCount() * packingA
+                            == (size_t)mi.m * mi.k * mi.b / lanesPerWavefront,
                         "A matrix size mismatch",
-                        ShowValue(M),
-                        ShowValue(K),
-                        ShowValue(BATCH),
+                        ShowValue(mi),
                         ShowValue(lanesPerWavefront),
-                        ShowValue(M * K * BATCH / lanesPerWavefront),
+                        ShowValue(mi.m * mi.k * mi.b / lanesPerWavefront),
                         ShowValue(A->valueCount()),
                         ShowValue(packingA));
-            AssertFatal(B->valueCount() * packingB == (size_t)K * N * BATCH / lanesPerWavefront,
+            AssertFatal(B->valueCount() * packingB
+                            == (size_t)mi.k * mi.n * mi.b / lanesPerWavefront,
                         "B matrix size mismatch",
-                        ShowValue(K),
-                        ShowValue(N),
-                        ShowValue(BATCH),
+                        ShowValue(mi),
                         ShowValue(lanesPerWavefront),
-                        ShowValue(K * N * BATCH / lanesPerWavefront),
+                        ShowValue(mi.k * mi.n * mi.b / lanesPerWavefront),
                         ShowValue(B->valueCount()),
                         ShowValue(packingB));
-            AssertFatal(C->valueCount() * packingC == (size_t)M * N * BATCH / lanesPerWavefront,
+            AssertFatal(C->valueCount() * packingC
+                            == (size_t)mi.m * mi.n * mi.b / lanesPerWavefront,
                         "C matrix size mismatch",
-                        ShowValue(M),
-                        ShowValue(N),
-                        ShowValue(BATCH),
+                        ShowValue(mi),
                         ShowValue(lanesPerWavefront),
-                        ShowValue(M * N * BATCH / lanesPerWavefront),
+                        ShowValue(mi.m * mi.n * mi.b / lanesPerWavefront),
                         ShowValue(C->valueCount()),
                         ShowValue(typeC),
                         ShowValue(packingC));
-            AssertFatal(D->valueCount() * packingD == (size_t)M * N * BATCH / lanesPerWavefront,
+            AssertFatal(D->valueCount() * packingD
+                            == (size_t)mi.m * mi.n * mi.b / lanesPerWavefront,
                         "D matrix size mismatch",
-                        ShowValue(M),
-                        ShowValue(N),
-                        ShowValue(BATCH),
+                        ShowValue(mi),
                         ShowValue(lanesPerWavefront),
-                        ShowValue(M * N * BATCH / lanesPerWavefront),
+                        ShowValue(mi.m * mi.n * mi.b / lanesPerWavefront),
                         ShowValue(D->valueCount()),
                         ShowValue(typeD),
                         ShowValue(packingD));
@@ -176,11 +171,11 @@ namespace rocRoller
 
             if(arch.HasCapability(GPUCapability::HasWMMA))
             {
-                AssertFatal((M == 16) && (N == 16) && (K == 16 || K == 32),
+                AssertFatal((mi.m == 16) && (mi.n == 16) && (mi.k == 16 || mi.k == 32),
                             "Invalid inputs",
-                            ShowValue(M),
-                            ShowValue(N),
-                            ShowValue(K));
+                            ShowValue(mi.m),
+                            ShowValue(mi.n),
+                            ShowValue(mi.k));
 
                 if(isF8(typeA) && isF8(typeB))
                 {
@@ -202,7 +197,7 @@ namespace rocRoller
                 }
 
                 auto wmma = concatenate(
-                    "v_wmma_", typeStr(typeD), "_", M, "x", N, "x", K, "_", inputType);
+                    "v_wmma_", typeStr(typeD), "_", mi.m, "x", mi.n, "x", mi.k, "_", inputType);
                 co_yield_(Instruction(wmma, {D}, {A, B, C}, {}, ""));
             }
             else if(arch.HasCapability(GPUCapability::HasMFMA))
@@ -218,20 +213,22 @@ namespace rocRoller
                     // tile sizes.
                     if(isF8(typeA))
                     {
-                        if((M == 32 && N == 32 && K == 64) || (M == 16 && N == 16 && K == 128))
+                        if((mi.m == 32 && mi.n == 32 && mi.k == 64)
+                           || (mi.m == 16 && mi.n == 16 && mi.k == 128))
                             inputType = "_f8f6f4";
                     }
 
                     if(isBF16(typeA))
                     {
-                        if(((M == 32) && (N == 32) && (K == 8))
-                           || ((M == 16) && (N == 16) && (K == 16)))
+                        if(((mi.m == 32) && (mi.n == 32) && (mi.k == 8))
+                           || ((mi.m == 16) && (mi.n == 16) && (mi.k == 16)))
                         {
                             inputType = "bf16_1k";
                         }
                     }
                     // For F16 types, result will be "f16" (or "bf16").
-                    if((M == 16 && N == 16 && K == 32) || (M == 32 && N == 32 && K == 16))
+                    if((mi.m == 16 && mi.n == 16 && mi.k == 32)
+                       || (mi.m == 32 && mi.n == 32 && mi.k == 16))
                     {
                         if(isFP16(typeA))
                         {
@@ -261,10 +258,13 @@ namespace rocRoller
                 // TODO: _fp8_bf8 not handled
                 if(inputType == "_f8f6f4")
                 {
-                    if(!((M == 32 && N == 32 && K == 64) || (M == 16 && N == 16 && K == 128)))
+                    if(!((mi.m == 32 && mi.n == 32 && mi.k == 64)
+                         || (mi.m == 16 && mi.n == 16 && mi.k == 128)))
                     {
-                        Throw<FatalError>(
-                            "Invalid F8F6F4 MFMA size.", ShowValue(M), ShowValue(N), ShowValue(K));
+                        Throw<FatalError>("Invalid F8F6F4 MFMA size.",
+                                          ShowValue(mi.m),
+                                          ShowValue(mi.n),
+                                          ShowValue(mi.k));
                     }
 
                     modifier = concatenate("cbsz:",
@@ -273,8 +273,8 @@ namespace rocRoller
                                            Arithmetic::getModifier(typeB));
                 }
 
-                auto mfma
-                    = concatenate("v_mfma_", typeStr(typeD), "_", M, "x", N, "x", K, inputType);
+                auto mfma = concatenate(
+                    "v_mfma_", typeStr(typeD), "_", mi.m, "x", mi.n, "x", mi.k, inputType);
 
                 co_yield_(Instruction(mfma, {D}, {A, B, C}, {modifier}, ""));
             }

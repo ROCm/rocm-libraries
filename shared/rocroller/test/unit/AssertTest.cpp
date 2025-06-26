@@ -32,11 +32,13 @@
 #endif /* ROCROLLER_USE_HIP */
 
 #include <rocRoller/AssertOpKinds.hpp>
+
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
 #include "GPUContextFixture.hpp"
@@ -73,7 +75,7 @@ namespace AssertTest
                     rocRoller::KernelGraph::KernelGraph kgraph;
                     auto                                k = m_context->kernel();
                     k->setKernelDimensions(1);
-                    setKernelOptions({.assertOpKind = assertOpKind});
+                    setKernelOptions({{.assertOpKind = assertOpKind}});
                     auto assertOp = kgraph.control.addElement(AssertOp{});
                     m_context->schedule(rocRoller::KernelGraph::generate(kgraph, k));
                 },
@@ -90,7 +92,7 @@ namespace AssertTest
             k->setKernelDimensions(1);
             k->setWorkitemCount({one, one, one});
             k->setWorkgroupSize({1, 1, 1});
-            setKernelOptions({.assertOpKind = assertOpKind});
+            setKernelOptions({{.assertOpKind = assertOpKind}});
             m_context->schedule(k->preamble());
             m_context->schedule(k->prolog());
             k->setDynamicSharedMemBytes(zero);
@@ -223,7 +225,7 @@ namespace AssertTest
                     rocRoller::KernelGraph::KernelGraph kgraph;
                     auto                                k = m_context->kernel();
                     k->setKernelDimensions(1);
-                    setKernelOptions({.assertOpKind = assertOpKind});
+                    setKernelOptions({{.assertOpKind = assertOpKind}});
                     auto assertOp = kgraph.control.addElement(AssertOp{});
                     m_context->schedule(rocRoller::KernelGraph::generate(kgraph, k));
                 },
@@ -240,7 +242,7 @@ namespace AssertTest
             k->setKernelDimensions(1);
             k->setWorkitemCount({one, one, one});
             k->setWorkgroupSize({1, 1, 1});
-            setKernelOptions({.assertOpKind = assertOpKind});
+            setKernelOptions({{.assertOpKind = assertOpKind}});
             m_context->schedule(k->preamble());
             m_context->schedule(k->prolog());
             k->setDynamicSharedMemBytes(zero);

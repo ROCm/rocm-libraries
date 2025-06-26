@@ -102,5 +102,10 @@ namespace rocRoller
          * @return ExpressionPtr
          */
         ExpressionPtr rebuildExpression(ExpressionTree const& tree);
+
+        /**
+         * Returns a DOT/graphviz representation of `tree`.
+         */
+        std::string toDOT(ExpressionTree const& tree);
     }
 }

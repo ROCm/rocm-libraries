@@ -120,6 +120,7 @@ namespace rocRoller
     bool isUnpackedF6(DataType type);
     bool isF4(DataType type);
     bool isUnpackedF4(DataType type);
+    bool isUnpackedF8F6F4(DataType type);
 
     uint packingFactorForDataType(DataType type);
 

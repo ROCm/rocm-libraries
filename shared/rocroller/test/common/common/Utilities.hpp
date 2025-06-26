@@ -244,7 +244,7 @@ AcceptableError
     double tolerance = 0.0;
 
     std::stringstream ss;
-    ss << "Output espilon: " << std::scientific << eps;
+    ss << "Output epsilon: " << std::scientific << eps;
 
     if constexpr(std::is_same_v<TD, rocRoller::FP8> || std::is_same_v<TD, rocRoller::BF8>)
     {

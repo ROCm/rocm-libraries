@@ -25,7 +25,7 @@
  *******************************************************************************/
 
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
-#include <rocRoller/Utilities/Settings_fwd.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 
 namespace rocRoller
 {

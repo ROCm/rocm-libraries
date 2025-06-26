@@ -28,6 +28,9 @@
 
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
 
+#include <string>
+#include <vector>
+
 namespace rocRoller
 {
     namespace Register

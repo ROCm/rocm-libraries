@@ -31,6 +31,8 @@
 #include "include/GraphInspector.hpp"
 #include "include/visualize.hpp"
 
+#include <rocRoller/Utilities/Settings.hpp>
+
 namespace rocRoller
 {
     namespace Client

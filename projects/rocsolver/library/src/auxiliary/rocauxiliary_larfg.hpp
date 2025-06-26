@@ -44,8 +44,8 @@ __device__ static constexpr int WarpSize = 32;
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
-__device__ void run_set_taubeta(T* tau, T* norms, T* alpha, T* beta)
+template <typename T, typename S, std::enable_if_t<!rocblas_is_complex<T>, int> = 0>
+__device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
 {
     const auto ignore_beta = (beta == nullptr);
     if(norms[0] > 0)
@@ -84,10 +84,9 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, T* beta)
     }
 }
 
-template <typename T, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
-__device__ void run_set_taubeta(T* tau, T* norms, T* alpha, T* beta)
+template <typename T, typename S, std::enable_if_t<rocblas_is_complex<T>, int> = 0>
+__device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
 {
-    using S = decltype(std::real(T{}));
     S r, rr, ri, ar, ai;
 
     ar = alpha[0].real();
@@ -133,20 +132,20 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, T* beta)
         // beta:
         if(!ignore_beta)
         {
-            beta[0] = alpha[0];
+            beta[0] = alpha[0].real();
             alpha[0] = 1;
         }
     }
 }
 
-template <typename T, typename I, typename U, typename UB>
+template <typename T, typename I, typename S, typename U>
 ROCSOLVER_KERNEL void set_taubeta(T* tauA,
                                   const rocblas_stride strideP,
                                   T* norms,
                                   U alphaA,
                                   const rocblas_stride shiftA,
                                   const rocblas_stride strideA,
-                                  UB betaA,
+                                  S* betaA,
                                   const rocblas_stride shiftb,
                                   const rocblas_stride strideb)
 {
@@ -154,10 +153,10 @@ ROCSOLVER_KERNEL void set_taubeta(T* tauA,
 
     // select batch instance
     T* alpha = load_ptr_batch<T>(alphaA, bid, shiftA, strideA);
-    T* beta = betaA ? load_ptr_batch<T>(betaA, bid, shiftb, strideb) : nullptr;
+    S* beta = betaA ? load_ptr_batch<S>(betaA, bid, shiftb, strideb) : nullptr;
     T* tau = tauA + bid * strideP;
 
-    run_set_taubeta<T>(tau, norms + bid, alpha, beta);
+    run_set_taubeta<T, S>(tau, norms + bid, alpha, beta);
 }
 
 template <typename T, typename I>
@@ -225,12 +224,12 @@ rocblas_status
     return rocblas_status_continue;
 }
 
-template <typename T, typename I, typename U, bool COMPLEX = rocblas_is_complex<T>>
+template <typename T, typename I, typename S, typename U, bool COMPLEX = rocblas_is_complex<T>>
 rocblas_status rocsolver_larfg_template(rocblas_handle handle,
                                         const I n,
                                         U alpha,
                                         const rocblas_stride shifta,
-                                        T* beta,
+                                        S* beta,
                                         const rocblas_stride shiftb,
                                         const rocblas_stride strideb,
                                         U x,
@@ -271,7 +270,7 @@ rocblas_status rocsolver_larfg_template(rocblas_handle handle,
     }
 
     // if n is small, use small-size kernel
-    if(n <= LARFG_SSKER_MAX_N)
+    if(true)
     {
         // TODO: Some architectures have failures in sygvx with small-size kernels enabled, more investigation needed
         int device;
@@ -321,8 +320,9 @@ rocblas_status rocsolver_larfg_template(rocblas_handle handle,
                                         T* work,
                                         T* norms)
 {
-    return rocsolver_larfg_template(handle, n, alpha, shifta, (T*)nullptr, 0, 0, x, shiftx, incx,
-                                    stridex, tau, strideP, batch_count, work, norms);
+    using S = decltype(std::real(T{}));
+    return rocsolver_larfg_template<T, I, S>(handle, n, alpha, shifta, (S*)nullptr, 0, 0, x, shiftx,
+                                             incx, stridex, tau, strideP, batch_count, work, norms);
 }
 
 ROCSOLVER_END_NAMESPACE

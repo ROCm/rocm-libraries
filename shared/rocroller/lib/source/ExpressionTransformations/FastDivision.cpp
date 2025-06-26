@@ -524,8 +524,13 @@ namespace rocRoller
                         return div;
                     }
 
-                    extraComment = " (magicNumberDivision returned nullptr)";
+                    if(expr.comment.find("magicNumberDivision") == std::string::npos)
+                    {
+                        extraComment = fmt::format(" (magicNumberDivision by {} returned nullptr)",
+                                                   toString(rhs));
+                    }
                 }
+
                 return std::make_shared<Expression>(Divide{lhs, rhs, expr.comment + extraComment});
             }
 
@@ -560,7 +565,11 @@ namespace rocRoller
                         return rv;
                     }
 
-                    extraComment = " (modulo: magicNumberDivision returned nullptr)";
+                    if(expr.comment.find("magicNumberDivision") == std::string::npos)
+                    {
+                        extraComment = fmt::format(
+                            " (modulo: magicNumberDivision returned nullptr)", toString(rhs));
+                    }
                 }
 
                 return std::make_shared<Expression>(Modulo{lhs, rhs, expr.comment + extraComment});

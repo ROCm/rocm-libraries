@@ -109,7 +109,7 @@ namespace rocRoller
          * @param tag
          * @return Register::ValuePtr
          */
-        Register::ValuePtr getRegister(int tag);
+        Register::ValuePtr getRegister(int tag) const;
 
         /**
          * @brief Get the Expression associated with the provided tag.

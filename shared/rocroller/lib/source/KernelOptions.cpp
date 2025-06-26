@@ -25,12 +25,102 @@
  *******************************************************************************/
 
 #include <rocRoller/KernelOptions.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {
-    std::ostream& operator<<(std::ostream& os, const KernelOptions& input)
+    KernelOptions::KernelOptions()
+        : m_values(std::make_unique<KernelOptionValues>())
+    {
+        if(Settings::Get(Settings::NoRegisterLimits))
+        {
+            m_values->maxACCVGPRs *= 10;
+            m_values->maxSGPRs *= 10;
+            m_values->maxVGPRs *= 10;
+        }
+    }
+
+    KernelOptions::KernelOptions(KernelOptionValues&& other)
+        : m_values(std::make_unique<KernelOptionValues>(std::forward<KernelOptionValues>(other)))
+    {
+    }
+
+    KernelOptions::KernelOptions(KernelOptions const& other)
+        : m_values(std::make_unique<KernelOptionValues>(*other.m_values))
+    {
+    }
+    KernelOptions::KernelOptions(KernelOptions&& other)
+        : m_values(std::move(other.m_values))
+    {
+    }
+
+    KernelOptions& KernelOptions::operator=(KernelOptions const& other)
+    {
+        *m_values = *other;
+
+        return *this;
+    }
+    KernelOptions& KernelOptions::operator=(KernelOptions&& other)
+    {
+        m_values = std::move(other.m_values);
+
+        return *this;
+    }
+
+    KernelOptions& KernelOptions::operator=(KernelOptionValues const& other)
+    {
+        *m_values = other;
+
+        return *this;
+    }
+
+    KernelOptions& KernelOptions::operator=(KernelOptionValues&& other)
+    {
+        m_values = std::make_unique<KernelOptionValues>(std::move(other));
+
+        return *this;
+    }
+
+    KernelOptions::~KernelOptions() = default;
+
+    KernelOptionValues* KernelOptions::operator->()
+    {
+        return m_values.get();
+    }
+
+    KernelOptionValues& KernelOptions::operator*()
+    {
+        return *m_values;
+    }
+
+    KernelOptionValues const* KernelOptions::operator->() const
+    {
+        return m_values.get();
+    }
+
+    KernelOptionValues const& KernelOptions::operator*() const
+    {
+        return *m_values;
+    }
+
+    std::string KernelOptions::toString() const
+    {
+        return m_values->toString();
+    }
+
+    std::ostream& operator<<(std::ostream& stream, const KernelOptions& options)
+    {
+        return stream << *options;
+    }
+
+    // KernelOptions(KernelOptions const& other);
+    // KernelOptions(KernelOptions && other);
+    // KernelOptions & operator=(KernelOptions const& other);
+    // KernelOptions & operator=(KernelOptions && other);
+
+    std::ostream& operator<<(std::ostream& os, const KernelOptionValues& input)
     {
         os << "Kernel Options:" << std::endl;
         os << "  logLevel:\t\t\t" << input.logLevel << std::endl;
@@ -55,7 +145,7 @@ namespace rocRoller
         return os;
     }
 
-    std::string KernelOptions::toString() const
+    std::string KernelOptionValues::toString() const
     {
         if(logLevel >= LogLevel::Warning)
         {
