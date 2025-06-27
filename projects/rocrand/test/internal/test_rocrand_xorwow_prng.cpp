@@ -62,7 +62,7 @@ class xorwow_engine_type_test : public xorwow_generator::engine_type
 
 TEST(xorwow_engine_type_test, discard_test)
 {
-    const unsigned long long    seed = 1234567890123ULL;
+    const unsigned long long      seed = 1234567890123ULL;
     xorwow_generator::engine_type engine1(seed, 0, 678ULL);
     xorwow_generator::engine_type engine2(seed, 0, 677ULL);
 
@@ -95,7 +95,7 @@ TEST(xorwow_engine_type_test, discard_test)
 
 TEST(xorwow_engine_type_test, discard_sequence_test)
 {
-    const unsigned long long    seed = ~1234567890123ULL;
+    const unsigned long long      seed = ~1234567890123ULL;
     xorwow_generator::engine_type engine1(seed, 0, 444ULL);
     xorwow_generator::engine_type engine2(seed, 123ULL, 444ULL);
 
