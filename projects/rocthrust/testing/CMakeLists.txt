@@ -135,6 +135,18 @@ function(add_thrust_test TEST)
         )
     endif()
     rocm_install(TARGETS ${TEST_TARGET} COMPONENT tests)
+
+    # Check for per-test script. Script will be included in the current scope
+    # to allow custom property modifications.
+    set(TEST_CMAKE_SCRIPT "${TEST}.cmake")
+    file(GLOB TEST_CMAKE_SCRIPT
+        RELATIVE "${CMAKE_CURRENT_LIST_DIR}"
+        CONFIGURE_DEPENDS
+        "${TEST_CMAKE_SCRIPT}"
+    )
+    if (TEST_CMAKE_SCRIPT)
+        include("${TEST_CMAKE_SCRIPT}")
+    endif()
 endfunction()
 
 # ****************************************************************************
