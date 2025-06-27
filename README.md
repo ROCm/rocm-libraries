@@ -25,7 +25,7 @@ This table provides the current status of the migration of specific ROCm librari
 | `hipsparselt`       | Pending     |  |
 | `miopen`            | Pending     |  |
 | `mxdatagenerator`   | Completed   |  |
-| `rocblas`           | Pending 🔥 | Next in line. ETA 06/30 |
+| `rocblas`           | Pending 🔥 |  |
 | `rocfft`            | Pending     |  |
 | `rocprim`           | Completed   | [![Azure CI](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Fmonorepo%2FrocPRIM?repoName=ROCm%2Frocm-libraries&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=273&repoName=ROCm%2Frocm-libraries&branchName=develop) |
 | `rocrand`           | Completed   | [![Azure CI](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Fmonorepo%2FrocRAND?repoName=ROCm%2Frocm-libraries&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=274&repoName=ROCm%2Frocm-libraries&branchName=develop) |
@@ -34,6 +34,23 @@ This table provides the current status of the migration of specific ROCm librari
 | `rocthrust`         | Completed   | [![Azure CI](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Fmonorepo%2FrocThrust?repoName=ROCm%2Frocm-libraries&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=276&repoName=ROCm%2Frocm-libraries&branchName=develop) |
 | `rocroller`         | Pending     | Next in line. |
 | `tensile`           | Completed   | [![Azure CI](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Fmonorepo%2FTensile?repoName=ROCm%2Frocm-libraries&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=305&repoName=ROCm%2Frocm-libraries&branchName=develop) |
+
+
+## Tentative migration schedule
+
+| Component           | Tentative Date |
+|---------------------|----------------|
+| `rocBLAS`           | 6/30           |
+| `rocRoller`         | 7/7            |
+| `rocSparse`         | 7/11           |
+| `hipSparse`         | 7/14           |
+| `rocSolver`         | 7/18           |
+| `hipSparseLt`       | 7/21           |
+| `hipSolver`         | 7/25           |
+| `hipBLAS`           | 7/28           |
+| `Origami`           | 7/31           |
+
+*Remaining math libraries will be migrated in August*
 
 # TheRock CI Status
 
