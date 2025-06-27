@@ -20,7 +20,8 @@
 
 #include <cstdlib>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 #define HIP_CHECK_HMM(condition)                                                 \
   {                                                                              \

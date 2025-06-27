@@ -18,7 +18,8 @@
 #include <thrust/device_reference.h>
 #include <thrust/device_vector.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(DeviceReferenceTests, NumericalTestsParams);
 TESTS_DEFINE(DeviceReferenceIntegerTests, IntegerTestsParams);

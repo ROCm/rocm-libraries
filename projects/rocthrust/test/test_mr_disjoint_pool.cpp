@@ -19,7 +19,8 @@
 #include <thrust/mr/disjoint_sync_pool.h>
 #include <thrust/mr/new.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 struct alloc_id
 {

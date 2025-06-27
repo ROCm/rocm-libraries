@@ -27,7 +27,8 @@
 #include <cstddef>
 #include <memory>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 // The `thrust::device_malloc_allocator` is deprecated, considered removed and is only
 // here for compatibility, once it is removed, the `THRUST_SUPPRESS_DEPRECATED_PUSH`

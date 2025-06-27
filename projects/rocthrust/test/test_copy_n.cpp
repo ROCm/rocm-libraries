@@ -22,7 +22,9 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/sequence.h>
 
-#include "test_header.hpp"
+#include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(CopyNTests, FullTestsParams);
 TESTS_DEFINE(CopyNPrimitiveTests, NumericalTestsParams);
