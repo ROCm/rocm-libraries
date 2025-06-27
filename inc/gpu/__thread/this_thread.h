@@ -54,7 +54,6 @@ __host__ __device__ _LIBGPU_HIDE_FROM_ABI void sleep_for(const cuda::std::chrono
   }
 }
 
-__device__ gpu::thread::id get_id() noexcept;
 __device__ void pseudo_yield();
 __device__ unsigned int get_width() noexcept;
 __device__ unsigned int get_fiber_id() noexcept;

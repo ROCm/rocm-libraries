@@ -135,8 +135,8 @@ int main() {
         try {
             threads[i].join();
         } catch (...) {
-            printf("Exception when joining thread %u\n", i);
-            printf("threads[%u].get_id() = %d\n", i, threads[i].get_id());
+            std::cerr << "Exception when joining thread " << i << "\n";
+            std::cerr << "threads[" << i << "].get_id() = " << threads[i].get_id() << "\n";
             throw;
         }
     }

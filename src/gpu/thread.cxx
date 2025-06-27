@@ -83,13 +83,13 @@ __device__ WorkNode_Header *currentWorkNode[8192] = {};
 hipStream_t mainStream;
 std::atomic<uint32_t> gpuThreadFromHost_counter = 0;
 
-__host__ uint32_t ThreadData::nextTid() {
-    static std::atomic<uint32_t> threadIdCounter = 1;
+__host__ __thread_id::underlying_type ThreadData::nextTid() {
+    static std::atomic<__thread_id::underlying_type> threadIdCounter = 1;
     // Increment by 2 so host and device can use alternating ids.
     return (threadIdCounter += 2);
 }
-__device__ uint32_t ThreadData::nextTid() {
-    static __device__ hip::atomic<uint32_t, hip::thread_scope_device> threadIdCounter = 2;
+__device__ __thread_id::underlying_type ThreadData::nextTid() {
+    static __device__ hip::atomic<__thread_id::underlying_type, hip::thread_scope_device> threadIdCounter = 2;
     // Increment by 2 so host and device can use alternating ids.
     return (threadIdCounter += 2);
 }
@@ -473,7 +473,7 @@ _LIBGPU_EXPORTED_FROM_ABI __host__ __device__ void sleep_for(cuda::std::chrono::
 
 __device__ gpu::thread::id get_id() noexcept {
     using namespace internal;
-    __shared__ gpu::thread::id base_vtid;
+    __shared__ gpu::__thread_id::underlying_type base_vtid;
     if (threadIdx.x == 0) {
         WorkNode_Header *current = WorkNode_Header::lockAndFetch(&currentWorkNode[blockIdx.x]);
         base_vtid = current->tdata.vthread_id;
@@ -482,10 +482,10 @@ __device__ gpu::thread::id get_id() noexcept {
     // TODO: What if only some of the fibers call this_thread::get_id()? This could deadlock. Also, what if the fiber
     // with threadIdx.x == 0 isn't one of the calling fibers?
     __syncthreads();
-    return base_vtid * thread::max_width() + threadIdx.x;
+    return gpu::__thread_id(base_vtid * thread::max_width() + threadIdx.x);
 
     // Something along these lines might work for when threadIdx.x == 0 isn't among the calling fibers.
-    // __shared__ gpu::thread::id base_vtid;
+    // __shared__ gpu::__thread_id::underlying_type base_vtid;
     // base_vtid = 0;
     // // TODO: this could still deadlock though...
     // __syncthreads();
@@ -497,7 +497,7 @@ __device__ gpu::thread::id get_id() noexcept {
     //     }
     //     __syncthreads();
     // } while (base_vtid == 0);
-    // return base_vtid * thread::max_width() + threadIdx.x;
+    // return gpu::__thread_id(base_vtid * thread::max_width() + threadIdx.x);
 }
 
 __device__ void pseudo_yield() {
@@ -586,7 +586,7 @@ __host__ __device__ thread::id thread::get_id(uint32_t index) const {
         throw std::out_of_range("thread::get_id: index is greater than thread width");
     }
 #endif // !__HIP_DEVICE_COMPILE__
-    return cached_tdata.vthread_id * thread::max_width() + index;
+    return gpu::__thread_id(cached_tdata.vthread_id * thread::max_width() + index);
 }
 
 __host__ __device__ void thread::join() {
