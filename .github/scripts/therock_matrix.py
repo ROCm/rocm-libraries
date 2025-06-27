@@ -10,7 +10,7 @@ subtree_to_project_map = {
 project_map = {
     "prim": {
         "cmake_options": "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "project_to_test": "test_rocprim, test_rocthrust, test_hipcub",
+        "project_to_test": "rocprim, rocthrust, hipcub",
         "subtree_checkout": "projects/rocprim\nprojects/hipcub\nprojects/rocthrust",
     },
 }
