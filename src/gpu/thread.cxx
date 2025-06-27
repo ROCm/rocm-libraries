@@ -550,6 +550,9 @@ __host__ __device__ thread::~thread() {
 #endif
 }
 
+// TODO: Maybe instead of returning different ids for each fiber based on a user-provided index, a single thread::id
+// should hold info for all the fibers? Do we even want to differentiate IDs between fibers? thread::id is supposed to
+// be a pretty opaque type anyways, and is generally only used as a key for storing/sorting threads in containers.
 __host__ __device__ thread::id thread::get_id(uint32_t index) const {
     if (!joinable()) {
         return {};
