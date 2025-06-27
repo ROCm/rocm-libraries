@@ -10,7 +10,8 @@
       - | :code:`ROCBLAS_LAYER == 0`: Logging is disabled.
         | :code:`ROCBLAS_LAYER & 1 == 1`: Trace logging is enabled.
         | :code:`ROCBLAS_LAYER & 2 == 1`: Bench logging is enabled.
-        | :code:`ROCBLAS_LAYER & 2 == 1`: Profile logging is enabled.
+        | :code:`ROCBLAS_LAYER & 4 == 1`: Profile logging is enabled.
+        | :code:`ROCBLAS_LAYER & 8 == 1`: Internal API logging is enabled.
 
     * - | ``ROCBLAS_LOG_PATH``
         | Sets the full path for logging.

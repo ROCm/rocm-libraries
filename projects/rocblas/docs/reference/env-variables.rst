@@ -2,7 +2,7 @@
     :description: rocBLAS environment variables
     :keywords: AMD, rocBLAS, environment variables, environment
 
-.. _rocblas-envvariables:
+.. _env-variables:
 
 ********************************************************************
 Environment variables
@@ -23,7 +23,7 @@ tables.
     * - | ``ROCBLAS_USE_HIPBLASLT``
         | Provides manual control over which GEMM backend is used.
       - Unset by default.
-      - :ref:`Control the GEMM backend <rocblas-tensile_hipblaslt>`
+      - :ref:`Control the GEMM backend <rocblas-tensile-hipblaslt>`
       - | **Unset**: GEMM backend is automatically selected.
         | **0**: Tensile is always used as the GEMM backend.
         | **1**: hipBLASLt is preferred as the GEMM backend, but will fallback to Tensile on problems for which hipBLASLt does not provide a solution or when errors are encountered using the hipBLASLt backend.

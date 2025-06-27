@@ -8,7 +8,7 @@
 rocBLAS logging
 ********************************************************************
 
-You can set four environment variables to control logging:
+You can set five environment variables to control logging:
 
 .. _rocblas_logging_env:
 
