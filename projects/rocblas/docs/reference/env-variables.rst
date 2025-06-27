@@ -21,7 +21,7 @@ tables.
       - **Value**
 
     * - | ``ROCBLAS_USE_HIPBLASLT``
-        | Provide manually control which GEMM backend is used.
+        | Provides manual control over which GEMM backend is used.
       - Unset by default.
       - :ref:`Control the GEMM backend <rocblas-tensile_hipblaslt>`
       - | **Unset**: GEMM backend is automatically selected.
@@ -29,21 +29,21 @@ tables.
         | **1**: hipBLASLt is preferred as the GEMM backend, but will fallback to Tensile on problems for which hipBLASLt does not provide a solution or when errors are encountered using the hipBLASLt backend.
 
     * - | ``ROCBLAS_DEVICE_MEMORY_SIZE``
-        | Set how much memory to preallocate.
+        | Sets how much memory to preallocate.
       - Unset by default.
       - :ref:`rocblas_device_memory_size`
       - | **0 or unset**: Lets rocBLAS manage the device memory.
         | **Bigger than 0**: Sets the default handle device memory size to the specified size (in bytes).
 
     * - | ``ROCBLAS_DEFAULT_ATOMICS_MODE``
-        | Set the default atomics mode during the creation of ``rocblas_handle``.
+        | Sets the default atomics mode during the creation of ``rocblas_handle``.
       - Unset by default.
       - :ref:`Atomic Operations`
       - | **0**: Sets the default to :any:`rocblas_atomics_not_allowed`
-        | **1**: Sets the atomics to :any:`rocblas_atomics_allowed`
+        | **1**: Sets the atomics mode to :any:`rocblas_atomics_allowed`
 
     * - | ``ROCBLAS_STREAM_ORDER_ALLOC``
-        | Allow allocation and free to be stream ordered.
+        | Allows memory allocation and deallocation to be stream ordered.
       - 0
       - :ref:`stream order alloc`
       - | **0**: Disable
@@ -53,6 +53,6 @@ Logging environment variables
 --------------------------------------------------------------------------------
 
 The logging environment variables in rocBLAS are collected in the following
-table. How to use these variables, please check :ref:`logging`.
+table. For information on how to use these variables, see :ref:`logging`.
 
 .. include:: ../data/reference/env-variables/logging-env.rst
