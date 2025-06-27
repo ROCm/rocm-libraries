@@ -4,10 +4,16 @@
 #include <algorithm>
 #include <cmath>
 #include <random>
-#include <unordered_set>
 #include <vector>
 
 #include <rng/mt19937_octo_engine.hpp>
+
+#define MAXI(x) std::numeric_limits<x>::max()
+#define MINI(x) std::numeric_limits<x>::min()
+
+// Normalize betweem 0 and 1
+#define NORMALIZE(x, type) \
+    static_cast<double>(x - MINI(type)) / static_cast<double>(MAXI(type) - MINI(type))
 
 /* #################################################
 
@@ -39,13 +45,10 @@ TEST(Mt19937OctoEngineTest, test_host_gather)
     const unsigned int              ipt          = 7;
     const unsigned int              vpt          = 1 + ipt * 11;
 
-    rocrand_impl::host::mt19937_octo_engine test_engine;
-
     for(size_t tid = 0; tid < 8; tid++)
     {
-        dim3 t_idx = dim3(tid, 0, 0);
-
-        test_engine.gather(src.data(), t_idx);
+        rocrand_impl::host::mt19937_octo_engine test_engine;
+        test_engine.gather(src.data(), dim3(tid, 0, 0));
 
         std::vector<unsigned int> expected_items;
 
@@ -71,6 +74,132 @@ TEST(Mt19937OctoEngineTest, test_host_gather)
         for(size_t i = 0; i < vpt; i++)
             ASSERT_EQ(expected_items[i], actual_items[i]);
     }
+}
+
+unsigned int comp(unsigned int a, unsigned int b, unsigned int c)
+{
+    namespace constants = rocrand_impl::host::mt19937_constants;
+
+    unsigned int x  = (a & constants::upper_mask) | (b & constants::lower_mask);
+    unsigned int xA = x >> 1;
+    if(x & 1UL)
+        xA ^= constants::matrix_a;
+
+    x = c ^ xA;
+    return x;
+}
+
+TEST(Mt19937OctoEngineTest, comp_test)
+{
+    //Test the twister step
+    namespace constants = rocrand_impl::host::mt19937_constants;
+
+    std::vector<unsigned int> src(constants::n);
+    std::iota(src.begin(), src.end(), 0);
+
+    // the actual thread should not matter
+    rocrand_impl::host::mt19937_octo_engine test_engine;
+    test_engine.gather(src.data(), dim3(0, 0, 0));
+
+    for(size_t i = 0; i < constants::n; i++)
+    {
+        long long k = i;
+        long long j = k - (constants::n - 1);
+        if(j < 0)
+            j += constants::n;
+
+        long long m = k - (constants::n - constants::m);
+        if(m < 0)
+            m += constants::n;
+
+        ASSERT_EQ(comp(k, j, m), test_engine.comp(k, j, m))
+            << k << " " << j << " " << m << std::endl;
+    }
+}
+
+TEST(Mt19937OctoEngineTest, gen_next_n_consistency_test)
+{
+    namespace constants = rocrand_impl::host::mt19937_constants;
+
+    std::vector<unsigned int> src(constants::n);
+    std::iota(src.begin(), src.end(), 0);
+
+    rocrand_impl::host::mt19937_octo_engine octo_engine_a[8];
+    rocrand_impl::host::mt19937_octo_engine octo_engine_b[8];
+
+    for(size_t i = 0; i < 8; i++)
+    {
+        octo_engine_a[i].gather(src.data(), dim3(i));
+        octo_engine_b[i].gather(src.data(), dim3(i));
+    }
+
+    constexpr size_t test_size = 1000;
+
+    for(size_t _ = 0; _ < test_size; _++)
+    {
+        rocrand_impl::host::mt19937_octo_engine::gen_next_n(octo_engine_a);
+        rocrand_impl::host::mt19937_octo_engine::gen_next_n(octo_engine_b);
+
+        for(size_t tid = 0; tid < 8; tid++)
+        {
+            for(size_t i = 0; i < 78; i++)
+            {
+                ASSERT_EQ(octo_engine_a[tid].get(i), octo_engine_b[tid].get(i));
+            }
+        }
+    }
+}
+
+TEST(Mt19937OctoEngineTest, uniform_dis_test)
+{
+    // checks if we are uniformly distributed
+    namespace constants = rocrand_impl::host::mt19937_constants;
+
+    std::vector<unsigned int> src(constants::n);
+    std::iota(src.begin(), src.end(), 0);
+
+    rocrand_impl::host::mt19937_octo_engine octo_engine[8];
+
+    for(size_t i = 0; i < 8; i++)
+    {
+        octo_engine[i].gather(src.data(), dim3(i));
+    }
+
+    constexpr size_t test_size = 1000;
+
+    std::vector<double> output;
+
+    for(size_t _ = 0; _ < test_size; _++)
+    {
+        rocrand_impl::host::mt19937_octo_engine::gen_next_n(octo_engine);
+
+        for(size_t tid = 0; tid < 8; tid++)
+        {
+            for(size_t i = 0; i < 78; i++)
+            {
+                unsigned int x = octo_engine[tid].get(i);
+
+                double normalized = NORMALIZE(x, unsigned int);
+
+                output.push_back(normalized);
+            }
+        }
+    }
+
+    double actual_mean
+        = std::accumulate(output.begin(), output.end(), (double)0) / static_cast<double>(output.size());
+    double actual_std_dev = std::accumulate(output.begin(),
+                                            output.end(),
+                                            (double)0,
+                                            [=](double acc, double x)
+                                            { return acc + std::powf(x - actual_mean, 2); });
+    actual_std_dev        = std::sqrt(actual_std_dev / static_cast<double>(output.size() - 1));
+
+    double expected_mean    = 0.5;
+    double expected_std_dev = 0.288675134595; //sqrt(1/12)
+
+    ASSERT_NEAR(expected_mean, actual_mean, expected_mean * 0.01);
+    ASSERT_NEAR(expected_std_dev, actual_std_dev, expected_std_dev * 0.01);
 }
 
 TEST(Mt19937OctoEngineAccessorTest, load_test)
