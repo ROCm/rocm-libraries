@@ -41,7 +41,7 @@ of the function.
 Internal API logging outputs information like the GEMM backend used for a particular GEMM call.
 Not all internal APIs are logged. The log output goes to the same stream as trace logging.
 
-The default stream for logging output is standard error. :ref:`Three
+The default stream for logging output is standard error. :ref:`Four
 environment variables <rocblas_logging_env>` can set the full path name for a
 log file.
 
