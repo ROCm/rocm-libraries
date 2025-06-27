@@ -379,7 +379,8 @@ void sort_keys()
                 = std::chrono::duration_cast<std::chrono::microseconds>(host_end - host_start);
 
             std::cout << "device: " << elapsed_device.count() << " host: " << elapsed_host.count()
-                      << std::endl;
+                      << " host/device is " << 100 * (elapsed_host.count() / (float)elapsed_device.count())
+                      << "% when size is " << size << std::endl;
         }
     }
 
@@ -867,13 +868,6 @@ void sort_keys_double_buffer()
             common::device_ptr<key_type> d_keys_input(keys_input, size);
             common::device_ptr<key_type> d_keys_output(size);
 
-            // Calculate expected results on host
-            std::vector<key_type> expected(keys_input.get(), keys_input.get() + size);
-            std::stable_sort(
-                expected.begin(),
-                expected.end(),
-                test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
-
             rocprim::double_buffer<key_type> d_keys(d_keys_input.get(), d_keys_output.get());
 
             size_t temporary_storage_bytes;
@@ -912,6 +906,23 @@ void sort_keys_double_buffer()
                 gHelper.createAndLaunchGraph(stream);
             }
 
+            auto device_start = std::chrono::steady_clock::now();
+
+            bool is_sorted = test_utils::device_sort_check(
+                d_keys.current(),
+                size,
+                test_utils::key_comparator<key_type, descending, start_bit, end_bit>{},
+                stream,
+                debug_synchronous);
+            ASSERT_TRUE(is_sorted);
+
+            auto device_end = std::chrono::steady_clock::now();
+
+            auto elapsed_device
+                = std::chrono::duration_cast<std::chrono::microseconds>(device_end - device_start);
+
+            auto host_start = std::chrono::steady_clock::now();
+
             auto keys_output = std::make_unique<key_type[]>(size);
             HIP_CHECK(hipMemcpy(keys_output.get(),
                                 d_keys.current(),
@@ -923,10 +934,26 @@ void sort_keys_double_buffer()
                 gHelper.cleanupGraphHelper();
             }
 
+            // Calculate expected results on host
+            std::vector<key_type> expected(keys_input.get(), keys_input.get() + size);
+            std::stable_sort(
+                expected.begin(),
+                expected.end(),
+                test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
+
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output.get(),
                                                               keys_output.get() + size,
                                                               expected.begin(),
                                                               expected.end()));
+
+            auto host_end = std::chrono::steady_clock::now();
+
+            auto elapsed_host
+                = std::chrono::duration_cast<std::chrono::microseconds>(host_end - host_start);
+
+            std::cout << "device: " << elapsed_device.count() << " host: " << elapsed_host.count()
+                      << " host/device is " << 100 * (elapsed_host.count() / (float)elapsed_device.count())
+                      << "% when size is " << size << std::endl;
         }
     }
 
