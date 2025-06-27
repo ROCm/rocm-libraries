@@ -3,7 +3,7 @@ TestParameters:
 
 GlobalParameters:
   NumElementsToValidate: -1
-  MinimumRequiredVersion: 4.14.0
+  MinimumRequiredVersion: 5.0.0
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
   NewClient: 2

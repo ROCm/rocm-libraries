@@ -244,7 +244,7 @@ else()
     if (TENSILE_VERSION)
       find_package(Tensile ${TENSILE_VERSION} EXACT REQUIRED HIP LLVM OpenMP PATHS "${INSTALLED_TENSILE_PATH}")
     else()
-      find_package(Tensile 4.33.0 EXACT REQUIRED HIP LLVM OpenMP PATHS "${INSTALLED_TENSILE_PATH}")
+      find_package(Tensile 5.0.0 EXACT REQUIRED HIP LLVM OpenMP PATHS "${INSTALLED_TENSILE_PATH}")
     endif()
 
     # setup hipblaslt defines used for both the library and clients
