@@ -43,7 +43,6 @@ def pytest_addoption(parser):
     parser.addoption("--tensile-options")
     parser.addoption("--global-parameters")
     parser.addoption("--prebuilt-client")
-    parser.addoption("--no-common-build", action="store_true")
     parser.addoption("--builddir", "--client-dir")
     parser.addoption("--timing-file", default=None)
     parser.addoption("--asm-cache")
