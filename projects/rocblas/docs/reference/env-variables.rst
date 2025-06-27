@@ -40,7 +40,7 @@ tables.
       - Unset by default.
       - :ref:`Atomic Operations`
       - | **0**: Sets the default to :any:`rocblas_atomics_not_allowed`
-        | **1**: Sets the atomics mode to :any:`rocblas_atomics_allowed`
+        | **1**: Sets the default to :any:`rocblas_atomics_allowed`
 
     * - | ``ROCBLAS_STREAM_ORDER_ALLOC``
         | Allows memory allocation and deallocation to be stream ordered.
