@@ -1524,10 +1524,6 @@ def TensileCreateLibrary():
             codeObjectFiles,
         )
 
-    if args["BuildClient"]:
-        tPrint(1, "# Building Tensile Client")
-        ClientExecutable.getClientExecutable(outputPath)
-
     if args["ClientConfig"]:
         generateClientConfig(Path(outputPath), Path(masterFile).with_suffix(ext), codeObjectFiles)
 

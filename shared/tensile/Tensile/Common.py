@@ -2508,7 +2508,6 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
     "OutputPath",
     "EmbedLibraryKey",
     "Version",
-    "BuildClient",
     "ClientConfig",
     "WriteMasterSolutionIndex",
     "HipConfig",
