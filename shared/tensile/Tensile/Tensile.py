@@ -155,7 +155,8 @@ def addCommonArguments(argParser):
     argParser.add_argument("--library-format", dest="LibraryFormat", choices=["yaml", "msgpack"], \
         action="store", help="select which library format to use")
     argParser.add_argument("--client-lock", default=None)
-    argParser.add_argument("--prebuilt-client", default=None,
+    argParser.add_argument("--prebuilt-client",
+        default=os.path.abspath(os.path.join('build', 'client', 'tensile-client')),
         help="Specify the full path to a pre-built tensile-client executable")
     argParser.add_argument("--asm-cache", dest="AsmCacheFile", action="store", type=str, \
         help="Path to ASM cache YAML file. If it does not exist, generate the cache. If it does exist, use the cache file")
@@ -200,6 +201,7 @@ def argUpdatedGlobalParameters(args):
     if args.client_lock:
         rv["ClientExecutionLockPath"] = args.client_lock
     if args.prebuilt_client:
+        args.prebuilt_client = os.path.abspath(args.prebuilt_client)
         rv["PrebuiltClient"] = args.prebuilt_client
 
     for key, value in args.global_parameters:

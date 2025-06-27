@@ -509,20 +509,13 @@ def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataF
     writeClientConfigIni(problemSizes, problemType, libraryRootPath, codeObjectFiles, dataFilePath, configFile)
 
 def getClientExecutablePath():
-  prebuilt_client_path = globalParameters.get("PrebuiltClient")
-  if prebuilt_client_path:
-      clientExe = prebuilt_client_path
-      tPrint(1, f"# Using pre-built client specified by user: {clientExe}")
-  else:
-    clientExe = os.path.join(os.path.dirname(__file__), '..', 'build', 'client', 'tensile-client')
-    tPrint(1, f"# Using default client path: {clientExe}")
+  clientExe = globalParameters.get("PrebuiltClient")
 
   if not os.path.isfile(clientExe):
-    error_message = (
+    raise FileNotFoundError(
         f"Tensile client executable not found at '{clientExe}'.\n"
         "Please ensure the client is built or provide a valid path using the --prebuilt-client flag.\n"
         "To build, run: `invoke build-client` (you may need to `pip3 install invoke` first).\n"
         "For custom cmake build instructions, please refer to the README in next-cmake."
     )
-    raise FileNotFoundError(error_message)
   return clientExe
