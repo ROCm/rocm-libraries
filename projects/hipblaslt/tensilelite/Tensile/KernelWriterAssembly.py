@@ -11049,8 +11049,15 @@ class KernelWriterAssembly(KernelWriter):
         module.add(allocPostLoopSrdSuppress("ScaleB", labelStrB, sgprLength=sgpr("SizeJ")))
         module.add(SMulI32(dst=sgpr("SrdScaleA+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleA+2"), comment="ScaleAVec scaled by BPE"))# scaled by BPE
         module.add(SMulI32(dst=sgpr("SrdScaleB+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleB+2"), comment="ScaleBVec scaled by BPE"))# scaled by BPE
-        vectorDataTypes.scaleA.dataType = kernel["ProblemType"]["ComputeDataType"]
-        vectorDataTypes.scaleB.dataType = kernel["ProblemType"]["ComputeDataType"]
+        inputType = kernel["ProblemType"]["DataType"]
+        outputType = kernel["ProbemType"]["DestDataType"]
+        computeType = kernel["Problemtype"]["ComputeDataType"]
+        if inputType.isInt8() and outputType.isInt8() and computeType.isInt32():
+            vectorDataTypes.scaleA.dataType = DataType('S')
+            vectorDataTypes.scaleB.dataType = DataType('S')
+        else:
+            vectorDataTypes.scaleA.dataType = kernel["ProblemType"]["ComputeDataType"]
+            vectorDataTypes.scaleB.dataType = kernel["ProblemType"]["ComputeDataType"]
 
       factorDim0Label = Label(self.labels.getNameInc("Load_FactorDim_0"), "")
       factorDim1Label = Label(self.labels.getNameInc("Load_FactorDim_1"), "")
