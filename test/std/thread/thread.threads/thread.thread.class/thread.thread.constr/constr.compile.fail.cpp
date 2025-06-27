@@ -17,6 +17,8 @@
 
 #include <gpu/thread>
 
+#include "force_include_hip.h"
+
 int main(int, char**)
 {
     volatile gpu::thread t1;

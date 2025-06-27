@@ -17,10 +17,14 @@
 
 #include "test_macros.h"
 
+#include "force_include_hip.h"
+
 int main(int, char**)
 {
+#ifdef __HIP_DEVICE_COMPILE__
     gpu::thread::id id = gpu::this_thread::get_id();
     assert(id != gpu::thread::id());
+#endif
 
   return 0;
 }

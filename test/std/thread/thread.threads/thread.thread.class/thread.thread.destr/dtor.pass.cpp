@@ -24,18 +24,20 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
+#include "force_include_hip.h"
+
 class G
 {
     int alive_;
 public:
-    static int n_alive;
-    static bool op_run;
+    static __device__ int n_alive;
+    static __device__ bool op_run;
 
-    G() : alive_(1) {++n_alive;}
-    G(const G& g) : alive_(g.alive_) {++n_alive;}
-    ~G() {alive_ = 0; --n_alive;}
+    __device__ G() : alive_(1) {++n_alive;}
+    __device__ G(const G& g) : alive_(g.alive_) {++n_alive;}
+    __device__ ~G() {alive_ = 0; --n_alive;}
 
-    void operator()()
+    __device__ void operator()()
     {
         assert(alive_ == 1);
         assert(n_alive >= 1);
@@ -43,8 +45,8 @@ public:
     }
 };
 
-int G::n_alive = 0;
-bool G::op_run = false;
+__device__ int G::n_alive = 0;
+__device__ bool G::op_run = false;
 
 void f1()
 {
@@ -53,7 +55,9 @@ void f1()
 
 int main(int, char**)
 {
+#ifndef __HIP_DEVICE_COMPILE__
     std::set_terminate(f1);
+#else
     {
         assert(G::n_alive == 0);
         assert(!G::op_run);
@@ -64,6 +68,7 @@ int main(int, char**)
         }
     }
     assert(false);
+#endif
 
   return 0;
 }
