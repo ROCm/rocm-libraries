@@ -15,19 +15,27 @@
 
 // template <class F, class ...Args> thread(F&& f, Args&&... args);
 
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_USE_GPU_THREADS
+
 #include <gpu/thread>
 
 #include "test_macros.h"
 
+#include "force_include_hip.h"
+
 struct Incomplete;
 template<class T> struct Holder { T t; };
 
-void f(Holder<Incomplete> *) { }
+__device__ void f(Holder<Incomplete> *) { }
 
 int main(int, char **)
 {
+    // Since f is a device function, we can't reference it in host code, and our usual trick of wrapping the function
+    // call in an extended lambda causes an ADL lookup.
+#ifdef __HIP_DEVICE_COMPILE__ 
     Holder<Incomplete> *p = nullptr;
     gpu::thread t(f, p);
     t.join();
+#endif
     return 0;
 }

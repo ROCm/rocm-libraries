@@ -12,6 +12,11 @@
 
 // template <class F, class ...Args> thread(F&& f, Args&&... args);
 
+// User-defined operator new/delete are not allowed in CUDA/HIP:
+// https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#allocation-and-deallocation-functions
+// TODO: Maybe we can test allocation failures in a different way?
+// UNSUPPORTED: target={{.*}}
+
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: sanitizer-new-delete
 

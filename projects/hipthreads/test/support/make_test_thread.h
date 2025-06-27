@@ -6,6 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_PREP_DEVICE_FOR_THREADS
+
 #ifndef TEST_SUPPORT_MAKE_TEST_THREAD_H
 #define TEST_SUPPORT_MAKE_TEST_THREAD_H
 

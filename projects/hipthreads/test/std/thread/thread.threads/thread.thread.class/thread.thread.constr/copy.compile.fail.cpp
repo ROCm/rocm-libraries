@@ -14,6 +14,8 @@
 
 #include <gpu/thread>
 
+#include "force_include_hip.h"
+
 int main(int, char**)
 {
     gpu::thread t0; (void)t0;

@@ -23,9 +23,11 @@
 #include "make_test_thread.h"
 #include "test_macros.h"
 
+#include "force_include_hip.h"
+
 struct G
 {
-    void operator()() { }
+    __device__ void operator()() { }
 };
 
 void f1()
@@ -35,7 +37,9 @@ void f1()
 
 int main(int, char**)
 {
+#ifndef __HIP_DEVICE_COMPILE__
     std::set_terminate(f1);
+#else
     {
         G g;
         gpu::thread t0 = support::make_test_thread(g);
@@ -43,6 +47,7 @@ int main(int, char**)
         t0 = std::move(t1);
         assert(false);
     }
+#endif
 
     return 0;
 }

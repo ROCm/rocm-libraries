@@ -101,7 +101,16 @@ int main(int argc, char** argv)
     int * hip_ret = 0;
     HIP_CALL(err, hipMalloc(&hip_ret, sizeof(int)));
 
+#ifdef TEST_USE_GPU_THREADS
+    {
+        // Use gpu::thread to call fake_main so it can call functions in gpu::this_thread. This is also ensures that the
+        // GPU is already polling for work, and fake_main can launch more threads.
+        gpu::thread thd{cuda_thread_count, [] __device__(int *ret) { *ret = fake_main(0, NULL); }, hip_ret};
+        thd.join();
+    }
+#else
     fake_main_kernel<<<1, cuda_thread_count>>>(hip_ret);
+#endif
      
     HIP_CALL(err, hipGetLastError());
     HIP_CALL(err, hipDeviceSynchronize());
