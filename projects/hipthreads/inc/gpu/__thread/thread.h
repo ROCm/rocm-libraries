@@ -44,6 +44,7 @@
 #include "gpu/__support/hip_check.h"
 #include "gpu/__clib/malloc.h"
 #include "gpu/__clib/memcpy.h"
+#include "gpu/__thread/id.h"
 #include "gpu/__thread/worknode.h"
 
 namespace gpu {
@@ -68,7 +69,7 @@ class thread {
   public:
     // TODO: temporary measure. Should to be replaced with an actual class.
     // Right now a default constructed id is a valid thread id, and it shouldn't be.
-    using id = uint32_t;
+    using id = __thread_id;
 
     // TODO: The default member initializer for worknode_d makes it impossible to have an instance of gpu::thread in
     // __shared__ or __device__ memory (pointers to gpu::thread are still allowed). This is not ideal.

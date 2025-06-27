@@ -6,6 +6,7 @@
 #include "hip/hip_runtime.h"
 
 #include "gpu/__functional/invoke.h"
+#include "gpu/__thread/id.h"
 
 namespace gpu::internal {
 
@@ -19,7 +20,7 @@ struct ThreadData {
     uint32_t width = 0;
     // TODO: should this be a gpu::thread::max_width() array? For now we just store a common "base" id. See
     // this_thread::get_id for details on how the base id is converted to a full thread id.
-    uint32_t vthread_id = {};
+    __thread_id::underlying_type vthread_id = {};
 
     __device__ ThreadData() = default;
     __host__ ThreadData() = default;
@@ -27,8 +28,8 @@ struct ThreadData {
     __device__ ThreadData(uint32_t width);
     __host__ ThreadData(uint32_t width);
   private:
-    static __device__ uint32_t nextTid();
-    static __host__ uint32_t nextTid();
+    static __device__ __thread_id::underlying_type nextTid();
+    static __host__ __thread_id::underlying_type nextTid();
 };
 
 // TODO: Can we make a bunch of these members private?
