@@ -10,6 +10,24 @@ Documentation for rocRAND is available at
 * Changed return type for `rocrand_generate_poisson` for `SOBOL64` and `SCRAMBLED_SOBOL64` engines
 * Changed unnecessarily large 64-bit data type of constants used for skipping in `MRG32K3A` to 32-bit data type 
 
+### Added
+* Additional unit tests for `test_log_normal_distribution.cpp`
+* Additional unit tests for `test_normal_distribution.cpp`
+* Additional unit tests for `test_rocrand_mtgp32_prng.cpp`
+* Additional unit tests for `test_rocrand_scrambled_sobol32_qrng.cpp`
+* Additional unit tests for `test_rocrand_scrambled_sobol64_qrng.cpp`
+* Additional unit tests for `test_rocrand_sobol32_qrng.cpp`
+* Additional unit tests for `test_rocrand_sobol64_qrng.cpp`
+* Additional unit tests for `test_rocrand_threefry2x32_20_prng.cpp`
+* Additional unit tests for `test_rocrand_threefry2x64_20_prng.cpp`
+* Additional unit tests for `test_rocrand_threefry4x32_20_prng.cpp`
+* Additional unit tests for `test_rocrand_threefry4x64_20_prng.cpp`
+* Additional unit tests for `test_uniform_distribution.cpp`
+* New unit tests for `include/rocrand/rocrand_discrete.h` in `test_rocrand_discrete.cpp`
+* New unit tests for `include/rocrand/rocrand_mrg31k3p.h` in `test_rocrand_mrg31k3p_prng.cpp`
+* New unit tests for `include/rocrand/rocrand_mrg32k3a.h` in `test_rocrand_mrg32k3a_prng.cpp`
+* New unit tests for `include/rocrand/rocrand_poisson.h` in `test_rocrand_poisson.cpp`
+
 ## rocRAND 3.4.0 for ROCm 6.5
 
 ### Added
