@@ -25,7 +25,7 @@ This table provides the current status of the migration of specific ROCm librari
 | `hipsparselt`       | Pending     |  |
 | `miopen`            | Pending     |  |
 | `mxdatagenerator`   | Completed   |  |
-| `rocblas`           | Pending     | Next in line. |
+| `rocblas`           | Pending 🔥 | Next in line. ETA 06/30 |
 | `rocfft`            | Pending     |  |
 | `rocprim`           | Completed   | [![Azure CI](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Fmonorepo%2FrocPRIM?repoName=ROCm%2Frocm-libraries&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=273&repoName=ROCm%2Frocm-libraries&branchName=develop) |
 | `rocrand`           | Completed   | [![Azure CI](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Fmonorepo%2FrocRAND?repoName=ROCm%2Frocm-libraries&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=274&repoName=ROCm%2Frocm-libraries&branchName=develop) |
