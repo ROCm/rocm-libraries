@@ -11635,7 +11635,7 @@ class KernelWriterAssembly(KernelWriter):
 
   def setOccupancy(self, kernel):
     # Use VGPR up to next occupancy threshold:
-    # Account for additional temp sgprs that will be required for code gen, up to physical limits. +5 approximates upper end of required temp space for GSU sync
+    # Account for additional temp sgprs that will be required for code gen, up to physical limits. +5 approximates upper end of required temp space for GSUSynccodegenOpt
     requiredSgprs = min(self.sgprPool.size() + 5, self.states.regCaps["MaxSgpr"])
     maxVgprs, occupancy = self.getMaxRegsForOccupancy(kernel["NumThreads"], self.vgprPool.size(), requiredSgprs, \
                                                       self.getLdsSize(kernel), self.agprPool.size(), self.states.doubleVgpr)
