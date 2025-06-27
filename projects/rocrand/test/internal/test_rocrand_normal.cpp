@@ -734,7 +734,6 @@ TYPED_TEST(NormalDistributionRocRandStateTest, rocrand_device_state_tests)
                               || std::is_same_v<out_type, float4>),
                              float,
                              double>;
-#ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
     if constexpr(out_size == 1)
     {
         auto read_mean = [](out_type x) { return x; };
@@ -757,7 +756,6 @@ TYPED_TEST(NormalDistributionRocRandStateTest, rocrand_device_state_tests)
         }
     }
 
-#endif // ROCRAND_DETAIL_BM_NOT_IN_STATE
     if constexpr(out_size == 2)
     {
         auto read_mean = [](out_type x) { return x.x + x.y; };

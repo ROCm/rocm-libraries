@@ -62,7 +62,7 @@ namespace mt19937_constants
 // MT19937 constants.
 
 /// Number of elements in the state vector.
-inline constexpr unsigned int n = 624;
+inline constexpr unsigned int n = 624;   
 /// Exponent of Mersenne prime.
 inline constexpr unsigned int mexp = 19937;
 /// The next value of element \p i depends on <tt>(i + 1) % n</tt> and <tt>(i + m) % n</tt>.

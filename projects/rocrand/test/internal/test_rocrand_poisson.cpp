@@ -25,6 +25,7 @@
 #include <random>
 #include <vector>
 
+#undef ROCRAND_DETAIL_BM_NOT_IN_STATE
 #include <rocrand/rocrand_poisson.h>
 
 #define HIP_CHECK(cmd)                                                                         \
