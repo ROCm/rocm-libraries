@@ -427,10 +427,24 @@ int LayerNormDriver<T>::RunForwardGPU()
         std::cout << "GPU Kernel Time Forward LayerNorm Elapsed: " << kernel_average_time
                   << " ms\n";
 
-        size_t size = inflags.GetValueInt("in_n") * inflags.GetValueInt("in_c") *
-                      inflags.GetValueInt("in_h") * inflags.GetValueInt("in_w") *
-                      miopen::get_data_size(data_type) *
-                      2; // read x and write y (weight and bias usually negligible)
+        auto dims         = miopen::deref(inputDesc).GetLengths();
+        size_t outer_size = 1, inner_size = 1;
+        for(size_t i = 0; i < dims.size(); ++i)
+        {
+            if(i < dim)
+            {
+                outer_size *= dims[i];
+            }
+            else
+            {
+                inner_size *= dims[i];
+            }
+        }
+        size_t size = (2 * outer_size * inner_size + // input, output
+                       2 * inner_size +              // weight, bias
+                       2 * outer_size                // mean, rstd
+                       ) *
+                      miopen::get_data_size(data_type);
         std::cout << "Data size: " << size << std::endl;
         std::cout << "Throughput: " << (size / kernel_average_time * 1000 / 1e9) << " GB/s"
                   << std::endl;
@@ -512,10 +526,24 @@ int LayerNormDriver<T>::RunBackwardGPU()
         std::cout << "GPU Kernel Time Backward LayerNorm Elapsed: " << kernel_average_time
                   << " ms\n";
 
-        size_t size = inflags.GetValueInt("in_n") * inflags.GetValueInt("in_c") *
-                      inflags.GetValueInt("in_h") * inflags.GetValueInt("in_w") *
-                      miopen::get_data_size(data_type) *
-                      3; // read dy and x, and write dx (weight and bias usually negligible)
+        auto dims         = miopen::deref(inputDesc).GetLengths();
+        size_t outer_size = 1, inner_size = 1;
+        for(size_t i = 0; i < dims.size(); ++i)
+        {
+            if(i < dim)
+            {
+                outer_size *= dims[i];
+            }
+            else
+            {
+                inner_size *= dims[i];
+            }
+        }
+        size_t size = (3 * outer_size * inner_size + // dy, input, dx
+                       3 * inner_size +              // weight, dw, db
+                       2 * outer_size                // mean, rstd
+                       ) *
+                      miopen::get_data_size(data_type);
         std::cout << "Data size: " << size << std::endl;
         std::cout << "Throughput: " << (size / kernel_average_time * 1000 / 1e9) << " GB/s"
                   << std::endl;
