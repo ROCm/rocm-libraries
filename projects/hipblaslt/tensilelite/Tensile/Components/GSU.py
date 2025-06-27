@@ -1571,8 +1571,6 @@ class GSUOn(GSU):
         tmpS01Res = ContinuousRegister(tmpS01, 1)
 
         ########################################
-        # calculate addr and masks
-        module.addComment1("calc coords, apply mask, and issue loads (if necessary)")
         # On input, coord0 and coord1 are VGPRs computed in the pre-batch code, based
         # on the thread and tid number.    These are ELEMENT offsets from start of tensor C
         # for the top-left corner this thread will write.    These are not changed
@@ -1724,8 +1722,6 @@ class GSUOn(GSU):
         tmpS02 = tmpSgpr.idx + 1
 
         ########################################
-        # calculate addr and masks
-        module.addComment1("calc coords, apply mask, and issue loads (if necessary)")
         # On input, coord0 and coord1 are VGPRs computed in the pre-batch code, based
         # on the thread and tid number.    These are ELEMENT offsets from start of tensor C
         # for the top-left corner this thread will write.    These are not changed
@@ -1758,8 +1754,6 @@ class GSUOn(GSU):
         if (kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel'):
             ########################################
             # Reduction
-            module.addSpaceLine()
-
             if batchIdx == 0:
                 module.add(SMovB32(sgpr(tmpS02), 0, "Init sgpr offset for interleaved wave load"))
 
@@ -1871,6 +1865,7 @@ class GSUOn(GSU):
         tmpS04 = writer.sgprPool.checkOutAligned(2,2, preventOverflow=False) #
         tmpS05 = writer.sgprPool.checkOutAligned(2,2, preventOverflow=False) #
         tmpS06 = writer.sgprPool.checkOutAligned(4,4, preventOverflow=False) #overflow?
+        tmpS06Res = ContinuousRegister(idx=tmpS06, size=4)
 
         reductionOffset = kernel["MacroTile0"]*kernel["MacroTile1"]*writer.states.bpeCinternal
         #####################################synchronizer offset cal and set synchronizer#####################################
@@ -1917,7 +1912,7 @@ class GSUOn(GSU):
 
             checkSyncCode.add(SWaitCnt(lgkmcnt=0, comment="Wait for synchronizer"))
             checkSyncCode.add(SCmpEQU32(src0=sgpr(tmpS02), src1=hex(1), comment=""))
-            checkSyncCode.add(writer.longBranchScc0(label=labelend, posNeg=1, tmpSgprInfo=None, comment="long branch sync"))
+            checkSyncCode.add(writer.longBranchScc0(label=labelend, posNeg=1, tmpSgprInfo=tmpS06Res, comment="long branch sync"))
 
             checkSyncCode.addComment("check done end")
             checkSyncCode.addSpaceLine()
