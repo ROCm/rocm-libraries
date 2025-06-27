@@ -58,9 +58,9 @@ TEST(Mt19937OctoEngineTest, test_host_gather)
         }
 
         expected_items.insert(expected_items.begin(), special_elem[tid]);
-        
+
         std::sort(expected_items.begin(), expected_items.end());
-        
+
         std::vector<unsigned int> actual_items(vpt);
 
         for(size_t i = 0; i < vpt; i++)
@@ -70,5 +70,78 @@ TEST(Mt19937OctoEngineTest, test_host_gather)
 
         for(size_t i = 0; i < vpt; i++)
             ASSERT_EQ(expected_items[i], actual_items[i]);
+    }
+}
+
+TEST(Mt19937OctoEngineAccessorTest, load_test)
+{
+    namespace constants = rocrand_impl::host::mt19937_constants;
+
+    std::vector<unsigned int> src(constants::n);
+    std::iota(src.begin(), src.end(), 0);
+
+    const unsigned int ipt = 7;
+    const unsigned int vpt = 1 + ipt * 11;
+
+    rocrand_impl::host::mt19937_octo_engine_accessor<8> accessor(src.data());
+
+    for(size_t tid = 0; tid < 8; tid++)
+    {
+        auto accessor_engine = accessor.load(tid);
+
+        for(size_t i = 0; i < vpt; i++)
+        {
+            ASSERT_EQ(accessor_engine.get(i), src[i * 8 + tid]);
+        }
+    }
+}
+
+TEST(Mt19937OctoEngineAccessorTest, load_value_test)
+{
+    namespace constants = rocrand_impl::host::mt19937_constants;
+
+    std::vector<unsigned int> src(constants::n);
+    std::iota(src.begin(), src.end(), 0);
+
+    const unsigned int ipt = 7;
+    const unsigned int vpt = 1 + ipt * 11;
+
+    rocrand_impl::host::mt19937_octo_engine_accessor<8> accessor(src.data());
+
+    for(size_t tid = 0; tid < 8; tid++)
+    {
+        auto engine = accessor.load(tid);
+
+        for(size_t i = 0; i < vpt; i++)
+        {
+            ASSERT_EQ(engine.get(i), accessor.load_value(tid, i));
+        }
+    }
+}
+
+TEST(Mt19937OctoEngineAccessorTest, save_test)
+{
+    namespace constants = rocrand_impl::host::mt19937_constants;
+
+    std::vector<unsigned int> src(constants::n);
+    std::iota(src.begin(), src.end(), 0);
+
+    const unsigned int ipt = 7;
+    const unsigned int vpt = 1 + ipt * 11;
+
+    std::vector<rocrand_impl::host::mt19937_octo_engine> octo_engine(8);
+    rocrand_impl::host::mt19937_octo_engine_accessor<8>  accessor(src.data());
+
+    for(size_t tid = 0; tid < 8; tid++)
+    {
+
+        octo_engine[tid].gather(src.data(), dim3(tid, 0, 0));
+
+        accessor.save(tid, octo_engine[tid]);
+
+        for(size_t i = 0; i < vpt; i++)
+        {
+            ASSERT_EQ(octo_engine[tid].get(i), accessor.load_value(tid, i));
+        }
     }
 }
