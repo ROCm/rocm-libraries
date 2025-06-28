@@ -235,15 +235,24 @@ template <size_t queueSize>
 // else got to it first, returns nullptr. Safe to use with a queue which is written to by the CPU using hipMemcpy.
 template <size_t queueSize>
 __device__ WorkNode_Header *WorkQueue<queueSize>::tryPop_cpuSafe(bool shouldIncrementActiveCount, uint32_t index) {
-    // Atomic ops are only atomic with respect to the actions of other GPU cores, not the copy engine. In other words,
-    // the copy engine can execute a write in the middle of an atomic op. Thus, if we don't have this 'if' guarding the
-    // tryPop call, it's possible for the atomicExch in tryPop to load nullptr from cpuWorkQueue[i], the copy engine
-    // writes a non-null value to cpuWorkQueue[i], then the atomicExch over-writes it with null, and finally atomicExch
-    // returns null as if nothing happened.
+    // Atomic ops on device memory are only atomic with respect to the actions of other GPU cores, not the
+    // asyncEngine/copy engine. In other words, the copy engine can execute a write in the middle of an atomic op. Thus,
+    // if we don't have this 'if' guarding the tryPop call, it's possible for the atomicExch in tryPop to load nullptr
+    // from cpuWorkQueue[i], the copy engine writes a non-null value to cpuWorkQueue[i], then the atomicExch over-writes
+    // it with null, and finally atomicExch returns null as if nothing happened.
     if (atomicAdd(reinterpret_cast<uintptr_t *>(&queue[index]), 0) == 0) {
         return nullptr;
     }
     return tryPop(shouldIncrementActiveCount, index);
+
+    // TODO: Are we certain that we won't see individual bytes as they get written?
+    // If we do see them, then we can use the least significant bit of the pointer as a flag to indicate the write is
+    // complete. See sendToGPU for more details.
+    // if (atomicAdd(reinterpret_cast<uintptr_t *>(&queue[index]), 0) & 0x1ULL == 0) {
+    //     return nullptr;
+    // }
+    // WorkNode_Header *res = tryPop(shouldIncrementActiveCount, index);
+    // return reinterpret_cast<WorkNode_Header *>(reinterpret_cast<uintptr_t>(res) & ~0x1ULL);
 }
 
 // Fetches and simultaneously lock the next waiting worknode. If the queue is empty, returns nullptr.
@@ -350,7 +359,6 @@ static __host__ void prepDeviceForWork() {
         isFirstTime = true;
     }(), -1U);
 
-    // cpuWorkQueue.pushCount is initialized to -1U, so we don't need to do this the first time through
     if (isFirstTime) {
         // Initalize numVcores, so device code can call gpu::thread::hardware_concurrency
         static uint32_t temp2 = gpu::thread::hardware_concurrency();
@@ -358,7 +366,8 @@ static __host__ void prepDeviceForWork() {
     } else {
         // Tell the device there's work coming, so threading_main doesn't immediately return. This has to happen on the
         // EnqueingStream because notifyDeviceThereMightNotBeAnyMoreWork does its copy in that stream, and we need to make
-        // sure the change made by the last thread's destructor doesn't get over-written
+        // sure the change made by the last thread's destructor doesn't get over-written.
+        // cpuWorkQueue.pushCount is initialized to -1U, so we don't need to do this the first time through.
         __LIBGPU_HIP_CHECK__(hipMemcpyToSymbolAsync(HIP_SYMBOL(cpuWorkQueue), &temp, sizeof(temp), offsetof(decltype(cpuWorkQueue), pushCount), hipMemcpyHostToDevice, getEnqueingStream()));
         __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
     }
@@ -385,12 +394,27 @@ __host__ WorkNode_Header *WorkNode_Header::sendToGPU(WorkNode_Header **new_locat
 
     std::unique_ptr<WorkNode_Header, WorkNodeDeleter> worknode_d(static_cast<WorkNode_Header *>(gpu::malloc(this->worknodeSize)));
     __LIBGPU_HIP_CHECK__(hipMemcpyAsync(worknode_d.get(), this, this->worknodeSize, hipMemcpyHostToDevice, getEnqueingStream()));
+    hipEvent_t copyFinished;
+    __LIBGPU_HIP_CHECK__(hipEventCreate(&copyFinished));
+    __LIBGPU_HIP_CHECK__(hipEventRecord(copyFinished, getEnqueingStream()));
 
     // *new_location = worknode_d.get();
-    WorkNode_Header *temp = worknode_d.get();
-    __LIBGPU_HIP_CHECK__(hipMemcpyAsync(new_location, &temp, sizeof(void*), hipMemcpyHostToDevice, getEnqueingStream()));
+    __LIBGPU_HIP_CHECK__(hipStreamWriteValue64(getEnqueingStream(), new_location, reinterpret_cast<uintptr_t>(worknode_d.get()), 0));
 
-    __LIBGPU_HIP_CHECK__(hipStreamSynchronize(getEnqueingStream()));
+    // TODO: If the GPU is able to see individual bytes as they get written, we need a way to signal when the whole
+    // write is complete. It seems that on Navi4 cards, if the host uses hipMemcpyAsync to update queue[index], the
+    // device will see individual bytes as they get written. Switching to hipStreamWriteValue64 seems to have fixed the
+    // issue, but we should confirm that it's a proper fix. If it's not enough, uncomment this code and update
+    // tryPop_cpuSafe as well.
+    // Since the least significant bits of the pointer should always be 0, we can use one of them as
+    // a flag to signal the write is complete. Note: We are relying on stream operation ordering to guarantee that flag
+    // is only set AFTER the write completes. Futher note: If we were guaranteed that the least significant byte is
+    // always written last, we could combine the two operations into a single write. GPU is little-endian, therefore
+    // reinterpret_cast<char *>(new_location) + 7 is the MSB and new_location is the LSB
+
+    // __LIBGPU_HIP_CHECK__(hipMemsetAsync(new_location, (reinterpret_cast<uintptr_t>(worknode_d.get()) & 0xFF) | 0x1, 1, getEnqueingStream()));
+
+    __LIBGPU_HIP_CHECK__(hipEventSynchronize(copyFinished));
     return worknode_d.release();
 }
 __host__ WorkNode_Header *WorkNode_Header::sendToGPU() {
