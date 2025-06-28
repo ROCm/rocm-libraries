@@ -106,12 +106,13 @@ This workflow uses CMake to build the client into the default ``build/`` directo
    .. code-block:: cmake
       :linenos:
 
-    # configure and build in the default 'build' directory
-    cmake -S Tensile/next-cmake -B build \
-          -DTENSILE_ENABLE_CLIENT=ON
-          -DTENSILE_ENABLE_HOST=ON
-          -DTENSILE_ENABLE_DEVICE=OFF
-    cmake --build build --parallel
+    # configure in the default 'build' directory
+      cmake -S Tensile/next-cmake -B build  \
+          -DTENSILE_ENABLE_CLIENT=ON      \
+          -DTENSILE_ENABLE_HOST=ON        \
+          -DTENSILE_ENABLE_DEVICE=OFF     \
+      # build
+      cmake --build build --parallel
 
     # run an individual test, the script finds the client automatically
     Tensile/bin/Tensile Tensile/Tests/pre_checkin/<test>.yaml tensile-out
@@ -125,13 +126,14 @@ used to specify this custom path when running a test.
    .. code-block:: cmake
       :linenos:
 
-    # configure and build in a custom directory (e.g., my=custom-build)
-    cmake -S next-cmake -B my-custom-build \
-          -DCMAKE_PREFIX_PATH=/opt/rocm \
-          -DTENSILE_ENABLE_CLIENT=ON \
-          -DTENSILE_ENABLE_HOST=ON \
+    # configure in a custom directory (e.g., my=custom-build)
+    cmake -S next-cmake -B my-custom-build      \
+          -DCMAKE_PREFIX_PATH=/opt/rocm         \
+          -DTENSILE_ENABLE_CLIENT=ON            \
+          -DTENSILE_ENABLE_HOST=ON              \
           -DTENSILE_ENABLE_DEVICE=OFF
-    cmake --build my-build --parallel
+      # build
+      cmake --build my-build --parallel
 
     # run a test, specifying the custom client path with --prebuilt-client
     Tensile/bin/Tensile Tensile/Tests/pre_checkin/<test>.yaml tensile-out \
