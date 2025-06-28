@@ -11050,11 +11050,11 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SMulI32(dst=sgpr("SrdScaleA+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleA+2"), comment="ScaleAVec scaled by BPE"))# scaled by BPE
         module.add(SMulI32(dst=sgpr("SrdScaleB+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdScaleB+2"), comment="ScaleBVec scaled by BPE"))# scaled by BPE
         inputType = kernel["ProblemType"]["DataType"]
-        outputType = kernel["ProbemType"]["DestDataType"]
-        computeType = kernel["Problemtype"]["ComputeDataType"]
+        outputType = kernel["ProblemType"]["DestDataType"]
+        computeType = kernel["ProblemType"]["ComputeDataType"]
         if inputType.isInt8() and outputType.isInt8() and computeType.isInt32():
-            vectorDataTypes.scaleA.dataType = DataType('S')
-            vectorDataTypes.scaleB.dataType = DataType('S')
+            vectorDataTypes.scaleA.dataType = DataType('s')
+            vectorDataTypes.scaleB.dataType = DataType('s')
         else:
             vectorDataTypes.scaleA.dataType = kernel["ProblemType"]["ComputeDataType"]
             vectorDataTypes.scaleB.dataType = kernel["ProblemType"]["ComputeDataType"]
@@ -12611,7 +12611,9 @@ class KernelWriterAssembly(KernelWriter):
           else:
             printExit("[Compute fp32] Unrecognized data type %s."%str(dataType))
         elif kernel["ProblemType"]["ComputeDataType"].isInt32():
-          if dataType == kernel["ProblemType"]["ComputeDataType"]:
+          if kernel["ProblemType"]["DataType"].isInt8():
+            pass # this is to deal with I8I8I scaledatatype = fp32
+          elif dataType == kernel["ProblemType"]["ComputeDataType"]:
             pass # Same, no need to convert
           else:
             printExit("[Compute int32] Unrecognized data type %s."%str(dataType))
