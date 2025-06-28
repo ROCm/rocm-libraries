@@ -76,8 +76,8 @@ This is useful for debugging specific problems or isolating issues in a specific
 This workflow uses ``invoke`` to build the client into the default ``build/`` directory. 
 The executable will automatically be found when using the default build directory.
 
-.. code-block:: bash
-    :linenos:
+   .. code-block:: bash
+      :linenos:
 
     # install invoke if you haven't already
     pip3 install invoke
@@ -93,8 +93,8 @@ The executable will automatically be found when using the default build director
 This workflow uses ``tox`` with custom CMake arguments, which is useful for creating
 specialized builds (e.g., Debug builds).
 
-.. code-block:: bash
-    :linenos:
+   .. code-block:: bash
+      :linenos:
 
     # build the client using tox with custom CMake flags 
     TENSILE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox run -e build-client
@@ -103,8 +103,8 @@ specialized builds (e.g., Debug builds).
 
 This workflow uses CMake to build the client into the default ``build/`` directory.
 
-.. code-block:: bash
-    :linenos:
+   .. code-block:: cmake
+      :linenos:
 
     # configure and build in the default 'build' directory
     cmake -S Tensile/next-cmake -B build \
@@ -122,8 +122,8 @@ This workflow is for when you need to build the client in a location other
 than the default ``build/`` directory. The ``--prebuilt-client`` flag is then 
 used to specify this custom path when running a test.
 
-.. code-block:: bash
-    :linenos:
+   .. code-block:: cmake
+      :linenos:
 
     # configure and build in a custom directory (e.g., my=custom-build)
     cmake -S next-cmake -B my-custom-build \
@@ -143,7 +143,8 @@ The standard workflow for running an entire test suite (e.g., `pre_checkin`, `un
 `integration`) is to use `tox`. This command will build ``tensile-client`` and execute all 
 tests within the specified suite.
 
-.. code-block:: bash
+   .. code-block:: bash
+      :linenos:
 
     tox run -e ci -- -m {pre_checkin|extended|integration|unit}
 
