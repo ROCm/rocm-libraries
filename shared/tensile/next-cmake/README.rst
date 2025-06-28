@@ -79,14 +79,14 @@ The executable will automatically be found when using the default build director
    .. code-block:: bash
       :linenos:
 
-    # install invoke if you haven't already
-    pip3 install invoke
+      # install invoke if you haven't already
+      pip3 install invoke
 
-    # build the client to the default location with the default option
-    invoke build-client
+      # build the client to the default location with the default option
+      invoke build-client
 
-    # run an individual test
-    Tensile/bin/Tensile Tensile/Tests/pre_checkin/<test>.yaml tensile-out
+      # run an individual test
+      Tensile/bin/Tensile Tensile/Tests/pre_checkin/<test>.yaml tensile-out
 
 **2. Build with tox (Custom Build Args)**
 
@@ -96,8 +96,8 @@ specialized builds (e.g., Debug builds).
    .. code-block:: bash
       :linenos:
 
-    # build the client using tox with custom CMake flags 
-    TENSILE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox run -e build-client
+      # build the client using tox with custom CMake flags 
+      TENSILE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox run -e build-client
 
 **3. Build with CMake and Run Test (Default Path)**
 
@@ -106,8 +106,8 @@ This workflow uses CMake to build the client into the default ``build/`` directo
    .. code-block:: cmake
       :linenos:
 
-    # configure in the default 'build' directory
-      cmake -S Tensile/next-cmake -B build  \
+      # configure in the default 'build' directory
+      cmake -S next-cmake -B build        \
           -DTENSILE_ENABLE_CLIENT=ON      \
           -DTENSILE_ENABLE_HOST=ON        \
           -DTENSILE_ENABLE_DEVICE=OFF     \
