@@ -221,6 +221,8 @@ public:
         : fft_params(p)
     {
     }
+    hipfft_params(hipfft_params&& p) = default;
+    hipfft_params& operator=(hipfft_params&& other) = default;
 
     ~hipfft_params()
     {
@@ -486,6 +488,13 @@ public:
         // store token to check if plan was already made
         current_token = token();
         return fft_status_from_hipfftparams(ret);
+    }
+
+    hipfftResult_t set_stream(hipStream_t stream)
+    {
+        if(plan == INVALID_PLAN_HANDLE)
+            throw std::runtime_error("Plan must be created before setting a desired stream");
+        return hipfftSetStream(plan, stream);
     }
 
     void validate_fields() const override
