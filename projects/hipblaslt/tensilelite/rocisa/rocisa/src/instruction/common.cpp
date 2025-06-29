@@ -516,6 +516,16 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SBfmB32& self, nb::dict&) { return new rocisa::SBfmB32(self); });
 
+    nb::class_<rocisa::SFlbitI32B32, rocisa::CommonInstruction>(m_common, "SFlbitI32B32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::SFlbitI32B32& self, nb::dict&) { return new rocisa::SFlbitI32B32(self); });
+    
     nb::class_<rocisa::SMovkI32, rocisa::CommonInstruction>(m_common, "SMovkI32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,
@@ -1995,6 +2005,32 @@ void common_inst(nb::module_ m_common)
             return new rocisa::VReadfirstlaneB32(self);
         });
 
+    nb::class_<rocisa::VReadlaneB32, rocisa::CommonInstruction>(m_common, "VReadlaneB32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VReadlaneB32& self, nb::dict&) {
+            return new rocisa::VReadlaneB32(self);
+        });
+
+    nb::class_<rocisa::VWritelaneB32, rocisa::CommonInstruction>(m_common, "VWritelaneB32")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VWritelaneB32& self, nb::dict&) {
+            return new rocisa::VWritelaneB32(self);
+        });
+    
     nb::class_<rocisa::VRndneF32, rocisa::CommonInstruction>(m_common, "VRndneF32")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,

@@ -91,6 +91,7 @@ def getRequiredParametersMin() -> set:
         'Use64bShadowLimit',
         'UseInstOffsetForGRO',
         'UseSgprForGRO',
+        'UseGeneralWGM',
         'VectorStore',
         'VectorWidthA',
         'VectorWidthB',

@@ -1079,6 +1079,33 @@ namespace rocisa
         }
     };
 
+    struct SFlbitI32B32 : public CommonInstruction
+    {
+        SFlbitI32B32(const std::shared_ptr<Container>& dst,
+                const InstructionInput&           src,
+                const std::string&                comment = "")
+            : CommonInstruction(InstType::INST_B32,
+                                dst,
+                                {src},
+                                std::nullopt,
+                                std::nullopt,
+                                std::nullopt,
+                                comment)
+        {
+            setInst("s_flbit_i32_b32");
+        }
+
+        SFlbitI32B32(const SFlbitI32B32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SFlbitI32B32>(*this);
+        }
+    };
+  
     struct SMovkI32 : public CommonInstruction
     {
         SMovkI32(const std::shared_ptr<Container>& dst,
@@ -4804,6 +4831,52 @@ namespace rocisa
         }
     };
 
+    struct VReadlaneB32 : public CommonInstruction
+    {
+        VReadlaneB32(const std::shared_ptr<Container>& dst,
+                          const InstructionInput&           src0,
+                          const InstructionInput&           src1,
+                          const std::string&                comment = "")
+            : CommonInstruction(
+                                InstType::INST_B32, dst, {src0, src1}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_readlane_b32");
+        }
+
+        VReadlaneB32(const VReadlaneB32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VReadlaneB32>(*this);
+        }
+    };
+
+    struct VWritelaneB32 : public CommonInstruction
+    {
+        VWritelaneB32(const std::shared_ptr<Container>& dst,
+                          const InstructionInput&           src0,
+                          const InstructionInput&           src1,
+                          const std::string&                comment = "")
+            : CommonInstruction(
+                                InstType::INST_B32, dst, {src0, src1}, std::nullopt, std::nullopt, std::nullopt, comment)
+        {
+            setInst("v_writelane_b32");
+        }
+
+        VWritelaneB32(const VWritelaneB32& other)
+            : CommonInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VWritelaneB32>(*this);
+        }
+    };
+  
     struct VRndneF32 : public CommonInstruction
     {
         VRndneF32(const std::shared_ptr<Container>& dst,

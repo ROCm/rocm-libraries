@@ -521,6 +521,7 @@ validParameters = { # we need to make sure this matches develop
     "WorkGroupMappingXCCGroup": list(
         range(-1, 1024)
     ),  # change a workgroup's id so that contiguous workgroup can map on same XCC, remap workgroup in a group of WGMXCCG.
+    "UseGeneralWGM" : [0, 1, 2, 3, 4],
     "MaxOccupancy": list(
         range(1, 40 + 1)
     ),  # wg / CU; if cache thrashing is hurting performance, this allocates extra lds to artificially limit occupancy
