@@ -814,7 +814,7 @@ validParameters = { # we need to make sure this matches develop
     # -1 : Select between 0/1 based on # store elements.
     # 0  : Fetch from workgroup dim -> elements dim. (default)
     # 1  : Fetch from elements dim -> workgroup dim. Has better prefetch pattern when # store elements is large.
-    "MbskPrefetchOpt": [-1, 0, 1],
+    "MbskPrefetchMethod": [-1, 0, 1],
 }
 
 newMIValidParameters = {
