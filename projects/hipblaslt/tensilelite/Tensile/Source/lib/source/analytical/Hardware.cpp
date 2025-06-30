@@ -95,6 +95,7 @@ namespace TensileLite
                     {MatrixInstruction(16, 16, 128, 8), 32}, // V_MFMA_F32_16X16X128_F8
                     {MatrixInstruction(16, 16, 128, 6), 16}, // V_MFMA_F32_16X16X128_F6
                     {MatrixInstruction(16, 16, 128, 4), 16}, // V_MFMA_F32_16X16X128_F4
+                    {MatrixInstruction(32, 32, 64, 4), 32},  // V_MFMA_F32_32X32X64_F4
 
                 }}};
 
