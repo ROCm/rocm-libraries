@@ -90,7 +90,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT256x64x128_MIJkim9g9xaI3Jo7dWLdP3vllqFQEemFyMyNXnC8St9LQ=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT256x64x128_MI1zEvSrUfniyIPA5Nficsug_rlEaVAGxHNYFMuvmYifqc=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -393,7 +393,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT256x32x128_MIsN8mL96c3k_wuBKQqJIPYabjcjHjCsOl-iDL5L0SqMs=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT256x32x128_MI1oq7eVBWwzey19A8uIqsDkLEvAC8u4jm_3WdeHmyqNY8=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -696,7 +696,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT192x64x128_MI5MOcJeGqrbifKXJQPsdgn80ggu9QSuqzbatT5F12_HU=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT192x64x128_MI1RipBYLITmgLj7nJiXhyI57h-QdswAlXmvZRQ-t7Yij4=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -999,7 +999,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT192x32x128_MIwgvKn_Hinr9CavkLJGogtyyPECGXehUl-_MvVRGHzzw=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT192x32x128_MI1iIhyCvIYW4EQ_x86i0IZ86zDKGdESkaJ9YYcm0hSGzI=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -1302,7 +1302,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT160x64x128_MIj_-hpatulPvcIQYwdf3gX-aQ7LvN0h70dK8C99SX9bU=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT160x64x128_MI1eZeOxd9MrHLQR2GNA65EfarGb_PDYi0bDvnnTj3iymw=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -1605,7 +1605,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT160x32x128_MISo7AlUGfFRuCewfW2J5fYpQmZN4TTu3zNVaaua5i2s0=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT160x32x128_MI1fok8NkYtMokxqZZMiJ_iGKUDQvUnmdxY1flvKGmyHyE=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -1908,7 +1908,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT128x128x128_MvKNIhO4jw2oecLpiw3hqInJpJauD7UvRzNlHz657wgk=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT128x128x128_MI4THos_lFJzWi_Dnch9qAlPGNCCGbpGTJT_pt2NL4ZB8=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -2211,7 +2211,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT128x96x128_MIWRztZDDd3Ye6mPEmv0f6JLuHEKO-TShIP5Xxcxa8byE=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT128x96x128_MI1pEJy9yEKZBXA9EcPO5rjF-8vFHW5-X8UkNyH2oVn994=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -2514,7 +2514,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT128x64x128_MIBaS3UMAQLVto1yhk_GKe-1pSfbrkhD-RnKGPXd_UF1k=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT128x64x128_MI1S6e2ViSr3lOZh36puDEQ4ogQb2Kj5RPE7WzL1lq3F0M=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -2817,7 +2817,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT128x32x128_MI08z7QEKLhIxoeRLR-dX0dCcKiK2Xsqc_5wS4fgUj0uo=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT128x32x128_MI1C6jTq6qNnho1ENixE4x2q_23xMvUAX0Q3bKaL_ah5XQ=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -3120,7 +3120,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT96x128x128_MIUBAoMlE7J3FTZi7t1K36Lo2sK1DtQeF_kXDx23hGf4w=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT96x128x128_MI1158FxB1URc5cpKzdBy5PKmwBlaNnYvU5pNK2aJTi3FY=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -3423,7 +3423,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT96x96x128_MI1Py2oYWAuzyIsW1Xz7_cSSqtKF6mhD1GD0DLGiGrJeWM=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT96x96x128_MI163lHbClsVTGPnNSzP8QvKwmggFBp2OvBLf9IoiXlJZAY=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -3726,7 +3726,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT96x64x128_MI1aSZ_Zum90gANnqRMZQztpj_l8MBY8pI8sDfzZXwGWC4=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT96x64x128_MI16cyaq9MxU7sNbLEazHdXIfoficQy4YOPE4TFqMztilgY=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -4029,7 +4029,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT96x32x128_MI1Qh1_1R5I3xwVvM6c80TqZzU-cjrkeDWs7AOHveMrUoA=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT96x32x128_MI16O3R5PeDu0JjUKDdGyCc1CoE20Q-U4WqcAOA_B9UwqIo=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -4332,7 +4332,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x256x128_MI-0nUxYU6n--69WffZFL71TNsUk0uAE_FvbjQql5KxRs=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x256x128_MI1LPyOUj4mpprhT6Es7dZqjCKeRoX1IDrnjJ3fYZl1HPI=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -4635,7 +4635,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x192x128_MIv1bOa4d1-JxTUebfiybj1fiEEwry9-M-g5GampR2d6A=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x192x128_MI1dsiiVyF-YL7QpBTxukjNXBE5_N2gPbhGhfp7ioSoYBo=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -4938,7 +4938,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x160x128_MIR_I5mkFlvhrrm0_MtvnOY7Rc8qdwasT0eNrRDTTg-VM=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x160x128_MI1w-MN2Mm1J0St8q8s9xFauQAWxA0khy1Pd4WoSoekSlg=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -5241,7 +5241,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x128x128_MI3-oywkCWDsfRF1Lz9kMRXM1DKMMe97sJ-vTU2pR0ZXM=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x128x128_MI1cgKWeOcB-B078ImMnsIo0ZS6zy_3JERNpCWjdkytEyw=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -5544,7 +5544,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x96x128_MI1f0_uGSwdkRILbiWkqpQfl25zElgNsMFeBwvZVuwEjcI=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x96x128_MI16_rKHyj2ip3IiAlJ-oI4Mi3S3Jk5OCWj2H83MWBg-Vss=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -5847,7 +5847,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x64x128_MI1OEDib6TPuNH8TS49RL150gkqQBPu9YswDvElH9sIVsY=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x64x128_MI16Qa_B98mEcapAL2iX2YgOcoJisssJyHDlM9u9CPAkaUM=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -6150,7 +6150,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x32x128_MI1n22QcNaY1FUmEoYoC4wYXYKa5fU6fC38K1NNGJEu_LM=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x32x128_MI16EwXWjXKR9ATyJNfH3DyoYi3LQ4H0ugLmKOZi9zzkKhc=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -6453,7 +6453,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x256x128_MINf-RtOoG25MfR9az8y8OJH1X-ANxcggUXBNenHXu-os=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x256x128_MI15LrCqHq2DyagcJd2X5qTNiDHWQnVHm_AqMqcFDlvmsU=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -6756,7 +6756,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x192x128_MINUfMnKnM4JaDGsxYc7PoWMJyynMhVVUtVkGY5ZOl7c0=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x192x128_MI1RS5-E3dcQYltJiaIWglbCOB49DJT8EKGQr29y9ht3jk=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -7059,7 +7059,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x160x128_MIS7jyelzUjdHoOsgjsHwjvc9E1GctfStgvzQBF9xFjSo=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x160x128_MI1WAM7dQoYboHh0SapFH0XK75zgHRfXzHLhlFGHRFgW8U=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -7362,7 +7362,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x128x128_MIuYEvD1sVdUu-dPvGuQvcEXlddyUVc3_10R7pTBSpkVE=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x128x128_MI1fkykvXwBDcTCeZQcsORsfStQSOevaJqa0Sia79tVqpE=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -7665,7 +7665,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x96x128_MI105yQbTk7yuowintgILTAWJDLSgF4tw5ycFsHQ8C-pec=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x96x128_MI16WEwxgg8Y4FSUK3HPuX6yKvRQPHQ0p3bui3ZyCjYgs5k=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -7968,7 +7968,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x64x128_MI1VfIefGuXVzu1YsPIlFalVbNF559GxAnQUIyD272a1xs=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x64x128_MI16PYalQdoVElqz6wbixR1EPrpAfE0UNhfwtrN4ZWmHKYs=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -8271,7 +8271,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x32x128_MI1tljJOqrctvnyWBzHGqi83F7ghRJsi6oIaqxAWmgjve8=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x32x128_MI16XYtEgd7zoKly5GXv2t2pAYLX-e76OQRyOB6Ygozeu0A=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -8574,7 +8574,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT256x48x128_MI4vXQjW97QnuMZxxYOi2GcmAWwbtUq55N7kJJaEJyY74=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT256x48x128_MI1JWVR-jh-aLg0rrdtghL_Hme5Pul5fnhSrwkCOBuPtIU=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -8877,7 +8877,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT256x16x128_MIrV4i5_6c-SimbE0ASR_bHXvobP-MuQb68gtxmDAnJT8=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT256x16x128_MI1PwJ42uBJtJDXBA5J9eUpFXnSBdG873yhqH9x9xHr9aM=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -9180,7 +9180,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT48x256x128_MI-uyk9ipGGZUU-RosOJrlAGEZXF6COAjWaTDWYkqiHbI=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT48x256x128_MI1-ckiACWa5_Hl9q0vruUn7fAZYeT9xW9mnDjkhP2c50s=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -9483,7 +9483,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT16x256x128_MIIjQh7rEXH2vqX6tN7f_WSsTuuZZS2FaiTmuutxYIsEo=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT16x256x128_MI1MnL3tvF_jGDAY_I8anP7ysG0uEcoQof1urIS_BrpX_k=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -9786,7 +9786,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT128x64x256_MIp0XqNVDFbXGwrj8F6VbfZykAS78m5jUoBoq8MQtwvV0=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT128x64x256_MI1arXBxIFzyAilDtP1DqyksxdPITOkluw9jmLU5u0Tt2w=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -10089,7 +10089,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT128x32x256_MIHXOJAIrMiuOp2GzfEDCFZCzzaM0_QxKZ-aiqwYOId1o=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT128x32x256_MI1rXabrsjNwkup_JrxozMVR_3U4GdmTFKff0KArypEYAA=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -10392,7 +10392,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x128x256_MIj2CVIfzU_I84arz5da9MnjmWq1K0L3NdNsdrNHlZ7d8=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x128x256_MI1VT_L439A1JYsr4mdupck3knPO5y9YC1PTbi05SL_Cz0=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -10695,7 +10695,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x64x256_MI1p3s1I0yVZJU4viZ8mh5vromkFrsp-3ukLva2s_qZVB0=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x64x256_MI16zQIQS-CrV5B-hJqIIcfIrW4-99zhrrQJDstr_sFS9t4=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -10998,7 +10998,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x32x256_MI13TItZR-ZwoALzqIt7OAtUUw62y7pqlESGVnmT35xK1U=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x32x256_MI16yzgS8-MSN2UCxzxDcSy8jzQVwvB-olaZ82o1J7M6llU=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -11301,7 +11301,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x128x256_MIbpoYU02vd_aPy4lBm5WEK3dOohYUN0I1nVYvQSfry20=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x128x256_MI12hFMSt6lMTI8oWW_7aZTwxjiukY6LB_x-MEbbxd5p3M=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -11604,7 +11604,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x64x256_MI1zInCISVpCePfPtsqpSdVJ92RndRKEV9ZWvdV25oJCqo=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x64x256_MI163QE_QBcfCjhjm6YvZW1aBPJMqF6E2nryKoAjsugzB0U=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -11907,7 +11907,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x32x256_MI1-d6h77AHZH0jYxcPmpimM4o1IUdBjVd9qVcqdntZ2ao=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x32x256_MI16CqP0rVSFO3WDeB13qT6LUGERdrWprMFCekioRFqiTqQ=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -12210,7 +12210,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT256x16x256_MIMmeE4Y7fJyN0XnfWC1wjT5mc9IajBEhyfh2eOPlWkPc=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT256x16x256_MI1h8DSl_KtVz4vyL0LXehy8GQa575LmnT-GS8Sm349l8c=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -12513,7 +12513,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT16x256x256_MIYfp6vuNodesx35tz4h9xW18Bb0XrC_b8qnGtX2wgrB0=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT16x256x256_MI1ABd-H42vx6NZOkifL5ShxVhgON-oxRsJ0GyaVxfUhIg=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -12816,7 +12816,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT16x16x512_MI1NMSTK5bV3OUZZMeHWx6uGB0sBXXNRiTISO80IwC9kDs=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT16x16x512_MI160Nuqi97WrEd5kWYgnYYkOYOWZ8I-jc1R0TyAYU3gxQk=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -13119,7 +13119,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x16x512_MI1YeBxu7sXom85UQZXwVccACzah1aPFVmqawyiKc6-puE=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x16x512_MI16y2XC2HjmywvRNMRzvdc4xwYo7V4GZ1mS8mdECpGkL28=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -13422,7 +13422,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x16x512_MI17Njp9GvJU6dT-W7pm7FsczxJ2MidWfk9aupGRuW-vg4=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT64x16x512_MI162YLFRDLjA2hwymDeM7kI4wEg1_Ytlga74L2JT4VF0MM=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -13725,7 +13725,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT16x32x512_MI1OYMGNCnaGQoTKqUsQRc8yZOA78cGbD61TI-HJxHtK9Q=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT16x32x512_MI1651AQfSOaqL9x7qKXZbPBT7ZWUW0NRJycR149B4OSQTc=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -14028,7 +14028,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT16x64x512_MI1O3LIQpNvAB12RKcrQSFZ1UkTKIiZuBK1alfvBZ0jmhk=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT16x64x512_MI1674YMvMGkXuXL1Cf1gzLE5KEGPC_Zl12HLRkso0LE7_M=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -14331,7 +14331,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT16x16x1024_MICkm2q73XdH8zzHfYMJrjvOS5W-3E21MmXZ0BG4PfjEQ=
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT16x16x1024_MI1vOk7fZIE6d2Crn4j8R3f-gr9gYb6d1i7QRitxgT49e8=
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -14617,6 +14617,309 @@
     _WorkspaceSizePerElemBias: 0
     _WorkspaceSizePerElemC: 4
     _staggerStrideShift: 0
+    enableLDSTrA: false
+    enableLDSTrB: false
+    reorderGRInstForDTVA: false
+    reorderGRInstForDTVB: false
+    tailLoopOptA: false
+    tailLoopOptB: false
+  - 1LDSBuffer: 0
+    ActivationAlt: false
+    ActivationFuncCall: false
+    ActivationFused: true
+    AssertAIGreaterThanEqual: -1
+    AssertAILessThanEqual: -1
+    AssertFree0ElementMultiple: 1
+    AssertFree1ElementMultiple: 1
+    AssertSummationElementMultiple: 1
+    AssignedDerivedParameters: true
+    AssignedProblemIndependentDerivedParameters: true
+    BaseName: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x32x32_MI16xLaYt4XA53nJMoN4GRDxGCoYkMto7pvV9s9Hmk9M424A=
+    BufferLoad: true
+    BufferStore: true
+    CUCount: null
+    CUOccupancy: -1
+    ClusterLocalRead: 0
+    CodeObjectVersion: '4'
+    ConvertAfterDS: false
+    CustomKernelName: ''
+    DebugStreamK: 0
+    DepthU: 32
+    DirectToLds: false
+    DirectToLdsA: false
+    DirectToLdsB: false
+    DirectToVgprA: false
+    DirectToVgprB: false
+    DirectToVgprSparseMetadata: false
+    EdgeType: ShiftPtr
+    EnableF32XEmulationLds: false
+    EnableF32XdlMathOp: false
+    EnableMatrixInstruction: true
+    ExpandPointerSwap: 0
+    ExpertSchedulingMode: 0
+    ForceDisableShadowInit: false
+    GlobalReadPerMfma: 1
+    GlobalReadVectorWidthA: 1
+    GlobalReadVectorWidthB: 1
+    GlobalSplitU: 0
+    GlobalSplitUAlgorithm: MultipleBuffer
+    GlobalSplitUCoalesced: false
+    GlobalSplitUWorkGroupMappingRoundRobin: false
+    GlobalWriteVectorWidth: 1
+    GroupLoadStore: false
+    GuaranteeNoPartialA: true
+    GuaranteeNoPartialB: true
+    GuaranteeNoPartialMetadata: true
+    ISA: [9, 5, 0]
+    InnerUnroll: 1
+    InterleaveAlpha: 0
+    InternalSupportParams: {KernArgsVersion: 2, SupportCustomStaggerU: true, SupportCustomWGM: true,
+      SupportUserGSU: false, UseUniversalArgs: true}
+    Kernel: true
+    KernelLanguage: Assembly
+    KernelNameMin: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB0_AFC0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA1_GRVWB1_GSU0_GSUAMB_GLS0_ISA950_IU1_K1_LBSPPA256_LBSPPB256_LBSPPM0_LPA16_LPB16_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR0_PKA1_SIA3_SS1_SPO0_SRVW0_SSO0_SVW1_SK3_SKXCCM8_TLDS0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1
+    LDSTrInst: false
+    LSCA: 32
+    LSCB: 32
+    LSPA: 8
+    LSPB: 8
+    LVCA: 32
+    LVCB: 32
+    LVPA: 8
+    LVPB: 8
+    LdsBlockSizePerPadA: 256
+    LdsBlockSizePerPadB: 256
+    LdsBlockSizePerPadMetadata: 0
+    LdsBytesNoAmax: 6464
+    LdsInitCVgprs: false
+    LdsNumBytes: 6464
+    LdsNumElementsAlignedA: 1280
+    LdsNumElementsAlignedB: 1280
+    LdsNumElementsAlignedMetadata: 0
+    LdsOffsetA: 0
+    LdsOffsetA_Blk: 4096
+    LdsOffsetB: 1280
+    LdsOffsetB_Blk: 5376
+    LdsOffsetBias: 0
+    LdsOffsetBiasGSU: 0
+    LdsOffsetBiasNonGSU: 0
+    LdsOffsetMetadata: 1280
+    LdsOffsetMetadata_Blk: 5376
+    LdsPadA: 16
+    LdsPadB: 16
+    LdsPadMetadata: 0
+    LocalReadVectorWidth: 8
+    LocalSplitU: 1
+    LocalSplitUReuseLDS: 1
+    LocalWritePerMfma: -1
+    LocalWriteUseSgprA: false
+    LocalWriteUseSgprB: false
+    LoopIters: 1
+    LoopUnroll: 32
+    MFMA_BF16_1K: false
+    MIArchVgpr: false
+    MIBlock: [16, 16, 32, 1, 1, 1]
+    MIInputPerThread: 8
+    MIInputPerThreadA: 8
+    MIInputPerThreadB: 8
+    MIInputPerThreadMetadata: 8
+    MIOutputVectorWidth: 4
+    MIRegPerOut: 1
+    MIWaveGroup: [2, 2]
+    MIWaveTile: [1, 1]
+    MIWaveTileA: 1
+    MIWaveTileB: 1
+    MIWaveTileMetadata: 0
+    MacroTile0: 32
+    MacroTile1: 32
+    MacroTileA: 32
+    MacroTileB: 32
+    MagicDivAlg: 2
+    MathClocksUnrolledLoop: 0
+    MatrixInstB: 1
+    MatrixInstBM: 1
+    MatrixInstBN: 1
+    MatrixInstK: 32
+    MatrixInstM: 16
+    MatrixInstN: 16
+    MatrixInstruction: [16, 16, 32, 1]
+    MaxLDS: 163840
+    MaxOccupancy: 40
+    MbskPrefetchOpt: 0
+    NoLdsWriteCode: false
+    NoReject: false
+    NoTailLoop: false
+    NonDTLTailLoopA: false
+    NonDTLTailLoopB: false
+    NonTemporal: -1
+    NonTemporalA: 0
+    NonTemporalB: 0
+    NonTemporalC: 0
+    NonTemporalD: 0
+    NonTemporalE: 0
+    NonTemporalMetadata: 0
+    NonTemporalWS: 0
+    NumElementsPerBatchStore: 0
+    NumElementsPerThread: 4
+    NumGlobalWriteVectorsPerThread: 4
+    NumLoadsA: 4
+    NumLoadsB: 4
+    NumLoadsCoalescedA: 1
+    NumLoadsCoalescedB: 1
+    NumLoadsPerpendicularA: 4
+    NumLoadsPerpendicularB: 4
+    NumThreads: 256
+    NumWaveSplitK: 1
+    OptNoLoadLoop: 1
+    PackedC0IdxChars: [I]
+    PackedC0IndicesX: [0]
+    PackedC1IdxChars: [J]
+    PackedC1IndicesX: [1]
+    PrefetchGlobalRead: 2
+    PrefetchLocalRead: 0
+    PreloadKernArgs: true
+    ProblemType:
+      Activation: 1
+      ActivationComputeDataType: 0
+      ActivationFuncCall: 1
+      ActivationNoGuard: false
+      ActivationType: hipblaslt_all
+      AllowNoFreeDims: false
+      AssignedDerivedParameters: true
+      Batched: true
+      BetaOnlyUseBias: 1
+      BiasDataTypeList: [0, 4, 7]
+      BiasSrc: D
+      ComplexConjugateA: false
+      ComplexConjugateB: false
+      ComputeDataType: 0
+      DataType: 18
+      DataTypeA: 18
+      DataTypeAmaxD: 0
+      DataTypeB: 18
+      DataTypeE: 15
+      DestDataType: 15
+      F32XdlMathOp: 0
+      Gradient: false
+      GroupedGemm: false
+      HighPrecisionAccumulate: true
+      Index0: 0
+      Index01A: 0
+      Index01B: 1
+      Index1: 1
+      IndexAssignmentsA: [0, 3, 2]
+      IndexAssignmentsB: [1, 3, 2]
+      IndexAssignmentsLD: [4, 5, 6, 7]
+      IndexAssignmentsMetadata: [3, 0, 2]
+      IndexUnroll: 3
+      IndexUnrollA: 1
+      IndexUnrollB: 1
+      IndexUnrollM: 0
+      IndicesBatch: [2]
+      IndicesFree: [0, 1]
+      IndicesSummation: [3]
+      MirrorDimsA: []
+      MirrorDimsB: []
+      MirrorDimsMetadata: []
+      NumIndicesBatch: 1
+      NumIndicesC: 3
+      NumIndicesFree: 2
+      NumIndicesLD: 4
+      NumIndicesSummation: 1
+      OperationType: GEMM
+      OutputAmaxD: false
+      SetConstStrideA: []
+      SetConstStrideB: []
+      SetConstStrideBias: []
+      SilentHighPrecisionAccumulate: false
+      Sparse: 0
+      StochasticRounding: false
+      StridedBatched: true
+      SupportUserArgs: true
+      SwizzleTensorA: false
+      SwizzleTensorB: false
+      TLUA: true
+      TLUB: true
+      Tensor0: 0
+      Tensor1: 1
+      TileA: 0
+      TileAwareSelection: false
+      TileB: 1
+      TotalIndices: 4
+      TransposeA: false
+      TransposeB: true
+      UseBeta: true
+      UseBias: 1
+      UseE: false
+      UseInitialStridesAB: false
+      UseInitialStridesCD: false
+      UseScaleAB: Scalar
+      UseScaleAlphaVec: 1
+      UseScaleCD: false
+    ScheduleGlobalRead: 1
+    ScheduleIterAlg: 3
+    ScheduleLocalWrite: 1
+    SolutionIndex: 48
+    SolutionNameMin: Cijk_Ailk_Bjlk_B8F8F8S_BH_BiasSHB_HAS_SAB_SAV_UserArgs_MT32x32x32_MI16x16x1_SN_LDSB0_AFC0_AFEM1_AFEM1_ASEM1_CLR0_CADS0_DTVA0_DTVB0_EPS0_FDSI0_GRPM1_GRVWA1_GRVWB1_GSU0_GSUAMB_GSUC0_GSUWGMRR0_GLS0_ISA950_IU1_K1_LBSPPA256_LBSPPB256_LBSPPM0_LPA16_LPB16_LPM0_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS0_NLCA1_NLCB1_ONLL1_PGR2_PLR0_PKA1_SIA3_SS1_SU32_SUM0_SUS256_SPO0_SRVW0_SSO0_SVW1_SK3_SKXCCM8_TLDS0_ULSGRO0_USL1_UIOFGRO0_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB0_WS64_WG32_8_1_WGM1_WGMXCC1_WGMXCCGn1
+    SourceSwap: true
+    StaggerU: 32
+    StaggerUMapping: 0
+    StaggerUStride: 256
+    StorePriorityOpt: false
+    StoreRemapVectorWidth: 0
+    StoreSwapAddr: false
+    StoreSyncOpt: 0
+    StoreVectorWidth: 1
+    StreamK: 3
+    StreamKAtomic: 0
+    StreamKXCCMapping: 8
+    SubGroup0: 8
+    SubGroup1: 32
+    SubGroupA: 8
+    SubGroupB: 32
+    SuppressNoLoadLoop: false
+    ThreadTile: [1, 1]
+    ThreadTile0: 4
+    ThreadTile1: 1
+    ThreadTileA: 4
+    ThreadTileB: 1
+    TransposeLDS: 0
+    TransposeLDSMetadata: true
+    ULSGRODoubleG2L: 0
+    UnrollLoopSwapGlobalReadOrder: 0
+    UnrollMajorLDSA: 0
+    UnrollMajorLDSB: 0
+    UnrollMajorLDSMetadata: true
+    Use64bShadowLimit: 1
+    UseDotInstruction: false
+    UseF32XEmulation: false
+    UseInstOffsetForGRO: 0
+    UseSgprForGRO: -1
+    Valid: true
+    VectorStore: -1
+    VectorWidthA: 1
+    VectorWidthB: 1
+    WaveSeparateGlobalReadA: 0
+    WaveSeparateGlobalReadB: 0
+    WaveSeparateGlobalReadMetadata: 0
+    WaveSplitK: false
+    WavefrontSize: 64
+    WorkGroup: [32, 8, 1]
+    WorkGroupMapping: 1
+    WorkGroupMappingXCC: 1
+    WorkGroupMappingXCCGroup: -1
+    WorkGroupReduction: false
+    WorkspaceCheck: [4, 0, 0]
+    _DepthU: 32
+    _DepthUA: 32
+    _DepthUB: 32
+    _DepthUMetadata: 32
+    _GlobalAccumulation: PartialsBuffer
+    _UseSgprForGRO: 1
+    _VectorStore: 1
+    _WorkspaceSizePerElemBias: 0
+    _WorkspaceSizePerElemC: 4
+    _staggerStrideShift: 3
     enableLDSTrA: false
     enableLDSTrB: false
     reorderGRInstForDTVA: false
