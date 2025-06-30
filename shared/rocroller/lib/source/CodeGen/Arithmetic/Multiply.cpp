@@ -78,6 +78,9 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
+        // TODO Is this necessary?
+        if(rhs->regType() == Register::Type::Literal)
+            co_yield m_context->copier()->ensureType(rhs, rhs, Register::Type::Vector);
         co_yield_(Instruction("v_mul_lo_u32", {dest}, {lhs, rhs}, {}, ""));
     }
 
