@@ -239,11 +239,10 @@ inline hipError_t histogram_impl(void*          temporary_storage,
             return partition_result;
         }
 
-        ROCPRIM_RETURN_ON_ERROR(hipMemsetAsync(private_histograms,
-                                               0u,
-                                               size_private_histograms * sizeof(unsigned int),
-                                               stream));
-        ROCPRIM_RETURN_ON_ERROR(hipMemsetAsync(block_id_count, 0u, sizeof(unsigned int), stream));
+        // When using graphs private_histograms and block_id_count both returned a nullptr,
+        // that is why a memset is directly done on temporary_storage.
+        ROCPRIM_RETURN_ON_ERROR(
+            hipMemsetAsync(temporary_storage, 0, storage_size * sizeof(char), stream));
     }
 
     if(debug_synchronous)
