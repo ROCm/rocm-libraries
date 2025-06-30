@@ -34,21 +34,7 @@ trigger:
     - projects/rocsolver/.*.y*ml
     - projects/rocsolver/*.md
 
-pr:
-  autoCancel: true
-  branches:
-    include:
-    - develop
-    - release-staging/rocm-rel-7.*
-  paths:
-    include:
-    - projects/rocsolver
-    exclude:
-    - projects/rocsolver/.github
-    - projects/rocsolver/.jenkins
-    - projects/rocsolver/docs
-    - projects/rocsolver/.*.y*ml
-    - projects/rocsolver/*.md
+pr: none
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/rocSOLVER.yml@pipelines_repo

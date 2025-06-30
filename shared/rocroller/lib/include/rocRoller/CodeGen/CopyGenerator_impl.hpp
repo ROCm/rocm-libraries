@@ -34,6 +34,7 @@
 #include <rocRoller/Context.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 
 namespace rocRoller
 {

@@ -45,7 +45,9 @@ void ContextFixture::SetUp()
 
     RecordProperty("local_device", isLocalDevice());
 
-    Settings::getInstance()->set(Settings::EnforceGraphConstraints, true);
+    auto settings = Settings::getInstance();
+    settings->set(Settings::EnforceGraphConstraints, true);
+    settings->set(Settings::AuditControlTracers, true);
 }
 
 void ContextFixture::TearDown()

@@ -54,6 +54,13 @@ function( rocblas_client_library_settings lib_target_ )
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/common>
   )
 
+  if(BUILD_WITH_HIPBLASLT)
+    target_include_directories( ${lib_target_}
+      SYSTEM BEFORE PRIVATE
+        $<BUILD_INTERFACE:${HIPBLASLT_INCLUDE_DIR}>
+    )
+  endif()
+
   target_compile_definitions( ${lib_target_} PRIVATE ROCM_USE_FLOAT16 ROCBLAS_INTERNAL_API ROCBLAS_NO_DEPRECATED_WARNINGS )
   target_compile_definitions( ${lib_target_} PRIVATE ${TENSILE_DEFINES} ${HIPBLASLT_DEFINES} GOOGLE_TEST )
   # GOOGLE_TEST left off for reuse of this function by by gemm tuner

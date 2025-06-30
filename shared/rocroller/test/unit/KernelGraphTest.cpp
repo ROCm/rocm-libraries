@@ -1336,11 +1336,23 @@ namespace KernelGraphTest
         auto computeIndexes = kgraph1.control.getNodes<ComputeIndex>().to<std::vector>();
         EXPECT_EQ(computeIndexes.size(), 16);
 
-        // Verify number of Deallocates
-        auto addDeallocate  = std::make_shared<AddDeallocate>();
-        auto kgraph2        = kgraph1.transform(addDeallocate);
-        auto addDeallocates = kgraph2.control.getNodes<Deallocate>().to<std::vector>();
-        EXPECT_EQ(addDeallocates.size(), 16);
+        // Verify number of deallocated dimensions.  They may be merged into fewer deallocate nodes.
+        auto addDeallocate = std::make_shared<AddDeallocateDataFlow>();
+        auto kgraph2       = kgraph1.transform(addDeallocate);
+        {
+            std::set<int> deallocatedDims;
+            auto          deallocates = kgraph2.control.getNodes<Deallocate>();
+            for(auto deallocate : deallocates)
+            {
+                auto connections = kgraph2.mapper.getConnections(deallocate);
+                for(auto const& c : connections)
+                {
+                    EXPECT_THAT(deallocatedDims, ::testing::Not(::testing::Contains(c.coordinate)));
+                    deallocatedDims.insert(c.coordinate);
+                }
+            }
+            EXPECT_EQ(deallocatedDims.size(), 16);
+        }
 
         auto storeLDS = kgraphUnrolled.control.getNodes<StoreLDSTile>().to<std::vector>();
         EXPECT_EQ(storeLDS.size(), 8);
@@ -1353,10 +1365,22 @@ namespace KernelGraphTest
         computeIndexes = unrolled_kgraph_lds.control.getNodes<ComputeIndex>().to<std::vector>();
         EXPECT_EQ(computeIndexes.size(), 112);
 
-        // Verify number of Deallocates after unroll/fuse/lds
+        // Verify number of deallocated dimensions.  They may be merged into fewer deallocate nodes.
         unrolled_kgraph_lds = unrolled_kgraph_lds.transform(addDeallocate);
-        addDeallocates      = unrolled_kgraph_lds.control.getNodes<Deallocate>().to<std::vector>();
-        EXPECT_EQ(addDeallocates.size(), 86);
+        {
+            std::set<int> deallocatedDims;
+            auto          deallocates = unrolled_kgraph_lds.control.getNodes<Deallocate>();
+            for(auto deallocate : deallocates)
+            {
+                auto connections = unrolled_kgraph_lds.mapper.getConnections(deallocate);
+                for(auto const& c : connections)
+                {
+                    EXPECT_THAT(deallocatedDims, ::testing::Not(::testing::Contains(c.coordinate)));
+                    deallocatedDims.insert(c.coordinate);
+                }
+            }
+            EXPECT_EQ(deallocatedDims.size(), 86);
+        }
     }
 
     TEST_F(KernelGraphTest, InlineIncrement)
@@ -2964,7 +2988,7 @@ namespace KernelGraphTest
         transforms.push_back(std::make_shared<ConnectWorkgroups>(params, m_context));
         transforms.push_back(std::make_shared<AddPrefetch>(params, m_context));
         transforms.push_back(std::make_shared<AddComputeIndex>());
-        transforms.push_back(std::make_shared<AddDeallocate>());
+        transforms.push_back(std::make_shared<AddDeallocateDataFlow>());
 
         for(auto& t : transforms)
             kgraph = kgraph.transform(t);

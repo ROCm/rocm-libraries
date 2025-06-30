@@ -47,9 +47,7 @@ namespace rocRoller
                                                Register::ValuePtr  matC,
                                                Register::ValuePtr  scaleA,
                                                Register::ValuePtr  scaleB,
-                                               int                 M,
-                                               int                 N,
-                                               int                 K,
+                                               MatrixMultiplySizes miSizes,
                                                std::optional<uint> maybeScaleBlockSize)
         {
             AssertFatal(matA != nullptr);
@@ -60,43 +58,39 @@ namespace rocRoller
 
             auto const lanesPerWavefront = m_context->targetArchitecture().GetCapability(
                 GPUCapability::DefaultWavefrontSize);
-            AssertFatal(M > 0 && N > 0 && K > 0 && lanesPerWavefront > 0,
+            AssertFatal(miSizes.m > 0 && miSizes.n > 0 && miSizes.k > 0 && lanesPerWavefront > 0,
                         "Invalid inputs",
-                        ShowValue(M),
-                        ShowValue(N),
-                        ShowValue(K),
+                        ShowValue(miSizes),
                         ShowValue(lanesPerWavefront));
             auto const packingA = DataTypeInfo::Get(matA->variableType()).packing;
-            AssertFatal(matA->valueCount() * packingA == (size_t)M * K / lanesPerWavefront,
+            AssertFatal(matA->valueCount() * packingA
+                            == (size_t)miSizes.m * miSizes.k / lanesPerWavefront,
                         "A matrix size mismatch",
-                        ShowValue(M),
-                        ShowValue(K),
+                        ShowValue(miSizes),
                         ShowValue(lanesPerWavefront),
-                        ShowValue(M * K / lanesPerWavefront),
+                        ShowValue(miSizes.m * miSizes.k / lanesPerWavefront),
                         ShowValue(matA->valueCount()),
                         ShowValue(packingA));
             auto const packingB = DataTypeInfo::Get(matB->variableType()).packing;
-            AssertFatal(matB->valueCount() * packingB == (size_t)K * N / lanesPerWavefront,
+            AssertFatal(matB->valueCount() * packingB
+                            == (size_t)miSizes.k * miSizes.n / lanesPerWavefront,
                         "B matrix size mismatch",
-                        ShowValue(K),
-                        ShowValue(N),
+                        ShowValue(miSizes),
                         ShowValue(lanesPerWavefront),
-                        ShowValue(K * N / lanesPerWavefront),
+                        ShowValue(miSizes.k * miSizes.n / lanesPerWavefront),
                         ShowValue(matB->valueCount()),
                         ShowValue(packingB));
-            AssertFatal(matC->valueCount() == (size_t)M * N / lanesPerWavefront,
+            AssertFatal(matC->valueCount() == (size_t)miSizes.m * miSizes.n / lanesPerWavefront,
                         "C matrix size mismatch",
-                        ShowValue(M),
-                        ShowValue(N),
+                        ShowValue(miSizes),
                         ShowValue(lanesPerWavefront),
-                        ShowValue(M * N / lanesPerWavefront),
+                        ShowValue(miSizes.m * miSizes.n / lanesPerWavefront),
                         ShowValue(matC->valueCount()));
-            AssertFatal(dest->valueCount() == (size_t)M * N / lanesPerWavefront,
+            AssertFatal(dest->valueCount() == (size_t)miSizes.m * miSizes.n / lanesPerWavefront,
                         "D matrix size mismatch",
-                        ShowValue(M),
-                        ShowValue(N),
+                        ShowValue(miSizes),
                         ShowValue(lanesPerWavefront),
-                        ShowValue(M * N / lanesPerWavefront),
+                        ShowValue(miSizes.m * miSizes.n / lanesPerWavefront),
                         ShowValue(dest->valueCount()));
             AssertFatal(isValidInputType(matA->variableType()),
                         "Invalid matrix A data type",
@@ -138,11 +132,12 @@ namespace rocRoller
 
             if(arch.HasCapability(GPUCapability::HasMFMA_scale_f8f6f4))
             {
-                AssertFatal((M == 16 && N == 16 && K == 128) || (M == 32 && N == 32 && K == 64),
+                AssertFatal((miSizes.m == 16 && miSizes.n == 16 && miSizes.k == 128)
+                                || (miSizes.m == 32 && miSizes.n == 32 && miSizes.k == 64),
                             "Invalid wavetile {}x{}x{} for scaled MFMA instruction for {}.",
-                            M,
-                            N,
-                            K,
+                            miSizes.m,
+                            miSizes.n,
+                            miSizes.k,
                             arch.target().toString());
 
                 if(maybeScaleBlockSize)
@@ -154,7 +149,8 @@ namespace rocRoller
                                             arch.target().toString()));
                 }
 
-                mi = concatenate("v_mfma_scale_f32_", M, "x", N, "x", K, "_f8f6f4");
+                mi = concatenate(
+                    "v_mfma_scale_f32_", miSizes.m, "x", miSizes.n, "x", miSizes.k, "_f8f6f4");
 
                 modifiers += "cbsz:" + Arithmetic::getModifier(typeA);
                 modifiers += " blgp:" + Arithmetic::getModifier(typeB);

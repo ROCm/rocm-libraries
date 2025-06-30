@@ -333,6 +333,58 @@ streamKTwoTile: false
 ...
 """
 
+DP_HGEMM_GFX120X = """\
+---
+architecture:
+  ArchString: gfx1201
+  Xnack: false
+  Sramecc: false
+mac_m: 64
+mac_n: 64
+mac_k: 64
+wave_m: 16
+wave_n: 16
+wave_k: 16
+wave_b: 1
+workgroup_size_x: 64
+workgroup_size_y: 2
+workgroupMapping: [-1, -1]
+workgroupRemapXCC: false
+workgroupRemapXCCValue: -1
+unroll_x: 0
+unroll_y: 0
+loadLDS_A: true
+loadLDS_B: true
+storeLDS_D: true
+direct2LDS_A: false
+direct2LDS_B: false
+prefetch: false
+prefetchInFlight: 0
+prefetchLDSFactor: 0
+prefetchMixMemOps: false
+betaInFma: true
+scheduler: Priority
+matchMemoryAccess: true
+trans_A: N
+trans_B: N
+type_A: half
+type_B: half
+type_C: half
+type_D: half
+type_acc: float
+scale_A: None
+scaleType_A: None
+scale_B: None
+scaleType_B: None
+scaleBlockSize: 0
+loadScaleLDS_A: false
+loadScaleLDS_B: false
+swizzleScale: false
+prefetchScale: false
+streamK: false
+streamKTwoTile: false
+...
+"""
 
 def type_configurations():
     """Return list of type combinations to test."""
@@ -596,16 +648,14 @@ def test_gemm_validate(tmp_path):
     This runs each problem/solution three times.
     """
 
-    # TODO This is a temporary fix to enable GFX12 CI
-    if rocm_gfx().startswith("gfx12"):
-        return
+    isGFX120X = rocm_gfx().startswith("gfx120")
 
     problem_params = [["--m", "512", "--n", "512", "--k", "256", "--numWGs", "4"]]
     solution_params = [
         # data-parallel gemm, float, params from command line
-        [],
+        # [],
         # data-parallel gemm, float, params from config file
-        ["--config", DP_GEMM],
+        ["--config", DP_HGEMM_GFX120X if isGFX120X else DP_GEMM],
         # streamk gemm, float, params from command line
         # ["--streamk"],
     ]
@@ -622,10 +672,6 @@ def test_gemm_validate(tmp_path):
 )
 def test_gemm_validate_once(tmp_path, solution_params, problem_params):
     """GEMM generate (always) and validate (if arch matches)."""
-
-    # TODO This is a temporary fix to enable GFX12 CI
-    if rocm_gfx().startswith("gfx12"):
-        return
 
     gemm_validate_two_stage_codeobject(tmp_path, solution_params, problem_params)
 

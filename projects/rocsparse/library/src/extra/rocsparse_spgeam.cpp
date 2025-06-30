@@ -32,13 +32,8 @@
 #include "rocsparse_csrgeam_numeric.hpp"
 #include "rocsparse_csrgeam_symbolic.hpp"
 
-rocsparse_status _rocsparse_spgeam_descr::csrgeam_allocate_descr_memory(rocsparse_handle handle,
-                                                                        int64_t          m,
-                                                                        int64_t          n,
-                                                                        const void*      alpha,
-                                                                        int64_t          nnz_A,
-                                                                        const void*      beta,
-                                                                        int64_t          nnz_B)
+rocsparse_status _rocsparse_spgeam_descr::csrgeam_allocate_descr_memory(
+    rocsparse_handle handle, int64_t m, int64_t n, int64_t nnz_A, int64_t nnz_B)
 {
     ROCSPARSE_ROUTINE_TRACE;
 
@@ -126,6 +121,8 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spgeam_stage value_)
         CASE(rocsparse_spgeam_stage_compute);
         CASE(rocsparse_spgeam_stage_symbolic_compute);
         CASE(rocsparse_spgeam_stage_numeric_compute);
+        CASE(rocsparse_spgeam_stage_symbolic_analysis);
+        CASE(rocsparse_spgeam_stage_numeric_analysis);
 #undef CASE
     }
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -144,6 +141,8 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spgeam_input value_)
         CASE(rocsparse_spgeam_input_compute_datatype);
         CASE(rocsparse_spgeam_input_operation_A);
         CASE(rocsparse_spgeam_input_operation_B);
+        CASE(rocsparse_spgeam_input_scalar_alpha);
+        CASE(rocsparse_spgeam_input_scalar_beta);
 #undef CASE
     }
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -185,6 +184,8 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spgeam_stage value_)
     case rocsparse_spgeam_stage_compute:
     case rocsparse_spgeam_stage_symbolic_compute:
     case rocsparse_spgeam_stage_numeric_compute:
+    case rocsparse_spgeam_stage_symbolic_analysis:
+    case rocsparse_spgeam_stage_numeric_analysis:
     {
         return false;
     }
@@ -202,6 +203,8 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spgeam_input value_)
     case rocsparse_spgeam_input_compute_datatype:
     case rocsparse_spgeam_input_operation_A:
     case rocsparse_spgeam_input_operation_B:
+    case rocsparse_spgeam_input_scalar_alpha:
+    case rocsparse_spgeam_input_scalar_beta:
     {
         return false;
     }
@@ -291,6 +294,11 @@ namespace rocsparse
         const rocsparse_format format_A = mat_A->format;
         switch(stage)
         {
+        case rocsparse_spgeam_stage_numeric_analysis:
+        {
+            *buffer_size = 0;
+        }
+        case rocsparse_spgeam_stage_symbolic_analysis:
         case rocsparse_spgeam_stage_analysis:
         {
             switch(format_A)
@@ -400,70 +408,68 @@ namespace rocsparse
 
     static rocsparse_status spgeam_checkarg(rocsparse_handle            handle, //0
                                             rocsparse_spgeam_descr      descr, //1
-                                            const void*                 alpha, //2
-                                            rocsparse_const_spmat_descr mat_A, //3
-                                            const void*                 beta, //4
-                                            rocsparse_const_spmat_descr mat_B, //5
-                                            rocsparse_spmat_descr       mat_C, //6
-                                            rocsparse_spgeam_stage      stage, //7
-                                            size_t                      buffer_size, //8
-                                            void*                       temp_buffer) //9
+                                            rocsparse_const_spmat_descr mat_A, //2
+                                            rocsparse_const_spmat_descr mat_B, //3
+                                            rocsparse_spmat_descr       mat_C, //4
+                                            rocsparse_spgeam_stage      stage, //5
+                                            size_t                      buffer_size, //6
+                                            void*                       temp_buffer) //7
     {
         ROCSPARSE_ROUTINE_TRACE;
         ROCSPARSE_CHECKARG_HANDLE(0, handle);
 
         ROCSPARSE_CHECKARG_POINTER(1, descr);
-        ROCSPARSE_CHECKARG_POINTER(3, mat_A);
-        ROCSPARSE_CHECKARG_POINTER(5, mat_B);
+        ROCSPARSE_CHECKARG_POINTER(2, mat_A);
+        ROCSPARSE_CHECKARG_POINTER(3, mat_B);
         if(stage == rocsparse_spgeam_stage_compute
            || stage == rocsparse_spgeam_stage_symbolic_compute
            || stage == rocsparse_spgeam_stage_numeric_compute)
         {
-            ROCSPARSE_CHECKARG_POINTER(6, mat_C);
+            ROCSPARSE_CHECKARG_POINTER(4, mat_C);
         }
-        ROCSPARSE_CHECKARG(9,
+        ROCSPARSE_CHECKARG(7,
                            temp_buffer,
                            (buffer_size > 0 && temp_buffer == nullptr),
                            rocsparse_status_invalid_pointer);
 
-        ROCSPARSE_CHECKARG_ENUM(7, stage);
+        ROCSPARSE_CHECKARG_ENUM(5, stage);
 
-        ROCSPARSE_CHECKARG(3, mat_A, (mat_A->init == false), rocsparse_status_not_initialized);
-        ROCSPARSE_CHECKARG(5, mat_B, (mat_B->init == false), rocsparse_status_not_initialized);
+        ROCSPARSE_CHECKARG(2, mat_A, (mat_A->init == false), rocsparse_status_not_initialized);
+        ROCSPARSE_CHECKARG(3, mat_B, (mat_B->init == false), rocsparse_status_not_initialized);
 
         ROCSPARSE_CHECKARG(
-            5, mat_B, (mat_B->format != mat_A->format), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(3,
+            3, mat_B, (mat_B->format != mat_A->format), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(2,
                            mat_A,
                            (mat_A->data_type != descr->get_compute_datatype()),
                            rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(5,
+        ROCSPARSE_CHECKARG(3,
                            mat_B,
                            (mat_B->data_type != descr->get_compute_datatype()),
                            rocsparse_status_not_implemented);
 
         ROCSPARSE_CHECKARG(
-            5, mat_B, (mat_B->row_type != mat_A->row_type), rocsparse_status_type_mismatch);
+            3, mat_B, (mat_B->row_type != mat_A->row_type), rocsparse_status_type_mismatch);
         ROCSPARSE_CHECKARG(
-            5, mat_B, (mat_B->col_type != mat_A->col_type), rocsparse_status_type_mismatch);
+            3, mat_B, (mat_B->col_type != mat_A->col_type), rocsparse_status_type_mismatch);
 
         if(stage == rocsparse_spgeam_stage_compute
            || stage == rocsparse_spgeam_stage_symbolic_compute
            || stage == rocsparse_spgeam_stage_numeric_compute || mat_C != nullptr)
         {
-            ROCSPARSE_CHECKARG(6, mat_C, (mat_C->init == false), rocsparse_status_not_initialized);
+            ROCSPARSE_CHECKARG(4, mat_C, (mat_C->init == false), rocsparse_status_not_initialized);
 
             ROCSPARSE_CHECKARG(
-                6, mat_C, (mat_C->format != mat_A->format), rocsparse_status_not_implemented);
-            ROCSPARSE_CHECKARG(6,
+                4, mat_C, (mat_C->format != mat_A->format), rocsparse_status_not_implemented);
+            ROCSPARSE_CHECKARG(4,
                                mat_C,
                                (mat_C->data_type != descr->get_compute_datatype()),
                                rocsparse_status_not_implemented);
 
             ROCSPARSE_CHECKARG(
-                6, mat_C, (mat_C->row_type != mat_A->row_type), rocsparse_status_type_mismatch);
+                4, mat_C, (mat_C->row_type != mat_A->row_type), rocsparse_status_type_mismatch);
             ROCSPARSE_CHECKARG(
-                6, mat_C, (mat_C->col_type != mat_A->col_type), rocsparse_status_type_mismatch);
+                4, mat_C, (mat_C->col_type != mat_A->col_type), rocsparse_status_type_mismatch);
         }
 
         // Validate spgeam descriptor inputs.
@@ -496,6 +502,130 @@ namespace rocsparse
         // Validate the stage.
         switch(stage)
         {
+        case rocsparse_spgeam_stage_symbolic_analysis:
+        {
+
+            switch(previous_stage)
+            {
+
+            case rocsparse_spgeam_stage_symbolic_analysis:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_symbolic_analysis has already "
+                    "been "
+                    "executed");
+            }
+
+            case rocsparse_spgeam_stage_analysis:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_symbolic_analysis cannot be "
+                    "called "
+                    "after "
+                    "the stage rocsparse_spgeam_stage_analysis");
+            }
+
+            case rocsparse_spgeam_stage_compute:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_symbolic_analysis cannot be "
+                    "called "
+                    "after "
+                    "the stage rocsparse_spgeam_stage_compute");
+            }
+
+            case rocsparse_spgeam_stage_numeric_analysis:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_symbolic_analysis cannot be "
+                    "called "
+                    "after "
+                    "the stage rocsparse_spgeam_stage_numeric_analysis");
+            }
+
+            case rocsparse_spgeam_stage_numeric_compute:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_symbolic_analysis cannot be "
+                    "called "
+                    "after "
+                    "the stage rocsparse_spgeam_stage_numeric_compute");
+            }
+
+            case rocsparse_spgeam_stage_symbolic_compute:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_symbolic_analysis cannot be "
+                    "called "
+                    "after "
+                    "the stage rocsparse_spgeam_stage_symbolic_compute");
+            }
+            }
+
+            break;
+        }
+
+        case rocsparse_spgeam_stage_numeric_analysis:
+        {
+
+            switch(previous_stage)
+            {
+
+            case rocsparse_spgeam_stage_numeric_compute:
+            case rocsparse_spgeam_stage_symbolic_compute:
+            {
+                break;
+            }
+
+            case rocsparse_spgeam_stage_symbolic_analysis:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_numeric_analysis cannot be "
+                    "called "
+                    "after "
+                    "the stage rocsparse_spgeam_stage_symbolic_analysis");
+            }
+
+            case rocsparse_spgeam_stage_analysis:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_numeric_analysis cannot be "
+                    "called "
+                    "after "
+                    "the stage rocsparse_spgeam_stage_analysis");
+            }
+
+            case rocsparse_spgeam_stage_compute:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_numeric_analysis cannot be "
+                    "called "
+                    "after "
+                    "the stage rocsparse_spgeam_stage_compute");
+            }
+
+            case rocsparse_spgeam_stage_numeric_analysis:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_numeric_analysis has already "
+                    "been "
+                    "executed");
+            }
+            }
+
+            break;
+        }
+
         case rocsparse_spgeam_stage_symbolic_compute:
         {
 
@@ -510,9 +640,18 @@ namespace rocsparse
 
             switch(previous_stage)
             {
+            case rocsparse_spgeam_stage_symbolic_analysis:
+            {
+                break;
+            }
 
             case rocsparse_spgeam_stage_analysis:
             {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_symbolic_compute cannot be "
+                    "called "
+                    "after the stage rocsparse_spgeam_stage_analysis");
                 break;
             }
 
@@ -523,6 +662,15 @@ namespace rocsparse
                     "invalid stage, the stage rocsparse_spgeam_stage_symbolic_compute cannot be "
                     "called "
                     "after the stage rocsparse_spgeam_stage_compute");
+            }
+
+            case rocsparse_spgeam_stage_numeric_analysis:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_symbolic_compute cannot be "
+                    "called "
+                    "after the stage rocsparse_spgeam_stage_numeric_analysis");
             }
 
             case rocsparse_spgeam_stage_numeric_compute:
@@ -550,6 +698,24 @@ namespace rocsparse
         {
             switch(previous_stage)
             {
+            case rocsparse_spgeam_stage_symbolic_analysis:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_numeric_compute cannot be "
+                    "called "
+                    "after the stage rocsparse_spgeam_stage_symbolic_analysis");
+            }
+
+            case rocsparse_spgeam_stage_analysis:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_numeric_compute cannot be "
+                    "called "
+                    "after the stage rocsparse_spgeam_stage_analysis");
+            }
+
             case rocsparse_spgeam_stage_compute:
             {
                 RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
@@ -559,7 +725,7 @@ namespace rocsparse
                     "after the stage rocsparse_spgeam_stage_compute");
             }
 
-            case rocsparse_spgeam_stage_analysis:
+            case rocsparse_spgeam_stage_numeric_analysis:
             case rocsparse_spgeam_stage_numeric_compute:
             case rocsparse_spgeam_stage_symbolic_compute:
             {
@@ -589,6 +755,24 @@ namespace rocsparse
                     "invalid stage, the stage rocsparse_spgeam_stage_analysis cannot be called "
                     "after "
                     "the stage rocsparse_spgeam_stage_compute");
+            }
+
+            case rocsparse_spgeam_stage_numeric_analysis:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_analysis cannot be called "
+                    "after "
+                    "the stage rocsparse_spgeam_stage_numeric_analysis");
+            }
+
+            case rocsparse_spgeam_stage_symbolic_analysis:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_analysis cannot be called "
+                    "after "
+                    "the stage rocsparse_spgeam_stage_symbolic_analysis");
             }
 
             case rocsparse_spgeam_stage_numeric_compute:
@@ -647,6 +831,22 @@ namespace rocsparse
                     "invalid stage, the stage rocsparse_spgeam_stage_compute cannot be called "
                     "after the stage rocsparse_spgeam_stage_symbolic_compute");
             }
+
+            case rocsparse_spgeam_stage_numeric_analysis:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_compute cannot be called "
+                    "after the stage rocsparse_spgeam_stage_numeric_analysis");
+            }
+
+            case rocsparse_spgeam_stage_symbolic_analysis:
+            {
+                RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                    rocsparse_status_invalid_value,
+                    "invalid stage, the stage rocsparse_spgeam_stage_compute cannot be called "
+                    "after the stage rocsparse_spgeam_stage_symbolic_analysis");
+            }
             }
 
             break;
@@ -658,9 +858,7 @@ namespace rocsparse
 
     static rocsparse_status spgeam(rocsparse_handle             handle,
                                    const rocsparse_spgeam_descr descr,
-                                   const void*                  alpha,
                                    rocsparse_const_spmat_descr  mat_A,
-                                   const void*                  beta,
                                    rocsparse_const_spmat_descr  mat_B,
                                    rocsparse_spmat_descr        mat_C,
                                    rocsparse_spgeam_stage       stage,
@@ -671,6 +869,15 @@ namespace rocsparse
         const rocsparse_format format_A = mat_A->format;
         switch(stage)
         {
+        case rocsparse_spgeam_stage_numeric_analysis:
+        {
+            //
+            // do nothing.
+            //
+            return rocsparse_status_success;
+        }
+
+        case rocsparse_spgeam_stage_symbolic_analysis:
         case rocsparse_spgeam_stage_analysis:
         {
             switch(format_A)
@@ -680,7 +887,7 @@ namespace rocsparse
                 if(mat_C == nullptr)
                 {
                     RETURN_IF_ROCSPARSE_ERROR(descr->csrgeam_allocate_descr_memory(
-                        handle, mat_A->rows, mat_B->cols, alpha, mat_A->nnz, beta, mat_B->nnz));
+                        handle, mat_A->rows, mat_B->cols, mat_A->nnz, mat_B->nnz));
                 }
 
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrgeam_nnz(
@@ -732,10 +939,25 @@ namespace rocsparse
 
         case rocsparse_spgeam_stage_compute:
         {
-            const void* local_alpha = alpha;
-            const void* local_beta  = beta;
-            RETURN_IF_ROCSPARSE_ERROR(
-                convert_scalars(handle, descr, alpha, beta, &local_alpha, &local_beta));
+
+            const void* local_alpha = descr->get_scalar_A();
+            const void* local_beta  = descr->get_scalar_B();
+
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                (local_alpha == nullptr) ? rocsparse_status_invalid_pointer
+                                         : rocsparse_status_success,
+                "rocsparse_spgeam_input_scalar_alpha must be set up.");
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                (local_beta == nullptr) ? rocsparse_status_invalid_pointer
+                                        : rocsparse_status_success,
+                "rocsparse_spgeam_input_scalar_beta must be set up.");
+
+            RETURN_IF_ROCSPARSE_ERROR(convert_scalars(handle,
+                                                      descr,
+                                                      descr->get_scalar_A(),
+                                                      descr->get_scalar_B(),
+                                                      &local_alpha,
+                                                      &local_beta));
 
             switch(format_A)
             {
@@ -851,10 +1073,26 @@ namespace rocsparse
 
         case rocsparse_spgeam_stage_numeric_compute:
         {
-            const void* local_alpha = alpha;
-            const void* local_beta  = beta;
-            RETURN_IF_ROCSPARSE_ERROR(
-                convert_scalars(handle, descr, alpha, beta, &local_alpha, &local_beta));
+
+            const void* local_alpha = descr->get_scalar_A();
+            const void* local_beta  = descr->get_scalar_B();
+
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                (local_alpha == nullptr) ? rocsparse_status_invalid_pointer
+                                         : rocsparse_status_success,
+                "rocsparse_spgeam_input_scalar_alpha must be set up.");
+
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                (local_beta == nullptr) ? rocsparse_status_invalid_pointer
+                                        : rocsparse_status_success,
+                "rocsparse_spgeam_input_scalar_beta must be set up.");
+
+            RETURN_IF_ROCSPARSE_ERROR(convert_scalars(handle,
+                                                      descr,
+                                                      descr->get_scalar_A(),
+                                                      descr->get_scalar_B(),
+                                                      &local_alpha,
+                                                      &local_beta));
 
             switch(format_A)
             {
@@ -954,9 +1192,7 @@ catch(...)
 
 extern "C" rocsparse_status rocsparse_spgeam(rocsparse_handle            handle,
                                              rocsparse_spgeam_descr      descr,
-                                             const void*                 alpha,
                                              rocsparse_const_spmat_descr mat_A,
-                                             const void*                 beta,
                                              rocsparse_const_spmat_descr mat_B,
                                              rocsparse_spmat_descr       mat_C,
                                              rocsparse_spgeam_stage      stage,
@@ -966,28 +1202,19 @@ extern "C" rocsparse_status rocsparse_spgeam(rocsparse_handle            handle,
 try
 {
     ROCSPARSE_ROUTINE_TRACE;
-    rocsparse::log_trace("rocsparse_spgeam",
-                         handle,
-                         descr,
-                         alpha,
-                         mat_A,
-                         beta,
-                         mat_B,
-                         mat_C,
-                         stage,
-                         buffer_size,
-                         temp_buffer);
+    rocsparse::log_trace(
+        "rocsparse_spgeam", handle, descr, mat_A, mat_B, mat_C, stage, buffer_size, temp_buffer);
 
     const rocsparse_status status = rocsparse::spgeam_checkarg(
-        handle, descr, alpha, mat_A, beta, mat_B, mat_C, stage, buffer_size, temp_buffer);
+        handle, descr, mat_A, mat_B, mat_C, stage, buffer_size, temp_buffer);
     if(status != rocsparse_status_continue)
     {
         RETURN_IF_ROCSPARSE_ERROR(status);
         return rocsparse_status_success;
     }
 
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::spgeam(
-        handle, descr, alpha, mat_A, beta, mat_B, mat_C, stage, buffer_size, temp_buffer));
+    RETURN_IF_ROCSPARSE_ERROR(
+        rocsparse::spgeam(handle, descr, mat_A, mat_B, mat_C, stage, buffer_size, temp_buffer));
 
     // Record the stage that has been executed.
     descr->set_stage(stage);

@@ -356,14 +356,14 @@ enum hipblas_argument : int
 namespace ArgumentsHelper
 {
     template <hipblas_argument>
-    static constexpr auto apply = nullptr;
+    inline constexpr auto apply = nullptr;
 
     // Macro defining specializations for specific arguments
     // e_alpha, e_beta, and datatypes get turned into negative sentinel value specializations
     // clang-format off
 #define APPLY(NAME)                                                                         \
     template <>                                                                             \
-    HIPBLAS_CLANG_STATIC constexpr auto                                                     \
+    inline constexpr auto                                                     \
         apply<e_##NAME == e_alpha ? hipblas_argument(-1)                                    \
                                   : e_##NAME == e_beta ? hipblas_argument(-2)               \
                                   : e_##NAME == e_a_type ? hipblas_argument(-3)             \
@@ -379,45 +379,45 @@ namespace ArgumentsHelper
 
     // Specialization for e_alpha
     template <>
-    HIPBLAS_CLANG_STATIC constexpr auto apply<e_alpha> =
+    inline constexpr auto apply<e_alpha> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("alpha", arg.get_alpha<decltype(T)>());
         };
 
     // Specialization for e_beta
     template <>
-    HIPBLAS_CLANG_STATIC constexpr auto apply<e_beta> =
+    inline constexpr auto apply<e_beta> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("beta", arg.get_beta<decltype(T)>());
         };
 
     // Specialization for datatypes
     template <>
-    HIPBLAS_CLANG_STATIC constexpr auto apply<e_a_type> =
+    inline constexpr auto apply<e_a_type> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("a_type", hip_datatype2string(arg.a_type));
         };
 
     template <>
-    HIPBLAS_CLANG_STATIC constexpr auto apply<e_b_type> =
+    inline constexpr auto apply<e_b_type> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("b_type", hip_datatype2string(arg.b_type));
         };
 
     template <>
-    HIPBLAS_CLANG_STATIC constexpr auto apply<e_c_type> =
+    inline constexpr auto apply<e_c_type> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("c_type", hip_datatype2string(arg.c_type));
         };
 
     template <>
-    HIPBLAS_CLANG_STATIC constexpr auto apply<e_d_type> =
+    inline constexpr auto apply<e_d_type> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("d_type", hip_datatype2string(arg.d_type));
         };
 
     template <>
-    HIPBLAS_CLANG_STATIC constexpr auto apply<e_compute_type> =
+    inline constexpr auto apply<e_compute_type> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("compute_type", hip_datatype2string(arg.compute_type));
         };

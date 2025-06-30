@@ -31,6 +31,7 @@
 #include <stdlib.h>
 #include <vector>
 
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
@@ -75,7 +76,7 @@ namespace rocRoller
                 }
                 AssertFatal(m_assemblyFile.is_open(),
                             "Could not open file " + context->assemblyFileName() + " for writing.");
-                m_assemblyFile << inst.toString(context->kernelOptions().logLevel);
+                m_assemblyFile << inst.toString(context->kernelOptions()->logLevel);
                 m_assemblyFile.flush();
             }
 

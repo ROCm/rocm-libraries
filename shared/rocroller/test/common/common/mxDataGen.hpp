@@ -232,9 +232,7 @@ namespace rocRoller
                    std::vector<TC>&  hostC,
                    TensorDescriptor& descC,
                    float             min = -1.f,
-                   float             max = 1.f
-
-    )
+                   float             max = 1.f)
     {
         std::vector<uint8_t> defaultHostScaleA;
         std::vector<uint8_t> defaultHostScaleB;

@@ -102,7 +102,7 @@ namespace AliasDataFlowTagsTest
         graph = transform<UpdateWavefrontParameters>(graph, params);
         graph = transform<LoadPacked>(graph, context.get());
         graph = transform<AddConvert>(graph);
-        graph = transform<AddDeallocate>(graph);
+        graph = transform<AddDeallocateDataFlow>(graph);
         graph = transform<InlineIncrements>(graph);
         graph = transform<Simplify>(graph);
 

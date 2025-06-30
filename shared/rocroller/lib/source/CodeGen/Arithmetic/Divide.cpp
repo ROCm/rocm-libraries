@@ -65,6 +65,9 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
+        AssertFatal(m_context->kernelOptions()->enableFullDivision,
+                    "Full integer division not enabled by default.");
+
         co_yield_(Instruction::Lock(Scheduling::Dependency::VCC, "Start of Division"));
 
         // Allocate temporary registers
@@ -212,6 +215,8 @@ namespace rocRoller
         Register::ValuePtr rhs,
         Expression::Divide const&)
     {
+        AssertFatal(m_context->kernelOptions()->enableFullDivision,
+                    "Full integer division not enabled by default.");
 
         auto const& architecture  = m_context->targetArchitecture();
         auto const  wavefrontSize = architecture.GetCapability(GPUCapability::DefaultWavefrontSize);
@@ -541,6 +546,9 @@ namespace rocRoller
         Register::ValuePtr rhs,
         Expression::Divide const&)
     {
+        AssertFatal(m_context->kernelOptions()->enableFullDivision,
+                    "Full integer division not enabled by default.");
+
         auto const& architecture  = m_context->targetArchitecture();
         auto const  wavefrontSize = architecture.GetCapability(GPUCapability::DefaultWavefrontSize);
         AssertFatal(wavefrontSize == 32 || wavefrontSize == 64,

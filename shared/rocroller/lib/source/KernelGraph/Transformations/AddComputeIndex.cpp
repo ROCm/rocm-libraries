@@ -636,8 +636,21 @@ namespace rocRoller::KernelGraph
                                 kgraph, spec.location, kgraph.control.addElement(Scope()), false);
                         }
                         auto scope = scopes[spec.location];
-                        kgraph.control.addElement(Body(), {scope}, {chain.top});
-                        kgraph.control.addElement(Sequence(), {chain.bottom}, {spec.location});
+                        if(m_serializeComputeIndex)
+                        {
+                            auto isScope = kgraph.control.get<Scope>(scope).has_value();
+                            kgraph.control.addElement(isScope ? ControlEdge(Body())
+                                                              : ControlEdge(Sequence()),
+                                                      {scope},
+                                                      {chain.top});
+                            kgraph.control.addElement(Sequence(), {chain.bottom}, {spec.location});
+                            scopes[spec.location] = chain.bottom;
+                        }
+                        else
+                        {
+                            kgraph.control.addElement(Body(), {scope}, {chain.top});
+                            kgraph.control.addElement(Sequence(), {chain.bottom}, {spec.location});
+                        }
                     }
                     else
                     {
@@ -682,6 +695,8 @@ namespace rocRoller::KernelGraph
 
     private:
         std::map<ComputeIndexChainSpecification, std::vector<int>> m_chains;
+
+        bool m_serializeComputeIndex = true;
     };
 
     KernelGraph AddComputeIndex::apply(KernelGraph const& original)

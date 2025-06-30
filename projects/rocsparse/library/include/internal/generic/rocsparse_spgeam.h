@@ -114,7 +114,15 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *  \p rocsparse_spgeam. Once the computation is complete and the SpGEAM descriptor is no longer needed, the user must call
 *  \ref rocsparse_destroy_spgeam_descr. See full code example below.
 *
-*  The stage \ref rocsparse_spgeam_stage_compute computes the symbolic part and the numeric of the resulting matrix C. If the user wants to perform multiple operations involving matrices of same sparsity patterns but with different numerical values, then the stages \ref rocsparse_spgeam_stage_symbolic_compute and \ref rocsparse_spgeam_stage_numeric_compute can be used to separate the symbolic calculation from the numeric calculation. Note that the stage \ref rocsparse_spgeam_stage_compute cannot be mixed with the stages \ref rocsparse_spgeam_stage_symbolic_compute and \ref rocsparse_spgeam_stage_numeric_compute.
+*  The stage \ref rocsparse_spgeam_stage_compute computes the symbolic part and the numeric of the resulting matrix C. If the user wants to perform multiple operations involving matrices of same sparsity patterns but with different numerical values, then the symbolic stages (\ref rocsparse_spgeam_stage_symbolic_analysis and \ref rocsparse_spgeam_stage_symbolic_compute) and the numeric stages (\ref rocsparse_spgeam_stage_numeric_analysis and \ref rocsparse_spgeam_stage_numeric_compute) can be used to separate the symbolic calculation from the numeric calculation.
+*
+*  \note The stages  \ref rocsparse_spgeam_stage_analysis and \ref rocsparse_spgeam_stage_compute cannot be mixed with the stages \ref rocsparse_spgeam_stage_symbolic_analysis, \ref rocsparse_spgeam_stage_symbolic_compute, \ref rocsparse_spgeam_stage_numeric_analysis, and \ref rocsparse_spgeam_stage_numeric_compute.
+*  \note The stage \ref rocsparse_spgeam_stage_analysis must precede the stage \ref rocsparse_spgeam_stage_compute.
+*  \note The stage \ref rocsparse_spgeam_stage_symbolic_analysis must precede the stage \ref rocsparse_spgeam_stage_symbolic_compute.
+*  \note The stage \ref rocsparse_spgeam_stage_numeric_analysis must precede the stage \ref rocsparse_spgeam_stage_numeric_compute.
+*  \note The symbolic stages are not required to perform the numeric stages.
+*  \note The stage \ref rocsparse_spgeam_stage_numeric_analysis must be re-applied if the numeric values of the input matrices \p mat_A and \p mat_B have changed between subsquent calls of the stage \ref rocsparse_spgeam_stage_numeric_compute.
+*
 *  \p rocsparse_spgeam supports multiple combinations of index types, data types, and compute types. The tables below indicate
 *  the currently supported different index and data types that can be used for the sparse matrices \f$op(A)\f$, \f$op(B)\f$, and
 *  \f$C\f$, and the compute type for \f$\alpha\f$ and \f$\beta\f$. The advantage of using different index and data types is to save on
@@ -157,11 +165,7 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *  arrays. In the scenario where \f$C\f$ requires a larger index type for the row offset array, the user would need to store all three
 *  matrices using the larger index type \ref rocsparse_datatype_f64_r for the row offsets array.
 *
-*  \note If \f$\alpha == 0\f$, then \f$C = \beta \cdot op(B)\f$ will be computed.
-*  \note If \f$\beta == 0\f$, then \f$C = \alpha \cdot op(A) \f$ will be
-*  computed.
 *  \note Currently only CSR format is supported.
-*  \note \f$\alpha == beta == 0\f$ is invalid.
 *  \note Currently, only \p trans_A == \ref rocsparse_operation_none is supported.
 *  \note Currently, only \p trans_B == \ref rocsparse_operation_none is supported.
 *
@@ -173,11 +177,7 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *  @param[in]
 *  descr        SpGEAM descriptor
 *  @param[in]
-*  alpha        scalar \f$\alpha\f$.
-*  @param[in]
 *  mat_A        sparse matrix \f$A\f$ descriptor.
-*  @param[in]
-*  beta         scalar \f$\beta\f$.
 *  @param[in]
 *  mat_B        sparse matrix \f$B\f$ descriptor.
 *  @param[out]
@@ -194,8 +194,7 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval rocsparse_status_invalid_pointer \p alpha and \p beta are invalid,
-*          \p mat_A, \p mat_B, \p mat_C, \p descr or \p buffer_size pointer is invalid.
+*  \retval rocsparse_status_invalid_pointer \p mat_A, \p mat_B, \p mat_C, \p descr or \p buffer_size pointer is invalid.
 *
 *  \par First Example
 *  \code{.c}
@@ -304,7 +303,7 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *   rocsparse_spgeam_buffer_size(handle, descr, matA, matB, nullptr, rocsparse_spgeam_stage_analysis, &buffer_size_in_bytes, p_error);
 *
 *   hipMalloc(&buffer, buffer_size_in_bytes);
-*   rocsparse_spgeam(handle, descr, &alpha, matA, &beta, matB, nullptr, rocsparse_spgeam_stage_analysis, buffer_size_in_bytes, buffer, p_error);
+*   rocsparse_spgeam(handle, descr, matA, matB, nullptr, rocsparse_spgeam_stage_analysis, buffer_size_in_bytes, buffer, p_error);
 *   hipFree(buffer);
 *
 *   // Ensure analysis stage is complete before grabbing C non-zero count
@@ -330,8 +329,12 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *   // Compute phase
 *   rocsparse_spgeam_buffer_size(handle, descr, matA, matB, matC, rocsparse_spgeam_stage_compute, &buffer_size_in_bytes, p_error);
 *
+*   // Set alpha and beta
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_scalar_alpha, &alpha, sizeof(alpha), p_error);
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_scalar_beta, &beta, sizeof(beta), p_error);
+*
 *   hipMalloc(&buffer, buffer_size_in_bytes);
-*   rocsparse_spgeam(handle, descr, &alpha, matA, &beta, matB, matC, rocsparse_spgeam_stage_compute, buffer_size_in_bytes, buffer, p_error);
+*   rocsparse_spgeam(handle, descr, matA, matB, matC, rocsparse_spgeam_stage_compute, buffer_size_in_bytes, buffer, p_error);
 *   hipFree(buffer);
 *
 *   // Copy C matrix result back to host
@@ -462,6 +465,10 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *   const rocsparse_datatype scalar_datatype = rocsparse_datatype_f32_r;
 *   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_scalar_datatype, &scalar_datatype, sizeof(scalar_datatype), p_error);
 *
+*   // Set alpha and beta.
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_scalar_alpha, &alpha, sizeof(alpha), p_error);
+*   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_scalar_beta, &beta, sizeof(beta), p_error);
+*
 *   // Set the compute type on the descriptor
 *   const rocsparse_datatype compute_datatype = rocsparse_datatype_f32_r;
 *   rocsparse_spgeam_set_input(handle, descr, rocsparse_spgeam_input_compute_datatype, &compute_datatype, sizeof(compute_datatype), p_error);
@@ -469,10 +476,10 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *   // Calculate NNZ phase
 *   size_t buffer_size_in_bytes;
 *   void * buffer;
-*   rocsparse_spgeam_buffer_size(handle, descr, matA, matB, nullptr, rocsparse_spgeam_stage_analysis, &buffer_size_in_bytes, p_error);
+*   rocsparse_spgeam_buffer_size(handle, descr, matA, matB, nullptr, rocsparse_spgeam_stage_symbolic_analysis, &buffer_size_in_bytes, p_error);
 *
 *   hipMalloc(&buffer, buffer_size_in_bytes);
-*   rocsparse_spgeam(handle, descr, &alpha, matA, &beta, matB, nullptr, rocsparse_spgeam_stage_analysis, buffer_size_in_bytes, buffer, p_error);
+*   rocsparse_spgeam(handle, descr, matA, matB, nullptr, rocsparse_spgeam_stage_symbolic_analysis, buffer_size_in_bytes, buffer, p_error);
 *   hipFree(buffer);
 *
 *   // Ensure analysis stage is complete before grabbing C non-zero count
@@ -499,14 +506,20 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *   rocsparse_spgeam_buffer_size(handle, descr, matA, matB, matC, rocsparse_spgeam_stage_symbolic_compute, &buffer_size_in_bytes, p_error);
 *
 *   hipMalloc(&buffer, buffer_size_in_bytes);
-*   rocsparse_spgeam(handle, descr, &alpha, matA, &beta, matB, matC, rocsparse_spgeam_stage_symbolic_compute, buffer_size_in_bytes, buffer, p_error);
+*   rocsparse_spgeam(handle, descr, matA, matB, matC, rocsparse_spgeam_stage_symbolic_compute, buffer_size_in_bytes, buffer, p_error);
+*   hipFree(buffer);
+*
+*   rocsparse_spgeam_buffer_size(handle, descr, matA, matB, matC, rocsparse_spgeam_stage_numeric_analysis, &buffer_size_in_bytes, p_error);
+*
+*   hipMalloc(&buffer, buffer_size_in_bytes);
+*   rocsparse_spgeam(handle, descr, matA, matB, matC, rocsparse_spgeam_stage_numeric_analysis, buffer_size_in_bytes, buffer, p_error);
 *   hipFree(buffer);
 *
 *   // First Numeric compute phase
 *   rocsparse_spgeam_buffer_size(handle, descr, matA, matB, matC, rocsparse_spgeam_stage_numeric_compute, &buffer_size_in_bytes, p_error);
 *
 *   hipMalloc(&buffer, buffer_size_in_bytes);
-*   rocsparse_spgeam(handle, descr, &alpha, matA, &beta, matB, matC, rocsparse_spgeam_stage_numeric_compute, buffer_size_in_bytes, buffer, p_error);
+*   rocsparse_spgeam(handle, descr, matA, matB, matC, rocsparse_spgeam_stage_numeric_compute, buffer_size_in_bytes, buffer, p_error);
 *   hipFree(buffer);
 *
 *
@@ -515,7 +528,7 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 *   hcsr_val_B[1] += 0.5;
 *   hipMemcpy(dcsr_val_B, hcsr_val_B.data(), nnz_B * sizeof(float), hipMemcpyHostToDevice);
 *   hipMalloc(&buffer, buffer_size_in_bytes);
-*   rocsparse_spgeam(handle, descr, &alpha, matA, &beta, matB, matC, rocsparse_spgeam_stage_numeric_compute, buffer_size_in_bytes, buffer, p_error);
+*   rocsparse_spgeam(handle, descr, matA, matB, matC, rocsparse_spgeam_stage_numeric_compute, buffer_size_in_bytes, buffer, p_error);
 *   hipFree(buffer);
 *
 *   // Copy C matrix result back to host
@@ -552,9 +565,7 @@ rocsparse_status rocsparse_spgeam_buffer_size(rocsparse_handle            handle
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spgeam(rocsparse_handle            handle,
                                   rocsparse_spgeam_descr      descr,
-                                  const void*                 alpha,
                                   rocsparse_const_spmat_descr mat_A,
-                                  const void*                 beta,
                                   rocsparse_const_spmat_descr mat_B,
                                   rocsparse_spmat_descr       mat_C,
                                   rocsparse_spgeam_stage      stage,

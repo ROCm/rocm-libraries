@@ -744,7 +744,10 @@ namespace rocRoller
 
         std::string describe(ExpressionNode const& node)
         {
-            return toString(node.expr);
+            std::string desc = "nullptr";
+            if(node.reg)
+                desc = node.reg->description();
+            return fmt::format("{} = {}", desc, toString(node.expr));
         }
 
         std::string toDOT(ExpressionTree const& tree)

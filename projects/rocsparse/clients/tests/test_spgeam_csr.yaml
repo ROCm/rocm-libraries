@@ -32,8 +32,8 @@ Definitions:
     - { alpha:   0.0, beta:   1.0, alphai:  0.0, betai: 1.0 }
 
   - &alpha_beta_range_checkin
-    - { alpha: -99.0, beta:   1.5, alphai:  0.0, betai: 0.3 }
-    - { alpha:   2.0, beta: -99.0, alphai:  0.5, betai: 0.3 }
+    - { alpha: 0.0, beta:   1.5, alphai:  0.0, betai: 0.3 }
+    - { alpha:   2.0, beta: 0.0, alphai:  0.5, betai: 0.3 }
     - { alpha:   3.0, beta:   1.7, alphai: -0.5, betai: 0.8 }
 
   - &alpha_beta_range_nightly

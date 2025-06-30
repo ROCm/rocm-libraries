@@ -81,26 +81,23 @@ TEST_P(accuracy_test, vs_fftw)
         // only do round trip for single-GPU FFTs
         bool round_trip = params.multiGPU <= 1;
 
-        if(!params.run_callbacks)
+        try
         {
-            try
-            {
-                fft_vs_reference(params, round_trip);
-            }
-            catch(HOSTBUF_MEM_USAGE& e)
-            {
-                // explicitly clear cache
-                last_cpu_fft_data = last_cpu_fft_cache();
-                GTEST_SKIP() << e.msg;
-            }
-            catch(ROCFFT_SKIP& e)
-            {
-                GTEST_SKIP() << e.msg;
-            }
-            catch(ROCFFT_FAIL& e)
-            {
-                GTEST_FAIL() << e.msg;
-            }
+            fft_vs_reference(params, round_trip);
+        }
+        catch(HOSTBUF_MEM_USAGE& e)
+        {
+            // explicitly clear cache
+            last_cpu_fft_data = last_cpu_fft_cache();
+            GTEST_SKIP() << e.msg;
+        }
+        catch(ROCFFT_SKIP& e)
+        {
+            GTEST_SKIP() << e.msg;
+        }
+        catch(ROCFFT_FAIL& e)
+        {
+            GTEST_FAIL() << e.msg;
         }
         break;
     }
@@ -166,6 +163,37 @@ __device__ auto load_callback_dev_complex_float  = load_callback<rocfft_complex<
 __device__ auto load_callback_dev_double         = load_callback<double>;
 __device__ auto load_callback_dev_complex_double = load_callback<rocfft_complex<double>>;
 
+// load/store callbacks - cbdata in each is actually a scalar double
+// with a number to apply to each element
+template <typename Tdata>
+__host__ __device__ Tdata
+    load_callback_round_trip_inverse(Tdata* input, size_t offset, void* cbdata, void* sharedMem)
+{
+    auto testdata = static_cast<const callback_test_data*>(cbdata);
+    // subtract each element by scalar
+    if(input == testdata->base)
+        return input[offset] - testdata->scalar;
+    // wrong base address passed, return something obviously wrong
+    else
+    {
+        // wrong base address passed, return something obviously wrong
+        return input[0];
+    }
+}
+
+__device__ auto load_callback_round_trip_inverse_dev_half
+    = load_callback_round_trip_inverse<rocfft_fp16>;
+__device__ auto load_callback_round_trip_inverse_dev_complex_half
+    = load_callback_round_trip_inverse<rocfft_complex<rocfft_fp16>>;
+__device__ auto load_callback_round_trip_inverse_dev_float
+    = load_callback_round_trip_inverse<float>;
+__device__ auto load_callback_round_trip_inverse_dev_complex_float
+    = load_callback_round_trip_inverse<rocfft_complex<float>>;
+__device__ auto load_callback_round_trip_inverse_dev_double
+    = load_callback_round_trip_inverse<double>;
+__device__ auto load_callback_round_trip_inverse_dev_complex_double
+    = load_callback_round_trip_inverse<rocfft_complex<double>>;
+
 void* get_load_callback_host(fft_array_type itype,
                              fft_precision  precision,
                              bool           round_trip_inverse = false)
@@ -179,22 +207,55 @@ void* get_load_callback_host(fft_array_type itype,
         switch(precision)
         {
         case fft_precision_half:
-            EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
-                                          HIP_SYMBOL(load_callback_dev_complex_half),
-                                          sizeof(void*)),
-                      hipSuccess);
+            if(round_trip_inverse)
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(
+                              &load_callback_host,
+                              HIP_SYMBOL(load_callback_round_trip_inverse_dev_complex_half),
+                              sizeof(void*)),
+                          hipSuccess);
+            }
+            else
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
+                                              HIP_SYMBOL(load_callback_dev_complex_half),
+                                              sizeof(void*)),
+                          hipSuccess);
+            }
             return load_callback_host;
         case fft_precision_single:
-            EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
-                                          HIP_SYMBOL(load_callback_dev_complex_float),
-                                          sizeof(void*)),
-                      hipSuccess);
+            if(round_trip_inverse)
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(
+                              &load_callback_host,
+                              HIP_SYMBOL(load_callback_round_trip_inverse_dev_complex_float),
+                              sizeof(void*)),
+                          hipSuccess);
+            }
+            else
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
+                                              HIP_SYMBOL(load_callback_dev_complex_float),
+                                              sizeof(void*)),
+                          hipSuccess);
+            }
             return load_callback_host;
         case fft_precision_double:
-            EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
-                                          HIP_SYMBOL(load_callback_dev_complex_double),
-                                          sizeof(void*)),
-                      hipSuccess);
+            if(round_trip_inverse)
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(
+                              &load_callback_host,
+                              HIP_SYMBOL(load_callback_round_trip_inverse_dev_complex_double),
+                              sizeof(void*)),
+                          hipSuccess);
+            }
+            else
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
+                                              HIP_SYMBOL(load_callback_dev_complex_double),
+                                              sizeof(void*)),
+                          hipSuccess);
+            }
             return load_callback_host;
         }
     }
@@ -203,19 +264,55 @@ void* get_load_callback_host(fft_array_type itype,
         switch(precision)
         {
         case fft_precision_half:
-            EXPECT_EQ(hipMemcpyFromSymbol(
-                          &load_callback_host, HIP_SYMBOL(load_callback_dev_half), sizeof(void*)),
-                      hipSuccess);
+            if(round_trip_inverse)
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
+                                              HIP_SYMBOL(load_callback_round_trip_inverse_dev_half),
+                                              sizeof(void*)),
+                          hipSuccess);
+            }
+            else
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
+                                              HIP_SYMBOL(load_callback_dev_half),
+                                              sizeof(void*)),
+                          hipSuccess);
+            }
             return load_callback_host;
         case fft_precision_single:
-            EXPECT_EQ(hipMemcpyFromSymbol(
-                          &load_callback_host, HIP_SYMBOL(load_callback_dev_float), sizeof(void*)),
-                      hipSuccess);
+            if(round_trip_inverse)
+            {
+                EXPECT_EQ(
+                    hipMemcpyFromSymbol(&load_callback_host,
+                                        HIP_SYMBOL(load_callback_round_trip_inverse_dev_float),
+                                        sizeof(void*)),
+                    hipSuccess);
+            }
+            else
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
+                                              HIP_SYMBOL(load_callback_dev_float),
+                                              sizeof(void*)),
+                          hipSuccess);
+            }
             return load_callback_host;
         case fft_precision_double:
-            EXPECT_EQ(hipMemcpyFromSymbol(
-                          &load_callback_host, HIP_SYMBOL(load_callback_dev_double), sizeof(void*)),
-                      hipSuccess);
+
+            if(round_trip_inverse)
+            {
+                EXPECT_EQ(
+                    hipMemcpyFromSymbol(&load_callback_host,
+                                        HIP_SYMBOL(load_callback_round_trip_inverse_dev_double),
+                                        sizeof(void*)),
+                    hipSuccess);
+            }
+            else
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(&load_callback_host,
+                                              HIP_SYMBOL(load_callback_dev_double),
+                                              sizeof(void*)),
+                          hipSuccess);
+            }
             return load_callback_host;
         }
     }
@@ -245,6 +342,31 @@ __device__ auto store_callback_dev_complex_float  = store_callback<rocfft_comple
 __device__ auto store_callback_dev_double         = store_callback<double>;
 __device__ auto store_callback_dev_complex_double = store_callback<rocfft_complex<double>>;
 
+template <typename Tdata>
+__host__ __device__ static void store_callback_round_trip_inverse(
+    Tdata* output, size_t offset, Tdata element, void* cbdata, void* sharedMem)
+{
+    auto testdata = static_cast<callback_test_data*>(cbdata);
+    // divide each element by scalar
+    if(output == testdata->base)
+    {
+        output[offset] = element / testdata->scalar;
+    }
+    // otherwise, wrong base address passed, just don't write
+}
+__device__ auto store_callback_round_trip_inverse_dev_half
+    = store_callback_round_trip_inverse<rocfft_fp16>;
+__device__ auto store_callback_round_trip_inverse_dev_complex_half
+    = store_callback_round_trip_inverse<rocfft_complex<rocfft_fp16>>;
+__device__ auto store_callback_round_trip_inverse_dev_float
+    = store_callback_round_trip_inverse<float>;
+__device__ auto store_callback_round_trip_inverse_dev_complex_float
+    = store_callback_round_trip_inverse<rocfft_complex<float>>;
+__device__ auto store_callback_round_trip_inverse_dev_double
+    = store_callback_round_trip_inverse<double>;
+__device__ auto store_callback_round_trip_inverse_dev_complex_double
+    = store_callback_round_trip_inverse<rocfft_complex<double>>;
+
 void* get_store_callback_host(fft_array_type otype,
                               fft_precision  precision,
                               bool           round_trip_inverse = false)
@@ -258,22 +380,55 @@ void* get_store_callback_host(fft_array_type otype,
         switch(precision)
         {
         case fft_precision_half:
-            EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
-                                          HIP_SYMBOL(store_callback_dev_complex_half),
-                                          sizeof(void*)),
-                      hipSuccess);
+            if(round_trip_inverse)
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(
+                              &store_callback_host,
+                              HIP_SYMBOL(store_callback_round_trip_inverse_dev_complex_half),
+                              sizeof(void*)),
+                          hipSuccess);
+            }
+            else
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
+                                              HIP_SYMBOL(store_callback_dev_complex_half),
+                                              sizeof(void*)),
+                          hipSuccess);
+            }
             return store_callback_host;
         case fft_precision_single:
-            EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
-                                          HIP_SYMBOL(store_callback_dev_complex_float),
-                                          sizeof(void*)),
-                      hipSuccess);
+            if(round_trip_inverse)
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(
+                              &store_callback_host,
+                              HIP_SYMBOL(store_callback_round_trip_inverse_dev_complex_float),
+                              sizeof(void*)),
+                          hipSuccess);
+            }
+            else
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
+                                              HIP_SYMBOL(store_callback_dev_complex_float),
+                                              sizeof(void*)),
+                          hipSuccess);
+            }
             return store_callback_host;
         case fft_precision_double:
-            EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
-                                          HIP_SYMBOL(store_callback_dev_complex_double),
-                                          sizeof(void*)),
-                      hipSuccess);
+            if(round_trip_inverse)
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(
+                              &store_callback_host,
+                              HIP_SYMBOL(store_callback_round_trip_inverse_dev_complex_double),
+                              sizeof(void*)),
+                          hipSuccess);
+            }
+            else
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
+                                              HIP_SYMBOL(store_callback_dev_complex_double),
+                                              sizeof(void*)),
+                          hipSuccess);
+            }
             return store_callback_host;
         }
     }
@@ -282,21 +437,55 @@ void* get_store_callback_host(fft_array_type otype,
         switch(precision)
         {
         case fft_precision_half:
-            EXPECT_EQ(hipMemcpyFromSymbol(
-                          &store_callback_host, HIP_SYMBOL(store_callback_dev_half), sizeof(void*)),
-                      hipSuccess);
+            if(round_trip_inverse)
+            {
+                EXPECT_EQ(
+                    hipMemcpyFromSymbol(&store_callback_host,
+                                        HIP_SYMBOL(store_callback_round_trip_inverse_dev_half),
+                                        sizeof(void*)),
+                    hipSuccess);
+            }
+            else
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
+                                              HIP_SYMBOL(store_callback_dev_half),
+                                              sizeof(void*)),
+                          hipSuccess);
+            }
             return store_callback_host;
         case fft_precision_single:
-            EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
-                                          HIP_SYMBOL(store_callback_dev_float),
-                                          sizeof(void*)),
-                      hipSuccess);
+            if(round_trip_inverse)
+            {
+                EXPECT_EQ(
+                    hipMemcpyFromSymbol(&store_callback_host,
+                                        HIP_SYMBOL(store_callback_round_trip_inverse_dev_float),
+                                        sizeof(void*)),
+                    hipSuccess);
+            }
+            else
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
+                                              HIP_SYMBOL(store_callback_dev_float),
+                                              sizeof(void*)),
+                          hipSuccess);
+            }
             return store_callback_host;
         case fft_precision_double:
-            EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
-                                          HIP_SYMBOL(store_callback_dev_double),
-                                          sizeof(void*)),
-                      hipSuccess);
+            if(round_trip_inverse)
+            {
+                EXPECT_EQ(
+                    hipMemcpyFromSymbol(&store_callback_host,
+                                        HIP_SYMBOL(store_callback_round_trip_inverse_dev_double),
+                                        sizeof(void*)),
+                    hipSuccess);
+            }
+            else
+            {
+                EXPECT_EQ(hipMemcpyFromSymbol(&store_callback_host,
+                                              HIP_SYMBOL(store_callback_dev_double),
+                                              sizeof(void*)),
+                          hipSuccess);
+            }
             return store_callback_host;
         }
     }

@@ -498,6 +498,36 @@ def tensile_sgemm_guidepost():
     )
 
 
+def streamk_sweep():
+    for twoTile in {True, False}:
+        for base in [HGEMM_7680x8448x8448]:
+            # Currently these run out of LDS everywhere except gfx950.
+            # + [SGEMM_3072x4096x4096]
+            for mac_m in [64, 128]:
+                for mac_n in [64, 128, 256]:
+                    for mac_k in [16, 32, 64]:
+                        if twoTile and mac_m * mac_n * mac_k >= (64 * 256 * 64):
+                            # currently these run out of VGPRs.
+                            pass
+                        else:
+                            yield mkGEMM(
+                                base,
+                                mac_m=mac_m,
+                                mac_n=mac_n,
+                                mac_k=mac_k,
+                                workgroup_size_x=128,
+                                workgroup_size_y=2,
+                                trans_A="N",
+                                trans_B="T",
+                                visualize=False,
+                                prefetch=False,  # TODO: Fix k loop unrolling with stream k
+                                # prefetchInFlight=2,
+                                # prefetchLDSFactor=2,
+                                streamK=True,
+                                streamKTwoTile=twoTile,
+                            )
+
+
 def streamk():
     for twoTile in {True, False}:
         # SGEMM
@@ -597,8 +627,8 @@ def tensile_benchmarks():
 
 def codegen():
     yield CodeGenRun(instCount=40000, instructions="comments")
-    yield CodeGenRun(instCount=40000, instructions="simple_mfma")
-    yield CodeGenRun(instCount=40000, instructions="complex_mfma_with_coop")
+    yield CodeGenRun(instCount=40000, instructions="simple_mi")
+    yield CodeGenRun(instCount=40000, instructions="complex_mi_with_coop")
 
 
 def f16gemm_16x16x32_params(transA, transB):
@@ -1420,6 +1450,22 @@ def fp4_target_d2lds_mi32x32x64_pf2x1():
     )
 
 
+def add_wgm(mapping, suite):
+    for run in suite:
+        run.workgroupMapping = mapping
+        yield run
+
+
+def fp4_target_d2lds_mi32x32x64_pf2x1_wgm():
+    yield from add_wgm((0, 2), fp4_target_d2lds_mi32x32x64_pf2x1())
+
+
+def fp4_target_d2lds_mi32x32x64_pf4x1_sweep_wgms():
+    for wgm_dim in [0, 1]:
+        for wgm_value in range(1, 50):
+            yield from add_wgm((wgm_dim, wgm_value), fp4_target_d2lds_mi32x32x64_pf2x1())
+
+
 def fp4_target_d2lds_mi32x32x64_pf4x1():
     yield GEMMRun(
         M=4096,
@@ -1467,6 +1513,15 @@ def fp4_target_d2lds_mi32x32x64_pf4x1():
         numWarmUp=1000,
         numInner=1000,
     )
+
+
+def fp4_target_d2lds_mi32x32x64_pf4x1_wgm():
+    yield from add_wgm((0, 2), fp4_target_d2lds_mi32x32x64_pf4x1())
+
+
+def fp4_target_d2lds_mi32x32x64_pf4x1_both():
+    yield from fp4_target_d2lds_mi32x32x64_pf4x1()
+    yield from fp4_target_d2lds_mi32x32x64_pf4x1_wgm()
 
 
 def fp4_target_d2lds_mi16x16x128_pf4x1():
@@ -1518,6 +1573,15 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
     )
 
 
+def fp4_target_d2lds_mi16x16x128_pf4x1_wgm():
+    yield from add_wgm((0, 2), fp4_target_d2lds_mi16x16x128_pf4x1())
+
+
+def fp4_target_d2lds_mi16x16x128_pf4x1_both():
+    yield from fp4_target_d2lds_mi16x16x128_pf4x1()
+    yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
+
+
 def fp4_no_scale_target_d2lds_mi16x16x128_pf4x1():
     yield GEMMRun(
         M=4096,
@@ -1562,7 +1626,11 @@ def fp4_no_scale_target_d2lds_mi16x16x128_pf4x1():
     )
 
 
-def fp4_kernels():
+def fp4_no_scale_target_d2lds_mi16x16x128_pf4x1_wgm():
+    yield from add_wgm((0, 2), fp4_target_d2lds_mi16x16x128_pf4x1())
+
+
+def fp4_kernels_no_wgm():
     yield from fp4_target()
     yield from fp4_target_d2lds_mi32x32x64_pf2x1()
     yield from fp4_target_d2lds_mi32x32x64_pf4x1()
@@ -1570,10 +1638,16 @@ def fp4_kernels():
     yield from fp4_no_scale_target_d2lds_mi16x16x128_pf4x1()
 
 
-def add_wgm(mapping, suite):
-    for run in suite:
-        run.workgroupMapping = mapping
-        yield run
+def fp4_kernels_wgm():
+    yield from fp4_target_d2lds_mi32x32x64_pf2x1_wgm()
+    yield from fp4_target_d2lds_mi32x32x64_pf4x1_wgm()
+    yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
+    yield from fp4_no_scale_target_d2lds_mi16x16x128_pf4x1_wgm()
+
+
+def fp4_kernels():
+    yield from fp4_kernels_no_wgm()
+    # yield from fp4_kernels_wgm()
 
 
 def fp4_target_sweep_wgms():
@@ -1591,12 +1665,14 @@ def all():
     yield from hgemm()
     yield from hgemm_no_store_LDS()
     yield from streamk()
+    yield from streamk_sweep()
     yield from scalar_is_zero()
     yield from codegen()
 
 
 def all_gfx120X():
     yield from hgemm_gfx120X()
+    yield from codegen()
 
 
 def hgemm_guideposts():

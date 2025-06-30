@@ -39,6 +39,7 @@
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups.hpp>
 #include <rocRoller/KernelGraph/Transforms/ConnectWorkgroups_detail.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
 #include "CustomMatchers.hpp"
@@ -285,6 +286,8 @@ namespace ConnectWorkgroupsTest
                 info, graph, rocRoller::Graph::Direction::Downstream, m_dim, m_wgm);
 
             m_graph = std::make_shared<KernelGraph>(graph);
+
+            kernel->setKernelGraphMeta(m_graph);
         }
 
         rocRoller::KernelGraph::KernelGraphPtr m_graph;
@@ -308,7 +311,7 @@ namespace ConnectWorkgroupsTest
             //
             // The remapped dimension is baked into the kernel
 
-            auto context = TestContext::ForTestDevice();
+            auto context = TestContext::ForTestDevice({{.enableFullDivision = true}}, remapDim);
             auto kernel  = RemapWorkgroupKernel(context.get(), remapDim);
 
             auto numTilesM = GENERATE(22, 55);

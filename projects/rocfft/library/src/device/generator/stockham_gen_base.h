@@ -70,8 +70,9 @@ struct StockhamKernel : public StockhamGeneratorSpecs
             workgroup_size = threads_per_transform * transforms_per_block;
         }
 
-        nregisters = compute_nregisters(length, factors, threads_per_transform);
-        R.size     = Expression{nregisters};
+        nregisters                = compute_nregisters(length, factors, threads_per_transform);
+        R.size                    = Expression{nregisters};
+        lds_reg_sync.decl_default = Literal{"true"};
     }
     virtual ~StockhamKernel(){};
 
@@ -210,6 +211,9 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     // butterfly registers
     Variable R{"R", "scalar_type", false, false};
 
+    // do syncthreads in lds_reg device functions
+    Variable lds_reg_sync{"lds_reg_sync", "bool"};
+
     virtual unsigned int launcher_workgroup_size()
     {
         return workgroup_size;
@@ -234,6 +238,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         TemplateList tpls;
         tpls.append(scalar_type);
         tpls.append(stride_type);
+        tpls.append(lds_reg_sync);
         return tpls;
     }
 
@@ -584,7 +589,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         // first pass of load (full)
         unsigned int width  = factors[0];
         float        height = static_cast<float>(length) / width / threads_per_transform;
-        body += SyncThreads();
+        body += If{lds_reg_sync, {SyncThreads()}};
         body += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5, Component::BOTH),
                          width,
                          height,
@@ -614,7 +619,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         unsigned int width     = factors.back();
         float        height    = static_cast<float>(length) / width / threads_per_transform;
         unsigned int cumheight = product(factors.begin(), factors.end() - 1);
-        body += SyncThreads();
+        body += If{lds_reg_sync, {SyncThreads()}};
         body += add_work(std::bind(store_lds, this, _1, _2, _3, _4, _5, Component::BOTH, cumheight),
                          width,
                          height,
@@ -909,9 +914,10 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
     virtual StatementList store_to_global(bool store_registers) = 0;
 
-    virtual TemplateList device_lds_reg_inout_device_call_templates()
+    virtual TemplateList device_lds_reg_inout_device_call_templates(bool syncthreads = true)
     {
-        return {scalar_type, stride_type};
+        Variable sync_var{syncthreads ? "true" : "false", "bool"};
+        return {scalar_type, stride_type, sync_var};
     }
 
     virtual std::vector<Expression> device_lds_reg_inout_device_call_arguments()

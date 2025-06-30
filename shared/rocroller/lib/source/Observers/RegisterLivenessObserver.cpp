@@ -27,9 +27,12 @@
 #include <algorithm>
 #include <sstream>
 
+#include <rocRoller/Scheduling/Observers/RegisterLivenessObserver.hpp>
+
 #include <rocRoller/CodeGen/Instruction.hpp>
 #include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
-#include <rocRoller/Scheduling/Observers/RegisterLivenessObserver.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 
 namespace rocRoller
 {
@@ -124,7 +127,7 @@ namespace rocRoller
                 }
             }
 
-            entry.instruction = inst.toString(context->kernelOptions().logLevel);
+            entry.instruction = inst.toString(context->kernelOptions()->logLevel);
             m_lineCount += std::count(entry.instruction.begin(), entry.instruction.end(), '\n');
             std::replace(entry.instruction.begin(), entry.instruction.end(), '\n', ';');
             entry.isBranch = info.isBranch();

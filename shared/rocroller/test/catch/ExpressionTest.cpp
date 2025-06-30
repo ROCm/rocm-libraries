@@ -2338,4 +2338,71 @@ namespace ExpressionTest
         CHECK(Expression::complexity(intExpr / intExpr)
               > Expression::complexity(intExpr + intExpr));
     }
+
+    TEST_CASE("Expression kernel arguments", "[expression][utility]")
+    {
+        namespace XP  = Expression;
+        using strings = std::unordered_set<std::string>;
+
+        auto karg0 = std::make_shared<AssemblyKernelArgument>("KernelArg0", DataType::Int32);
+        auto karg1 = std::make_shared<AssemblyKernelArgument>("KernelArg1", DataType::Int32);
+        auto karg2 = std::make_shared<AssemblyKernelArgument>("KernelArg2", DataType::Int32);
+
+        auto kargExp0 = std::make_shared<XP::Expression>(karg0);
+        auto kargExp1 = std::make_shared<XP::Expression>(karg1);
+        auto kargExp2 = std::make_shared<XP::Expression>(karg2);
+
+        CHECK(referencedKernelArguments(kargExp0) == strings({"KernelArg0"}));
+
+        CHECK(referencedKernelArguments((kargExp0 + kargExp0) + XP::literal(5))
+              == strings({"KernelArg0"}));
+
+        CHECK(referencedKernelArguments((kargExp0 + kargExp1) + XP::literal(5))
+              == strings({"KernelArg0", "KernelArg1"}));
+
+        CHECK(referencedKernelArguments(
+                  Expression::conditional(kargExp0, kargExp1, (kargExp2 + XP::literal(5))))
+              == strings({"KernelArg0", "KernelArg1", "KernelArg2"}));
+
+        SECTION("a")
+        {
+            auto scaledMM = std::make_shared<XP::Expression>(Expression::ScaledMatrixMultiply{
+                kargExp0, XP::literal(3), XP::literal(2), XP::literal(3), XP::literal(9)});
+
+            CHECK(referencedKernelArguments(scaledMM) == strings({"KernelArg0"}));
+        }
+
+        SECTION("b")
+        {
+            auto scaledMM = std::make_shared<XP::Expression>(Expression::ScaledMatrixMultiply{
+                XP::literal(1), kargExp1, XP::literal(3), XP::literal(2), XP::literal(3)});
+
+            CHECK(referencedKernelArguments(scaledMM) == strings({"KernelArg1"}));
+        }
+
+        SECTION("c")
+        {
+            auto scaledMM = std::make_shared<XP::Expression>(Expression::ScaledMatrixMultiply{
+                XP::literal(3), XP::literal(1), kargExp2, XP::literal(2), XP::literal(3)});
+
+            CHECK(referencedKernelArguments(scaledMM) == strings({"KernelArg2"}));
+        }
+
+        SECTION("sa")
+        {
+            auto scaledMM = std::make_shared<XP::Expression>(Expression::ScaledMatrixMultiply{
+                XP::literal(2), XP::literal(3), XP::literal(1), kargExp0, XP::literal(3)});
+
+            CHECK(referencedKernelArguments(scaledMM) == strings({"KernelArg0"}));
+        }
+
+        SECTION("sb")
+        {
+            auto scaledMM = std::make_shared<XP::Expression>(Expression::ScaledMatrixMultiply{
+                XP::literal(3), XP::literal(2), XP::literal(3), XP::literal(1), kargExp1});
+
+            CHECK(referencedKernelArguments(scaledMM) == strings({"KernelArg1"}));
+        }
+    }
+
 }

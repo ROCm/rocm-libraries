@@ -26,6 +26,7 @@
 
 #include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_runtime.h>
@@ -103,5 +104,28 @@ namespace rocRoller
     {
         int idx;
         return hipGetDevice(&idx) == hipSuccess;
+    }
+
+    std::map<GPUArchitectureTarget, GPUArchitecture> GPUArchitectureLibrary::LoadLibrary()
+    {
+        TIMER(t, "GPUArchitectureLibrary::LoadLibrary");
+
+        auto envPath
+            = std::filesystem::path(Settings::getInstance()->get(Settings::ArchitectureFile));
+
+        if(!envPath.empty() && std::filesystem::exists(envPath))
+        {
+            if(envPath.extension() == ".yaml" || envPath.extension() == ".yml")
+            {
+                return GPUArchitecture::readYaml(envPath);
+            }
+            else if(envPath.extension() == ".msgpack")
+            {
+                return GPUArchitecture::readMsgpack(envPath);
+            }
+            // ignore otherwise
+        }
+
+        return GPUArchitecture::readEmbeddedMsgpack();
     }
 }
