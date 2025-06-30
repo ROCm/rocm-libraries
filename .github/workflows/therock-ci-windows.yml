@@ -81,6 +81,7 @@ jobs:
 
       - name: Fetch sources
         run: |
+          git config --global core.longpaths true
           python ./TheRock/build_tools/fetch_sources.py --jobs 96 --no-include-math-libs
 
       - name: Checkout closed source AMDGPU/ROCm interop library folder
