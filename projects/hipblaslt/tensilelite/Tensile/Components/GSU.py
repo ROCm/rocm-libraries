@@ -762,7 +762,7 @@ class GSUOn(GSU):
         addr0 = vgpr(vgproffset)
         bps = kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw
 
-        if not kernel["MbskPrefetchOpt"]:
+        if not kernel["MbskPrefetchMethod"]:
             for elementIdx in range(0, len(batchElements)):
                 mask     = ss.elementMask[elementIdx]
                 addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
@@ -1936,7 +1936,7 @@ class GSUOn(GSU):
         storeWidth = kernel["StoreVectorWidth"]
         increment = kernel["NumThreads"] * storeWidth * writer.states.bpeCinternal
 
-        if not kernel["MbskPrefetchOpt"]:
+        if not kernel["MbskPrefetchMethod"]:
             for elementIdx in range(0, len(batchElements)):
                 mask     = ss.elementMask[elementIdx]
                 addrCalc: AddrCalculation = ss.elementAddr[elementIdx]

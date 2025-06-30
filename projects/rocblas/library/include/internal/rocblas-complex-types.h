@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2019-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -513,13 +513,13 @@ using rocblas_double_complex = rocblas_complex_num<double>;
 
 /*! \brief rocblas_is_complex<T> returns true iff T is complex */
 template <typename T>
-static constexpr bool rocblas_is_complex = false;
+inline constexpr bool rocblas_is_complex = false;
 
 template <>
-ROCBLAS_CLANG_STATIC constexpr bool rocblas_is_complex<rocblas_float_complex> = true;
+inline constexpr bool rocblas_is_complex<rocblas_float_complex> = true;
 
 template <>
-ROCBLAS_CLANG_STATIC constexpr bool rocblas_is_complex<rocblas_double_complex> = true;
+inline constexpr bool rocblas_is_complex<rocblas_double_complex> = true;
 
 //!
 //! @brief Struct to define pair of value and index.
