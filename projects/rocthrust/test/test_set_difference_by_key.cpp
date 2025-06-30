@@ -301,7 +301,7 @@ TYPED_TEST(SetDifferenceByKeyPrimitiveTests, TestSetDifferenceByKeyMultiset)
       SCOPED_TRACE(testing::Message() << "with seed= " << seed);
 
       thrust::host_vector<T> vec =
-        get_random_data<T>(2 * size, get_default_limits<T>::min(), get_default_limits<T>::max(), seed);
+        get_random_data<int>(2 * size, get_default_limits<int>::min(), get_default_limits<int>::max(), seed);
 
       // restrict elements to [min,13)
       for (typename thrust::host_vector<T>::iterator i = vec.begin(); i != vec.end(); ++i)
