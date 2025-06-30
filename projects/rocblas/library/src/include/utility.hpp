@@ -789,6 +789,9 @@ constexpr double rocblas_internal_value_category(const T& beta)
     return beta == T(0) ? 0.0 : beta == T(1) ? 1.0 : beta == T(-1) ? -1.0 : 2.0;
 }
 
+// Internal use
+int rocblas_internal_get_arch(rocblas_handle handle);
+
 // Internal use, whether Tensile supports ldc != ldd
 // We assume true if the value is greater than or equal to 906
 bool rocblas_internal_tensile_supports_ldc_ne_ldd(rocblas_handle handle);
