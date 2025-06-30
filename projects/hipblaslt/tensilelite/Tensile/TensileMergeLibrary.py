@@ -88,13 +88,13 @@ def sanitizeSolutions(solList):
             sol["StaggerUStride"] = 0
             sol["_staggerStrideShift"] = 0
 
-def reNameSolutions(solList):
+def reNameSolutions(data):
+    solList = data[5]
     for sol in solList:
-        sol["ProblemType"] = ProblemType(sol["ProblemType"], False)
-        problemTypeToEnum(sol["ProblemType"])
-        sol["ProblemType"] = sol["ProblemType"].state
+        sol["ProblemType"] = data[4]
         sol["SolutionNameMin"] = getSolutionNameMin(sol,splitGSU=False)
         sol["KernelNameMin"] = getKernelNameMin(sol,splitGSU=False)
+        del sol["ProblemType"]
 
 def removeUnusedSolutions(oriData, prefix=""):
     origNumSolutions = len(oriData[5])
@@ -176,20 +176,18 @@ def compareProblemType(oriData, incData):
     oriData[4] = oriData[4].state
     oriProblemType = oriData[4]
 
+    incData[4] = ProblemType(incData[4],False)
+    problemTypeToEnum(incData[4])
+    incData[4] = incData[4].state
+    incProblemType = incData[4]
+
     results = ""
-    solIdx = 0
-    # Compare existing ProblemType items of originalFiles with incrementalFiles
-    for i, _ in enumerate(incData[5]):
-        # TODO: check header ProblemType if kernel ProblemType is removed in the future
-        incKernelProblemType = incData[5][i]["ProblemType"]
-        if oriProblemType !=  incKernelProblemType:
-            for item in oriProblemType:
-                if oriProblemType[item] != incKernelProblemType[item]:
-                    results += f"\t{item}: {oriProblemType[item]} != {incKernelProblemType[item]}\n"
-            solIdx = i
-            break
+    if oriProblemType != incProblemType:
+        for item in oriProblemType:
+            if oriProblemType[item] != incProblemType[item]:
+                results += f"\t{item}: {oriProblemType[item]} != {incProblemType[item]}\n"
     if (results):
-        sys.exit(f"[Error] ProblemType in library logic doesn't match solution(idx={solIdx}): \n{results}")
+        sys.exit(f"[Error] ProblemType in library logic doesn't match: \n{results}")
 
 def msg(*args, **kwargs):
     for i in args: print(i, end=" ")
@@ -316,17 +314,17 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
         # For example, merge Gridbased yaml to Equality folder or Equality yaml to GridBased folder
         compareDestFolderToYaml(originalDir, incFile, incData)
 
-        sanitizeSolutions(oriData[5])
-        sanitizeSolutions(incData[5])
-
-        # So far "SolutionIndex" in logic yamls has zero impact on actual 1-1 size mapping (but the order of the Solution does)
-        # since mergeLogic() takes that value very seriously so we reindex them here so it doesn't choke on duplicated SolutionIndex
-        reNameSolutions(oriData[5])
-        reNameSolutions(incData[5])
-
         # Terminate when ProblemType of originalFiles and incrementalFiles mismatch
         compareProblemType(oriData, incData)
 
+        sanitizeSolutions(oriData[5])
+        sanitizeSolutions(incData[5])
+
+        reNameSolutions(oriData)
+        reNameSolutions(incData)
+
+        # So far "SolutionIndex" in logic yamls has zero impact on actual 1-1 size mapping (but the order of the Solution does)
+        # since mergeLogic() takes that value very seriously so we reindex them here so it doesn't choke on duplicated SolutionIndex
         oriData, numRemoved, numSolutions, numKernels = removeDuplicatedSolutions(oriData)
         msg("Base logic file:", numRemoved, "duplicated solution(s) removed,",\
             "sizes: %d, solutions: %d, kernels: %d"%(len(oriData[7]),numSolutions,numKernels))
