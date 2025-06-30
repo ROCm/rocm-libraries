@@ -11625,7 +11625,7 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   def getMBSKGSUTotal(self, kernel):
-    if kernel["MbskPrefetchOpt"]:
+    if kernel["MbskPrefetchMethod"]:
       return kernel["NumMbskPrefetchElements"] + 1
     GSUtotal = 16
     if (kernel["MIWaveTile"][0] * kernel["MIWaveTile"][1]) * (kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]) > 8:
