@@ -458,18 +458,18 @@ template<unsigned int BlockSize,
          class Counter,
          class SampleToBinOp>
 ROCPRIM_DEVICE ROCPRIM_INLINE
-void histogram_global(SampleIterator                                   samples,
-                      unsigned int                                     columns,
-                      unsigned int                                     rows,
-                      unsigned int                                     row_stride,
-                      fixed_array<Counter*, ActiveChannels>            histogram,
+void histogram_global(SampleIterator                             samples,
+                      unsigned int                               columns,
+                      unsigned int                               rows,
+                      unsigned int                               row_stride,
+                      fixed_array<Counter*, ActiveChannels>      histogram,
                       const fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
                       const fixed_array<unsigned int, ActiveChannels>  bins_bits,
                       const fixed_array<unsigned int, ActiveChannels>  bins,
-                      unsigned int*                                    private_histograms,
-                      unsigned int                                     max_blocks,
-                      unsigned int                                     virtual_max_blocks,
-                      unsigned int*                                    block_id_count)
+                      unsigned int*                              private_histograms,
+                      const unsigned int                         max_blocks,
+                      const unsigned int                         virtual_max_blocks,
+                      unsigned int*                              block_id_count)
 {
     using sample_type        = typename std::iterator_traits<SampleIterator>::value_type;
     using sample_vector_type = sample_vector<sample_type, Channels>;
@@ -497,23 +497,10 @@ void histogram_global(SampleIterator                                   samples,
         block_histogram[channel] += flat_block_id * total_bins;
     }
 
-    unsigned int virtual_block_id = 0;
+    unsigned int virtual_block_id = flat_block_id;
+
     while(virtual_block_id < virtual_max_blocks)
     {
-        if(flat_id == 0)
-        {
-            block_id_count_shared = ::rocprim::detail::atomic_add(block_id_count, 1u);
-        }
-
-        ::rocprim::syncthreads();
-
-        virtual_block_id = block_id_count_shared;
-
-        if (virtual_block_id >= virtual_max_blocks)
-        {
-            break;
-        }
-
         const unsigned int row_id       = virtual_block_id % rows;
         const unsigned int col_id       = virtual_block_id / rows;
         const unsigned int block_offset = col_id * items_per_block;
@@ -556,9 +543,18 @@ void histogram_global(SampleIterator                                   samples,
                 }
             }
         }
-    }
 
-    ::rocprim::syncthreads();
+        if(flat_id == 0)
+        {
+            block_id_count_shared = ::rocprim::detail::atomic_add(block_id_count, 1u);
+        }
+
+        ::rocprim::syncthreads();
+
+        virtual_block_id = block_id_count_shared;
+
+        ::rocprim::syncthreads();
+    }
 
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {

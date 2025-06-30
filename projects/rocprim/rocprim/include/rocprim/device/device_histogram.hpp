@@ -243,6 +243,9 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         // that is why a memset is directly done on temporary_storage.
         ROCPRIM_RETURN_ON_ERROR(
             hipMemsetAsync(temporary_storage, 0, storage_size * sizeof(char), stream));
+
+        ROCPRIM_RETURN_ON_ERROR(
+            hipMemcpyAsync(block_id_count, &global_histogram_grid_size, sizeof(unsigned int), hipMemcpyHostToDevice, stream));
     }
 
     if(debug_synchronous)
