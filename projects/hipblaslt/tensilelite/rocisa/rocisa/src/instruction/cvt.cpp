@@ -77,6 +77,19 @@ void cvt_inst(nb::module_ m_inst)
             return new rocisa::VCvtF32toF16(self);
         });
 
+    nb::class_<rocisa::VCvtPkF32toF16, rocisa::VCvtInstruction>(m_inst, "VCvtPkF32toF16")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::VCvtPkF32toF16& self, const nb::dict&) {
+            return new rocisa::VCvtPkF32toF16(self);
+        });
+
     nb::class_<rocisa::VCvtF32toU32, rocisa::VCvtInstruction>(m_inst, "VCvtF32toU32")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const InstructionInput&,

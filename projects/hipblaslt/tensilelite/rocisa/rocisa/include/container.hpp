@@ -517,8 +517,10 @@ namespace rocisa
             , high_bit(high_bit)
         {
         }
+
         True16Modifiers(const int high_bit = -1)
-            : True16Modifiers(static_cast<HighBitSel>(high_bit))
+            : Container()
+            , high_bit(static_cast<HighBitSel>(high_bit))
         {
         }
 

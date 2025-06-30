@@ -10094,7 +10094,7 @@ class KernelWriterAssembly(KernelWriter):
   # Local Write: Do It A/B
   ##############################################################################
   def localWriteDo(self, kernel, tP, swapAB=0):
-
+    ti = rocIsa.getInstance()
     tc = tP["tensorChar"]
     imod = Module()
     isBpeInputLarger = True if tP["bpeGR"] > tP["bpe"] else False
