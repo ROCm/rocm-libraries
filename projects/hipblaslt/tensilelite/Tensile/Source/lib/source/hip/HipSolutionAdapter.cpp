@@ -298,6 +298,8 @@ namespace TensileLite
 
                     if(err == hipSuccess)
                         return err;
+                    else if(err == hipErrorFileNotFound)
+                        (void)hipGetLastError(); // clear hipErrorFileNotFound
                 }
 
                 return err;

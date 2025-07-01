@@ -2657,11 +2657,11 @@ class Solution(collections.abc.Mapping):
 
     # Mbsk prefetch optimization
     if state["_GlobalAccumulation"] != 'MultipleBufferSingleKernel':
-        state["MbskPrefetchOpt"] = 0
-    elif state["MbskPrefetchOpt"] == -1:
+        state["MbskPrefetchMethod"] = 0
+    elif state["MbskPrefetchMethod"] == -1:
       numStoreElements = state["NumElementsPerThread"] // state["StoreVectorWidth"]
-      state["MbskPrefetchOpt"] = 1 if numStoreElements >= 4 else 0
-    if state["MbskPrefetchOpt"] == 1:
+      state["MbskPrefetchMethod"] = 1 if numStoreElements >= 4 else 0
+    if state["MbskPrefetchMethod"] == 1:
       state["NumMbskPrefetchElements"] = 16
       storeRegs = state["StoreVectorWidth"] * state["ProblemType"]["ComputeDataType"].numRegisters()
       # exceed 16*4 = 64 VPGRs
