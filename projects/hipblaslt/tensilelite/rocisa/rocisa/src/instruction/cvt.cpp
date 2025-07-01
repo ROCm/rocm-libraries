@@ -53,10 +53,12 @@ void cvt_inst(nb::module_ m_inst)
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const InstructionInput&,
                       const std::optional<rocisa::SDWAModifiers>&,
+                      const std::vector<int>&,
                       const std::string&>(),
              nb::arg("dst"),
              nb::arg("src"),
              nb::arg("sdwa")    = std::nullopt,
+             nb::arg("true16")  = std::vector<int>({}),
              nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::VCvtF16toF32& self, const nb::dict&) {
             return new rocisa::VCvtF16toF32(self);

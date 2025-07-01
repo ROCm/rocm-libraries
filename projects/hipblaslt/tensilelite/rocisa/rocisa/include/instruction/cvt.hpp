@@ -119,8 +119,9 @@ namespace rocisa
         VCvtF16toF32(const std::shared_ptr<RegisterContainer>& dst,
                      const InstructionInput&                   src,
                      const std::optional<SDWAModifiers>&       sdwa    = std::nullopt,
+                     const std::vector<int>&                   true16  = {},
                      const std::string&                        comment = "")
-            : VCvtInstruction(CvtType::CVT_F16_to_F32, dst, {src}, sdwa, std::nullopt, std::vector<int>({}), comment)
+            : VCvtInstruction(CvtType::CVT_F16_to_F32, dst, {src}, sdwa, std::nullopt, true16, comment)
         {
             setInst("v_cvt_f32_f16");
         }
