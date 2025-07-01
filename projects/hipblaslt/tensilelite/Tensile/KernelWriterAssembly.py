@@ -14536,7 +14536,7 @@ class KernelWriterAssembly(KernelWriter):
                             addr0, addr1, offset=globalOffset, comment="global store bias"))
         tmpVgprN += tmpVgprNStep
         globalOffset += biasBpe
-    module.add(SMovB64(dst=EXEC(), src=-1, comment="Reset exec mask"))
+    module.add(SMovBX(dst=EXEC(), src=-1, comment="Reset exec mask"))
     return module
 
   ########################################
