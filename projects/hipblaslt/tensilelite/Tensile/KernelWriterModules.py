@@ -108,37 +108,30 @@ def wait(states, kernel, tPA, tPB, skipGlobalRead, skipLocalWrite, \
        (conservativeWaitCnt & 0x4) and skipLocalWrite != -1 or \
        (conservativeWaitCnt & 0x8) and skipLocalRead  != -1:
         imod = Module("ConservativeWaitCnt")
-        imod.add(SWaitCnt(lgkmcnt=0, vmcnt=0, vscnt=0, comment="debug %s"%comment))
+        imod.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=0, comment="debug %s"%comment))
         imod.add(SBarrier(comment="debug"))
         return imod
 
-    maxLgkmcnt = states.asmCaps["MaxLgkmcnt"]
-    lgkmcnt = min(lgkmcnt, maxLgkmcnt)
     if lgkmcnt >= 0 and vmcnt >= 0:
         vmcnt = -1 # preserve prior behavior of removing vmcnt here?
-    maxVmcnt = states.asmCaps["MaxVmcnt"]
-    vmcnt = min(vmcnt, maxVmcnt)
-    # This line is added for backward compatibility
-    vscnt = vmcnt if lgkmcnt != -1 and vmcnt != -1 and states.archCaps["SeparateVscnt"] else -1
 
-    waitcnt = SWaitCnt(lgkmcnt,vmcnt, vscnt, comment=comment)
+    waitcnt = SWaitCnt(dscnt=lgkmcnt, vlcnt=vmcnt, comment=comment)
     return waitcnt
 
 ##############################################################################
 # SyncThreads
 ##############################################################################
-def syncThreads(kernel, archCaps, comment="", skipForceWaitcnt0=False):
+def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False):
     imod = Module("syncThreads")
     if kernel["NumThreads"] > kernel["WavefrontSize"]:
-        if archCaps["SeparateVscnt"]:
-            imod.add(SWaitCnt(lgkmcnt=-2, comment="extra navi wait"))
+        if asmCaps["SeparateVscnt"]:
+            imod.add(SWaitCnt(dscnt=0, comment="extra navi wait"))
         elif kernel["ScheduleIterAlg"] == 2 \
           or kernel["PrefetchGlobalRead"] == 2 \
           or skipForceWaitcnt0:
             imod.addComment("Skip force waitcnt0")
         elif archCaps["Waitcnt0Disabled"]:
-            # FIXME: should we add s_waitcnt_vscnt?
-            imod.add(SWaitCnt(lgkmcnt=0, vmcnt=0, vscnt=-1, comment="force waitcnt0"))
+            imod.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=0, comment="force waitcnt0"))
 
         imod.add(SBarrier(comment=comment))
     else:

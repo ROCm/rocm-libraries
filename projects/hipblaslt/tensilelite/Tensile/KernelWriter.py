@@ -528,8 +528,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   def makeSchedule(self, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, skipGlobalReadInc=False, firstIter=False, lastLoop=False, lastLc=False, isNGLL=False):
 
-    maxVmcnt = self.states.asmCaps["MaxVmcnt"]
-
     self.codes.unrollLoopHeader = Module()
     # schedule of work for each local_read iteration:
     self.codes.perIterGlobalRead = [ Module() for i in range (kernel["LoopIters"]) ]
@@ -548,7 +546,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     siaComponent = Component.SIA.find(self)
     siaComponent.schedIntoIteration(self, kernel, tensorParametersA, tensorParametersB, \
-      localWriteEndIter, firstIter, lastLoop, lastLc, maxVmcnt, globalReadIncACode, \
+      localWriteEndIter, firstIter, lastLoop, lastLc, globalReadIncACode, \
       globalReadIncBCode, isNGLL)
 
   ##############################################################################
@@ -746,7 +744,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["1LDSBuffer"]:
         barrier = Module()
         barrier.addComment0("1 LDS buffer: read-sync-write")
-        barrier.add(SWaitCnt(lgkmcnt=0, comment=""))
+        barrier.add(SWaitCnt(dscnt=0, comment=""))
         barrier.add(SBarrier())
         iterCode.add(barrier)
       iterCode.add(localWriteCode)
@@ -1033,12 +1031,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   if (vacancy["atMfmaIndex"] % numMfmaPerIter == 0 or readsIter != vacancy["atIter"]) and \
                       (vacancy["noReadsAtThisIter"] or readsIter <= vacancy["atIter"] + self.states.numItersPLR):
                     if isinstance(self.localReadsWait[readsIter], SWaitCnt):
-                      self.localReadsWait[readsIter].lgkmcnt += 1
-                      # This line is added for backward compatibility
-                      self.localReadsWait[readsIter].vscnt = self.localReadsWait[readsIter].vmcnt \
-                        if self.localReadsWait[readsIter].lgkmcnt != -1 and \
-                          self.localReadsWait[readsIter].vmcnt != -1 and \
-                          self.states.archCaps["SeparateVscnt"] else -1
+                      self.localReadsWait[readsIter].dscnt += 1
             else:
               # make sure the localread sequence remain the same
               vacancy["latencyLeft"] = 0
@@ -1254,7 +1247,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if kernel["1LDSBuffer"] and mfmaIndex == self.states.sync1LdsMfmaIndex:
           barrier = Module()
           barrier.addComment0("1 LDS buffer: read-sync-write")
-          barrier.add(SWaitCnt(lgkmcnt=0, comment=""))
+          barrier.add(SWaitCnt(dscnt=0, comment=""))
           barrier.add(SBarrier())
           iterCode.add(barrier)
 
@@ -1367,19 +1360,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
             if isinstance(ds, DSLoadInstruction) and not hasAnyDependency(ds, instsToCheck) or isinstance(ds, DSStoreInstruction):
               numDsInsts += 1
             elif isinstance(ds, SWaitCnt):
-              if ds.lgkmcnt >= 0 and lastLgkmCnt == -1:
-                lastLgkmCnt = ds.lgkmcnt + numDsInsts
+              if ds.dscnt >= 0 and lastLgkmCnt == -1:
+                lastLgkmCnt = ds.dscnt + numDsInsts
 
           if lastLgkmCnt != numDsInsts:
             if lastLgkmCnt == -1 or (lastLgkmCnt >= 0 and lastLgkmCnt > numDsInsts):
-              waitDsRead = SWaitCnt(lgkmcnt=numDsInsts, comment="Wait for dependent lr")
+              waitDsRead = SWaitCnt(dscnt=numDsInsts, comment="Wait for dependent lr")
               iterCode.add(waitDsRead)
         else:
           if kernel["UnrollMajorLDSB"] and not (kernel["ProblemType"]["DataTypeB"].isAnyFloat8() and kernel["ConvertAfterDS"]):
             if iteration == 0 and i == kernel["MIWaveTileA"]:
               # add 1 more waitcnt before using ds read data
               waitCode2 = deepcopy(waitCode)
-              waitCode2.lgkmcnt = localReadsIssuedInThisIter
+              waitCode2.dscnt = localReadsIssuedInThisIter
               iterCode.add(waitCode2)
           if i == 0:
             iterCode.add(waitCode)
@@ -1722,7 +1715,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if isinstance(waitCode, SWaitCnt):
 
       # Set the waitCount, based on the new iter schedule
-      lgkmcnt = waitCode.lgkmcnt
+      lgkmcnt = waitCode.dscnt
       localReads = 0
       localWrites = 0
       if kernel["EnableMatrixInstruction"]:
@@ -1808,12 +1801,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
             else:
               lgkmcnt = localWrites  # this only survives if writes are at the end
 
-      waitCode.comment += " old=%u, new=%u newLW=%u newLR=%u" % (waitCode.lgkmcnt, lgkmcnt,localWrites,localReads)
+      waitCode.comment += " old=%u, new=%u newLW=%u newLR=%u" % (waitCode.dscnt, lgkmcnt,localWrites,localReads)
       if iteration == 0:
         waitCode.comment += " for iteration == 0"
-      waitCode.lgkmcnt = lgkmcnt
-      # This line is added for backward compatibility
-      waitCode.vscnt = waitCode.vmcnt if waitCode.lgkmcnt != -1 and waitCode.vmcnt != -1 and self.states.archCaps["SeparateVscnt"] else -1
+      waitCode.dscnt = lgkmcnt
 
     return iterCode
 
@@ -5531,7 +5522,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   def _syncThreads(self, kernel, comment="", skipForceWaitcnt0=False):
     if self.do["Sync"]:
-      return syncThreads(kernel, self.states.archCaps, comment, skipForceWaitcnt0=skipForceWaitcnt0)
+      return syncThreads(kernel, self.states.archCaps, self.states.asmCaps, comment, skipForceWaitcnt0=skipForceWaitcnt0)
     return Module("SyncThreads (Empty)")
 
   ##############################################################################

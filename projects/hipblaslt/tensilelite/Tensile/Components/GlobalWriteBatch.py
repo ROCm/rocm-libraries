@@ -219,13 +219,8 @@ class GlobalWriteBatchWriter:
       else:
         lgkmcnt = -1
       # Get vscnt
-      if vmcnt != -1:
-        if self.parentWriter.states.archCaps["SeparateVscnt"] or self.parentWriter.states.archCaps["SeparateVMcnt"]:
-          vscnt = 0
-        else:
+      if vmcnt != -1 and not (self.parentWriter.states.asmCaps["SeparateVscnt"] or self.parentWriter.states.asmCaps["SeparateVMcnt"]):
           vscnt = self.storesIssued if not self.kernel["GroupLoadStore"] else 0
-      else:
-        vscnt = -1
       if (vmcnt != -1) or (vscnt != -1) or (lgkmcnt != -1):
         # Get comment
         comment = ""
@@ -240,7 +235,7 @@ class GlobalWriteBatchWriter:
             tmp += " - %s"%cntStr
           comment = comment + (" " if comment else "") + "lgkmcnt(%d) = %d%s"%(lgkmcnt, lgkmcntTotalIssued, tmp)
         # if not self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
-        return SWaitCnt(lgkmcnt=lgkmcnt, vmcnt=vmcnt, vscnt=vscnt, comment="%s (interleaved)"%comment)
+        return SWaitCnt(dscnt=lgkmcnt, vlcnt=vmcnt, vscnt=vscnt, comment="%s (interleaved)"%comment)
     else:
       commentList = []
       # Global read wait
@@ -265,7 +260,7 @@ class GlobalWriteBatchWriter:
         comment = "wait for " + commentList[0]
         for c in commentList[1:]:
           comment += ", %s"%c
-        return SWaitCnt(lgkmcnt=lgkmcnt, vmcnt=vmcnt, vscnt=vscnt, comment=comment)
+        return SWaitCnt(dscnt=lgkmcnt, vlcnt=vmcnt, vscnt=vscnt, comment=comment)
     return None
 
   ##############################################################################
@@ -343,9 +338,7 @@ class GlobalWriteBatchWriter:
     # across all the store loop iters.
     if self.debugConfig["ConservativeWaitCnt"] & 0x10:
       module.add(SBarrier("debug"))
-      module.add(SWaitCnt(vmcnt=0, comment="ConservativeWaitCnt"))
-      if self.parentWriter.states.archCaps["SeparateVscnt"]:
-        module.add(SWaitCnt(vscnt=0, comment="writes"))
+      module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="ConservativeWaitCnt"))
       module.add(SBarrier("debug"))
     if not self.edge and self.debugConfig["ForceEdgeStores"] >= 2:
       module.add(self.parentWriter.getBomb()) # should not get here
@@ -456,13 +449,13 @@ class GlobalWriteBatchWriter:
           if self.kernel["GroupLoadStore"]:
             # Group bias load with C input to
             if isSingleKernel and (not self.isLocalBarrierInit):
-              loadInputCode.add(SWaitCnt(lgkmcnt=0, comment="Wait for LDS write"))
+              loadInputCode.add(SWaitCnt(dscnt=0, comment="Wait for LDS write"))
               loadInputCode.add(SBarrier("LDS write barrier"))
               self.isLocalBarrierInit = True
             loadInputCode.add(self.parentWriter.addLdsLoad(self.kernel["ProblemType"]["ComputeDataType"], dataVec, ldsAddrVgpr, vecOffset, gwvw, comment=comment))
           else:
             if isSingleKernel and (not self.isLocalBarrierInit):
-              module.add(SWaitCnt(lgkmcnt=0, comment="Wait for LDS write"))
+              module.add(SWaitCnt(dscnt=0, comment="Wait for LDS write"))
               module.add(SBarrier("LDS write barrier"))
               self.isLocalBarrierInit = True
             module.add(self.parentWriter.addLdsLoad(self.kernel["ProblemType"]["ComputeDataType"], dataVec, ldsAddrVgpr, vecOffset, gwvw, comment=comment))
@@ -1217,7 +1210,7 @@ class GlobalWriteBatchWriter:
       useBuffer = self.kernel["BufferStore"]
       # Note - CheckStoreC won't work for EDGE store cases since they load 0 for OOB, would need more sophisticated check
       # Note - TODO- CheckStoreC also won't work for StoreRemap
-      module.add(SWaitCnt(vmcnt=0, vscnt=0, comment="CheckStoreC, wait for stores to complete"))
+      module.add(SWaitCnt(vscnt=0, comment="CheckStoreC, wait for stores to complete"))
       for elementIdx in range(0, len(self.batchElements)):
         addr = self.ss.elementAddr[elementIdx].addrDVgpr
         sumIdx = self.ss.elementSumIdx[elementIdx]
@@ -1246,7 +1239,7 @@ class GlobalWriteBatchWriter:
         elif self.kernel["ProblemType"]["DestDataType"].isDoubleComplex():
           module.add(self.parentWriter.chooseGlobalRead(useBuffer, bps, sumIdx*4, \
                                 addr0, addr1, soffset=0, offset=0))
-      module.add(SWaitCnt(vmcnt=0, vscnt=0, comment="CheckStoreC, wait for stores to complete"))
+      module.add(SWaitCnt(vscnt=0, comment="CheckStoreC, wait for stores to complete"))
       # Add checks for expected values:
       module.add(SMovB32(sgpr(self.tmpS01), self.parentWriter.db["CheckStoreC"], "expected value"))
       for elementIdx in range(0, len(self.batchElements)):
@@ -1264,7 +1257,7 @@ class GlobalWriteBatchWriter:
 
     if self.parentWriter.db["ConservativeWaitCnt"] & 0x40:
       module.add(SBarrier("debug"))
-      module.add(SWaitCnt(vmcnt=0, vscnt=0, comment="ConservativeWaitCnt"))
+      module.add(SWaitCnt(vscnt=0, comment="ConservativeWaitCnt"))
       module.add(SBarrier("debug"))
 
   def _emitAtomicAdd(self, module: Module):
@@ -1315,7 +1308,7 @@ class GlobalWriteBatchWriter:
     ########################################
     # wait for batched load
     # TODO - we are always atomic here?
-    module.add(SWaitCnt(vmcnt=0, vscnt=0, comment="wait C (atomic)"))
+    module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="wait C (atomic)"))
     ########################################
     # first attempt write
     module.addComment1("issue first atomic writes")
@@ -1377,7 +1370,7 @@ class GlobalWriteBatchWriter:
 
     ########################################
     # wait for first attempt write
-    module.add(SWaitCnt(vmcnt=0, vscnt=0, comment="wait for atomic writes"))
+    module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="wait for atomic writes"))
     ########################################
     # check first attempt
     module.addComment1("check success of writes, update masks")
@@ -1493,7 +1486,7 @@ class GlobalWriteBatchWriter:
                                             "try again"))
 
     # wait for batched write
-    module.add(SWaitCnt(vmcnt=0, vscnt=0, comment="wait for atomic writes"))
+    module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="wait for atomic writes"))
     # check batched write success
     module.addComment1("apply masks and check for success")
     for elementIdx in range(0, len(self.batchElements)):
