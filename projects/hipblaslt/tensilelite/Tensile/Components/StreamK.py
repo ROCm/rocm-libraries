@@ -21,14 +21,14 @@
 ################################################################################
 
 from rocisa.code import Module, Label
-from rocisa.container import vgpr, sgpr, SMEMModifiers, replaceHolder, EXEC,\
+from rocisa.container import vgpr, sgpr, SMEMModifiers, FLATModifiers, replaceHolder, EXEC,\
     VOP3PModifiers, ContinuousRegister
 from rocisa.instruction import SAddCU32, SAddI32, SAddU32, SAndB32, SBarrier, \
     SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, \
     SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, \
     SMinU32, SMovB32, SMovB64, SMulI32, SNop, SSleep, SStoreB32, SSubU32, \
     SWaitCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, \
-    VReadfirstlaneB32, VCvtBF16toFP32
+    VReadfirstlaneB32, VCvtBF16toFP32, GStoreB32
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
     vectorStaticMultiply, BranchIfNotZero, scalarUInt32DivideAndRemainder
 
@@ -370,7 +370,7 @@ class StreamK(Component):
 
             # Check flag
             module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sCtaIdx), shiftHex=log2(4), comment="flag offset based on CTA index"))
-            module.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="get flag"))
+            module.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True, dlc=True), comment="get flag"))
 
             module.add(SWaitCnt(kmcnt=0, comment="wait for flag load"))
             if kernel["DebugStreamK"] & 2 == 0:
@@ -384,7 +384,15 @@ class StreamK(Component):
             module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=0, comment="Check for wave 0"))
             module.add(SCBranchSCC0(labelName=skipFlagReset.getLabelName(), comment="Skip flag reset"))
             # (tmpSgpr+2) contains a vlue of 0, use it to reset the flag
-            module.add(SStoreB32(src=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="reset flag"))
+            # module.add(SStoreB32(src=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="reset flag"))
+            module.addComment1("-----------------masked vector store start---------------------")
+            module.add(VMovB32(dst=vgpr(tmpVgpr), src=0, comment="move 0 to tmpVgpr1"))
+            module.add(VMovB32(dst=vgpr(tmpVgpr+1), src=sgpr(tmpSgpr), comment="move offset to tmpVgpr2"))
+            module.add(SMovB32(dst=EXEC(), src="0x00000001", comment="Set thread 0"))
+            module.add(GStoreB32(src=vgpr(tmpVgpr), base=sgpr("AddressFlags", 2), soffset=vgpr(tmpVgpr+1), flat=FLATModifiers(glc=True, slc=True, isStore=True), comment="reset flag"))
+            module.add(SMovB32(dst=EXEC(), src="0xFFFFFFFF", comment="Reset exec mask"))
+            module.add(SWaitCnt(vmcnt=(0), comment="wait for data store"))
+            module.addComment1("-----------------masked vector store end---------------------")
             module.add(skipFlagReset)
             writer.sgprPool.checkIn(tmpSgpr)
 
@@ -684,8 +692,16 @@ class StreamK(Component):
                 module.add(VReadfirstlaneB32(dst=sgpr(flagSgpr), src=vgpr("Serial"), comment="Wave 0 updates flags"))
                 module.add(SCmpEQU32(src0=sgpr(flagSgpr), src1=0, comment="Check for wave 0"))
                 module.add(SCBranchSCC0(labelName=skipFlagSet.getLabelName(), comment="Skip flag set"))
-                module.add(SMovB32(dst=sgpr(flagSgpr), src=1, comment="flag data"))
-                module.add(SStoreB32(src=sgpr(flagSgpr), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="set flag"))
+                # module.add(SMovB32(dst=sgpr(flagSgpr), src=1, comment="flag data"))
+                # module.add(SStoreB32(src=sgpr(flagSgpr), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="set flag"))
+                module.addComment1("-----------------masked vector store start---------------------")
+                module.add(VMovB32(dst=vgpr(tmpVgpr), src=1, comment="flag data"))
+                module.add(VMovB32(dst=vgpr(tmpVgpr+1), src=sgpr(tmpSgpr), comment="move offset"))
+                module.add(SMovB32(dst=EXEC(), src="0x00000001", comment="Set thread 0"))
+                module.add(GStoreB32(src=vgpr(tmpVgpr), base=sgpr("AddressFlags", 2), soffset=vgpr(tmpVgpr+1), flat=FLATModifiers(glc=True, slc=True, isStore=True), comment="set flag"))
+                module.add(SMovB32(dst=EXEC(), src="0xFFFFFFFF", comment="Reset exec mask"))
+                module.add(SWaitCnt(vmcnt=0, comment="wait for data store"))
+                module.addComment1("-----------------masked vector store end---------------------")
                 module.add(skipFlagSet)
             module.add(SWaitCnt(kmcnt=0, comment="wait for flag")) # TODO just for testing
 
@@ -1631,6 +1647,11 @@ class StreamKBasic(StreamK):
         xccMapping = Component.XCCMapping.find(writer)
         module.add(xccMapping(writer, kernel))
 
+        # Workaround not needed for gfx11x
+        module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
+        module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
+        module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
+
         module.add(SMovB32(dst=sgpr("StreamKIdx"), src=sgpr("WorkGroup0"), comment="Save original StreamK index"))
         # Basic SK
         module.add(SMulI32(dst=sgpr("StreamKIter"), src0=sgpr("StreamKIdx"), src1=sgpr("SKItersPerWG"), comment="StreamK starting iteration"))
@@ -1708,6 +1729,11 @@ class StreamKTwoTileOriginal(StreamK):
 
         xccMapping = Component.XCCMapping.find(writer)
         module.add(xccMapping(writer, kernel))
+
+        # Workaround not needed for gfx11x
+        module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
+        module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
+        module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
 
         module.add(SMovB32(dst=sgpr("StreamKIdx"), src=sgpr("WorkGroup0"), comment="Save original StreamK index"))
         # Two-tile SK (SK first)
@@ -1824,6 +1850,11 @@ class StreamKTwoTileDPFirst(StreamK):
 
         xccMapping = Component.XCCMapping.find(writer)
         module.add(xccMapping(writer, kernel))
+
+        # Workaround not needed for gfx11x
+        module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
+        module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
+        module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
 
         module.add(SMovB32(dst=sgpr("StreamKIdx"), src=sgpr("WorkGroup0"), comment="Save original StreamK index"))
         # Two-tile SK (DP first)
