@@ -44,13 +44,8 @@ namespace detail
 
 template<class Config, unsigned int ActiveChannels, class Counter>
 ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.block_size) void
-<<<<<<< HEAD
-    init_histogram_kernel(fixed_array<Counter*, ActiveChannels>           histogram,
-                          const fixed_array<unsigned int, ActiveChannels> bins)
-=======
     init_histogram_kernel(fixed_array<Counter*, ActiveChannels>     histogram,
-                          fixed_array<size_t, ActiveChannels> bins)
->>>>>>> 86d06adef9 (Change types of private histogram and indexing of bins)
+                          const fixed_array<size_t, ActiveChannels> bins)
 {
     static constexpr histogram_config_params params = device_params<Config>();
 
@@ -104,7 +99,8 @@ template<class Config,
          class SampleIterator,
          class Counter,
          class SampleToBinOp>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.block_size) void
+ROCPRIM_KERNEL
+ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_private_config.block_size) void
     histogram_global_kernel(SampleIterator                                   samples,
                             unsigned int                                     columns,
                             unsigned int                                     rows,
@@ -119,8 +115,8 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.bl
 {
     static constexpr histogram_config_params params = device_params<Config>();
 
-    histogram_global<params.histogram_config.block_size,
-                     params.histogram_config.items_per_thread,
+    histogram_global<params.histogram_private_config.block_size,
+                     params.histogram_private_config.items_per_thread,
                      Channels,
                      ActiveChannels>(samples,
                                      columns,
@@ -211,6 +207,9 @@ inline hipError_t histogram_impl(void*          temporary_storage,
     }
     else
     {
+
+        const auto items_per_block = params.histogram_private_config.block_size
+                                     * params.histogram_private_config.items_per_thread;
         auto kernel = HIP_KERNEL_NAME(histogram_global_kernel<config,
                                                               Channels,
                                                               ActiveChannels,
@@ -352,18 +351,20 @@ inline hipError_t histogram_impl(void*          temporary_storage,
             start = std::chrono::steady_clock::now();
         }
         histogram_global_kernel<config, Channels, ActiveChannels>
-            <<<dim3(global_histogram_grid_size), dim3(block_size), 0, stream>>>(
-                samples,
-                columns,
-                rows,
-                row_stride,
-                fixed_array<Counter*, ActiveChannels>(histogram),
-                fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
-                fixed_array<size_t, ActiveChannels>(bins_bits),
-                fixed_array<size_t, ActiveChannels>(bins),
-                private_histograms,
-                virtual_max_blocks,
-                block_id_count);
+            <<<dim3(global_histogram_grid_size),
+               dim3(params.histogram_private_config.block_size),
+               0,
+               stream>>>(samples,
+                         columns,
+                         rows,
+                         row_stride,
+                         fixed_array<Counter*, ActiveChannels>(histogram),
+                         fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
+                         fixed_array<size_t, ActiveChannels>(bins_bits),
+                         fixed_array<size_t, ActiveChannels>(bins),
+                         private_histograms,
+                         virtual_max_blocks,
+                         block_id_count);
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_global",
                                                     blocks_x * block_size * rows,
                                                     start);
