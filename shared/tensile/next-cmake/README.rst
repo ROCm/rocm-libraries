@@ -115,7 +115,7 @@ used to specify this custom path when running a test.
           -DTENSILE_ENABLE_HOST=ON              \
           -DTENSILE_ENABLE_DEVICE=OFF
       # build
-      cmake --build my-build --parallel
+      cmake --build my-custom-build --parallel
 
     # run a test, specifying the custom client path with --prebuilt-client
     Tensile/bin/Tensile Tensile/Tests/pre_checkin/<test>.yaml tensile-out \
