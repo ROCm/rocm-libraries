@@ -42,6 +42,7 @@ target_link_libraries(rocroller-tests-catch
         rocroller::common-test-utilities
         Catch2::Catch2WithMain
         ${BLAS_LIBRARIES}
+        ${msgpack_libs}
 )
 
 set(_CMAKE_CURRENT_SOURCE_DIR "${ROCROLLER_TEST_DIR}/catch")

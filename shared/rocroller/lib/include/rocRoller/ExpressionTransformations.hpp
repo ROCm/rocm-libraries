@@ -146,6 +146,12 @@ namespace rocRoller
         ExpressionPtr lowerExponential(ExpressionPtr expr);
 
         /**
+         * @brief Replace unsigned ArithmeticShiftR with LogicalShiftR
+         *
+         */
+        ExpressionPtr lowerUnsignedArithmeticShiftR(ExpressionPtr expr);
+
+        /**
          * Helper (lambda/transducer) for applying all fast arithmetic transformations.
          *
          * Usage:
