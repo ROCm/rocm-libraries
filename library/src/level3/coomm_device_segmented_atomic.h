@@ -92,7 +92,7 @@ namespace rocsparse
             const T v
                 = (idx < nnz)
                       ? alpha * rocsparse::nontemporal_load(coo_val + idx + batch_stride_A * batch)
-                      : static_cast<T>(0);
+                      : static_cast<A>(0);
 
             row = r;
 

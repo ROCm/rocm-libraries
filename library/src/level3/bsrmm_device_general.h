@@ -87,14 +87,14 @@ namespace rocsparse
                         shared_B[BSR_BLOCK_DIM * tidy + tidx]
                             = (global_col < N && (tidx + y) < block_dim)
                                   ? dense_B[block_dim * block_col + (tidx + y) + global_col * ldb]
-                                  : static_cast<T>(0);
+                                  : static_cast<B>(0);
                     }
                     else
                     {
                         shared_B[BSR_BLOCK_DIM * tidy + tidx]
                             = (global_col < N && (tidx + y) < block_dim)
                                   ? dense_B[global_col + ldb * (block_dim * block_col + (tidx + y))]
-                                  : static_cast<T>(0);
+                                  : static_cast<B>(0);
                     }
 
                     if(direction == rocsparse_direction_row)
@@ -103,7 +103,7 @@ namespace rocsparse
                             = ((tidx + x) < block_dim && (tidy + y) < block_dim)
                                   ? bsr_val[block_dim * block_dim * k + block_dim * (tidx + x)
                                             + (tidy + y)]
-                                  : static_cast<T>(0);
+                                  : static_cast<A>(0);
                     }
                     else
                     {
@@ -111,7 +111,7 @@ namespace rocsparse
                             = ((tidx + x) < block_dim && (tidy + y) < block_dim)
                                   ? bsr_val[block_dim * block_dim * k + block_dim * (tidy + y)
                                             + (tidx + x)]
-                                  : static_cast<T>(0);
+                                  : static_cast<A>(0);
                     }
 
                     __syncthreads();

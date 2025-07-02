@@ -252,7 +252,7 @@ namespace rocsparse
             const J c = __shfl(col_ind, i, WF_SIZE);
 
             valB[i] = (colB + lid) < N ? v * conj_val(dense_B[c + ldb * (colB + lid)], conj_B)
-                                       : static_cast<T>(0);
+                                       : static_cast<B>(0);
         }
 
         __syncthreads();
