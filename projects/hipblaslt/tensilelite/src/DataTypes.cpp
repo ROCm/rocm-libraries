@@ -133,12 +133,12 @@ namespace rocisa
         case rocisa::DataType::BFloat8Float8_fnuz:
             return TensileLite::TypeInfo<BFloat8Float8_fnuz>::ElementSize;
 #ifdef TENSILE_USE_FP6
-            case rocisa::DataType::Float6:
-                return TensileLite::TypeInfo<TensileLite::Float6x32>::ElementSize;
+        case rocisa::DataType::Float6:
+            return TensileLite::TypeInfo<TensileLite::Float6x16>::ElementSize;
 #endif // #ifdef TENSILE_USE_FP6
 #ifdef TENSILE_USE_BF6
         case rocisa::DataType::BFloat6:
-            return TensileLite::TypeInfo<TensileLite::BFloat6x32>::ElementSize;
+            return TensileLite::TypeInfo<TensileLite::BFloat6x16>::ElementSize;
 #endif // #ifdef TENSILE_USE_BF6
 #ifdef TENSILE_USE_FP4
         case rocisa::DataType::Float4:
@@ -264,10 +264,10 @@ namespace TensileLite
         registerTypeInfo<Float8BFloat8_fnuz>();
         registerTypeInfo<BFloat8Float8_fnuz>();
 #ifdef TENSILE_USE_FP6
-        registerTypeInfo<Float6x32>();
+        registerTypeInfo<Float6x16>();
 #endif // #ifdef TENSILE_USE_FP6
 #ifdef TENSILE_USE_BF6
-        registerTypeInfo<BFloat6x32>();
+        registerTypeInfo<BFloat6x16>();
 #endif // #ifdef TENSILE_USE_BF6
 #ifdef TENSILE_USE_FP4
         registerTypeInfo<Float4x2>();

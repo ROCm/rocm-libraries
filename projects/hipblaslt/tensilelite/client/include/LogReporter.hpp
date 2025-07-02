@@ -351,17 +351,17 @@ namespace TensileLite
                     else if(tensor.dataType() == rocisa::DataType::Float6)
                         logTensorTyped(level,
                                        name,
-                                       reinterpret_cast<Float6x32 const*>(data),
+                                       reinterpret_cast<Float6x16 const*>(data),
                                        tensor,
-                                       reinterpret_cast<Float6x32 const*>(ptrVal));
+                                       reinterpret_cast<Float6x16 const*>(ptrVal));
 #endif // #ifdef TENSILE_USE_FP6
 #ifdef TENSILE_USE_BF6
                     else if(tensor.dataType() == rocisa::DataType::BFloat6)
                         logTensorTyped(level,
                                        name,
-                                       reinterpret_cast<BFloat6x32 const*>(data),
+                                       reinterpret_cast<BFloat6x16 const*>(data),
                                        tensor,
-                                       reinterpret_cast<BFloat6x32 const*>(ptrVal));
+                                       reinterpret_cast<BFloat6x16 const*>(ptrVal));
 #endif // #ifdef TENSILE_USE_BF6
 #ifdef TENSILE_USE_FP4
                     else if(tensor.dataType() == rocisa::DataType::Float4)

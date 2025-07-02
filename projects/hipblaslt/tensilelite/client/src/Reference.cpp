@@ -376,7 +376,7 @@ namespace TensileLite
 #ifdef TENSILE_USE_FP4
             case rocisa::DataType::Float4:
 #endif // #ifdef TENSILE_USE_FP4
-            ;
+                ;
             }
             return DataInitialization::getValue<Accumulator, InitMode::Zero>();
         }
@@ -496,7 +496,7 @@ namespace TensileLite
 #ifdef TENSILE_USE_FP4
             case rocisa::DataType::Float4:
 #endif // #ifdef TENSILE_USE_FP4
-            ;
+                ;
             }
         }
 
@@ -553,7 +553,7 @@ namespace TensileLite
 #ifdef TENSILE_USE_FP4
             case rocisa::DataType::Float4:
 #endif // #ifdef TENSILE_USE_FP4
-            ;
+                ;
             }
         }
 
@@ -1183,67 +1183,71 @@ namespace TensileLite
             return true;
         }
 
-        template<typename Inputs, typename Accumulator, typename MathOpAccum, typename AType, typename BType, typename ComputeInputType
+        template <typename Inputs,
+                  typename Accumulator,
+                  typename MathOpAccum,
+                  typename AType,
+                  typename BType,
+                  typename ComputeInputType
 #if defined(TENSILE_USE_FP6) || defined(TENSILE_USE_BF6) || defined(TENSILE_USE_FP4)
-            , std::enable_if_t<true
+                  ,
+                  std::enable_if_t<true
 #ifdef TENSILE_USE_FP6
-                               && (!std::is_same<Float6x32, AType>::value && !std::is_same<Float6x32, BType>::value)
+                                       && (!std::is_same<Float6x16, AType>::value
+                                           && !std::is_same<Float6x16, BType>::value)
 #endif // #ifdef TENSILE_USE_FP6
 #ifdef TENSILE_USE_BF6
-                               && (!std::is_same<BFloat6x32, AType>::value && !std::is_same<BFloat6x32, BType>::value)
+                                       && (!std::is_same<BFloat6x16, AType>::value
+                                           && !std::is_same<BFloat6x16, BType>::value)
 #endif // #ifdef TENSILE_USE_BF6
 #ifdef TENSILE_USE_FP4
-                               && (!std::is_same<Float4x2, AType>::value && !std::is_same<Float4x2, BType>::value)
+                                       && (!std::is_same<Float4x2, AType>::value
+                                           && !std::is_same<Float4x2, BType>::value)
 #endif // #ifdef TENSILE_USE_FP4
-                               , bool> = true
+                                       ,
+                                   bool> = true
 #endif // defined(TENSILE_USE_FP6) || defined(TENSILE_USE_BF6) || defined(TENSILE_USE_FP4)
-        >
-        Accumulator multiply(
-            ContractionProblemGemm const& problem,
-            ContractionInputs const&      inputs,
-            AType const* aPtr,
-            BType const* bPtr,
-            const size_t aIdx,
-            const size_t bIdx,
-            const bool aConjugate,
-            const bool bConjugate)
+                  >
+        Accumulator multiply(ContractionProblemGemm const& problem,
+                             ContractionInputs const&      inputs,
+                             AType const*                  aPtr,
+                             BType const*                  bPtr,
+                             const size_t                  aIdx,
+                             const size_t                  bIdx,
+                             const bool                    aConjugate,
+                             const bool                    bConjugate)
         {
             Accumulator value(0);
 
             AType aVal = Transform<AType>::Input(aPtr[aIdx], aConjugate);
             BType bVal = Transform<BType>::Input(bPtr[bIdx], bConjugate);
 
-            if constexpr(sizeof(typename Inputs::AType)
-                            > sizeof(typename Inputs::ComputeInputType)
-                        && sizeof(typename Inputs::BType)
-                            > sizeof(typename Inputs::ComputeInputType))
+            if constexpr(sizeof(typename Inputs::AType) > sizeof(typename Inputs::ComputeInputType)
+                         && sizeof(typename Inputs::BType)
+                                > sizeof(typename Inputs::ComputeInputType))
             {
-                if constexpr(std::is_same<Float8BFloat8,
-                                        typename Inputs::ComputeInputType>::value)
+                if constexpr(std::is_same<Float8BFloat8, typename Inputs::ComputeInputType>::value)
                 {
                     auto aValCast = static_cast<TensileLite::Float8>(aVal);
                     auto bValCast = static_cast<TensileLite::BFloat8>(bVal);
                     value += multiply<Accumulator, MathOpAccum>(aValCast, bValCast);
                 }
-                else if constexpr(std::is_same<
-                                        BFloat8Float8,
-                                        typename Inputs::ComputeInputType>::value)
+                else if constexpr(std::is_same<BFloat8Float8,
+                                               typename Inputs::ComputeInputType>::value)
                 {
                     auto aValCast = static_cast<TensileLite::BFloat8>(aVal);
                     auto bValCast = static_cast<TensileLite::Float8>(bVal);
                     value += multiply<Accumulator, MathOpAccum>(aValCast, bValCast);
                 }
-                else if constexpr(std::is_same<
-                                        Float8BFloat8_fnuz,
-                                        typename Inputs::ComputeInputType>::value)
+                else if constexpr(std::is_same<Float8BFloat8_fnuz,
+                                               typename Inputs::ComputeInputType>::value)
                 {
                     auto aValCast = static_cast<TensileLite::Float8_fnuz>(aVal);
                     auto bValCast = static_cast<TensileLite::BFloat8_fnuz>(bVal);
                     value += multiply<Accumulator, MathOpAccum>(aValCast, bValCast);
                 }
-                else if constexpr(std::is_same<
-                                        BFloat8Float8_fnuz,
-                                        typename Inputs::ComputeInputType>::value)
+                else if constexpr(std::is_same<BFloat8Float8_fnuz,
+                                               typename Inputs::ComputeInputType>::value)
                 {
                     auto aValCast = static_cast<TensileLite::BFloat8_fnuz>(aVal);
                     auto bValCast = static_cast<TensileLite::Float8_fnuz>(bVal);
@@ -1256,33 +1260,29 @@ namespace TensileLite
                     {
                         Accumulator scaleA = GetValue<Accumulator>(
                             problem.alphaType(), inputs.scaleA, 0, aConjugate);
-                        auto tmp = multiply<Accumulator>(aVal, scaleA);
-                        aValCast
-                            = static_cast<typename Inputs::ComputeInputType>(tmp);
+                        auto tmp           = multiply<Accumulator>(aVal, scaleA);
+                        aValCast           = static_cast<typename Inputs::ComputeInputType>(tmp);
                         Accumulator scaleB = GetValue<Accumulator>(
                             problem.alphaType(), inputs.scaleB, 0, aConjugate);
-                        tmp = multiply<Accumulator>(bVal, scaleB);
-                        bValCast
-                            = static_cast<typename Inputs::ComputeInputType>(tmp);
+                        tmp      = multiply<Accumulator>(bVal, scaleB);
+                        bValCast = static_cast<typename Inputs::ComputeInputType>(tmp);
                     }
                     else
                     {
-                        aValCast
-                            = static_cast<typename Inputs::ComputeInputType>(aVal);
-                        bValCast
-                            = static_cast<typename Inputs::ComputeInputType>(bVal);
+                        aValCast = static_cast<typename Inputs::ComputeInputType>(aVal);
+                        bValCast = static_cast<typename Inputs::ComputeInputType>(bVal);
                     }
                     value += multiply<Accumulator, MathOpAccum>(aValCast, bValCast);
                 }
             }
             else if constexpr(sizeof(typename Inputs::AType)
-                                > sizeof(typename Inputs::ComputeInputType))
+                              > sizeof(typename Inputs::ComputeInputType))
             {
                 typename Inputs::ComputeInputType aValCast;
                 if(problem.useScaleAB() == "Scalar")
                 {
-                    Accumulator scaleA = GetValue<Accumulator>(
-                        problem.alphaType(), inputs.scaleA, 0, aConjugate);
+                    Accumulator scaleA
+                        = GetValue<Accumulator>(problem.alphaType(), inputs.scaleA, 0, aConjugate);
                     auto tmp = multiply<Accumulator>(aVal, scaleA);
                     aValCast = static_cast<typename Inputs::ComputeInputType>(tmp);
                 }
@@ -1293,13 +1293,13 @@ namespace TensileLite
                 value += multiply<Accumulator, MathOpAccum>(aValCast, bVal);
             }
             else if constexpr(sizeof(typename Inputs::BType)
-                                > sizeof(typename Inputs::ComputeInputType))
+                              > sizeof(typename Inputs::ComputeInputType))
             {
                 typename Inputs::ComputeInputType bValCast;
                 if(problem.useScaleAB() == "Scalar")
                 {
-                    Accumulator scaleB = GetValue<Accumulator>(
-                        problem.alphaType(), inputs.scaleB, 0, aConjugate);
+                    Accumulator scaleB
+                        = GetValue<Accumulator>(problem.alphaType(), inputs.scaleB, 0, aConjugate);
                     auto tmp = multiply<Accumulator>(bVal, scaleB);
                     bValCast = static_cast<typename Inputs::ComputeInputType>(tmp);
                 }
@@ -1318,27 +1318,35 @@ namespace TensileLite
         }
 
 #if defined(TENSILE_USE_FP6) || defined(TENSILE_USE_BF6) || defined(TENSILE_USE_FP4)
-        template<typename Inputs, typename Accumulator, typename MathOpAccum, typename AType, typename BType, typename ComputeInputType,
-            std::enable_if_t<false
+        template <typename Inputs,
+                  typename Accumulator,
+                  typename MathOpAccum,
+                  typename AType,
+                  typename BType,
+                  typename ComputeInputType,
+                  std::enable_if_t<false
 #ifdef TENSILE_USE_FP6
-                             || (std::is_same<Float6x32, AType>::value && std::is_same<Float6x32, BType>::value)
+                                       || (std::is_same<Float6x16, AType>::value
+                                           && std::is_same<Float6x16, BType>::value)
 #endif // #ifdef TENSILE_USE_FP6
 #ifdef TENSILE_USE_BF6
-                             || (std::is_same<BFloat6x32, AType>::value && std::is_same<BFloat6x32, BType>::value)
+                                       || (std::is_same<BFloat6x16, AType>::value
+                                           && std::is_same<BFloat6x16, BType>::value)
 #endif // #ifdef TENSILE_USE_BF6
 #ifdef TENSILE_USE_FP4
-                             || (std::is_same<Float4x2, AType>::value && std::is_same<Float4x2, BType>::value)
+                                       || (std::is_same<Float4x2, AType>::value
+                                           && std::is_same<Float4x2, BType>::value)
 #endif // #ifdef TENSILE_USE_FP4
-                             , bool> = true>
-        Accumulator multiply(
-            ContractionProblemGemm const& problem,
-            ContractionInputs const&      inputs,
-            AType const* aPtr,
-            BType const* bPtr,
-            const size_t aIdx,
-            const size_t bIdx,
-            const bool aConjugate,
-            const bool bConjugate)
+                                       ,
+                                   bool> = true>
+        Accumulator multiply(ContractionProblemGemm const& problem,
+                             ContractionInputs const&      inputs,
+                             AType const*                  aPtr,
+                             BType const*                  bPtr,
+                             const size_t                  aIdx,
+                             const size_t                  bIdx,
+                             const bool                    aConjugate,
+                             const bool                    bConjugate)
         {
             size_t aPackIdx = aIdx / TypeInfo<AType>::Packing;
             size_t aElemIdx = aIdx % TypeInfo<AType>::Packing;
@@ -1523,7 +1531,9 @@ namespace TensileLite
 
                             size_t aIdx = aIndex + (aI * aStride);
                             size_t bIdx = bIndex + (bI * bStride);
-                            value += multiply<Inputs, Accumulator, MathOpAccum,
+                            value += multiply<Inputs,
+                                              Accumulator,
+                                              MathOpAccum,
                                               typename Inputs::AType,
                                               typename Inputs::BType,
                                               typename Inputs::ComputeInputType>(

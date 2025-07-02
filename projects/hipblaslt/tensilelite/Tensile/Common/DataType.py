@@ -225,7 +225,7 @@ class DataType:
             'nameAbbrev': 'fp6_fp6',
             'miOutTypeNameAbbrev': 'f32',
             'reg': 0.1875,
-            'hip': 'tensile_float6x32',
+            'hip': 'tensile_Float6x16',
             'isComplex': False
         },
         {
@@ -234,7 +234,7 @@ class DataType:
             'nameAbbrev': 'bf6_bf6',
             'miOutTypeNameAbbrev': 'f32',
             'reg': 0.1875,
-            'hip': 'tensile_bfloat6x32',
+            'hip': 'tensile_bFloat6x16',
             'isComplex': False
         },
         {
