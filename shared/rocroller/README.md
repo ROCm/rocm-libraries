@@ -324,7 +324,7 @@ Additionally, there are tests that run against guidepost kernels that have been 
 - Setting `ROCROLLER_ARCHITECTURE_FILE` will overwrite the default GPU architecture file generated at `source/rocRoller/GPUArchitecture_def.msgpack`. Currently supported file formats are YAML and Msgpack.
 - If your kernel is running out of registers and you want to know how close you are to fitting, setting `ROCROLLER_IGNORE_OUT_OF_REGISTERS=1` will let you generate the complete kernel and look at where the peak register usage is and how high it is.
 - `ROCROLLER_ENFORCE_GRAPH_CONSTRAINTS` and `ROCROLLER_AUDIT_CONTROL_TRACERS` will enable some checks during graph creation and code generation that may expose some issues earlier. These are enabled by default in gtest/catch tests and in `rrperf run`.
-- Setting `AMD_COMGR_SAVE_TEMPS=1` `AMD_COMGR_EMIT_VERBOSE_LOGS=1` `AMD_COMGR_REDIRECT_LOGS=stdout` can help provide more assembler debug output.
+- Setting `AMD_COMGR_SAVE_TEMPS=1` `AMD_COMGR_EMIT_VERBOSE_LOGS=1` `AMD_COMGR_REDIRECT_LOGS=stderr` can help provide more assembler debug output.
 - Set `ROCROLLER_ASSEMBLER=Subprocess` and `ROCROLLER_DEBUG_ASSEMBLER_PATH=<assembler like amdclang>` to use an external assembler.
 
 

@@ -241,10 +241,12 @@ namespace rocRoller
              * associated with a JammedWaveTileNumber is squashed (set
              * to zero) when comparing unroll colouring.
              */
-            std::map<int, std::unordered_set<int>> findDuplicates(KernelGraph const&     graph,
-                                                                  UnrollColouring const& colouring,
-                                                                  auto const&            candidates,
-                                                                  bool squashJammedColours)
+            std::map<int, std::unordered_set<int>>
+                findDuplicates(KernelGraph const&                  graph,
+                               UnrollColouring const&              colouring,
+                               auto const&                         candidates,
+                               bool                                squashJammedColours,
+                               std::unordered_map<int, int> const& nodeOrders)
             {
                 using namespace LoadStoreSpecification;
 
@@ -258,9 +260,8 @@ namespace rocRoller
                     if(opSpecs.contains(spec))
                     {
                         auto originalOp = opSpecs[spec];
-                        auto ordering
-                            = graph.control.compareNodes(rocRoller::UpdateCache, op, originalOp);
-                        if(ordering == ControlGraph::NodeOrdering::LeftFirst)
+
+                        if(nodeOrders.at(originalOp) < nodeOrders.at(op))
                             opSpecs[spec] = op;
                     }
                     else
@@ -389,6 +390,55 @@ namespace rocRoller
             }
         }
 
+        template <typename... OperationTypes>
+        static void collectOrderedNodes(KernelGraph const&       graph,
+                                        std::unordered_set<int>& visited,
+                                        int                      tag,
+                                        std::vector<int>&        result)
+        {
+            auto traverse = [&]<typename EdgeType>() {
+                for(auto child : graph.control.getOutputNodeIndices<EdgeType>(tag))
+                {
+                    if(not visited.contains(child))
+                    {
+                        visited.insert(child);
+                        collectOrderedNodes<OperationTypes...>(graph, visited, child, result);
+                    }
+                }
+            };
+            traverse.template operator()<ControlGraph::Sequence>();
+            traverse.template operator()<ControlGraph::ForLoopIncrement>();
+            traverse.template operator()<ControlGraph::Else>();
+            traverse.template operator()<ControlGraph::Body>();
+            traverse.template operator()<ControlGraph::Initialize>();
+
+            bool const isTargetOperation
+                = (graph.control.get<OperationTypes>(tag).has_value() || ...);
+
+            if(isTargetOperation)
+            {
+                result.push_back(tag);
+            }
+        }
+
+        template <typename... OperationTypes>
+        std::vector<int> getOrderedNodes(KernelGraph const& graph)
+        {
+            auto roots = graph.control.roots().to<std::vector>();
+
+            std::vector<int> result;
+            if(roots.empty())
+                return result;
+
+            std::unordered_set<int> visited;
+            for(auto const& node : roots)
+            {
+                visited.insert(node);
+                collectOrderedNodes<OperationTypes...>(graph, visited, node, result);
+            }
+            return result;
+        }
+
         KernelGraph RemoveDuplicates::apply(KernelGraph const& original)
         {
             TIMER(t, "KernelGraph::RemoveDuplicates");
@@ -396,6 +446,13 @@ namespace rocRoller
             auto colouring = colourByUnrollValue(original);
             auto graph     = original;
             removeRedundantSequenceEdges(graph);
+
+            auto                         orderedNodes = getOrderedNodes<ControlGraph::LoadTiled,
+                                                ControlGraph::StoreLDSTile,
+                                                ControlGraph::LoadLDSTile>(graph);
+            std::unordered_map<int, int> nodeOrders;
+            for(int i = 0; i < orderedNodes.size(); i++)
+                nodeOrders.emplace(orderedNodes[i], i);
 
             // Two passes:
             //   1. Workgroup (LoadTiled and StoreLDSTile) and
@@ -409,16 +466,18 @@ namespace rocRoller
             Log::debug("RemoveDuplicates Workgroup pass");
             {
                 auto candidates = RD::getWGCandidates(original);
-                auto duplicates = RD::findDuplicates(original, colouring, candidates, true);
-                graph           = RD::removeDuplicates(graph, duplicates);
+                auto duplicates
+                    = RD::findDuplicates(original, colouring, candidates, true, nodeOrders);
+                graph = RD::removeDuplicates(graph, duplicates);
             }
 
             // LoadLDSTile operation on Wave tiles
             Log::debug("RemoveDuplicates Wave pass");
             {
                 auto candidates = RD::getWaveCandidates(original);
-                auto duplicates = RD::findDuplicates(original, colouring, candidates, false);
-                graph           = RD::removeDuplicates(graph, duplicates);
+                auto duplicates
+                    = RD::findDuplicates(original, colouring, candidates, false, nodeOrders);
+                graph = RD::removeDuplicates(graph, duplicates);
             }
 
             removeRedundantNOPs(graph);
