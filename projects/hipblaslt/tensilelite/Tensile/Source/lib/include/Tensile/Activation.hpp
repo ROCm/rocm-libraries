@@ -55,6 +55,7 @@ namespace TensileLite
         None = 0,
         Abs,
         Clippedrelu,
+        Clamp,
         Gelu,
         Leakyrelu,
         Relu,
