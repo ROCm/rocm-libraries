@@ -471,15 +471,79 @@ template<unsigned int BlockSize,
 ROCPRIM_DEVICE ROCPRIM_INLINE
 void histogram_global(SampleIterator                                   samples,
                       unsigned int                                     columns,
-                      unsigned int                                     rows,
                       unsigned int                                     row_stride,
                       fixed_array<Counter*, ActiveChannels>            histogram,
                       const fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
-                      const fixed_array<size_t, ActiveChannels>        bins_bits,
-                      const fixed_array<size_t, ActiveChannels>        bins,
-                      Counter*                                         private_histograms,
-                      const unsigned int                               virtual_max_blocks,
-                      unsigned int*                                    block_id_count)
+                      const fixed_array<size_t, ActiveChannels>        bins_bits)
+{
+    using sample_type        = typename std::iterator_traits<SampleIterator>::value_type;
+    using sample_vector_type = sample_vector<sample_type, Channels>;
+
+    constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
+
+    const unsigned int flat_id      = ::rocprim::detail::block_thread_id<0>();
+    const unsigned int block_id0    = ::rocprim::detail::block_id<0>();
+    const unsigned int block_id1    = ::rocprim::detail::block_id<1>();
+    const unsigned int block_offset = block_id0 * items_per_block;
+
+    samples += block_id1 * row_stride + Channels * block_offset;
+
+    sample_vector_type values[ItemsPerThread];
+    unsigned int       valid_count;
+    if(block_offset + items_per_block <= columns)
+    {
+        valid_count = items_per_block;
+        load_samples<BlockSize>(flat_id, samples, values);
+    }
+    else
+    {
+        valid_count = columns - block_offset;
+        load_samples<BlockSize>(flat_id, samples, values, valid_count);
+    }
+
+    ROCPRIM_UNROLL
+    for(unsigned int i = 0; i < ItemsPerThread; i++)
+    {
+        for(unsigned int channel = 0; channel < ActiveChannels; channel++)
+        {
+            size_t bin;
+            if(sample_to_bin_op[channel](values[i].values[channel], bin))
+            {
+                const unsigned int pos = flat_id * ItemsPerThread + i;
+                lane_mask_type     same_bin_lanes_mask
+                    = ::rocprim::match_any(bin, bins_bits[channel], pos < valid_count);
+
+                if(::rocprim::group_elect(same_bin_lanes_mask))
+                {
+                    // Write the number of lanes having this bin,
+                    // if the current lane is the first (and maybe only) lane with this bin.
+                    ::rocprim::detail::atomic_add(&histogram[channel][bin],
+                                                  ::rocprim::bit_count(same_bin_lanes_mask));
+                }
+            }
+        }
+    }
+}
+
+template<unsigned int BlockSize,
+         unsigned int ItemsPerThread,
+         unsigned int Channels,
+         unsigned int ActiveChannels,
+         class SampleIterator,
+         class Counter,
+         class SampleToBinOp>
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void histogram_private_global(SampleIterator                                   samples,
+                              unsigned int                                     columns,
+                              unsigned int                                     rows,
+                              unsigned int                                     row_stride,
+                              fixed_array<Counter*, ActiveChannels>            histogram,
+                              const fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
+                              const fixed_array<size_t, ActiveChannels>        bins_bits,
+                              const fixed_array<size_t, ActiveChannels>        bins,
+                              Counter*                                         private_histograms,
+                              const unsigned int                               virtual_max_blocks,
+                              unsigned int*                                    block_id_count)
 {
     using sample_type        = typename std::iterator_traits<SampleIterator>::value_type;
     using sample_vector_type = sample_vector<sample_type, Channels>;
