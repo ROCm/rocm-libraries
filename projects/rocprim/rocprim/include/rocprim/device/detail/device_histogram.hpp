@@ -41,7 +41,7 @@ namespace detail
 {
 
 // Special wrapper for passing fixed-length arrays (i.e. T values[Size]) into kernels
-template<class T, unsigned int Size>
+template<class T, size_t Size>
 class fixed_array
 {
 private:
@@ -56,12 +56,12 @@ public:
         }
     }
 
-    ROCPRIM_HOST_DEVICE T& operator[](unsigned int index)
+    ROCPRIM_HOST_DEVICE T& operator[](size_t index)
     {
         return values[index];
     }
 
-    ROCPRIM_HOST_DEVICE const T& operator[](unsigned int index) const
+    ROCPRIM_HOST_DEVICE const T& operator[](size_t index) const
     {
         return values[index];
     }
@@ -70,14 +70,17 @@ public:
 template<class Level, class Enable = void>
 struct sample_to_bin_even
 {
-    unsigned int bins;
-    Level        lower_level;
-    Level        upper_level;
-    Level        scale;
+    size_t bins;
+    Level  lower_level;
+    Level  upper_level;
+    Level  scale;
 
-    ROCPRIM_HOST_DEVICE sample_to_bin_even() = default;
+    ROCPRIM_HOST_DEVICE
+    sample_to_bin_even()
+        = default;
 
-    ROCPRIM_HOST_DEVICE sample_to_bin_even(unsigned int bins, Level lower_level, Level upper_level)
+    ROCPRIM_HOST_DEVICE
+    sample_to_bin_even(size_t bins, Level lower_level, Level upper_level)
         : bins(bins)
         , lower_level(lower_level)
         , upper_level(upper_level)
@@ -85,12 +88,12 @@ struct sample_to_bin_even
     {}
 
     template<class Sample>
-    ROCPRIM_HOST_DEVICE bool operator()(Sample sample, unsigned int& bin) const
+    ROCPRIM_HOST_DEVICE bool operator()(Sample sample, size_t& bin) const
     {
         const Level s = static_cast<Level>(sample);
         if(s >= lower_level && s < upper_level)
         {
-            bin = static_cast<unsigned int>((s - lower_level) / scale);
+            bin = static_cast<size_t>((s - lower_level) / scale);
             return true;
         }
         return false;
@@ -103,16 +106,17 @@ struct sample_to_bin_even<
     Level,
     typename std::enable_if<std::is_integral<Level>::value && (sizeof(Level) <= 4)>::type>
 {
-    unsigned int  bins;
+    size_t        bins;
     Level         lower_level;
     Level         upper_level;
     uint_fast_div scale;
 
-    ROCPRIM_HOST_DEVICE inline sample_to_bin_even() = default;
+    ROCPRIM_HOST_DEVICE
+    inline sample_to_bin_even()
+        = default;
 
-    ROCPRIM_HOST_DEVICE inline sample_to_bin_even(unsigned int bins,
-                                                  Level        lower_level,
-                                                  Level        upper_level)
+    ROCPRIM_HOST_DEVICE
+    inline sample_to_bin_even(size_t bins, Level lower_level, Level upper_level)
         : bins(bins)
         , lower_level(lower_level)
         , upper_level(upper_level)
@@ -120,12 +124,13 @@ struct sample_to_bin_even<
     {}
 
     template<class Sample>
-    ROCPRIM_HOST_DEVICE inline bool operator()(Sample sample, unsigned int& bin) const
+    ROCPRIM_HOST_DEVICE
+    inline bool operator()(Sample sample, size_t& bin) const
     {
         const Level s = static_cast<Level>(sample);
         if(s >= lower_level && s < upper_level)
         {
-            bin = static_cast<unsigned int>(s - lower_level) / scale;
+            bin = static_cast<size_t>(s - lower_level) / scale;
             return true;
         }
         return false;
@@ -137,16 +142,17 @@ template<class Level>
 struct sample_to_bin_even<Level,
                           typename std::enable_if<rocprim::is_floating_point<Level>::value>::type>
 {
-    unsigned int bins;
-    Level        lower_level;
-    Level        upper_level;
-    Level        inv_scale;
+    size_t bins;
+    Level  lower_level;
+    Level  upper_level;
+    Level  inv_scale;
 
-    ROCPRIM_HOST_DEVICE inline sample_to_bin_even() = default;
+    ROCPRIM_HOST_DEVICE
+    inline sample_to_bin_even()
+        = default;
 
-    ROCPRIM_HOST_DEVICE inline sample_to_bin_even(unsigned int bins,
-                                                  Level        lower_level,
-                                                  Level        upper_level)
+    ROCPRIM_HOST_DEVICE
+    inline sample_to_bin_even(size_t bins, Level lower_level, Level upper_level)
         : bins(bins)
         , lower_level(lower_level)
         , upper_level(upper_level)
@@ -154,12 +160,13 @@ struct sample_to_bin_even<Level,
     {}
 
     template<class Sample>
-    ROCPRIM_HOST_DEVICE inline bool operator()(Sample sample, unsigned int& bin) const
+    ROCPRIM_HOST_DEVICE
+    inline bool operator()(Sample sample, size_t& bin) const
     {
         const Level s = static_cast<Level>(sample);
         if(s >= lower_level && s < upper_level)
         {
-            bin = static_cast<unsigned int>((s - lower_level) * inv_scale);
+            bin = static_cast<size_t>((s - lower_level) * inv_scale);
             return true;
         }
         return false;
@@ -191,17 +198,21 @@ ROCPRIM_HOST_DEVICE inline unsigned int upper_bound(const T* values, unsigned in
 template<class Level>
 struct sample_to_bin_range
 {
-    unsigned int bins;
+    size_t       bins;
     const Level* level_values;
 
-    ROCPRIM_HOST_DEVICE inline sample_to_bin_range() = default;
+    ROCPRIM_HOST_DEVICE
+    inline sample_to_bin_range()
+        = default;
 
-    ROCPRIM_HOST_DEVICE inline sample_to_bin_range(unsigned int bins, const Level* level_values)
+    ROCPRIM_HOST_DEVICE
+    inline sample_to_bin_range(size_t bins, const Level* level_values)
         : bins(bins), level_values(level_values)
     {}
 
     template<class Sample>
-    ROCPRIM_HOST_DEVICE inline bool operator()(Sample sample, unsigned int& bin) const
+    ROCPRIM_HOST_DEVICE
+    inline bool operator()(Sample sample, size_t& bin) const
     {
         const Level s = static_cast<Level>(sample);
         bin           = upper_bound(level_values, bins + 1, s) - 1;
@@ -307,13 +318,13 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void
 
 template<unsigned int BlockSize, unsigned int ActiveChannels, class Counter>
 ROCPRIM_DEVICE ROCPRIM_INLINE
-void init_histogram(fixed_array<Counter*, ActiveChannels>           histogram,
-                    const fixed_array<unsigned int, ActiveChannels> bins)
+void init_histogram(fixed_array<Counter*, ActiveChannels>     histogram,
+                    const fixed_array<size_t, ActiveChannels> bins)
 {
     const unsigned int flat_id  = ::rocprim::detail::block_thread_id<0>();
     const unsigned int block_id = ::rocprim::detail::block_id<0>();
 
-    const unsigned int index = block_id * BlockSize + flat_id;
+    const size_t index = block_id * BlockSize + flat_id;
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
         if(index < bins[channel])
@@ -339,7 +350,7 @@ void histogram_shared(SampleIterator                                   samples,
                       unsigned int                                     shared_histograms,
                       fixed_array<Counter*, ActiveChannels>            histogram,
                       const fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
-                      const fixed_array<unsigned int, ActiveChannels>  bins,
+                      const fixed_array<size_t, ActiveChannels>        bins,
                       unsigned int*                                    block_histogram_start)
 {
     using sample_type        = typename std::iterator_traits<SampleIterator>::value_type;
@@ -392,7 +403,7 @@ void histogram_shared(SampleIterator                                   samples,
                 {
                     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
                     {
-                        unsigned int bin;
+                        size_t bin;
                         if(sample_to_bin_op[channel](values[i].values[channel], bin))
                         {
                             ::rocprim::detail::atomic_add(block_histogram[channel] + bin
@@ -416,7 +427,7 @@ void histogram_shared(SampleIterator                                   samples,
                     {
                         for(unsigned int channel = 0; channel < ActiveChannels; channel++)
                         {
-                            unsigned int bin;
+                            size_t bin;
                             if(sample_to_bin_op[channel](values[i].values[channel], bin))
                             {
                                 ::rocprim::detail::atomic_add(block_histogram[channel] + bin
@@ -458,18 +469,17 @@ template<unsigned int BlockSize,
          class Counter,
          class SampleToBinOp>
 ROCPRIM_DEVICE ROCPRIM_INLINE
-void histogram_global(SampleIterator                             samples,
-                      unsigned int                               columns,
-                      unsigned int                               rows,
-                      unsigned int                               row_stride,
-                      fixed_array<Counter*, ActiveChannels>      histogram,
+void histogram_global(SampleIterator                                   samples,
+                      unsigned int                                     columns,
+                      unsigned int                                     rows,
+                      unsigned int                                     row_stride,
+                      fixed_array<Counter*, ActiveChannels>            histogram,
                       const fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
-                      const fixed_array<unsigned int, ActiveChannels>  bins_bits,
-                      const fixed_array<unsigned int, ActiveChannels>  bins,
-                      unsigned int*                              private_histograms,
-                      const unsigned int                         max_blocks,
-                      const unsigned int                         virtual_max_blocks,
-                      unsigned int*                              block_id_count)
+                      const fixed_array<size_t, ActiveChannels>        bins_bits,
+                      const fixed_array<size_t, ActiveChannels>        bins,
+                      Counter*                                         private_histograms,
+                      const unsigned int                               virtual_max_blocks,
+                      unsigned int*                                    block_id_count)
 {
     using sample_type        = typename std::iterator_traits<SampleIterator>::value_type;
     using sample_vector_type = sample_vector<sample_type, Channels>;
@@ -478,14 +488,13 @@ void histogram_global(SampleIterator                             samples,
 
     const unsigned int flat_id       = ::rocprim::flat_block_thread_id();
     const unsigned int flat_block_id = ::rocprim::flat_block_id();
-    const unsigned int total_items   = rows * columns;
 
     __shared__
     unsigned int       block_id_count_shared;
 
     // starts of the first histogram for each channel
-    unsigned int* block_histogram[ActiveChannels];
-    unsigned int  total_bins = 0;
+    Counter* block_histogram[ActiveChannels];
+    size_t  total_bins = 0;
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
         block_histogram[channel] = private_histograms + total_bins;
@@ -526,7 +535,7 @@ void histogram_global(SampleIterator                             samples,
         {
             for(unsigned int channel = 0; channel < ActiveChannels; channel++)
             {
-                unsigned int bin;
+                size_t bin;
                 if(sample_to_bin_op[channel](values[i].values[channel], bin))
                 {
                     const unsigned int pos = flat_id * ItemsPerThread + i;
@@ -558,9 +567,9 @@ void histogram_global(SampleIterator                             samples,
 
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
-        for(unsigned int bin = flat_id; bin < bins[channel]; bin += BlockSize)
+        for(size_t bin = flat_id; bin < bins[channel]; bin += BlockSize)
         {
-            unsigned int total = block_histogram[channel][bin];
+            Counter total = block_histogram[channel][bin];
             if(total > 0)
             {
                 ::rocprim::detail::atomic_add(&histogram[channel][bin], total);

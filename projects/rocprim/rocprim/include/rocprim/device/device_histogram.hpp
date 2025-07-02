@@ -44,8 +44,13 @@ namespace detail
 
 template<class Config, unsigned int ActiveChannels, class Counter>
 ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.block_size) void
+<<<<<<< HEAD
     init_histogram_kernel(fixed_array<Counter*, ActiveChannels>           histogram,
                           const fixed_array<unsigned int, ActiveChannels> bins)
+=======
+    init_histogram_kernel(fixed_array<Counter*, ActiveChannels>     histogram,
+                          fixed_array<size_t, ActiveChannels> bins)
+>>>>>>> 86d06adef9 (Change types of private histogram and indexing of bins)
 {
     static constexpr histogram_config_params params = device_params<Config>();
 
@@ -67,7 +72,7 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.bl
                             unsigned int                                     shared_histograms,
                             fixed_array<Counter*, ActiveChannels>            histogram,
                             const fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
-                            const fixed_array<unsigned int, ActiveChannels>  bins)
+                            const fixed_array<size_t, ActiveChannels>        bins)
 {
     static constexpr histogram_config_params params = device_params<Config>();
 
@@ -106,10 +111,9 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.bl
                             unsigned int                                     row_stride,
                             fixed_array<Counter*, ActiveChannels>            histogram,
                             const fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
-                            const fixed_array<unsigned int, ActiveChannels>  bins_bits,
-                            const fixed_array<unsigned int, ActiveChannels>  bins,
-                            unsigned int*                                    private_histograms,
-                            unsigned int                                     max_blocks,
+                            const fixed_array<size_t, ActiveChannels>        bins_bits,
+                            const fixed_array<size_t, ActiveChannels>        bins,
+                            Counter*                                         private_histograms,
                             unsigned int                                     virtual_max_blocks,
                             unsigned int*                                    block_id_count)
 {
@@ -127,7 +131,6 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.bl
                                      bins_bits,
                                      bins,
                                      private_histograms,
-                                     max_blocks,
                                      virtual_max_blocks,
                                      block_id_count);
 }
@@ -173,17 +176,17 @@ inline hipError_t histogram_impl(void*          temporary_storage,
     const unsigned int blocks_x   = ::rocprim::detail::ceiling_div(columns, items_per_block);
     const unsigned int row_stride = row_stride_bytes / sizeof(sample_type);
 
-    unsigned int bins[ActiveChannels];
-    unsigned int bins_bits[ActiveChannels];
-    unsigned int total_shared_bins = 0;
-    unsigned int max_bins          = 0;
-    unsigned int total_bins        = 0;
+    size_t bins[ActiveChannels];
+    size_t bins_bits[ActiveChannels];
+    size_t total_shared_bins = 0;
+    size_t max_bins          = 0;
+    size_t total_bins        = 0;
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
         bins[channel] = levels[channel] - 1;
         bins_bits[channel]
             = static_cast<unsigned int>(std::log2(detail::next_power_of_two(bins[channel])));
-        const unsigned int size = bins[channel];
+        const size_t size = bins[channel];
         // Prevent LDS bank conflicts
         total_shared_bins += rocprim::detail::is_power_of_two(size) ? size + 1 : size;
         total_bins += size;
@@ -191,8 +194,7 @@ inline hipError_t histogram_impl(void*          temporary_storage,
     }
 
     const bool use_shared_mem = total_shared_bins <= shared_impl_max_bins;
-
-    unsigned int* private_histograms = nullptr;
+    Counter* private_histograms = nullptr;
     unsigned int* block_id_count = nullptr;
     int global_histogram_grid_size = 0;
     unsigned int virtual_max_blocks = 0;
@@ -226,7 +228,7 @@ inline hipError_t histogram_impl(void*          temporary_storage,
             = rocprim::min(static_cast<unsigned int>(global_histogram_grid_size),
                            virtual_max_blocks);
 
-        const unsigned   size_private_histograms = total_bins * global_histogram_grid_size;
+        const size_t size_private_histograms = total_bins * global_histogram_grid_size;
         const hipError_t partition_result        = detail::temp_storage::partition(
             temporary_storage,
             storage_size,
@@ -242,7 +244,7 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         // When using graphs private_histograms and block_id_count both returned a nullptr,
         // that is why a memset is directly done on temporary_storage.
         ROCPRIM_RETURN_ON_ERROR(
-            hipMemsetAsync(temporary_storage, 0, storage_size * sizeof(char), stream));
+            hipMemsetAsync(temporary_storage, 0, storage_size, stream));
 
         ROCPRIM_RETURN_ON_ERROR(
             hipMemcpyAsync(block_id_count, &global_histogram_grid_size, sizeof(unsigned int), hipMemcpyHostToDevice, stream));
@@ -267,7 +269,7 @@ inline hipError_t histogram_impl(void*          temporary_storage,
            dim3(block_size),
            0,
            stream>>>(fixed_array<Counter*, ActiveChannels>(histogram),
-                     fixed_array<unsigned int, ActiveChannels>(bins));
+                     fixed_array<size_t, ActiveChannels>(bins));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_histogram", max_bins, start);
 
     if(columns == 0 || rows == 0)
@@ -338,7 +340,7 @@ inline hipError_t histogram_impl(void*          temporary_storage,
                            chosen_shared_histograms,
                            fixed_array<Counter*, ActiveChannels>(histogram),
                            fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
-                           fixed_array<unsigned int, ActiveChannels>(bins));
+                           fixed_array<size_t, ActiveChannels>(bins));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_shared",
                                                     grid_size.x * grid_size.y * block_size,
                                                     start);
@@ -357,11 +359,11 @@ inline hipError_t histogram_impl(void*          temporary_storage,
                 row_stride,
                 fixed_array<Counter*, ActiveChannels>(histogram),
                 fixed_array<SampleToBinOp, ActiveChannels>(sample_to_bin_op),
-                fixed_array<unsigned int, ActiveChannels>(bins_bits),
-                fixed_array<unsigned int, ActiveChannels>(bins),
+                fixed_array<size_t, ActiveChannels>(bins_bits),
+                fixed_array<size_t, ActiveChannels>(bins),
                 private_histograms,
-                global_histogram_grid_size,
-                virtual_max_blocks, block_id_count);
+                virtual_max_blocks,
+                block_id_count);
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("histogram_global",
                                                     blocks_x * block_size * rows,
                                                     start);

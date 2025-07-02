@@ -76,7 +76,7 @@ void run_even_benchmark(benchmark_utils::state&& state,
     std::vector<T> input = generate<T>(size, entropy_reduction, lower_level, upper_level);
 
     common::device_ptr<T>            d_input(input);
-    common::device_ptr<counter_type> d_histogram(size);
+    common::device_ptr<counter_type> d_histogram(bins);
 
     size_t temporary_storage_bytes = 0;
     HIP_CHECK(rocprim::histogram_even(nullptr,
