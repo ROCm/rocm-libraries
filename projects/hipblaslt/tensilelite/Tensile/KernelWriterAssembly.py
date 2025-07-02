@@ -32,7 +32,7 @@ from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, \
                       DPPModifiers, vgpr, sgpr, accvgpr, mgpr, ContinuousRegister, \
                       HWRegContainer
 from rocisa.instruction import SGetPositivePCOffset, SLongBranchPositive, SCLongBranchScc0, SCLongBranchScc1, \
-                        SMulInt64to32, VCvtBF16toFP32
+                        SMulInt64to32, VCvtBF16toFP32, VCvtF32toI32, VCvtI32toF32
 from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUInt32CeilDivideAndRemainder, \
                         vectorStaticDivideAndRemainder, scalarStaticDivideAndRemainder, scalarStaticCeilDivide, \
                         scalarStaticRemainder, scalarUInt32DivideAndRemainder, sMagicDiv, vectorStaticMultiply, \
@@ -9177,8 +9177,22 @@ class KernelWriterAssembly(KernelWriter):
                   localWriteCVTCode.add(VCvtF16toF32(dst=vgpr(vgprTmp), src=paramList[0], sdwa=SDWAModifiers(src0_sel=src_sel), comment="convert to F32"))
 
                   # ScaleA/B
-                  if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and kernel["ProblemType"]["DataType%s"%tc].numRegisters() > kernel["ProblemType"]["DataType"].numRegisters():
-                    localWriteCVTCode.add(VMulF32(dst=vgpr(vgprTmp), src0=vgpr(vgprTmp), src1=sgpr("Scale%s"%tc), comment="Input *= scale %s"%tc))
+                  if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and (
+                    kernel["ProblemType"]["DataType%s"%tc].numRegisters() > kernel["ProblemType"]["DataType"].numRegisters() or
+                    # check if it is I8I8I
+                    (
+                     kernel["ProblemType"]["DataType%s"%tc].isInt8() and kernel["ProblemType"]["DestDataType%s"%tc].isInt8() and
+                     kernel["ProblemType"]["ComputeDataType"].isInt32()
+                    )
+                  ):
+                    if kernel["ProblemType"]["ComputeDataType"].isInt32():
+                      vgprTmpF32 = self.vgprPool.checkout(1)
+                      localWriteCVTCode.add(VCvtI32toF32(dst=vgpr(vgprTmpF32), src=vgpr(vgprTmp), comment="Convert int32 to fp32 for scalar scaling"))
+                      localWriteCVTCode.add(VMulF32(dst=vgpr(vgprTmpF32), src0=vgpr(vgprTmpF32), src1=sgpr("Scale%s"%tc), comment="Input *= scale %s"%tc))
+                      localWriteCVTCode.add(VCvtF32toI32(dst=vgpr(vgprTmp), src=vgpr(vgprTmpF32), comment="Convert fp32 back to int32 after apply scalar scaling"))
+                      self.vgprPool.checkin(vgprTmpF32)
+                    else:
+                      localWriteCVTCode.add(VMulF32(dst=vgpr(vgprTmp), src0=vgpr(vgprTmp), src1=sgpr("Scale%s"%tc), comment="Input *= scale %s"%tc))
 
                   if kernel["ProblemType"]["StochasticRounding"]:
                     vRand = vgprTmp+1 #seed
@@ -10986,8 +11000,12 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and \
         isSingleKernel and \
         ((kernel["ProblemType"]["DataTypeA"].numRegisters() <= kernel["ProblemType"]["DataType"].numRegisters()) or \
-        (kernel["ProblemType"]["DataTypeB"].numRegisters() <= kernel["ProblemType"]["DataType"].numRegisters())):
-        assert(kernel["ProblemType"]["ComputeDataType"].isSingle())
+        (kernel["ProblemType"]["DataTypeB"].numRegisters() <= kernel["ProblemType"]["DataType"].numRegisters()) or
+        (
+         kernel["ProblemType"]["ComputeDataType"].isInt32() and
+         kernel["ProblemType"]["DataType"].isInt8() and kernel["ProblemType"]["DestDataType"].isInt8()
+        )):
+        assert(kernel["ProblemType"]["ComputeDataType"].isSingle() or kernel["ProblemType"]["ComputeDataType"].isInt32())
         sgprScaleA = self.sgprPool.checkOut(1, preventOverflow=False)
         sgprScaleB = self.sgprPool.checkOut(1, preventOverflow=False)
         for i,name in enumerate(['A','B']):
@@ -11246,15 +11264,34 @@ class KernelWriterAssembly(KernelWriter):
 
       if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and (((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') and \
         ((kernel["ProblemType"]["DataTypeA"].numRegisters() <= kernel["ProblemType"]["DataType"].numRegisters()) or \
-        (kernel["ProblemType"]["DataTypeB"].numRegisters() <= kernel["ProblemType"]["DataType"].numRegisters())):
-        assert(kernel["ProblemType"]["ComputeDataType"].isSingle())
+        (kernel["ProblemType"]["DataTypeB"].numRegisters() <= kernel["ProblemType"]["DataType"].numRegisters()) or \
+        (
+         kernel["ProblemType"]["ComputeDataType"].isInt32() and
+         kernel["ProblemType"]["DataType"].isInt8() and kernel["ProblemType"]["DestDataType"].isInt8()
+        )):
+        assert(kernel["ProblemType"]["ComputeDataType"].isSingle() or kernel["ProblemType"]["ComputeDataType"].isInt32())
         newAlphaVgpr = self.vgprPool.checkOut(1)
         module.add(VMovB32(dst=vgpr(newAlphaVgpr), src=sgpr("Alpha")))
         module.add(SWaitCnt(lgkmcnt=0, kmcnt=0, comment="wait for scaleAB load"))
         if kernel["ProblemType"]["DataTypeA"].numRegisters() <= kernel["ProblemType"]["DataType"].numRegisters():
           module.add(VMulF32(dst=vgpr(newAlphaVgpr), src0=vgpr(newAlphaVgpr), src1=sgpr(sgprScaleA)))
+        else:
+          if kernel["ProblemType"]["ComputeDataType"].isInt32():
+            tmpAlphaF32 = self.vgprPool.checkout(1)
+            module.add(VCvtI32toF32(dst=vgpr(tmpAlphaF32), src=vgpr(newAlphaVgpr), comment="Convert int32 to fp32 for scalar scaling"))
+            module.add(VMulF32(dst=vgpr(tmpAlphaF32), src0=vgpr(tmpAlphaF32), src1=sgpr(sgprScaleA), comment="Input *= scale %s"%tc))
+            module.add(VCvtF32toI32(dst=vgpr(newAlphaVgpr), src=vgpr(tmpAlphaF32), comment="Convert fp32 back to int32 after apply scalar scaling"))
+            self.vgprPool.checkin(tmpAlphaF32)
         if kernel["ProblemType"]["DataTypeB"].numRegisters() <= kernel["ProblemType"]["DataType"].numRegisters():
           module.add(VMulF32(dst=vgpr(newAlphaVgpr), src0=vgpr(newAlphaVgpr), src1=sgpr(sgprScaleB)))
+        else:
+          if kernel["ProblemType"]["ComputeDataType"].isInt32():
+            tmpAlphaF32 = self.vgprPool.checkout(1)
+            module.add(VCvtI32toF32(dst=vgpr(tmpAlphaF32), src=vgpr(newAlphaVgpr), comment="Convert int32 to fp32 for scalar scaling"))
+            module.add(VMulF32(dst=vgpr(tmpAlphaF32), src0=vgpr(tmpAlphaF32), src1=sgpr(sgprScaleB), comment="Input *= scale %s"%tc))
+            module.add(VCvtF32toI32(dst=vgpr(newAlphaVgpr), src=vgpr(tmpAlphaF32), comment="Convert fp32 back to int32 after apply scalar scaling"))
+            self.vgprPool.checkin(tmpAlphaF32)
+
         module.add(SNop(waitState=0, comment="1 wait states"))
         if kernel["StreamK"] > 0:
           oldAlpha = self.sgprPool.checkOut(1)
@@ -11612,8 +11649,12 @@ class KernelWriterAssembly(KernelWriter):
 
       if kernel["ProblemType"]["UseScaleAB"] == "Scalar" and kernel["StreamK"] > 0 and \
         ((kernel["ProblemType"]["DataTypeA"].numRegisters() <= kernel["ProblemType"]["DataType"].numRegisters()) or \
-        (kernel["ProblemType"]["DataTypeB"].numRegisters() <= kernel["ProblemType"]["DataType"].numRegisters())):
-        assert(kernel["ProblemType"]["ComputeDataType"].isSingle())
+        (kernel["ProblemType"]["DataTypeB"].numRegisters() <= kernel["ProblemType"]["DataType"].numRegisters()) or \
+        (
+         kernel["ProblemType"]["ComputeDataType"].isInt32() and
+         kernel["ProblemType"]["DataType"].isInt8() and kernel["ProblemType"]["DestDataType"].isInt8()
+        )):
+        assert(kernel["ProblemType"]["ComputeDataType"].isSingle() or kernel["ProblemType"]["ComputeDataType"].isInt32())
         module.add(SMovB32(dst=sgpr("Alpha"), src=sgpr(oldAlpha), comment="Restore alpha value"))
         self.sgprPool.checkIn(oldAlpha)
 
