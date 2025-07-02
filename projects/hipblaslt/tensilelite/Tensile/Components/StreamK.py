@@ -21,14 +21,14 @@
 ################################################################################
 
 from rocisa.code import Module, Label
-from rocisa.container import vgpr, sgpr, SMEMModifiers, replaceHolder, EXEC,\
+from rocisa.container import vgpr, sgpr, SMEMModifiers, FLATModifiers, replaceHolder, EXEC,\
     VOP3PModifiers, ContinuousRegister
 from rocisa.instruction import SAddCU32, SAddI32, SAddU32, SAndB32, SBarrier, \
     SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, \
     SCmpGtU32, SCmpLeU32, SCmpLtU32, SCmpGeU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, \
     SMinU32, SMovB32, SMovB64, SMulI32, SNop, SSleep, SStoreB32, SSubU32, \
     SWaitCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, \
-    VReadfirstlaneB32, VCvtBF16toFP32
+    VReadfirstlaneB32, VCvtBF16toFP32, GStoreB32
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
     vectorStaticMultiply, BranchIfNotZero, scalarUInt32DivideAndRemainder
 
@@ -228,7 +228,7 @@ class StreamK(Component):
                 tmpSgpr0   = tmpSgprInfo.idx+1
                 tmpSgpr1   = tmpSgprInfo.idx+2
                 tmpSgpr2   = tmpSgprInfo.idx+0
-                tmpSgpr3   = tmpSgprInfo.idx+3                
+                tmpSgpr3   = tmpSgprInfo.idx+3
             module.addComment("Split Output Buffer offset: Free0 + (Free1-1)*StrideC1J + (Free2-1)*StrideCK * SplitIdx * bpe%s")
             # PartialIdx was saved in sgprBeta for re-use
             module.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgpr0), sgpr(tmpSgpr1), sgpr("SizesFree+0"), sgpr("SkPartialIdx"), comment="Free0"))
@@ -806,8 +806,16 @@ class StreamK(Component):
                 module.add(VReadfirstlaneB32(dst=sgpr(flagSgpr), src=vgpr("Serial"), comment="Wave 0 updates flags"))
                 module.add(SCmpEQU32(src0=sgpr(flagSgpr), src1=0, comment="Check for wave 0"))
                 module.add(SCBranchSCC0(labelName=skipFlagSet.getLabelName(), comment="Skip flag set"))
-                module.add(SMovB32(dst=sgpr(flagSgpr), src=1, comment="flag data"))
-                module.add(SStoreB32(src=sgpr(flagSgpr), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="set flag"))
+                # module.add(SMovB32(dst=sgpr(flagSgpr), src=1, comment="flag data"))
+                # module.add(SStoreB32(src=sgpr(flagSgpr), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="set flag"))
+                module.addComment1("-----------------masked vector store start---------------------")
+                module.add(VMovB32(dst=vgpr(tmpVgpr), src=1, comment="flag data"))
+                module.add(VMovB32(dst=vgpr(tmpVgpr+1), src=sgpr(tmpSgpr), comment="move offset"))
+                module.add(SMovB32(dst=EXEC(), src="0x00000001", comment="Set thread 0"))
+                module.add(GStoreB32(src=vgpr(tmpVgpr), base=sgpr("AddressFlags", 2), soffset=vgpr(tmpVgpr+1), flat=FLATModifiers(glc=True, slc=True, isStore=True), comment="set flag"))
+                module.add(SMovB32(dst=EXEC(), src="0xFFFFFFFF", comment="Reset exec mask"))
+                module.add(SWaitCnt(vmcnt=0, comment="wait for data store"))
+                module.addComment1("-----------------masked vector store end---------------------")
                 module.add(skipFlagSet)
             module.add(SWaitCnt(kmcnt=0, comment="wait for flag")) # TODO just for testing
 
@@ -1753,6 +1761,11 @@ class StreamKBasic(StreamK):
         xccMapping = Component.XCCMapping.find(writer)
         module.add(xccMapping(writer, kernel))
 
+        # Workaround not needed for gfx11x
+        module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
+        module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
+        module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
+
         module.add(SMovB32(dst=sgpr("StreamKIdx"), src=sgpr("WorkGroup0"), comment="Save original StreamK index"))
         # Basic SK
         module.add(SMulI32(dst=sgpr("StreamKIter"), src0=sgpr("StreamKIdx"), src1=sgpr("SKItersPerWG"), comment="StreamK starting iteration"))
@@ -1830,6 +1843,11 @@ class StreamKTwoTileOriginal(StreamK):
 
         xccMapping = Component.XCCMapping.find(writer)
         module.add(xccMapping(writer, kernel))
+
+        # Workaround not needed for gfx11x
+        module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
+        module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
+        module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
 
         module.add(SMovB32(dst=sgpr("StreamKIdx"), src=sgpr("WorkGroup0"), comment="Save original StreamK index"))
         # Two-tile SK (SK first)
@@ -1950,6 +1968,11 @@ class StreamKTwoTileDPFirst(StreamK):
         xccMapping = Component.XCCMapping.find(writer)
         module.add(xccMapping(writer, kernel))
 
+        # Workaround not needed for gfx11x
+        module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
+        module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
+        module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
+
         module.add(SMovB32(dst=sgpr("StreamKIdx"), src=sgpr("WorkGroup0"), comment="Save original StreamK index"))
         # Two-tile SK (DP first)
         # Do DP tiles before SK
@@ -1979,13 +2002,13 @@ class StreamKTwoTileDPFirst(StreamK):
         # if (partialIdx < extraIters) then (skIter = partialIdx * (itersPerWG + 1)) else (skIter = partialIdx * itersPerWG + extraIters)
         skHasExtraLabel = Label("SK_HasExtra", "")
         skDoneExtraLabel = Label("SK_DoneExtra", "")
-        
+
         # PartialIdx = itersPerTile % skSplit (skSplit is passed as SkSplit)
         # extraIters = ItersPerTile - SkSplit * skItersPerWG
         sSkExtraIters = writer.sgprPool.checkOut(1, "extraIters")
         module.add(SMulI32(dst=sgpr(sSkExtraIters), src0=sgpr("SkSplit"), src1=sgpr("SKItersPerWG")))
         module.add(SSubU32(dst=sgpr(sSkExtraIters), src0=sgpr("ItersPerTile"), src1=sgpr(sSkExtraIters), comment="extraIters = itersPerTile - SkSplit * skItersPerWG"))
-        
+
         module.add(SMulI32(dst=sgpr("StreamKIter"), src0=sgpr(stmpPartialIdx), src1=sgpr("SKItersPerWG"), comment="StreamK starting iteration (case: after extra iters)"))
         module.add(SCmpLtU32(src0=sgpr(stmpPartialIdx), src1=sgpr(sSkExtraIters), comment="Check if WG gets an extra iteration"))
         module.add(SCBranchSCC1(labelName=skHasExtraLabel.getLabelName(), comment="Has extra iter"))
@@ -2007,7 +2030,7 @@ class StreamKTwoTileDPFirst(StreamK):
         module.add(SMovB32(dst=sgpr("SkPartialIdx"), src=sgpr(stmpPartialIdx), comment="Save partial idx for SrdD calculation"))
         # Done init
         module.add(SBranch(labelName=skInitDone.getLabelName(), comment="Done init for parallel reduction"))
-        
+
         # # Save PratialIdx for later, skExtraIters is unused for partial reduction
         # module.add(SMovB32(dst=sgpr("skExtraIters"), src=sgpr(stmpPartialIdx), comment="Save partial idx for SrdD calculation"))
         # # StreamKIter = tile * itersPerTile + itersPerWG * partialIndex

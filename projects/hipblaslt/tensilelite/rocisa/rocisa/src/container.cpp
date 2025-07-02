@@ -276,10 +276,11 @@ void init_containers(nb::module_ m)
                 std::get<0>(t), std::get<1>(t), std::get<2>(t), std::get<3>(t), std::get<4>(t));
         });
     nb::class_<rocisa::FLATModifiers, rocisa::Container>(m_con, "FLATModifiers")
-        .def(nb::init<int, bool, bool, bool, bool>(),
+        .def(nb::init<int, bool, bool, bool, bool, bool>(),
              nb::arg("offset12") = 0,
              nb::arg("glc")      = false,
              nb::arg("slc")      = false,
+             nb::arg("dlc")      = false,
              nb::arg("lds")      = false,
              nb::arg("isStore")  = false)
         .def_rw("isStore", &rocisa::FLATModifiers::isStore)
@@ -290,14 +291,18 @@ void init_containers(nb::module_ m)
              })
         .def("__getstate__",
              [](const rocisa::FLATModifiers& self) {
-                 return std::make_tuple(self.offset12, self.glc, self.slc, self.lds, self.isStore);
+                 return std::make_tuple(
+                     self.offset12, self.glc, self.slc, self.dlc, self.lds, self.isStore);
              })
-        .def(
-            "__setstate__",
-            [](rocisa::FLATModifiers& self, std::tuple<int, bool, bool, bool, bool> t) {
-                new(&self) rocisa::FLATModifiers(
-                    std::get<0>(t), std::get<1>(t), std::get<2>(t), std::get<3>(t), std::get<4>(t));
-            });
+        .def("__setstate__",
+             [](rocisa::FLATModifiers& self, std::tuple<int, bool, bool, bool, bool, bool> t) {
+                 new(&self) rocisa::FLATModifiers(std::get<0>(t),
+                                                  std::get<1>(t),
+                                                  std::get<2>(t),
+                                                  std::get<3>(t),
+                                                  std::get<4>(t),
+                                                  std::get<5>(t));
+             });
 
     nb::class_<rocisa::GLOBALModifiers, rocisa::Container>(m_con, "GLOBALModifiers")
         .def(nb::init<int>(),
@@ -318,11 +323,12 @@ void init_containers(nb::module_ m)
              });
 
     nb::class_<rocisa::MUBUFModifiers, rocisa::Container>(m_con, "MUBUFModifiers")
-        .def(nb::init<bool, int, bool, bool, bool, bool, bool>(),
+        .def(nb::init<bool, int, bool, bool, bool, bool, bool, bool>(),
              nb::arg("offen")    = false,
              nb::arg("offset12") = 0,
              nb::arg("glc")      = false,
              nb::arg("slc")      = false,
+             nb::arg("dlc")      = false,
              nb::arg("nt")       = false,
              nb::arg("lds")      = false,
              nb::arg("isStore")  = false)
@@ -332,27 +338,34 @@ void init_containers(nb::module_ m)
              [](const rocisa::MUBUFModifiers& self, nb::dict&) {
                  return rocisa::MUBUFModifiers(self);
              })
-        .def(
-            "__getstate__",
-            [](const rocisa::MUBUFModifiers& self) {
-                return std::make_tuple(
-                    self.offen, self.offset12, self.glc, self.slc, self.nt, self.lds, self.isStore);
-            })
+        .def("__getstate__",
+             [](const rocisa::MUBUFModifiers& self) {
+                 return std::make_tuple(self.offen,
+                                        self.offset12,
+                                        self.glc,
+                                        self.slc,
+                                        self.dlc,
+                                        self.nt,
+                                        self.lds,
+                                        self.isStore);
+             })
         .def("__setstate__",
-             [](rocisa::MUBUFModifiers&                             self,
-                std::tuple<bool, int, bool, bool, bool, bool, bool> t) {
+             [](rocisa::MUBUFModifiers&                                   self,
+                std::tuple<bool, int, bool, bool, bool, bool, bool, bool> t) {
                  new(&self) rocisa::MUBUFModifiers(std::get<0>(t),
                                                    std::get<1>(t),
                                                    std::get<2>(t),
                                                    std::get<3>(t),
                                                    std::get<4>(t),
                                                    std::get<5>(t),
-                                                   std::get<6>(t));
+                                                   std::get<6>(t),
+                                                   std::get<7>(t));
              });
 
     nb::class_<rocisa::SMEMModifiers, rocisa::Container>(m_con, "SMEMModifiers")
-        .def(nb::init<bool, bool, int>(),
+        .def(nb::init<bool, bool, bool, int>(),
              nb::arg("glc")    = false,
+             nb::arg("dlc")    = false,
              nb::arg("nv")     = false,
              nb::arg("offset") = 0)
         .def("__str__", &rocisa::SMEMModifiers::toString)
@@ -362,10 +375,11 @@ void init_containers(nb::module_ m)
              })
         .def("__getstate__",
              [](const rocisa::SMEMModifiers& self) {
-                 return std::make_tuple(self.glc, self.nv, self.offset);
+                 return std::make_tuple(self.glc, self.dlc, self.nv, self.offset);
              })
-        .def("__setstate__", [](rocisa::SMEMModifiers& self, std::tuple<bool, bool, int> t) {
-            new(&self) rocisa::SMEMModifiers(std::get<0>(t), std::get<1>(t), std::get<2>(t));
+        .def("__setstate__", [](rocisa::SMEMModifiers& self, std::tuple<bool, bool, bool, int> t) {
+            new(&self) rocisa::SMEMModifiers(
+                std::get<0>(t), std::get<1>(t), std::get<2>(t), std::get<3>(t));
         });
 
     nb::class_<rocisa::SDWAModifiers, rocisa::Container>(m_con, "SDWAModifiers")

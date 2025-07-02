@@ -276,6 +276,26 @@ inline std::map<std::string, int>
                           assemblerPath,
                           "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null, offen offset:0, glc",
                           isDebug);
+    rv["HasDLCModifier"]
+        = tryAssembler(isaVersion,
+                       assemblerPath,
+                       "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0, offen offset:0, dlc",
+                       isDebug)
+          || tryAssembler(isaVersion,
+                          assemblerPath,
+                          "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null, offen offset:0, dlc",
+                          isDebug);
+    rv["HasSCOPEModifier"]
+        = tryAssembler(
+              isaVersion,
+              assemblerPath,
+              "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0, offen offset:0, scope:SCOPE_DEV",
+              isDebug)
+          || tryAssembler(
+              isaVersion,
+              assemblerPath,
+              "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null, offen offset:0, scope:SCOPE_DEV",
+              isDebug);
     rv["HasMUBUFConst"] = tryAssembler(isaVersion,
                                        assemblerPath,
                                        "buffer_load_dword v40, v36, s[24:27], 1 offen offset:0",
