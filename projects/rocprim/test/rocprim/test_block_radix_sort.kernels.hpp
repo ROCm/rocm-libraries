@@ -32,6 +32,7 @@
 #include "test_utils.hpp"
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
+#include "test_utils_sort_checker.hpp"
 #include "test_utils_sort_comparator.hpp"
 
 #include <rocprim/block/block_load_func.hpp>
@@ -242,16 +243,6 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 0>::type
                                            common::generate_limits<key_type>::max(),
                                            rng_engine);
 
-        // Calculate expected results on host
-        std::vector<key_type> expected(keys_output.get(), keys_output.get() + size);
-        for(size_t i = 0; i < size / items_per_block; i++)
-        {
-            std::stable_sort(
-                expected.begin() + (i * items_per_block),
-                expected.begin() + ((i + 1) * items_per_block),
-                test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
-        }
-
         // Preparing device
         common::device_ptr<key_type> device_keys_output(keys_output, size);
 
@@ -263,6 +254,35 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 0>::type
                                                           end_bit);
         HIP_CHECK(hipGetLastError());
 
+        auto device_start = std::chrono::steady_clock::now();
+
+        bool all_blocks_sorted = true;
+        for(size_t b = 0; b < grid_size; ++b)
+        {
+            all_blocks_sorted &= test_utils::device_sort_check(
+                device_keys_output.get() + b * items_per_block,
+                items_per_block,
+                test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
+        }
+        ASSERT_TRUE(all_blocks_sorted);
+
+        auto device_end = std::chrono::steady_clock::now();
+
+        auto elapsed_device
+            = std::chrono::duration_cast<std::chrono::microseconds>(device_end - device_start);
+
+        auto host_start = std::chrono::steady_clock::now();
+
+        // Calculate expected results on host
+        std::vector<key_type> expected(keys_output.get(), keys_output.get() + size);
+        for(size_t i = 0; i < size / items_per_block; i++)
+        {
+            std::stable_sort(
+                expected.begin() + (i * items_per_block),
+                expected.begin() + ((i + 1) * items_per_block),
+                test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
+        }
+
         // Getting results to host
         keys_output = device_keys_output.load_to_unique_ptr();
 
@@ -271,6 +291,16 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 0>::type
                                                       keys_output.get() + size,
                                                       expected.begin(),
                                                       expected.end()));
+
+        auto host_end = std::chrono::steady_clock::now();
+
+        auto elapsed_host
+            = std::chrono::duration_cast<std::chrono::microseconds>(host_end - host_start);
+
+        std::cout << "device: " << elapsed_device.count() << " host: " << elapsed_host.count()
+                  << " host/device is "
+                  << 100 * (elapsed_host.count() / (float)elapsed_device.count())
+                  << "% when size is " << size << std::endl;
     }
 }
 
