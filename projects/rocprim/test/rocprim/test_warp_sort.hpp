@@ -28,6 +28,7 @@
 #include "test_utils.hpp"
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
+#include "test_utils_sort_checker.hpp"
 
 #include <rocprim/config.hpp>
 #include <rocprim/detail/various.hpp>
@@ -91,16 +92,6 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, Sort)
         // Generate data
         std::vector<T> output = test_utils::get_random_data_wrapped<T>(size, 0, 100, seed_value);
 
-        // Calculate expected results on host
-        std::vector<T> expected(output);
-        binary_op_type binary_op;
-        for(size_t i = 0; i < output.size() / logical_warp_size / items_per_thread; i++)
-        {
-            std::sort(expected.begin() + (i * logical_warp_size * items_per_thread),
-                      expected.begin() + ((i + 1) * logical_warp_size * items_per_thread),
-                      binary_op);
-        }
-
         // Writing to device memory
         common::device_ptr<T> d_output(output);
 
@@ -115,6 +106,36 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, Sort)
 
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
+
+        binary_op_type binary_op;
+
+        auto device_start = std::chrono::steady_clock::now();
+
+        bool all_blocks_sorted = true;
+        for(size_t i = 0; i < output.size() / logical_warp_size / items_per_thread; i++)
+        {
+            all_blocks_sorted &= test_utils::device_sort_check(
+                d_output.get() + (i * logical_warp_size * items_per_thread),
+                logical_warp_size * items_per_thread,
+                binary_op);
+        }
+        ASSERT_TRUE(all_blocks_sorted);
+
+        auto device_end = std::chrono::steady_clock::now();
+
+        auto elapsed_device
+            = std::chrono::duration_cast<std::chrono::microseconds>(device_end - device_start);
+
+        auto host_start = std::chrono::steady_clock::now();
+
+        // Calculate expected results on host
+        std::vector<T> expected(output);
+        for(size_t i = 0; i < output.size() / logical_warp_size / items_per_thread; i++)
+        {
+            std::sort(expected.begin() + (i * logical_warp_size * items_per_thread),
+                      expected.begin() + ((i + 1) * logical_warp_size * items_per_thread),
+                      binary_op);
+        }
 
         // Read from device memory
         output = d_output.load();
