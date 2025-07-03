@@ -109,25 +109,6 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, Sort)
 
         binary_op_type binary_op;
 
-        auto device_start = std::chrono::steady_clock::now();
-
-        bool all_blocks_sorted = true;
-        for(size_t i = 0; i < output.size() / logical_warp_size / items_per_thread; i++)
-        {
-            all_blocks_sorted &= test_utils::device_sort_check(
-                d_output.get() + (i * logical_warp_size * items_per_thread),
-                logical_warp_size * items_per_thread,
-                binary_op);
-        }
-        ASSERT_TRUE(all_blocks_sorted);
-
-        auto device_end = std::chrono::steady_clock::now();
-
-        auto elapsed_device
-            = std::chrono::duration_cast<std::chrono::microseconds>(device_end - device_start);
-
-        auto host_start = std::chrono::steady_clock::now();
-
         // Calculate expected results on host
         std::vector<T> expected(output);
         for(size_t i = 0; i < output.size() / logical_warp_size / items_per_thread; i++)
