@@ -20884,13 +20884,10 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmmStridedBatched_64(hipblasHandle_t    
     Note about memory allocation:
     When trsm is launched with a k evenly divisible by the internal block size of 128,
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
-    memory found in the handle to increase overall performance. This memory can be managed by using
-    the environment variable ROCBLAS_DEVICE_MEMORY_SIZE. If it is equal to 0 or unset, it lets rocBLAS
-    manage the device memory. It uses a default size, like 32MiB or 128MiB, and expands it when necessary.
-    If it is greater than 0, it sets the default handle device memory size to the specified size (in bytes).
-    Under these circumstances it is recommended that ROCBLAS_DEVICE_MEMORY_SIZE be set
-    to the desired chunk of right hand sides to be used at a time
-    (where k is m when HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT.
+    memory found in the handle to increase overall performance (where k is m when
+    HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT). For more information on
+    pre-allocated memory in the handle please see the Device Memory Allocation
+    in rocBLAS section of the rocBLAS API Reference.
 
     - Supported precisions in rocBLAS : s,d,c,z
     - Supported precisions in cuBLAS  : s,d,c,z
@@ -21079,13 +21076,10 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsm_64(hipblasHandle_t         handle,
     Note about memory allocation:
     When trsm is launched with a k evenly divisible by the internal block size of 128,
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
-    memory found in the handle to increase overall performance. This memory can be managed by using
-    the environment variable ROCBLAS_DEVICE_MEMORY_SIZE. If it is equal to 0 or unset, it lets rocBLAS
-    manage the device memory. It uses a default size, like 32MiB or 128MiB, and expands it when necessary.
-    If it is greater than 0, it sets the default handle device memory size to the specified size (in bytes).
-    Under these circumstances it is recommended that ROCBLAS_DEVICE_MEMORY_SIZE be set
-    to the desired chunk of right hand sides to be used at a time
-    (where k is m when HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT).
+    memory found in the handle to increase overall performance (where k is m when
+    HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT). For more information on
+    pre-allocated memory in the handle please see the Device Memory Allocation
+    in rocBLAS section of the rocBLAS API Reference.
 
     - Supported precisions in rocBLAS : s,d,c,z
     - Supported precisions in cuBLAS  : s,d,c,z
@@ -21272,13 +21266,10 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsmBatched_64(hipblasHandle_t           
     Note about memory allocation:
     When trsm is launched with a k evenly divisible by the internal block size of 128,
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
-    memory found in the handle to increase overall performance. This memory can be managed by using
-    the environment variable ROCBLAS_DEVICE_MEMORY_SIZE. If it is equal to 0 or unset, it lets rocBLAS
-    manage the device memory. It uses a default size, like 32MiB or 128MiB, and expands it when necessary.
-    If it is greater than 0, it sets the default handle device memory size to the specified size (in bytes).
-    Under these circumstances it is recommended that ROCBLAS_DEVICE_MEMORY_SIZE be set
-    to the desired chunk of right hand sides to be used at a time.
-    (where k is m when HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT)
+    memory found in the handle to increase overall performance (where k is m when
+    HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT). For more information on
+    pre-allocated memory in the handle please see the Device Memory Allocation
+    in rocBLAS section of the rocBLAS API Reference.
 
     - Supported precisions in rocBLAS : s,d,c,z
     - Supported precisions in cuBLAS  : No support

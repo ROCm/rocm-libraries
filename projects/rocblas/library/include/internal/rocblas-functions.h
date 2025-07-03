@@ -19314,13 +19314,10 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrtri_strided_batched(rocblas_handle     
     Note about memory allocation:
     When trsm is launched with a k evenly divisible by the internal block size of 128,
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
-    memory found in the handle to increase overall performance. his memory can be managed by using
-    the environment variable ROCBLAS_DEVICE_MEMORY_SIZE. If it is equal to 0 or unset, it lets rocBLAS
-    manage the device memory. It uses a default size, like 32MiB or 128MiB, and expands it when necessary.
-    If it is greater than 0, it sets the default handle device memory size to the specified size (in bytes).
-    Under these circumstances it is recommended that ROCBLAS_DEVICE_MEMORY_SIZE be set
-    to the desired chunk of right hand sides to be used at a time
-    (where k is m when rocblas_side_left and is n when rocblas_side_right).
+    memory found in the handle to increase overall performance (where k is m
+    when rocblas_side_left and is n when rocblas_side_right). For more
+    information on pre-allocated memory in the handle please see the Device
+    Memory Allocation in rocBLAS section of :ref:api-reference-guide.
 
     Although not widespread, some gemm kernels used by trsm may use atomic operations.
     See Atomic Operations in the API Reference Guide for more information.
@@ -19514,13 +19511,10 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_64(rocblas_handle                han
     Note about memory allocation:
     When trsm is launched with a k evenly divisible by the internal block size of 128,
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
-    memory found in the handle to increase overall performance. This memory can be managed by using
-    the environment variable ROCBLAS_DEVICE_MEMORY_SIZE. If it is equal to 0 or unset, it lets rocBLAS
-    manage the device memory. It uses a default size, like 32MiB or 128MiB, and expands it when necessary.
-    If it is greater than 0, it sets the default handle device memory size to the specified size (in bytes).
-    Under these circumstances it is recommended that ROCBLAS_DEVICE_MEMORY_SIZE be set
-    to the desired chunk of right hand sides to be used at a time
-    (where k is m when rocblas_side_left and is n when rocblas_side_right).
+    memory found in the handle to increase overall performance (where k is m
+    when rocblas_side_left and is n when rocblas_side_right). For more
+    information on pre-allocated memory in the handle please see the Device
+    Memory Allocation in rocBLAS section of :ref:api-reference-guide.
 
     @param[in]
     handle    [rocblas_handle]
@@ -19709,13 +19703,11 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_batched_64(rocblas_handle           
     Note about memory allocation:
     When trsm is launched with a k evenly divisible by the internal block size of 128,
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
-    memory found in the handle to increase overall performance. This memory can be managed by using
-    the environment variable ROCBLAS_DEVICE_MEMORY_SIZE. If it is equal to 0 or unset, it lets rocBLAS
-    manage the device memory. It uses a default size, like 32MiB or 128MiB, and expands it when necessary.
-    If it is greater than 0, it sets the default handle device memory size to the specified size (in bytes).
-    Under these circumstances it is recommended that ROCBLAS_DEVICE_MEMORY_SIZE be set
-    to the desired chunk of right hand sides to be used at a time
-    (where k is m when rocblas_side_left and is n when rocblas_side_right).
+    memory found in the handle to increase overall performance (where k is m when
+    HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT). For more information on
+    pre-allocated memory in the handle please see the Device Memory Allocation
+    in rocBLAS section of the rocBLAS API Reference.
+
     @param[in]
     handle    [rocblas_handle]
               handle to the rocblas library context queue.
