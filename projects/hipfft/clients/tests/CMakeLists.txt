@@ -224,7 +224,7 @@ if (WIN32)
 endif()
 
 option(BUILD_CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)
-set(COVERAGE_TEST_OPTIONS "--smoketest" CACHE STRING "Command line arguments for hipfft-test when generating a code coverage report")
+set(COVERAGE_TEST_OPTIONS "--smoketest" CACHE STRING "Command line arguments for hipfft-test when generating a code coverage report (Note: an additional run of hipfft-test targeting multi_gpu* and callback* tests is always executed and coverage results are aggregated)")
 if (BUILD_CODE_COVERAGE)
   add_custom_target(
     code_cov_tests
@@ -232,6 +232,7 @@ if (BUILD_CODE_COVERAGE)
     COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/hipfft-coverage_%p.profraw" GTEST_LISTENER=NO_PASS_LINE_IN_LOG $<TARGET_FILE:hipfft-test> --precompile=./clients/staging/hipfft-test-precompile.db ${COVERAGE_TEST_OPTIONS}
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/hipfft-coverage_%p.profraw" GTEST_LISTENER=NO_PASS_LINE_IN_LOG $<TARGET_FILE:hipfft-test> --precompile=./clients/staging/hipfft-test-precompile-multi_gpu-plus-callback.db --gtest_filter=multi_gpu*:callback*
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 

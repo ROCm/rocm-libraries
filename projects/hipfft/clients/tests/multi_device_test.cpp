@@ -33,6 +33,9 @@ static const std::vector<std::vector<size_t>> multi_gpu_sizes = {
     {128, 256},
     {64, 128, 256},
 };
+static const std::vector<size_t>        multi_gpu_batch_range = {10, 1};
+static std::vector<std::vector<size_t>> ioffset_range_zero    = {{0, 0}};
+static std::vector<std::vector<size_t>> ooffset_range_zero    = {{0, 0}};
 
 enum SplitType
 {
@@ -71,22 +74,22 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
     auto params_complex                                        = param_generator_complex(test_prob,
                                                   multi_gpu_sizes,
                                                   precision_range_sp_dp,
-                                                  {1, 10},
+                                                  multi_gpu_batch_range,
                                                   stride_generator(stride_range),
                                                   stride_generator(stride_range),
-                                                  {{0, 0}},
-                                                  {{0, 0}},
-                                                  {fft_placement_inplace, fft_placement_notinplace},
+                                                  ioffset_range_zero,
+                                                  ooffset_range_zero,
+                                                  place_range,
                                                   false);
 
     auto params_real = param_generator_real(test_prob,
                                             multi_gpu_sizes,
                                             precision_range_sp_dp,
-                                            {1, 10},
+                                            multi_gpu_batch_range,
                                             stride_generator(stride_range),
                                             stride_generator(stride_range),
-                                            {{0, 0}},
-                                            {{0, 0}},
+                                            ioffset_range_zero,
+                                            ooffset_range_zero,
                                             {fft_placement_notinplace},
                                             false);
 
