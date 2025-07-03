@@ -55,18 +55,16 @@ struct PointerDiff
     }
 };
 
-template <typename T>
-struct NonCopyable {
+template<typename T>
+struct NonCopyable
+{
     T data;
 
-    __device__ __host__
-    NonCopyable() noexcept : data(T{}) {}
+    __device__ __host__ NonCopyable() noexcept : data(T{}) {}
 
-    __device__ __host__
-    NonCopyable(const T& data) noexcept : data(data) {}
+    __device__ __host__ NonCopyable(const T& data) noexcept : data(data) {}
 
-    __device__ __host__
-    NonCopyable(NonCopyable&& other) noexcept : data(std::move(other.data)) {}
+    __device__ __host__ NonCopyable(NonCopyable&& other) noexcept : data(std::move(other.data)) {}
 
     __device__ __host__
     NonCopyable&
@@ -113,10 +111,8 @@ struct HipcubDeviceTransformTests : public ::testing::Test
     static constexpr bool debug_synchronous = false;
 };
 
-using HipcubDeviceTransformTestsParams = ::testing::Types<
-    HipcubDeviceTransformParams<int32_t>,
-    HipcubDeviceTransformParams<float>
->;
+using HipcubDeviceTransformTestsParams
+    = ::testing::Types<HipcubDeviceTransformParams<int32_t>, HipcubDeviceTransformParams<float>>;
 
 TYPED_TEST_SUITE(HipcubDeviceTransformTests, HipcubDeviceTransformTestsParams);
 
@@ -215,8 +211,11 @@ TYPED_TEST(HipcubDeviceTransformTests, TransformAddrStableNonCopyable)
             HIP_CHECK(hipMemcpy(d_input, h_input.data(), num_input_bytes, hipMemcpyHostToDevice));
 
             // Do the thing
-            HIP_CHECK(
-                hipcub::DeviceTransform::TransformStableArgumentAddresses(d_input, d_output, size, unary_op{}, stream));
+            HIP_CHECK(hipcub::DeviceTransform::TransformStableArgumentAddresses(d_input,
+                                                                                d_output,
+                                                                                size,
+                                                                                unary_op{},
+                                                                                stream));
 
             // Fetch output
             HIP_CHECK(hipMemcpy(h_output.data(), d_output, num_output_bytes, hipMemcpyDeviceToHost))
@@ -252,7 +251,7 @@ TYPED_TEST(HipcubDeviceTransformTests, TransformAddrStablePointerDiff)
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             // Generate data
-            std::vector<input_type> h_input(size);
+            std::vector<input_type>  h_input(size);
             std::vector<output_type> h_output(size);
 
             // Device pointers
@@ -269,8 +268,11 @@ TYPED_TEST(HipcubDeviceTransformTests, TransformAddrStablePointerDiff)
             HIP_CHECK(hipMemcpy(d_input, h_input.data(), num_input_bytes, hipMemcpyHostToDevice));
 
             // Do the thing
-            HIP_CHECK(
-                hipcub::DeviceTransform::TransformStableArgumentAddresses(d_input, d_output, size, unary_op{d_input}, stream));
+            HIP_CHECK(hipcub::DeviceTransform::TransformStableArgumentAddresses(d_input,
+                                                                                d_output,
+                                                                                size,
+                                                                                unary_op{d_input},
+                                                                                stream));
 
             // Fetch output
             HIP_CHECK(hipMemcpy(h_output.data(), d_output, num_output_bytes, hipMemcpyDeviceToHost))

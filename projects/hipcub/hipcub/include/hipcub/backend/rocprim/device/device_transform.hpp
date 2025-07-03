@@ -34,11 +34,10 @@
 #include "../../../config.hpp"
 #include "../../../tuple.hpp"
 
-
-#include <rocprim/iterator/discard_iterator.hpp>
-#include <rocprim/iterator/counting_iterator.hpp>
-#include <rocprim/iterator/zip_iterator.hpp>
 #include <rocprim/device/device_transform.hpp>
+#include <rocprim/iterator/counting_iterator.hpp>
+#include <rocprim/iterator/discard_iterator.hpp>
+#include <rocprim/iterator/zip_iterator.hpp>
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -61,13 +60,15 @@ struct TransformStableAddrsImpl
         auto input_it = rocprim::make_zip_iterator(inputs);
 
         return rocprim::transform(
-            rocprim::counting_iterator<size_t>{}, 
-            rocprim::discard_iterator{}, 
-            num_items, 
-            [transform_op, input_it, output](size_t offset) {
-                output[offset] = std::move(rocprim::apply(transform_op, std::move(input_it[offset])));
+            rocprim::counting_iterator<size_t>{},
+            rocprim::discard_iterator{},
+            num_items,
+            [transform_op, input_it, output](size_t offset)
+            {
+                output[offset]
+                    = std::move(rocprim::apply(transform_op, std::move(input_it[offset])));
                 return rocprim::empty_type{};
-            }, 
+            },
             stream);
     }
 };
