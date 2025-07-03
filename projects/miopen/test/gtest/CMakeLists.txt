@@ -22,6 +22,10 @@ if(MIOPEN_BACKEND_OPENCL)
   set(SKIP_TESTS dumpTensorTest.cpp)
 endif()
 
+if(NOT MIOPEN_TEST_DISCRETE)
+  set(SKIP_TESTS ${SKIP_TESTS} unit_implicitgemm_ck_util.cpp)
+endif()
+
 function(add_gtest_negative_filter NEGATIVE_FILTER_TO_ADD)
     set (TMP_FILTER ${MIOPEN_GTEST_FILTER_NEGATIVE})
 
