@@ -299,31 +299,31 @@ inline void sort_keys_empty_data()
 
             if(descending)
             {
-                rocprim::segmented_radix_sort_keys_desc<config>(d_temporary_storage.get(),
-                                                                temporary_storage_bytes,
-                                                                d_keys.get(),
-                                                                d_keys.get(),
-                                                                size,
-                                                                segments_count,
-                                                                d_offsets.get(),
-                                                                d_offsets.get() + 1,
-                                                                start_bit,
-                                                                end_bit,
-                                                                stream);
+                HIP_CHECK(rocprim::segmented_radix_sort_keys_desc<config>(d_temporary_storage.get(),
+                                                                          temporary_storage_bytes,
+                                                                          d_keys.get(),
+                                                                          d_keys.get(),
+                                                                          size,
+                                                                          segments_count,
+                                                                          d_offsets.get(),
+                                                                          d_offsets.get() + 1,
+                                                                          start_bit,
+                                                                          end_bit,
+                                                                          stream));
             }
             else
             {
-                rocprim::segmented_radix_sort_keys<config>(d_temporary_storage.get(),
-                                                           temporary_storage_bytes,
-                                                           d_keys.get(),
-                                                           d_keys.get(),
-                                                           size,
-                                                           segments_count,
-                                                           d_offsets.get(),
-                                                           d_offsets.get() + 1,
-                                                           start_bit,
-                                                           end_bit,
-                                                           stream);
+                HIP_CHECK(rocprim::segmented_radix_sort_keys<config>(d_temporary_storage.get(),
+                                                                     temporary_storage_bytes,
+                                                                     d_keys.get(),
+                                                                     d_keys.get(),
+                                                                     size,
+                                                                     segments_count,
+                                                                     d_offsets.get(),
+                                                                     d_offsets.get() + 1,
+                                                                     start_bit,
+                                                                     end_bit,
+                                                                     stream));
             }
 
             const auto keys_output = d_keys.load();
