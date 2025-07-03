@@ -90,8 +90,7 @@ void sort_key_kernel(key_type*    device_keys_output,
 
     // Share LDS storage between all different sort invocations explicitely.
     // This resolves local memory allocation exceeding limits when targeting SPIR-V.
-    __shared__
-    typename block_radix_sort::storage_type storage;
+    __shared__ typename block_radix_sort::storage_type storage;
 
     // Sort differently depending on passed flags.
     if(to_striped)
@@ -153,8 +152,7 @@ void sort_key_value_kernel(key_type*    device_keys_output,
 
     // Share LDS storage between all different sort invocations explicitely.
     // This resolved local memory allocation exceeding limits when targeting SPIR-V.
-    __shared__
-    typename block_radix_sort::storage_type storage;
+    __shared__ typename block_radix_sort::storage_type storage;
 
     // Sort differently depending on passed flags.
     if(to_striped)
