@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+
+################################################################################
+#
+# MIT License
+#
+# Copyright 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+# ies of the Software, and to permit persons to whom the Software is furnished
+# to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+################################################################################
+
+from __future__ import print_function
+import grp
+import os
+import subprocess
+import argparse
+
+dockerfiles = {
+    "amdclang": "docker/dockerfile-ubuntu-amdclang",
+    "gcc": "docker/dockerfile-ubuntu-gcc",
+}
+
+
+def parseArgs():
+    parser = argparse.ArgumentParser(
+        description="Build and Run Project Docker Containers. "
+        "Run from root of git directory.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    parser.add_argument(
+        "--user", default=os.environ["USER"], help="Username to create in containers."
+    )
+    parser.add_argument(
+        "--uid", default=str(os.getuid()), help="UID to assign to the created user."
+    )
+    parser.add_argument(
+        "--git_user",
+        default=subprocess.getoutput(["git config user.name"]),
+        help="Username to set as the git user name in container.",
+    )
+    parser.add_argument(
+        "--git_email",
+        default=subprocess.getoutput(["git config user.email"]),
+        help="Email to set as git email in container.",
+    )
+
+    parser.add_argument(
+        "--image_prefix", default="mxdatagen", help="Prefix for image names."
+    )
+    parser.add_argument(
+        "--container_prefix", default="dev", help="Prefix for container name."
+    )
+
+    parser.add_argument(
+        "--user_dockerfile",
+        default="docker/user-image/Dockerfile",
+        help="User docker file.",
+    )
+
+    parser.add_argument(
+        "--privileged",
+        action="store_true",
+        help="Whether to run the container in privileged mode.",
+    )
+
+    parser.add_argument(
+        "--versions",
+        default=dockerfiles.keys(),
+        choices=dockerfiles.keys(),
+        nargs="+",
+        help="Which container versions to build.",
+    )
+
+    parser.add_argument(
+        "--context",
+        default="./",
+        help="What context to use when building the containers.",
+    )
+    parser.add_argument(
+        "--volumes",
+        default=[os.getcwd() + ":/data"],
+        action="append",
+        help="What volumes to mount to the container. e.g. /source:/dest",
+    )
+
+    parser.add_argument(
+        "--delete_existing_container",
+        action="store_true",
+        help="Whether to remove an already running container before launching a new one.",
+    )
+
+    parser.add_argument(
+        "--interactive_args",
+        default="-dt",
+        dest="interactive_arg",
+        help="Interactive args to pass to docker. E.g. -ti or -dt",
+    )
+    parser.add_argument(
+        "--docker_gpu_args",
+        default=None,
+        action="append",
+        help="Used to override default docker GPU args.",
+    )
+    parser.add_argument(
+        "--base_build_extra_args",
+        default=[],
+        action="append",
+        help="Used to pass extra args to the docker build of the base image.",
+    )
+    parser.add_argument(
+        "--user_build_extra_args",
+        default=[],
+        action="append",
+        help="Used to pass extra args to the docker build of the user image.",
+    )
+    parser.add_argument(
+        "--run_extra_args",
+        default=[],
+        action="append",
+        help="Used to pass extra args to the docker run of the user container.",
+    )
+
+    parser.add_argument(
+        "--skip_base_build",
+        action="store_true",
+        help="Whether to skip the base image build.",
+    )
+    parser.add_argument(
+        "--skip_user_build",
+        action="store_true",
+        help="Whether to skip the user image build.",
+    )
+    parser.add_argument(
+        "--skip_container_run",
+        action="store_true",
+        help="Whether to skip launching the container.",
+    )
+
+    parser.add_argument(
+        "--pull",
+        dest="base_build_extra_args",
+        action="append_const",
+        const="--pull",
+        help="Whether to try to pull newer base images",
+    )
+
+    parser.add_argument("command", nargs=argparse.REMAINDER)
+
+    return parser.parse_args()
+
+
+def buildImage(dockerfile, name, context="./", *args):
+    printAndRun(
+        ["docker", "build", "-t", name, "-f", dockerfile] + list(args) + [context]
+    )
+
+
+def get_render_group():
+    try:
+        return grp.getgrnam("render").gr_gid
+    except KeyError:
+        return None
+
+
+def get_render_group_args():
+    render_group = get_render_group()
+    if render_group is None:
+        return []
+
+    return ["-e", "_RENDER_GID=" + str(render_group)]
+
+
+def get_run_args(args, image_name, container_name):
+    volume_args = sum([["-v", volume] for volume in args.volumes], [])
+
+    env_args = [
+        "-e",
+        "_USER=" + args.user,
+        "-e",
+        "_UID=" + args.uid,
+        "-e",
+        "_GIT_USER=" + args.git_user,
+        "-e",
+        "_GIT_EMAIL=" + args.git_email,
+    ]
+
+    env_args += get_render_group_args()
+    if args.privileged:
+        env_args += ["--privileged"]
+
+    run_args = ["docker", "run"]
+    run_args += env_args
+    run_args += volume_args
+    run_args += [args.interactive_arg]
+    run_args += args.docker_gpu_args
+    run_args += ["--name", container_name, image_name + ":latest"]
+    run_args += args.run_extra_args
+    run_args += args.command
+
+    return run_args
+
+
+def main():
+    final_output = ""
+    args = parseArgs()
+
+    if args.docker_gpu_args is None:
+        args.docker_gpu_args = [
+            "--device=/dev/kfd",
+            "--device=/dev/dri",
+            "--security-opt=seccomp=unconfined",
+            "--net=host",
+        ]
+
+    if not args.git_user or not args.git_email:
+        final_output += (
+            "WARNING: Git configuration was not detectable, use 'git config' to set "
+            "user.name and user.email to have them automatically passed in.\n"
+        )
+
+    if len(args.command) > 0:
+        args.command = ["bash", "--login", "-c", " ".join(args.command)]
+
+    for version in args.versions:
+        base_image_name = "-".join([args.image_prefix, version])
+        user_image_name = "-".join([base_image_name, "user"])
+        container_name = "_".join([args.user, args.container_prefix, version])
+
+        if args.delete_existing_container:
+            printAndRun(["docker", "rm", "-f", container_name])
+
+        if not args.skip_base_build:
+            buildImage(
+                dockerfiles[version],
+                base_image_name,
+                args.context,
+                *args.base_build_extra_args
+            )
+
+        if not args.skip_user_build:
+            buildImage(
+                args.user_dockerfile,
+                user_image_name,
+                args.context,
+                "--build-arg",
+                "base_image=" + base_image_name,
+                *args.user_build_extra_args
+            )
+
+        if not args.skip_container_run:
+            run_args = get_run_args(args, user_image_name, container_name)
+            printAndRun(run_args)
+            final_output += (
+                " ".join(["docker exec -ti -u", args.user, container_name, "bash"])
+                + "\n"
+            )
+
+    if final_output:
+        print("Enter these containers with the following commands:")
+        print(final_output)
+
+
+def printAndRun(run_args):
+    print(" ".join(run_args))
+    subprocess.check_call(run_args)
+
+
+if __name__ == "__main__":
+    main()

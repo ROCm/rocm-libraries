@@ -568,7 +568,11 @@ TEST_CASE("combineShifts works", "[expression][expression-transformation]")
         {
             auto exp     = (argExp << literal(5u)) >> literal(4u);
             auto fastExp = fast(exp);
-            CHECK_THAT(fastExp, IdenticalTo(exp));
+            if(dataTypeInfo.isSigned)
+                CHECK_THAT(fastExp, IdenticalTo(exp));
+            else
+                CHECK_THAT(fastExp,
+                           IdenticalTo(logicalShiftR((argExp << literal(5u)), literal(4u))));
         }
 
         SECTION("Shift right then left masks off LSBs.")
@@ -594,7 +598,27 @@ TEST_CASE("combineShifts works", "[expression][expression-transformation]")
         {
             auto exp     = (argExp >> literal(2u)) << literal(5u);
             auto fastExp = fast(exp);
-            CHECK_THAT(fastExp, IdenticalTo(exp));
+            if(dataTypeInfo.isSigned)
+                CHECK_THAT(fastExp, IdenticalTo(exp));
+            else
+                CHECK_THAT(fastExp, IdenticalTo(logicalShiftR(argExp, literal(2u)) << literal(5u)));
+        }
+
+        SECTION("Direct combineShift with shift left then right (arithmetic) masks off MSBs for "
+                "unsigned.")
+        {
+            auto exp    = (argExp << literal(4u)) >> literal(4u);
+            auto newExp = combineShifts(exp);
+
+            auto maskExp = argExp & literal(0b00001111111111111111111111111111u, dataType);
+            if(dataTypeInfo.isSigned)
+            {
+                CHECK_THAT(newExp, IdenticalTo(exp));
+            }
+            else
+            {
+                CHECK_THAT(newExp, IdenticalTo(maskExp));
+            }
         }
     }
 
@@ -663,7 +687,10 @@ TEST_CASE("combineShifts works", "[expression][expression-transformation]")
         {
             auto exp     = (argExp << literal(5u)) >> literal(4u);
             auto fastExp = fast(exp);
-            CHECK_THAT(fastExp, IdenticalTo(exp));
+            if(dataTypeInfo.isSigned)
+                CHECK_THAT(fastExp, IdenticalTo(exp));
+            else
+                CHECK_THAT(fastExp, IdenticalTo(logicalShiftR(argExp << literal(5u), literal(4u))));
         }
 
         SECTION("Shift right then left masks off LSBs.")
@@ -692,7 +719,131 @@ TEST_CASE("combineShifts works", "[expression][expression-transformation]")
         {
             auto exp     = (argExp >> literal(2u)) << literal(5u);
             auto fastExp = fast(exp);
-            CHECK_THAT(fastExp, IdenticalTo(exp));
+            if(dataTypeInfo.isSigned)
+                CHECK_THAT(fastExp, IdenticalTo(exp));
+            else
+                CHECK_THAT(fastExp,
+                           IdenticalTo((logicalShiftR(argExp, literal(2u)) << literal(5u))));
         }
+
+        SECTION("Direct combineShift with shift left then right (arithmetic) masks off MSBs for "
+                "unsigned.")
+        {
+            auto exp    = (argExp << literal(4u)) >> literal(4u);
+            auto newExp = combineShifts(exp);
+
+            auto maskExp
+                = argExp
+                  & literal(0b0000111111111111111111111111111111111111111111111111111111111111ull,
+                            dataType);
+
+            if(dataTypeInfo.isSigned)
+            {
+                CHECK_THAT(newExp, IdenticalTo(exp));
+            }
+            else
+            {
+                CHECK_THAT(newExp, IdenticalTo(maskExp));
+            }
+        }
+    }
+}
+
+TEST_CASE("Simplify Shift ExpressionTransformation works",
+          "[expression][expression-transformation]")
+{
+    using namespace rocRoller;
+    auto context = TestContext::ForDefaultTarget();
+
+    auto zero = Expression::literal(0);
+    auto one  = Expression::literal(1);
+    auto a    = Expression::literal(33);
+    auto b    = Expression::literal(35);
+    auto c    = Expression::literal(30);
+    auto e    = Expression::literal(64);
+
+    SECTION("Shift right by more than 31 bits")
+    {
+        auto r = Register::Value::Placeholder(
+            context.get(), Register::Type::Vector, DataType::Int32, 1);
+        r->allocateNow();
+        auto v = r->expression();
+
+        auto expr = fuseAssociative(logicalShiftR(logicalShiftR(logicalShiftR(v, one), one), a));
+
+        CHECK_THAT(expr, IdenticalTo(logicalShiftR(v, b)));
+        auto expected = Expression::literal(0, DataType::Int32);
+        CHECK_THAT(simplify(expr), IdenticalTo(expected));
+    }
+
+    SECTION("Shift right by more than 63 bits")
+    {
+        auto r = Register::Value::Placeholder(
+            context.get(), Register::Type::Vector, DataType::Int64, 1);
+        r->allocateNow();
+        auto v = r->expression();
+
+        auto expr = fuseAssociative(logicalShiftR(logicalShiftR(logicalShiftR(v, one), a), c));
+
+        CHECK_THAT(expr, IdenticalTo(logicalShiftR(v, e)));
+        auto expected = Expression::literal(0, DataType::Int64);
+        CHECK_THAT(simplify(expr), IdenticalTo(expected));
+    }
+
+    SECTION("Shift left by more than 31 bits")
+    {
+        auto r = Register::Value::Placeholder(
+            context.get(), Register::Type::Vector, DataType::Int32, 1);
+        r->allocateNow();
+        auto v = r->expression();
+
+        auto expr     = v << a;
+        auto expected = Expression::literal(0, DataType::Int32);
+        CHECK_THAT(simplify(expr), IdenticalTo(expected));
+    }
+
+    SECTION("Shift left by more than 63 bits")
+    {
+        auto r = Register::Value::Placeholder(
+            context.get(), Register::Type::Vector, DataType::Int64, 1);
+        r->allocateNow();
+        auto v = r->expression();
+
+        auto expr     = v << e;
+        auto expected = Expression::literal(0, DataType::Int64);
+        CHECK_THAT(simplify(expr), IdenticalTo(expected));
+    }
+}
+
+TEST_CASE("LowerUnsignedArithmeticShiftR ExpressionTransformation works",
+          "[expression][expression-transformation]")
+{
+    using namespace rocRoller;
+    auto context = TestContext::ForDefaultTarget();
+
+    auto a = Expression::literal(21);
+
+    SECTION("Unsigned ArithmeticShiftR should be lowered to LogicalShiftR")
+    {
+        auto r = Register::Value::Placeholder(
+            context.get(), Register::Type::Vector, DataType::UInt32, 1);
+        r->allocateNow();
+        auto v = r->expression();
+
+        auto expr = std::make_shared<rocRoller::Expression::Expression>(
+            rocRoller::Expression::ArithmeticShiftR{v, a});
+        CHECK_THAT(lowerUnsignedArithmeticShiftR(expr), IdenticalTo(logicalShiftR(v, a)));
+    }
+
+    SECTION("Signed ArithmeticShiftR should NOT be lowered to LogicalShiftR")
+    {
+        auto r = Register::Value::Placeholder(
+            context.get(), Register::Type::Vector, DataType::Int32, 1);
+        r->allocateNow();
+        auto v = r->expression();
+
+        auto expr = std::make_shared<rocRoller::Expression::Expression>(
+            rocRoller::Expression::ArithmeticShiftR{v, a});
+        CHECK_THAT(lowerUnsignedArithmeticShiftR(expr), IdenticalTo(expr));
     }
 }

@@ -136,6 +136,8 @@ In order to achieve the goal of keeping the `develop` branch healthy, a team of 
 This team will collaborate to identify offending commits to isolate what changes need to be reverted.
 There may be occassions where bulk reverts may need to occur for more complex issues.
 
+See [docs/gardening.md](docs/gardening.md) for more information.
+
 ---
 
 ## Developer Communications

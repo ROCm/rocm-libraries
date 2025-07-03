@@ -21,7 +21,6 @@ on:
       - synchronize
       - reopened
       - ready_for_review
-      - labeled
     branches:
       - develop
       - staging
@@ -38,9 +37,9 @@ concurrency:
 
 jobs:
   dispatch-azure-ci:
-    if: ${{ github.event.action != 'labeled' || github.event.label.name == 'ci:azure' }}
     name: Dispatch Azure CI
     runs-on: ubuntu-latest
+    timeout-minutes: 720
     steps:
     - name: Generate a token
       id: generate-token
@@ -141,6 +140,7 @@ jobs:
 
     - name: Wait for and report Azure CI status
       if: steps.dispatch.outputs.run_ids
+      timeout-minutes: 720
       run: |
         run_ids=(${{ steps.dispatch.outputs.run_ids }})
         echo "Waiting on runs: ${run_ids[*]}"

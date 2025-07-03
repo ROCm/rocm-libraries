@@ -426,8 +426,8 @@ namespace rocRollerTest::Graphs
         params->prefetchLDSFactor             = m_problem.prefetchLDSFactor;
         params->prefetchMixMemOps             = m_problem.prefetchMixMemOps;
         // params->prefetchMixMemOps             = true;
-        params->transposeMemoryAccess[LayoutType::MATRIX_A] = m_problem.transA == "T";
-        params->transposeMemoryAccess[LayoutType::MATRIX_B] = m_problem.transB == "T";
+        params->transposeMemoryAccess.set(LayoutType::MATRIX_A, m_problem.transA == "T");
+        params->transposeMemoryAccess.set(LayoutType::MATRIX_B, m_problem.transB == "T");
         // params->transposeMemoryAccess[LayoutType::None]     = false;
 
         if(m_problem.streamK)

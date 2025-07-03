@@ -1081,6 +1081,15 @@ template <typename Ti, typename To, typename Tc>
 bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
 {
 #ifdef BUILD_WITH_HIPBLASLT
+    if constexpr(sizeof(Ti) >= 4)
+    {
+        // TODO remove after tuning
+        if(rocblas_internal_get_arch(prob.handle) == 950)
+        {
+            return false;
+        }
+    }
+
     bool batched = prob.batch_A != nullptr;
     return prob.handle->tryHipBLASLt(batched);
 #else
