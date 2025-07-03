@@ -28,7 +28,6 @@
 #include "test_seed.hpp"
 #include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
-#include "test_utils_sort_checker.hpp"
 #include "test_utils_sort_comparator.hpp"
 
 #include <rocprim/block/block_sort.hpp>
@@ -153,8 +152,7 @@ void TestSortKeyValue()
         {
             auto j = i;
             for(; j < output_key.size() && eq_op(output_key[j], output_key[i]); ++j)
-            {
-            }
+            {}
             std::sort(output_value.begin() + i, output_value.begin() + j, value_op);
             std::sort(expected_value.begin() + i, expected_value.begin() + j, value_op);
             i = j;
@@ -199,20 +197,27 @@ void TestSortKey(std::vector<size_t> sizes)
                 // hipMallocManaged() currently doesnt support zero byte allocation
                 continue;
             }
-
             // Generate data
             std::vector<key_type> output
                 = test_utils::get_random_data_wrapped<key_type>(size, -100, 100, seed_value);
 
+            // Calculate expected results on host
+            std::vector<key_type> expected(output);
+            binary_op_type        binary_op;
+            for(size_t i = 0; i < rocprim::detail::ceiling_div(output.size(), items_per_block); i++)
+            {
+                std::sort(expected.begin() + (i * items_per_block),
+                          expected.begin() + std::min(size, ((i + 1) * items_per_block)),
+                          binary_op);
+            }
+
             // Preparing device
             common::device_ptr<key_type> device_key_output(output);
 
+            const unsigned int grid_size = rocprim::detail::ceiling_div(size, items_per_block);
             // Running kernel, ignored if invalid size
             if(size > 0)
             {
-                const unsigned int grid_size = rocprim::detail::ceiling_div(size, items_per_block);
-                binary_op_type     binary_op;
-
                 hipLaunchKernelGGL(HIP_KERNEL_NAME(sort_keys_kernel<block_size,
                                                                     items_per_thread,
                                                                     key_type*,
@@ -224,40 +229,10 @@ void TestSortKey(std::vector<size_t> sizes)
                                    stream,
                                    device_key_output.get(),
                                    size);
+            }
 
-                auto device_start = std::chrono::steady_clock::now();
-
-                bool all_blocks_sorted = true;
-                for(size_t b = 0; b < grid_size; ++b)
-                {
-                    const size_t offset         = b * items_per_block;
-                    const size_t elems_in_block = std::min(items_per_block, (unsigned int) (size - offset));
-
-                    all_blocks_sorted
-                        &= test_utils::device_sort_check(device_key_output.get() + offset,
-                                                         elems_in_block,
-                                                         binary_op);
-                }
-                ASSERT_TRUE(all_blocks_sorted);
-
-                auto device_end = std::chrono::steady_clock::now();
-
-                auto elapsed_device = std::chrono::duration_cast<std::chrono::microseconds>(
-                    device_end - device_start);
-
-                auto host_start = std::chrono::steady_clock::now();
-
-                // Calculate expected results on host
-                std::vector<key_type> expected(output);
-                for(size_t i = 0; i < grid_size; i++)
-                {
-                    std::sort(expected.begin() + (i * items_per_block),
-                              expected.begin() + std::min(size, ((i + 1) * items_per_block)),
-                              binary_op);
-                }
-
-                // Reading results back
-                output = device_key_output.load();
+            // Reading results back
+            output = device_key_output.load();
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
         }
@@ -267,9 +242,8 @@ void TestSortKey(std::vector<size_t> sizes)
 struct less_tuple
 {
     template<class A, class B>
-    ROCPRIM_HOST_DEVICE
-    inline constexpr bool operator()(const rocprim::tuple<A, B>& a,
-                                     const rocprim::tuple<A, B>& b) const
+    ROCPRIM_HOST_DEVICE inline constexpr bool operator()(const rocprim::tuple<A, B>& a,
+                                                         const rocprim::tuple<A, B>& b) const
     {
         return rocprim::get<0>(a) < rocprim::get<0>(b);
     }
@@ -454,7 +428,7 @@ typed_test_def(suite_name,
     static constexpr const rocprim::block_sort_algorithm algo = TEST_BLOCK_SORT_ALGORITHM;
     static constexpr const unsigned int                  block_size       = TestFixture::block_size;
     static constexpr const unsigned int                  items_per_thread = 4;
-    std::vector<size_t>                                  sizes
+    std::vector<size_t> sizes
         = {0, 53, 512, 5000, 34567, (1 << 17) - 1220, 1134 * 256, (1 << 20) - 123};
     TestSortKey<block_size, items_per_thread, key_type, value_type, algo, binary_op_type>(sizes);
 }

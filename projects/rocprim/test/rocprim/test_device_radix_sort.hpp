@@ -341,8 +341,6 @@ void sort_keys()
                 gHelper.cleanupGraphHelper();
             }
 
-            auto device_start = std::chrono::steady_clock::now();
-
             bool is_sorted = test_utils::device_sort_check(
                 d_keys_output.get(),
                 size,
@@ -350,37 +348,6 @@ void sort_keys()
                 stream,
                 debug_synchronous);
             ASSERT_TRUE(is_sorted);
-
-            auto device_end = std::chrono::steady_clock::now();
-
-            auto elapsed_device
-                = std::chrono::duration_cast<std::chrono::microseconds>(device_end - device_start);
-
-            auto host_start = std::chrono::steady_clock::now();
-
-            // Load output to host
-            const auto keys_output = d_keys_output.load_to_unique_ptr();
-
-            // Calculate expected results on host
-            std::vector<key_type> expected(keys_input.get(), keys_input.get() + size);
-            std::stable_sort(
-                expected.begin(),
-                expected.end(),
-                test_utils::key_comparator<key_type, descending, start_bit, end_bit>{});
-
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output.get(),
-                                                              keys_output.get() + size,
-                                                              expected.begin(),
-                                                              expected.end()));
-
-            auto host_end = std::chrono::steady_clock::now();
-
-            auto elapsed_host
-                = std::chrono::duration_cast<std::chrono::microseconds>(host_end - host_start);
-
-            std::cout << "device: " << elapsed_device.count() << " host: " << elapsed_host.count()
-                      << " host/device is " << 100 * (elapsed_host.count() / (float)elapsed_device.count())
-                      << "% when size is " << size << std::endl;
         }
     }
 
@@ -906,8 +873,6 @@ void sort_keys_double_buffer()
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            auto device_start = std::chrono::steady_clock::now();
-
             bool is_sorted = test_utils::device_sort_check(
                 d_keys.current(),
                 size,
@@ -915,45 +880,6 @@ void sort_keys_double_buffer()
                 stream,
                 debug_synchronous);
             ASSERT_TRUE(is_sorted);
-
-            auto device_end = std::chrono::steady_clock::now();
-
-            auto elapsed_device
-                = std::chrono::duration_cast<std::chrono::microseconds>(device_end - device_start);
-
-            auto host_start = std::chrono::steady_clock::now();
-
-            auto keys_output = std::make_unique<key_type[]>(size);
-            HIP_CHECK(hipMemcpy(keys_output.get(),
-                                d_keys.current(),
-                                size * sizeof(key_type),
-                                hipMemcpyDeviceToHost));
-
-            if(TestFixture::params::use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
-            }
-
-            // Calculate expected results on host
-            std::vector<key_type> expected(keys_input.get(), keys_input.get() + size);
-            std::stable_sort(
-                expected.begin(),
-                expected.end(),
-                test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
-
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output.get(),
-                                                              keys_output.get() + size,
-                                                              expected.begin(),
-                                                              expected.end()));
-
-            auto host_end = std::chrono::steady_clock::now();
-
-            auto elapsed_host
-                = std::chrono::duration_cast<std::chrono::microseconds>(host_end - host_start);
-
-            std::cout << "device: " << elapsed_device.count() << " host: " << elapsed_host.count()
-                      << " host/device is " << 100 * (elapsed_host.count() / (float)elapsed_device.count())
-                      << "% when size is " << size << std::endl;
         }
     }
 

@@ -222,25 +222,6 @@ inline void sort_keys()
                                                                      debug_synchronous));
             }
 
-            // auto device_start = std::chrono::steady_clock::now();
-
-            // bool all_blocks_sorted = true;
-            // for(size_t s = 0; s < segments_count; ++s)
-            // {
-            //     all_blocks_sorted &= test_utils::device_sort_check(
-            //         d_keys_output.get() + offsets[s],
-            //         offsets[s + 1] - offsets[s],
-            //         test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
-            // }
-            // ASSERT_TRUE(all_blocks_sorted);
-
-            // auto device_end = std::chrono::steady_clock::now();
-
-            // auto elapsed_device
-            //     = std::chrono::duration_cast<std::chrono::microseconds>(device_end - device_start);
-
-            auto host_start = std::chrono::steady_clock::now();
-
             // Calculate expected results on host
             std::vector<key_type> expected(keys_input);
             for(size_t i = 0; i < segments_count; i++)
@@ -254,16 +235,6 @@ inline void sort_keys()
             const auto keys_output = d_keys_output.load();
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
-
-            auto host_end = std::chrono::steady_clock::now();
-
-            auto elapsed_host
-                = std::chrono::duration_cast<std::chrono::microseconds>(host_end - host_start);
-
-            // std::cout << "device: " << elapsed_device.count() << " host: " << elapsed_host.count()
-            //           << " host/device is "
-            //           << 100 * (elapsed_host.count() / (float)elapsed_device.count())
-            //           << "% when size is " << size << std::endl;
         }
     }
 }
@@ -451,8 +422,6 @@ inline void sort_keys_large_segments()
                                                                  stream));
         }
 
-        auto device_start = std::chrono::steady_clock::now();
-
         bool all_blocks_sorted = true;
         for(size_t s = 0; s < segments_count; ++s)
         {
@@ -462,36 +431,6 @@ inline void sort_keys_large_segments()
                 test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
         }
         ASSERT_TRUE(all_blocks_sorted);
-
-        // auto device_end = std::chrono::steady_clock::now();
-
-        // auto elapsed_device
-        //     = std::chrono::duration_cast<std::chrono::microseconds>(device_end - device_start);
-
-        // auto host_start = std::chrono::steady_clock::now();
-
-        // // Calculate expected results on host
-        // std::vector<key_type> expected(keys_input);
-        // for(size_t i = 0; i < segments_count; i++)
-        // {
-        //     std::stable_sort(
-        //         expected.begin() + offsets[i],
-        //         expected.begin() + offsets[i + 1],
-        //         test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
-        // }
-
-        // const auto keys_output = d_keys_output.load();
-
-        // ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
-        // auto host_end = std::chrono::steady_clock::now();
-
-        // auto elapsed_host
-        //     = std::chrono::duration_cast<std::chrono::microseconds>(host_end - host_start);
-
-        // std::cout << "device: " << elapsed_device.count() << " host: " << elapsed_host.count()
-        //           << " host/device is "
-        //           << 100 * (elapsed_host.count() / (float)elapsed_device.count())
-        //           << "% when size is " << size << std::endl;
     }
 }
 
@@ -616,48 +555,19 @@ inline void sort_keys_unspecified_ranges()
                                                                      stream));
             }
 
-            auto device_start = std::chrono::steady_clock::now();
+            // Calculate expected results on host
+            std::vector<key_type> expected(keys_input);
+            for(size_t i = 0; i < segments_count; i++)
+            {
+                std::stable_sort(
+                    expected.begin() + begin_offsets[i],
+                    expected.begin() + end_offsets[i],
+                    test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
+            }
 
-            // bool all_blocks_sorted = true;
-            // for(size_t s = 0; s < segments_count; ++s)
-            // {
-            //     all_blocks_sorted &= test_utils::device_sort_check(
-            //         d_keys_output.get() + begin_offsets[s],
-            //         end_offsets[s] - begin_offsets[s],
-            //         test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
-            // }
-            // ASSERT_TRUE(all_blocks_sorted);
+            const auto keys_output = d_keys_output.load();
 
-            // auto device_end = std::chrono::steady_clock::now();
-
-            // auto elapsed_device
-            //     = std::chrono::duration_cast<std::chrono::microseconds>(device_end - device_start);
-
-            // auto host_start = std::chrono::steady_clock::now();
-
-            // // Calculate expected results on host
-            // std::vector<key_type> expected(keys_input);
-            // for(size_t i = 0; i < segments_count; i++)
-            // {
-            //     std::stable_sort(
-            //         expected.begin() + begin_offsets[i],
-            //         expected.begin() + end_offsets[i],
-            //         test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
-            // }
-
-            // const auto keys_output = d_keys_output.load();
-
-            // ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
-
-            // auto host_end = std::chrono::steady_clock::now();
-
-            // auto elapsed_host
-            //     = std::chrono::duration_cast<std::chrono::microseconds>(host_end - host_start);
-
-            // std::cout << "device: " << elapsed_device.count() << " host: " << elapsed_host.count()
-            //           << " host/device is "
-            //           << 100 * (elapsed_host.count() / (float)elapsed_device.count())
-            //           << "% when size is " << size << std::endl;
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
         }
     }
 }
@@ -1090,25 +1000,6 @@ inline void sort_keys_double_buffer()
                                                                      debug_synchronous));
             }
 
-            auto device_start = std::chrono::steady_clock::now();
-
-            bool all_blocks_sorted = true;
-            for(size_t s = 0; s < segments_count; ++s)
-            {
-                all_blocks_sorted &= test_utils::device_sort_check(
-                    d_keys.current() + offsets[s],
-                    offsets[s + 1] - offsets[s],
-                    test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
-            }
-            ASSERT_TRUE(all_blocks_sorted);
-
-            auto device_end = std::chrono::steady_clock::now();
-
-            auto elapsed_device
-                = std::chrono::duration_cast<std::chrono::microseconds>(device_end - device_start);
-
-            auto host_start = std::chrono::steady_clock::now();
-
             // Calculate expected results on host
             std::vector<key_type> expected(keys_input);
             for(size_t i = 0; i < segments_count; i++)
@@ -1126,16 +1017,6 @@ inline void sort_keys_double_buffer()
                                 hipMemcpyDeviceToHost));
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
-
-            auto host_end = std::chrono::steady_clock::now();
-
-            auto elapsed_host
-                = std::chrono::duration_cast<std::chrono::microseconds>(host_end - host_start);
-
-            std::cout << "device: " << elapsed_device.count() << " host: " << elapsed_host.count()
-                      << " host/device is "
-                      << 100 * (elapsed_host.count() / (float)elapsed_device.count())
-                      << "% when size is " << size << std::endl;
         }
     }
 }

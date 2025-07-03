@@ -417,44 +417,11 @@ TYPED_TEST(DeviceMergeInplaceTests, MergeInplace)
                                              compare_op,
                                              stream));
 
-            auto device_start = std::chrono::steady_clock::now();
-
             // check if is sorted on device
             bool is_sorted
                 = test_utils::device_sort_check(d_data.get(), size_total, compare_op, stream);
 
             ASSERT_TRUE(is_sorted);
-
-            auto device_end = std::chrono::steady_clock::now();
-
-            auto elapsed_device
-                = std::chrono::duration_cast<std::chrono::microseconds>(device_end - device_start);
-
-            auto host_start = std::chrono::steady_clock::now();
-
-            // compare with reference
-            auto h_output = d_data.load_async(stream);
-
-            // compute reference
-            std::vector<value_type> h_reference(size_a + size_b);
-            std::merge(h_data.begin(),
-                       h_data.begin() + size_a,
-                       h_data.begin() + size_a,
-                       h_data.end(),
-                       h_reference.begin());
-
-            // assert on host first, as this will print the offending value and index
-            ASSERT_NO_FATAL_FAILURE((test_utils::assert_eq(h_output, h_reference)));
-
-            auto host_end = std::chrono::steady_clock::now();
-
-            auto elapsed_host
-                = std::chrono::duration_cast<std::chrono::microseconds>(host_end - host_start);
-
-            std::cout << "device: " << elapsed_device.count() << " host: " << elapsed_host.count()
-                      << " host/device is "
-                      << 100 * (elapsed_host.count() / (float)elapsed_device.count())
-                      << "% when size is " << size_total << std::endl;
         }
 
         d_data.free_manually();

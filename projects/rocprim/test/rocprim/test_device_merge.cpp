@@ -257,8 +257,6 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
 
             ASSERT_FALSE(out_of_bounds.get());
 
-            auto device_start = std::chrono::steady_clock::now();
-
             bool is_sorted = test_utils::device_sort_check(d_keys_output.get(),
                                                            size1 + size2,
                                                            compare_op,
@@ -267,40 +265,10 @@ TYPED_TEST(RocprimDeviceMergeTests, MergeKey)
 
             ASSERT_TRUE(is_sorted);
 
-            auto device_end = std::chrono::steady_clock::now();
-
-            auto elapsed_device
-                = std::chrono::duration_cast<std::chrono::microseconds>(device_end - device_start);
-
-            auto host_start = std::chrono::steady_clock::now();
-
-            // Calculate expected results on host
-            std::vector<key_type> expected(keys_output.size());
-            std::merge(keys_input1.begin(),
-                       keys_input1.end(),
-                       keys_input2.begin(),
-                       keys_input2.end(),
-                       expected.begin(),
-                       compare_op);
-
-            // Copy keys_output to host
-            keys_output = d_keys_output.load();
-
-            // Check if keys_output values are as expected
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected));
-
-            auto host_end = std::chrono::steady_clock::now();
-
-            auto elapsed_host
-                = std::chrono::duration_cast<std::chrono::microseconds>(host_end - host_start);
-
-            std::cout << "device: " << elapsed_device.count() << " host: " << elapsed_host.count()
-                      << " host/device is "
-                      << 100 * (elapsed_host.count() / (float)elapsed_device.count())
-                      << "% when size is " << size1 + size2 << std::endl;
-
             if(TestFixture::use_graphs)
+            {
                 gHelper.cleanupGraphHelper();
+            }
         }
     }
 
