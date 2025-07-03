@@ -33,7 +33,6 @@ rocsparse_float_complex
 
 .. doxygenstruct:: rocsparse_float_complex
 
-
 rocsparse_double_complex
 ------------------------
 

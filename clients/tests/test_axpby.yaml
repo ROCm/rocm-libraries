@@ -57,6 +57,17 @@ Tests:
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
 - name: axpby
+  category: quick
+  function: axpby
+  indextype: *i32_i64
+  precision: *bfloat16_bfloat16_float32_xyt_precision
+  M: [1000]
+  nnz: [104, 278]
+  alpha: [0.1]
+  beta: [0.5]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+
+- name: axpby
   category: pre_checkin
   function: axpby
   indextype: *i32_i64
@@ -78,6 +89,17 @@ Tests:
   nnz: [11000]
   alpha: [0.3]
   beta: [0.0]
+  baseA: [rocsparse_index_base_zero]
+
+- name: axpby
+  category: pre_checkin
+  function: axpby
+  indextype: *i32_i64
+  precision: *bfloat16_bfloat16_float32_xyt_precision
+  M: [33205]
+  nnz: [15710]
+  alpha: [0.4]
+  beta: [1.0]
   baseA: [rocsparse_index_base_zero]
 
 - name: axpby
