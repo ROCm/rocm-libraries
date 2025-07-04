@@ -154,6 +154,7 @@ set(rocroller_src
     source/ExpressionTransformations/LowerBitfieldValues.cpp
     source/ExpressionTransformations/LowerExponential.cpp
     source/ExpressionTransformations/LowerPRNG.cpp
+    source/ExpressionTransformations/LowerUnsignedArithmeticShiftR.cpp
     source/ExpressionTransformations/PositionalArgumentPropagation.cpp
     source/ExpressionTransformations/RestoreCommandArguments.cpp
     source/ExpressionTransformations/Simplify.cpp

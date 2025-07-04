@@ -968,6 +968,8 @@ auto rocsparse_it_sparse_to_dense_dispatch(const Arguments& arg)
         {
         case rocsparse_datatype_f16_r:
             return TEST<int32_t, _Float16>{}(arg);
+        case rocsparse_datatype_bf16_r:
+            return TEST<int32_t, rocsparse_bfloat16>{}(arg);
         case rocsparse_datatype_f32_r:
             return TEST<int32_t, float>{}(arg);
         case rocsparse_datatype_f64_r:
@@ -980,7 +982,6 @@ auto rocsparse_it_sparse_to_dense_dispatch(const Arguments& arg)
         case rocsparse_datatype_u8_r:
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
-        case rocsparse_datatype_bf16_r:
             return TEST<void>{}(arg);
         }
     }
@@ -990,6 +991,8 @@ auto rocsparse_it_sparse_to_dense_dispatch(const Arguments& arg)
         {
         case rocsparse_datatype_f16_r:
             return TEST<int64_t, _Float16>{}(arg);
+        case rocsparse_datatype_bf16_r:
+            return TEST<int64_t, rocsparse_bfloat16>{}(arg);
         case rocsparse_datatype_f32_r:
             return TEST<int64_t, float>{}(arg);
         case rocsparse_datatype_f64_r:
@@ -1002,7 +1005,6 @@ auto rocsparse_it_sparse_to_dense_dispatch(const Arguments& arg)
         case rocsparse_datatype_u8_r:
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
-        case rocsparse_datatype_bf16_r:
             return TEST<void>{}(arg);
         }
     }
@@ -1028,6 +1030,8 @@ auto rocsparse_ijt_sparse_to_dense_dispatch(const Arguments& arg)
         {
         case rocsparse_datatype_f16_r:
             return TEST<int32_t, int32_t, _Float16>{}(arg);
+        case rocsparse_datatype_bf16_r:
+            return TEST<int32_t, int32_t, rocsparse_bfloat16>{}(arg);
         case rocsparse_datatype_f32_r:
             return TEST<int32_t, int32_t, float>{}(arg);
         case rocsparse_datatype_f64_r:
@@ -1040,7 +1044,6 @@ auto rocsparse_ijt_sparse_to_dense_dispatch(const Arguments& arg)
         case rocsparse_datatype_u8_r:
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
-        case rocsparse_datatype_bf16_r:
             return TEST<void>{}(arg);
         }
     }
@@ -1050,6 +1053,8 @@ auto rocsparse_ijt_sparse_to_dense_dispatch(const Arguments& arg)
         {
         case rocsparse_datatype_f16_r:
             return TEST<int64_t, int32_t, _Float16>{}(arg);
+        case rocsparse_datatype_bf16_r:
+            return TEST<int64_t, int32_t, rocsparse_bfloat16>{}(arg);
         case rocsparse_datatype_f32_r:
             return TEST<int64_t, int32_t, float>{}(arg);
         case rocsparse_datatype_f64_r:
@@ -1062,7 +1067,6 @@ auto rocsparse_ijt_sparse_to_dense_dispatch(const Arguments& arg)
         case rocsparse_datatype_u8_r:
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
-        case rocsparse_datatype_bf16_r:
             return TEST<void>{}(arg);
         }
     }
@@ -1072,6 +1076,8 @@ auto rocsparse_ijt_sparse_to_dense_dispatch(const Arguments& arg)
         {
         case rocsparse_datatype_f16_r:
             return TEST<int64_t, int64_t, _Float16>{}(arg);
+        case rocsparse_datatype_bf16_r:
+            return TEST<int64_t, int64_t, rocsparse_bfloat16>{}(arg);
         case rocsparse_datatype_f32_r:
             return TEST<int64_t, int64_t, float>{}(arg);
         case rocsparse_datatype_f64_r:
@@ -1084,7 +1090,6 @@ auto rocsparse_ijt_sparse_to_dense_dispatch(const Arguments& arg)
         case rocsparse_datatype_u8_r:
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
-        case rocsparse_datatype_bf16_r:
             return TEST<void>{}(arg);
         }
     }

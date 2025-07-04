@@ -39,6 +39,7 @@ jobs:
   dispatch-azure-ci:
     name: Dispatch Azure CI
     runs-on: ubuntu-latest
+    timeout-minutes: 720
     steps:
     - name: Generate a token
       id: generate-token
@@ -139,6 +140,7 @@ jobs:
 
     - name: Wait for and report Azure CI status
       if: steps.dispatch.outputs.run_ids
+      timeout-minutes: 720
       run: |
         run_ids=(${{ steps.dispatch.outputs.run_ids }})
         echo "Waiting on runs: ${run_ids[*]}"

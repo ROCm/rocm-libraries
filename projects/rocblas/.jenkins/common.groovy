@@ -63,6 +63,7 @@ def runCompileCommand(platform, project, jobName, settings, boolean sameOrg=fals
         if (env.CHANGE_TARGET == "develop" && pullRequest.labels.size() > 0)
         {
             labelOptions = pullRequest.labels.join(';')
+            labelOptions = labelOptions.replace(" ", "_")
             dynamicOptions = dynamicOptions + """ --ci_labels \"${labelOptions}\" """
         }
     }

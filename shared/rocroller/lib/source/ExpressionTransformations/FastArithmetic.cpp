@@ -48,6 +48,7 @@ namespace rocRoller
             x = simplify(x);
             x = lowerExponential(x);
             x = fastMultiplication(x);
+            x = lowerUnsignedArithmeticShiftR(x);
             x = fuseAssociative(x);
             x = combineShifts(x);
             x = fuseTernary(x);
