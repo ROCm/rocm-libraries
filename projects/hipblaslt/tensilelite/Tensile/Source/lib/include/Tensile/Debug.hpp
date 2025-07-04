@@ -93,6 +93,8 @@ namespace TensileLite
 
         bool gridBasedBatchExp() const;
 
+        bool disableStaggerU() const;
+
         __attribute__((always_inline)) inline void markerStart(const char* name) const
         {
 #ifdef Tensile_ENABLE_MARKER
@@ -142,6 +144,7 @@ namespace TensileLite
         bool        m_gridbasedKdTree     = false;
         bool        m_gridbasedBatchExp   = false;
         bool        m_printMarker         = false;
+        bool        m_disableStaggerU     = false;
 
         Debug();
     };
