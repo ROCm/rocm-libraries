@@ -181,6 +181,9 @@ namespace rocRoller
                     Parameters::Solution::LoadPath::BufferToLDSViaVGPR};
                 bool storeLDSD = true;
 
+                std::pair<uint, uint> padLDSA = {0u, 0u};
+                std::pair<uint, uint> padLDSB = {0u, 0u};
+
                 bool prefetch          = false;
                 int  prefetchInFlight  = 2;
                 int  prefetchLDSFactor = 0;
@@ -227,6 +230,11 @@ namespace rocRoller::Client::GEMMClient::CLI
 {
     constexpr bool PARSE_SUCCESS = true;
     constexpr bool PARSE_FAILURE = false;
+
+    /**
+     * @brief Parse an XxY pair.
+     */
+    bool ParseUIntPair(const std::string& arg, std::pair<uint, uint>& x);
 
     /**
      * @brief Parse an MxNxK or MxNxKxB tuple from a string.

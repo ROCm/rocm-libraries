@@ -252,6 +252,8 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "unroll_y", params.unrollY);
             iot::mapRequired(io, "load_A", params.loadPathA);
             iot::mapRequired(io, "load_B", params.loadPathB);
+            iot::mapRequired(io, "padLDS_A", params.padLDSA);
+            iot::mapRequired(io, "padLDS_B", params.padLDSB);
             iot::mapRequired(io, "storeLDS_D", params.storeLDSD);
             iot::mapRequired(io, "prefetch", params.prefetch);
             iot::mapRequired(io, "prefetchInFlight", params.prefetchInFlight);

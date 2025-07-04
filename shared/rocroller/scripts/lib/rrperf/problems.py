@@ -224,6 +224,9 @@ class GEMMSolution:
     storeLDS_D: bool = True
     betaInFma: bool = True
 
+    padLDS_A: int = -1
+    padLDS_B: int = -1
+
     scheduler: str = "Priority"
     schedulerCost: str = "LinearWeighted"
 

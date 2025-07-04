@@ -56,5 +56,9 @@ namespace CLI
             return rocRoller::Client::GEMMClient::CLI::ParseMKNL(s, v);
         }
 
+        inline bool lexical_cast(const std::string& s, std::pair<uint, uint>& v)
+        {
+            return rocRoller::Client::GEMMClient::CLI::ParseUIntPair(s, v);
+        }
     }
 }

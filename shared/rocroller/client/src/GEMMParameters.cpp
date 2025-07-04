@@ -306,6 +306,29 @@ namespace rocRoller
 
 namespace rocRoller::Client::GEMMClient::CLI
 {
+    bool ParseUIntPair(const std::string& arg, std::pair<uint, uint>& x)
+    {
+        if(arg.empty())
+            return PARSE_FAILURE;
+
+        std::regex  pattern(R"(\d+)x(\d+)");
+        std::smatch match;
+
+        bool matched = std::regex_match(arg, match, pattern);
+        if(matched)
+        {
+            x.first  = std::stoi(match[1]);
+            x.second = std::stoi(match[2]);
+        }
+        else
+        {
+            std::cerr << "Invalid format for XxY pair.\n" << std::endl;
+            return PARSE_FAILURE;
+        }
+
+        return PARSE_SUCCESS;
+    }
+
     bool ParseMNKB(const std::string& arg, rocRoller::Client::GEMMClient::MNKBTuple& x)
     {
         if(arg.empty())
