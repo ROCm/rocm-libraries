@@ -55,7 +55,6 @@ namespace TensileLite
         None = 0,
         Abs,
         Clippedrelu,
-        Clamp,
         Gelu,
         Leakyrelu,
         Relu,
@@ -65,6 +64,7 @@ namespace TensileLite
         Geluscaling,
         Silu,
         Swish,
+        Clamp,
         All,
         Hipblaslt_all,
         Exp, // Verification use only.

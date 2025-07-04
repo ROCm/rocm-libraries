@@ -155,9 +155,6 @@ class ActivationType:
                           ('clippedrelu', { \
                             'instance': ActivationTypeRegister('clippedrelu', False, 2, True,  True,  True,   False, False, False,  True), \
                             'supported_by': SupportedBy.TENSILE}), \
-                          ('clamp', { \
-                            'instance': ActivationTypeRegister('clamp', False, 2, True,  True,  True,   False, False, False,  True), \
-                            'supported_by': SupportedBy.TENSILE | SupportedBy.HIPBLASLT}), \
                           ('gelu', { \
                             'instance': ActivationTypeRegister('gelu', False, 0,        True,  True, False,   False, False, False, False), \
                             'supported_by': SupportedBy.TENSILE | SupportedBy.HIPBLASLT}), \
@@ -185,6 +182,9 @@ class ActivationType:
                           ('swish', { \
                             'instance': ActivationTypeRegister('swish', False, 1,        True,  True, False,   False, False, False, False), \
                             'supported_by': SupportedBy.TENSILE}), \
+                          ('clamp', { \
+                            'instance': ActivationTypeRegister('clamp', False, 2, True,  True,  True,   False, False, False,  True), \
+                            'supported_by': SupportedBy.TENSILE | SupportedBy.HIPBLASLT}), \
                           ('hipblaslt_all', { \
                             'instance': ActivationTypeRegister('hipblaslt_all', False, 0), \
                             'supported_by': SupportedBy.HIPBLASLT}), \
@@ -355,8 +355,6 @@ class ActivationModule:
             module = self.getAbsModule(cDataType, vgprIn, vgprOut)
         elif (activationType == 'clippedrelu'):
             module = self.getClippedReluModule(cDataType, vgprIn, vgprOut, "activationAlpha", "activationBeta")
-        elif (activationType == 'clamp'):
-            module = self.getClampModule(cDataType, vgprIn, vgprOut, "activationAlpha", "activationBeta")
         elif (activationType == 'exp'):
             module = self.getExpModule(cDataType, vgprIn, vgprOut)
         elif (activationType == 'gelu'):
@@ -377,6 +375,8 @@ class ActivationModule:
             module = self.getSiluModule(cDataType, vgprIn, vgprOut)
         elif (activationType == 'swish'):
             module = self.getSwishModule(cDataType, vgprIn, vgprOut, "activationAlpha")
+        elif (activationType == 'clamp'):
+            module = self.getClampModule(cDataType, vgprIn, vgprOut, "activationAlpha", "activationBeta")
         elif (activationType == 'none'):
             return Module("No activation")
         else:
@@ -525,35 +525,6 @@ class ActivationModule:
             module.add(VCmpGTI32(dst=VCC(), src0=self.vgprPrefix(vgprIn), src1=sgpr(activationAlpha), comment="x > alpha ?"))
             module.add(VMinI32(dst=self.vgprPrefix(vgprIn), src0=sgpr(activationBeta), src1=self.vgprPrefix(vgprIn), comment="min(x, beta)"))
             module.add(VCndMaskB32(dst=self.vgprPrefix(vgprIn), src0=0.0, src1=self.vgprPrefix(vgprIn), comment="set x to 0 if <= alpha"))
-        return module
-
-    def getClampModule(self, cDataType, vgprIn, vgprOut, activationAlpha, activationBeta):
-        module = Module("Clamp")
-        if cDataType.isDouble():
-            Vin, Vout = self.vgprPrefix(vgprIn, 2), self.vgprPrefix(vgprOut, 2)
-            alpha, beta = sgpr(activationAlpha, 2), sgpr(activationBeta, 2)
-        else:
-            Vin, Vout = self.vgprPrefix(vgprIn), self.vgprPrefix(vgprOut)
-            alpha, beta = sgpr(activationAlpha), sgpr(activationBeta)
-        if cDataType.isHalf():
-            MIN, MAX = VMinF16, VMaxF16
-        elif cDataType.isSingle():
-            MIN, MAX = VMinF32, VMaxF32
-        elif cDataType.isDouble():
-            MIN, MAX = VMinF64, VMaxF64
-        elif cDataType.isInt32():
-            MIN, MAX = VMinI32, VMaxI32
-
-        if cDataType.isHalf():
-            for i in range(0, 2):
-                select_bit = SelectBit.WORD_0 if i == 0 else SelectBit.WORD_1
-                sdwa = SDWAModifiers(dst_sel = select_bit, dst_unused = UnusedBit.UNUSED_PRESERVE,
-                                     src0_sel = select_bit, src1_sel = select_bit)
-                module.add(MIN(dst = Vout, src0 = beta, src1 = Vin, sdwa = sdwa, comment = "min(x, beta)"))
-                module.add(MAX(dst = Vout, src0 = alpha, src1 = Vout, sdwa = sdwa, comment = "max(alpha, min(x, beta))"))
-        else:
-            module.add(MIN(dst = Vout, src0 = beta, src1 = Vin, comment = "min(x, beta)"))
-            module.add(MAX(dst = Vout, src0 = alpha, src1 = Vout, comment = "max(alpha, min(x, beta))"))
         return module
 
     def getExpModule(self, cDataType, vgprIn, vgprOut):
@@ -899,6 +870,35 @@ class ActivationModule:
         module.add(mulFunction(dst=self.vgprPrefix(Holder(idx=vgprTempIn)), src0=self.vgprPrefix(vgprIn), src1=sgpr(activationAlpha), comment="x * beta"))
         module.addModuleAsFlatItems(self.getSigmoidModule(cDataType, Holder(idx=vgprTempIn), Holder(idx=vgprTempOut)))
         module.add(mulFunction(dst=self.vgprPrefix(vgprOut), src0=self.vgprPrefix(vgprIn), src1=self.vgprPrefix(Holder(idx=vgprTempOut)), comment="x / (1 + exp(-x * beta))"))
+        return module
+
+    def getClampModule(self, cDataType, vgprIn, vgprOut, activationAlpha, activationBeta):
+        module = Module("Clamp")
+        if cDataType.isDouble():
+            Vin, Vout = self.vgprPrefix(vgprIn, 2), self.vgprPrefix(vgprOut, 2)
+            alpha, beta = sgpr(activationAlpha, 2), sgpr(activationBeta, 2)
+        else:
+            Vin, Vout = self.vgprPrefix(vgprIn), self.vgprPrefix(vgprOut)
+            alpha, beta = sgpr(activationAlpha), sgpr(activationBeta)
+        if cDataType.isHalf():
+            MIN, MAX = VMinF16, VMaxF16
+        elif cDataType.isSingle():
+            MIN, MAX = VMinF32, VMaxF32
+        elif cDataType.isDouble():
+            MIN, MAX = VMinF64, VMaxF64
+        elif cDataType.isInt32():
+            MIN, MAX = VMinI32, VMaxI32
+
+        if cDataType.isHalf():
+            for i in range(0, 2):
+                select_bit = SelectBit.WORD_0 if i == 0 else SelectBit.WORD_1
+                sdwa = SDWAModifiers(dst_sel = select_bit, dst_unused = UnusedBit.UNUSED_PRESERVE,
+                                     src0_sel = select_bit, src1_sel = select_bit)
+                module.add(MIN(dst = Vout, src0 = beta, src1 = Vin, sdwa = sdwa, comment = "min(x, beta)"))
+                module.add(MAX(dst = Vout, src0 = alpha, src1 = Vout, sdwa = sdwa, comment = "max(alpha, min(x, beta))"))
+        else:
+            module.add(MIN(dst = Vout, src0 = beta, src1 = Vin, comment = "min(x, beta)"))
+            module.add(MAX(dst = Vout, src0 = alpha, src1 = Vout, comment = "max(alpha, min(x, beta))"))
         return module
 
     ################################################################################
@@ -1331,8 +1331,6 @@ class ActivationInline:
         kStr += (padSpacesStr + "value = (value > alpha) ? min(value, beta) : 0.0;\n")
       elif self.dataType.isInt32():
         kStr += (padSpacesStr + "value = (value > alpha) ? min(value, beta) : 0;\n")
-    elif (activationType == 'clamp'):
-      kStr += (padSpacesStr + "value = max(alpha, min(value, beta));\n")
     elif (activationType == 'exp'):
       kStr += (asm + " // Exp\n")
       module = activation.getExpModule(self.dataType, 0, 0)
@@ -1396,6 +1394,8 @@ class ActivationInline:
       kStr += self.getActivationAsmStr(activation, module, (len(asm) * " "))
       kStr += addSpace(asm, ": \"+v\"(value) : \"s\"(alpha)\n")
       kStr += self.getRequiredRegStr(asm, activation.vgprCounter, activation.sgprCounter)
+    elif (activationType == 'clamp'):
+      kStr += (padSpacesStr + "value = max(alpha, min(value, beta));\n")
     else:
       if (activationType != 'none'):
         raise RuntimeError("Unrecognized type %s."%activationType)
