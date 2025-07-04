@@ -430,6 +430,9 @@ namespace rocRoller
                     auto memoryTypeA = GetMemoryType(solutionParams.loadPathA);
                     auto memoryTypeB = GetMemoryType(solutionParams.loadPathB);
 
+                    params->padLDS[LayoutType::MATRIX_A] = solutionParams.padLDSA;
+                    params->padLDS[LayoutType::MATRIX_B] = solutionParams.padLDSB;
+
                     auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macK},
                         LayoutType::MATRIX_A,
