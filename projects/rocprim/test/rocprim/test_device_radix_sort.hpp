@@ -880,6 +880,11 @@ void sort_keys_double_buffer()
                 stream,
                 debug_synchronous);
             ASSERT_TRUE(is_sorted);
+
+            if(TestFixture::params::use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
         }
     }
 

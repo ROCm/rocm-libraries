@@ -219,7 +219,7 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 0>::type
     }
 
     const size_t size      = items_per_block * 19;
-    const size_t grid_size = size / items_per_block;
+    const size_t grid_size = rocprim::detail::ceiling_div(size, items_per_block);
 
     SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
     SCOPED_TRACE(testing::Message() << "with size = " << size);
@@ -297,7 +297,7 @@ auto test_block_radix_sort() -> typename std::enable_if<Method == 1>::type
     }
 
     const size_t size      = items_per_block * 19;
-    const size_t grid_size = size / items_per_block;
+    const size_t grid_size = rocprim::detail::ceiling_div(size, items_per_block);
 
     SCOPED_TRACE(testing::Message() << "with items_per_block = " << items_per_block);
     SCOPED_TRACE(testing::Message() << "with size = " << size);

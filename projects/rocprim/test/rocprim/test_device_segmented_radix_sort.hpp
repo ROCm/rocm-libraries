@@ -489,8 +489,8 @@ inline void sort_keys_unspecified_ranges()
             std::vector<offset_type> end_offsets(begin_offsets.cbegin() + 1, begin_offsets.cend());
             begin_offsets.pop_back();
 
-            size_t empty_segments
-                = std::min<size_t>(rocprim::max(segments_count / 16, 1u), segments_count);
+            size_t empty_segments = segments_count / 16;
+
             std::vector<bool> is_empty_segment(segments_count, false);
             std::fill(is_empty_segment.begin(), is_empty_segment.begin() + empty_segments, true);
             std::shuffle(is_empty_segment.begin(), is_empty_segment.end(), gen);
@@ -787,8 +787,8 @@ inline void sort_pairs_unspecified_ranges()
             std::vector<offset_type> end_offsets(begin_offsets.cbegin() + 1, begin_offsets.cend());
             begin_offsets.pop_back();
 
-            size_t empty_segments
-                = std::min<size_t>(rocprim::max(segments_count / 16, 1u), segments_count);
+            size_t empty_segments = segments_count / 16;
+
             std::vector<bool> is_empty_segment(segments_count, false);
             std::fill(is_empty_segment.begin(), is_empty_segment.begin() + empty_segments, true);
             std::shuffle(is_empty_segment.begin(), is_empty_segment.end(), gen);
