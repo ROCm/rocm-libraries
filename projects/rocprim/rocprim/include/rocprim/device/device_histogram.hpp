@@ -239,17 +239,35 @@ inline hipError_t histogram_impl(void*          temporary_storage,
     {
         const auto items_per_block = params.histogram_private_config.block_size
                                      * params.histogram_private_config.items_per_thread;
-        auto kernel = HIP_KERNEL_NAME(histogram_private_global_kernel<config,
-                                                                      Channels,
-                                                                      ActiveChannels,
-                                                                      SampleIterator,
-                                                                      Counter,
-                                                                      SampleToBinOp>);
 
-        ROCPRIM_RETURN_ON_ERROR(detail::grid_dim_for_max_active_blocks(global_histogram_grid_size,
-                                                                       block_size,
-                                                                       kernel,
-                                                                       stream));
+        hipDevice_t default_device;
+        ROCPRIM_RETURN_ON_ERROR(hipStreamGetDevice(0, &default_device));
+
+        hipDevice_t stream_device;
+        ROCPRIM_RETURN_ON_ERROR(hipStreamGetDevice(stream, &stream_device));
+
+        // after setting device, we can't just exit on non-success
+        hipError_t result = hipSetDevice(stream_device);
+
+        int num_multi_processors;
+        if(result == hipSuccess)
+        {
+            result
+                = hipDeviceGetAttribute(&num_multi_processors,
+                                        hipDeviceAttribute_t::hipDeviceAttributeMultiprocessorCount,
+                                        stream_device);
+            // sanity check
+            if(num_multi_processors == 0)
+            {
+                result = hipErrorUnknown;
+            }
+        }
+        // always attempt to restore to default device
+        hipError_t set_result = hipSetDevice(default_device);
+        ROCPRIM_RETURN_ON_ERROR(set_result);
+        ROCPRIM_RETURN_ON_ERROR(result);
+
+        global_histogram_grid_size = num_multi_processors;
 
         virtual_max_blocks = ::rocprim::detail::ceiling_div(columns, items_per_block) * rows;
         global_histogram_grid_size
