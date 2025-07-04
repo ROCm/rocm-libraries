@@ -120,25 +120,38 @@ namespace rocisa
             module->addComment(comment);
         }
 
-        if(tmpSgprRes.size < 3)
+        if(rocIsa::getInstance().getAsmCaps()["HasAdd_PC_i64"])
         {
-            throw std::runtime_error("ContinuousRegister size must be at least 3.");
-        }
+            //what '.' does is to create a label right before that instruction
+            //So s_add_pc_i64 (target_label - .) effectively becomes:
+            //      .temp_label
+            //      s_add_pc_i64 (target_label - temp_label)
+            //the size of s_add_pc_i64 (target_label - temp_label) is 8 + 4 bytes, so you will need to do -12 as well
 
-        int tmpSgprX2, tmpSgprX1;
-        if(tmpSgprRes.idx % 2 == 0)
-        {
-            tmpSgprX2 = tmpSgprRes.idx;
-            tmpSgprX1 = tmpSgprRes.idx + 2;
+            //TODO: remove hardcore "-.-12" when compiler update for label value calculation
+            module->addT<SAddPCI64_SIMM>(labelName + "-.-12", "Add PC to " + labelName + ", the constant correction is dependent on the current assembler behavior.");
         }
         else
         {
-            tmpSgprX2 = tmpSgprRes.idx + 1;
-            tmpSgprX1 = tmpSgprRes.idx;
+            if(tmpSgprRes.size < 3)
+            {
+                throw std::runtime_error("ContinuousRegister size must be at least 3.");
+            }
+            int tmpSgprX2, tmpSgprX1;
+            if(tmpSgprRes.idx % 2 == 0)
+            {
+                tmpSgprX2 = tmpSgprRes.idx;
+                tmpSgprX1 = tmpSgprRes.idx + 2;
+            }
+            else
+            {
+                tmpSgprX2 = tmpSgprRes.idx + 1;
+                tmpSgprX1 = tmpSgprRes.idx;
+            }
+            auto cr = ContinuousRegister(tmpSgprX1, 1);
+            module->add(SGetPositivePCOffset(tmpSgprX2, label, cr));
+            module->addT<SSetPCB64>(sgpr(tmpSgprX2, 2), "branch to " + labelName);
         }
-        auto cr = ContinuousRegister(tmpSgprX1, 1);
-        module->add(SGetPositivePCOffset(tmpSgprX2, label, cr));
-        module->addT<SSetPCB64>(sgpr(tmpSgprX2, 2), "branch to " + labelName);
 
         return module;
     }
