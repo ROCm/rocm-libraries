@@ -388,12 +388,12 @@ namespace
             return rocisa::DataType::Int8;
         case HIP_R_32I:
             return rocisa::DataType::Int32;
-        case HIP_R_6F_E2M3_EXT: // FIXME: fix this when tensile provide FP6 type
-            return rocisa::DataType::Float8;
-        case HIP_R_6F_E3M2_EXT: // FIXME: fix this when tensile provide BF6 type
-            return rocisa::DataType::Float8;
-        case HIP_R_4F_E2M1_EXT: // FIXME: fix this when tensile provide FP4 type
-            return rocisa::DataType::Float8;
+        case HIP_R_6F_E2M3_EXT:
+            return rocisa::DataType::Float6;
+        case HIP_R_6F_E3M2_EXT:
+            return rocisa::DataType::BFloat6;
+        case HIP_R_4F_E2M1_EXT:
+            return rocisa::DataType::Float4;
         default:
             throw std::runtime_error("Unsupported type.");
         }
@@ -424,6 +424,12 @@ namespace
             return HIP_R_8I;
         case rocisa::DataType::Int32:
             return HIP_R_32I;
+        case rocisa::DataType::Float6:
+            return static_cast<hipDataType>(HIP_R_6F_E2M3_EXT);
+        case rocisa::DataType::BFloat6:
+            return static_cast<hipDataType>(HIP_R_6F_E3M2_EXT);
+        case rocisa::DataType::Float4:
+            return static_cast<hipDataType>(HIP_R_4F_E2M1_EXT);
         default:
             throw std::runtime_error("Unsupported type.");
         }

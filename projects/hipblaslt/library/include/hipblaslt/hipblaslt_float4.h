@@ -1,3 +1,29 @@
+/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+
 #ifndef _HIPBLASLT_FLOAT4_H_
 #define _HIPBLASLT_FLOAT4_H_
 
@@ -15,14 +41,10 @@ struct HIPBLASLT_EXPORT hipblaslt_f4x2
         stochastic
     };
 
-    uint8_t __x;
+    uint8_t                 __x;
+    static constexpr size_t packed_size = 2;
 
     hipblaslt_f4x2() = default;
-
-    explicit HIP_HOST_DEVICE hipblaslt_f4x2(uint8_t x)
-        : __x(x)
-    {
-    }
 
     explicit HIP_HOST_DEVICE hipblaslt_f4x2(_Float16             v0,
                                             _Float16             v1,
@@ -71,36 +93,50 @@ struct HIPBLASLT_EXPORT hipblaslt_f4x2
     {
     }
 
+    explicit HIP_HOST_DEVICE hipblaslt_f4x2(_Float16             val,
+                                            hip_f4_rounding_mode rm
+                                            = hip_f4_rounding_mode::standard,
+                                            uint32_t rng = 0)
+        : hipblaslt_f4x2(val, val, rm, rng)
+    {
+    }
+
+    explicit HIP_HOST_DEVICE hipblaslt_f4x2(float                val,
+                                            hip_f4_rounding_mode rm
+                                            = hip_f4_rounding_mode::standard,
+                                            uint32_t rng = 0)
+        : hipblaslt_f4x2(val, val, rm, rng)
+    {
+    }
+
+    explicit HIP_HOST_DEVICE hipblaslt_f4x2(double               val,
+                                            hip_f4_rounding_mode rm
+                                            = hip_f4_rounding_mode::standard,
+                                            uint32_t rng = 0)
+        : hipblaslt_f4x2(val, val, rm, rng)
+    {
+    }
+
+    float castElement(size_t idx) const
+    {
+        __amd_floatx2_storage_t fp32x2 = __amd_cvt_fp4x2_to_floatx2_scale(__x, __AMD_OCP_E2M1, 0);
+        if(idx < packed_size)
+            return fp32x2[idx];
+        else
+            return 0.0;
+    };
+
+    // only conver the first fp4 element to float16
     operator _Float16() const
     {
         return _Float16(float(*this));
     }
 
+    // only conver the first fp4 element to float
     operator float() const
     {
-        uint8_t                                val    = __x & 0x0F; // Remove first four bits
-        static constexpr std::array<float, 16> values = {
-            0.0, // 0000
-            0.5, // 0001
-            1.0, // 0010
-            1.5, // 0011
-            2.0, // 0100
-            3.0, // 0101
-            4.0, // 0110
-            6.0, // 0111
-
-            -0.0,
-            -0.5,
-            -1.0,
-            -1.5,
-            -2.0,
-            -3.0,
-            -4.0,
-            -6.0,
-        };
-
-        return values[__x];
-    };
+        return castElement(0);
+    }
 
     // assignment overloading only from the same types
     inline __host__ __device__ hipblaslt_f4x2& operator=(const hipblaslt_f4x2& a)

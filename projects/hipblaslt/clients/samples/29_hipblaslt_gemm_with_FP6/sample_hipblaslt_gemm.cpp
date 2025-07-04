@@ -30,7 +30,7 @@
 
 #include "helper.h"
 
-void simpleGemmF4(hipblasLtHandle_t  handle,
+void simpleGemmF6(hipblasLtHandle_t  handle,
                   hipblasOperation_t trans_a,
                   hipblasOperation_t trans_b,
                   int64_t            m,
@@ -47,13 +47,13 @@ void simpleGemmF4(hipblasLtHandle_t  handle,
                   int64_t            max_workspace_size,
                   hipStream_t        stream);
 
-void UnpackData(float* unpackedData, const hipblaslt_f4x2* packedData, size_t size)
+void UnpackData(float* unpackedData, const hipblaslt_f6x16* packedData, size_t size)
 {
-    for(size_t idx = 0; idx < size / 2; idx++)
+    for(size_t idx = 0; idx < size / packedData->packed_size; idx++)
     {
-        for(size_t i = 0; i < 2; i++)
+        for(size_t i = 0; i < packedData->packed_size; i++)
         {
-            unpackedData[2 * idx + i] = packedData[idx].castElement(i);
+            unpackedData[packedData->packed_size * idx + i] = packedData[idx].castElement(i);
         }
     }
 }
@@ -103,8 +103,8 @@ int main()
      *  b = (k, n). ldb = k
      *  c = d = (m, n). ldc = ldd = m
      */
-    constexpr size_t                                            batch_count = 1;
-    Runner<hipblaslt_f4x2, hipblaslt_f4x2, float, float, float> runner(
+    constexpr size_t                                              batch_count = 1;
+    Runner<hipblaslt_f6x16, hipblaslt_f6x16, float, float, float> runner(
         1024 /*m*/,
         512 /*n*/,
         1024 /*k*/,
@@ -116,33 +116,33 @@ int main()
     std::vector<float> cpuR(runner.m * runner.n, 0.f);
     std::vector<float> cpuA(runner.m * runner.k, 0.f);
     std::vector<float> cpuB(runner.k * runner.n, 0.f);
-    UnpackData(cpuA.data(), static_cast<hipblaslt_f4x2*>(runner.a), runner.m * runner.k);
-    UnpackData(cpuB.data(), static_cast<hipblaslt_f4x2*>(runner.b), runner.n * runner.k);
+    UnpackData(cpuA.data(), static_cast<hipblaslt_f6x16*>(runner.a), runner.m * runner.k);
+    UnpackData(cpuB.data(), static_cast<hipblaslt_f6x16*>(runner.b), runner.n * runner.k);
     CPUMatMul(cpuR.data(), cpuA.data(), cpuB.data(), runner.m, runner.n, runner.k);
     runner.run([&runner] {
-        simpleGemmF4(runner.handle,
-                   HIPBLAS_OP_T,
-                   HIPBLAS_OP_N,
-                   runner.m,
-                   runner.n,
-                   runner.k,
-                   runner.batch_count,
-                   runner.alpha,
-                   runner.beta,
-                   runner.d_a,
-                   runner.d_b,
-                   runner.d_c,
-                   runner.d_d,
-                   runner.d_workspace,
-                   runner.max_workspace_size,
-                   runner.stream);
+        simpleGemmF6(runner.handle,
+                     HIPBLAS_OP_T,
+                     HIPBLAS_OP_N,
+                     runner.m,
+                     runner.n,
+                     runner.k,
+                     runner.batch_count,
+                     runner.alpha,
+                     runner.beta,
+                     runner.d_a,
+                     runner.d_b,
+                     runner.d_c,
+                     runner.d_d,
+                     runner.d_workspace,
+                     runner.max_workspace_size,
+                     runner.stream);
     });
 
     validate(cpuR, runner.d, runner.m, runner.n);
     return 0;
 }
 
-void simpleGemmF4(hipblasLtHandle_t  handle,
+void simpleGemmF6(hipblasLtHandle_t  handle,
                   hipblasOperation_t trans_a,
                   hipblasOperation_t trans_b,
                   int64_t            m,
@@ -161,9 +161,9 @@ void simpleGemmF4(hipblasLtHandle_t  handle,
 {
     hipblasLtMatrixLayout_t matA, matB, matC, matD;
     CHECK_HIPBLASLT_ERROR(
-        hipblasLtMatrixLayoutCreate(&matA, static_cast<hipDataType>(HIP_R_4F_E2M1_EXT), k, m, k));
+        hipblasLtMatrixLayoutCreate(&matA, static_cast<hipDataType>(HIP_R_6F_E2M3_EXT), k, m, k));
     CHECK_HIPBLASLT_ERROR(
-        hipblasLtMatrixLayoutCreate(&matB, static_cast<hipDataType>(HIP_R_4F_E2M1_EXT), k, n, k));
+        hipblasLtMatrixLayoutCreate(&matB, static_cast<hipDataType>(HIP_R_6F_E2M3_EXT), k, n, k));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matC, HIP_R_32F, m, n, m));
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matD, HIP_R_32F, m, n, m));
 
@@ -240,4 +240,3 @@ void simpleGemmF4(hipblasLtHandle_t  handle,
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref));
     return;
 }
-

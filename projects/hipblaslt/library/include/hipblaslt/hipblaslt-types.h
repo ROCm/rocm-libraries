@@ -38,6 +38,8 @@
 #endif
 
 #include "hipblaslt_float8.h"
+#include "hipblaslt_bfloat6.h"
+#include "hipblaslt_float6.h"
 #include "hipblaslt_float4.h"
 #include <float.h>
 
