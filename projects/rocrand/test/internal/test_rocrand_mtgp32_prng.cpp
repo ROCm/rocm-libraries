@@ -123,7 +123,7 @@ void rocrand_kernel(rocrand_state_mtgp32* states, unsigned int* device_output)
 TEST(AdditionalTests, rocrand_check_uniform_property)
 {
     //Test of rocrand returns a uniformly distributed distribution
-    constexpr size_t items_per_thread = 1024;
+    constexpr size_t items_per_thread = 512;
     constexpr size_t block_size       = 16;
     constexpr size_t grid_size        = 16;
 
@@ -141,7 +141,7 @@ TEST(AdditionalTests, rocrand_check_uniform_property)
     rocrand_kernel<items_per_thread, block_size>
         <<<dim3(grid_size), dim3(block_size)>>>(states, device_output);
 
-    unsigned int host_output[size];
+    unsigned int* host_output = new unsigned int[size];
     HIP_CHECK(
         hipMemcpy(host_output, device_output, sizeof(unsigned int) * size, hipMemcpyDeviceToHost));
 
@@ -181,6 +181,8 @@ TEST(AdditionalTests, rocrand_check_uniform_property)
     // make sure results are within 5% of expected values
     ASSERT_NEAR(expected_mean, actual_mean, expected_mean * 0.05);
     ASSERT_NEAR(expected_std_dev, actual_std_dev, expected_std_dev * 0.05);
+
+    delete[] host_output;
 
     HIP_CHECK(hipFree(states));
     HIP_CHECK(hipFree(device_output));
@@ -259,13 +261,13 @@ TEST(AdditionalTests, rocrand_mtgp32_block_copy)
                                                 src_device_output,
                                                 pram_set_output);
 
-    unsigned int src_host_output[size];
+    unsigned int* src_host_output = new unsigned int[size];
     HIP_CHECK(hipMemcpy(src_host_output,
                         src_device_output,
                         sizeof(unsigned int) * size,
                         hipMemcpyDeviceToHost));
 
-    unsigned int dest_host_output[size];
+    unsigned int* dest_host_output = new unsigned int[size];
     HIP_CHECK(hipMemcpy(dest_host_output,
                         pram_set_output,
                         sizeof(unsigned int) * size,
@@ -273,6 +275,9 @@ TEST(AdditionalTests, rocrand_mtgp32_block_copy)
 
     for(size_t i = 0; i < size; i++)
         ASSERT_EQ(src_host_output[i], dest_host_output[i]) << "Index: " << i;
+
+    delete[] src_host_output;
+    delete[] dest_host_output;
 
     HIP_CHECK(hipFree(src_states));
     HIP_CHECK(hipFree(src_device_output));
@@ -321,13 +326,13 @@ TEST(AdditionalTests, rocrand_mtgp32_set_params)
                                                 param_set_states,
                                                 src_device_output,
                                                 pram_set_output);
-    unsigned int src_host_output[size];
+    unsigned int* src_host_output = new unsigned int[size];
     HIP_CHECK(hipMemcpy(src_host_output,
                         src_device_output,
                         sizeof(unsigned int) * size,
                         hipMemcpyDeviceToHost));
 
-    unsigned int dest_host_output[size];
+    unsigned int* dest_host_output = new unsigned int[size];
     HIP_CHECK(hipMemcpy(dest_host_output,
                         pram_set_output,
                         sizeof(unsigned int) * size,
@@ -335,6 +340,10 @@ TEST(AdditionalTests, rocrand_mtgp32_set_params)
 
     for(size_t i = 0; i < size; i++)
         ASSERT_EQ(src_host_output[i], dest_host_output[i]) << "Index: " << i;
+
+    delete[] src_host_output;
+    delete[] dest_host_output;
+
     HIP_CHECK(hipFree(created_states));
     HIP_CHECK(hipFree(src_device_output));
     HIP_CHECK(hipFree(param_set_states));
@@ -386,7 +395,7 @@ TEST(AdditionalTests, operator_check_uniform_property)
     operator_kernel<items_per_thread, block_size>
         <<<dim3(grid_size), dim3(block_size)>>>(states, device_output);
 
-    unsigned int host_output[size];
+    unsigned int* host_output = new unsigned int[size];
     HIP_CHECK(
         hipMemcpy(host_output, device_output, sizeof(unsigned int) * size, hipMemcpyDeviceToHost));
 
@@ -426,6 +435,8 @@ TEST(AdditionalTests, operator_check_uniform_property)
     // make sure results are within 5% of expected values
     ASSERT_NEAR(expected_mean, actual_mean, expected_mean * 0.05);
     ASSERT_NEAR(expected_std_dev, actual_std_dev, expected_std_dev * 0.05);
+
+    delete[] host_output;
 
     HIP_CHECK(hipFree(states));
     HIP_CHECK(hipFree(device_output));

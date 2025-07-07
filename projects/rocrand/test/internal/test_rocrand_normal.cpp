@@ -520,12 +520,11 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_uint_in_half2_ou
     using InputType             = unsigned int;
     constexpr size_t OutputSize = 2;
 
-    auto mean_func    = [](OutputType x) { return x.x + x.y; };
+    auto mean_func = [](OutputType x) { return static_cast<float>(x.x) + static_cast<float>(x.y); };
     auto std_dev_func = [](OutputType x, double actual_mean)
     {
-        __half mean = static_cast<__half>(actual_mean);
-        __half f    = x.x - mean;
-        __half s    = x.y - mean;
+        float f = static_cast<float>(x.x) - actual_mean;
+        float s = static_cast<float>(x.y) - actual_mean;
         return (f * f) + (s * s);
     };
 
@@ -542,12 +541,11 @@ TEST(NormalDistributionRocRandNumericTest, rocrand_host_numeric_ull_in_half2_out
     using InputType             = unsigned long long;
     constexpr size_t OutputSize = 2;
 
-    auto mean_func    = [](OutputType x) { return x.x + x.y; };
+    auto mean_func = [](OutputType x) { return static_cast<float>(x.x) + static_cast<float>(x.y); };
     auto std_dev_func = [](OutputType x, double actual_mean)
     {
-        __half mean = static_cast<__half>(actual_mean);
-        __half f    = x.x - mean;
-        __half s    = x.y - mean;
+        float f = static_cast<float>(x.x) - actual_mean;
+        float s = static_cast<float>(x.y) - actual_mean;
         return (f * f) + (s * s);
     };
 

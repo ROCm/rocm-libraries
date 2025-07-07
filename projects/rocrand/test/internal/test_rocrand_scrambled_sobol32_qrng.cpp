@@ -375,7 +375,7 @@ TEST(AdditionalTest, device_rocrand)
     uint host_scramble_constants[scramble_offset_size] = {128, 64, 32, 16, 8, 4, 2, 1};
     uint host_offsets[scramble_offset_size]            = {1, 2, 4, 8, 16, 32, 64, 128};
 
-    uint host_output[total_size];
+    uint* host_output = new uint[total_size];
 
     uint* device_directions;
     uint* device_scramble_constants;
@@ -444,6 +444,8 @@ TEST(AdditionalTest, device_rocrand)
     ASSERT_NEAR(expected_mean, actual_mean, expected_mean * 0.05);
     ASSERT_NEAR(expected_std_dev, actual_std_dev, expected_std_dev * 0.05);
 
+    delete[] host_output;
+
     HIP_CHECK(hipFree(device_directions));
     HIP_CHECK(hipFree(device_scramble_constants));
     HIP_CHECK(hipFree(device_offsets));
@@ -483,8 +485,8 @@ TEST(AdditionalTest, device_skipahead)
         rocrand_get_direction_vectors32(&directions, ROCRAND_DIRECTION_VECTORS_32_JOEKUO6));
     const uint offsets[offset_size] = {8, 16, 32, 64, 128};
 
-    uint host_output1[offset_size];
-    uint host_output2[offset_size];
+    uint* host_output1 = new uint[offset_size];
+    uint* host_output2 = new uint[offset_size];
 
     uint* device_directions;
     uint* device_offsets;
@@ -512,6 +514,9 @@ TEST(AdditionalTest, device_skipahead)
 
     for(size_t i = 0; i < offset_size; i++)
         ASSERT_EQ(host_output1[i], host_output2[i]);
+
+    delete[] host_output1;
+    delete[] host_output2;
 
     HIP_CHECK(hipFree(device_directions));
     HIP_CHECK(hipFree(device_offsets));
