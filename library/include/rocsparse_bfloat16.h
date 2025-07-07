@@ -310,7 +310,6 @@ inline __host__ __device__ bool operator>=(rocsparse_bfloat16 a, rocsparse_bfloa
 {
     return !(a < b);
 }
-
 inline __host__ __device__ rocsparse_bfloat16 operator+=(rocsparse_bfloat16 a, rocsparse_bfloat16 b)
 {
     return a = a + b;

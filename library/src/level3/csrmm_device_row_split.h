@@ -556,7 +556,7 @@ namespace rocsparse
     }
 
     template <typename T, uint32_t WFSIZE>
-    ROCSPARSE_DEVICE_ILF void device_partial_sum(T* sum) {};
+    ROCSPARSE_DEVICE_ILF void device_partial_sum(T* sum){};
 
     template <typename T, uint32_t WFSIZE, uint32_t N, uint32_t... R>
     ROCSPARSE_DEVICE_ILF void device_partial_sum(T* sum)

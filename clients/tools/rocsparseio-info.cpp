@@ -51,7 +51,7 @@ struct transpose_pair_t
     transpose_pair_t(J i, const T* v, struct transpose_pair_t* n = nullptr)
         : index(i)
         , val(v)
-        , next(n) {};
+        , next(n){};
     ~transpose_pair_t()
     {
         index = -1;
