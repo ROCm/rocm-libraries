@@ -13,6 +13,7 @@ Documentation for hipFFT is available at
 
 * Removed hipfft-rider legacy compatibility from clients
 * Remove support for the gfx940 and gfx941 targets from the client programs.
+* Remove backward compatibility symlink for include directories.
 
 ## hipFFT 1.0.18 for ROCm 6.4.0
 
