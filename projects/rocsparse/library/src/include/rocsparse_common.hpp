@@ -77,6 +77,10 @@ namespace rocsparse
     {
         return *ptr;
     }
+    __device__ __forceinline__ rocsparse_bfloat16 ldg(const rocsparse_bfloat16* ptr)
+    {
+        return *ptr;
+    }
     __device__ __forceinline__ int8_t ldg(const int8_t* ptr)
     {
         return __ldg(ptr);
@@ -292,6 +296,10 @@ namespace rocsparse
     {
         return x;
     }
+    __device__ __forceinline__ rocsparse_bfloat16 conj(const rocsparse_bfloat16& x)
+    {
+        return x;
+    }
     __device__ __forceinline__ int32_t conj(const int32_t& x)
     {
         return x;
@@ -378,6 +386,10 @@ namespace rocsparse
     }
 
     __device__ __forceinline__ _Float16 nontemporal_load(const _Float16* ptr)
+    {
+        return *ptr;
+    }
+    __device__ __forceinline__ rocsparse_bfloat16 nontemporal_load(const rocsparse_bfloat16* ptr)
     {
         return *ptr;
     }

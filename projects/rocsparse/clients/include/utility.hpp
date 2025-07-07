@@ -918,11 +918,6 @@ public:
  */
 double get_time_us(void);
 
-/*! \brief  CPU Timer(in microsecond): synchronize with given queue/stream and return
- *  wall time
- */
-double get_time_us_sync(hipStream_t stream);
-
 /*! \brief Return path of this executable */
 std::string rocsparse_exepath();
 
@@ -935,10 +930,11 @@ namespace rocsparse_clients
     struct timer
     {
     private:
-        hipEvent_t m_start, m_stop;
+        hipStream_t m_stream;
+        hipEvent_t  m_start, m_stop;
 
     public:
-        timer();
+        timer(hipStream_t stream);
         void  start();
         float stop();
         ~timer();
@@ -948,7 +944,10 @@ namespace rocsparse_clients
    * the median of the mean of the wall-clock time.
    */
     template <typename T, typename... ARG>
-    double run_benchmark(const Arguments& arguments, T func, ARG&&... arg)
+    double run_benchmark(const Arguments&        arguments,
+                         T                       func,
+                         rocsparse_local_handle& handle,
+                         ARG&&... arg)
     {
         if(arguments.iters_inner == 0)
         {
@@ -968,9 +967,12 @@ namespace rocsparse_clients
         const int32_t n_sub_calls  = arguments.iters_inner;
         const int32_t n_calls      = arguments.iters;
 
+        hipStream_t stream;
+        rocsparse_get_stream(handle, &stream);
+
         for(int32_t iter = 0; iter < n_cold_calls; ++iter)
         {
-            const rocsparse_status status = func(arg...);
+            const rocsparse_status status = func(handle, std::forward<ARG>(arg)...);
             if(status != rocsparse_status_success)
             {
                 std::cerr << "error " << __FUNCTION__ << ": cold call failed." << std::endl;
@@ -980,13 +982,13 @@ namespace rocsparse_clients
 
         std::vector<double> gpu_time(n_calls);
 
-        rocsparse_clients::timer t;
+        rocsparse_clients::timer t(stream);
         for(int32_t iter = 0; iter < n_calls; ++iter)
         {
             t.start();
             for(int32_t sub_iter = 0; sub_iter < n_sub_calls; ++sub_iter)
             {
-                (void)func(arg...);
+                std::ignore = func(handle, std::forward<ARG>(arg)...);
             }
             const double t_microseconds = (t.stop() * 1000);
             gpu_time[iter]              = t_microseconds / n_sub_calls;
@@ -999,7 +1001,7 @@ namespace rocsparse_clients
 
 }
 
-#define ROCSPARSE_CLIENTS_RUN_BENCHMARK(arguments_, gpu_time_used_, func_)                         \
+#define ROCSPARSE_CLIENTS_RUN_BENCHMARK(handle, arguments_, gpu_time_used_, func_)                 \
     if(arguments_.iters_inner == 0)                                                                \
     {                                                                                              \
         std::cerr << "error " << __FUNCTION__ << ": arguments_.iters_inner is zero." << std::endl; \
@@ -1015,6 +1017,10 @@ namespace rocsparse_clients
     const int32_t n_cold_calls = 2;                                                                \
     const int32_t n_sub_calls  = arguments_.iters_inner;                                           \
     const int32_t n_calls      = arguments_.iters;                                                 \
+                                                                                                   \
+    hipStream_t stream;                                                                            \
+    rocsparse_get_stream(handle, &stream);                                                         \
+                                                                                                   \
     for(int32_t iter = 0; iter < n_cold_calls; ++iter)                                             \
     {                                                                                              \
         CHECK_ROCSPARSE_ERROR(func_);                                                              \
@@ -1022,13 +1028,13 @@ namespace rocsparse_clients
                                                                                                    \
     std::vector<double> gpu_time(n_calls);                                                         \
                                                                                                    \
-    rocsparse_clients::timer t;                                                                    \
+    rocsparse_clients::timer t(stream);                                                            \
     for(int32_t iter = 0; iter < n_calls; ++iter)                                                  \
     {                                                                                              \
         t.start();                                                                                 \
         for(int32_t iter2 = 0; iter2 < n_sub_calls; ++iter2)                                       \
         {                                                                                          \
-            (void)(func_);                                                                         \
+            std::ignore = func_;                                                                   \
         }                                                                                          \
         const double t_microseconds = (t.stop() * 1000);                                           \
         gpu_time[iter]              = t_microseconds / n_sub_calls;                                \

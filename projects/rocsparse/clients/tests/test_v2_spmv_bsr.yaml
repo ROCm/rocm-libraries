@@ -253,6 +253,31 @@ Tests:
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
 
+- name: v2_spmv_bsr
+  category: pre_checkin
+  function: v2_spmv_bsr
+  indextype: *i32_i64
+  precision: *float16_float16_float32_float32_axyt_precision
+  M: [59128]
+  N: [54760]
+  block_dim: [9]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_column]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: v2_spmv_bsr
+  category: pre_checkin
+  function: v2_spmv_bsr
+  indextype: *i32_i64
+  precision: *bfloat16_bfloat16_float32_float32_axyt_precision
+  M: [54849]
+  N: [56893]
+  block_dim: [10]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_column]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
 
 - name: v2_spmv_bsr_file
   category: pre_checkin
