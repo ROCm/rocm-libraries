@@ -21,6 +21,7 @@
 #include <gtest/gtest.h>
 #include <stdio.h>
 
+#include <numeric>
 #include <random>
 
 #undef ROCRAND_DETAIL_BM_NOT_IN_STATE

@@ -22,6 +22,7 @@
 #include <stdio.h>
 
 #include <cmath>
+#include <numeric>
 #include <random>
 #include <vector>
 

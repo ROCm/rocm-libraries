@@ -21,6 +21,7 @@
 #include <gtest/gtest.h>
 #include <stdio.h>
 
+#include <numeric>
 #include <random>
 
 #include <rocrand/rocrand_discrete.h>
