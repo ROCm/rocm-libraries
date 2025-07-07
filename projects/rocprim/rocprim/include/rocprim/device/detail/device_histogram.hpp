@@ -56,12 +56,15 @@ public:
         }
     }
 
-    ROCPRIM_HOST_DEVICE T& operator[](size_t index)
+    ROCPRIM_HOST_DEVICE
+    T& operator[](size_t index)
     {
         return values[index];
     }
 
-    ROCPRIM_HOST_DEVICE const T& operator[](size_t index) const
+    ROCPRIM_HOST_DEVICE
+    const T&
+        operator[](size_t index) const
     {
         return values[index];
     }
@@ -75,12 +78,11 @@ struct sample_to_bin_even
     Level  upper_level;
     Level  scale;
 
-    ROCPRIM_HOST_DEVICE
-    sample_to_bin_even()
-        = default;
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE sample_to_bin_even() = default;
 
-    ROCPRIM_HOST_DEVICE
-    sample_to_bin_even(size_t bins, Level lower_level, Level upper_level)
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE sample_to_bin_even(size_t bins,
+                                                         Level  lower_level,
+                                                         Level  upper_level)
         : bins(bins)
         , lower_level(lower_level)
         , upper_level(upper_level)
@@ -88,7 +90,8 @@ struct sample_to_bin_even
     {}
 
     template<class Sample>
-    ROCPRIM_HOST_DEVICE bool operator()(Sample sample, size_t& bin) const
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+    bool operator()(Sample sample, size_t& bin) const
     {
         const Level s = static_cast<Level>(sample);
         if(s >= lower_level && s < upper_level)
@@ -111,12 +114,11 @@ struct sample_to_bin_even<
     Level         upper_level;
     uint_fast_div scale;
 
-    ROCPRIM_HOST_DEVICE
-    inline sample_to_bin_even()
-        = default;
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE sample_to_bin_even() = default;
 
-    ROCPRIM_HOST_DEVICE
-    inline sample_to_bin_even(size_t bins, Level lower_level, Level upper_level)
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE sample_to_bin_even(size_t bins,
+                                                         Level  lower_level,
+                                                         Level  upper_level)
         : bins(bins)
         , lower_level(lower_level)
         , upper_level(upper_level)
@@ -125,7 +127,8 @@ struct sample_to_bin_even<
 
     template<class Sample>
     ROCPRIM_HOST_DEVICE
-    inline bool operator()(Sample sample, size_t& bin) const
+    ROCPRIM_INLINE
+    bool operator()(Sample sample, size_t& bin) const
     {
         const Level s = static_cast<Level>(sample);
         if(s >= lower_level && s < upper_level)
@@ -147,12 +150,11 @@ struct sample_to_bin_even<Level,
     Level  upper_level;
     Level  inv_scale;
 
-    ROCPRIM_HOST_DEVICE
-    inline sample_to_bin_even()
-        = default;
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE sample_to_bin_even() = default;
 
-    ROCPRIM_HOST_DEVICE
-    inline sample_to_bin_even(size_t bins, Level lower_level, Level upper_level)
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE sample_to_bin_even(size_t bins,
+                                                         Level  lower_level,
+                                                         Level  upper_level)
         : bins(bins)
         , lower_level(lower_level)
         , upper_level(upper_level)
@@ -161,7 +163,8 @@ struct sample_to_bin_even<Level,
 
     template<class Sample>
     ROCPRIM_HOST_DEVICE
-    inline bool operator()(Sample sample, size_t& bin) const
+    ROCPRIM_INLINE
+    bool operator()(Sample sample, size_t& bin) const
     {
         const Level s = static_cast<Level>(sample);
         if(s >= lower_level && s < upper_level)
@@ -175,7 +178,8 @@ struct sample_to_bin_even<Level,
 
 // Returns index of the first element in values that is greater than value, or count if no such element is found.
 template<class T>
-ROCPRIM_HOST_DEVICE inline unsigned int upper_bound(const T* values, unsigned int count, T value)
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+unsigned int upper_bound(const T* values, unsigned int count, T value)
 {
     unsigned int current = 0;
     while(count > 0)
@@ -198,21 +202,19 @@ ROCPRIM_HOST_DEVICE inline unsigned int upper_bound(const T* values, unsigned in
 template<class Level>
 struct sample_to_bin_range
 {
-    size_t       bins;
+    size_t bins;
     const Level* level_values;
 
-    ROCPRIM_HOST_DEVICE
-    inline sample_to_bin_range()
-        = default;
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE sample_to_bin_range() = default;
 
-    ROCPRIM_HOST_DEVICE
-    inline sample_to_bin_range(size_t bins, const Level* level_values)
+    ROCPRIM_HOST_DEVICE ROCPRIM_INLINE sample_to_bin_range(size_t bins, const Level* level_values)
         : bins(bins), level_values(level_values)
     {}
 
     template<class Sample>
     ROCPRIM_HOST_DEVICE
-    inline bool operator()(Sample sample, size_t& bin) const
+    ROCPRIM_INLINE
+    bool operator()(Sample sample, size_t& bin) const
     {
         const Level s = static_cast<Level>(sample);
         bin           = upper_bound(level_values, bins + 1, s) - 1;
@@ -550,15 +552,14 @@ void histogram_private_global(SampleIterator                                   s
 
     constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
 
-    const unsigned int flat_id       = ::rocprim::flat_block_thread_id();
+    const unsigned int flat_id = ::rocprim::flat_block_thread_id();
     const unsigned int flat_block_id = ::rocprim::flat_block_id();
 
-    __shared__
-    unsigned int       block_id_count_shared;
+    __shared__ unsigned int block_id_count_shared;
 
     // starts of the first histogram for each channel
     Counter* block_histogram[ActiveChannels];
-    size_t  total_bins = 0;
+    size_t   total_bins = 0;
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
     {
         block_histogram[channel] = private_histograms + total_bins;

@@ -127,8 +127,8 @@ template<class Config,
          class SampleIterator,
          class Counter,
          class SampleToBinOp>
-ROCPRIM_KERNEL
-ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_private_config.block_size) void
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>()
+                                         .histogram_private_config.block_size) void
     histogram_private_global_kernel(SampleIterator                             samples,
                                     unsigned int                               columns,
                                     unsigned int                               rows,
@@ -217,7 +217,7 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         max_bins = std::max(max_bins, bins[channel]);
     }
 
-    const bool use_shared_mem = total_shared_bins <= shared_impl_max_bins;
+    const bool use_shared_mem        = total_shared_bins <= shared_impl_max_bins;
     const bool use_private_histogram = target_arch == target_arch::gfx942;
 
     Counter*      private_histograms         = nullptr;
@@ -349,10 +349,11 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         for(unsigned int n = params.shared_impl_histograms; n >= 1; n--)
         {
             int blocks_per_mp;
-            ROCPRIM_RETURN_ON_ERROR(hipOccupancyMaxActiveBlocksPerMultiprocessor(&blocks_per_mp,
-                                                                   kernel,
-                                                                   block_size,
-                                                                   n * block_histogram_bytes));
+            ROCPRIM_RETURN_ON_ERROR(
+                hipOccupancyMaxActiveBlocksPerMultiprocessor(&blocks_per_mp,
+                                                             kernel,
+                                                             block_size,
+                                                             n * block_histogram_bytes));
 
             if(blocks_per_mp > max_blocks_per_mp)
             {
