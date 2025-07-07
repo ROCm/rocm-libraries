@@ -306,7 +306,7 @@ TEST(VariousComplexTest, hypotf)
 //
 // ===================================================================
 
-#ifndef _MSC_VER
+#ifndef _WIN32
 
 TYPED_TEST(VariousComplexTest, asinh)
 {
@@ -1134,4 +1134,4 @@ TYPED_TEST(VariousComplexTest, tan)
   //-710 / 2 and 710 / 2 since cosh and sinh is quadratic and anything above 710 will result
   // in out of bounds even for double! We also have to acount the 2 multiplier);
 }
-#endif // MSC
+#endif // _WIN32
