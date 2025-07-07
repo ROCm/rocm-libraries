@@ -178,7 +178,9 @@ inline void testing_reproducibility(const Arguments& arg, F test_execute)
         static void testing_bad_arg(const Arguments& arg)                                         \
         {                                                                                         \
             test_check::reset_auto_testing_bad_arg();                                             \
+            rocsparse_disable_debug_verbose();                                                    \
             testing_##ROUTINE##_bad_arg<P...>(arg);                                               \
+            rocsparse_enable_debug_verbose();                                                     \
             if(false && false == test_check::did_auto_testing_bad_arg())                          \
             {                                                                                     \
                 std::cerr << "rocsparse_test warning testing bad arguments of "                   \
