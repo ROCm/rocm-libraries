@@ -85,7 +85,10 @@ def rocRollerGetBaseParameters() {
 ci: {
     String urlJobName = auxiliary.getTopJobName(env.BUILD_URL)
 
-    def propertyList = ["enterprise":[pipelineTriggers([cron('0 H(0-5) * * *')])]]
+    def propertyList = [
+        "enterprise":[pipelineTriggers([cron('0 H(0-5) * * *')])],
+        "rocm-libraries":[pipelineTriggers([cron('0 H(0-5) * * *')])]
+    ]
     def additionalParameters = [
         string(
             name: "ROCROLLER_AMDGPU_URL",
@@ -113,7 +116,10 @@ ci: {
     ]
 
     if(env.CHANGE_ID){
-        propertyList = ["enterprise":[pipelineTriggers([cron('0 1 * * 0')])]]
+        propertyList = [
+            "enterprise":[pipelineTriggers([cron('0 1 * * 0')])],
+            "rocm-libraries":[pipelineTriggers([cron('0 1 * * 0')])]
+        ]
         additionalParameters += [
             booleanParam(
                 name: "Build target branch for comparison",
@@ -128,8 +134,16 @@ ci: {
     auxiliary.registerAdditionalParameters(additionalParameters)
     propertyList = auxiliary.appendPropertyList(propertyList)
 
-    def jobNameList = ["enterprise":(["rocroller-ubuntu20-clang":['rocroller-compile', 'rocroller-gfx90a'],
-                                  "rocroller-ubuntu20-gcc":['rocroller-compile', 'rocroller-gfx90a']])]
+    def jobNameList = [
+        "enterprise":([
+            "rocroller-ubuntu20-clang":['rocroller-compile', 'rocroller-gfx90a'],
+            "rocroller-ubuntu20-gcc":['rocroller-compile', 'rocroller-gfx90a']
+        ]),
+        "rocm-libraries":([
+            "rocroller-ubuntu20-clang":['rocroller-compile', 'rocroller-gfx90a'],
+            "rocroller-ubuntu20-gcc":['rocroller-compile', 'rocroller-gfx90a']
+        ])
+    ]
     jobNameList = auxiliary.appendJobNameList(jobNameList)
 
     propertyList.each

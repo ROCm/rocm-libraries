@@ -33,6 +33,7 @@ set(rocsparse_source
   src/common/rocsparse_handle.cpp
   src/common/rocsparse_mat_info.cpp
   src/common/rocsparse_trm_info.cpp
+  src/common/rocsparse_sorted_coo2csr_info.cpp
   src/common/rocsparse_indextype_utils.cpp
   src/common/rocsparse_datatype_utils.cpp
   src/common/rocsparse_one.cpp

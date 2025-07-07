@@ -34,6 +34,7 @@
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/CrashKernelGenerator.hpp>
+#include <rocRoller/CodeGen/GenerateNodes.hpp>
 #include <rocRoller/CodeGen/LoadStoreTileGenerator.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Expression.hpp>
@@ -157,6 +158,8 @@ namespace rocRoller
              */
             Generator<Instruction> generate(std::set<int> candidates, Transformer coords)
             {
+                auto const& options = m_context->kernelOptions();
+
                 rocRoller::Log::getLogger()->debug(
                     concatenate("KernelGraph::CodeGenerator::generate: ", candidates));
 
@@ -165,83 +168,46 @@ namespace rocRoller
 
                 candidates = m_graph->control.followEdges<Sequence>(candidates);
 
-                while(!candidates.empty())
-                {
-                    std::set<int> nodes = findAndRemoveSatisfiedNodes(candidates);
+                auto proc      = Settings::getInstance()->get(Settings::Scheduler);
+                auto cost      = Settings::getInstance()->get(Settings::SchedulerCost);
+                auto scheduler = Component::GetNew<Scheduling::Scheduler>(proc, cost, m_context);
 
-                    // If there are no valid nodes, we have a problem.
-                    AssertFatal(!nodes.empty(),
-                                "Invalid control graph!",
-                                ShowValue(m_graph->control),
-                                ShowValue(candidates),
-                                ShowValue(m_completedControlNodes));
+                auto generateNode = [&](int tag) -> Generator<Instruction> {
+                    auto op = m_graph->control.getNode(tag);
+                    co_yield call(tag, op, coords);
+                };
 
-                    // Generate code for all the nodes we found.
+                auto nodeIsReady = [this](int tag) { return hasGeneratedInputs(tag); };
 
-                    std::vector<Generator<Instruction>> generators;
-                    for(auto tag : nodes)
+                auto nodeCategory = [this, &options](int tag) -> size_t {
+                    if(options->maxConcurrentControlOps)
                     {
                         auto op = m_graph->control.getNode(tag);
-                        generators.push_back(call(tag, op, coords));
+                        return op.index();
                     }
 
-                    if(generators.size() == 1)
-                    {
-                        co_yield std::move(generators[0]);
-                    }
-                    else
-                    {
-                        co_yield Instruction::Comment(
-                            concatenate("BEGIN Scheduler for operations ", nodes));
-                        auto proc = Settings::getInstance()->get(Settings::Scheduler);
-                        auto cost = Settings::getInstance()->get(Settings::SchedulerCost);
-                        auto scheduler
-                            = Component::GetNew<Scheduling::Scheduler>(proc, cost, m_context);
+                    return 0;
+                };
 
-                        if(!scheduler->supportsAddingStreams())
-                        {
-                            co_yield (*scheduler)(generators);
-                        }
-                        else
-                        {
-                            auto generator         = (*scheduler)(generators);
-                            auto numCompletedNodes = m_completedControlNodes.size();
+                auto categoryLimit = [&options](size_t category) -> size_t {
+                    size_t unlimited = std::numeric_limits<int>::max();
 
-                            for(auto iter = generator.begin(); iter != generator.end(); ++iter)
-                            {
-                                if(numCompletedNodes != m_completedControlNodes.size()
-                                   && !candidates.empty())
-                                {
-                                    auto newNodes = findAndRemoveSatisfiedNodes(candidates);
+                    if(category == variantIndex<Operation, Deallocate>())
+                        return unlimited;
 
-                                    if(!newNodes.empty())
-                                    {
-                                        co_yield Instruction::Comment(
-                                            concatenate("ADD operations ",
-                                                        newNodes,
-                                                        " to scheduler for ",
-                                                        nodes));
+                    return options->maxConcurrentControlOps.value_or(unlimited);
+                };
 
-                                        for(auto tag : newNodes)
-                                        {
-                                            auto op = m_graph->control.getNode(tag);
-                                            generators.push_back(call(tag, op, coords));
-                                        }
+                auto comparePriorities = [](int a, int b) { return a > b; };
 
-                                        nodes.insert(newNodes.begin(), newNodes.end());
-                                    }
-
-                                    numCompletedNodes = m_completedControlNodes.size();
-                                }
-
-                                co_yield *iter;
-                            }
-                        }
-
-                        co_yield Instruction::Comment(
-                            concatenate("END Scheduler for operations ", nodes));
-                    }
-                }
+                co_yield generateNodes<int, size_t>(scheduler,
+                                                    candidates,
+                                                    m_completedControlNodes,
+                                                    generateNode,
+                                                    nodeIsReady,
+                                                    nodeCategory,
+                                                    categoryLimit,
+                                                    comparePriorities);
 
                 co_yield Instruction::Comment("end: " + message);
             }
@@ -430,7 +396,10 @@ namespace rocRoller
                 {
                     if(op.condition == nullptr) // Unconditional Assert
                     {
+                        co_yield Instruction::Lock(Scheduling::Dependency::Branch,
+                                                   "Assert nullptr");
                         co_yield m_context->crasher()->generateCrashSequence(assertOpKind);
+                        co_yield Instruction::Unlock("Assert nullptr");
                     }
                     else
                     {

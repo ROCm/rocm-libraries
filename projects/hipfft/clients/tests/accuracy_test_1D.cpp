@@ -319,29 +319,22 @@ INSTANTIATE_TEST_SUITE_P(DISABLED_offset_mix_1D,
 
 // small 1D sizes just need to make sure our factorization isn't
 // completely broken, so we just check simple C2C outplace interleaved
-INSTANTIATE_TEST_SUITE_P(small_1D,
-                         accuracy_test,
-                         ::testing::ValuesIn(param_generator_base(
-                             test_prob,
-                             {fft_transform_type_complex_forward},
-                             generate_lengths({small_1D_sizes()}),
-                             {fft_precision_single},
-                             {1},
-                             [](fft_transform_type                       t,
-                                const std::vector<fft_result_placement>& place_range,
-                                const bool                               planar) {
-                                 return std::vector<type_place_io_t>{
-                                     std::make_tuple(t,
-                                                     place_range[0],
-                                                     fft_array_type_complex_interleaved,
-                                                     fft_array_type_complex_interleaved)};
-                             },
-                             stride_range,
-                             stride_range,
-                             ioffset_range_zero,
-                             ooffset_range_zero,
-                             {fft_placement_notinplace})),
-                         accuracy_test::TestName);
+INSTANTIATE_TEST_SUITE_P(
+    small_1D,
+    accuracy_test,
+    ::testing::ValuesIn(param_generator_base(test_prob,
+                                             {fft_transform_type_complex_forward},
+                                             generate_lengths({small_1D_sizes()}),
+                                             {fft_precision_single},
+                                             {1},
+                                             generate_types,
+                                             stride_range,
+                                             stride_range,
+                                             ioffset_range_zero,
+                                             ooffset_range_zero,
+                                             {fft_placement_notinplace},
+                                             false /* planar */)),
+    accuracy_test::TestName);
 
 // NB:
 // We have known non-unit strides issues for 1D:
@@ -352,7 +345,7 @@ INSTANTIATE_TEST_SUITE_P(small_1D,
 // main tests.
 //
 // The below test covers non-unit strides, pow of 2, middle sizes, which has SBCC/SBRC kernels
-// invloved.
+// involved.
 const static std::vector<size_t>              pow2_range_for_stride      = {4096, 8192, 524288};
 const static std::vector<size_t>              pow2_range_for_stride_half = {4096, 8192};
 const static std::vector<std::vector<size_t>> stride_range_for_pow2      = {{2}, {3}};
@@ -364,7 +357,7 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::ValuesIn(param_generator_complex(test_prob,
                                                 generate_lengths({pow2_range_for_stride}),
                                                 precision_range_sp_dp,
-                                                batch_range_1D,
+                                                batch_range_for_stride,
                                                 stride_range_for_pow2,
                                                 stride_range_for_pow2,
                                                 ioffset_range_zero,
@@ -380,7 +373,7 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::ValuesIn(param_generator_real(test_prob,
                                              generate_lengths({pow2_range_for_stride}),
                                              precision_range_sp_dp,
-                                             batch_range_1D,
+                                             batch_range_for_stride,
                                              stride_range_for_pow2,
                                              stride_range_for_pow2,
                                              ioffset_range_zero,
@@ -396,7 +389,7 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::ValuesIn(param_generator_real(test_prob,
                                              generate_lengths({pow2_range_for_stride_half}),
                                              {fft_precision_half},
-                                             batch_range_1D,
+                                             batch_range_for_stride,
                                              stride_range_for_pow2,
                                              stride_range_for_pow2,
                                              ioffset_range_zero,

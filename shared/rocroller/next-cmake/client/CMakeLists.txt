@@ -52,6 +52,7 @@ target_link_libraries(rocroller_gemm
         roc::rocroller
         rocroller::common-test-utilities
         CLI11::CLI11
+        ${msgpack_libs}
         ${BLAS_LIBRARIES}
 )
 if(ROCROLLER_BUILD_SHARED_LIBS)

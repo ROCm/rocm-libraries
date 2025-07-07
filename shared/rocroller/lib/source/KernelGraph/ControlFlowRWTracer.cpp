@@ -267,7 +267,13 @@ namespace rocRoller::KernelGraph
         trackRegister(tag, dst, ReadWrite::WRITE);
     }
 
-    void ControlFlowRWTracer::operator()(Barrier const& op, int tag) {}
+    void ControlFlowRWTracer::operator()(Barrier const& op, int tag)
+    {
+        for(auto const& c : m_graph.mapper.getConnections(tag))
+        {
+            m_trace.push_back({tag, c.coordinate, ReadWrite::READ});
+        }
+    }
 
     void ControlFlowRWTracer::operator()(ComputeIndex const& op, int tag)
     {

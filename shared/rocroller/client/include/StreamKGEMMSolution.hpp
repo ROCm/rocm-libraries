@@ -74,7 +74,7 @@ namespace rocRoller
                     return command;
                 }
 
-                virtual CommandParametersPtr
+                CommandParametersPtr
                     makeCommandParameters(CommandPtr                command,
                                           SolutionParameters const& solutionParams) override
                 {
@@ -88,10 +88,9 @@ namespace rocRoller
                     return params;
                 }
 
-                virtual CommandArguments
-                    commandArguments(CommandPtr               command,
-                                     ProblemParameters const& problemParams,
-                                     RunParameters const&     runParams) const override
+                CommandArguments commandArguments(CommandPtr               command,
+                                                  ProblemParameters const& problemParams,
+                                                  RunParameters const&     runParams) const override
                 {
                     auto commandArgs = DataParallelGEMMSolution::commandArguments(
                         command, problemParams, runParams);
@@ -101,10 +100,10 @@ namespace rocRoller
                     return commandArgs;
                 }
 
-                virtual void validateRunParameters(CommandPtr               command,
-                                                   ProblemParameters const& problemParams,
-                                                   RunParameters const&     runParams,
-                                                   CommandKernelPtr         commandKernel) override
+                void validateRunParameters(CommandPtr               command,
+                                           ProblemParameters const& problemParams,
+                                           RunParameters const&     runParams,
+                                           CommandKernelPtr         commandKernel) override
                 {
                     DataParallelGEMMSolution::validateRunParameters(
                         command, problemParams, runParams, commandKernel);

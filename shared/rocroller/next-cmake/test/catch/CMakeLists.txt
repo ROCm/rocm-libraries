@@ -42,6 +42,7 @@ target_link_libraries(rocroller-tests-catch
         rocroller::common-test-utilities
         Catch2::Catch2WithMain
         ${BLAS_LIBRARIES}
+        ${msgpack_libs}
 )
 
 set(_CMAKE_CURRENT_SOURCE_DIR "${ROCROLLER_TEST_DIR}/catch")
@@ -49,6 +50,7 @@ target_sources(rocroller-tests-catch
     PRIVATE
         "${_CMAKE_CURRENT_SOURCE_DIR}/CustomAssertions.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/TestKernels.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/AddDeallocateTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/AddPrefetchTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/AliasDataFlowTagsTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/AnnotateInstructionsTest.cpp"
