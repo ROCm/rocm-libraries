@@ -742,9 +742,12 @@ namespace TensileLite
                 uint32_t skItersPerWG = skTiles * itersPerTile / skGrid;
                 uint32_t skExtraIters = skTiles * itersPerTile % (skGrid);
 
+                // Pack skGrid and skTiles into a single uint32_t such that the upper 16 bits
+                // represent skGrid and the lower 16 bits represent skTiles
+                uint32_t skGridAndTiles = (skGrid <<16) | (skTiles & 0xFFFF);
+
                 args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
-                args.template append<uint32_t>("skGrid", skGrid);
-                args.template append<uint32_t>("skTiles", skTiles);
+                args.template append<uint32_t>("skGridAndTiles", skGridAndTiles);
                 args.template append<uint32_t>("skExtraIters", skExtraIters);
             }
         }
