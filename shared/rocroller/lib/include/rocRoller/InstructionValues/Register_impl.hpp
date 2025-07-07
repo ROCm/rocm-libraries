@@ -96,6 +96,7 @@ namespace rocRoller
             case Type::EXEC_HI:
             case Type::TTMP7:
             case Type::TTMP9:
+            case Type::Constant:
             case Type::Count:
                 Throw<FatalError>("No prefix available for ", toString(t), " values");
             }
@@ -273,6 +274,8 @@ namespace rocRoller
                 return "TTMP7";
             case Type::TTMP9:
                 return "TTMP9";
+            case Type::Constant:
+                return "Constant";
             }
             Throw<FatalError>("Invalid register type!");
         }
@@ -323,6 +326,7 @@ namespace rocRoller
             , m_varType(variableType)
         {
             AssertFatal(ctx != nullptr);
+            AssertFatal(regType != Register::Type::Constant);
             AssertFatal(count > 0, "Invalid register count ", ShowValue(count));
 
             auto const info = DataTypeInfo::Get(variableType);
@@ -344,6 +348,7 @@ namespace rocRoller
             , m_allocationCoord(coord.begin(), coord.end())
         {
             AssertFatal(ctx != nullptr);
+            AssertFatal(regType != Register::Type::Constant);
             m_allocation = Allocation::SameAs(*this, m_name, {});
         }
 
@@ -357,6 +362,7 @@ namespace rocRoller
             , m_allocationCoord(coord)
         {
             AssertFatal(ctx != nullptr);
+            AssertFatal(regType != Register::Type::Constant);
             m_allocation = Allocation::SameAs(*this, m_name, {});
         }
 
@@ -366,6 +372,7 @@ namespace rocRoller
             , m_regType(regType)
             , m_varType(variableType)
         {
+            AssertFatal(regType != Register::Type::Constant);
             // auto range = std::ranges::iota_view{0, count};
             // m_allocationCoord = std::vector(range.begin(), range.end());
             m_allocationCoord = std::vector<int>(count);
@@ -382,6 +389,7 @@ namespace rocRoller
             , m_varType(variableType)
             , m_allocationCoord(coord.begin(), coord.end())
         {
+            AssertFatal(regType != Register::Type::Constant);
             AssertFatal(m_context.lock() != nullptr);
         }
 
@@ -395,6 +403,7 @@ namespace rocRoller
             , m_varType(variableType)
             , m_allocationCoord(coord)
         {
+            AssertFatal(regType != Register::Type::Constant);
             AssertFatal(m_context.lock() != nullptr);
         }
 
@@ -759,6 +768,9 @@ namespace rocRoller
             case Type::LocalData:
                 os << "LDS:" << m_ldsAllocation->toString();
                 return;
+            case Type::Constant:
+                os << getConstant();
+                return;
             case Type::Count:
                 break;
             }
@@ -807,6 +819,16 @@ namespace rocRoller
             {
                 return "";
             }
+            return rocRoller::toString(m_literalValue);
+        }
+
+        inline std::string Value::getConstant() const
+        {
+            if(m_regType != Type::Constant)
+            {
+                return "";
+            }
+            // Constant is a subset of literal
             return rocRoller::toString(m_literalValue);
         }
 

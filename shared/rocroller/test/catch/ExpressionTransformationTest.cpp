@@ -407,6 +407,106 @@ TEST_CASE("FastArithmetic includes translate time evaluation",
     CHECK_THAT(fastArith(c * zero), IdenticalTo(literal(0.f)));
 }
 
+TEST_CASE("ConvertPropagation", "[expression][expression-transformation]")
+{
+    using namespace rocRoller;
+    using enum DataType;
+    using Expression::literal;
+    auto context = TestContext::ForDefaultTarget();
+
+    std::vector<Expression::ExpressionPtr> r64{
+        3,
+        Register::Value::Placeholder(context.get(), Register::Type::Vector, Int64, 1)
+            ->expression()};
+
+    std::vector<Expression::ExpressionPtr> r32{
+        3,
+        Register::Value::Placeholder(context.get(), Register::Type::Vector, Int32, 1)
+            ->expression()};
+
+    Expression::FastArithmetic fastArith(context.get());
+    CHECK(fastArith(nullptr).get() == nullptr);
+
+    SECTION("basic")
+    {
+        // Int32(r64 + r64) -> Int32(Int32(r64) + Int32(r64))
+        CHECK_THAT(convertPropagation(convert(Int32, r64[0] + r64[1])),
+                   IdenticalTo(convert(Int32, convert(Int32, r64[0]) + convert(Int32, r64[1]))));
+
+        // Int32(r64 + r64 * r64) -> Int32(Int32(r64) + Int32(r64) * Int32(r64))
+        CHECK_THAT(
+            convertPropagation(convert(Int32, r64[0] + r64[1] * r64[2])),
+            IdenticalTo(convert(
+                Int32, convert(Int32, r64[0]) + convert(Int32, r64[1]) * convert(Int32, r64[2]))));
+
+        // r64 + Int32(r64 * r64) -> r64 + Int32(Int32(r64) * Int32(r64))
+        CHECK_THAT(
+            convertPropagation(r64[0] + convert(Int32, r64[1] * r64[2])),
+            IdenticalTo(r64[0] + convert(Int32, convert(Int32, r64[1]) * convert(Int32, r64[2]))));
+
+        // Int64(r64) -> no change
+        CHECK_THAT(convertPropagation(convert(Int64, r64[0])), IdenticalTo(convert(Int64, r64[0])));
+
+        // Int32(r64) -> Int32(Int32(r64))
+        CHECK_THAT(convertPropagation(convert(Int32, r64[0])),
+                   IdenticalTo(convert(Int32, convert(Int32, r64[0]))));
+
+        // Int32(r64 << r64) -> Int32(Int32(r64) << r64)
+        CHECK_THAT(convertPropagation(convert(Int32, r64[0] << r64[1])),
+                   IdenticalTo(convert(Int32, convert(Int32, r64[0]) << r64[1])));
+
+        // Int32((r64 + r64) << r64) -> Int32((Int32(r64) + Int32(r64)) << r64)
+        CHECK_THAT(convertPropagation(convert(Int32, addShiftL(r64[0], r64[1], r64[2]))),
+                   IdenticalTo(convert(
+                       Int32, addShiftL(convert(Int32, r64[0]), convert(Int32, r64[1]), r64[2]))));
+
+        // Int32((r64 << r64) + r64) -> Int32((Int32(r64) << r64) + Int32(r64))
+        CHECK_THAT(convertPropagation(convert(Int32, shiftLAdd(r64[0], r64[1], r64[2]))),
+                   IdenticalTo(convert(
+                       Int32, shiftLAdd(convert(Int32, r64[0]), r64[1], convert(Int32, r64[2])))));
+    }
+
+    SECTION("skipped datatypes")
+    {
+        Expression::ExpressionPtr f1 = literal(1.0);
+        CHECK_THAT(convertPropagation(convert(Float, f1 + f1)),
+                   IdenticalTo(convert(Float, f1 + f1)));
+
+        Expression::ExpressionPtr halfx2
+            = Register::Value::Placeholder(context.get(), Register::Type::Vector, Halfx2, 1)
+                  ->expression();
+        CHECK_THAT(convertPropagation(convert(Float, halfx2 + halfx2)),
+                   IdenticalTo((convert(Float, halfx2 + halfx2))));
+    }
+
+    SECTION("nested convert")
+    {
+        // Int32(r64 + Int64(r32 * r32)) -> Int32(Int32(r64), Int64(r32 * r32))
+        CHECK_THAT(
+            convertPropagation(convert(Int32, r64[0] + convert(Int64, r32[1] * r32[2]))),
+            IdenticalTo(convert(Int32, convert(Int32, r64[0]) + convert(Int64, r32[1] * r32[2]))));
+
+        // Do not propagate existing converts to larger types
+        // Int32(r64 + Int64(r64 * r64)) -> Int32(Int32(r64) + Int64(r64 * r64))
+        auto expr = convertPropagation(convert(Int32, r64[0] + convert(Int64, r64[1] * r64[2])));
+        CHECK_THAT(
+            expr,
+            IdenticalTo(convert(Int32, convert(Int32, r64[0]) + convert(Int64, r64[1] * r64[2]))));
+    }
+
+    SECTION("conditional")
+    {
+        auto cond = Register::Value::Placeholder(context.get(), Register::Type::Vector, Bool32, 1)
+                        ->expression();
+        auto expr
+            = convertPropagation(convert(Int32, Expression::conditional(cond, r64[0], r64[1])));
+        CHECK_THAT(expr,
+                   IdenticalTo(convert(Int32,
+                                       Expression::conditional(
+                                           cond, convert(Int32, r64[0]), convert(Int32, r64[1])))));
+    }
+}
+
 TEST_CASE("launchTimeSubExpressions works", "[expression][expression-transformation]")
 {
     using namespace rocRoller;

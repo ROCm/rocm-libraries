@@ -100,7 +100,7 @@ try
         {
         case rocsparse::blas_impl_none:
         {
-            return rocsparse_status_success;
+            break;
         }
         case rocsparse::blas_impl_default:
         case rocsparse::blas_impl_rocblas:

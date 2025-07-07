@@ -90,12 +90,12 @@ void inline protected_assert_eq(T val, T expected, size_t index)
 {
     if constexpr (UseGTestAssert)
     {
-        const bool result = (val == expected);
-        ASSERT_TRUE(result) << "where index = " << index;
+        ASSERT_EQ(val, expected) << "where index = " << index;
     }
     else
     {
-        ASSERT_EQ(val, expected) << "where index = " << index;
+        const bool result = (val == expected);
+        ASSERT_TRUE(result) << "where index = " << index;
     }
 }
 
@@ -104,12 +104,12 @@ void inline protected_assert_eq(T val, T expected)
 {
     if constexpr (UseGTestAssert)
     {
-        const bool result = (val == expected);
-        ASSERT_TRUE(result);
+        ASSERT_EQ(val, expected);
     }
     else
     {
-        ASSERT_EQ(val, expected);
+        const bool result = (val == expected);
+        ASSERT_TRUE(result);
     }
 }
 
