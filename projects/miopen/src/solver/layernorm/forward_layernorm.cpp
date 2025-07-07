@@ -80,10 +80,6 @@ ConvSolution LayernormForward::GetSolution(const ExecutionContext& context,
             {"MODE", mode},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
             {"MIOPEN_WEIGHT_BIAS", 1},
-            {"MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD", 2},
-            {"MIOPEN_WEIGHT_BIAS_FUSED_ADD", 3},
-            {"MIOPEN_ELEMENTWISE_AFFINE_T5", 4},
-            {"MIOPEN_WEIGHT_BIAS_T5", 5},
         };
 
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});

@@ -592,12 +592,13 @@ int LayerNormDriver<T>::VerifyForward()
     const double tolerance  = GetTolerance();
     auto error              = miopen::rms_range(outhost, out);
     std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
+    int status             = miopenStatusSuccess;
 
     if(!std::isfinite(error) || error > tolerance)
     {
         std::cout << "Forward LayerNorm FAILED against " << solver_type
                   << " CPU reference: " << error << " > " << tolerance << std::endl;
-        return EC_VerifyFwd;
+        status = EC_VerifyFwd;
     }
     else
     {
@@ -610,7 +611,7 @@ int LayerNormDriver<T>::VerifyForward()
     {
         std::cout << "Forward LayerNorm mean FAILED against " << solver_type
                   << " CPU reference: " << meanerror << " > " << tolerance << std::endl;
-        return EC_VerifyFwd;
+        status = EC_VerifyFwd;
     }
     else
     {
@@ -623,7 +624,7 @@ int LayerNormDriver<T>::VerifyForward()
     {
         std::cout << "Forward LayerNorm rstd FAILED against " << solver_type
                   << " CPU reference: " << rstderror << " > " << tolerance << std::endl;
-        return EC_VerifyFwd;
+        status = EC_VerifyFwd;
     }
     else
     {
@@ -631,7 +632,7 @@ int LayerNormDriver<T>::VerifyForward()
                   << " CPU reference (" << rstderror << " < " << tolerance << ')' << std::endl;
     }
 
-    return miopenStatusSuccess;
+    return status;
 }
 
 template <typename T>
@@ -641,12 +642,13 @@ int LayerNormDriver<T>::VerifyBackward()
     const double tolerance  = GetTolerance();
     auto error              = miopen::rms_range(dxhost, dx);
     std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
+    int status             = miopenStatusSuccess;
 
     if(!std::isfinite(error) || error > tolerance)
     {
         std::cout << "Backward LayerNorm FAILED against " << solver_type
                   << " CPU reference: " << error << " > " << tolerance << std::endl;
-        return EC_VerifyBwd;
+        status = EC_VerifyBwd;
     }
     else
     {
@@ -659,7 +661,7 @@ int LayerNormDriver<T>::VerifyBackward()
     {
         std::cout << "Backward LayerNorm dw FAILED against " << solver_type
                   << " CPU reference: " << dwerror << " > " << tolerance << std::endl;
-        return EC_VerifyBwd;
+        status = EC_VerifyBwd;
     }
     else
     {
@@ -672,7 +674,7 @@ int LayerNormDriver<T>::VerifyBackward()
     {
         std::cout << "Backward LayerNorm db FAILED against " << solver_type
                   << " CPU reference: " << dberror << " > " << tolerance << std::endl;
-        return EC_VerifyBwd;
+        status = EC_VerifyBwd;
     }
     else
     {
@@ -680,7 +682,7 @@ int LayerNormDriver<T>::VerifyBackward()
                   << " CPU reference (" << dberror << " < " << tolerance << ')' << std::endl;
     }
 
-    return miopenStatusSuccess;
+    return status;
 }
 
 template <typename T>
