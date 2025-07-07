@@ -557,6 +557,12 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
     if(parameters.placement != fft_placement_inplace)
     {
         allocate_buffer(output_buf, osize);
+        // avoid false negatives via nonzero initialization:
+        hip_error_code = hipMemset(output_buf.data(), 1, osize);
+        if(hip_error_code != hipSuccess)
+        {
+            GTEST_FAIL() << "Non-zero initialization of output buffer failed";
+        }
     }
 
     hostbuf hostbuffer;
