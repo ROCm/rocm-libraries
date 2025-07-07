@@ -1853,6 +1853,56 @@ public:
     {
         return run_callbacks;
     }
+    // checks if the parameters are consistent with a "default" data layout (considering strides and distances)
+    bool is_using_default_layout() const
+    {
+        auto is_zero                = [](const decltype(ioffset)::value_type& i) { return i == 0; };
+        bool default_layout_is_used = std::all_of(ioffset.begin(), ioffset.end(), is_zero)
+                                      && std::all_of(ooffset.begin(), ooffset.end(), is_zero);
+        size_t default_ival = 1;
+        size_t default_oval = 1;
+        default_layout_is_used
+            &= (default_ival == istride.back()) && (default_oval == ostride.back());
+        switch(transform_type)
+        {
+        case fft_transform_type_complex_forward:
+        case fft_transform_type_complex_inverse:
+        {
+            default_ival *= length.back();
+            default_oval *= length.back();
+            break;
+        }
+        case fft_transform_type_real_forward:
+        case fft_transform_type_real_inverse:
+        {
+            const size_t hermitian_symmetric_length = length.back() / 2 + 1;
+            size_t*      ptr_default_real_val       = &default_ival;
+            size_t*      ptr_default_cmplx_val      = &default_oval;
+            if(transform_type == fft_transform_type_real_inverse)
+                std::swap(ptr_default_real_val, ptr_default_cmplx_val);
+            *ptr_default_cmplx_val *= hermitian_symmetric_length;
+            if(placement == fft_placement_inplace)
+                *ptr_default_real_val *= 2 * hermitian_symmetric_length; // padding to be used
+            else
+                *ptr_default_real_val *= length.back();
+            break;
+        }
+        default:
+            throw std::runtime_error("Invalid transform type");
+        }
+        // check strides for multi-dimensional cases
+        for(int stride_idx = static_cast<int>(dim()) - 2; stride_idx >= 0 && default_layout_is_used;
+            stride_idx--)
+        {
+            default_layout_is_used
+                &= (default_ival == istride[stride_idx]) && (default_oval == ostride[stride_idx]);
+            default_ival *= length[stride_idx];
+            default_oval *= length[stride_idx];
+        }
+        // check distances
+        default_layout_is_used &= (idist == default_ival) && (odist == default_oval);
+        return default_layout_is_used;
+    }
 
     // Given a data type and dimensions, fill the buffer, imposing Hermitian symmetry if necessary.
     template <typename Tbuff>
@@ -2160,10 +2210,12 @@ public:
         }
     }
 
-    virtual fft_status set_callbacks(void* load_cb_host,
-                                     void* load_cb_data,
-                                     void* store_cb_host,
-                                     void* store_cb_data)
+    virtual fft_status set_callbacks(void*  load_cb_host,
+                                     void*  load_cb_data,
+                                     void*  store_cb_host,
+                                     void*  store_cb_data,
+                                     size_t load_cb_shared_mem_bytes,
+                                     size_t store_cb_shared_mem_bytes)
     {
         return fft_status_success;
     }

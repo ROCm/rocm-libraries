@@ -83,7 +83,6 @@ def runTestCommand (platform, project, gfilter)
 
 
     platform.runCommand(this, command)
-    junit "${project.paths.project_build_prefix}/build/${buildType}/clients/staging/*.xml"
 }
 
 def runPackageCommand(platform, project)
