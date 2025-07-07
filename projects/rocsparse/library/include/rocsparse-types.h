@@ -536,7 +536,7 @@ typedef enum rocsparse_datatype_
     rocsparse_datatype_u8_r   = 161, /**<  8-bit unsigned integer, real */
     rocsparse_datatype_i32_r  = 162, /**< 32-bit signed integer, real */
     rocsparse_datatype_u32_r  = 163, /**< 32-bit unsigned integer, real */
-    rocsparse_datatype_bf16_r = 168 /**< 16-bit bfloat, real */
+    rocsparse_datatype_bf16_r = 168 /**< 16-bit brain floating point, real */
 } rocsparse_datatype;
 
 /*! \ingroup types_module

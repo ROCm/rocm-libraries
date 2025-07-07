@@ -48,16 +48,19 @@ As an example to include an admin: *we have a critical feature but develop is br
 
 ## Rotation
 
-Week | Non-APAC | APAC
+Week | North America | Europe / India / APAC
 ---- | ------- | ---------
-Jun 30, 2025 | <placeholder1> | <placeholder2>
+Jun 30, 2025 | ellosel | marbre
 July 7, 2025 | <placeholder1> | <placeholder2>
 
 ### Log
 
 Filling in this section is optional while on rotation. While this level of
 organization and tracking is not expected from all members, seeing the incident
-history and actions taken in one location can be useful.
+history and actions taken in one location can be useful. However, for bugs that you can't immediately address
+please file a new GH issue and label it with the "gardener" label.
+
+You can see current list of [gardener known bugs](https://github.com/ROCm/rocm-libraries/issues?q=is%3Aissue%20state%3Aopen%20label%3Agardener)
 
 Date | Library | Issue overview | Link to details | Resolved?
 ---- | ------- | -------------- | --------------- | ---------
