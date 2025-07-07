@@ -450,7 +450,7 @@ void inclusive_scan_reduce_initial_value_kernel(T* device_output,
     }
 }
 
-
+// #ifndef __HIP_PLATFORM_NVIDIA__
 TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanReduceInitialValue)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -557,6 +557,9 @@ TYPED_TEST(HipcubBlockScanSingleValueTests, InclusiveScanReduceInitialValue)
         HIP_CHECK(hipFree(device_output_reductions));
     }
 }
+
+// #endif //__HIP_PLATFORM_NVIDIA__
+
 #endif
 
 template<unsigned int BlockSize, hipcub::BlockScanAlgorithm Algorithm, class T>
