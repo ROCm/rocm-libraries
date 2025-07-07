@@ -3,7 +3,7 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
-## rocFFT 1.0.34 (unreleased)
+## rocFFT 1.0.34 for ROCm 7.0.0
 
 ### Added
 
@@ -23,6 +23,7 @@ Documentation for rocFFT is available at
   - 6144
   - 6561
   - 8192
+* Implemented single-kernel plans for some large 1D problem sizes, on devices with at least 160KiB of LDS.
 
 ### Resolved issues
 
