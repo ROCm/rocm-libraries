@@ -180,6 +180,11 @@ int main(int argc, char** argv)
     rocsparse_enable_debug();
 
     //
+    // Add additional debug check for kernel launches.
+    //
+    rocsparse_enable_debug_kernel_launch();
+
+    //
     // Enable test debug arguments.
     //
     if(rocsparse_clients_envariables::is_defined(

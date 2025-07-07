@@ -1,5 +1,6 @@
+/*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,17 +22,34 @@
  *
  * ************************************************************************ */
 
-/*! \file
- *  \brief rocsparse.h includes other *.h and exposes a common interface
- */
+#pragma once
 
-#ifndef ROCSPARSE_H
-#define ROCSPARSE_H
+#include "rocsparse-types.h"
 
-#include "rocsparse-auxiliary.h"
-#include "rocsparse-debugging.h"
-#include "rocsparse-functions.h"
-#include "rocsparse-roctx.h"
-#include "rocsparse-version.h"
+namespace rocsparse
+{
+    struct sorted_coo2csr_info_t
+    {
+    private:
+        int64_t             m_num_rows{};
+        rocsparse_indextype m_row_ptr_indextype{};
+        void*               m_row_ptr{};
 
-#endif /* ROCSPARSE_H */
+    public:
+        const void* get_row_ptr() const;
+        sorted_coo2csr_info_t() = delete;
+
+        sorted_coo2csr_info_t(int64_t             num_rows,
+                              rocsparse_indextype ptr_indextype,
+                              hipStream_t         stream);
+
+        hipError_t free_memory(hipStream_t stream);
+        ~sorted_coo2csr_info_t();
+
+        rocsparse_status calculate(rocsparse_handle     handle,
+                                   int64_t              coo_row_ind_size,
+                                   const void*          coo_row_ind,
+                                   rocsparse_indextype  coo_row_ind_indextype,
+                                   rocsparse_index_base coo_row_ind_index_base);
+    };
+}

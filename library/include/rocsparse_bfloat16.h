@@ -274,9 +274,9 @@ inline __host__ __device__ rocsparse_bfloat16 operator*(rocsparse_bfloat16 a, ro
 {
     return rocsparse_bfloat16(float(a) * float(b));
 }
-inline __host__ __device__ rocsparse_bfloat16 operator*(float a, rocsparse_bfloat16 b)
+inline __host__ __device__ float operator*(float a, rocsparse_bfloat16 b)
 {
-    return rocsparse_bfloat16(a * float(b));
+    return a * float(b);
 }
 inline __host__ __device__ rocsparse_bfloat16 operator/(rocsparse_bfloat16 a, rocsparse_bfloat16 b)
 {
@@ -323,7 +323,6 @@ inline __host__ __device__ float operator+=(float a, rocsparse_bfloat16 b)
 {
     return a = a + float(b);
 }
-
 inline __host__ __device__ rocsparse_bfloat16 operator-=(rocsparse_bfloat16 a, rocsparse_bfloat16 b)
 {
     return a = a - b;
@@ -336,14 +335,13 @@ inline __host__ __device__ float operator-=(float a, rocsparse_bfloat16 b)
 {
     return a = a - float(b);
 }
-
 inline __host__ __device__ rocsparse_bfloat16 operator*=(rocsparse_bfloat16 a, rocsparse_bfloat16 b)
 {
     return a = a * b;
 }
-inline __host__ __device__ rocsparse_bfloat16 operator*=(rocsparse_bfloat16 a, float b)
+inline __host__ __device__ float operator*=(rocsparse_bfloat16 a, float b)
 {
-    return a = rocsparse_bfloat16(float(a) * b);
+    return a = float(a) * b;
 }
 inline __host__ __device__ float operator*=(float a, rocsparse_bfloat16 b)
 {

@@ -177,7 +177,7 @@ namespace rocsparse
         const I row = (gid < nnz) ? rocsparse::nontemporal_load(&coo_row_ind[gid]) - idx_base : -1;
         const I col = (gid < nnz) ? rocsparse::nontemporal_load(&coo_col_ind[gid]) - idx_base : 0;
         const T val
-            = (gid < nnz) ? alpha * rocsparse::nontemporal_load(&coo_val[gid]) : static_cast<A>(0);
+            = (gid < nnz) ? alpha * rocsparse::nontemporal_load(&coo_val[gid]) : 0;
 
         for(I l = ncol_offset; l < n; l += WF_SIZE)
         {

@@ -1,5 +1,6 @@
+/*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,17 +22,49 @@
  *
  * ************************************************************************ */
 
-/*! \file
- *  \brief rocsparse.h includes other *.h and exposes a common interface
- */
+#pragma once
 
-#ifndef ROCSPARSE_H
-#define ROCSPARSE_H
+#include "rocsparse-types.h"
+#include "rocsparse_envariables.hpp"
 
-#include "rocsparse-auxiliary.h"
-#include "rocsparse-debugging.h"
-#include "rocsparse-functions.h"
-#include "rocsparse-roctx.h"
-#include "rocsparse-version.h"
+namespace rocsparse
+{
+    struct roctx_variables_st
+    {
+    private:
+        bool roctx_enabled;
 
-#endif /* ROCSPARSE_H */
+    public:
+        bool get_roctx_enabled() const;
+        void set_roctx_enabled(bool value);
+    };
+
+    struct roctx_st
+    {
+    private:
+        roctx_variables_st m_var{};
+
+    public:
+        static roctx_st& instance()
+        {
+            static roctx_st self;
+            return self;
+        }
+
+        static roctx_variables_st& var()
+        {
+            return instance().m_var;
+        }
+
+        ~roctx_st() = default;
+
+    private:
+        roctx_st()
+        {
+            const bool roctx_enabled = ROCSPARSE_ENVARIABLES.get(rocsparse::envariables::ROCTX);
+            m_var.set_roctx_enabled(roctx_enabled);
+        };
+    };
+
+#define rocsparse_roctx_variables rocsparse::roctx_st::instance().var()
+}
