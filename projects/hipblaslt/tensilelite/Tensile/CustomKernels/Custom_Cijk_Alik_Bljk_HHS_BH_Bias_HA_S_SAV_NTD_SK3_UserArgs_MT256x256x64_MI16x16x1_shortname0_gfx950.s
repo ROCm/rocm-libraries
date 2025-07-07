@@ -4,13 +4,13 @@
 /******************************************/
 .amdgcn_target "amdgcn-amd-amdhsa--gfx950"
 .text
-.protected Custom_Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
-.globl Custom_Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
+.protected Custom_Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
+.globl Custom_Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
 .p2align 8
-.type Custom_Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950,@function
+.type Custom_Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950,@function
 .section .rodata,#alloc
 .p2align 6
-.amdhsa_kernel Custom_Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
+.amdhsa_kernel Custom_Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_accum_offset 256 // accvgpr offset
   .amdhsa_next_free_vgpr 512 // vgprs
@@ -96,8 +96,8 @@ amdhsa.version:
   - 1
   - 1
 amdhsa.kernels:
-  - .name: Custom_Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
-    .symbol: 'Custom_Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950.kd'
+  - .name: Custom_Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
+    .symbol: 'Custom_Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950.kd'
     .language:                   OpenCL C
     .language_version:
       - 2
@@ -338,7 +338,7 @@ amdhsa.kernels:
     .wavefront_size:             64
 ...
 .end_amdgpu_metadata
-Custom_Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950:
+Custom_Cijk_Alik_Bljk_HHS_BH_Bias_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950:
 label_ASM_Start:  /// Main body of the asm kernel
 .macro V_MAGIC_DIV vgprDstIdx:req, dividend:req, magicNumber:req, magicShift:req, magicA:req
     v_mul_hi_u32 v[\vgprDstIdx+1], \dividend, \magicNumber
