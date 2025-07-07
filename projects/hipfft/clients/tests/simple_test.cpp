@@ -23,6 +23,7 @@
 #include <fftw3.h>
 #include <gtest/gtest.h>
 #include <hip/hip_vector_types.h>
+#include <random>
 #include <vector>
 
 #include "../hipfft_params.h"
@@ -47,6 +48,83 @@ inline double type_epsilon_simple<double>()
 {
     return 1e-7;
 }
+
+/* Static utility class template helping with the definition of valid/invalid
+   values for arguments of (un)scoped enumeration types in API testing.
+   Usage: for an enumeration type of interest, say "enum_of_interest", define
+template <>
+const std::vector<enum_of_interest> enum_helper<enum_of_interest>::valid_values =
+        {all, the, known, valid, values, of, type, enum_of_interest};
+   before using any of this class' self-explanatory public member functions.
+*/
+template <typename T, std::enable_if_t<std::is_enum_v<T>, bool> = true>
+class enum_helper
+{
+    using base_t = typename std::underlying_type<T>::type;
+    // static class cannot be instantiated, copied, or moved
+    enum_helper()                    = delete;
+    ~enum_helper()                   = delete;
+    enum_helper(const enum_helper&)  = delete;
+    enum_helper(enum_helper&& other) = delete;
+    enum_helper& operator=(const enum_helper&) = delete;
+    enum_helper& operator=(enum_helper&& other) = delete;
+
+public:
+    static const std::vector<T> valid_values;
+
+    static bool has_value(const T& val)
+    {
+        return std::any_of(
+            valid_values.begin(), valid_values.end(), [&](const T& v) { return v == val; });
+    }
+
+    static size_t num_valid_values()
+    {
+        return valid_values.size();
+    }
+    static T get_any_valid_value(size_t prng_seed = 0)
+    {
+        const size_t nvals = num_valid_values();
+        if(nvals == 0)
+            throw std::runtime_error(
+                "enum_helper::get_any_valid_value: no valid value is defined.");
+        std::ranlux24_base gen(prng_seed);
+        return valid_values[static_cast<size_t>(gen()) % nvals];
+    }
+
+    static T get_invalid_value(size_t prng_seed = 0)
+    {
+        constexpr base_t max_base_val = std::numeric_limits<base_t>::max();
+        constexpr base_t min_base_val = std::numeric_limits<base_t>::min();
+
+        std::ranlux24_base                    gen(prng_seed);
+        std::uniform_int_distribution<base_t> dis(min_base_val, max_base_val);
+        // limit number of attempts to 10x the number of possible value
+        size_t num_attempts = 0;
+        T      made_up_value;
+        auto   generate_candidate = [&]() {
+            num_attempts++;
+            made_up_value = static_cast<T>(dis(gen));
+            return;
+        };
+        generate_candidate();
+        while(has_value(made_up_value) && num_attempts < 10 * num_valid_values())
+        {
+            generate_candidate();
+        }
+        if(has_value(made_up_value))
+            throw std::runtime_error(
+                "enum_helper::get_invalid_value failed to generate an invalid valid");
+        return made_up_value;
+    }
+};
+
+// definition of valid values for various enum types
+template <>
+const std::vector<hipfftLibraryPropertyType> enum_helper<hipfftLibraryPropertyType>::valid_values
+    = {hipfftLibraryPropertyType::HIPFFT_MAJOR_VERSION,
+       hipfftLibraryPropertyType::HIPFFT_MINOR_VERSION,
+       hipfftLibraryPropertyType::HIPFFT_PATCH_LEVEL};
 
 TEST(hipfftTest, Create1dPlan)
 {
@@ -643,4 +721,31 @@ TEST(hipfftTest, OutplaceOnly)
     ASSERT_LT(nrmse, type_epsilon_simple<double>());
     fftw_destroy_plan(ref_p);
     fftw_free(ref_out);
+}
+
+static constexpr int absurd_version_or_property = std::numeric_limits<int>::min();
+TEST(hipfftTest, GetVersion)
+{
+    // valid use case(s)
+    int tmp = absurd_version_or_property;
+    EXPECT_EQ(hipfftGetVersion(&tmp), HIPFFT_SUCCESS);
+    EXPECT_NE(tmp, absurd_version_or_property);
+    EXPECT_EQ(hipfftGetVersion(nullptr), HIPFFT_INVALID_VALUE);
+}
+
+TEST(hipfftTest, GetProperty)
+{
+    // valid use case(s)
+    int tmp;
+    for(auto prop_type : enum_helper<hipfftLibraryPropertyType>::valid_values)
+    {
+        tmp = absurd_version_or_property;
+        EXPECT_EQ(hipfftGetProperty(prop_type, &tmp), HIPFFT_SUCCESS);
+        EXPECT_NE(tmp, absurd_version_or_property);
+    }
+    // invalid use case(s)
+    const auto valid_property_type = enum_helper<hipfftLibraryPropertyType>::get_any_valid_value();
+    EXPECT_EQ(hipfftGetProperty(valid_property_type, nullptr), HIPFFT_INVALID_VALUE);
+    const auto invalid_property_type = enum_helper<hipfftLibraryPropertyType>::get_invalid_value();
+    EXPECT_EQ(hipfftGetProperty(invalid_property_type, &tmp), HIPFFT_INVALID_TYPE);
 }

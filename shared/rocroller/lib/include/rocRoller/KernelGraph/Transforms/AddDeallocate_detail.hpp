@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,40 +26,31 @@
 
 #pragma once
 
-#include <memory>
-#include <string>
+#include <set>
+
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 
 namespace rocRoller
 {
-    namespace Scheduling
+    namespace KernelGraph
     {
-        enum class SchedulerProcedure : int
+        namespace AddDeallocateDetail
         {
-            Sequential = 0,
-            RoundRobin,
-            Random,
-            Cooperative,
-            Priority,
-            Count
-        };
-
-        enum class Dependency
-        {
-            None = 0,
-            SCC,
-            VCC,
-            Branch,
-            Unlock,
-            M0,
-            Count
-        };
-
-        class Scheduler;
-        class LockState;
-
-        using SchedulerPtr = std::shared_ptr<Scheduler>;
-
-        std::string toString(SchedulerProcedure const&);
-        std::string toString(Dependency const&);
+            /**
+             * @brief Add the next downstream Barrier to the list of dependencies.
+             *
+             * @param dependencies The set of dependencies for the Deallocate operation.
+             * @param coordinate The coordinate for which to add the Deallocate operation.
+             * @param lastRWOps The last read/write operations for the coordinate.
+             * @param original The original kernel graph.
+             * @param compare The topological comparison function (original).
+             */
+            void addDownstreamBarrierInLoop(std::set<int>&            dependencies,
+                                            int                       coordinate,
+                                            std::set<int> const&      lastRWOps,
+                                            KernelGraph const&        original,
+                                            TopologicalCompare const& compare);
+        }
     }
 }

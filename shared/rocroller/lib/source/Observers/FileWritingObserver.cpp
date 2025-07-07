@@ -24,42 +24,51 @@
  *
  *******************************************************************************/
 
-#pragma once
+#include <fstream>
+#include <stdlib.h>
 
-#include <memory>
-#include <string>
+#include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
+
+#include <rocRoller/Context.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
+#include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 
 namespace rocRoller
 {
     namespace Scheduling
     {
-        enum class SchedulerProcedure : int
+        FileWritingObserver::FileWritingObserver() {}
+
+        FileWritingObserver::FileWritingObserver(ContextPtr context)
+            : m_context(context)
+            , m_assemblyFile()
         {
-            Sequential = 0,
-            RoundRobin,
-            Random,
-            Cooperative,
-            Priority,
-            Count
-        };
+        }
 
-        enum class Dependency
+        FileWritingObserver::FileWritingObserver(FileWritingObserver const& input)
+            : m_context(input.m_context)
+            , m_assemblyFile()
         {
-            None = 0,
-            SCC,
-            VCC,
-            Branch,
-            Unlock,
-            M0,
-            Count
-        };
+        }
 
-        class Scheduler;
-        class LockState;
+        void FileWritingObserver::observe(Instruction const& inst)
+        {
+            auto context = m_context.lock();
+            if(!m_assemblyFile.is_open())
+            {
+                m_assemblyFile.open(context->assemblyFileName(), std::ios_base::out);
+            }
+            AssertFatal(m_assemblyFile.is_open(),
+                        "Could not open file " + context->assemblyFileName() + " for writing.");
+            m_assemblyFile << inst.toString(context->kernelOptions()->logLevel);
+            m_assemblyFile.flush();
+        }
 
-        using SchedulerPtr = std::shared_ptr<Scheduler>;
+        bool FileWritingObserver::runtimeRequired()
+        {
+            return Settings::getInstance()->get(Settings::SaveAssembly);
+        }
 
-        std::string toString(SchedulerProcedure const&);
-        std::string toString(Dependency const&);
     }
 }

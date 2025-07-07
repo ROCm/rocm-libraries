@@ -71,18 +71,6 @@ namespace rocRoller
         virtual std::string name() const = 0;
 
         /**
-         * @brief For certain vector binary instructions that can not have a literal as the second source, swap.
-         * Side effect: Potentially swaps the lhs and rhs registers
-         *
-         * TODO: Swap if RHS is anything but a VGPR
-         *
-         * @param lhs First source register (src0)
-         * @param rhs Second source register (src1)
-         * @return Generator<Instruction> May yield a move to VGPR instruction if needed
-         */
-        Generator<Instruction> swapIfRHSLiteral(Register::ValuePtr& lhs, Register::ValuePtr& rhs);
-
-        /**
          * @brief Use VALU to perform a scalar comparison.
          *
          * Some vectors comparison instructions (like v_cmp_le_i64)

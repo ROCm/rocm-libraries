@@ -40,7 +40,6 @@
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/Operations/T_Execute.hpp>
-#include <rocRoller/Scheduling/Observers/FileWritingObserver.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
@@ -97,6 +96,13 @@ namespace MatrixMultiplyTest
         return 6.f;
     }
 
+    struct ScaleParams
+    {
+        DataType scaleTypeA     = DataType::None;
+        DataType scaleTypeB     = DataType::None;
+        uint     scaleBlockSize = 1;
+    };
+
     template <typename... Ts>
     class BaseMatrixMultiplyContextFixture
         : public BaseGPUContextFixture,
@@ -114,18 +120,14 @@ namespace MatrixMultiplyTest
         CommandKernelPtr commandKernel;
 
         template <typename TA, typename TB, typename TD, typename ACC = float>
-        void matrixMultiplyMacroTile(int            wave_m,
-                                     int            wave_n,
-                                     int            wave_k,
-                                     int            wave_b,
-                                     bool           useLDSB        = true,
-                                     std::string    transA         = "N",
-                                     std::string    transB         = "N",
-                                     bool           scaleA         = false,
-                                     bool           scaleB         = false,
-                                     const uint     scaleBlockSize = 32,
-                                     const DataType scaleTypeA     = DataType::E8M0,
-                                     const DataType scaleTypeB     = DataType::E8M0)
+        void matrixMultiplyMacroTile(int               wave_m,
+                                     int               wave_n,
+                                     int               wave_k,
+                                     int               wave_b,
+                                     bool              useLDSB     = true,
+                                     std::string       transA      = "N",
+                                     std::string       transB      = "N",
+                                     const ScaleParams scaleParams = {})
         {
             commandKernel = nullptr;
 
@@ -139,6 +141,12 @@ namespace MatrixMultiplyTest
             {
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
             }
+
+            const bool scaleA         = scaleParams.scaleTypeA != DataType::None;
+            const bool scaleB         = scaleParams.scaleTypeB != DataType::None;
+            const auto scaleTypeA     = scaleParams.scaleTypeA;
+            const auto scaleTypeB     = scaleParams.scaleTypeB;
+            const auto scaleBlockSize = scaleParams.scaleBlockSize;
 
             if(scaleA || scaleB)
             {
@@ -453,28 +461,26 @@ namespace MatrixMultiplyTest
                                           int                 n,
                                           int                 k,
                                           int                 b,
-                                          bool                useLDSB        = true,
-                                          std::string         transA         = "N",
-                                          std::string         transB         = "N",
-                                          bool                scaleA         = false,
-                                          bool                scaleB         = false,
-                                          const uint          scaleBlockSize = 32)
+                                          bool                useLDSB     = true,
+                                          std::string         transA      = "N",
+                                          std::string         transB      = "N",
+                                          const ScaleParams   scaleParams = {})
         {
             if(typeB == rocRoller::DataType::FP8)
                 matrixMultiplyMacroTile<TA, FP8, float>(
-                    m, n, k, b, useLDSB, transA, transB, scaleA, scaleB, scaleBlockSize);
+                    m, n, k, b, useLDSB, transA, transB, scaleParams);
             else if(typeB == rocRoller::DataType::BF8)
                 matrixMultiplyMacroTile<TA, BF8, float>(
-                    m, n, k, b, useLDSB, transA, transB, scaleA, scaleB, scaleBlockSize);
+                    m, n, k, b, useLDSB, transA, transB, scaleParams);
             else if(typeB == rocRoller::DataType::FP6)
                 matrixMultiplyMacroTile<TA, FP6, float>(
-                    m, n, k, b, useLDSB, transA, transB, scaleA, scaleB, scaleBlockSize);
+                    m, n, k, b, useLDSB, transA, transB, scaleParams);
             else if(typeB == rocRoller::DataType::BF6)
                 matrixMultiplyMacroTile<TA, BF6, float>(
-                    m, n, k, b, useLDSB, transA, transB, scaleA, scaleB, scaleBlockSize);
+                    m, n, k, b, useLDSB, transA, transB, scaleParams);
             else if(typeB == rocRoller::DataType::FP4)
                 matrixMultiplyMacroTile<TA, FP4, float>(
-                    m, n, k, b, useLDSB, transA, transB, scaleA, scaleB, scaleBlockSize);
+                    m, n, k, b, useLDSB, transA, transB, scaleParams);
             else
                 Throw<FatalError>("Invalid type.");
         }
@@ -485,28 +491,26 @@ namespace MatrixMultiplyTest
                                           int                 n,
                                           int                 k,
                                           int                 b,
-                                          bool                useLDSB        = true,
-                                          std::string         transA         = "N",
-                                          std::string         transB         = "N",
-                                          bool                scaleA         = false,
-                                          bool                scaleB         = false,
-                                          const uint          scaleBlockSize = 32)
+                                          bool                useLDSB     = true,
+                                          std::string         transA      = "N",
+                                          std::string         transB      = "N",
+                                          const ScaleParams   scaleParams = {})
         {
             if(typeA == rocRoller::DataType::FP8)
                 matrixMultiplyMacroTileMixed<FP8>(
-                    typeB, m, n, k, b, useLDSB, transA, transB, scaleA, scaleB, scaleBlockSize);
+                    typeB, m, n, k, b, useLDSB, transA, transB, scaleParams);
             else if(typeA == rocRoller::DataType::BF8)
                 matrixMultiplyMacroTileMixed<BF8>(
-                    typeB, m, n, k, b, useLDSB, transA, transB, scaleA, scaleB, scaleBlockSize);
+                    typeB, m, n, k, b, useLDSB, transA, transB, scaleParams);
             else if(typeA == rocRoller::DataType::FP6)
                 matrixMultiplyMacroTileMixed<FP6>(
-                    typeB, m, n, k, b, useLDSB, transA, transB, scaleA, scaleB, scaleBlockSize);
+                    typeB, m, n, k, b, useLDSB, transA, transB, scaleParams);
             else if(typeA == rocRoller::DataType::BF6)
                 matrixMultiplyMacroTileMixed<BF6>(
-                    typeB, m, n, k, b, useLDSB, transA, transB, scaleA, scaleB, scaleBlockSize);
+                    typeB, m, n, k, b, useLDSB, transA, transB, scaleParams);
             else if(typeA == rocRoller::DataType::FP4)
                 matrixMultiplyMacroTileMixed<FP4>(
-                    typeB, m, n, k, b, useLDSB, transA, transB, scaleA, scaleB, scaleBlockSize);
+                    typeB, m, n, k, b, useLDSB, transA, transB, scaleParams);
             else
                 Throw<FatalError>("Invalid type.");
         }
@@ -1491,30 +1495,33 @@ namespace MatrixMultiplyTest
 
         std::string modifiers{"cbsz:0b000 blgp:0b000"};
 
+        ScaleParams const scaleParams
+            = {.scaleTypeA = DataType::E8M0, .scaleTypeB = DataType::E8M0, .scaleBlockSize = 32};
+
         switch(typeAB)
         {
         case DataType::FP8:
             matrixMultiplyMacroTile<FP8, FP8, float>(
-                waveM, waveN, waveK, 1, true, transA, transB, true, true);
+                waveM, waveN, waveK, 1, true, transA, transB, scaleParams);
             break;
         case DataType::BF8:
             matrixMultiplyMacroTile<BF8, BF8, float>(
-                waveM, waveN, waveK, 1, true, transA, transB, true, true);
+                waveM, waveN, waveK, 1, true, transA, transB, scaleParams);
             modifiers = "cbsz:0b001 blgp:0b001";
             break;
         case DataType::FP6:
             matrixMultiplyMacroTile<FP6, FP6, float>(
-                waveM, waveN, waveK, 1, true, transA, transB, true, true);
+                waveM, waveN, waveK, 1, true, transA, transB, scaleParams);
             modifiers = "cbsz:0b010 blgp:0b010";
             break;
         case DataType::BF6:
             matrixMultiplyMacroTile<BF6, BF6, float>(
-                waveM, waveN, waveK, 1, true, transA, transB, true, true);
+                waveM, waveN, waveK, 1, true, transA, transB, scaleParams);
             modifiers = "cbsz:0b011 blgp:0b011";
             break;
         case DataType::FP4:
             matrixMultiplyMacroTile<FP4, FP4, float>(
-                waveM, waveN, waveK, 1, true, transA, transB, true, true);
+                waveM, waveN, waveK, 1, true, transA, transB, scaleParams);
             modifiers = "cbsz:0b100 blgp:0b100";
             break;
         default:
@@ -1799,8 +1806,11 @@ namespace MatrixMultiplyTest
             GTEST_SKIP() << "FIXME: Skipping scaled non-TN 16x16x128 tests";
         }
 
+        ScaleParams const scaleParams
+            = {.scaleTypeA = DataType::E8M0, .scaleTypeB = DataType::E8M0, .scaleBlockSize = 32};
+
         matrixMultiplyMacroTileMixed(
-            typeA, typeB, waveM, waveN, waveK, 1, true, transA, transB, true, true);
+            typeA, typeB, waveM, waveN, waveK, 1, true, transA, transB, scaleParams);
     }
 
     INSTANTIATE_TEST_SUITE_P(
