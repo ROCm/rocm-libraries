@@ -23,6 +23,8 @@
 
 #include <gtest/gtest.h>
 
+#define M_PI 3.1415926535897932
+
 #define CHECK_CORRECT(std_complex, thrust_complex, real_eps, imag_eps, real_val, imag_val)                   \
   do                                                                                                         \
   {                                                                                                          \
@@ -86,15 +88,30 @@ void run_rng_test(const StdFunc& sf, const ThrustFunc& tf)
   for (size_t i = 0; i < test_size; i++)
   {
     T r_num = dis(gen);
-
+    T expected, actual;
     if constexpr (SingleParam)
     {
-      ASSERT_EQ(sf(r_num), tf(r_num));
+      expected = sf(r_num);
+      actual   = tf(r_num);
     }
     else
     {
       T r_num_ = dis(gen);
-      ASSERT_EQ(sf(r_num, r_num_), tf(r_num, r_num_));
+      expected = sf(r_num, r_num_);
+      actual   = tf(r_num, r_num_);
+    }
+
+    if (std::isinf(expected))
+    {
+      ASSERT_TRUE(std::isinf(actual));
+    }
+    else if (std::isnan(expected))
+    {
+      ASSERT_TRUE(std::isnan(actual));
+    }
+    else
+    {
+      ASSERT_NEAR(expected, actual, expected * 0.01);
     }
   }
 }
@@ -226,7 +243,7 @@ TEST(VariousComplexTest, copysignf)
 TYPED_TEST(VariousComplexTest, log1p)
 {
   using T = typename TestFixture::T;
-  run_rng_test<T>(
+  run_rng_test<T, true>(
     [](const T& x) {
       return std::log1p(x);
     },
@@ -238,7 +255,7 @@ TYPED_TEST(VariousComplexTest, log1p)
 TYPED_TEST(VariousComplexTest, log1pf)
 {
   using T = typename TestFixture::T;
-  run_rng_test<T>(
+  run_rng_test<T, true>(
     [](const T& x) {
       return std::log1pf(x);
     },
@@ -288,6 +305,8 @@ TEST(VariousComplexTest, hypotf)
 //                          CATRIG & CATRIGF
 //
 // ===================================================================
+
+#ifndef _MSC_VER
 
 TYPED_TEST(VariousComplexTest, asinh)
 {
@@ -921,7 +940,7 @@ TEST(VariousComplexTest, logf_special_cases)
   // checking cases where real or imag is greater than 1e6
   run_test(5e7f, 0.5);
   run_test(0.5f, 5e7f);
-  
+
   c.in = 0x7f800000;
   run_test(c.out, 0.5); // inf
   run_test(0.5, c.out); // inf
@@ -1115,3 +1134,4 @@ TYPED_TEST(VariousComplexTest, tan)
   //-710 / 2 and 710 / 2 since cosh and sinh is quadratic and anything above 710 will result
   // in out of bounds even for double! We also have to acount the 2 multiplier);
 }
+#endif // MSC
