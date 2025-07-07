@@ -350,11 +350,7 @@ if(HIPBLASLT_ENABLE_HOST)
 endif()
 
 if(HIPBLASLT_ENABLE_DEVICE)
-    if(WIN32)
-        set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}hipblaslt/bin" CACHE PATH "path to tensile library")
-    else()
-        set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipblaslt" CACHE PATH "path to tensile library")
-    endif()
+    set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipblaslt" CACHE PATH "path to tensile library")
     rocm_install(
         DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/Tensile/library
         DESTINATION ${HIPBLASLT_TENSILE_LIBRARY_DIR}
