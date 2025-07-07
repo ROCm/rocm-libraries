@@ -76,7 +76,23 @@ public:
     }
     size_t real_scalar_type_size() const
     {
-        return precision == fft_precision_double ? sizeof(double) : sizeof(float);
+        size_t ret = 0;
+        switch(precision)
+        {
+        case fft_precision_half:
+            ret = sizeof(rocfft_fp16);
+            break;
+        case fft_precision_single:
+            ret = sizeof(float);
+            break;
+        case fft_precision_double:
+            ret = sizeof(double);
+            break;
+        default:
+            throw std::runtime_error("Unknown precision");
+            break;
+        }
+        return ret;
     }
 
     hipfft_params make_sub_dft_params(size_t step_id, size_t stream_id) const
