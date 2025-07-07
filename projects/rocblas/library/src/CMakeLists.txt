@@ -820,11 +820,7 @@ rocm_install_targets(
 )
 
 if( BUILD_WITH_TENSILE )
-  if (WIN32)
-    set( ROCBLAS_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/bin/rocblas" CACHE PATH "path to tensile library" )
-  else()
-    set( ROCBLAS_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/rocblas" CACHE PATH "path to tensile library" )
-  endif()
+  set( ROCBLAS_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/rocblas" CACHE PATH "path to tensile library" )
   # For ASAN package, Tensile library files(which are not shared libraries) are not required
   if( NOT ENABLE_ASAN_PACKAGING )
     if( BUILD_SHARED_LIBS )
