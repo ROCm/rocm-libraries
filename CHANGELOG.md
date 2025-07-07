@@ -13,6 +13,7 @@ Documentation for rocFFT is available at
 
 * Removed rocfft-rider legacy compatibility from clients
 * Removed support for the gfx940 and gfx941 targets from the client programs.
+* Removed backward compatibility symlink for include directories.
 
 ### Optimized
 
