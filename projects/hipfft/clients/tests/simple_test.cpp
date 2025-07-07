@@ -128,7 +128,7 @@ const std::vector<hipfftLibraryPropertyType> enum_helper<hipfftLibraryPropertyTy
 
 TEST(hipfftTest, Create1dPlan)
 {
-    hipfftHandle plan   = nullptr;
+    hipfftHandle plan   = hipfft_params::INVALID_PLAN_HANDLE;
     size_t       length = 1024;
     ASSERT_EQ(hipfftPlan1d(&plan, length, HIPFFT_C2C, 1), HIPFFT_SUCCESS);
 

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,16 +22,39 @@
  * ************************************************************************ */
 
 /*! \file
- *  \brief rocsparse.h includes other *.h and exposes a common interface
+ *  \brief rocsparse-roctx.h provides rocTX instrumentation functions in rocsparse
  */
 
-#ifndef ROCSPARSE_H
-#define ROCSPARSE_H
+#ifndef ROCSPARSE_ROCTX_H
+#define ROCSPARSE_ROCTX_H
 
-#include "rocsparse-auxiliary.h"
-#include "rocsparse-debugging.h"
-#include "rocsparse-functions.h"
-#include "rocsparse-roctx.h"
-#include "rocsparse-version.h"
+#include "rocsparse/rocsparse-export.h"
 
-#endif /* ROCSPARSE_H */
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/*! \ingroup aux_module
+ * \details Enable rocTX instrumentation.
+ * \note This routine ignores the environment variable ROCSPARSE_ROCTX.
+ */
+ROCSPARSE_EXPORT
+void rocsparse_enable_roctx();
+
+/*! \ingroup aux_module
+ * \details Disable rocTX instrumentation.
+ * \note This routine ignores the environment variable ROCSPARSE_ROCTX.
+ */
+ROCSPARSE_EXPORT void rocsparse_disable_roctx();
+
+/*! \ingroup aux_module
+ * \details Query whether rocTX instrumentation has been enabled. See \ref rocsparse_enable_roctx.
+ * \return 1 if enabled, 0 otherwise.
+ */
+ROCSPARSE_EXPORT int rocsparse_state_roctx();
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* ROCSPARSE_ROCTX_H */
