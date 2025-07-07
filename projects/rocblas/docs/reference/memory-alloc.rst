@@ -10,7 +10,7 @@ Device memory allocation in rocBLAS
 ********************************************************************
 
 For temporary device memory, rocBLAS uses a per-handle memory allocation with out-of-band management.
-More information is in the Device memory allocation section of :ref:programmers-guide.
+For more information, see the device memory allocation section of the :ref:programmers-guide.
 
 The following computational functions use temporary device memory.
 
