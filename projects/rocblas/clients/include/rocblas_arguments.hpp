@@ -382,14 +382,14 @@ enum rocblas_argument : int
 namespace ArgumentsHelper
 {
     template <rocblas_argument>
-    static constexpr auto apply = nullptr;
+    inline constexpr auto apply = nullptr;
 
     // Macro defining specializations for specific arguments
     // e_alpha and e_beta get turned into negative sentinel value specializations
     // clang-format off
 #define APPLY(NAME)                                                                         \
     template <>                                                                             \
-    ROCBLAS_CLANG_STATIC constexpr auto                                                     \
+    inline constexpr auto                                                     \
         apply<e_##NAME == e_alpha ? rocblas_argument(-1)                                    \
                                   : e_##NAME == e_beta ? rocblas_argument(-2) : e_##NAME> = \
             [](auto&& func, const Arguments& arg, auto) { func(#NAME, arg.NAME); }
@@ -399,14 +399,14 @@ namespace ArgumentsHelper
 
     // Specialization for e_alpha
     template <>
-    ROCBLAS_CLANG_STATIC constexpr auto apply<e_alpha> =
+    inline constexpr auto apply<e_alpha> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("alpha", arg.get_alpha<decltype(T)>());
         };
 
     // Specialization for e_beta
     template <>
-    ROCBLAS_CLANG_STATIC constexpr auto apply<e_beta> =
+    inline constexpr auto apply<e_beta> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("beta", arg.get_beta<decltype(T)>());
         };

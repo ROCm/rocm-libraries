@@ -30,13 +30,28 @@
 #include "../shared/concurrency.h"
 #include "../shared/fft_params.h"
 #include "../shared/hipfft_brick.h"
+#include "../shared/test_params.h"
 #include "hipfft/hipfft.h"
 #include "hipfft/hipfftXt.h"
+#include <random>
 
 #ifdef HIPFFT_MPI_ENABLE
 #include "hipfft/hipfftMp.h"
 #include <mpi.h>
 #endif
+
+template <typename T,
+          typename... Args,
+          std::enable_if_t<std::is_integral_v<T> && (std::is_same_v<T, Args> && ...), bool> = true>
+static void set_with_random_nonnegative_values(const std::string& token, T& val, Args&... args)
+{
+    std::hash<std::string>           hasher;
+    std::ranlux24_base               gen(random_seed + hasher(token));
+    std::uniform_int_distribution<T> dis(static_cast<T>(0), std::numeric_limits<T>::max());
+    val = dis(gen);
+    ((args = dis(gen)), ...);
+    return;
+}
 
 inline fft_status fft_status_from_hipfftparams(const hipfftResult_t val)
 {
@@ -140,6 +155,13 @@ public:
     std::vector<long long int> ll_length;
     std::vector<long long int> ll_inembed;
     std::vector<long long int> ll_onembed;
+
+    template <typename T>
+    struct many_api_layout_args
+    {
+        T *input_embed, *output_embed;
+        T  input_stride, output_stride, input_distance, output_distance;
+    };
 
     struct hipLibXtDesc_deleter
     {
@@ -454,10 +476,12 @@ public:
         }
     }
 
-    fft_status set_callbacks(void* load_cb_host,
-                             void* load_cb_data,
-                             void* store_cb_host,
-                             void* store_cb_data) override
+    fft_status set_callbacks(void*  load_cb_host,
+                             void*  load_cb_data,
+                             void*  store_cb_host,
+                             void*  store_cb_data,
+                             size_t load_cb_shared_mem_bytes  = 0,
+                             size_t store_cb_shared_mem_bytes = 0) override
     {
         if(run_callbacks)
         {
@@ -476,6 +500,16 @@ public:
                     plan, &store_cb_host, HIPFFT_CB_ST_COMPLEX, &store_cb_data);
                 if(ret != HIPFFT_SUCCESS)
                     return fft_status_from_hipfftparams(ret);
+
+                ret = hipfftXtSetCallbackSharedSize(
+                    plan, HIPFFT_CB_LD_REAL, load_cb_shared_mem_bytes);
+                if(ret != HIPFFT_SUCCESS)
+                    return fft_status_from_hipfftparams(ret);
+
+                ret = hipfftXtSetCallbackSharedSize(
+                    plan, HIPFFT_CB_ST_COMPLEX, store_cb_shared_mem_bytes);
+                if(ret != HIPFFT_SUCCESS)
+                    return fft_status_from_hipfftparams(ret);
                 break;
             case HIPFFT_D2Z:
                 ret = hipfftXtSetCallback(
@@ -487,6 +521,16 @@ public:
                     plan, &store_cb_host, HIPFFT_CB_ST_COMPLEX_DOUBLE, &store_cb_data);
                 if(ret != HIPFFT_SUCCESS)
                     return fft_status_from_hipfftparams(ret);
+
+                ret = hipfftXtSetCallbackSharedSize(
+                    plan, HIPFFT_CB_LD_REAL_DOUBLE, load_cb_shared_mem_bytes);
+                if(ret != HIPFFT_SUCCESS)
+                    return fft_status_from_hipfftparams(ret);
+
+                ret = hipfftXtSetCallbackSharedSize(
+                    plan, HIPFFT_CB_ST_COMPLEX_DOUBLE, store_cb_shared_mem_bytes);
+                if(ret != HIPFFT_SUCCESS)
+                    return fft_status_from_hipfftparams(ret);
                 break;
             case HIPFFT_C2R:
                 ret = hipfftXtSetCallback(plan, &load_cb_host, HIPFFT_CB_LD_COMPLEX, &load_cb_data);
@@ -494,6 +538,16 @@ public:
                     return fft_status_from_hipfftparams(ret);
 
                 ret = hipfftXtSetCallback(plan, &store_cb_host, HIPFFT_CB_ST_REAL, &store_cb_data);
+                if(ret != HIPFFT_SUCCESS)
+                    return fft_status_from_hipfftparams(ret);
+
+                ret = hipfftXtSetCallbackSharedSize(
+                    plan, HIPFFT_CB_LD_COMPLEX, load_cb_shared_mem_bytes);
+                if(ret != HIPFFT_SUCCESS)
+                    return fft_status_from_hipfftparams(ret);
+
+                ret = hipfftXtSetCallbackSharedSize(
+                    plan, HIPFFT_CB_ST_REAL, store_cb_shared_mem_bytes);
                 if(ret != HIPFFT_SUCCESS)
                     return fft_status_from_hipfftparams(ret);
                 break;
@@ -507,6 +561,16 @@ public:
                     plan, &store_cb_host, HIPFFT_CB_ST_REAL_DOUBLE, &store_cb_data);
                 if(ret != HIPFFT_SUCCESS)
                     return fft_status_from_hipfftparams(ret);
+
+                ret = hipfftXtSetCallbackSharedSize(
+                    plan, HIPFFT_CB_LD_COMPLEX_DOUBLE, load_cb_shared_mem_bytes);
+                if(ret != HIPFFT_SUCCESS)
+                    return fft_status_from_hipfftparams(ret);
+
+                ret = hipfftXtSetCallbackSharedSize(
+                    plan, HIPFFT_CB_ST_REAL_DOUBLE, store_cb_shared_mem_bytes);
+                if(ret != HIPFFT_SUCCESS)
+                    return fft_status_from_hipfftparams(ret);
                 break;
             case HIPFFT_C2C:
                 ret = hipfftXtSetCallback(plan, &load_cb_host, HIPFFT_CB_LD_COMPLEX, &load_cb_data);
@@ -515,6 +579,16 @@ public:
 
                 ret = hipfftXtSetCallback(
                     plan, &store_cb_host, HIPFFT_CB_ST_COMPLEX, &store_cb_data);
+                if(ret != HIPFFT_SUCCESS)
+                    return fft_status_from_hipfftparams(ret);
+
+                ret = hipfftXtSetCallbackSharedSize(
+                    plan, HIPFFT_CB_LD_COMPLEX, load_cb_shared_mem_bytes);
+                if(ret != HIPFFT_SUCCESS)
+                    return fft_status_from_hipfftparams(ret);
+
+                ret = hipfftXtSetCallbackSharedSize(
+                    plan, HIPFFT_CB_ST_COMPLEX, store_cb_shared_mem_bytes);
                 if(ret != HIPFFT_SUCCESS)
                     return fft_status_from_hipfftparams(ret);
                 break;
@@ -526,6 +600,16 @@ public:
 
                 ret = hipfftXtSetCallback(
                     plan, &store_cb_host, HIPFFT_CB_ST_COMPLEX_DOUBLE, &store_cb_data);
+                if(ret != HIPFFT_SUCCESS)
+                    return fft_status_from_hipfftparams(ret);
+
+                ret = hipfftXtSetCallbackSharedSize(
+                    plan, HIPFFT_CB_LD_COMPLEX_DOUBLE, load_cb_shared_mem_bytes);
+                if(ret != HIPFFT_SUCCESS)
+                    return fft_status_from_hipfftparams(ret);
+
+                ret = hipfftXtSetCallbackSharedSize(
+                    plan, HIPFFT_CB_ST_COMPLEX_DOUBLE, store_cb_shared_mem_bytes);
                 if(ret != HIPFFT_SUCCESS)
                     return fft_status_from_hipfftparams(ret);
                 break;
@@ -932,6 +1016,52 @@ private:
         return false;
     }
 
+    template <
+        typename T,
+        std::enable_if_t<std::is_same_v<T, int> || std::is_same_v<T, long long int>, bool> = true>
+    many_api_layout_args<T> make_valid_layout_args_for_plan_many()
+    {
+        many_api_layout_args<T> ret;
+        if constexpr(std::is_same_v<T, int>)
+        {
+            ret.input_embed  = int_inembed.data();
+            ret.output_embed = int_onembed.data();
+        }
+        else
+        {
+            ret.input_embed  = ll_inembed.data();
+            ret.output_embed = ll_onembed.data();
+        }
+        ret.input_stride    = static_cast<T>(istride.back());
+        ret.output_stride   = static_cast<T>(ostride.back());
+        ret.input_distance  = static_cast<T>(idist);
+        ret.output_distance = static_cast<T>(odist);
+        if(is_using_default_layout())
+        {
+            // If using a default layout, users can
+            // (A) either set explicitly inembed, onembed, strides, and distances (like above);
+            // (B) or use nullptr as arguments for inembed and onembed. Strides and
+            //     distances are supposed to be ignored in that case.
+            // --> choose randomly between either valid usage when a default layout is
+            //     used, so that all possible valid use case scenarios are considered.
+            const std::string test_token = token();
+            int               randomizer;
+            set_with_random_nonnegative_values(test_token, randomizer);
+            if(randomizer % 2 == 0)
+            {
+                ret.input_embed  = nullptr;
+                ret.output_embed = nullptr;
+                // FIXME: negative values are not truly ignored for now.
+                set_with_random_nonnegative_values(test_token,
+                                                   ret.input_stride,
+                                                   ret.output_stride,
+                                                   ret.input_distance,
+                                                   ret.output_distance);
+            }
+        }
+        return ret;
+    }
+
     // Not all plan options work with all creation types.  Return a
     // suitable plan creation type for the current FFT parameters.
     int get_create_type()
@@ -996,15 +1126,16 @@ private:
     }
     hipfftResult_t create_plan_many()
     {
-        auto ret = hipfftPlanMany(&plan,
+        auto layout_args = make_valid_layout_args_for_plan_many<int>();
+        auto ret         = hipfftPlanMany(&plan,
                                   dim(),
                                   int_length.data(),
-                                  int_inembed.data(),
-                                  istride.back(),
-                                  idist,
-                                  int_onembed.data(),
-                                  ostride.back(),
-                                  odist,
+                                  layout_args.input_embed,
+                                  layout_args.input_stride,
+                                  layout_args.input_distance,
+                                  layout_args.output_embed,
+                                  layout_args.output_stride,
+                                  layout_args.output_distance,
                                   *hipfft_transform_type,
                                   nbatch);
         return ret;
@@ -1128,15 +1259,16 @@ private:
         auto ret = create_with_pre_make();
         if(ret != HIPFFT_SUCCESS)
             return ret;
+        auto layout_args = make_valid_layout_args_for_plan_many<int>();
         return hipfftMakePlanMany(plan,
                                   dim(),
                                   int_length.data(),
-                                  int_inembed.data(),
-                                  istride.back(),
-                                  idist,
-                                  int_onembed.data(),
-                                  ostride.back(),
-                                  odist,
+                                  layout_args.input_embed,
+                                  layout_args.input_stride,
+                                  layout_args.input_distance,
+                                  layout_args.output_embed,
+                                  layout_args.output_stride,
+                                  layout_args.output_distance,
                                   *hipfft_transform_type,
                                   nbatch,
                                   workbuffersize_ptr);
@@ -1147,15 +1279,16 @@ private:
         auto ret = create_with_pre_make();
         if(ret != HIPFFT_SUCCESS)
             return ret;
+        auto layout_args = make_valid_layout_args_for_plan_many<long long int>();
         return hipfftMakePlanMany64(plan,
                                     dim(),
                                     ll_length.data(),
-                                    ll_inembed.data(),
-                                    istride.back(),
-                                    idist,
-                                    ll_onembed.data(),
-                                    ostride.back(),
-                                    odist,
+                                    layout_args.input_embed,
+                                    layout_args.input_stride,
+                                    layout_args.input_distance,
+                                    layout_args.output_embed,
+                                    layout_args.output_stride,
+                                    layout_args.output_distance,
                                     *hipfft_transform_type,
                                     nbatch,
                                     workbuffersize_ptr);
@@ -1184,16 +1317,17 @@ private:
             break;
         }
 
+        auto layout_args = make_valid_layout_args_for_plan_many<long long int>();
         return hipfftXtMakePlanMany(plan,
                                     dim(),
                                     ll_length.data(),
-                                    ll_inembed.data(),
-                                    istride.back(),
-                                    idist,
+                                    layout_args.input_embed,
+                                    layout_args.input_stride,
+                                    layout_args.input_distance,
                                     inputType,
-                                    ll_onembed.data(),
-                                    ostride.back(),
-                                    odist,
+                                    layout_args.output_embed,
+                                    layout_args.output_stride,
+                                    layout_args.output_distance,
                                     outputType,
                                     nbatch,
                                     workbuffersize_ptr,

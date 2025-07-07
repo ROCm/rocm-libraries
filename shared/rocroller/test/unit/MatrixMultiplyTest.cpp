@@ -276,8 +276,8 @@ namespace MatrixMultiplyTest
             params->packMultipleElementsInto1VGPR = true;
             params->enableLongDwordInstructions   = true;
 
-            params->transposeMemoryAccess[LayoutType::MATRIX_A] = transA == "T";
-            params->transposeMemoryAccess[LayoutType::MATRIX_B] = transB == "T";
+            params->transposeMemoryAccess.set(LayoutType::MATRIX_A, transA == "T");
+            params->transposeMemoryAccess.set(LayoutType::MATRIX_B, transB == "T");
 
             // TODO: the translate step should figure out that there is a
             // T_Mul and do the right thing for the T_Load_Tiled commands
@@ -625,8 +625,8 @@ namespace MatrixMultiplyTest
             params->setDimensionInfo(tagLoadA, macTileA);
             params->setDimensionInfo(tagLoadB, macTileB);
             params->setManualWavefrontCount({wavefrontCountX, wavefrontCountY});
-            params->transposeMemoryAccess[LayoutType::MATRIX_A] = transA;
-            params->transposeMemoryAccess[LayoutType::MATRIX_B] = transB;
+            params->transposeMemoryAccess.set(LayoutType::MATRIX_A, transA);
+            params->transposeMemoryAccess.set(LayoutType::MATRIX_B, transB);
 
             CommandKernel commandKernel(command, "MatrixMultiplyAB");
             commandKernel.setContext(m_context);

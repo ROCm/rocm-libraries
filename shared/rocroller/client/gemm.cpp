@@ -497,7 +497,7 @@ namespace rocRoller::Client::GEMMClient
                          * 1.e-9
                   << std::endl;
 
-        result.kernelAssemble = TimerPool::nanoseconds("CommandKernel::assembleKernel");
+        result.kernelAssemble = TimerPool::nanoseconds("Assembler::assembleMachineCode");
         result.kernelGenerate = TimerPool::nanoseconds("CommandKernel::generateKernel");
 
         if(runParams.check)
