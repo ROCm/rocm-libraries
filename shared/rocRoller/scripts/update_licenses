@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+
+################################################################################
+#
+# MIT License
+#
+# Copyright 2024-2025 AMD ROCm(TM) Software
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+# ies of the Software, and to permit persons to whom the Software is furnished
+# to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+################################################################################
+
+import argparse
+import datetime
+from pathlib import Path
+import re
+import sys
+
+repo_dir = Path(__file__).resolve().parent.parent
+sys.path.append(str(repo_dir / "scripts" / "lib"))
+
+from rrperf import git  # noqa: E402
+
+
+def can_add_license(path: Path) -> bool:
+    exclusion_list = [
+        "CODEOWNERS",
+        "CppCheckSuppressions.txt",
+        "requirements.txt",
+        ".clang-format",
+    ]
+
+    acceptable_extensions = [
+        ".txt",
+        ".cmake",
+        ".hpp",
+        ".cpp",
+        ".in",
+        ".py",
+        ".sh",
+    ]
+
+    return path.name not in exclusion_list and (
+        path.suffix in acceptable_extensions
+        or ("" == path.suffix and "." not in path.stem)
+    )
+
+
+def has_license(text: str) -> bool:
+    mit_found = "MIT License" in text
+    if "opyright" in text and not mit_found:
+        raise RuntimeError("Copyright but no MIT License found")
+    return mit_found
+
+
+def update_date(text: str) -> str:
+    if not has_license(text):
+        raise RuntimeError("No license, can not update copyright date")
+
+    current_year = datetime.datetime.now().year
+    lines = text.splitlines()
+    found = False
+    for i in range(len(lines)):
+        if "Copyright" not in lines[i]:
+            continue
+        found = True
+        years = re.findall(r"\d+", lines[i])
+        if len(years) == 1:
+            if int(years[0]) != current_year:
+                raise RuntimeError(
+                    f"Please manually update date range: {path}\n{lines[i]}"
+                )
+            break
+        elif len(years) == 2:
+            if int(years[1]) != current_year:
+                print(f"Updating copyright date: {path}")
+                old_year = years[1]
+                lines[i] = lines[i].replace(old_year, str(current_year))
+            break
+        else:
+            raise RuntimeError(f"Malformed date in license: {path}\n{lines[i]}")
+
+    if not found:
+        raise RuntimeError("Copyright not found in license")
+    return "\n".join(lines)
+
+
+def prepend_license(text: str, license_text: str) -> str:
+    lines = text.splitlines()
+    index = 0
+    if len(lines) > index and "#!" in lines[index]:
+        index += 1
+    if len(lines) > index and "# -*- coding:" in lines[index]:
+        index += 1
+    lines[index:index] = license_text.splitlines()
+    return "\n".join(lines)
+
+
+def select_license_text(suffix: str) -> str:
+    if suffix in [".hpp", ".cpp", ".in"]:
+        return """/*******************************************************************************
+ *
+ * MIT License
+ *
+ * Copyright 2025 AMD ROCm(TM) Software
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ *******************************************************************************/
+
+"""
+    else:
+        return """
+################################################################################
+#
+# MIT License
+#
+# Copyright 2025 AMD ROCm(TM) Software
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
+# ies of the Software, and to permit persons to whom the Software is furnished
+# to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
+# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
+# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+#
+################################################################################
+
+"""
+
+
+def add_and_update_license(path: Path):
+    if not can_add_license(path):
+        return
+
+    text = path.read_text()
+    if not has_license(text):
+        print(f"Adding license: {path}")
+        text = prepend_license(text, select_license_text(path.suffix))
+    text = update_date(text)
+
+    path.write_text(f"{text}\n")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Add licenses to source files")
+
+    parser.add_argument("dir", type=Path, default=Path.cwd(), nargs="?")
+
+    args = parser.parse_args()
+
+    errors = []
+    for x in git.ls_tree(args.dir):
+        path = args.dir / Path(x)
+        if path.is_file():
+            try:
+                add_and_update_license(path)
+            except RuntimeError as e:
+                print(e)
+                errors.append(path)
+
+    if len(errors) > 0:
+        print("\nIssues with the following files, please manually fix:\n")
+        for e in errors:
+            print(e)
