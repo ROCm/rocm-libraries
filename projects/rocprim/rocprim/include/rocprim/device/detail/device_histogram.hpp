@@ -365,7 +365,7 @@ void histogram_shared(SampleIterator                                   samples,
     const unsigned int block_id1  = ::rocprim::detail::block_id<1>();
     const unsigned int grid_size0 = ::rocprim::detail::grid_size<0>();
 
-    // starts of the first histogram for each channel
+    // Store the start of the first histogram for each channel
     unsigned int* block_histogram[ActiveChannels];
     unsigned int  total_bins = 0;
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)
@@ -557,7 +557,7 @@ void histogram_private_global(SampleIterator                                   s
 
     __shared__ unsigned int block_id_count_shared;
 
-    // starts of the first histogram for each channel
+    // Store the start of the first histogram for each channel
     Counter* block_histogram[ActiveChannels];
     size_t   total_bins = 0;
     for(unsigned int channel = 0; channel < ActiveChannels; channel++)

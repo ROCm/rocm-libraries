@@ -246,7 +246,7 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         hipDevice_t stream_device;
         ROCPRIM_RETURN_ON_ERROR(hipStreamGetDevice(stream, &stream_device));
 
-        // after setting device, we can't just exit on non-success
+        // After setting device, we can't just exit on non-success.
         hipError_t result = hipSetDevice(stream_device);
 
         int num_multi_processors;
@@ -256,13 +256,13 @@ inline hipError_t histogram_impl(void*          temporary_storage,
                 = hipDeviceGetAttribute(&num_multi_processors,
                                         hipDeviceAttribute_t::hipDeviceAttributeMultiprocessorCount,
                                         stream_device);
-            // sanity check
+            // Sanity check.
             if(num_multi_processors == 0)
             {
                 result = hipErrorUnknown;
             }
         }
-        // always attempt to restore to default device
+        // Always attempt to restore to default device.
         hipError_t set_result = hipSetDevice(default_device);
         ROCPRIM_RETURN_ON_ERROR(set_result);
         ROCPRIM_RETURN_ON_ERROR(result);
@@ -287,8 +287,8 @@ inline hipError_t histogram_impl(void*          temporary_storage,
             return partition_result;
         }
 
-        // When using graphs private_histograms and block_id_count both returned a nullptr,
-        // that is why a memset is directly done on temporary_storage.
+        // When using graphs, private_histograms and block_id_count both returned a nullptr.
+        // That is why a memset is directly done on temporary_storage.
         ROCPRIM_RETURN_ON_ERROR(hipMemsetAsync(temporary_storage, 0, storage_size, stream));
 
         ROCPRIM_RETURN_ON_ERROR(hipMemcpyAsync(block_id_count,
