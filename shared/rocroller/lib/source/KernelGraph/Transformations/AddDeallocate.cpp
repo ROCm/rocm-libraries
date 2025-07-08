@@ -28,6 +28,7 @@
 #include <vector>
 
 #include <rocRoller/KernelGraph/Transforms/AddDeallocate.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddDeallocate_detail.hpp>
 
 #include <rocRoller/Context.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowArgumentTracer.hpp>
@@ -232,31 +233,6 @@ namespace rocRoller::KernelGraph
 
             graph.control.deleteElement(nodeIdx);
             graph.mapper.purge(nodeIdx);
-        }
-
-        template <CInputRangeOf<int> Range>
-        void mergeDeallocateNodes(KernelGraph& graph, int dstIdx, Range& srcs)
-        {
-            auto dst = graph.control.getNode<Deallocate>(dstIdx);
-
-            auto connectionIdx = graph.mapper.getConnections(dstIdx).size();
-
-            for(int srcIdx : srcs)
-            {
-                auto src = graph.control.getNode<Deallocate>(srcIdx);
-
-                dst.arguments.insert(
-                    dst.arguments.end(), src.arguments.begin(), src.arguments.end());
-
-                for(auto const& c : graph.mapper.getConnections(srcIdx))
-                {
-                    graph.mapper.connect<Dimension>(dstIdx, c.coordinate, connectionIdx);
-                    connectionIdx++;
-                }
-
-                deleteControlNode(graph, srcIdx);
-            }
-            graph.control.setElement(dstIdx, std::move(dst));
         }
     }
 
