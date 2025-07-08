@@ -78,9 +78,9 @@ The hipRAND source code can be cloned in two different ways.
    For example, if you have ROCm 7.0 installed, clone the ``release/rocm-rel-7.0`` branch.
 
 *  Clone the entire `rocm-libraries <https://github.com/ROCm/rocm-libraries>`_ repository.
-   This is the default method and is the preferred option if you need to install other
+   This is the default method and is the recommended option if you need to install other
    ROCm libraries alongside hipRAND. However, due to the download size, ``git clone``
-   might take some time to complete.
+   might take a significant amount of time to complete.
 
    On a system with ROCm x.y installed, use the following command to obtain the source code
    for hipRAND version x.y. Replace x.y with the actual version:
@@ -104,7 +104,7 @@ The hipRAND source code can be cloned in two different ways.
 
 .. note::
 
-   To build ROCm release 6.4 and older, use the hipRAND repository at `<https://github.com/ROCm/hipRAND>`_.
+   To build ROCm 6.4 and older, use the hipRAND repository at `<https://github.com/ROCm/hipRAND>`_.
    For more information, see the documentation associated with the release you want to build.
 
 Building the library
