@@ -18,7 +18,7 @@ The hipRAND public repository is located at `<https://github.com/ROCm/rocm-libra
 
 .. note::
 
-   The hipRAND repository for ROCm release 6.4 and earlier is located at `<https://github.com/ROCm/hipRAND>`_.
+   The hipRAND repository for ROCm 6.4 and earlier is located at `<https://github.com/ROCm/hipRAND>`_.
 
 .. grid:: 2
   :gutter: 3

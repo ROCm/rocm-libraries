@@ -104,7 +104,7 @@ The hipRAND source code can be cloned in two different ways.
 
 .. note::
 
-   To build ROCm 6.4 and older, use the hipRAND repository at `<https://github.com/ROCm/hipRAND>`_.
+   To build ROCm 6.4 and earlier, use the hipRAND repository at `<https://github.com/ROCm/hipRAND>`_.
    For more information, see the documentation associated with the release you want to build.
 
 Building the library
