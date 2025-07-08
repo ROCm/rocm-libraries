@@ -2760,7 +2760,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     int addRequest = 0;
                     for(size_t t = 0; t < 1; t++) // C API not supported yet
                     {
-                        size_t tmpWorkspaceSize = 0;
+                        size_t tmpWorkspaceSize             = 0;
                         tmpAlgo[j].algo.max_workspace_bytes = max_workspace_size;
                         if(hipblaslt_ext::matmulIsAlgoSupported(handle,
                                                                 matmul[0][0],
@@ -2914,6 +2914,13 @@ void testing_matmul_with_bias(const Arguments& arg,
                 heuristicTuningIndex.clear();
                 for(int j = 0; j < tmpAlgo.size(); j++)
                 {
+                    if(tuningVec.size() == 1 && tuningVec[0] == hipblaslt_ext::GemmTuning())
+                    {
+                        heuristicResult.push_back(tmpAlgo[j]);
+                        heuristicTuningIndex.push_back(0);
+                        workspace_size = std::max(workspace_size, tmpAlgo[j].workspaceSize);
+                        continue;
+                    }
                     for(size_t t = 0; t < tuningVec.size(); t++)
                     {
                         size_t tmpWorkspaceSize = 0;
@@ -3009,6 +3016,12 @@ void testing_matmul_with_bias(const Arguments& arg,
             heuristicTuningIndex.clear();
             for(int j = 0; j < tmpAlgo.size(); j++)
             {
+                if(tuningVec.size() == 1 && tuningVec[0] == hipblaslt_ext::GemmTuning())
+                {
+                    heuristicResult.push_back(tmpAlgo[j]);
+                    heuristicTuningIndex.push_back(0);
+                    continue;
+                }
                 for(size_t t = 0; t < tuningVec.size(); t++)
                 {
                     size_t tmpWorkspaceSize = 0;

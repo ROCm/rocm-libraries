@@ -91,8 +91,9 @@ namespace hipblaslt_ext
         std::unique_ptr<GemmPreferenceImpl> pimpl;
     };
 
-    [[deprecated("GemmPreferenceV2 is deprecated, use GemmPreference instead.")]]
-    typedef GemmPreference GemmPreferenceV2;
+    [[deprecated(
+        "GemmPreferenceV2 is deprecated, use GemmPreference instead.")]] typedef GemmPreference
+        GemmPreferenceV2;
 
     /*! \ingroup types_module
      *  \brief hipblasLt extension ProblemType for gemm problems.
@@ -144,8 +145,9 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT hipblasComputeType_t getTypeCompute() const; //!< The compute datatype.
     };
 
-    [[deprecated("GemmProblemTypeV2 is deprecated, use GemmProblemType instead.")]]
-    typedef GemmProblemType GemmProblemTypeV2;
+    [[deprecated(
+        "GemmProblemTypeV2 is deprecated, use GemmProblemType instead.")]] typedef GemmProblemType
+        GemmProblemTypeV2;
 
     /*! \ingroup types_module
      *  \brief hipblasLt extension Epilogue for gemm problems.
@@ -204,8 +206,8 @@ namespace hipblaslt_ext
         std::unique_ptr<GemmEpilogueImpl> pimpl;
     };
 
-    [[deprecated("GemmEpilogueV2 is deprecated, use GemmEpilogue instead.")]]
-    typedef GemmEpilogue GemmEpilogueV2;
+    [[deprecated("GemmEpilogueV2 is deprecated, use GemmEpilogue instead.")]] typedef GemmEpilogue
+        GemmEpilogueV2;
 
     struct GemmTuning
     {
@@ -215,6 +217,8 @@ namespace hipblaslt_ext
 
         HIPBLASLT_EXPORT             GemmTuning(const GemmTuning& tuning);
         HIPBLASLT_EXPORT GemmTuning& operator=(const GemmTuning& tuning);
+        HIPBLASLT_EXPORT bool
+            operator==(const GemmTuning& other) const; //!< Compare two tuning objects for equality.
 
         HIPBLASLT_EXPORT             GemmTuning(GemmTuning&& tuning);
         HIPBLASLT_EXPORT GemmTuning& operator=(GemmTuning&& tuning);
@@ -234,8 +238,8 @@ namespace hipblaslt_ext
         std::unique_ptr<GemmTuningImpl> pimpl;
     };
 
-    [[deprecated("GemmTuningV2 is deprecated, use GemmTuning instead.")]]
-    typedef GemmTuning GemmTuningV2;
+    [[deprecated(
+        "GemmTuningV2 is deprecated, use GemmTuning instead.")]] typedef GemmTuning GemmTuningV2;
 
     /*! \ingroup types_module
      *  \brief hipblasLt extension Inputs for gemm problems.
@@ -296,8 +300,8 @@ namespace hipblaslt_ext
         std::unique_ptr<GemmInputsImpl> pimpl;
     };
 
-    [[deprecated("GemmInputsV2 is deprecated, use GemmInputs instead.")]]
-    typedef GemmInputs GemmInputsV2;
+    [[deprecated(
+        "GemmInputsV2 is deprecated, use GemmInputs instead.")]] typedef GemmInputs GemmInputsV2;
 
     /*! \ingroup types_module
      *  \brief hipblasLt extension GPU inputs for gemm problems.

@@ -382,6 +382,10 @@ namespace hipblaslt_ext
         *pimpl = *tuning.pimpl;
         return *this;
     }
+    bool GemmTuning::operator==(const GemmTuning& other) const
+    {
+        return pimpl->splitK == other.pimpl->splitK && pimpl->wgm == other.pimpl->wgm;
+    }
 
     GemmTuning::GemmTuning(GemmTuning&& tuning)            = default;
     GemmTuning& GemmTuning::operator=(GemmTuning&& tuning) = default;
