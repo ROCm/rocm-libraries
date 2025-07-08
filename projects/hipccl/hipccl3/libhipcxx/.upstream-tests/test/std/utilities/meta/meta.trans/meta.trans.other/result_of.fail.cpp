@@ -31,7 +31,7 @@
 // error: static assertion failed: Attempt to use an extended __device__ lambda in a context 
 // that requires querying its return type in host code. Use a named function object, a __host__ __device__ 
 // lambda, or cuda::proclaim_return_type instead.
-// UNSUPPORTED: hipcc
+// UNSUPPORTED: hipcc, hiprtc
 // UNSUPPORTED: clang && (!nvcc)
 
 // <cuda/std/functional>

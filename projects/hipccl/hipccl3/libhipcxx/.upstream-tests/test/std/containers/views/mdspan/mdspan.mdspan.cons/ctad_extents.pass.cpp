@@ -7,6 +7,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 // UNSUPPORTED: c++11
 // UNSUPPORTED: msvc && c++14, msvc && c++17
 
@@ -38,7 +60,12 @@ int main(int, char**)
   // TEST(TestMdspanCTAD, extents_object_move)
   {
     cuda::std::array<int, 1> d{42};
+    // NOTE(HIPRTC): Internal issue #83.
+    #if !defined(_CCCL_COMPILER_HIPRTC)
     cuda::std::mdspan m{d.data(), std::move(cuda::std::extents{64, 128})};
+    #else
+    cuda::std::mdspan m{d.data(), cuda::std::move(cuda::std::extents{64, 128})};
+    #endif
 
     CHECK_MDSPAN(m, d);
   }

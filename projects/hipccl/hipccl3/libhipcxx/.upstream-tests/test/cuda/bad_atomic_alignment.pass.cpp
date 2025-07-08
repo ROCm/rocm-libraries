@@ -27,7 +27,7 @@
 // UNSUPPORTED: libcpp-has-no-threads, pre-sm-60
 // UNSUPPORTED: windows && pre-sm-70
 
-// UNSUPPORTED: hipcc
+// UNSUPPORTED: hipcc, hiprtc
 // NOTE(HIP): HIP builtin atomics do not work with underaligned types (SWDEV-393058). 
 // As a workaround, you need to use alignas(8) 
 // to align the user-defined types manually. 

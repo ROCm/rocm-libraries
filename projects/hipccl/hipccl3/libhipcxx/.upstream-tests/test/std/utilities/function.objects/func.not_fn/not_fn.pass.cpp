@@ -569,7 +569,7 @@ __host__ __device__ void call_operator_sfinae_test()
 #endif // TEST_COMPILER_ICC
   // NVRTC appears to be unhappy about... the lambda?
   // but doesn't let me fix it with annotations
-#ifndef TEST_COMPILER_NVRTC
+#if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPRTC)
   { // returns bad type with no operator!
     auto fn = [](auto x) {
       return x;

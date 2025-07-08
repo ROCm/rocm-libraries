@@ -23,7 +23,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: hipcc
+// UNSUPPORTED: hipcc, hiprtc
 // UNSUPPORTED: nvrtc, pre-sm-70
 // XFAIL: clang && (!nvcc)
 

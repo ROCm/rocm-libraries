@@ -24,7 +24,7 @@
 // THE SOFTWARE.
 
 // TODO(HIP/AMD): Analyze support of this API on HIP platform with C++20
-// UNSUPPORTED: hipcc
+// UNSUPPORTED: hipcc, hiprtc
 
 // UNSUPPORTED: c++98, c++03, c++11, c++14, c++17
 // XFAIL: dylib-has-no-filesystem

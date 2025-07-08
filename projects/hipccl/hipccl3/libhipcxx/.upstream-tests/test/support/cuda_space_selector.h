@@ -33,11 +33,11 @@
 
 #include "concurrent_agents.h"
 
-#if defined(__clang__) && defined(__CUDA__)
+#if defined(__clang__) && (defined(__CUDA__) || defined(__HIP__))
 #  include <new>
 #endif
 
-#ifdef _CCCL_COMPILER_NVRTC
+#if defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #  define LAMBDA [=]
 #else
 #  define LAMBDA [=] __host__ __device__
@@ -123,7 +123,11 @@ struct init_initializer
   template <typename T, typename... Ts>
   __host__ __device__ static void construct(T& t, Ts&&... ts)
   {
+    #if !defined(_CCCL_COMPILER_HIPRTC)
     t.init(std::forward<Ts>(ts)...);
+    #else
+    t.init(cuda::std::forward<Ts>(ts)...);
+    #endif
   }
 };
 
@@ -132,7 +136,11 @@ struct constructor_initializer
   template <typename T, typename... Ts>
   __host__ __device__ static void construct(T& t, Ts&&... ts)
   {
+    #if !defined(_CCCL_COMPILER_HIPRTC)
     new ((void*) &t) T(std::forward<Ts>(ts)...);
+    #else
+    new ((void*) &t) T(cuda::std::forward<Ts>(ts)...);
+    #endif
   }
 };
 
@@ -170,7 +178,11 @@ public:
     assert(ptr);
 
     execute_on_main_thread([&] {
+      #if !defined(_CCCL_COMPILER_HIPRTC)
       Initializer::construct(*ptr, std::forward<Ts>(ts)...);
+      #else
+      Initializer::construct(*ptr, cuda::std::forward<Ts>(ts)...);
+      #endif
     });
     return ptr;
   }

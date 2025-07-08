@@ -38,7 +38,7 @@
 #  endif
 #endif
 #ifndef TEST_IMP_INCLUDED_HEADER
-#  ifndef __CUDACC_RTC__
+#  if !defined(__CUDACC_RTC__) && !defined(__HIPCC_RTC__)
 #    include <ciso646>
 #  endif // __CUDACC_RTC__
 #endif
@@ -114,6 +114,10 @@
 // This is not mutually exclusive with other compilers, as NVCC uses a host
 // compiler.
 # define TEST_COMPILER_HIPCC
+#  define TEST_COMPILER_CLANG_HIP
+#endif
+#if defined(__HIPCC_RTC__)
+#  define TEST_COMPILER_HIPRTC
 #endif
 
 // NOTE(HIP/AMD): temporary WAR due to incompatibility with rocThrust for some macros
@@ -231,6 +235,12 @@
 #else
 #  define NEW_IS_NOEXCEPT_NVRTC
 #endif // TEST_COMPILER_NVRTC
+
+#if defined(TEST_COMPILER_HIPRTC)
+#  define NEW_IS_NOEXCEPT_HIPRTC noexcept
+#else
+#  define NEW_IS_NOEXCEPT_HIPRTC
+#endif // TEST_COMPILER_HIPRTC
 
 // Sniff out to see if the underling C library has C11 features
 // Note that at this time (July 2018), MacOS X and iOS do NOT.
@@ -404,7 +414,7 @@ struct is_same<T, T>
 #  define TEST_HAS_NO_UNICODE_CHARS
 #endif
 
-#if defined(__GNUC__) || defined(__clang__) || defined(TEST_COMPILER_NVRTC)
+#if defined(__GNUC__) || defined(__clang__) || defined(TEST_COMPILER_NVRTC) || defined(TEST_COMPILER_HIPRTC)
 template <class Tp>
 __host__ __device__ inline void DoNotOptimize(Tp const& value)
 {

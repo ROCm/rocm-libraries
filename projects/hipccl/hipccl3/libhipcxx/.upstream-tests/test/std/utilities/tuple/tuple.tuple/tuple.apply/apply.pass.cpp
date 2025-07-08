@@ -24,7 +24,7 @@
 // THE SOFTWARE.
 
 // UNSUPPORTED: c++98, c++03, c++11, c++14
-// UNSUPPORTED: nvrtc
+// UNSUPPORTED: nvrtc, hiprtc
 // UNSUPPORTED: gcc-6
 
 // <cuda/std/tuple>

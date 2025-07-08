@@ -23,7 +23,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: hipcc
+// UNSUPPORTED: hipcc, hiprtc
 // UNSUPPORTED: c++98, c++03, c++11
 // NOTE(HIP):
 // This test is including hip/std/string which does not exist.

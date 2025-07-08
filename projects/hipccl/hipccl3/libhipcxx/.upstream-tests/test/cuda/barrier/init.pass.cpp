@@ -28,7 +28,7 @@
 // UNSUPPORTED: pre-sm-70
 
 // NOTE(HIP/AMD): currently barrier is not supported on AMD hardware
-// UNSUPPORTED: hipcc
+// UNSUPPORTED: hipcc, hiprtc
 
 #include <cuda/barrier>
 

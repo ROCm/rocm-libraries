@@ -26,7 +26,7 @@
 // THE SOFTWARE.
 
 // NOTE(HIP/AMD): AMD does not have a PTX equivalent
-// UNSUPPORTED: hipcc
+// UNSUPPORTED: hipcc, hiprtc
 
 // UNSUPPORTED: libcpp-has-no-threads
 // UNSUPPORTED: clang && !nvcc

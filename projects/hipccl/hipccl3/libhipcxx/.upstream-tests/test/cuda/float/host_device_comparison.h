@@ -25,7 +25,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: nvrtc
+// UNSUPPORTED: nvrtc, hiprtc
 
 #include <cuda/std/cmath>
 #include <cuda/std/type_traits>

@@ -33,7 +33,7 @@
 // NVRTC_SKIP_KERNEL_RUN // This will have effect once PR 433 is merged (line above should be removed.)
 
 // NOTE(HIP/AMD): currently barrier is not supported on AMD hardware
-// UNSUPPORTED: hipcc
+// UNSUPPORTED: hipcc, hiprtc
 
 // <cuda/barrier>
 

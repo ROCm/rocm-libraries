@@ -6,6 +6,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+// MIT License
+//
+// Modifications Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 // This test fails because diagnose_if doesn't emit all of the diagnostics
 // when -fdelayed-template-parsing is enabled, like it is on Windows.
 // XFAIL: LIBCXX-WINDOWS-FIXME
@@ -29,14 +51,10 @@ int main(int, char**)
   ((void) val2);
   // load operations
   {
-    x.load(cuda::std::memory_order_release); // expected-warning {{memory order argument to atomic operation is
-                                             // invalid}}
-    x.load(cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is
-                                             // invalid}}
-    vx.load(cuda::std::memory_order_release); // expected-warning {{memory order argument to atomic operation is
-                                              // invalid}}
-    vx.load(cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is
-                                              // invalid}}
+    x.load(cuda::std::memory_order_release); // expected-warning {{memory order argument to atomic operation is invalid}}
+    x.load(cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is invalid}}
+    vx.load(cuda::std::memory_order_release); // expected-warning {{memory order argument to atomic operation is invalid}}
+    vx.load(cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is invalid}}
     // valid memory orders
     x.load(cuda::std::memory_order_relaxed);
     x.load(cuda::std::memory_order_consume);
@@ -44,14 +62,10 @@ int main(int, char**)
     x.load(cuda::std::memory_order_seq_cst);
   }
   {
-    cuda::std::atomic_load_explicit(&x, cuda::std::memory_order_release); // expected-warning {{memory order argument to
-                                                                          // atomic operation is invalid}}
-    cuda::std::atomic_load_explicit(&x, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to
-                                                                          // atomic operation is invalid}}
-    cuda::std::atomic_load_explicit(&vx, cuda::std::memory_order_release); // expected-warning {{memory order argument
-                                                                           // to atomic operation is invalid}}
-    cuda::std::atomic_load_explicit(&vx, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument
-                                                                           // to atomic operation is invalid}}
+    cuda::std::atomic_load_explicit(&x, cuda::std::memory_order_release); // expected-warning {{memory order argument to atomic operation is invalid}}
+    cuda::std::atomic_load_explicit(&x, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is invalid}}
+    cuda::std::atomic_load_explicit(&vx, cuda::std::memory_order_release); // expected-warning {{memory order argument to atomic operation is invalid}}
+    cuda::std::atomic_load_explicit(&vx, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is invalid}}
     // valid memory orders
     cuda::std::atomic_load_explicit(&x, cuda::std::memory_order_relaxed);
     cuda::std::atomic_load_explicit(&x, cuda::std::memory_order_consume);
@@ -60,42 +74,24 @@ int main(int, char**)
   }
   // store operations
   {
-    x.store(42, cuda::std::memory_order_consume); // expected-warning {{memory order argument to atomic operation is
-                                                  // invalid}}
-    x.store(42, cuda::std::memory_order_acquire); // expected-warning {{memory order argument to atomic operation is
-                                                  // invalid}}
-    x.store(42, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is
-                                                  // invalid}}
-    vx.store(42, cuda::std::memory_order_consume); // expected-warning {{memory order argument to atomic operation is
-                                                   // invalid}}
-    vx.store(42, cuda::std::memory_order_acquire); // expected-warning {{memory order argument to atomic operation is
-                                                   // invalid}}
-    vx.store(42, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is
-                                                   // invalid}}
+    x.store(42, cuda::std::memory_order_consume); // expected-warning {{memory order argument to atomic operation is invalid}}
+    x.store(42, cuda::std::memory_order_acquire); // expected-warning {{memory order argument to atomic operation is invalid}}
+    x.store(42, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is invalid}}
+    vx.store(42, cuda::std::memory_order_consume); // expected-warning {{memory order argument to atomic operation is invalid}}
+    vx.store(42, cuda::std::memory_order_acquire); // expected-warning {{memory order argument to atomic operation is invalid}}
+    vx.store(42, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is invalid}}
     // valid memory orders
     x.store(42, cuda::std::memory_order_relaxed);
     x.store(42, cuda::std::memory_order_release);
     x.store(42, cuda::std::memory_order_seq_cst);
   }
   {
-    cuda::std::atomic_store_explicit(&x, 42, cuda::std::memory_order_consume); // expected-warning {{memory order
-                                                                               // argument to atomic operation is
-                                                                               // invalid}}
-    cuda::std::atomic_store_explicit(&x, 42, cuda::std::memory_order_acquire); // expected-warning {{memory order
-                                                                               // argument to atomic operation is
-                                                                               // invalid}}
-    cuda::std::atomic_store_explicit(&x, 42, cuda::std::memory_order_acq_rel); // expected-warning {{memory order
-                                                                               // argument to atomic operation is
-                                                                               // invalid}}
-    cuda::std::atomic_store_explicit(&vx, 42, cuda::std::memory_order_consume); // expected-warning {{memory order
-                                                                                // argument to atomic operation is
-                                                                                // invalid}}
-    cuda::std::atomic_store_explicit(&vx, 42, cuda::std::memory_order_acquire); // expected-warning {{memory order
-                                                                                // argument to atomic operation is
-                                                                                // invalid}}
-    cuda::std::atomic_store_explicit(&vx, 42, cuda::std::memory_order_acq_rel); // expected-warning {{memory order
-                                                                                // argument to atomic operation is
-                                                                                // invalid}}
+    cuda::std::atomic_store_explicit(&x, 42, cuda::std::memory_order_consume); // expected-warning {{memory order argument to atomic operation is invalid}}
+    cuda::std::atomic_store_explicit(&x, 42, cuda::std::memory_order_acquire); // expected-warning {{memory order argument to atomic operation is invalid}}
+    cuda::std::atomic_store_explicit(&x, 42, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is invalid}}
+    cuda::std::atomic_store_explicit(&vx, 42, cuda::std::memory_order_consume); // expected-warning {{memory order argument to atomic operation is invalid}}
+    cuda::std::atomic_store_explicit(&vx, 42, cuda::std::memory_order_acquire); // expected-warning {{memory order argument to atomic operation is invalid}}
+    cuda::std::atomic_store_explicit(&vx, 42, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is invalid}}
     // valid memory orders
     cuda::std::atomic_store_explicit(&x, 42, cuda::std::memory_order_relaxed);
     cuda::std::atomic_store_explicit(&x, 42, cuda::std::memory_order_release);
@@ -104,41 +100,13 @@ int main(int, char**)
   // compare exchange weak
   {
     x.compare_exchange_weak(
-      val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_release); // expected-warning
-                                                                                     // {{memory
-                                                                                     // order
-                                                                                     // argument
-                                                                                     // to atomic
-                                                                                     // operation
-                                                                                     // is
-                                                                                     // invalid}}
+      val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_release); // expected-warning {{memory order argument to atomic operation is invalid}}
     x.compare_exchange_weak(
-      val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_acq_rel); // expected-warning
-                                                                                     // {{memory
-                                                                                     // order
-                                                                                     // argument
-                                                                                     // to atomic
-                                                                                     // operation
-                                                                                     // is
-                                                                                     // invalid}}
+      val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is invalid}}
     vx.compare_exchange_weak(
-      val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_release); // expected-warning
-                                                                                     // {{memory
-                                                                                     // order
-                                                                                     // argument
-                                                                                     // to atomic
-                                                                                     // operation
-                                                                                     // is
-                                                                                     // invalid}}
+      val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_release); // expected-warning {{memory order argument to atomic operation is invalid}}
     vx.compare_exchange_weak(
-      val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_acq_rel); // expected-warning
-                                                                                     // {{memory
-                                                                                     // order
-                                                                                     // argument
-                                                                                     // to atomic
-                                                                                     // operation
-                                                                                     // is
-                                                                                     // invalid}}
+      val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is invalid}}
     // valid memory orders
     x.compare_exchange_weak(val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_relaxed);
     x.compare_exchange_weak(val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_consume);
@@ -150,21 +118,13 @@ int main(int, char**)
   }
   {
     cuda::std::atomic_compare_exchange_weak_explicit(
-      &x, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_release); // expected-warning {{memory
-                                                                                          // order argument to atomic
-                                                                                          // operation is invalid}}
+      &x, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_release); // expected-warning {{memory order argument to atomic operation is invalid}}
     cuda::std::atomic_compare_exchange_weak_explicit(
-      &x, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_acq_rel); // expected-warning {{memory
-                                                                                          // order argument to atomic
-                                                                                          // operation is invalid}}
+      &x, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is invalid}}
     cuda::std::atomic_compare_exchange_weak_explicit(
-      &vx, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_release); // expected-warning {{memory
-                                                                                           // order argument to atomic
-                                                                                           // operation is invalid}}
+      &vx, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_release); // expected-warning {{memory order argument to atomic operation is invalid}}
     cuda::std::atomic_compare_exchange_weak_explicit(
-      &vx, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_acq_rel); // expected-warning {{memory
-                                                                                           // order argument to atomic
-                                                                                           // operation is invalid}}
+      &vx, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is invalid}}
     // valid memory orders
     cuda::std::atomic_compare_exchange_weak_explicit(
       &x, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_relaxed);
@@ -178,33 +138,13 @@ int main(int, char**)
   // compare exchange strong
   {
     x.compare_exchange_strong(
-      val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_release); // expected-warning
-                                                                                     // {{memory
-                                                                                     // order
-                                                                                     // argument
-                                                                                     // to
-                                                                                     // atomic
-                                                                                     // operation
-                                                                                     // is
-                                                                                     // invalid}}
+      val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_release); // expected-warning {{memory order argument to atomic operation is invalid}}
     x.compare_exchange_strong(
-      val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_acq_rel); // expected-warning
-                                                                                     // {{memory
-                                                                                     // order
-                                                                                     // argument
-                                                                                     // to
-                                                                                     // atomic
-                                                                                     // operation
-                                                                                     // is
-                                                                                     // invalid}}
+      val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is invalid}}
     vx.compare_exchange_strong(
-      val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_release); // expected-warning {{memory order
-                                                                                     // argument to atomic operation is
-                                                                                     // invalid}}
+      val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_release); // expected-warning {{memory order argument to atomic operation is invalid}}
     vx.compare_exchange_strong(
-      val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_acq_rel); // expected-warning {{memory order
-                                                                                     // argument to atomic operation is
-                                                                                     // invalid}}
+      val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is invalid}}
     // valid memory orders
     x.compare_exchange_strong(val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_relaxed);
     x.compare_exchange_strong(val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_consume);
@@ -216,21 +156,13 @@ int main(int, char**)
   }
   {
     cuda::std::atomic_compare_exchange_strong_explicit(
-      &x, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_release); // expected-warning {{memory
-                                                                                          // order argument to atomic
-                                                                                          // operation is invalid}}
+      &x, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_release); // expected-warning {{memory order argument to atomic operation is invalid}}
     cuda::std::atomic_compare_exchange_strong_explicit(
-      &x, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_acq_rel); // expected-warning {{memory
-                                                                                          // order argument to atomic
-                                                                                          // operation is invalid}}
+      &x, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is invalid}}
     cuda::std::atomic_compare_exchange_strong_explicit(
-      &vx, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_release); // expected-warning {{memory
-                                                                                           // order argument to atomic
-                                                                                           // operation is invalid}}
+      &vx, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_release); // expected-warning {{memory order argument to atomic operation is invalid}}
     cuda::std::atomic_compare_exchange_strong_explicit(
-      &vx, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_acq_rel); // expected-warning {{memory
-                                                                                           // order argument to atomic
-                                                                                           // operation is invalid}}
+      &vx, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_acq_rel); // expected-warning {{memory order argument to atomic operation is invalid}}
     // valid memory orders
     cuda::std::atomic_compare_exchange_strong_explicit(
       &x, &val1, val2, cuda::std::memory_order_seq_cst, cuda::std::memory_order_relaxed);

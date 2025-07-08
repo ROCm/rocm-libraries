@@ -25,13 +25,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-//
 // UNSUPPORTED: libcpp-has-no-threads
 // UNSUPPORTED: pre-sm-90
 // UNSUPPORTED: nvcc-11
 
 // NOTE(HIP/AMD): currently barrier is not supported on AMD hardware
-// UNSUPPORTED: hipcc
+// UNSUPPORTED: hipcc, hiprtc
 
 // <cuda/barrier>
 

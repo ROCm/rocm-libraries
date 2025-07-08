@@ -443,7 +443,7 @@ int main(int, char**)
     test_result_of<PMD(cuda::std::reference_wrapper<S const>), const char&>();
     test_no_result<PMD(ND&)>();
   }
-#if defined(TEST_COMPILER_NVCC) || defined(__HIPCC__)
+#if defined(TEST_COMPILER_NVCC) || defined(TEST_COMPILER_HIPCC) || defined(__HIPCC__)
   { // extended lambda
     NV_IF_TARGET(
       NV_IS_DEVICE,

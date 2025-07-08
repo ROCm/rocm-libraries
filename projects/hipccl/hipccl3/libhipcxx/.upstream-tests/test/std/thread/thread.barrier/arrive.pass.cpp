@@ -24,7 +24,7 @@
 // THE SOFTWARE.
 
 //
-// UNSUPPORTED: hipcc
+// UNSUPPORTED: hipcc, hiprtc
 // UNSUPPORTED: libcpp-has-no-threads
 // UNSUPPORTED: pre-sm-70
 

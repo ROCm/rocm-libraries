@@ -7,6 +7,24 @@
 // SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES.
 //
 //===----------------------------------------------------------------------===//
+
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 // <memory>
 
 // unique_ptr
@@ -32,7 +50,7 @@ private:
 };
 #endif // !TEST_COMPILER_GCC && !TEST_COMPILER_MSVC
 
-#ifndef TEST_COMPILER_NVRTC // A class static data member with non-const type is considered a host variable
+#if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPRTC) // A class static data member with non-const type is considered a host variable
 struct D3
 {
   static long pointer;
@@ -57,7 +75,7 @@ __host__ __device__ TEST_CONSTEXPR_CXX23 void test_basic()
     static_assert(cuda::std::is_same<typename P::pointer, int*>::value, "");
   }
 #endif // !TEST_COMPILER_GCC && !TEST_COMPILER_MSVC
-#ifndef TEST_COMPILER_NVRTC
+#if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPRTC)
   {
     typedef cuda::std::unique_ptr<VT, D3> P;
     static_assert(cuda::std::is_same<typename P::pointer, int*>::value, "");

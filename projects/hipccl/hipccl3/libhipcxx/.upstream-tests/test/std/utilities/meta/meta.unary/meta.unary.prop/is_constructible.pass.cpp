@@ -308,7 +308,7 @@ int main(int, char**)
   static_assert(cuda::std::is_constructible<int&&, ExplicitTo<int&&>>::value, "");
 #endif
 
-#if defined(TEST_CLANG_VER) && !defined(TEST_COMPILER_NVCC)
+#if defined(TEST_CLANG_VER) && !defined(TEST_COMPILER_NVCC) && !defined(TEST_COMPILER_HIPCC)
 #  if TEST_CLANG_VER < 400
   static_assert(clang_disallows_valid_static_cast_bug, "bug still exists");
   // FIXME Clang disallows this construction because it thinks that
@@ -323,17 +323,17 @@ int main(int, char**)
 #endif
 
 // FIXME Compilers disagree about the validity of these tests.
-#if defined(TEST_CLANG_VER) && !defined(TEST_COMPILER_NVCC)
+#if defined(TEST_CLANG_VER) && !defined(TEST_COMPILER_NVCC) && !defined(TEST_COMPILER_HIPCC)
   test_is_constructible<const int&, ExplicitTo<int>>();
   LIBCPP_STATIC_ASSERT(
     clang_disallows_valid_static_cast_bug != cuda::std::__libcpp_is_constructible<int&&, ExplicitTo<int>>::value, "");
   static_assert(cuda::std::is_constructible<int&&, ExplicitTo<int>>::value, "");
-#elif defined(TEST_COMPILER_MSVC) && defined(TEST_COMPILER_NVCC)
+#elif defined(TEST_COMPILER_MSVC) && defined(TEST_COMPILER_NVCC) && defined(TEST_COMPILER_HIPCC)
   // FIXME NVCC and MSVC disagree about the validity of these tests, and give
   //       different answers in host and device code, which is just wonderful.
-#elif defined(TEST_CLANG_VER) && defined(TEST_COMPILER_NVCC)
+#elif defined(TEST_CLANG_VER) && (defined(TEST_COMPILER_NVCC) || defined(TEST_COMPILER_HIPCC))
   // FIXME NVCC fails the assertion below when used with clang.
-#elif defined(TEST_COMPILER_NVRTC) || defined(TEST_COMPILER_NVHPC)
+#elif defined(TEST_COMPILER_NVRTC) || defined(TEST_COMPILER_HIPRTC) || defined(TEST_COMPILER_NVHPC)
   // FIXME NVRTC also doesn't like these tests.
   // FIXME neither does NVCC+nvhpc.
 #elif !defined(__GNUC__)

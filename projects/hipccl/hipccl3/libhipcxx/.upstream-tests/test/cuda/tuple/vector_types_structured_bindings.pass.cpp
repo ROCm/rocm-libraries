@@ -27,7 +27,7 @@
 // UNSUPPORTED: c++11, c++14
 // UNSUPPORTED: msvc
 // NOTE(HIP/AMD): currently not supported due to union member of HIP_vector_types (see SWDEV-527851)
-// UNSUPPORTED: hipcc
+// UNSUPPORTED: hipcc, hiprtc
 
 #include <cuda/std/cassert>
 #include <cuda/std/tuple>

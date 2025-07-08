@@ -26,7 +26,7 @@
 // THE SOFTWARE.
 
 // NOTE(HIP/AMD): currently barrier is not supported on AMD hardware
-// UNSUPPORTED: hipcc
+// UNSUPPORTED: hipcc, hiprtc
 
 // UNSUPPORTED: pre-sm-80
 

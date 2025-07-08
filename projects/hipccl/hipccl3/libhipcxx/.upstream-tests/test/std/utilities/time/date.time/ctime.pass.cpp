@@ -32,7 +32,7 @@
 #  error NULL not defined
 #endif
 
-#ifndef TEST_COMPILER_NVRTC
+#if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPRTC)
 #  ifndef CLOCKS_PER_SEC
 #    error CLOCKS_PER_SEC not defined
 #  endif
@@ -58,7 +58,7 @@ int main(int, char**)
   unused(c); // Prevent unused warning
   unused(s); // Prevent unused warning
   unused(t); // Prevent unused warning
-#ifndef TEST_COMPILER_NVRTC
+#if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPRTC)
   cuda::std::tm tm = {};
   char str[3];
   unused(tm); // Prevent unused warning

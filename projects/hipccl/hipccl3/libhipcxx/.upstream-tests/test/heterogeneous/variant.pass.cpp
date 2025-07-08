@@ -25,7 +25,7 @@
 
 // UNSUPPORTED: c++11
 // UNSUPPORTED: msvc-19.16
-// UNSUPPORTED: nvrtc
+// UNSUPPORTED: nvrtc, hiprtc
 
 // uncomment for a really verbose output detailing what test steps are being launched
 // #define DEBUG_TESTERS

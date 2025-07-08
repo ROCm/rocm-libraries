@@ -26,7 +26,7 @@
 // THE SOFTWARE.
 
 // UNSUPPORTED: pre-sm-70
-// UNSUPPORTED: hipcc
+// UNSUPPORTED: hipcc, hiprtc
 
 #include "utils.h"
 

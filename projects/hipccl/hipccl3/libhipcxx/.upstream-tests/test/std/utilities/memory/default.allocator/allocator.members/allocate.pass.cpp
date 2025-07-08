@@ -92,7 +92,7 @@ __host__ __device__ void test_aligned()
     globalMemCounter.last_new_size  = 0;
     globalMemCounter.last_new_align = 0;
     T* ap                           = a.allocate(3);
-#if !defined(TEST_COMPILER_NVCC) && !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPCC)
+#if !defined(TEST_COMPILER_NVCC) && !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_HIPCC) && !defined(TEST_COMPILER_HIPRTC)
     DoNotOptimize(ap);
 #else
     const auto meow = reinterpret_cast<uintptr_t>(ap) + 2;

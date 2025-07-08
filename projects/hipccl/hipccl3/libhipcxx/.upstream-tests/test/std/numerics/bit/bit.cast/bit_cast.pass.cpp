@@ -8,6 +8,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 // <cuda/std/bit>
 //
 // template<class To, class From>
@@ -260,7 +277,7 @@ __host__ __device__ bool tests()
         1e-20f,
         2.71828f,
         3.14159f,
-#if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_CLANG_CUDA)
+#if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_CLANG_CUDA) && !defined(TEST_COMPILER_HIPRTC) && !defined(TEST_COMPILER_HIPCC)
         cuda::std::nanf(""),
 #endif // !TEST_COMPILER_NVRTC && !TEST_COMPILER_CLANG_CUDA
         __builtin_nanf("0x55550001"), // NaN with a payload
@@ -285,7 +302,7 @@ __host__ __device__ bool tests()
         1e-100,
         2.718281828459045,
         3.141592653589793238462643383279502884197169399375105820974944,
-#if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_CLANG_CUDA)
+#if !defined(TEST_COMPILER_NVRTC) && !defined(TEST_COMPILER_CLANG_CUDA) && !defined(TEST_COMPILER_HIPRTC) && !defined(TEST_COMPILER_HIPCC)
         cuda::std::nan(""),
 #endif // !TEST_COMPILER_NVRTC && !TEST_COMPILER_CLANG_CUDA
         cuda::std::numeric_limits<double>::signaling_NaN(),

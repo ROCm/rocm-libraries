@@ -24,7 +24,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: hipcc
+// UNSUPPORTED: hipcc, hiprtc
 // NOTE(HIP): This test includes the header cuda/std/vector which does not exist.
 // HIPCC gives the correct error: cuda/std/string file not found.
 // However, other errors are expected, consider the expected-error. 

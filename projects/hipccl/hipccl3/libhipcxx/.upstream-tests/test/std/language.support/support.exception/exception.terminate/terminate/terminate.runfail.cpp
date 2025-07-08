@@ -26,7 +26,7 @@
 
 // test terminate
 // UNSUPPORTED: no_execute
-// UNSUPPORTED: nvrtc
+// UNSUPPORTED: nvrtc, hiprtc
 
 #include <cuda/std/__exception/terminate.h>
 #include <cuda/std/cassert>

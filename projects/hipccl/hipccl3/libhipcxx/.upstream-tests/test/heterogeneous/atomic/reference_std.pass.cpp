@@ -23,7 +23,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// UNSUPPORTED: nvrtc, pre-sm-60
+// UNSUPPORTED: nvrtc, hiprtc, pre-sm-60
 // UNSUPPORTED: windows && pre-sm-70
 
 #include <cuda/std/atomic>

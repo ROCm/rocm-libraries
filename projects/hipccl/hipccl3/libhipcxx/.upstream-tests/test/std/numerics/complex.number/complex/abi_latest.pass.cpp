@@ -26,7 +26,7 @@
 // HIP does not support long double, but it silently treats it as double without emitting a
 // compiler error. Therefore, this test is unsupported for HIP. Please see "Use of Long
 // Double Type" at https://docs.amd.com/bundle/HIP-Programming-Guide-v5.1/page/Programming_with_HIP.html.
-// UNSUPPORTED: hipcc
+// UNSUPPORTED: hipcc, hiprtc
 // <cuda/std/complex>
 
 // template<class T>

@@ -31,7 +31,7 @@
 // UNSUPPORTED: nvcc-11
 
 // NOTE(HIP/AMD): currently barrier is not supported on AMD hardware
-// UNSUPPORTED: hipcc
+// UNSUPPORTED: hipcc, hiprtc
 
 // <cuda/barrier>
 

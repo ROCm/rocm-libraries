@@ -29,7 +29,7 @@
 #include <cuda/std/cassert>
 #include <cuda/std/cstdlib>
 
-#if !defined(_LIBCUDACXX_COMPILER_NVRTC)
+#if !defined(_LIBCUDACXX_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
 #  include <new>
 #endif // !_LIBCUDACXX_COMPILER_NVRTC
 
