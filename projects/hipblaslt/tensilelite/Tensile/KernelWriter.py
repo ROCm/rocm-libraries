@@ -143,6 +143,7 @@ class StateValues:
   bpeCinternal: int = field(init=False)
 
   # KernelWriter
+  invalidLSUCode: bool                   = False
   inTailLoop: bool                       = False
   overflowedResources: int               = 0
   ## Schedule
@@ -5093,7 +5094,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tP["metadataWriteSwapByteOffset"] = 0
     tP["isSwizzled"] = (kernel["ProblemType"]["SwizzleTensorB"] and tP["isB"]) or (kernel["ProblemType"]["SwizzleTensorA"] and tP["isA"])
 
-    if (cM == "A" or cM == "B") and kernel["ProblemType"]["SwizzleTensor%s"%cM]:
+    if tP["isSwizzled"]:
       # 16 means bytes of buffer_load_dwordx4
       tP["swizzlePackK"] = 16 // kernel["MIInputPerThread%s"%cM] // kernel["ProblemType"]["DataType%s"%cM].numBytes()
       tP["swizzleK"] = kernel["MatrixInstK"] * tP["swizzlePackK"]
