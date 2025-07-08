@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -94,6 +94,22 @@ inline void rocsparse_importer_copy_mixed_arrays(size_t size,
 
 template <>
 inline void rocsparse_importer_copy_mixed_arrays(size_t size,
+                                                 int8_t* __restrict__ x,
+                                                 const rocsparse_bfloat16* __restrict__ y)
+{
+    throw rocsparse_status_not_implemented;
+}
+
+template <>
+inline void rocsparse_importer_copy_mixed_arrays(size_t size,
+                                                 _Float16* __restrict__ x,
+                                                 const rocsparse_bfloat16* __restrict__ y)
+{
+    throw rocsparse_status_not_implemented;
+}
+
+template <>
+inline void rocsparse_importer_copy_mixed_arrays(size_t size,
                                                  _Float16* __restrict__ x,
                                                  const rocsparse_float_complex* __restrict__ y)
 {
@@ -103,6 +119,30 @@ inline void rocsparse_importer_copy_mixed_arrays(size_t size,
 template <>
 inline void rocsparse_importer_copy_mixed_arrays(size_t size,
                                                  _Float16* __restrict__ x,
+                                                 const rocsparse_double_complex* __restrict__ y)
+{
+    throw rocsparse_status_not_implemented;
+}
+
+template <>
+inline void rocsparse_importer_copy_mixed_arrays(size_t size,
+                                                 rocsparse_bfloat16* __restrict__ x,
+                                                 const _Float16* __restrict__ y)
+{
+    throw rocsparse_status_not_implemented;
+}
+
+template <>
+inline void rocsparse_importer_copy_mixed_arrays(size_t size,
+                                                 rocsparse_bfloat16* __restrict__ x,
+                                                 const rocsparse_float_complex* __restrict__ y)
+{
+    throw rocsparse_status_not_implemented;
+}
+
+template <>
+inline void rocsparse_importer_copy_mixed_arrays(size_t size,
+                                                 rocsparse_bfloat16* __restrict__ x,
                                                  const rocsparse_double_complex* __restrict__ y)
 {
     throw rocsparse_status_not_implemented;

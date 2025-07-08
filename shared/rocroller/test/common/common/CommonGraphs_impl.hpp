@@ -500,7 +500,7 @@ namespace rocRollerTest::Graphs
         params->setManualKernelDimension(2);
         params->setManualWorkgroupSize({workgroupSizeX, workgroupSizeY, 1});
 
-        params->transposeMemoryAccess[LayoutType::None] = true;
+        params->transposeMemoryAccess.set(LayoutType::None, true);
 
         return params;
     }

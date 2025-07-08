@@ -152,18 +152,6 @@ option(BUILD_COMPRESSED_DBG "Enable compressed debug symbols" ON)
 check_cxx_compiler_flag("--offload-compress" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
 cmake_dependent_option(BUILD_OFFLOAD_COMPRESS "Build with offload compression" ON CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS OFF)
 
-cmake_dependent_option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY
-  "Build with file/folder reorg backward compatibility enabled" OFF "NOT WIN32" OFF)
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
-  rocm_wrap_header_dir(
-    ${CMAKE_SOURCE_DIR}/library/include/rocsolver
-    PATTERNS "*.h"
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS ${CMAKE_INSTALL_INCLUDEDIR}
-  )
-endif()
-
-
 message(STATUS "Tests: ${BUILD_CLIENTS_TESTS}")
 message(STATUS "Benchmarks: ${BUILD_CLIENTS_BENCHMARKS}")
 message(STATUS "Samples: ${BUILD_CLIENTS_SAMPLES}")

@@ -353,7 +353,20 @@ template <class HT, class TT>
   inline THRUST_HOST_DEVICE
   cons( const cons<HT2, TT2>& u ) : head(u.head), tail(u.tail) {}
 
+  template <class HT2>
+  inline THRUST_HOST_DEVICE
+  cons( const cons<HT2, null_type>& u ) : head(u.head), tail() {}
+
   cons(const cons &) = default;
+
+  THRUST_EXEC_CHECK_DISABLE
+  template <class HT2>
+  inline THRUST_HOST_DEVICE
+  cons& operator=( const cons<HT2, null_type>& u ) {
+    head = u.head;
+    tail = thrust::null_type();
+    return *this;
+  }
 
   THRUST_EXEC_CHECK_DISABLE
   template <class HT2, class TT2>

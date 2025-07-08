@@ -85,9 +85,9 @@ namespace rocRoller
                                                    RunParameters const&     runParams,
                                                    CommandKernelPtr         commandKernel)
                 {
-                    auto args = this->commandArguments(command, problemParams, runParams)
-                                    .runtimeArguments();
-                    AssertFatal(commandKernel->matchesPredicates(args, LogLevel::Error),
+                    auto commandArgs = this->commandArguments(command, problemParams, runParams);
+                    AssertFatal(commandKernel->matchesPredicates(commandArgs.runtimeArguments(),
+                                                                 LogLevel::Error),
                                 "Invalid run parameters: all predicates must match.");
                 }
 

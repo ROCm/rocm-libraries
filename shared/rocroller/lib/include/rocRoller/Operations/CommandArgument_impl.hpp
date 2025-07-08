@@ -55,7 +55,7 @@ namespace rocRoller
     {
         if(m_variableType.pointerType == PointerType::Value)
         {
-            AssertFatal(m_size == sizeof(T), ShowValue(m_size), ShowValue(sizeof(T*)));
+            AssertFatal(m_size == sizeof(T), ShowValue(m_size), ShowValue(sizeof(T)));
             AssertFatal((m_offset + m_size) <= args.size(),
                         ShowValue(m_offset),
                         ShowValue(m_size),
