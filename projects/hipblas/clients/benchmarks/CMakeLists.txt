@@ -80,6 +80,8 @@ target_compile_options(hipblas-bench PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_
 target_compile_definitions( hipblas-bench PRIVATE HIPBLAS_BENCH ${COMMON_DEFINES} ${BLIS_DEFINES} )
 
 target_link_libraries( hipblas-bench PRIVATE ${BLAS_LIBRARY} ${COMMON_LINK_LIBS} )
+apply_omp_settings( hipblas-bench )
+
 if (NOT WIN32)
     target_link_libraries( hipblas-bench PRIVATE stdc++fs )
 endif()

@@ -279,7 +279,6 @@ group_num=false
 manual_small_arg=false
 manual_large_arg=false
 build_address_sanitizer=false
-build_freorg_bkwdcomp=false
 solmap_data_folder=false
 
 # #################################################
@@ -328,9 +327,6 @@ while true; do
             shift ;;
         --address-sanitizer)
             build_address_sanitizer=true
-            shift ;;
-        --rm-legacy-include-dir)
-            build_freorg_bkwdcomp=false
             shift ;;
         --prefix)
             echo $2
@@ -439,11 +435,6 @@ if [[ "${build_address_sanitizer}" == true ]]; then
     cmake_common_options="$cmake_common_options -DBUILD_ADDRESS_SANITIZER=ON"
 fi
 
-if [[ "${build_freorg_bkwdcomp}" == true ]]; then
-  cmake_common_options="${cmake_common_options} -DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=ON"
-else
-  cmake_common_options="${cmake_common_options} -DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=OFF"
-fi
 # generator
 if [[ "${pattern_arg}" != false ]]; then
     cmake_common_options="${cmake_common_options} -DGENERATOR_PATTERN=${pattern_arg}"

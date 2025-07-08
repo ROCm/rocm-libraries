@@ -97,7 +97,10 @@ ci: {
 
     properties(auxiliary.addCommonProperties([pipelineTriggers([cron('0 12 * * 6')])]))
 
-    def jobNameList = ["enterprise":(["ubuntu20":['rocroller-compile']])]
+    def jobNameList = [
+        "enterprise":(["ubuntu20":['rocroller-compile']]),
+        "rocm-libraries":(["ubuntu20":['rocroller-compile']])
+    ]
     jobNameList = auxiliary.appendJobNameList(jobNameList)
 
     jobNameList.each

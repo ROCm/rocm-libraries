@@ -49,9 +49,8 @@ inline double type_epsilon<double>()
 
 TEST(hipfftTest, Create1dPlan)
 {
-    hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
-    ASSERT_EQ(hipfftCreate(&plan), HIPFFT_SUCCESS);
-    size_t length = 1024;
+    hipfftHandle plan   = hipfft_params::INVALID_PLAN_HANDLE;
+    size_t       length = 1024;
     ASSERT_EQ(hipfftPlan1d(&plan, length, HIPFFT_C2C, 1), HIPFFT_SUCCESS);
 
     ASSERT_EQ(hipfftDestroy(plan), HIPFFT_SUCCESS);
