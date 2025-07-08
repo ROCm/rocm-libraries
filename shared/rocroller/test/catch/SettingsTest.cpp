@@ -32,6 +32,7 @@
 #include "SimpleTest.hpp"
 #include "common/SourceMatcher.hpp"
 #include <rocRoller/Utilities/Settings_fwd.hpp>
+#include <thread>
 
 using namespace rocRoller;
 using namespace Catch::Matchers;
