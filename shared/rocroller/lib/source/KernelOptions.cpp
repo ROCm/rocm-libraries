@@ -115,47 +115,56 @@ namespace rocRoller
         return stream << *options;
     }
 
-    // KernelOptions(KernelOptions const& other);
-    // KernelOptions(KernelOptions && other);
-    // KernelOptions & operator=(KernelOptions const& other);
-    // KernelOptions & operator=(KernelOptions && other);
-
     std::ostream& operator<<(std::ostream& os, const KernelOptionValues& input)
     {
-        os << "Kernel Options:" << std::endl;
-        os << "  logLevel:\t\t\t" << input.logLevel << std::endl;
-        os << "  alwaysWaitAfterLoad:\t\t" << input.alwaysWaitAfterLoad << std::endl;
-        os << "  alwaysWaitAfterStore:\t\t" << input.alwaysWaitAfterStore << std::endl;
-        os << "  alwaysWaitBeforeBranch:\t" << input.alwaysWaitBeforeBranch << std::endl;
-        os << "  preloadKernelArguments:\t" << input.preloadKernelArguments << std::endl;
-        os << "  maxACCVGPRs:\t\t\t" << input.maxACCVGPRs << std::endl;
-        os << "  maxSGPRs:\t\t\t" << input.maxSGPRs << std::endl;
-        os << "  maxVGPRs:\t\t\t" << input.maxVGPRs << std::endl;
-        os << "  loadLocalWidth:\t\t" << input.loadLocalWidth << std::endl;
-        os << "  loadGlobalWidth:\t\t" << input.loadGlobalWidth << std::endl;
-        os << "  storeLocalWidth:\t\t" << input.storeLocalWidth << std::endl;
-        os << "  storeGlobalWidth:\t\t" << input.storeGlobalWidth << std::endl;
-        os << "  setNextFreeVGPRToMax:\t" << input.setNextFreeVGPRToMax << std::endl;
-        os << "  assertWaitCntState:\t\t" << input.assertWaitCntState << std::endl;
-        os << "  deduplicateArguments:\t\t" << input.deduplicateArguments << std::endl;
-        os << "  lazyAddArguments:\t\t" << input.lazyAddArguments << std::endl;
-        os << "  minLaunchTimeExpressionComplexity:\t\t" << input.minLaunchTimeExpressionComplexity
-           << std::endl;
-
-        return os;
+        return os << toString(input);
     }
 
     std::string KernelOptionValues::toString() const
     {
-        if(logLevel >= LogLevel::Warning)
-        {
-            std::stringstream ss;
-            ss << *this;
-            return ss.str();
-        }
-        else
-        {
-            return "";
-        }
+        return rocRoller::toString(*this);
+    }
+
+    std::string toString(KernelOptionValues const& values)
+    {
+        static_assert(sizeof(KernelOptionValues) == 68,
+                      "Edit the toString() function when adding a kernel option!");
+
+        std::string rv = "Kernel Options:\n";
+
+#define Show(name, value) rv += fmt::format("  {: <35}{: >10}\n", name ":", value)
+
+#define ShowOption(name) Show(#name, values.name)
+#define ShowString(name) Show(#name, toString(values.name))
+
+        ShowString(logLevel);
+        ShowOption(alwaysWaitAfterLoad);
+        ShowOption(alwaysWaitAfterStore);
+        ShowOption(alwaysWaitBeforeBranch);
+        ShowOption(alwaysWaitZeroBeforeBarrier);
+        ShowOption(preloadKernelArguments);
+        ShowOption(maxACCVGPRs);
+        ShowOption(maxSGPRs);
+        ShowOption(maxVGPRs);
+        ShowOption(loadLocalWidth);
+        ShowOption(loadGlobalWidth);
+        ShowOption(storeLocalWidth);
+        ShowOption(storeGlobalWidth);
+        ShowOption(assertWaitCntState);
+        ShowOption(setNextFreeVGPRToMax);
+        ShowOption(deduplicateArguments);
+        ShowOption(lazyAddArguments);
+        ShowOption(minLaunchTimeExpressionComplexity);
+        ShowOption(maxConcurrentSubExpressions);
+        Show("maxConcurrentControlOps",
+             values.maxConcurrentControlOps ? std::to_string(*values.maxConcurrentControlOps)
+                                            : "none");
+        ShowOption(enableFullDivision);
+
+#undef Show
+#undef ShowOption
+#undef ShowString
+
+        return rv;
     }
 }

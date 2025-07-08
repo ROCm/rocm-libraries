@@ -705,18 +705,27 @@ class GSUOn(GSU):
 
         indices = list(range(0, kernel["ProblemType"]["NumIndicesC"]))
         numDim = len(indices)
-        with writer.allocTmpSgpr(5) as tmpSgprInfo:
-            tmpSgpr = tmpSgprInfo.idx
-            module.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgpr+0), sgpr(tmpSgpr+1), sgpr("SizesFree+0"), 1, tmpVgpr, "Free0"))
-            for i in range(1, numDim):
-                module.add(SSubU32(dst=sgpr(tmpSgpr+4), src0=sgpr("SizesFree+%u"%i), src1=1, comment="Free%u" % i))
-                module.add(SMulI32(dst=sgpr(tmpSgpr+4), src0=sgpr(tmpSgpr+4), src1=1, comment="Free%u" % i))
-                module.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgpr+2), sgpr(tmpSgpr+3), sgpr(tmpSgpr+4), sgpr("StrideC%s"%writer.states.indexChars[i]), tmpVgpr, "Free%u" % i))
-                module.add(SAddU32(dst=sgpr(tmpSgpr+0), src0=sgpr(tmpSgpr+0), src1=sgpr(tmpSgpr+2), comment="Free%u" % i))
-                module.add(SAddCU32(dst=sgpr(tmpSgpr+1), src0=sgpr(tmpSgpr+1), src1=sgpr(tmpSgpr+3), comment="Free%u" % i))
+        tmpSgpr1 = writer.sgprPool.checkOut(2, preventOverflow=False)
+        tmpSgpr2 = writer.sgprPool.checkOut(1, preventOverflow=False)
+        tmpSgpr3 = writer.sgprPool.checkOut(1, preventOverflow=False)
+        tmpSgpr4 = writer.sgprPool.checkOut(1, preventOverflow=False)
 
-            bpetmp = int(writer.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters()) # self.states.bpeCinternal
-            module.add(SLShiftLeftB64(dst=sgpr(tmpS04,2), src=sgpr(tmpSgpr+0,2), shiftHex=log2(writer.states.bpeCexternal), comment="scale by bpe"))
+        module.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgpr1+0), sgpr(tmpSgpr1+1), sgpr("SizesFree+0"), 1, tmpVgpr, "Free0"))
+
+        for i in range(1, numDim):
+            module.add(SSubU32(dst=sgpr(tmpSgpr4), src0=sgpr("SizesFree+%u" % i), src1=1, comment="Free%u" % i))
+            module.add(SMulI32(dst=sgpr(tmpSgpr4), src0=sgpr(tmpSgpr4), src1=1, comment="Free%u" % i))
+            module.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmpSgpr2), sgpr(tmpSgpr3), sgpr(tmpSgpr4), sgpr("StrideC%s" % writer.states.indexChars[i]), tmpVgpr, "Free%u" % i))
+            module.add(SAddU32(dst=sgpr(tmpSgpr1+0), src0=sgpr(tmpSgpr1+0), src1=sgpr(tmpSgpr2), comment="Free%u" % i))
+            module.add(SAddCU32(dst=sgpr(tmpSgpr1+1), src0=sgpr(tmpSgpr1+1), src1=sgpr(tmpSgpr3), comment="Free%u" % i))
+
+        bpetmp = int(writer.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters())  # self.states.bpeCinternal
+        module.add(SLShiftLeftB64(dst=sgpr(tmpS04, 2), src=sgpr(tmpSgpr1+0, 2), shiftHex=log2(writer.states.bpeCexternal), comment="scale by bpe"))
+
+        writer.sgprPool.checkIn(tmpSgpr1)
+        writer.sgprPool.checkIn(tmpSgpr2)
+        writer.sgprPool.checkIn(tmpSgpr3)
+        writer.sgprPool.checkIn(tmpSgpr4)
 
         module.addSpaceLine()
         #####################################cal synchronizer sum start#####################################

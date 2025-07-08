@@ -173,9 +173,8 @@ void testing_gemmi(const Arguments& arg)
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
-        const double gpu_time_used = rocsparse_clients::run_benchmark(arg, [&] {
-            return testing::rocsparse_gemmi<T>(PARAMS(transA, transB, h_alpha, dA, dB, h_beta, dC));
-        });
+        const double gpu_time_used = rocsparse_clients::run_benchmark(
+            arg, rocsparse_gemmi<T>, PARAMS(transA, transB, h_alpha, dA, dB, h_beta, dC));
 
         double gpu_gflops = get_gpu_gflops(gpu_time_used,
                                            csrmm_gflop_count<rocsparse_int, rocsparse_int>,

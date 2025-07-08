@@ -37,6 +37,27 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+
+        class TopologicalCompare
+        {
+        public:
+            TopologicalCompare() = delete;
+            TopologicalCompare(KernelGraphPtr graph)
+                : m_graph(graph)
+            {
+                AssertFatal(graph);
+            };
+
+            bool operator()(int a, int b) const
+            {
+                return m_graph->control.compareNodes(rocRoller::UpdateCache, a, b)
+                       == ControlGraph::NodeOrdering::LeftFirst;
+            }
+
+        private:
+            KernelGraphPtr m_graph;
+        };
+
         // Return value of colourByUnrollValue.  A colour-mapping is...
         struct UnrollColouring
         {
