@@ -1199,10 +1199,17 @@ namespace rocRoller
         }
 
         template <typename Node, typename Edge, bool Hyper>
+        int Hypergraph<Node, Edge, Hyper>::nextIndex() const
+        {
+            return m_nextIndex;
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
         template <typename T>
         requires(std::constructible_from<Edge, T>)
             std::set<int> Hypergraph<Node, Edge, Hyper>::followEdges(
                 std::set<int> const& candidates)
+        const
         {
             // Nodes to be analyzed
             std::set<int> currentNodes = candidates;
@@ -1256,6 +1263,31 @@ namespace rocRoller
                     co_yield reachableNodes<Dir>(
                         graph, nextNode, nodePredicate, edgePredicate, destNodePredicate);
             }
+        }
+
+        template <typename Node, typename Edge, bool Hyper>
+        std::optional<int> Hypergraph<Node, Edge, Hyper>::findEdge(int tail, int head) const
+        {
+            static_assert(!Hyper, "findEdge not supported for hypergraphs.");
+
+            auto const& bySrcDst = m_incidence.template get<BySrcDst>();
+            auto const& byDst    = m_incidence.template get<ByDst>();
+
+            auto dstIter = byDst.lower_bound(std::make_tuple(head, 0));
+            while(dstIter != byDst.end() && dstIter->dst == head)
+            {
+                auto theEdge = dstIter->src;
+
+                auto sdIter = bySrcDst.lower_bound(std::make_tuple(tail, theEdge));
+                if(sdIter != bySrcDst.end() && sdIter->src == tail && sdIter->dst == theEdge)
+                {
+                    return theEdge;
+                }
+
+                ++dstIter;
+            }
+
+            return std::nullopt;
         }
 
     }

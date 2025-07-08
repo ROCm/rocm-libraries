@@ -2761,6 +2761,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     for(size_t t = 0; t < 1; t++) // C API not supported yet
                     {
                         size_t tmpWorkspaceSize = 0;
+                        tmpAlgo[j].algo.max_workspace_bytes = max_workspace_size;
                         if(hipblaslt_ext::matmulIsAlgoSupported(handle,
                                                                 matmul[0][0],
                                                                 alpha_in[0],

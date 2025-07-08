@@ -305,10 +305,11 @@ namespace rocRoller
             requires std::derived_from<T, Ternary> || CTernaryMixed<T>;
         };
 
-        /*
+        /**
+         * `result = (lhs + r1hs) << r2hs`
+         *
          * AddShiftL performs a fusion of Add expression followed by
          * ShiftL expression, lowering to the fused instruction if possible.
-         * result = (lhs + r1hs) << r2hs
          */
         struct AddShiftL : Ternary
         {
@@ -317,10 +318,11 @@ namespace rocRoller
             constexpr static inline int             Complexity = 2;
         };
 
-        /*
+        /**
+         * `result = (lhs << r1hs) + r2hs`
+         *
          * ShiftLAdd performs a fusion of ShiftL expression followed by
          * Add expression, lowering to the fused instruction if possible.
-         * result = (lhs << r1hs) + r2hs
          */
         struct ShiftLAdd : Ternary
         {
@@ -330,7 +332,7 @@ namespace rocRoller
         };
 
         /**
-         * Represents DEST = MatA * MatB + MatC.
+         * result = (lhs x r1hs) + r2hs.
          *
          * MatA is M x K, with B batches.  MatB is K x N, with B batches.  MatC is M x N, with B batches.
          */
@@ -357,6 +359,9 @@ namespace rocRoller
             constexpr static inline int             Complexity = 20;
         };
 
+        /**
+         * result = ((matA * scaleA) x (matB * scaleB)) + matC
+         */
         struct ScaledMatrixMultiply
         {
             ExpressionPtr matA, matB, matC, scaleA, scaleB;
@@ -383,7 +388,8 @@ namespace rocRoller
         };
 
         /**
-         * Represents DEST = LHS ? R1HS : R2HS.
+         * dest = lhs ? r1hs : r2hs.
+         *
          * Utilizes cselect
         */
         struct Conditional : Ternary
@@ -394,7 +400,8 @@ namespace rocRoller
         };
 
         /**
-         * Represents DEST = LHS * R1HS + R2HS.
+         * dest = lhs * r1hs + r2hs.
+         *
          * Utilizes TernaryMixed instead of Ternary
          * allows for mixed precision arithmetic
          */
@@ -888,6 +895,15 @@ namespace rocRoller
          */
         bool containsSubExpression(ExpressionPtr const& expr, ExpressionPtr const& subExpr);
         bool containsSubExpression(Expression const& expr, Expression const& subExpr);
+
+        std::unordered_set<std::string> referencedKernelArguments(ExpressionPtr const& expr);
+        std::unordered_set<std::string> referencedKernelArguments(Expression const& expr);
+
+        std::unordered_set<std::string>
+            referencedKernelArguments(ExpressionPtr const&      expr,
+                                      RegisterTagManager const& tagManager);
+        std::unordered_set<std::string>
+            referencedKernelArguments(Expression const& expr, RegisterTagManager const& tagManager);
 
     } // namespace Expression
 } // namespace rocRoller

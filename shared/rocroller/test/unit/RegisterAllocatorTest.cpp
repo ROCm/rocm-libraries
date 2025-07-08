@@ -24,13 +24,15 @@
  *
  *******************************************************************************/
 
+#include <rocRoller/InstructionValues/RegisterAllocator.hpp>
+
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/ExecutableKernel.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
-#include <rocRoller/InstructionValues/RegisterAllocator.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 
 #include "GPUContextFixture.hpp"
 #include "GenericContextFixture.hpp"
@@ -44,9 +46,9 @@ namespace RegisterAllocatorTest
     protected:
         void SetUp() override
         {
-            m_kernelOptions.maxACCVGPRs = 50;
-            m_kernelOptions.maxSGPRs    = 50;
-            m_kernelOptions.maxVGPRs    = 50;
+            m_kernelOptions->maxACCVGPRs = 50;
+            m_kernelOptions->maxSGPRs    = 50;
+            m_kernelOptions->maxVGPRs    = 50;
 
             GenericContextFixture::SetUp();
         }
@@ -242,9 +244,9 @@ namespace RegisterAllocatorTest
             Register::Type::Scalar,
         };
 
-        ASSERT_LE(m_context->kernelOptions().maxACCVGPRs, 50);
-        ASSERT_LE(m_context->kernelOptions().maxVGPRs, 50);
-        ASSERT_LE(m_context->kernelOptions().maxSGPRs, 50);
+        ASSERT_LE(m_context->kernelOptions()->maxACCVGPRs, 50);
+        ASSERT_LE(m_context->kernelOptions()->maxVGPRs, 50);
+        ASSERT_LE(m_context->kernelOptions()->maxSGPRs, 50);
 
         for(auto regType : regTypes)
         {

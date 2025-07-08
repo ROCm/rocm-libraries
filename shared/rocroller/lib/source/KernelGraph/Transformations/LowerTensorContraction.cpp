@@ -738,8 +738,10 @@ namespace rocRoller
 
             for(auto const siblingTag : info.siblingOps)
             {
-                for(auto edgeTag :
-                    graph.control.getNeighbours<Graph::Direction::Downstream>(siblingTag))
+                auto edgeTags
+                    = graph.control.getNeighbours<Graph::Direction::Downstream>(siblingTag)
+                          .to<std::vector>();
+                for(auto edgeTag : edgeTags)
                 {
                     auto edge = graph.control.getElement(edgeTag);
                     graph.control.deleteElement(edgeTag);

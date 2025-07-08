@@ -50,7 +50,7 @@ namespace rocRoller
         return m_expressions.at(tag);
     }
 
-    inline Register::ValuePtr RegisterTagManager::getRegister(int tag)
+    inline Register::ValuePtr RegisterTagManager::getRegister(int tag) const
     {
         auto merge = getIndex(tag);
         if(merge)
@@ -235,7 +235,11 @@ namespace rocRoller
 
     inline void RegisterTagManager::deleteTag(int tag)
     {
-        auto comment = fmt::format("Deleting tag {}", tag);
+        auto        ctx = m_context.lock();
+        std::string comment;
+        if(ctx)
+            comment = fmt::format("Deleting tag {}", tag);
+
         AssertFatal(!isBorrowed(tag), "Tag ", tag, " has been borrowed.");
 
         m_registers.erase(tag);
@@ -244,13 +248,15 @@ namespace rocRoller
         auto alias = getAlias(tag);
         if(alias)
         {
-            comment += fmt::format("alias (-> {})", *alias);
+            if(ctx)
+                comment += fmt::format("alias (-> {})", *alias);
             m_borrowedTags.erase(*alias);
         }
 
+        if(ctx)
         {
             auto inst = Instruction::Comment(comment);
-            m_context.lock()->schedule(inst);
+            ctx->schedule(inst);
         }
     }
 

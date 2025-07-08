@@ -260,9 +260,15 @@ namespace rocRoller
         };
 
         /**
-         * @brief Deallocates a register.
+         * @brief Deallocates a register tag.
          */
-        RR_EMPTY_STRUCT_WITH_NAME(Deallocate);
+        struct Deallocate
+        {
+            std::vector<std::string> arguments;
+
+            std::string name() const;
+            std::string toString() const;
+        };
 
         /**
          * LoadLinear - Load linear dimension.

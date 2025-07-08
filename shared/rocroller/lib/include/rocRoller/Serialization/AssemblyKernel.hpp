@@ -38,6 +38,7 @@
 #include <rocRoller/Serialization/Enum.hpp>
 #include <rocRoller/Serialization/Expression.hpp>
 #include <rocRoller/Serialization/KernelGraph.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Version.hpp>
 
 namespace rocRoller

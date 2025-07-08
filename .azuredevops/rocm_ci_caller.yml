@@ -51,13 +51,11 @@ jobs:
               -ghr '$(REPOSITORY_NAME)' \
               -ghsha '$(HEAD_SHA)' \
               -ghprn '$(PR_NUM)' \
-              -s '$(DEV)' \
               -ghpru '$(PR_URL)' \
               -ghprt \"\$TITLE\" \
               -ghpat '$(GH_PAT)' \
               -br   '$(BASE_REF)' \
               -et   '$(EVENT_TYPE)'" > /dev/null 2>&1
-
     displayName: Invoke jenkins_api.py in Docker  
     env:  
       svc_acc_org_secret: $(svc_acc_org_secret)

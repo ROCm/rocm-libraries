@@ -44,11 +44,13 @@
 #include <rocRoller/KernelGraph/Transforms/FuseLoops.hpp>
 #include <rocRoller/KernelGraph/Transforms/IdentifyParallelDimensions.hpp>
 #include <rocRoller/KernelGraph/Transforms/InlineIncrements.hpp>
+#include <rocRoller/KernelGraph/Transforms/InlineInits.hpp>
 #include <rocRoller/KernelGraph/Transforms/LoadPacked.hpp>
 #include <rocRoller/KernelGraph/Transforms/LoopOverTileNumbers.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerLinear.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerTensorContraction.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerTile.hpp>
+#include <rocRoller/KernelGraph/Transforms/NopExtraScopes.hpp>
 #include <rocRoller/KernelGraph/Transforms/OrderEpilogueBlocks.hpp>
 #include <rocRoller/KernelGraph/Transforms/OrderMemory.hpp>
 #include <rocRoller/KernelGraph/Transforms/OrderMultiplyNodes.hpp>

@@ -671,7 +671,6 @@ THRUST_HOST_DEVICE inline double real_part_reciprocal(double x, double y)
  * Re(catanh(z)) = x/|z|^2 + O(x/z^4)
  *    as z -> infinity, uniformly in x
  */
-#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
 THRUST_HOST_DEVICE inline complex<double> catanh(complex<double> z)
 {
   double x, y, ax, ay, rx, ry;
@@ -769,8 +768,6 @@ THRUST_HOST_DEVICE inline complex<double> catan(complex<double> z)
   return (complex<double>(w.imag(), w.real()));
 }
 
-#endif
-
 } // namespace complex
 
 } // namespace detail
@@ -851,13 +848,11 @@ THRUST_HOST_DEVICE inline complex<double> asin(const complex<double>& z)
   return detail::complex::casin(z);
 }
 
-#if (__cplusplus >= 201103L || !defined _MSC_VER) && !defined(__clang__)
 template <>
 THRUST_HOST_DEVICE inline complex<double> atan(const complex<double>& z)
 {
   return detail::complex::catan(z);
 }
-#endif
 
 template <>
 THRUST_HOST_DEVICE inline complex<double> acosh(const complex<double>& z)
@@ -871,12 +866,10 @@ THRUST_HOST_DEVICE inline complex<double> asinh(const complex<double>& z)
   return detail::complex::casinh(z);
 }
 
-#if (THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC) && !defined(__clang__)
 template <>
 THRUST_HOST_DEVICE inline complex<double> atanh(const complex<double>& z)
 {
   return detail::complex::catanh(z);
 }
-#endif
 
 THRUST_NAMESPACE_END

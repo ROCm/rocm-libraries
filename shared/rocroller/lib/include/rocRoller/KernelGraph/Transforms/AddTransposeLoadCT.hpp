@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <rocRoller/CodeGen/Arithmetic/MatrixMultiply_fwd.hpp>
 #include <rocRoller/CodeGen/Utils.hpp>
 #include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
@@ -33,31 +34,29 @@ namespace rocRoller
     namespace KernelGraph
     {
         /** @brief returns True iff the target architecture has instructions
-         * to transpose wavetiles of MacroTile @macroTile of @typde datatype.
+         * to transpose wavetiles of sizes mi.m x mi.n x mi.k of @typde datatype.
          */
-        bool isTransposableTile(GPUArchitecture const&     arch,
-                                CoordinateGraph::MacroTile macroTile,
-                                DataType                   type);
+        bool isTransposableTile(GPUArchitecture const&                     arch,
+                                InstructionGenerators::MatrixMultiplySizes mi,
+                                DataType                                   type);
 
         /** @brief Add coordinate-transforms for transpose-loading a WaveTile
          * from row/column coordinates `iWaveX` and `iWaveY`.
          *
          * The `lane` and `element` parameters are existing coordinates
          * corresponding to a Lane coordiante and VGPR coordinate (which should
-         * be thought of as which element/item is being addressed). Each lane
-         * loads 32 elements.
+         * be thought of as which element/item is being addressed).
          */
-        void addTransposeLoadWaveTileCT(ContextPtr                       context,
-                                        std::vector<DeferredConnection>& connections,
-                                        KernelGraph&                     graph,
-                                        int                              macTileTag,
-                                        int                              iWaveX,
-                                        int                              iWaveY,
-                                        int                              lane,
-                                        int                              element,
-                                        uint                             M,
-                                        uint                             K,
-                                        uint                             bitsPerElement,
-                                        int                              wavefrontSize);
+        void addTransposeLoadWaveTileCT(ContextPtr                                 context,
+                                        std::vector<DeferredConnection>&           connections,
+                                        KernelGraph&                               graph,
+                                        int                                        macTileTag,
+                                        int                                        iWaveX,
+                                        int                                        iWaveY,
+                                        int                                        lane,
+                                        int                                        element,
+                                        InstructionGenerators::MatrixMultiplySizes mi,
+                                        uint                                       bitsPerElement,
+                                        int                                        wavefrontSize);
     }
 }

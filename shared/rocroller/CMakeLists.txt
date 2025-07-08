@@ -104,6 +104,7 @@ rocm_setup_version(VERSION ${ROCROLLER_VERSION})
 
 option(ROCROLLER_ENABLE_TIMERS "Enable rocRoller timer code." OFF)
 option(ROCROLLER_USE_HIP "Use HIP within the rocRoller." ON)
+option(ROCROLLER_USE_LLD "Use LLD within the rocRoller." ON)
 option(ROCROLLER_EMBED_ARCH_DEF
        "Embed the generated GPU architecture msgpack in the library" ON
 )
@@ -120,7 +121,7 @@ option(BUILD_CLIENTS "Build performance testing clients" ON)
 option(BUILD_TESTING "Build rocRoller test clients" ON)
 option(BUILD_DOCS "Build rocRoller documentation" ON)
 option(BUILD_VERBOSE "Output additional build information" OFF)
-option(BUILD_ADDRESS_SANITIZER "Build hipBLASLt with address sanitizer enabled (clang only)" OFF)
+option(BUILD_ADDRESS_SANITIZER "Build rocRoller with address sanitizer enabled (clang only)" OFF)
 
 option(MXDATAGENERATOR_SSH "Fetch mxDataGenerator via SSH" OFF)
 set(MXDATAGENERATOR_GIT_URL "github.com" CACHE STRING "Base Git URL to fetch mxDataGenerator from.")
@@ -138,16 +139,18 @@ set_property(CACHE YAML_BACKEND PROPERTY STRINGS YAML_CPP LLVM)
 # For paths given when reporting errors
 add_compile_options(-fmacro-prefix-map=${PROJECT_SOURCE_DIR}=.)
 
-if(BUILD_ADDRESS_SANITIZER)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
-endif()
-
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    if(BUILD_ADDRESS_SANITIZER)
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
+    endif()
     set(COROUTINES_COMPILE_OPTION)
     set(EXTRA_COMPILE_OPTIONS)
     set(EXTRA_LINK_OPTIONS -fuse-ld=lld -frtti)
 else()
+    if(BUILD_ADDRESS_SANITIZER)
+        message(FATAL_ERROR "BUILD_ADDRESS_SANITIZER with a non-clang compiler is not supported")
+    endif()
     set(COROUTINES_COMPILE_OPTION -fcoroutines)
     set(EXTRA_COMPILE_OPTIONS)
     set(EXTRA_LINK_OPTIONS -frtti)
@@ -176,13 +179,6 @@ if(ROCROLLER_USE_HIP)
     endif()
 
     llvm_map_components_to_libnames(llvm_libs mc support)
-    find_package(
-        LLD
-        REQUIRED
-        CONFIG
-        HINTS
-        ${LLVM_DIR}/../lld/
-    )
 endif()
 
 # does not show up in headers, no system package required
@@ -241,7 +237,6 @@ configure_file(
 
 add_subdirectory(GPUArchitectureGenerator)
 add_subdirectory(lib)
-
 
 if(BUILD_CLIENTS OR BUILD_TESTING)
     add_subdirectory(test/common)

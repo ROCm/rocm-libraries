@@ -2875,10 +2875,13 @@ namespace TensileLite
             }
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
             auto       tiles     = problem.getNumTiles(sizeMapping, gsu);
-            size_t     skGrid    = getSKGrid(problem, hardware, tiles);
-            // Get space required for partial tiles
-            if(tiles % skGrid != 0 && !streamKDP)
-                size += partialTileSize(skGrid);
+            if(tiles > 0) // Grouped GEMM reports 0 tiles
+            {
+                size_t     skGrid    = getSKGrid(problem, hardware, tiles);
+                // Get space required for partial tiles
+                if(skGrid > 0 && tiles % skGrid != 0 && !streamKDP)
+                    size += partialTileSize(skGrid);
+            }
         }
         else
         {
@@ -3189,6 +3192,9 @@ namespace TensileLite
                     }
                 }
             }
+
+            if (tiles % skGrid != 0 && partialTileSize(skGrid) > problem.workspaceSize())
+                skGrid = tiles;
             return skGrid;
         }
         // Limit the CUs Stream-K is launched on either max or the specified,

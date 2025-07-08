@@ -35,23 +35,7 @@ trigger:
     - projects/hipblaslt/.*.y*ml
     - projects/hipblaslt/*.md
 
-pr:
-  autoCancel: true
-  branches:
-    include:
-    - develop
-    - release-staging/rocm-rel-7.*
-  paths:
-    include:
-    - projects/hipblaslt
-    exclude:
-    - projects/hipblaslt/.githooks
-    - projects/hipblaslt/.github
-    - projects/hipblaslt/docs
-    - projects/hipblaslt/CODEOWNERS
-    - projects/hipblaslt/.*.y*ml
-    - projects/hipblaslt/*.md
-  drafts: false
+pr: none
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/hipBLASLt.yml@pipelines_repo

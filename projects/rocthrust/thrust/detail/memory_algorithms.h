@@ -26,13 +26,13 @@ THRUST_NAMESPACE_BEGIN
 ///////////////////////////////////////////////////////////////////////////////
 
 template <typename T>
-THRUST_HOST_DEVICE void destroy_at(T* location)
+THRUST_HOST_DEVICE void destroy_at(T* location) noexcept
 {
   location->~T();
 }
 
 template <typename Allocator, typename T>
-THRUST_HOST_DEVICE void destroy_at(Allocator const& alloc, T* location)
+THRUST_HOST_DEVICE void destroy_at(Allocator const& alloc, T* location) noexcept
 {
   using traits = typename detail::allocator_traits<typename detail::remove_cv<
     typename detail::remove_reference<Allocator>::type>::type>::template rebind_traits<T>::other;
@@ -43,7 +43,7 @@ THRUST_HOST_DEVICE void destroy_at(Allocator const& alloc, T* location)
 }
 
 template <typename ForwardIt>
-THRUST_HOST_DEVICE ForwardIt destroy(ForwardIt first, ForwardIt last)
+THRUST_HOST_DEVICE ForwardIt destroy(ForwardIt first, ForwardIt last) noexcept
 {
   for (; first != last; ++first)
   {
@@ -54,7 +54,7 @@ THRUST_HOST_DEVICE ForwardIt destroy(ForwardIt first, ForwardIt last)
 }
 
 template <typename Allocator, typename ForwardIt>
-THRUST_HOST_DEVICE ForwardIt destroy(Allocator const& alloc, ForwardIt first, ForwardIt last)
+THRUST_HOST_DEVICE ForwardIt destroy(Allocator const& alloc, ForwardIt first, ForwardIt last) noexcept
 {
   using T      = typename iterator_traits<ForwardIt>::value_type;
   using traits = typename detail::allocator_traits<typename detail::remove_cv<
@@ -71,7 +71,7 @@ THRUST_HOST_DEVICE ForwardIt destroy(Allocator const& alloc, ForwardIt first, Fo
 }
 
 template <typename ForwardIt, typename Size>
-THRUST_HOST_DEVICE ForwardIt destroy_n(ForwardIt first, Size n)
+THRUST_HOST_DEVICE ForwardIt destroy_n(ForwardIt first, Size n) noexcept
 {
   for (; n > 0; (void) ++first, --n)
   {
@@ -82,7 +82,7 @@ THRUST_HOST_DEVICE ForwardIt destroy_n(ForwardIt first, Size n)
 }
 
 template <typename Allocator, typename ForwardIt, typename Size>
-THRUST_HOST_DEVICE ForwardIt destroy_n(Allocator const& alloc, ForwardIt first, Size n)
+THRUST_HOST_DEVICE ForwardIt destroy_n(Allocator const& alloc, ForwardIt first, Size n) noexcept
 {
   using T      = typename iterator_traits<ForwardIt>::value_type;
   using traits = typename detail::allocator_traits<typename detail::remove_cv<

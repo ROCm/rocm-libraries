@@ -9,6 +9,20 @@ Exported rocSPARSE functions
 
 This topic provides a list of the exported rocSPARSE functions in various categories.
 
+
+ROC-TX functions
+----------------
+
++-----------------------------------------------------+
+|Function name                                        |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_enable_roctx`                   |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_disable_roctx`                  |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_state_roctx`                    |
++-----------------------------------------------------+
+
 Debugging functions
 -------------------
 +-----------------------------------------------------+

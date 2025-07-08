@@ -56,6 +56,10 @@ option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg wit
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
 
+# Allow the user to optionally select offset type dispatch to fixed 32 or 64 bit types
+set(THRUST_DISPATCH_TYPE "Dynamic" CACHE STRING "Select Thrust offset type dispatch." FORCE)
+set_property(CACHE THRUST_DISPATCH_TYPE PROPERTY STRINGS "Dynamic" "Force32bit" "Force64bit")
+
 #Adding CMAKE_PREFIX_PATH
 list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm ${ROCM_PATH} )
 

@@ -184,6 +184,12 @@ namespace rocRoller
             false,
             -1};
 
+        static inline const SettingsOption<bool> NoRegisterLimits{
+            "ROCROLLER_IGNORE_OUT_OF_REGISTERS",
+            "Ignore register count limits for debugging purposes.",
+            false,
+            -1};
+
         static inline const SettingsOption<bool> AllowUnknownInstructions{
             "ROCROLLER_ALLOW_UNKNOWN_INSTRUCTIONS",
             "Whether to allow arbitrary instructions.",
@@ -194,6 +200,13 @@ namespace rocRoller
             "ROCROLLER_ENFORCE_GRAPH_CONSTRAINTS",
             "Whether to enforce kernel graph constraints. (Could negatively impact code gen "
             "performance)",
+            false,
+            -1};
+
+        static inline const SettingsOption<bool> AuditControlTracers{
+            "ROCROLLER_AUDIT_CONTROL_TRACERS",
+            "Whether to audit predicted use of arguments and/or registers."
+            "Could impact code gen performance.",
             false,
             -1};
 

@@ -1336,11 +1336,23 @@ namespace KernelGraphTest
         auto computeIndexes = kgraph1.control.getNodes<ComputeIndex>().to<std::vector>();
         EXPECT_EQ(computeIndexes.size(), 16);
 
-        // Verify number of Deallocates
-        auto addDeallocate  = std::make_shared<AddDeallocate>();
-        auto kgraph2        = kgraph1.transform(addDeallocate);
-        auto addDeallocates = kgraph2.control.getNodes<Deallocate>().to<std::vector>();
-        EXPECT_EQ(addDeallocates.size(), 16);
+        // Verify number of deallocated dimensions.  They may be merged into fewer deallocate nodes.
+        auto addDeallocate = std::make_shared<AddDeallocateDataFlow>();
+        auto kgraph2       = kgraph1.transform(addDeallocate);
+        {
+            std::set<int> deallocatedDims;
+            auto          deallocates = kgraph2.control.getNodes<Deallocate>();
+            for(auto deallocate : deallocates)
+            {
+                auto connections = kgraph2.mapper.getConnections(deallocate);
+                for(auto const& c : connections)
+                {
+                    EXPECT_THAT(deallocatedDims, ::testing::Not(::testing::Contains(c.coordinate)));
+                    deallocatedDims.insert(c.coordinate);
+                }
+            }
+            EXPECT_EQ(deallocatedDims.size(), 16);
+        }
 
         auto storeLDS = kgraphUnrolled.control.getNodes<StoreLDSTile>().to<std::vector>();
         EXPECT_EQ(storeLDS.size(), 8);
@@ -1353,10 +1365,22 @@ namespace KernelGraphTest
         computeIndexes = unrolled_kgraph_lds.control.getNodes<ComputeIndex>().to<std::vector>();
         EXPECT_EQ(computeIndexes.size(), 112);
 
-        // Verify number of Deallocates after unroll/fuse/lds
+        // Verify number of deallocated dimensions.  They may be merged into fewer deallocate nodes.
         unrolled_kgraph_lds = unrolled_kgraph_lds.transform(addDeallocate);
-        addDeallocates      = unrolled_kgraph_lds.control.getNodes<Deallocate>().to<std::vector>();
-        EXPECT_EQ(addDeallocates.size(), 86);
+        {
+            std::set<int> deallocatedDims;
+            auto          deallocates = unrolled_kgraph_lds.control.getNodes<Deallocate>();
+            for(auto deallocate : deallocates)
+            {
+                auto connections = unrolled_kgraph_lds.mapper.getConnections(deallocate);
+                for(auto const& c : connections)
+                {
+                    EXPECT_THAT(deallocatedDims, ::testing::Not(::testing::Contains(c.coordinate)));
+                    deallocatedDims.insert(c.coordinate);
+                }
+            }
+            EXPECT_EQ(deallocatedDims.size(), 86);
+        }
     }
 
     TEST_F(KernelGraphTest, InlineIncrement)
@@ -2933,88 +2957,6 @@ namespace KernelGraphTest
         {
             std::vector<char> assembledKernel = m_context->instructions()->assemble();
             EXPECT_GT(assembledKernel.size(), 0);
-        }
-    }
-
-    TEST_F(KernelGraphTest, LDSNoDeallocateInHotLoop)
-    {
-        using GD = Graph::Direction;
-
-        auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
-
-        example.setTileSize(128, 256, 8);
-        example.setMFMA(32, 32, 2, 1);
-        example.setUseLDS(true, true, true);
-
-        auto kgraph = example.getKernelGraph();
-        auto params = example.getCommandParameters();
-
-        params->unrollK           = 3;
-        params->prefetch          = true;
-        params->prefetchInFlight  = 3;
-        params->prefetchLDSFactor = 3;
-        params->prefetchMixMemOps = true;
-
-        std::vector<GraphTransformPtr> transforms;
-        transforms.push_back(std::make_shared<UpdateParameters>(params));
-        transforms.push_back(std::make_shared<AddLDS>(params, m_context));
-        transforms.push_back(std::make_shared<LowerLinear>(m_context));
-        transforms.push_back(std::make_shared<LowerTile>(params, m_context));
-        transforms.push_back(std::make_shared<LowerTensorContraction>(params, m_context));
-        transforms.push_back(std::make_shared<ConnectWorkgroups>(params, m_context));
-        transforms.push_back(std::make_shared<AddPrefetch>(params, m_context));
-        transforms.push_back(std::make_shared<AddComputeIndex>());
-        transforms.push_back(std::make_shared<AddDeallocate>());
-
-        for(auto& t : transforms)
-            kgraph = kgraph.transform(t);
-
-        auto ldsDeallocatePredicate = [&](int tag) -> bool {
-            auto maybeDeallocate = kgraph.control.get<Deallocate>(tag);
-            if(!maybeDeallocate)
-                return false;
-            auto dimTag   = kgraph.mapper.get<Dimension>(tag);
-            auto maybeLDS = kgraph.coordinates.get<LDS>(dimTag);
-            return maybeLDS.has_value();
-        };
-
-        auto forKLoopPredicate = [&](int tag) -> bool {
-            auto maybeForLoop = kgraph.control.get<ForLoopOp>(tag);
-            if(!maybeForLoop)
-                return false;
-            return maybeForLoop->loopName == rocRoller::KLOOP;
-        };
-
-        auto storeLDSPredicate = [&](int tag) -> bool {
-            auto maybeStoreLDSTile = kgraph.control.get<StoreLDSTile>(tag);
-            if(!maybeStoreLDSTile)
-                return false;
-            return true;
-        };
-
-        auto kernel  = *only(kgraph.control.roots());
-        auto forLoop = *only(kgraph.control.findNodes(kernel, forKLoopPredicate, GD::Downstream));
-
-        auto ldsDeallocateFromKernel
-            = kgraph.control.findNodes(kernel, ldsDeallocatePredicate, GD::Downstream)
-                  .to<std::vector>();
-
-        std::vector<int> ldsDeallocateInsideLoop;
-        for(auto body : kgraph.control.getOutputNodeIndices<Body>(forLoop))
-        {
-            auto t = kgraph.control.findNodes(body, ldsDeallocatePredicate, GD::Downstream)
-                         .to<std::vector>();
-            std::copy(t.cbegin(), t.cend(), std::back_inserter(ldsDeallocateInsideLoop));
-        }
-
-        EXPECT_FALSE(ldsDeallocateFromKernel.empty());
-        EXPECT_TRUE(ldsDeallocateInsideLoop.empty());
-
-        for(auto storeLDS : kgraph.control.findNodes(kernel, storeLDSPredicate, GD::Downstream))
-        {
-            auto deallocate = only(kgraph.control.getOutputNodeIndices<Sequence>(storeLDS));
-            auto barrier    = only(kgraph.control.getOutputNodeIndices<Sequence>(*deallocate));
-            EXPECT_EQ(kgraph.mapper.get<LDS>(storeLDS), kgraph.mapper.get<LDS>(*barrier));
         }
     }
 

@@ -221,7 +221,7 @@ namespace rocRoller
                     return command;
                 }
 
-                virtual CommandParametersPtr
+                CommandParametersPtr
                     makeCommandParameters(CommandPtr                command,
                                           SolutionParameters const& solutionParams) override
                 {
@@ -233,12 +233,6 @@ namespace rocRoller
                     auto typeB = fromString<DataType>(solutionParams.typeB);
                     auto typeC = fromString<DataType>(solutionParams.typeC);
                     auto typeD = fromString<DataType>(solutionParams.typeD);
-
-                    auto isF8F6F4 = [](auto dtype) {
-                        return (dtype == DataType::FP8 || dtype == DataType::BF8
-                                || dtype == DataType::FP6 || dtype == DataType::BF6
-                                || dtype == DataType::FP4);
-                    };
 
                     if(typeA == DataType::Float && typeB == DataType::Float)
                     {
@@ -272,7 +266,7 @@ namespace rocRoller
                         wave_k = 128;
                         wave_b = 1;
                     }
-                    else if(typeA != typeB && isF8F6F4(typeA) && isF8F6F4(typeB))
+                    else if(typeA != typeB && isUnpackedF8F6F4(typeA) && isUnpackedF8F6F4(typeB))
                     {
                         wave_m = 16;
                         wave_n = 16;
@@ -440,10 +434,10 @@ namespace rocRoller
 
                     if(solutionParams.matchMemoryAccess)
                     {
-                        params->transposeMemoryAccess[LayoutType::MATRIX_A]
-                            = solutionParams.transA == TransposeType::T;
-                        params->transposeMemoryAccess[LayoutType::MATRIX_B]
-                            = solutionParams.transB == TransposeType::T;
+                        params->transposeMemoryAccess.set(
+                            LayoutType::MATRIX_A, solutionParams.transA == TransposeType::T);
+                        params->transposeMemoryAccess.set(
+                            LayoutType::MATRIX_B, solutionParams.transB == TransposeType::T);
                     }
 
                     uint workgroup_size_x
@@ -489,10 +483,9 @@ namespace rocRoller
                     return params;
                 }
 
-                virtual CommandArguments
-                    commandArguments(CommandPtr               command,
-                                     ProblemParameters const& problemParams,
-                                     RunParameters const&     runParams) const override
+                CommandArguments commandArguments(CommandPtr               command,
+                                                  ProblemParameters const& problemParams,
+                                                  RunParameters const&     runParams) const override
                 {
                     CommandArguments commandArgs = command->createArguments();
 
@@ -541,9 +534,9 @@ namespace rocRoller
                     return commandArgs;
                 }
 
-                virtual void setPredicates(CommandPtr                command,
-                                           CommandKernelPtr          commandKernel,
-                                           SolutionParameters const& solutionParams) override
+                void setPredicates(CommandPtr                command,
+                                   CommandKernelPtr          commandKernel,
+                                   SolutionParameters const& solutionParams) override
                 {
                     using namespace rocRoller::Expression;
                     auto params = commandKernel->getCommandParameters();

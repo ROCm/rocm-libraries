@@ -37,6 +37,27 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+
+        class TopologicalCompare
+        {
+        public:
+            TopologicalCompare() = delete;
+            TopologicalCompare(KernelGraphPtr graph)
+                : m_graph(graph)
+            {
+                AssertFatal(graph);
+            };
+
+            bool operator()(int a, int b) const
+            {
+                return m_graph->control.compareNodes(rocRoller::UpdateCache, a, b)
+                       == ControlGraph::NodeOrdering::LeftFirst;
+            }
+
+        private:
+            KernelGraphPtr m_graph;
+        };
+
         // Return value of colourByUnrollValue.  A colour-mapping is...
         struct UnrollColouring
         {
@@ -184,6 +205,16 @@ namespace rocRoller
 
         std::pair<std::unordered_set<int>, std::unordered_set<int>>
             findAllRequiredCoordinates(int op, KernelGraph const& graph);
+
+        /**
+         * @brief Return an augmented path that includes all
+         * neighbours (in direction `direction`) of edges in the
+         * original path.
+         */
+        std::unordered_set<int> includeEdgeNeighbours(
+            rocRoller::KernelGraph::CoordinateGraph::CoordinateGraph const& coordinates,
+            Graph::Direction                                                direction,
+            std::unordered_set<int> const&                                  path);
 
         /**
          * @brief Find the operation of type T that contains the
@@ -655,6 +686,9 @@ namespace rocRoller
         *        verifying correctness.
         */
         void removeRedundantBodyEdgesBaselineMethod(KernelGraph& graph);
+
+        std::deque<int> controlStack(int control, KernelGraph const& graph);
+        std::deque<int> controlStack(int control, ControlGraph::ControlGraph const& graph);
     }
 }
 

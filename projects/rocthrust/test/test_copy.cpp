@@ -430,7 +430,7 @@ TYPED_TEST(CopyIntegerTests, TestCopyIf)
 
 TEST(CopyLargeTypesTests, TestCopyIfStencilLargeType)
 {
-  using T = large_data;
+  using T = test::large_data;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 

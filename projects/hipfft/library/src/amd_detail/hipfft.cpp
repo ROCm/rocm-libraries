@@ -32,8 +32,6 @@
 #include "hipfft/hipfftMp.h"
 #endif
 
-#include "../../../shared/arithmetic.h"
-#include "../../../shared/gpubuf.h"
 #include "../../../shared/ptrdiff.h"
 #include "../../../shared/rocfft_hip.h"
 
@@ -1579,6 +1577,8 @@ catch(...)
 hipfftResult hipfftGetVersion(int* version)
 try
 {
+    if(!version)
+        return HIPFFT_INVALID_VALUE;
     char v[256];
     ROC_FFT_CHECK_INVALID_VALUE(rocfft_get_version_string(v, 256));
 
@@ -1612,6 +1612,8 @@ catch(...)
 hipfftResult hipfftGetProperty(hipfftLibraryPropertyType type, int* value)
 try
 {
+    if(!value)
+        return HIPFFT_INVALID_VALUE;
     int full;
     hipfftGetVersion(&full);
 

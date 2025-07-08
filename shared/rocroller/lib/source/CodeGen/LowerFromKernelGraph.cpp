@@ -34,12 +34,14 @@
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/CrashKernelGenerator.hpp>
+#include <rocRoller/CodeGen/GenerateNodes.hpp>
 #include <rocRoller/CodeGen/LoadStoreTileGenerator.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/InstructionValues/LabelAllocator.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/ControlFlowArgumentTracer.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
@@ -48,6 +50,7 @@
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/Scheduling/Scheduler.hpp>
 #include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
@@ -64,13 +67,16 @@ namespace rocRoller
          */
         struct CodeGeneratorVisitor
         {
-            CodeGeneratorVisitor(KernelGraphPtr graph, AssemblyKernelPtr kernel)
-                : m_graph(graph)
+            CodeGeneratorVisitor(KernelGraphPtr                           graph,
+                                 AssemblyKernelPtr                        kernel,
+                                 std::optional<ControlFlowArgumentTracer> argTracer)
+                : m_graph(std::move(graph))
                 , m_kernel(kernel)
                 , m_context(kernel->context())
                 , m_fastArith{kernel->context()}
                 , m_loadStoreTileGenerator(
                       m_graph, kernel->context(), kernel->max_flat_workgroup_size())
+                , m_argumentTracer(std::move(argTracer))
             {
             }
 
@@ -152,6 +158,8 @@ namespace rocRoller
              */
             Generator<Instruction> generate(std::set<int> candidates, Transformer coords)
             {
+                auto const& options = m_context->kernelOptions();
+
                 rocRoller::Log::getLogger()->debug(
                     concatenate("KernelGraph::CodeGenerator::generate: ", candidates));
 
@@ -160,83 +168,46 @@ namespace rocRoller
 
                 candidates = m_graph->control.followEdges<Sequence>(candidates);
 
-                while(!candidates.empty())
-                {
-                    std::set<int> nodes = findAndRemoveSatisfiedNodes(candidates);
+                auto proc      = Settings::getInstance()->get(Settings::Scheduler);
+                auto cost      = Settings::getInstance()->get(Settings::SchedulerCost);
+                auto scheduler = Component::GetNew<Scheduling::Scheduler>(proc, cost, m_context);
 
-                    // If there are no valid nodes, we have a problem.
-                    AssertFatal(!nodes.empty(),
-                                "Invalid control graph!",
-                                ShowValue(m_graph->control),
-                                ShowValue(candidates),
-                                ShowValue(m_completedControlNodes));
+                auto generateNode = [&](int tag) -> Generator<Instruction> {
+                    auto op = m_graph->control.getNode(tag);
+                    co_yield call(tag, op, coords);
+                };
 
-                    // Generate code for all the nodes we found.
+                auto nodeIsReady = [this](int tag) { return hasGeneratedInputs(tag); };
 
-                    std::vector<Generator<Instruction>> generators;
-                    for(auto tag : nodes)
+                auto nodeCategory = [this, &options](int tag) -> size_t {
+                    if(options->maxConcurrentControlOps)
                     {
                         auto op = m_graph->control.getNode(tag);
-                        generators.push_back(call(tag, op, coords));
+                        return op.index();
                     }
 
-                    if(generators.size() == 1)
-                    {
-                        co_yield std::move(generators[0]);
-                    }
-                    else
-                    {
-                        co_yield Instruction::Comment(
-                            concatenate("BEGIN Scheduler for operations ", nodes));
-                        auto proc = Settings::getInstance()->get(Settings::Scheduler);
-                        auto cost = Settings::getInstance()->get(Settings::SchedulerCost);
-                        auto scheduler
-                            = Component::GetNew<Scheduling::Scheduler>(proc, cost, m_context);
+                    return 0;
+                };
 
-                        if(!scheduler->supportsAddingStreams())
-                        {
-                            co_yield (*scheduler)(generators);
-                        }
-                        else
-                        {
-                            auto generator         = (*scheduler)(generators);
-                            auto numCompletedNodes = m_completedControlNodes.size();
+                auto categoryLimit = [&options](size_t category) -> size_t {
+                    size_t unlimited = std::numeric_limits<int>::max();
 
-                            for(auto iter = generator.begin(); iter != generator.end(); ++iter)
-                            {
-                                if(numCompletedNodes != m_completedControlNodes.size()
-                                   && !candidates.empty())
-                                {
-                                    auto newNodes = findAndRemoveSatisfiedNodes(candidates);
+                    if(category == variantIndex<Operation, Deallocate>())
+                        return unlimited;
 
-                                    if(!newNodes.empty())
-                                    {
-                                        co_yield Instruction::Comment(
-                                            concatenate("ADD operations ",
-                                                        newNodes,
-                                                        " to scheduler for ",
-                                                        nodes));
+                    return options->maxConcurrentControlOps.value_or(unlimited);
+                };
 
-                                        for(auto tag : newNodes)
-                                        {
-                                            auto op = m_graph->control.getNode(tag);
-                                            generators.push_back(call(tag, op, coords));
-                                        }
+                auto comparePriorities = [](int a, int b) { return a > b; };
 
-                                        nodes.insert(newNodes.begin(), newNodes.end());
-                                    }
-
-                                    numCompletedNodes = m_completedControlNodes.size();
-                                }
-
-                                co_yield *iter;
-                            }
-                        }
-
-                        co_yield Instruction::Comment(
-                            concatenate("END Scheduler for operations ", nodes));
-                    }
-                }
+                co_yield generateNodes<int, size_t>(scheduler,
+                                                    candidates,
+                                                    m_completedControlNodes,
+                                                    generateNode,
+                                                    nodeIsReady,
+                                                    nodeCategory,
+                                                    categoryLimit,
+                                                    comparePriorities);
 
                 co_yield Instruction::Comment("end: " + message);
             }
@@ -259,12 +230,70 @@ namespace rocRoller
 
                 try
                 {
+                    std::set<std::string> allReferencedArgs;
+
                     for(auto inst : std::visit(*this,
                                                std::variant<int>(tag),
                                                operation,
                                                std::variant<Transformer>(coords))
                                         .map(AddControlOp(tag)))
+                    {
+                        if(m_argumentTracer && inst.innerControlOp() == tag)
+                        {
+                            if(!inst.referencedArg().empty())
+                            {
+                                allReferencedArgs.insert(inst.referencedArg());
+                            }
+                        }
                         co_yield inst;
+                    }
+
+                    if(m_argumentTracer)
+                    {
+                        std::set<std::string> expectedArgs, extraArgs, missedArgs;
+
+                        {
+                            auto const& tmp = m_argumentTracer->referencedArguments(tag);
+                            expectedArgs.insert(tmp.begin(), tmp.end());
+                        }
+
+                        std::set_difference(expectedArgs.begin(),
+                                            expectedArgs.end(),
+                                            allReferencedArgs.begin(),
+                                            allReferencedArgs.end(),
+                                            std::inserter(extraArgs, extraArgs.end()));
+
+                        std::set_difference(allReferencedArgs.begin(),
+                                            allReferencedArgs.end(),
+                                            expectedArgs.begin(),
+                                            expectedArgs.end(),
+                                            std::inserter(missedArgs, missedArgs.end()));
+
+                        if(!missedArgs.empty())
+                        {
+                            auto msg = fmt::format(
+                                "Tag {} ({}) Missed referenced args!", tag, toString(operation));
+
+                            for(auto const& argName : missedArgs)
+                            {
+                                auto arg = m_context->kernel()->findArgument(argName);
+
+                                msg += fmt::format(
+                                    "\n\t- {}: {}\n", argName, toString(arg.expression));
+                            }
+
+                            AssertFatal(false,
+                                        msg,
+                                        ShowValue(expectedArgs),
+                                        ShowValue(extraArgs),
+                                        ShowValue(m_context->kernel()->arguments()),
+                                        ShowValue(operation));
+                        }
+
+                        if(!extraArgs.empty())
+                            co_yield Instruction::Comment(
+                                concatenate(" Tag ", tag, "non referenced ", ShowValue(extraArgs)));
+                    }
                 }
                 catch(rocRoller::Error& exc)
                 {
@@ -355,7 +384,7 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, AssertOp const& op, Transformer coords)
             {
-                auto assertOpKind = m_context->kernelOptions().assertOpKind;
+                auto assertOpKind = m_context->kernelOptions()->assertOpKind;
                 AssertFatal(assertOpKind < AssertOpKind::Count, "Invalid AssertOpKind");
 
                 if(assertOpKind == AssertOpKind::NoOp)
@@ -367,7 +396,10 @@ namespace rocRoller
                 {
                     if(op.condition == nullptr) // Unconditional Assert
                     {
+                        co_yield Instruction::Lock(Scheduling::Dependency::Branch,
+                                                   "Assert nullptr");
                         co_yield m_context->crasher()->generateCrashSequence(assertOpKind);
+                        co_yield Instruction::Unlock("Assert nullptr");
                     }
                     else
                     {
@@ -648,17 +680,25 @@ namespace rocRoller
             Generator<Instruction>
                 operator()(int tag, Deallocate const& deallocate, Transformer coords)
             {
-                auto dimTag = m_graph->mapper.get<Dimension>(tag);
-                rocRoller::Log::getLogger()->debug(
-                    "  deallocate dimension: {} tag {}", dimTag, tag);
-                co_yield Instruction::Comment(concatenate("Deallocate ", dimTag));
-                m_context->registerTagManager()->deleteTag(dimTag);
+                for(auto const& c : m_graph->mapper.getConnections(tag))
+                {
+                    Log::debug("  deallocate dimension: {} tag {}", c.coordinate, tag);
+                    co_yield Instruction::Comment(concatenate("Deallocate ", c.coordinate));
+                    m_context->registerTagManager()->deleteTag(c.coordinate);
+                }
+
+                for(auto const& argument : deallocate.arguments)
+                {
+                    Log::debug("Deallocate argument {}", argument);
+                    co_yield Instruction::Comment(concatenate("Deallocate ", argument));
+                    m_context->argLoader()->releaseArgument(argument);
+                }
             }
 
             Generator<Instruction> operator()(int tag, Barrier const&, Transformer)
             {
                 std::vector<Register::ValuePtr> srcs;
-                for(auto& c : m_graph->mapper.getConnections(tag))
+                for(auto const& c : m_graph->mapper.getConnections(tag))
                 {
                     auto srcTag = c.coordinate;
                     auto reg    = m_context->registerTagManager()->getRegister(srcTag);
@@ -1228,20 +1268,44 @@ namespace rocRoller
 
             FastArithmetic         m_fastArith;
             LoadStoreTileGenerator m_loadStoreTileGenerator;
+
+            std::optional<ControlFlowArgumentTracer> m_argumentTracer;
         };
 
-        Generator<Instruction> generate(KernelGraph graph, AssemblyKernelPtr kernel)
+        Generator<Instruction> generateImpl(KernelGraph                              graph,
+                                            AssemblyKernelPtr                        kernel,
+                                            std::optional<ControlFlowArgumentTracer> argTracer)
         {
+
             TIMER(t, "KernelGraph::generate");
-            auto graphPtr = std::make_shared<KernelGraph>(graph);
+            auto graphPtr = std::make_shared<KernelGraph>(std::move(graph));
 
             if(Settings::getInstance()->get(Settings::LogGraphs))
                 rocRoller::Log::getLogger()->debug("KernelGraph::generate(); DOT\n{}",
                                                    graphPtr->toDOT(true));
 
-            auto visitor = CodeGeneratorVisitor(graphPtr, kernel);
+            auto visitor = CodeGeneratorVisitor(graphPtr, kernel, std::move(argTracer));
 
             co_yield visitor.generate();
+        }
+
+        Generator<Instruction> generate(KernelGraph graph, AssemblyKernelPtr kernel)
+        {
+            std::optional<ControlFlowArgumentTracer> argTracer;
+
+            if(Settings::Get(Settings::AuditControlTracers))
+            {
+                argTracer.emplace(graph, kernel);
+            }
+
+            co_yield generateImpl(graph, kernel, std::move(argTracer));
+        }
+
+        Generator<Instruction> generate(KernelGraph                 graph,
+                                        AssemblyKernelPtr           kernel,
+                                        ControlFlowArgumentTracer&& argTracer)
+        {
+            co_yield generateImpl(graph, kernel, std::move(argTracer));
         }
     }
 }

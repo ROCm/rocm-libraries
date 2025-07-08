@@ -36,7 +36,7 @@
 
 #if THRUST_CPP_DIALECT >= 2017
 
-#  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#  ifdef _CCCL_CUDA_COMPILER
 
 #    include <thrust/system/cuda/config.h>
 
@@ -115,12 +115,13 @@ namespace cuda_cub
 // ADL entry point.
 template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename UnaryFunction>
 auto async_for_each(execution_policy<DerivedPolicy>& policy, ForwardIt first, Sentinel last, UnaryFunction&& func)
-  THRUST_RETURNS(thrust::system::cuda::detail::async_for_each_n(policy, first, distance(first, last), THRUST_FWD(func)));
+  THRUST_RETURNS(
+    thrust::system::cuda::detail::async_for_each_n(policy, first, thrust::distance(first, last), THRUST_FWD(func)));
 
 } // namespace cuda_cub
 
 THRUST_NAMESPACE_END
 
-#  endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#  endif // _CCCL_CUDA_COMPILER
 
 #endif

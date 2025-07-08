@@ -904,9 +904,9 @@ rocsparse_status rocsparse::dnvec_transfer_from(rocsparse_handle            hand
     case rocsparse_datatype_i32_r:
     case rocsparse_datatype_u32_r:
     case rocsparse_datatype_f16_r:
-    case rocsparse_datatype_bf16_r:
     case rocsparse_datatype_f32_r:
     case rocsparse_datatype_f64_r:
+    case rocsparse_datatype_bf16_r:
     {
         switch(source->data_type)
         {
@@ -924,9 +924,9 @@ rocsparse_status rocsparse::dnvec_transfer_from(rocsparse_handle            hand
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
         case rocsparse_datatype_f16_r:
-        case rocsparse_datatype_bf16_r:
         case rocsparse_datatype_f32_r:
         case rocsparse_datatype_f64_r:
+        case rocsparse_datatype_bf16_r:
         {
             break;
         }
