@@ -67,6 +67,6 @@
 /projects/rocsolver/library/include/ @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
 /projects/rocsparse/* @ntrost57 @YvanMokwinski @jsandham @kliegeois
 /projects/rocthrust/* @stanleytsang-amd @umfranzw @RobsonRLemos @lawruble13
-/shared/tensile/* @babakpst @yoichiyoshida @bragadeesh @AlexBrownAMD @nakajee
-/shared/rocRoller/* @ROCm/rocroller-developers
 /shared/mxdatagenerator/* @ROCm/rocroller-developers
+/shared/rocRoller/* @ROCm/rocroller-developers
+/shared/tensile/* @babakpst @yoichiyoshida @bragadeesh @AlexBrownAMD @nakajee
