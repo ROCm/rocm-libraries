@@ -45,7 +45,7 @@ A few commands in the script require ``sudo`` access, which might prompt you for
 
 .. note::
 
-   To build ROCm release 6.4 and older, use the hipBLASLt repository at `<https://github.com/ROCm/hipBLASLt>`_.
+   To build ROCm 6.4 and older, use the hipBLASLt repository at `<https://github.com/ROCm/hipBLASLt>`_.
    Select the documentation associated with the release you want to build.
 
 Some typical examples showing how to use ``install.sh`` to build the library dependencies and library are
