@@ -58,7 +58,7 @@ namespace chrono
 {
 
 #if defined(__HIP__) || defined(__HIPCC_RTC__)
-#if _LIBCUDACXX_STD_VER>17 && defined(_LIBCUDACXX_EXPERIMENTAL_CHRONO_HIP)
+#if _CCCL_STD_VER>2017 && defined(_LIBCUDACXX_EXPERIMENTAL_CHRONO_HIP)
 // Workaround for system_clock on AMD GPUs for c++20, please see documentation in the below header file
 #include "../support/hip/chrono_hip_extension.h"
 #endif
@@ -72,7 +72,7 @@ _LIBCUDACXX_HIDE_FROM_ABI system_clock::time_point system_clock::now() noexcept
     asm volatile("mov.u64 %0, %%globaltimer;":"=l"(__time)::);
     return time_point(duration_cast<duration>(nanoseconds(__time)));
 #elif defined(__HIP_DEVICE_COMPILE__) || defined(__HIPCC_RTC__)
-#if _LIBCUDACXX_STD_VER>17 
+#if _CCCL_STD_VER>2017
 #if defined(_LIBCUDACXX_EXPERIMENTAL_CHRONO_HIP)
     if(!(hip_gpu_ext::__unix_sysclock0_host_ticks>=0)) {
         // FIXME(HIP): As this function needs to be NOEXCEPT, we can't throw an exception at this point.
@@ -103,7 +103,7 @@ _LIBCUDACXX_HIDE_FROM_ABI system_clock::time_point system_clock::now() noexcept
     // default HIP implementation
     long long __time = wall_clock64();
     return time_point(duration_cast<duration>(chrono::duration<long long, ratio<1,_LIBCUDACXX_HIP_TSC_CLOCKRATE>>(__time)));
-#endif /*_LIBCUDACXX_STD_VER>17*/
+#endif /*_CCCL_STD_VER>2017*/
 #else
     return time_point(duration_cast<duration>(nanoseconds(
             ::std::chrono::duration_cast<::std::chrono::nanoseconds>(
