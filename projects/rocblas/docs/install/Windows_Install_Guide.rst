@@ -88,7 +88,9 @@ you build rocBLAS with a different Tensile logic target. See the ``--logic`` com
 Download rocBLAS
 ----------------
 
-The rocBLAS source code, which is the same as the ROCm Linux version, is available from the `rocBLAS GitHub page <https://github.com/ROCm/rocBLAS>`_.
+The rocBLAS source code, which is the same as the ROCm Linux version, is available from the
+`rocBLAS folder <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_
+of the `rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries>`_.
 The ROCm HIP SDK version might appear in the default installation path,
 but you can run the HIP SDK compiler to display the version from the ``bin/`` folder:
 
@@ -105,8 +107,13 @@ To download rocBLAS, use the following command:
 
 ::
 
-   git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocBLAS.git
-   cd rocBLAS
+   git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries/projects/rocblas
+
+.. note::
+
+   To build ROCm 6.4 and older, use the rocBLAS repository at `<https://github.com/ROCm/rocBLAS>`_.
+   For more information, see the documentation associated with the release you want to build.
 
 Replace ``x.y`` in the above command with the version of HIP SDK installed on your machine.
 For example, if you have HIP 5.5 installed, then use ``-b release/rocm-rel-5.5``.
@@ -169,6 +176,9 @@ Building the library dependencies and library
 Common examples of how to use ``rmake.py`` to build the library dependencies and library are
 shown in the table below:
 
+.. note::
+
+   You can run ``rmake.py`` from the ``projects\rocblas`` directory.
 
 .. csv-table::
    :header: "Command","Description"
@@ -212,7 +222,7 @@ The rocBLAS clients can be built on their own by using ``rmake.py`` with a pre-e
 
 The version of the rocBLAS clients being built should match the version of the installed rocBLAS.
 You can determine the version of the installed rocBLAS in the HIP SDK directory
-from the file ``include\rocblas\internal\rocblas-version.h``.
+from the file ``projects\rocblas\include\rocblas\internal\rocblas-version.h``.
 If you have installed the ``grep`` utility, you can find the version of rocBLAS being built
 by running the ``grep "VERSION_STRING" CMakeLists.txt`` command in the
 rocBLAS directory where you are building the clients.

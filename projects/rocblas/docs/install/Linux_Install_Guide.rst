@@ -110,10 +110,15 @@ run the following help command:
 
    ./install.sh --help
 
+.. note::
+
+   You can run the ``install.sh`` script from the ``projects/rocblas`` directory.
+
 Download rocBLAS
 ----------------
 
-The rocBLAS source code is available at the `rocBLAS GitHub page <https://github.com/ROCm/rocBLAS>`_.
+The rocBLAS source code is available from the `rocBLAS folder <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_
+of the `rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries>`_.
 Verify the ROCm version on your system. On an Ubuntu distribution, use:
 
 .. code-block:: shell
@@ -135,13 +140,18 @@ To download rocBLAS, use the following command:
 
 .. code-block:: shell
 
-   git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocBLAS.git
-   cd rocBLAS
+   git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocm-libraries.git
+   cd  rocm-libraries/projects/rocblas
+
+.. note::
+
+   To build ROCm 6.4 and older, use the rocBLAS repository at `<https://github.com/ROCm/rocBLAS>`_.
+   For more information, see the documentation associated with the release you want to build.
 
 Replace ``x.y`` in the above command with the ROCm version installed on your machine.
 For example, if you have ROCm 6.2 installed, replace ``release/rocm-rel-x.y`` with ``release/rocm-rel-6.2``.
 
-
+The rocBLAS source code is found in the ``projects/rocblas`` directory.
 The following sections list the steps to build rocBLAS using the ``install.sh`` script.
 You can build either:
 
