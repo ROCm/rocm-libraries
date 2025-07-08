@@ -22,7 +22,7 @@ The rocRAND public repository is located at `<https://github.com/ROCm/rocm-libra
 
 .. note::
 
-   The rocRAND repository for ROCm release 6.4 and earlier is located at `<https://github.com/ROCm/rocRAND>`_.
+   The rocRAND repository for ROCm 6.4 and earlier is located at `<https://github.com/ROCm/rocRAND>`_.
 
 .. grid:: 2
   :gutter: 3
