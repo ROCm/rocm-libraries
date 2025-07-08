@@ -402,6 +402,7 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
     // IMPORTANT: alpha must not point to stack memory: ASAN caught stack-use-after-return where
     // alpha was set to a stack-local buffer (alpha_1) and then used later during solution search.
 
+    // TODO: Split ComputeInputTypeA/B
     RocblasltContractionProblem problem{opA,
                                         opB,
                                         m,

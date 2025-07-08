@@ -544,7 +544,8 @@ namespace TensileLite
             rocisa::DataType cType                     = rocisa::DataType::Float;
             rocisa::DataType dType                     = rocisa::DataType::Float;
             rocisa::DataType eType                     = rocisa::DataType::Float;
-            rocisa::DataType computeInputType          = rocisa::DataType::Float;
+            rocisa::DataType computeInputTypeA         = rocisa::DataType::Float;
+            rocisa::DataType computeInputTypeB         = rocisa::DataType::Float;
             rocisa::DataType computeType               = rocisa::DataType::Float;
             rocisa::DataType f32XdlMathOp              = rocisa::DataType::Float;
             rocisa::DataType activationComputeDataType = rocisa::DataType::Float;

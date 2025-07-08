@@ -1417,7 +1417,7 @@ namespace TensileLite
                 };
                 TypesEqual() = default;
 
-                std::array<rocisa::DataType, 5> value;
+                std::array<rocisa::DataType, 6> value;
 
                 static std::string Type()
                 {
@@ -1429,7 +1429,8 @@ namespace TensileLite
                     return problem.a().dataType() == value[0] && problem.b().dataType() == value[1]
                            && problem.c().dataType() == value[2]
                            && problem.d().dataType() == value[3]
-                           && problem.computeInputType() == value[4];
+                           && problem.computeInputTypeA() == value[4]
+                           && problem.computeInputTypeB() == value[5];
                 }
 
                 virtual std::string toString() const override
@@ -1443,8 +1444,10 @@ namespace TensileLite
                                        value[2],
                                        ", d:",
                                        value[3],
-                                       ", compute input type:",
-                                       value[4]);
+                                       ", compute input typeA:",
+                                       value[4],
+                                       ", compute input typeB:",
+                                       value[5]);
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
@@ -1472,11 +1475,16 @@ namespace TensileLite
                                         "==",
                                         "sol_d",
                                         value[3],
-                                        "prob_compute",
-                                        problem.computeInputType(),
+                                        "prob_compute_a",
+                                        problem.computeInputTypeA(),
                                         "==",
-                                        "sol_compute",
-                                        value[4]);
+                                        "sol_compute_a",
+                                        value[4],
+                                        "prob_compute_b",
+                                        problem.computeInputTypeB(),
+                                        "==",
+                                        "sol_compute_b",
+                                        value[5]);
                 }
             };
 

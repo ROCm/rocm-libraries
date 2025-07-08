@@ -374,6 +374,30 @@ class ProblemSizes:
     for sizeRange in self.ranges:
       s += "  %s" % sizeRange
     return s
+# Get real Dataype for A and B when using mix-types (i.g. Float8BFloat8);
+def getRealDataTypeA(dataType):
+    if dataType.isFloat8BFloat8():
+        return DataType(DataTypeEnum.Float8)
+    elif dataType.isBFloat8Float8():
+        return DataType(DataTypeEnum.BFloat8)
+    elif dataType.isFloat8BFloat8_fnuz():
+        return DataType(DataTypeEnum.Float8_fnuz)
+    elif dataType.isBFloat8Float8_fnuz():
+        return DataType(DataTypeEnum.BFloat8_fnuz)
+    else:
+        return dataType
+    
+def getRealDataTypeB(dataType):
+    if dataType.isFloat8BFloat8():
+        return DataType(DataTypeEnum.BFloat8)
+    elif dataType.isBFloat8Float8():
+        return DataType(DataTypeEnum.Float8)
+    elif dataType.isFloat8BFloat8_fnuz():
+        return DataType(DataTypeEnum.BFloat8_fnuz)
+    elif dataType.isBFloat8Float8_fnuz():
+        return DataType(DataTypeEnum.Float8_fnuz)
+    else:
+        return dataType
 
 ################################################################################
 # ProblemType
@@ -389,6 +413,8 @@ _defaultProblemType = {
     "DataType": 0,  # data types can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "DataTypeA": 0,  # A data type can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "DataTypeB": 0,  # B data type can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
+    "MacDataTypeA": 0, # A data type which is used for mac/mfma/wmma computation.
+    "MacDataTypeB": 0, # B data type which is used for mac/mfma/wmma computation.
     "DataTypeE": 0,  # E data type can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "DataTypeAmaxD": 0,  # AmaxD data type can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
     "DestDataType": 0,  # destination data types can specified by a variety of ways, such as "s", as listed in SolutionStructs.py::DataType
@@ -471,6 +497,7 @@ _defaultProblemType = {
     "SupportUserArgs": True,
     "SwizzleTensorA": False,
     "SwizzleTensorB": False,
+    "isMixMode": False,  # True means this is a mix-mode problem, i.e. Float8BFloat6 or BFloat6Float8
     "MetadataLayout": 0,
     # MX Block
     "MXBlockA": 0,
@@ -560,6 +587,41 @@ _validMXGEMMTypes = [
     ("B6", "S", "S"),
     ("B6F6", "S", "S"),
     ("F4", "S", "S"),
+    ("F8", "H", "S"),
+    ("F8B8", "H", "S"),
+    ("B8", "H", "S"),
+    ("B8F8", "H", "S"),
+    ("F6", "H", "S"),
+    ("F6B6", "H", "S"),
+    ("B6", "H", "S"),
+    ("B6F6", "H", "S"),
+    ("F4", "H", "S"),
+    ("F8", "B", "S"),
+    ("F8B8", "B", "S"),
+    ("B8", "B", "S"),
+    ("B8F8", "B", "S"),
+    ("F6", "B", "S"),
+    ("F6B6", "B", "S"),
+    ("B6", "B", "S"),
+    ("B6F6", "B", "S"),
+    ("F4", "B", "S"),
+    ("F8", "F8", "S"),
+    ("F8B8", "F8", "S"),
+    ("B8", "F8", "S"),
+    ("B8F8", "F8", "S"),
+    ("F6", "F8", "S"),
+    ("F6B6", "F8", "S"),
+    ("B6", "F8", "S"),
+    ("B6F6", "F8", "S"),
+    ("F4", "F8", "S"),
+    ("F8", "B8", "S"),
+    ("F8B8", "B8", "S"),
+    ("B8", "B8", "S"),
+    ("B8F8", "B8", "S"),
+    ("F6", "B8", "S"),
+    ("F6B6", "B8", "S"),
+    ("B6", "B8", "S"),
+    ("B6F6", "B8", "S")
 ]
 
 _validMXGEMMBlock = [
@@ -628,6 +690,10 @@ _HPATypes = [
 def problemTypeToEnum(problemType):
   problemType["DataType"] = \
           problemType["DataType"].value
+  problemType["MacDataTypeA"] = \
+          problemType["MacDataTypeA"].value
+  problemType["MacDataTypeB"] = \
+          problemType["MacDataTypeB"].value
   problemType["DataTypeA"] = \
           problemType["DataTypeA"].value
   problemType["DataTypeB"] = \
@@ -680,18 +746,36 @@ class ProblemType(Mapping):
       self["DataType"]  = DataType(config["DataType"])
       self["DataTypeA"] = self["DataType"]
       self["DataTypeB"] = self["DataType"]
+      self["MacDataTypeA"] = self["DataType"]
+      self["MacDataTypeB"] = self["DataType"]
     else:
       raise Exception("NO data type specified")
       self["DataType"]  = DataType(0)
       self["DataTypeA"] = DataType(0)
       self["DataTypeB"] = DataType(0)
+      self["MacDataTypeA"] = DataType(0)
+      self["MacDataTypeB"] = DataType(0)
+
+    if "MacDataTypeA" in config:
+      self["MacDataTypeA"] = DataType(config["MacDataTypeA"])
+    self["MacDataTypeA"] = getRealDataTypeA(self["MacDataTypeA"])
+
+    if "MacDataTypeB" in config:
+      self["MacDataTypeB"] = DataType(config["MacDataTypeB"])
+    self["MacDataTypeB"] = getRealDataTypeB(self["MacDataTypeB"])
 
     if "DataTypeA" in config:
       self["DataTypeA"] = DataType(config["DataTypeA"])
+    else:
+      self["DataTypeA"] = self["MacDataTypeA"]
+    self["DataTypeA"] = getRealDataTypeA(self["DataTypeA"])
 
     if "DataTypeB" in config:
       self["DataTypeB"] = DataType(config["DataTypeB"])
-
+    else:
+      self["DataTypeB"] = self["MacDataTypeB"]
+    self["DataTypeB"] = getRealDataTypeB(self["DataTypeB"])
+    
     if "DestDataType" in config:
       self["DestDataType"] = DataType(config["DestDataType"])
     else:
@@ -716,7 +800,7 @@ class ProblemType(Mapping):
         else:
           raise Exception("NO compute data type, or dest data type, or data type specified")
           self["DataType"] = DataType(0)
-
+    self["isMixMode"] = True if not self["Sparse"] and self["MacDataTypeA"].value != self["MacDataTypeB"].value else False
     if "DataTypeMXSA" in config:
       self["DataTypeMXSA"] = DataType(config["DataTypeMXSA"])
     else:
@@ -872,6 +956,8 @@ class ProblemType(Mapping):
   #   See the discussion in ValidParameters.py for validGEMMTypes
   ################################################################################
   def _checkIfSupportedGEMMType(self):
+    # Here we use "DataType" instead of "MacDataTypeA(B)" for validation. It is totally fine cause we passed "MacDataTypeA(B)" into Client side.
+    # Ex: MacDataTypeA: b6, MacDataTypeB: f4 -> we can either choose "DataType: f4" or "DataType: b6"
     inType = self["DataType"]
     outType = self["DestDataType"]
     computeType = self["ComputeDataType"]
@@ -1098,9 +1184,12 @@ class ProblemType(Mapping):
       name.append("C")
 
     # DataTypes
-    if self["DataType"] != self["DataTypeA"] or self["DataType"] != self["DataTypeB"]:
+    macTypeStr = self["MacDataTypeA"].toChar()
+    if self["MacDataTypeA"] != self["MacDataTypeB"]:
+      macTypeStr = self["MacDataTypeA"].toChar() + self["MacDataTypeB"].toChar()
+    if self["MacDataTypeA"] != self["DataTypeA"] or self["MacDataTypeB"] != self["DataTypeB"]:
       name.append(self["DataTypeA"].toChar() + self["DataTypeB"].toChar())
-    name.append(self["DataType"].toChar()) # Type of A/B
+    name.append(macTypeStr) # Type of A/B, split Type of A/B when A!=B
 
     # Special condition for some newly supported kernels:
     #   HHS, HSS, BSS and I8II kernels, use a clearer naming _TiToTc_

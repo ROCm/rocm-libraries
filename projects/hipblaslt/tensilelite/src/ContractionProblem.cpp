@@ -1430,7 +1430,8 @@ namespace TensileLite
         rocisa::DataType               typeD,
         rocisa::DataType               typeAlpha,
         rocisa::DataType               typeBeta,
-        rocisa::DataType               typeComputeInput,
+        rocisa::DataType               typeComputeInputA,
+        rocisa::DataType               typeComputeInputB,
         rocisa::DataType               typeCompute,
         double                         alpha,
         double                         beta,
@@ -1548,7 +1549,8 @@ namespace TensileLite
 													nop,
                                                     maxWorkspaceBytes};
 
-        problem.setComputeInputType(typeComputeInput);
+        problem.setComputeInputTypeA(typeComputeInputA);
+        problem.setComputeInputTypeB(typeComputeInputB);
         problem.setAlphaType(typeAlpha);
         problem.setBetaType(typeBeta);
 

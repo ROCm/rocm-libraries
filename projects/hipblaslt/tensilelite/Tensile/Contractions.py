@@ -67,7 +67,7 @@ class BoundIndex:
 
 
 class ProblemType:
-    StateKeys = ['operationIdentifier', 'transA', 'transB', 'computeInputType', 'aType', 'bType', 'cType', 'dType', 'eType', 'computeType',
+    StateKeys = ['operationIdentifier', 'transA', 'transB', 'computeInputTypeA', 'computeInputTypeB', 'aType', 'bType', 'cType', 'dType', 'eType', 'computeType',
                  'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useScaleAB', 'useScaleCD', 'useScaleAlphaVec', 'biasDataTypeWhiteList',
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
@@ -133,14 +133,24 @@ class ProblemType:
 
         rv.transA = bool(d['TransposeA'])
         rv.transB = bool(d['TransposeB'])
+        # it will either be set as d['MacDataType'] or a specified input
+        if 'MacDataTypeA' in d: 
+            rv.computeInputTypeA = DataType(d['MacDataTypeA'])
+        else:
+            rv.computeInputTypeA = srcType
+        if 'MacDataTypeB' in d:
+            rv.computeInputTypeB = DataType(d['MacDataTypeB'])
+        else:
+            rv.computeInputTypeB = srcType
+
         if 'DataTypeA' in d: #it will either be set as d['DataType'] or a specified input
             rv.aType = DataType(d['DataTypeA'])
         else:
-            rv.aType = srcType
+            rv.aType = rv.computeInputTypeA
         if 'DataTypeB' in d:
             rv.bType = DataType(d['DataTypeB'])
         else:
-            rv.bType = srcType
+            rv.bType = rv.computeInputTypeB
 
         if rv.aType.isFloat8BFloat8() or rv.bType.isFloat8BFloat8():
             rv.aType = DataType("F8")
@@ -165,7 +175,6 @@ class ProblemType:
         else:
             rv.amaxDType = computeType
 
-        rv.computeInputType = srcType
         rv.cType = dstType
         rv.dType = dstType
         # we already checked the src/dst/compute types are supported and well-assigned in SolutionStruct
@@ -380,7 +389,7 @@ class ProblemType:
             # predicates.append(ProblemPredicate("GroupedGemm", value=self.groupedGemm))
 
         if includeType:
-            predicates.append(ProblemPredicate("TypesEqual", value=(self.aType, self.bType, self.cType, self.dType, self.computeInputType)))
+            predicates.append(ProblemPredicate("TypesEqual", value=(self.aType, self.bType, self.cType, self.dType, self.computeInputTypeA, self.computeInputTypeB)))
             predicates.append(ProblemPredicate("HighPrecisionAccumulate", value=self.highPrecisionAccumulate))
             predicates.append(ProblemPredicate("Activation", value=self.activationType))
             predicates.append(ProblemPredicate("ActivationComputeType", value=self.activationComputeDataType))
