@@ -50,9 +50,10 @@
 #endif
 
 #if defined(__HIPCC__)
-# define _CCCL_HIPCC
 # define _CCCL_COMPILER_HIPCC
-#elif defined(__HIPCC_RTC__)
+#endif
+
+#if defined(__HIPCC_RTC__)
 # define _CCCL_COMPILER_HIPRTC
 #endif
 
@@ -82,7 +83,7 @@
 #  define _CCCL_CUDA_COMPILER
 #endif // cuda compiler available
 
-#if defined(__HIP_PLATFORM_AMD__) || defined(_CCCL_COMPILER_HIPCC)
+#if defined(__HIP_PLATFORM_AMD__) || defined(_CCCL_COMPILER_HIPCC) || defined(_CCCL_COMPILER_HIPRTC)
 # define _CCCL_HIP_COMPILER
 #endif
 

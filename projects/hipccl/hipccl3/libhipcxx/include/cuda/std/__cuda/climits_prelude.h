@@ -38,7 +38,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if  !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
+#if  !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #  include <climits>
 #  include <cstdint>
 

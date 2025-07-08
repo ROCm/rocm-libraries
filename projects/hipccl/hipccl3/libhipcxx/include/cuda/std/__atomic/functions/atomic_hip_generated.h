@@ -27,7 +27,6 @@
 #pragma once
 
 #include <hip/hip_runtime.h>
-#include <hip/amd_detail/amd_hip_atomic.h>
 
 //#include <cuda/std/cassert>
 //#include <cuda/std/cstdint>

@@ -1,5 +1,22 @@
 #!/bin/bash
 
+# Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
 set -eo pipefail
 
 # Ensure the script is being executed in its containing directory
@@ -7,9 +24,9 @@ cd "$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )";
 
 # Script defaults
 VERBOSE=${VERBOSE:-}
-HOST_COMPILER=${CXX:-g++} # $CXX if set, otherwise `g++`
+HOST_COMPILER=${CXX:-hipcc} # $CXX if set, otherwise `g++`
 CXX_STANDARD=17
-CUDA_COMPILER=${CUDACXX:-nvcc} # $CUDACXX if set, otherwise `nvcc`
+CUDA_COMPILER=${CUDACXX:-hipcc} # $CUDACXX if set, otherwise `nvcc`
 CUDA_ARCHS= # Empty, use presets by default.
 GLOBAL_CMAKE_OPTIONS=()
 DISABLE_CUB_BENCHMARKS= # Enable to force-disable building CUB benchmarks.
@@ -34,8 +51,8 @@ function usage {
     echo "  $ PARALLEL_LEVEL=8 $0"
     echo "  $ PARALLEL_LEVEL=8 $0 -cxx g++-9"
     echo "  $ $0 -cxx clang++-8"
-    echo "  $ $0 -configure -arch=80"
-    echo "  $ $0 -cxx g++-8 -std 14 -arch 80-real -v -cuda /usr/local/bin/nvcc"
+    echo "  $ $0 -configure -arch=gfx90a"
+    echo "  $ $0 -cxx g++-8 -std 14 -arch gfx90a -v -cuda /opt/rocm/bin/hipcc"
     echo "  $ $0 -cmake-options \"-DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS=-Wfatal-errors\""
     exit 1
 }
@@ -75,7 +92,7 @@ HOST_COMPILER=$(which ${HOST_COMPILER})
 CUDA_COMPILER=$(which ${CUDA_COMPILER})
 
 if [[ -n "${CUDA_ARCHS}" ]]; then
-    GLOBAL_CMAKE_OPTIONS+=("-DCMAKE_CUDA_ARCHITECTURES=${CUDA_ARCHS}")
+    GLOBAL_CMAKE_OPTIONS+=("-DCMAKE_HIP_ARCHITECTURES=${CUDA_ARCHS}")
 fi
 
 if [ $VERBOSE ]; then
@@ -123,7 +140,7 @@ print_environment_details() {
       CXX \
       CUDACXX \
       CUDAHOSTCXX \
-      NVCC_VERSION \
+      HIPCC_VERSION \
       CMAKE_BUILD_PARALLEL_LEVEL \
       CTEST_PARALLEL_LEVEL \
       CCCL_BUILD_INFIX \
@@ -133,10 +150,10 @@ print_environment_details() {
   echo "Current commit is:"
   git log -1 || echo "Not a repository"
 
-  if command -v nvidia-smi &> /dev/null; then
-    nvidia-smi
+  if command -v rocm-smi &> /dev/null; then
+    rocm-smi
   else
-    echo "nvidia-smi not found"
+    echo "rocm-smi not found"
   fi
 
   if command -v cmake &> /dev/null; then
@@ -155,8 +172,8 @@ print_environment_details() {
 }
 
 fail_if_no_gpu() {
-    if ! nvidia-smi &> /dev/null; then
-        echo "Error: No NVIDIA GPU detected. Please ensure you have an NVIDIA GPU installed and the drivers are properly configured." >&2
+    if ! rocm-smi &> /dev/null; then
+        echo "Error: No AMD GPU detected. Please ensure you have an AMD GPU installed and the drivers are properly configured." >&2
         exit 1
     fi
 }

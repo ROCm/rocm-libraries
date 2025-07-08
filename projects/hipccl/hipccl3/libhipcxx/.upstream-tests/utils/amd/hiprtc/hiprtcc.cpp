@@ -8,6 +8,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #include <algorithm>
 #include <cassert>
 #include <deque>
@@ -17,8 +34,8 @@
 #include <string>
 #include <vector>
 
-#include "nvrtcc_build.h"
-#include "nvrtcc_run.h"
+#include "hiprtcc_build.h"
+#include "hiprtcc_run.h"
 #include "utils/platform.h"
 #include <stdio.h>
 
@@ -51,8 +68,8 @@ int g_argc;
 char** g_argv;
 
 // Ignore PTX arch, only capture output version since PTX only compilation *must* be the same
-std::regex real_capture("^.*arch=.*,code=(sm_[0-9]+a?)$");
-std::regex virtual_capture("^.*arch=.*,code=(compute_[0-9]+a?)$");
+std::regex real_capture(R"((?:--offload-arch=)?(gfx(90[8a]|94[012]|1100)))");
+std::regex virtual_capture(R"((?:--offload-arch=)?(gfx(90[8a]|94[012]|1100)))"); // NOTE(HIP): HIP does not support virtual archs
 
 // Arch list is a set of unique pairs of strings and bools
 // e.x. { compute_arch, real_or_virtual }
@@ -68,10 +85,10 @@ static ArchConfig translate_gpu_arch(const std::string& arch)
   std::regex_match(arch, real, real_capture);
   std::regex_match(arch, virt, virtual_capture);
 
-  // Safe default of "compute_60" in case parsing fails
+  // Safe default of "gfx90a" in case parsing fails
   ArchConfig config = (real.size()) ? ArchConfig{real[1].str(), true}
                     : (virt.size()) ? ArchConfig{virt[1].str(), false}
-                                    : ArchConfig{"compute_60", false};
+                                    : ArchConfig{"gfx90a", true};
 
   return config;
 }
@@ -94,13 +111,13 @@ ArgPair argHandlers[] = {
   {// Forward all arguments to NVCC
    std::regex("^-E$"),
    [](const std::smatch&) {
-     platform_exec("nvcc", g_argv, g_argc);
+     platform_exec("hipcc", g_argv, g_argc);
      return ABORT; // Unreachable
    }},
   {// Greed input file type flag
    make_greedy_handler("^-x$")},
   {// Matches for CUDA input type
-   std::regex("^-x ?cu$"),
+   std::regex("^-x ?hip$"),
    [](const std::smatch& match) {
      ignoredArguments.emplace_back(match[0].str());
      return NORMAL;
@@ -124,7 +141,8 @@ ArgPair argHandlers[] = {
    // Might need to figure out if we need to force include a file manually
    std::regex("^-include ?(.+)$"),
    [](const std::smatch& match) {
-     nvrtcArguments.emplace_back("--pre-include=" + match[1].str());
+    // NOTE(HIPRTC): --pre-include is not supported.
+     nvrtcArguments.emplace_back("-include" + match[1].str());
      return NORMAL;
    }},
   {make_greedy_handler("^-o$")},
@@ -143,11 +161,11 @@ ArgPair argHandlers[] = {
      outputFile = match[2].str();
      return NORMAL;
    }},
-  {make_greedy_handler("^-gencode$")},
-  {// Matches '-gencode=' or '-gencode ...'
-   std::regex("^-gencode[= ]?(.+)$"),
-   [](const std::smatch& match) {
-     buildList.emplace(translate_gpu_arch(match[1].str().data()));
+  {make_greedy_handler("^--offload-arch$")},
+  {// Matches '--offload-arch=' or '--offload-arch ...'
+   std::regex("^--offload-arch[= ]?(.+)$"),
+    [](const std::smatch& match) {
+    // buildList.emplace(translate_gpu_arch(match[1].str().data()));
      return NORMAL;
    }},
   {// Matches the many various versions of dialect switch and normalizes it
@@ -182,8 +200,9 @@ ArgPair argHandlers[] = {
    std::regex("^([^-].+)[\\\\/].+$"),
    [](const std::smatch& match) {
      inputFile = match[0].str();
+     // NOTE(HIPRTC): HIPRTC does not like whitespace after -I
      // Capture directory of input file as an include path
-     nvrtcArguments.emplace_back("-I " + match[1].str());
+     nvrtcArguments.emplace_back("-I" + match[1].str());
      return NORMAL;
    }},
   {// Throw away remaining arguments
@@ -225,6 +244,27 @@ int main(int argc, char** argv)
     }
   }
 
+  hipDevice_t device;
+  hipDeviceProp_t device_prop;
+
+  (void)hipGetDevice(&device);
+  (void)hipGetDeviceProperties(&device_prop, device);
+
+  const std::regex gfx_arch_pattern("(gfx[0-9a-fA-F]+)(:[-+:\\w]+)?");
+
+  std::smatch match;
+  std::string full_arch_name(device_prop.gcnArchName);
+  std::string short_arch_name;
+
+  if (std::regex_search(full_arch_name, match, gfx_arch_pattern)) {
+    short_arch_name = match[1].str(); // Extract the first capture group
+  }
+  else{
+    std::cerr << "HIP fatal error: Cannot determine target architecture name of current device!" << std::endl;
+    std::terminate();
+  }
+  buildList.emplace(translate_gpu_arch(short_arch_name));
+
   fprintf(stderr, "NVRTCC Configuration:\r\n");
   fprintf(stderr, "  Output dir: %s\r\n", outputDir.c_str());
   fprintf(stderr, "  Output file: %s\r\n", outputFile.c_str());
@@ -264,16 +304,16 @@ int main(int argc, char** argv)
 
   // load input test file and prepend fakemain
   std::string testCu = program + load_input_file(inputFile);
-
+  
   // Write any needed kernel launch data to file for later
   RunConfig runConfig = parse_run_config(testCu);
-
+  
   if (!skipOutput)
   {
     std::ofstream ostr(outputTemplate + ".build.yml");
     ostr << "cuda_thread_count: " << runConfig.threadCount << '\n';
     ostr << "cuda_block_shmem_size: " << runConfig.shmemSize << '\n';
-
+    
     // Do a build for each arch and add it to the build list
     ostr << "builds:\n";
     for (const auto& build : buildList)

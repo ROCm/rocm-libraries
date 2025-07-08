@@ -7,6 +7,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #ifndef _LIBCUDACXX_STRING_H
 #define _LIBCUDACXX_STRING_H
 
@@ -61,15 +78,17 @@ size_t strlen(const char* s);
 #  pragma system_header
 #endif // no system header
 
-#if !defined(_CCCL_COMPILER_NVRTC)
+#if !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #  include <string.h>
 #endif // !_CCCL_COMPILER_NVRTC
 
 // MSVCRT, GNU libc and its derivates may already have the correct prototype in
 // <string.h>. This macro can be defined by users if their C library provides
 // the right signature.
+// NOTE(HIP): Clang already overloads these APIs, so we dont need to do it here.
+// /opt/rocm-6.5.0/lib/llvm/lib/clang/19/include/llvm_libc_wrappers/string.h
 #if defined(__CORRECT_ISO_CPP_STRING_H_PROTO) || defined(_LIBCUDACXX_MSVCRT) || defined(__sun__) \
-  || defined(_STRING_H_CPLUSPLUS_98_CONFORMANCE_)
+  || defined(_STRING_H_CPLUSPLUS_98_CONFORMANCE_) || defined(_CCCL_COMPILER_HIPRTC)
 #  define _LIBCUDACXX_STRING_H_HAS_CONST_OVERLOADS
 #endif
 

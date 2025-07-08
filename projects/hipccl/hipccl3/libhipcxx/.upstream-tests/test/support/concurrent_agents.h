@@ -32,14 +32,13 @@
 
 #ifndef _CONCURRENT_AGENTS_H
 #define _CONCURRENT_AGENTS_H
-
-#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+// NOTE(HIP): The error message "This test requires CUDA dynamic parallelism to work." is misleading:
+// On the device, only a lamda is defined which is also valid for HIP.
+#if !defined(__CUDA_ARCH__) && !defined(__HIPCC_RTC__)
 #  include <thread>
 #else
-# if !defined(__HIP_DEVICE_COMPILE__)
-#   if __CUDA_ARCH__ < 350
+#   if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 350
 #     error "This test requires CUDA dynamic parallelism to work."
-#   endif
 # endif
 #endif
 

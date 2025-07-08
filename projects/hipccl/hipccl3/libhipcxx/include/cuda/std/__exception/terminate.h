@@ -40,7 +40,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if !defined(_CCCL_COMPILER_NVRTC)
+#if !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #  include <exception>
 #endif // !_CCCL_COMPILER_NVRTC
 

@@ -1,10 +1,32 @@
-project(nvrtcc)
+# Modifications Copyright (c) 2024-2025 Advanced Micro Devices, Inc.
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
 
-enable_language(CUDA)
-find_package(CUDAToolkit REQUIRED)
+project(hiprtcc)
 
-add_executable(libcudacxx.nvrtcc nvrtcc.cpp)
+enable_language(HIP)
+find_package(HIP REQUIRED)
 
-set_target_properties(libcudacxx.nvrtcc PROPERTIES OUTPUT_NAME nvrtcc)
-target_link_libraries(libcudacxx.nvrtcc CUDA::nvrtc CUDA::cudart CUDA::cuda_driver)
+add_executable(libcudacxx.nvrtcc hiprtcc.cpp)
+
+set_target_properties(libcudacxx.nvrtcc PROPERTIES OUTPUT_NAME hiprtcc)
+target_link_libraries(libcudacxx.nvrtcc hiprtc hip::host)
 target_compile_features(libcudacxx.nvrtcc PRIVATE cxx_std_17)
+# NOTE(HIPRTC): This is a workaround before 
+# we are sure the header is available during hiprtc compilation.
+target_compile_definitions(libcudacxx.nvrtcc PRIVATE
+  $<$<BOOL:${LIBHIPCXX_ENABLE_HIPRTC_WORKAROUND}>:LIBHIPCXX_ENABLE_HIPRTC_WORKAROUND>
+)

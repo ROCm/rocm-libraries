@@ -171,7 +171,7 @@ Types:
 #include <cuda/std/climits>
 #include <cuda/std/version>
 
-#if !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
+#if !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #  include <cstdint>
 #endif // _CCCL_COMPILER_NVRTC
 

@@ -24,8 +24,8 @@ macro(pythonize_bool var)
 endmacro()
 
 if (LIBCUDACXX_ENABLE_CUDA)
-find_package(CUDAToolkit REQUIRED)
-get_target_property(CUDA_INCLUDE_DIR CUDA::cudart INTERFACE_INCLUDE_DIRECTORIES)
+  find_package(CUDAToolkit REQUIRED)
+  get_target_property(CUDA_INCLUDE_DIR CUDA::cudart INTERFACE_INCLUDE_DIRECTORIES)
 
 set(LIBCUDACXX_HIGHEST_COMPUTE_ARCH 90)
 
@@ -51,7 +51,7 @@ if (LIBCUDACXX_TEST_WITH_NVRTC)
   set(LIBCUDACXX_CUDA_COMPILER "${CMAKE_BINARY_DIR}/libcudacxx/test/utils/nvidia/nvrtc/nvrtcc")
   set(LIBCUDACXX_CUDA_COMPILER_ARG1 "")
   set(LIBCUDACXX_CUDA_TEST_WITH_NVRTC "True")
-  set(LIBCUDACXX_FORCE_INCLUDE "-include '${libcudacxx_SOURCE_DIR}/test/support/nvrtc_limit_macros.h'")
+  set(LIBCUDACXX_FORCE_INCLUDE "-include '${libhipcxx_SOURCE_DIR}/test/support/nvrtc_limit_macros.h'")
   set(LIBCUDACXX_TEST_COMPILER_FLAGS "-I'${CUDA_INCLUDE_DIR}'")
   # Use the NVRTCC utility to run the built test outputs
   set(LIBCUDACXX_EXECUTOR "PrefixExecutor(['${LIBCUDACXX_CUDA_COMPILER}'], LocalExecutor())")
@@ -69,7 +69,7 @@ elseif (LIBHIPCXX_TEST_WITH_HIPRTC)
   set(LIBCUDACXX_EXECUTOR "PrefixExecutor(['${LIBCUDACXX_CUDA_COMPILER}'], LocalExecutor())")
 else() # NOT LIBCUDACXX_TEST_WITH_NVRTC
   if (LIBCUDACXX_ENABLE_CUDA)
-    set(LIBCUDACXX_FORCE_INCLUDE "-include ${libcudacxx_SOURCE_DIR}/test/force_include_cuda.h")
+    set(LIBCUDACXX_FORCE_INCLUDE "-include ${libhipcxx_SOURCE_DIR}/test/force_include_cuda.h")
     set(LIBCUDACXX_CUDA_COMPILER "${CMAKE_CUDA_COMPILER}")
     set(LIBCUDACXX_CUDA_TEST_WITH_NVRTC "False")
     set(LIBCUDACXX_TEST_COMPILER_FLAGS "-DLIBCUDACXX_ENABLE_EXPERIMENTAL_MEMORY_RESOURCE")
@@ -134,7 +134,11 @@ if (${CMAKE_CUDA_COMPILER_ID} STREQUAL "HIPCC")
   )
 endif()
 
-set(LIBCUDACXX_COMPUTE_ARCHS_STRING "${CMAKE_CUDA_ARCHITECTURES}")
+if (LIBCUDACXX_ENABLE_HIP)
+  set(LIBCUDACXX_COMPUTE_ARCHS_STRING "${CMAKE_HIP_ARCHITECTURES}")
+else()
+  set(LIBCUDACXX_COMPUTE_ARCHS_STRING "${CMAKE_CUDA_ARCHITECTURES}")
+endif()
 
 include(AddLLVM)
 
@@ -163,15 +167,28 @@ find_program(libcudacxx_LIT lit REQUIRED)
 set(libcudacxx_LIT_FLAGS "" CACHE STRING "Semi-colon separated list of flags passed to the invocation of lit.")
 message(STATUS "libcudacxx_LIT_FLAGS: ${libcudacxx_LIT_FLAGS}")
 
-if (NOT LIBHIPCXX_TEST_WITH_HIPRTC)
-  # Build but don't run the tests. Used by CI to pre-seed sccache for the test machines.
-  # Only executed if explicitly requested.
-  add_custom_target(libcudacxx.test.lit.precompile
-    DEPENDS libcudacxx.test.public_headers libcudacxx.test.internal_headers libcudacxx.test.public_headers_host_only
-    COMMAND "${CMAKE_COMMAND}" -E env "LIBCUDACXX_SITE_CONFIG=${lit_site_cfg_path}"
-    "${libcudacxx_LIT}" -vv --no-progress-bar ${libcudacxx_LIT_FLAGS} "-Dexecutor=\"NoopExecutor()\"" "${libhipcxx_SOURCE_DIR}/test/libcudacxx"
-  )
+if (LIBCUDACXX_ENABLE_CUDA)
+  if (NOT LIBCUDACXX_TEST_WITH_NVRTC)
+    # Build but don't run the tests. Used by CI to pre-seed sccache for the test machines.
+    # Only executed if explicitly requested.
+    add_custom_target(libcudacxx.test.lit.precompile
+      DEPENDS libcudacxx.test.public_headers libcudacxx.test.internal_headers libcudacxx.test.public_headers_host_only
+      COMMAND "${CMAKE_COMMAND}" -E env "LIBCUDACXX_SITE_CONFIG=${lit_site_cfg_path}"
+      "${libcudacxx_LIT}" -vv --no-progress-bar ${libcudacxx_LIT_FLAGS} "-Dexecutor=\"NoopExecutor()\"" "${libhipcxx_SOURCE_DIR}/test/libcudacxx"
+    )
 
+  endif()
+elseif(LIBCUDACXX_ENABLE_HIP)
+  if (NOT LIBHIPCXX_TEST_WITH_HIPRTC)
+    # Build but don't run the tests. Used by CI to pre-seed sccache for the test machines.
+    # Only executed if explicitly requested.
+    add_custom_target(libcudacxx.test.lit.precompile
+      DEPENDS libcudacxx.test.public_headers libcudacxx.test.internal_headers libcudacxx.test.public_headers_host_only
+      COMMAND "${CMAKE_COMMAND}" -E env "LIBCUDACXX_SITE_CONFIG=${lit_site_cfg_path}"
+      "${libcudacxx_LIT}" -vv --no-progress-bar ${libcudacxx_LIT_FLAGS} "-Dexecutor=\"NoopExecutor()\"" "${libhipcxx_SOURCE_DIR}/test"
+    )
+
+  endif()
 endif()
 
 # Restricted to avoid oversubscribing the GPU:
@@ -184,7 +201,7 @@ add_test(NAME libcudacxx.test.lit COMMAND
     "LIBCUDACXX_SITE_CONFIG=${lit_site_cfg_path}"
   "${libcudacxx_LIT}" -vv --no-progress-bar ${libcudacxx_LIT_FLAGS}
     -j "${libcudacxx_LIT_PARALLEL_LEVEL}"
-      "${libhipcxx_SOURCE_DIR}/test/libcudacxx"
+      "${libhipcxx_SOURCE_DIR}/test"
 )
 
 set_tests_properties(libcudacxx.test.lit PROPERTIES
@@ -227,13 +244,18 @@ add_subdirectory(public_headers)
 # Libcudacxx auto-generated public header as std tests
 add_subdirectory(public_headers_host_only)
 
-# NOTE(HIP): We have added this temporarily.
-# Enable building libhipcxx with hiprtcc if HIPRTC is enabled.
-if (LIBHIPCXX_TEST_WITH_HIPRTC)
-  add_subdirectory(
-    ${libhipcxx_SOURCE_DIR}/utils/amd/hiprtc
-    ${CMAKE_BINARY_DIR}/libcudacxx/test/utils/amd/hiprtc
-    )
+if(LIBCUDACXX_ENABLE_CUDA)
+  # Enable building the nvrtcc project if NVRTC is enabled
+  if (LIBCUDACXX_TEST_WITH_NVRTC)
+    add_subdirectory(utils/nvidia/nvrtc)
+  endif()
+elseif(LIBCUDACXX_ENABLE_HIP)
+  if (LIBHIPCXX_TEST_WITH_HIPRTC)
+    add_subdirectory(
+      ${libhipcxx_SOURCE_DIR}/utils/amd/hiprtc
+      ${CMAKE_BINARY_DIR}/libcudacxx/test/utils/amd/hiprtc
+      )
+  endif()
 endif()
 
 find_program(filecheck "FileCheck")

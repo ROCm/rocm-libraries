@@ -22,7 +22,9 @@
 
 
 #pragma once
-
+#if defined(__HIP__)
+#include <hip/hip_runtime.h>
+#endif
 #ifndef __HIP_DEVICE_COMPILE__
 #ifndef __host__ 
 #define __host__
@@ -76,10 +78,11 @@ namespace libhipcxx
   __device__ inline int __FFS<unsigned long long>(unsigned long long v) {
     return __ffsll(static_cast<unsigned long long int>(v));
   }
-  
+  #if !defined(_CCCL_COMPILER_HIPRTC)
   template <>
   __device__ inline int __FFS<uint64_t>(uint64_t v) {
     return __ffsll(static_cast<unsigned long long int>(v));
   }
+  #endif
   #endif
 }

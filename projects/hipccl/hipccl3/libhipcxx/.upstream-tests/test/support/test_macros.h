@@ -95,6 +95,8 @@
 #  define TEST_COMPILER_MSVC
 #elif defined(__CUDACC_RTC__)
 #  define TEST_COMPILER_NVRTC
+#elif defined(__HIPCC_RTC__)
+#  define TEST_COMPILER_HIPRTC
 #elif defined(__EDG__)
 #  define TEST_COMPILER_EDG
 #endif
@@ -114,7 +116,6 @@
 // This is not mutually exclusive with other compilers, as NVCC uses a host
 // compiler.
 # define TEST_COMPILER_HIPCC
-#  define TEST_COMPILER_CLANG_HIP
 #endif
 #if defined(__HIPCC_RTC__)
 #  define TEST_COMPILER_HIPRTC

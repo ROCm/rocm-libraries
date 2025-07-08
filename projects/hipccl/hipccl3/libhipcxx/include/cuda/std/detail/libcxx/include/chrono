@@ -851,7 +851,7 @@ constexpr chrono::year                                  operator ""y(unsigned lo
 #endif // no system header
 
 #ifdef __cuda_std__
-#  if !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
+#  if !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #    include <chrono>
 #  endif // _CCCL_COMPILER_NVRTC
 #endif // __cuda_std__

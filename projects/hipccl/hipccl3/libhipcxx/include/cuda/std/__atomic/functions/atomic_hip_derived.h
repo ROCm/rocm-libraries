@@ -30,8 +30,12 @@
 #include <cuda/std/__type_traits/enable_if.h>
 #include <cuda/std/__type_traits/is_signed.h>
 #include <cuda/std/__type_traits/is_unsigned.h>
+#if !defined(_CCCL_COMPILER_HIPRTC)
 #include <cstdint>
-
+#else
+// NOTE(HIPRTC): Define intptr_t.
+typedef int64_t intptr_t;
+#endif
 template<class _Type, class _Scope, typename _CUDA_VSTD::enable_if<sizeof(_Type) <= 2, int>::type = 0>
 bool __device__ __atomic_compare_exchange_cuda(_Type volatile *__ptr, _Type *__expected, const _Type __desired, bool, int __success_memorder, int __failure_memorder, _Scope __s) {
 

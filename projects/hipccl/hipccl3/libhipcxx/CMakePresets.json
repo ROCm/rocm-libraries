@@ -13,7 +13,7 @@
       "binaryDir": "${sourceDir}/build/$env{CCCL_BUILD_INFIX}/${presetName}",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_CUDA_ARCHITECTURES": "60;70;80",
+        "CMAKE_HIP_ARCHITECTURES": "gfx90a;gfx942",
         "CCCL_ENABLE_UNSTABLE": true,
         "CCCL_ENABLE_LIBCUDACXX": false,
         "CCCL_ENABLE_CUB": false,
@@ -21,7 +21,7 @@
         "CCCL_ENABLE_CUDAX": false,
         "CCCL_ENABLE_TESTING": false,
         "CCCL_ENABLE_EXAMPLES": false,
-        "libcudacxx_ENABLE_INSTALL_RULES": true,
+        "libhipcxx_ENABLE_INSTALL_RULES": true,
         "CUB_ENABLE_INSTALL_RULES": true,
         "THRUST_ENABLE_INSTALL_RULES": true,
         "cudax_ENABLE_INSTALL_RULES": true
@@ -143,8 +143,9 @@
       "hidden": true,
       "inherits": "libcudacxx-base",
       "cacheVariables": {
-        "LIBCUDACXX_TEST_WITH_NVRTC": true,
-        "CMAKE_CUDA_ARCHITECTURES": "70"
+        "LIBHIPCXX_TEST_WITH_HIPRTC": true,
+        "LIBHIPCXX_ENABLE_HIPRTC_WORKAROUND": false,
+        "CMAKE_HIP_ARCHITECTURES": "gfx90a"
       }
     },
     {

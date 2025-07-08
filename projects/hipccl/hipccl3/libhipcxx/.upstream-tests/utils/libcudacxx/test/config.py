@@ -213,7 +213,7 @@ class Configuration(object):
         self.configure_link_flags()
         self.configure_env()
         self.configure_color_diagnostics()
-        if (self.cxx.type != 'nvrtcc'):
+        if (self.cxx.type != 'nvrtcc' and self.cxx.type != 'hiprtcc'):
           self.configure_debug_mode()
           self.configure_warnings()
           self.configure_sanitizer()
@@ -284,6 +284,7 @@ class Configuration(object):
         cxx = self.get_lit_conf('cxx_under_test')
         cxx_first_arg = self.get_lit_conf('cxx_first_arg')
         nvrtc = self.get_lit_bool('is_nvrtc', False)
+        hiprtc = self.get_lit_bool('is_hiprtc', False)
 
         self.cxx_is_clang_cl = cxx is not None and \
                                os.path.basename(cxx) == 'clang-cl.exe'
@@ -314,6 +315,32 @@ class Configuration(object):
                                 self.cxx.default_dialect))
             self.cxx.compile_env = dict(os.environ)
         # If compiler is *not* NVRTCC
+        ## Build CXXCompiler manually for HIPRTCC
+        elif hiprtc is True:
+            cxx_type = "hiprtcc"
+            self.cxx = CXXCompiler(
+                path=cxx,
+                first_arg=cxx_first_arg,
+                cxx_type=cxx_type,
+                cxx_version=('1', '1', '1'))
+
+            self.cxx.default_dialect = "c++11"
+            self.cxx.source_lang = 'hip'
+            maj_v, min_v, patch_v = self.cxx.version
+            self.config.available_features.add("hiprtc")
+            self.config.available_features.add('%s-%s' % (self.cxx.type, maj_v))
+            self.config.available_features.add('%s-%s.%s' % (
+                self.cxx.type, maj_v, min_v))
+            self.config.available_features.add('%s-%s.%s.%s' % (
+                self.cxx.type, maj_v, min_v, patch_v))
+            self.lit_config.note("detected cxx.type as: {}".format(
+                                self.cxx.type))
+            self.lit_config.note("detected cxx.version as: {}".format(
+                                self.cxx.version))
+            self.lit_config.note("detected cxx.default_dialect as: {}".format(
+                                self.cxx.default_dialect))
+            self.cxx.compile_env = dict(os.environ)
+        # If compiler is *not* HIPRTCC
         else:
             # If no specific cxx_under_test was given, attempt to infer it as
             # clang++.
@@ -406,7 +433,7 @@ class Configuration(object):
                            link_flags=link_flags)
 
     def _dump_macros_verbose(self, *args, **kwargs):
-        if (self.cxx.type == 'nvrtcc'):
+        if (self.cxx.type == 'nvrtcc' or self.cxx.type == 'hiprtcc'):
             return None
         macros_or_error = self.cxx.dumpMacros(*args, **kwargs)
         if isinstance(macros_or_error, tuple):
@@ -480,7 +507,7 @@ class Configuration(object):
                 self.config.enable_experimental = 'true'
 
     def configure_use_clang_verify(self):
-        if self.cxx.type == 'nvrtcc':
+        if (self.cxx.type == 'nvrtcc' or self.cxx.type == 'hiprtcc'):
             return
         '''If set, run clang with -verify on failing tests.'''
         self.use_clang_verify = self.get_lit_bool('use_clang_verify')
@@ -523,7 +550,7 @@ class Configuration(object):
     def configure_ccache(self):
         use_ccache_default = os.environ.get('CMAKE_CUDA_COMPILER_LAUNCHER') is not None
         use_ccache = self.get_lit_bool('use_ccache', use_ccache_default)
-        if use_ccache and not self.cxx.type == 'nvrtcc':
+        if use_ccache and not self.cxx.type == 'nvrtcc' and not self.cxx.type == 'hiprtcc':
             self.cxx.use_ccache = True
             self.lit_config.note('enabling ccache')
 
@@ -677,6 +704,8 @@ class Configuration(object):
         compute_archs = self.get_lit_conf('compute_archs')
         if self.cxx.type == 'nvrtcc':
             self.config.available_features.add("nvrtc")
+        if self.cxx.type == 'hiprtcc':
+            self.config.available_features.add("hiprtc")
         if self.cxx.type == 'nvcc':
             self.cxx.compile_flags += ['--extended-lambda']
         real_arch_format = '-gencode=arch=compute_{0},code=sm_{0}'
@@ -692,13 +721,13 @@ class Configuration(object):
         pre_sm_90 = True
         pre_sm_90a = True
         pre_gfx90a = True
+        pre_gfx942 = True
         pre_gfx908 = True
         # TODO(HIP/AMD): does it make sense to add variants for gfx941 and gfx942?
-        pre_gfx940 = True
         if compute_archs and (self.cxx.type == 'nvcc' or self.cxx.type == 'clang' or self.cxx.type == 'nvrtcc'):
             pre_gfx90a = False
+            pre_gfx942 = False
             pre_gfx908 = False
-            pre_gfx940 = False
             pre_sm_32 = False
             pre_sm_60 = False
             pre_sm_70 = False
@@ -731,10 +760,10 @@ class Configuration(object):
                 if mode.count("virtual"):
                     arch_flag = virt_arch_format.format(str(arch) + subarchitecture)
                 self.cxx.compile_flags += [arch_flag]
-        elif compute_archs and self.cxx.type == 'hipcc':
+        elif compute_archs and (self.cxx.type == 'hipcc' or self.cxx.type == 'hiprtcc'):
             pre_gfx90a = False
             pre_gfx908 = False
-            pre_gfx940 = False
+            pre_gfx942 = False
             pre_sm_32  = False
             pre_sm_60  = False
             pre_sm_70  = False
@@ -744,9 +773,9 @@ class Configuration(object):
             for arch in compute_archs:
                 if arch == "gfx908": 
                     pre_gfx90a = True
-                    pre_gfx940 = True
+                    pre_gfx942 = True
                 elif arch == "gfx90a":
-                    pre_gfx940 = True
+                    pre_gfx942 = True
                 if arch in ["gfx908", "gfx90a", "gfx940", "gfx941", "gfx942", "gfx1100"]:
                   arch_flag = '--offload-arch={0}'.format(arch)
                   self.cxx.compile_flags += [arch_flag]
@@ -754,8 +783,8 @@ class Configuration(object):
             self.config.available_features.add("pre-gfx908")
         if pre_gfx90a:
             self.config.available_features.add("pre-gfx90a")
-        if pre_gfx940:
-            self.config.available_features.add("pre-gfx940")
+        if pre_gfx942:
+            self.config.available_features.add("pre-gfx942")
         if pre_sm_32:
             self.config.available_features.add("pre-sm-32")
         if pre_sm_60:
@@ -837,7 +866,6 @@ class Configuration(object):
             extraflags = []
             if self.cxx.type == 'clang':
                 extraflags = ['-Wno-unknown-cuda-version', '--no-cuda-version-check']
-
             # Do a check with the user/config flag to ensure that the flag is supported.
             if not self.cxx.hasCompileFlag([stdflag] + extraflags):
                 raise OSError("Configured compiler does not support flag {0}".format(stdflag))
@@ -1020,6 +1048,7 @@ class Configuration(object):
     def configure_compile_flags_exceptions(self):
         enable_exceptions = self.get_lit_bool('enable_exceptions', True)
         nvrtc             = self.get_lit_bool('is_nvrtc', False)
+        hiprtc            = self.get_lit_bool('is_hiprtc', False)
 
         if not enable_exceptions:
             self.config.available_features.add('libcpp-no-exceptions')
@@ -1034,6 +1063,8 @@ class Configuration(object):
                     self.cxx.compile_flags += ['-Xcompiler']
                 self.cxx.compile_flags += ['-fno-exceptions']
         elif nvrtc:
+            self.config.available_features.add('libcpp-no-exceptions')
+        elif hiprtc:
             self.config.available_features.add('libcpp-no-exceptions')
 
     def configure_compile_flags_rtti(self):

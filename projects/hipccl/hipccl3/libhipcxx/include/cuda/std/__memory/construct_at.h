@@ -8,6 +8,23 @@
 //
 //===----------------------------------------------------------------------===//
 
+// Modifications Copyright (c) 2025 Advanced Micro Devices, Inc.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 #ifndef _LIBCUDACXX___MEMORY_CONSTRUCT_AT_H
 #define _LIBCUDACXX___MEMORY_CONSTRUCT_AT_H
 
@@ -39,12 +56,92 @@
 #include <cuda/std/__utility/move.h>
 #include <cuda/std/detail/libcxx/include/__assert>
 
-#ifdef _CCCL_CUDA_COMPILER_CLANG
-#  include <new>
-#endif // _CCCL_CUDA_COMPILER_CLANG
+#if defined(LIBHIPCXX_ENABLE_HIPRTC_WORKAROUND)
+  // NOTE(HIPRTC): We need to inline this header here otherwise we error:
+  // include_next <new> header not found.
+  #if defined(_CCCL_CUDA_COMPILER_CLANG) || defined(_CCCL_COMPILER_HIPCC)
+  #if defined(_CCCL_COMPILER_HIPRTC)
+  #if __cplusplus >= 201103L
+  #define CUDA_NOEXCEPT noexcept
+  #else
+  #define CUDA_NOEXCEPT
+  #endif
+  struct nothrow_t
+    {
+  #if __cplusplus >= 201103L
+      explicit nothrow_t() = default;
+  #endif
+    };
+  // Device overrides for non-placement new and delete.
+  __device__ inline void *operator new(__SIZE_TYPE__ size) {
+    if (size == 0) {
+      size = 1;
+    }
+    return ::malloc(size);
+  }
+  __device__ inline void *operator new(__SIZE_TYPE__ size,
+                                      const nothrow_t &) CUDA_NOEXCEPT {
+    return ::operator new(size);
+  }
 
+  __device__ inline void *operator new[](__SIZE_TYPE__ size) {
+    return ::operator new(size);
+  }
+  __device__ inline void *operator new[](__SIZE_TYPE__ size,
+                                        const nothrow_t &) {
+    return ::operator new(size);
+  }
+
+  __device__ inline void operator delete(void* ptr) CUDA_NOEXCEPT {
+    if (ptr) {
+      ::free(ptr);
+    }
+  }
+  __device__ inline void operator delete(void *ptr,
+                                        const nothrow_t &) CUDA_NOEXCEPT {
+    ::operator delete(ptr);
+  }
+
+  __device__ inline void operator delete[](void* ptr) CUDA_NOEXCEPT {
+    ::operator delete(ptr);
+  }
+  __device__ inline void operator delete[](void *ptr,
+                                          const nothrow_t &) CUDA_NOEXCEPT {
+    ::operator delete(ptr);
+  }
+
+  // Sized delete, C++14 only.
+  #if __cplusplus >= 201402L
+  __device__ inline void operator delete(void *ptr,
+                                        __SIZE_TYPE__ size) CUDA_NOEXCEPT {
+    ::operator delete(ptr);
+  }
+  __device__ inline void operator delete[](void *ptr,
+                                          __SIZE_TYPE__ size) CUDA_NOEXCEPT {
+    ::operator delete(ptr);
+  }
+  #endif
+
+  // Device overrides for placement new and delete.
+  __device__ inline void *operator new(__SIZE_TYPE__, void *__ptr) CUDA_NOEXCEPT {
+    return __ptr;
+  }
+  __device__ inline void *operator new[](__SIZE_TYPE__, void *__ptr) CUDA_NOEXCEPT {
+    return __ptr;
+  }
+  __device__ inline void operator delete(void *, void *) CUDA_NOEXCEPT {}
+  __device__ inline void operator delete[](void *, void *) CUDA_NOEXCEPT {}
+  #else
+  #  include <new>
+  #endif
+#endif // _CCCL_CUDA_COMPILER_CLANG
+#else
+  #if defined(_CCCL_CUDA_COMPILER_CLANG) || defined(_CCCL_COMPILER_HIPCC)
+  #  include <new>
+  #endif // _CCCL_CUDA_COMPILER_CLANG
+#endif // LIBHIPCXX_ENABLE_HIPRTC_WORKAROUND
 #if _CCCL_STD_VER >= 2020 // need to backfill ::std::construct_at
-#  ifndef _CCCL_COMPILER_NVRTC
+#  if !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #    include <memory>
 #  endif // _CCCL_COMPILER_NVRTC
 

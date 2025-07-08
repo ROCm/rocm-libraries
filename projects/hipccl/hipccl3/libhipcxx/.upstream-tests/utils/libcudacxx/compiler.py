@@ -267,6 +267,11 @@ class CXXCompiler(object):
             cmd += ['-E']
         elif mode == self.CM_Compile \
           or mode == self.CM_CheckCompileFlag:
+            # NOTE(HIP): -c is not used when -fsyntax-only is set.
+            # We get an error because of -Werror. We resolve it by passing
+            # -Wno-unused-command-line-argument to the compiler.
+            if self.type == 'hipcc' or self.type == 'hiprtcc' or self.type == 'clang++':
+                cmd += ['-Wno-unused-command-line-argument']
             cmd += ['-c']
         cmd += self.flags
         if self.use_verify:
@@ -291,8 +296,14 @@ class CXXCompiler(object):
                              input_is_cxx=True)
 
     def compileCmd(self, source_files, out=None, flags=[], mode = CM_Compile):
-        return self._basicCmd(source_files, out, flags=flags, mode=mode,
+        cmd = self._basicCmd(source_files, out, flags=flags, mode=mode,
                              input_is_cxx=True) + ['-c']
+        # NOTE(HIP): -c is not used when -fsyntax-only is set.
+        # We get an error because of -Werror. We resolve it by passing
+        # -Wno-unused-command-line-argument to the compiler.
+        if self.type == 'hipcc' or self.type == 'hiprtcc' or self.type == 'clang++':
+                cmd += ['-Wno-unused-command-line-argument']
+        return cmd
 
     def linkCmd(self, source_files, out=None, flags=[]):
         return self._basicCmd(source_files, out, flags=flags,
@@ -426,8 +437,19 @@ class CXXCompiler(object):
         # Add -Werror to ensure that an unrecognized flag causes a non-zero
         # exit code. -Werror is supported on all known non-nvcc compiler types.
         if self.type is not None and self.type != 'nvcc' and self.type != 'msvc':
+            # NOTE(HIP): -c is not used when -fsyntax-only is set.
+            # We get an error because of -Werror. We resolve it by passing
+            # -Wno-unused-command-line-argument to the compiler.
+            if self.type == 'hipcc' or self.type == 'hiprtcc' or self.type == 'clang++':
+                flags += ['-Wno-unused-command-line-argument']
             flags += ['-Werror', '-fsyntax-only']
-        empty_cpp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "empty.cpp")
+        if self.type == 'hiprtcc':
+            # NOTE(HIPRTC): HIPRTC does not like compiling empty files. 
+            # "ERROR: hiprtcLinkComplete(rtc_link_state, &codePtr, &codeSize2) failed with error HIPRTC_ERROR_LINKING".
+            # Instead use nothing_to_do.pass.cpp for hiprtcc.
+            empty_cpp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../test/nothing_to_do.pass.cpp")
+        else:
+            empty_cpp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "empty.cpp")
         cmd, out, err, rc = self.checkCompileFlag(empty_cpp, out=os.devnull, flags=flags)
         if out.find('flag is not supported with the configured host compiler') != -1:
             return False

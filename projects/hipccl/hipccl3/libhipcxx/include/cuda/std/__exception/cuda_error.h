@@ -45,7 +45,7 @@
 
 #include <cuda/std/__exception/terminate.h>
 
-#if !defined(_CCCL_COMPILER_NVRTC)
+#if !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #  include <cstdio>
 #  include <stdexcept>
 #endif // !_CCCL_COMPILER_NVRTC

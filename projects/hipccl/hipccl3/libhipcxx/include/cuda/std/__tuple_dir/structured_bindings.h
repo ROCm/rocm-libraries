@@ -40,7 +40,7 @@
 _CCCL_DIAG_PUSH
 _CCCL_DIAG_SUPPRESS_CLANG("-Wmismatched-tags")
 
-#if  !defined(_CCCL_COMPILER_NVRTC) && !defined(_LIBCUDACXX_COMPILER_HIPRTC)
+#if  !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 // Fetch utility to get primary template for ::std::tuple_size necessary for the specialization of
 // ::std::tuple_size<cuda::std::tuple> to enable structured bindings.
 // See https://github.com/NVIDIA/libcudacxx/issues/316
@@ -61,7 +61,7 @@ _CCCL_DIAG_SUPPRESS_CLANG("-Wmismatched-tags")
 #if _CCCL_STD_VER >= 2017
 namespace std
 {
-#  if defined(_CCCL_COMPILER_NVRTC)
+#  if defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 template <class... _Tp>
 struct tuple_size;
 

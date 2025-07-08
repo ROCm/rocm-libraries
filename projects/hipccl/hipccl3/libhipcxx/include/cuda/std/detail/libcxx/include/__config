@@ -75,7 +75,7 @@
 #  define _LIBCUDACXX_COMPILER_CLANG_CUDA
 #endif
 
-#ifdef __HIPCC_RTC__
+#if defined(_CCCL_COMPILER_HIPRTC)
 # define _LIBCUDACXX_COMPILER_HIPRTC
 #endif
 
@@ -104,7 +104,7 @@ extern "C++" {
 #    error libcu++ requires C++11 or later
 #  endif
 
-#  if (defined(_CCCL_COMPILER_NVHPC) && defined(__linux__)) || defined(_CCCL_COMPILER_NVRTC)
+#  if (defined(_CCCL_COMPILER_NVHPC) && defined(__linux__)) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    ifndef __ELF__
 #      define __ELF__
 #    endif // !__ELF__
@@ -184,7 +184,7 @@ extern "C++" {
 #    define __has_include(...) 0
 #  endif
 
-#  if !defined(_CCCL_CUDA_COMPILER_NVCC) && !defined(_CCCL_COMPILER_NVRTC)
+#  if !defined(_CCCL_CUDA_COMPILER_NVCC) && !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPCC) && !defined(_CCCL_COMPILER_HIPRTC)
 // If NVCC is not being used <complex> can safely use `long double` without warnings
 #    define _LIBCUDACXX_HAS_COMPLEX_LONG_DOUBLE
 // NVCC does not have a way of silencing non '_' prefixed UDLs
@@ -328,7 +328,7 @@ extern "C++" {
 #  endif
 
 #  ifndef _LIBCUDACXX_LITTLE_ENDIAN
-#    if defined(_CCCL_COMPILER_NVRTC)
+#    if defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #      define _LIBCUDACXX_LITTLE_ENDIAN
 #    endif
 #  endif // _LIBCUDACXX_LITTLE_ENDIAN
@@ -375,7 +375,7 @@ extern "C++" {
 #    endif // __linux__
 #  endif
 
-#  if defined(_CCCL_COMPILER_NVRTC)
+#  if defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define __alignof(x) alignof(x)
 #  endif // _CCCL_COMPILER_NVRTC
 
@@ -402,7 +402,7 @@ extern "C++" {
 
 // This is wrapped in __CUDA_ARCH__ to prevent error: "ignoring '#pragma unroll'
 // [-Werror=unknown-pragmas]"
-#  if defined(__CUDA_ARCH__)
+#  if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #    if defined(_CCCL_COMPILER_MSVC)
 #      define _LIBCUDACXX_PRAGMA_UNROLL(_N) __pragma(_LIBCUDACXX_TOSTRING(unroll _N))
 #    else // ^^^ _CCCL_COMPILER_MSVC ^^^ / vvv !_CCCL_COMPILER_MSVC vvv
@@ -412,7 +412,7 @@ extern "C++" {
 #    define _LIBCUDACXX_PRAGMA_UNROLL(_N)
 #  endif // !__CUDA_ARCH__
 
-#  if defined(_CCCL_CUDA_COMPILER)
+#  if defined(_CCCL_CUDA_COMPILER) || defined(_CCCL_HIP_COMPILER)
 #    define _LIBCUDACXX_ATOMIC_ALWAYS_LOCK_FREE(size, ptr) (size <= 8)
 #  elif defined(_CCCL_COMPILER_CLANG) || defined(_CCCL_COMPILER_GCC)
 #    define _LIBCUDACXX_ATOMIC_ALWAYS_LOCK_FREE(...) __atomic_always_lock_free(__VA_ARGS__)
@@ -451,7 +451,8 @@ extern "C++" {
 
 // NVCC and NVRTC in C++11 mode freaks out about `__builtin_is_constant_evaluated`.
 #  if _CCCL_STD_VER < 2014 \
-    && (defined(_CCCL_CUDA_COMPILER_NVCC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_NVHPC))
+    && (defined(_CCCL_CUDA_COMPILER_NVCC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_NVHPC) || \
+        defined(_CCCL_COMPILER_HIPCC) || defined(_CCCL_COMPILER_HIPRTC))
 #    undef _LIBCUDACXX_IS_CONSTANT_EVALUATED
 #  endif // _CCCL_STD_VER < 2014 && _CCCL_CUDA_COMPILER_NVCC
 
@@ -470,27 +471,27 @@ extern "C++" {
 #  endif // __check_builtin(decay)
 
 #  if __check_builtin(has_nothrow_assign) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 403) \
-    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_HAS_NOTHROW_ASSIGN(...) __has_nothrow_assign(__VA_ARGS__)
 #  endif // __check_builtin(has_nothrow_assign)
 
 #  if __check_builtin(has_nothrow_constructor) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 403) \
-    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_HAS_NOTHROW_CONSTRUCTOR(...) __has_nothrow_constructor(__VA_ARGS__)
 #  endif // __check_builtin(has_nothrow_constructor)
 
 #  if __check_builtin(has_nothrow_copy) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 403) \
-    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_HAS_NOTHROW_COPY(...) __has_nothrow_copy(__VA_ARGS__)
 #  endif // __check_builtin(has_nothrow_copy)
 
 #  if __check_builtin(has_trivial_constructor) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 403) \
-    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_HAS_TRIVIAL_CONSTRUCTOR(...) __has_trivial_constructor(__VA_ARGS__)
 #  endif // __check_builtin(has_trivial_constructor)
 
 #  if __check_builtin(has_trivial_destructor) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 403) \
-    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_HAS_TRIVIAL_DESTRUCTOR(...) __has_trivial_destructor(__VA_ARGS__)
 #  endif // __check_builtin(has_trivial_destructor)
 
@@ -499,12 +500,12 @@ extern "C++" {
 #  endif // __check_builtin(has_unique_object_representations)
 
 #  if __check_builtin(has_virtual_destructor) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 403) \
-    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_HAS_VIRTUAL_DESTRUCTOR(...) __has_virtual_destructor(__VA_ARGS__)
 #  endif // __check_builtin(has_virtual_destructor)
 
 #  if __check_builtin(is_aggregate) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 700) \
-    || (defined(_CCCL_COMPILER_MSVC) && _MSC_VER > 1914) || defined(_CCCL_COMPILER_NVRTC)
+    || (defined(_CCCL_COMPILER_MSVC) && _MSC_VER > 1914) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_AGGREGATE(...) __is_aggregate(__VA_ARGS__)
 #  endif // __check_builtin(is_aggregate)
 
@@ -525,21 +526,21 @@ extern "C++" {
 #  endif // __check_builtin(is_assignable)
 
 #  if __check_builtin(is_base_of) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 403) || defined(_CCCL_COMPILER_MSVC) \
-    || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_BASE_OF(...) __is_base_of(__VA_ARGS__)
 #  endif // __check_builtin(is_base_of)
 
 #  if __check_builtin(is_class) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 403) || defined(_CCCL_COMPILER_MSVC) \
-    || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_CLASS(...) __is_class(__VA_ARGS__)
 #  endif // __check_builtin(is_class)
 
 #  if __check_builtin(is_constructible) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 800) \
-    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_CONSTRUCTIBLE(...) __is_constructible(__VA_ARGS__)
 #  endif // __check_builtin(is_constructible)
 
-#  if __check_builtin(is_convertible_to) || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+#  if __check_builtin(is_convertible_to) || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_CONVERTIBLE_TO(...) __is_convertible_to(__VA_ARGS__)
 #  endif // __check_builtin(is_convertible_to)
 
@@ -548,17 +549,17 @@ extern "C++" {
 #  endif // __check_builtin(is_destructible)
 
 #  if __check_builtin(is_empty) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 403) || defined(_CCCL_COMPILER_MSVC) \
-    || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_EMPTY(...) __is_empty(__VA_ARGS__)
 #  endif // __check_builtin(is_empty)
 
 #  if __check_builtin(is_enum) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 403) || defined(_CCCL_COMPILER_MSVC) \
-    || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_ENUM(...) __is_enum(__VA_ARGS__)
 #  endif // __check_builtin(is_enum)
 
 #  if __check_builtin(is_final) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 407) || defined(_CCCL_COMPILER_MSVC) \
-    || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_FINAL(...) __is_final(__VA_ARGS__)
 #  endif // __check_builtin(is_final)
 
@@ -567,7 +568,7 @@ extern "C++" {
 #  endif // __check_builtin(is_function)
 
 #  if __check_builtin(is_literal_type) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 406) \
-    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_LITERAL(...) __is_literal_type(__VA_ARGS__)
 #  endif // __check_builtin(is_literal_type)
 
@@ -581,15 +582,15 @@ extern "C++" {
 #    endif // nvcc < 11.3
 #  endif // !_LIBCUDACXX_USE_IS_LVALUE_REFERENCE_FALLBACK
 
-#  if __check_builtin(is_nothrow_assignable) || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+#  if __check_builtin(is_nothrow_assignable) || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_NOTHROW_ASSIGNABLE(...) __is_nothrow_assignable(__VA_ARGS__)
 #  endif // __check_builtin(is_nothrow_assignable)
 
-#  if __check_builtin(is_nothrow_constructible) || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+#  if __check_builtin(is_nothrow_constructible) || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_NOTHROW_CONSTRUCTIBLE(...) __is_nothrow_constructible(__VA_ARGS__)
 #  endif // __check_builtin(is_nothrow_constructible)
 
-#  if __check_builtin(is_nothrow_destructible) || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+#  if __check_builtin(is_nothrow_destructible) || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_NOTHROW_DESTRUCTIBLE(...) __is_nothrow_destructible(__VA_ARGS__)
 #  endif // __check_builtin(is_nothrow_destructible)
 
@@ -604,7 +605,7 @@ extern "C++" {
 #  endif // !_LIBCUDACXX_USE_IS_OBJECT_FALLBACK
 
 #  if __check_builtin(is_pod) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 403) || defined(_CCCL_COMPILER_MSVC) \
-    || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_POD(...) __is_pod(__VA_ARGS__)
 #  endif // __check_builtin(is_pod)
 
@@ -614,7 +615,7 @@ extern "C++" {
 #  endif // __check_builtin(is_pointer)
 
 #  if __check_builtin(is_polymorphic) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 403) \
-    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_POLYMORPHIC(...) __is_polymorphic(__VA_ARGS__)
 #  endif // __check_builtin(is_polymorphic)
 
@@ -646,27 +647,27 @@ extern "C++" {
 #  endif // __check_builtin(is_signed)
 
 #  if __check_builtin(is_standard_layout) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 407) \
-    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_STANDARD_LAYOUT(...) __is_standard_layout(__VA_ARGS__)
 #  endif // __check_builtin(is_standard_layout)
 
 #  if __check_builtin(is_trivial) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 405) || defined(_CCCL_COMPILER_MSVC) \
-    || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_TRIVIAL(...) __is_trivial(__VA_ARGS__)
 #  endif // __check_builtin(is_trivial)
 
 #  if __check_builtin(is_trivially_assignable) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 501) \
-    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_TRIVIALLY_ASSIGNABLE(...) __is_trivially_assignable(__VA_ARGS__)
 #  endif // __check_builtin(is_trivially_assignable)
 
 #  if __check_builtin(is_trivially_constructible) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 501) \
-    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_TRIVIALLY_CONSTRUCTIBLE(...) __is_trivially_constructible(__VA_ARGS__)
 #  endif // __check_builtin(is_trivially_constructible)
 
 #  if __check_builtin(is_trivially_copyable) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 501) \
-    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_TRIVIALLY_COPYABLE(...) __is_trivially_copyable(__VA_ARGS__)
 #  endif // __check_builtin(is_trivially_copyable)
 
@@ -675,7 +676,7 @@ extern "C++" {
 #  endif // __check_builtin(is_trivially_destructible)
 
 #  if __check_builtin(is_union) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 403) || defined(_CCCL_COMPILER_MSVC) \
-    || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_IS_UNION(...) __is_union(__VA_ARGS__)
 #  endif // __check_builtin(is_union)
 
@@ -745,7 +746,7 @@ extern "C++" {
 #  endif // __check_builtin(remove_volatile)
 
 #  if __check_builtin(underlying_type) || (defined(_CCCL_COMPILER_GCC) && _GNUC_VER >= 407) \
-    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC)
+    || defined(_CCCL_COMPILER_MSVC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_UNDERLYING_TYPE(...) __underlying_type(__VA_ARGS__)
 #  endif // __check_builtin(underlying_type)
 
@@ -877,7 +878,7 @@ typedef __char32_t char32_t;
 
 #    define _LIBCUDACXX_HAS_NO_VECTOR_EXTENSION
 
-#  elif defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_NVHPC)
+#  elif defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_NVHPC) || defined(_CCCL_COMPILER_HIPRTC)
 
 #    if !defined(__cpp_variable_templates) || __cpp_variable_templates < 201304L
 #      define _LIBCUDACXX_HAS_NO_VARIABLE_TEMPLATES
@@ -892,7 +893,7 @@ typedef __char32_t char32_t;
 #  endif // !_LIBCUDACXX_FREESTANDING
 
 #  ifndef _LIBCUDACXX_DISABLE_VISIBILITY_ANNOTATIONS
-#    if defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_CUDA_COMPILER_NVHPC)
+#    if defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_CUDA_COMPILER_NVHPC) || defined(_CCCL_COMPILER_HIPRTC)
 #      define _LIBCUDACXX_DISABLE_VISIBILITY_ANNOTATIONS
 #    endif
 #  endif // _LIBCUDACXX_DISABLE_VISIBILITY_ANNOTATIONS
@@ -931,7 +932,7 @@ typedef __char32_t char32_t;
 #  endif // !_LIBCUDACXX_HAS_NO_INT128
 
 #  ifndef _LIBCUDACXX_HAS_NO_LONG_DOUBLE
-#    if defined(_CCCL_CUDACC)
+#    if defined(_CCCL_CUDACC) || defined(_CCCL_COMPILER_HIPCC)
 #      define _LIBCUDACXX_HAS_NO_LONG_DOUBLE
 #    endif
 #  endif // _LIBCUDACXX_HAS_NO_LONG_DOUBLE
@@ -1185,13 +1186,13 @@ __sanitizer_annotate_contiguous_container(const void*, const void*, const void*,
 
 // Thread API
 #  ifndef _LIBCUDACXX_HAS_THREAD_API_EXTERNAL
-#    if defined(_CCCL_COMPILER_NVRTC) || defined(__EMSCRIPTEN__) || defined(_LIBCUDACXX_COMPILER_HIPRTC)
+#    if defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC) || defined(__EMSCRIPTEN__)
 #      define _LIBCUDACXX_HAS_THREAD_API_EXTERNAL
 #    endif
 #  endif // _LIBCUDACXX_HAS_THREAD_API_EXTERNAL
 
 #  ifndef _LIBCUDACXX_HAS_THREAD_API_CUDA
-#    if (defined(__CUDA_ARCH__) || defined(__EMSCRIPTEN__)) || defined(__HIP_DEVICE_COMPILE__) || defined(__HIPCC_RTC__)
+#    if (defined(__CUDA_ARCH__) || defined(__EMSCRIPTEN__)) || defined(__HIP_DEVICE_COMPILE__) || defined(_CCCL_COMPILER_HIPRTC)
 #      define _LIBCUDACXX_HAS_THREAD_API_CUDA
 #    endif // __cuda_std__
 #  endif // _LIBCUDACXX_HAS_THREAD_API_CUDA
@@ -1266,7 +1267,7 @@ __sanitizer_annotate_contiguous_container(const void*, const void*, const void*,
 
 // CUDA Atomics supersede host atomics in order to insert the host/device dispatch layer
 #  if defined(_CCCL_CUDA_COMPILER_NVCC) || defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_NVHPC) \
-    || defined(_CCCL_CUDACC) || defined(_CCCL_COMPILER_HIPCC)
+    || defined(_CCCL_CUDACC) || defined(_CCCL_COMPILER_HIPRTC) || defined(_CCCL_COMPILER_HIPCC)
 #    define _LIBCUDACXX_HAS_CUDA_ATOMIC_IMPL
 #  endif
 
@@ -1337,7 +1338,7 @@ __sanitizer_annotate_contiguous_container(const void*, const void*, const void*,
 // We need `is_constant_evaluated` for clang and gcc. MSVC also needs extensive rework
 #  if !defined(_LIBCUDACXX_IS_CONSTANT_EVALUATED)
 #    define _LIBCUDACXX_HAS_NO_CONSTEXPR_COMPLEX_OPERATIONS
-#  elif defined(_CCCL_COMPILER_NVRTC)
+#  elif defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC)
 #    define _LIBCUDACXX_HAS_NO_CONSTEXPR_COMPLEX_OPERATIONS
 #  elif defined(_CCCL_COMPILER_MSVC)
 #    define _LIBCUDACXX_HAS_NO_CONSTEXPR_COMPLEX_OPERATIONS
@@ -1432,7 +1433,7 @@ To override this error and proceed with the build, please set the compile-time f
 
 // We can only expose constexpr allocations if the compiler supports it
 #  if defined(__cpp_constexpr_dynamic_alloc) && defined(__cpp_lib_constexpr_dynamic_alloc) && _CCCL_STD_VER >= 2020 \
-    && !defined(_CCCL_COMPILER_NVRTC)
+    && !defined(_CCCL_COMPILER_NVRTC) && !defined(_CCCL_COMPILER_HIPRTC)
 #    define _CCCL_HAS_CONSTEXPR_ALLOCATION
 #    define _CCCL_CONSTEXPR_CXX20_ALLOCATION constexpr
 #  else // ^^^ __cpp_constexpr_dynamic_alloc ^^^ / vvv !__cpp_constexpr_dynamic_alloc vvv
@@ -1441,7 +1442,7 @@ To override this error and proceed with the build, please set the compile-time f
 
 // NVRTC has a bug that prevented the use of delegated constructors, as it did not accept execution space annotations.
 // This creates a whole lot of boilerplate that we can avoid through a macro (see nvbug3961621)
-#  if defined(_CCCL_COMPILER_NVRTC) || (defined(_CCCL_CUDACC_BELOW_11_3) && defined(_CCCL_COMPILER_CLANG))
+#  if defined(_CCCL_COMPILER_NVRTC) || defined(_CCCL_COMPILER_HIPRTC) || (defined(_CCCL_CUDACC_BELOW_11_3) && defined(_CCCL_COMPILER_CLANG))
 #    define _LIBCUDACXX_DELEGATE_CONSTRUCTORS(__class, __baseclass, ...)                                 \
       using __base = __baseclass<__VA_ARGS__>;                                                           \
       template <class... _Args, __enable_if_t<_CCCL_TRAIT(is_constructible, __base, _Args...), int> = 0> \
@@ -1468,6 +1469,12 @@ To override this error and proceed with the build, please set the compile-time f
 #ifndef _LIBCUDACXX_HIP_RDTSC_NANOSECONDS_PER_CYCLE 
 #  define _LIBCUDACXX_HIP_RDTSC_NANOSECONDS_PER_CYCLE 40  // 25 MHz for s_memrealtime -> 1*1e9/25*1e6 ns/cycle = 40 ns/cycle (gfx90a and gfx908 only!)
 #endif
+
+#  if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+#    define _LIBCUDACXX_CPO_ACCESSIBILITY __device__ _LIBCUDACXX_CONSTEXPR_GLOBAL
+#  else
+#    define _LIBCUDACXX_CPO_ACCESSIBILITY _LIBCUDACXX_INLINE_VAR constexpr
+#  endif
 
 #endif // __cplusplus
 
