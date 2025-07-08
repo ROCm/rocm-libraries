@@ -7,7 +7,6 @@
 #   - Run pr_category_label.py to determine which category labels to add/remove
 #   - Update labels on the PR using GitHub CLI (gh)
 #   - Check if the PR creator is a member of the specified organization and add/remove labels accordingly
-#   - Run pr_fanout_sync_labels.py to sync custom labels from the monorepo PR to the subrepo PRs
 
 name: Auto Label PR
 
@@ -47,7 +46,7 @@ jobs:
       - name: Generate GitHub App token (only for branch PRs)
         id: generate-token
         if: ${{ !github.event.pull_request.head.repo.fork }}
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
