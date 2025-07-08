@@ -8,8 +8,9 @@ This script is part of the monorepo synchronization system. It runs after a mono
 is merged and applies relevant changes to the corresponding sub-repositories using Git patches.
 
 - Uses the merge commit of the monorepo PR to extract subtree changes.
-- Generates patch files per changed subtree.
-- Applies each patch to its respective sub-repository, adjusting for subtree prefix.
+- Generates one patch per changed file under each subtree.
+- Applies each patch as a separate commit in the subrepo.
+- Squashes all commits per subtree into one before pushing.
 - Uses the repos-config.json file to map subtrees to sub-repos.
 - Assumes this script is run from the root of the monorepo.
 
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Apply subtree patches to sub-repositories.")
-    parser.add_argument("--repo", required=True, help="Full  repository name (e.g., org/repo)")
+    parser.add_argument("--repo", required=True, help="Full repository name (e.g., org/repo)")
     parser.add_argument("--pr", required=True, type=int, help="Pull request number")
     parser.add_argument("--subtrees", required=True, help="Newline-separated list of changed subtrees (category/name)")
     parser.add_argument("--config", required=False, default=".github/repos-config.json", help="Path to the repos-config.json file")
@@ -75,7 +76,7 @@ def _run_git(args: List[str], cwd: Optional[Path] = None) -> str:
     )
     if result.returncode != 0:
         logger.error(f"Git command failed: {' '.join(cmd)}\n{result.stderr}")
-        raise RuntimeError(f"Git command failed: {' '.join(cmd)}")
+        raise RuntimeError(f"Git command failed: {' '.join(cmd)}\n{result.stderr}")
     return result.stdout.strip()
 
 def _clone_subrepo(repo_url: str, branch: str, destination: Path) -> None:
@@ -143,7 +144,9 @@ def _commit_changes(repo_path: Path, message: str, author_name: str, author_emai
 
 def _set_authenticated_remote(repo_path: Path, repo_url: str) -> None:
     """Set the push URL to use the GitHub App token from GH_TOKEN env."""
-    token = os.environ["GH_TOKEN"]
+    token = os.environ.get("GH_TOKEN")
+    if not token:
+        raise RuntimeError("GH_TOKEN environment variable is not set")
     remote_url = f"https://x-access-token:{token}@github.com/{repo_url}.git"
     _run_git(["remote", "set-url", "origin", remote_url], cwd=repo_path)
 
@@ -152,11 +155,53 @@ def _push_changes(repo_path: Path, branch: str) -> None:
     _run_git(["push", "origin", branch], cwd=repo_path)
     logger.debug(f"Pushed changes from {repo_path} to origin")
 
-def generate_patch(prefix: str, merge_sha: str, patch_path: Path) -> None:
-    """Generate a patch file for a given subtree prefix from a merge commit."""
-    args = ["format-patch", "-1", merge_sha, f"--relative={prefix}", "--output", str(patch_path)]
-    _run_git(args)
-    logger.debug(f"Generated patch for prefix '{prefix}' at {patch_path}")
+def generate_file_level_patches(prefix: str, merge_sha: str, output_dir: Path) -> List[Path]:
+    """
+    Generate one patch file per changed file in the given subtree prefix from a merge commit.
+    Returns list of Path objects to the generated patch files.
+    """
+    # Get changed files in that subtree for the merge commit
+    files_str = _run_git([
+        "diff-tree", "--no-commit-id", "--name-only", "-r", merge_sha, "--", prefix
+    ])
+    files = [line.strip() for line in files_str.splitlines() if line.strip()]
+    patch_files = []
+
+    for changed_file in files:
+        # Generate patch for each file relative to subtree prefix
+        # Note: format-patch does not have an easy single-file option, so fallback to git diff output to patch file
+        patch_path = output_dir / (changed_file.replace("/", "_") + ".patch")
+        diff_output = _run_git([
+            "diff", f"{merge_sha}^!", "--", changed_file
+        ])
+        # Write patch to file, but rewrite paths to be relative to subtree prefix by removing prefix/
+        # Since changed_file is under prefix, strip prefix + slash from paths in patch header
+        adjusted_patch = _adjust_patch_paths(diff_output, prefix)
+        patch_path.write_text(adjusted_patch, encoding="utf-8")
+        patch_files.append(patch_path)
+
+    logger.debug(f"Generated {len(patch_files)} file-level patches for prefix '{prefix}'")
+    return patch_files
+
+def _adjust_patch_paths(patch_text: str, prefix: str) -> str:
+    """
+    Remove prefix/ from the paths in the patch text to make it relative for application in subrepo.
+    """
+    # Typical patch headers:
+    # --- a/prefix/filename
+    # +++ b/prefix/filename
+    # We replace 'a/prefix/' and 'b/prefix/' with 'a/' and 'b/'
+    lines = patch_text.splitlines()
+    adjusted_lines = []
+    prefix_slash = prefix.rstrip("/") + "/"
+    for line in lines:
+        if line.startswith("--- a/") and line[6:].startswith(prefix_slash):
+            adjusted_lines.append("--- a/" + line[6+len(prefix_slash):])
+        elif line.startswith("+++ b/") and line[6:].startswith(prefix_slash):
+            adjusted_lines.append("+++ b/" + line[6+len(prefix_slash):])
+        else:
+            adjusted_lines.append(line)
+    return "\n".join(adjusted_lines) + "\n"
 
 def resolve_patch_author(client: GitHubCLIClient, repo: str, pr: int) -> tuple[str, str]:
     """Determine the appropriate author for the patch
@@ -173,25 +218,51 @@ def resolve_patch_author(client: GitHubCLIClient, repo: str, pr: int) -> tuple[s
     name, email = client.get_user(username)
     return name or username, email
 
-def apply_patch_to_subrepo(entry: RepoEntry, monorepo_url: str, monorepo_pr: int,
-                            patch_path: Path, author_name: str, author_email: str,
+def apply_patches_and_squash(entry: RepoEntry, monorepo_url: str, monorepo_pr: int,
+                            patch_paths: List[Path], author_name: str, author_email: str,
                             merge_sha: str, dry_run: bool = False) -> None:
-    """Clone the subrepo, apply the patch, and attribute to the original author with commit message annotations."""
+    """
+    Clone the subrepo, apply multiple file-level patches each as a commit,
+    then squash all new commits into one before pushing.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         subrepo_path = Path(tmpdir) / entry.name
         _clone_subrepo(entry.url, entry.branch, subrepo_path)
         if dry_run:
-            logger.info(f"[Dry-run] Would apply patch to {entry.url} as {author_name} <{author_email}>")
+            logger.info(f"[Dry-run] Would apply {len(patch_paths)} patches to {entry.url} as {author_name} <{author_email}>")
             return
+
         _configure_git_user(subrepo_path)
-        _apply_patch(subrepo_path, patch_path)
-        _stage_changes(subrepo_path)
-        original_commit_msg = _extract_commit_message_from_patch(patch_path)
-        commit_msg = _format_commit_message(monorepo_url, monorepo_pr, merge_sha, original_commit_msg)
-        _commit_changes(subrepo_path, commit_msg, author_name, author_email)
+
+        # Get current HEAD commit (before applying patches)
+        base_commit = _run_git(["rev-parse", "HEAD"], cwd=subrepo_path)
+
+        for patch_path in patch_paths:
+            logger.debug(f"Applying patch {patch_path.name} to {entry.name}")
+            _apply_patch(subrepo_path, patch_path)
+            _stage_changes(subrepo_path)
+            original_commit_msg = _extract_commit_message_from_patch(patch_path)
+            commit_msg = _format_commit_message(monorepo_url, monorepo_pr, merge_sha, original_commit_msg)
+            _commit_changes(subrepo_path, commit_msg, author_name, author_email)
+
+        # Squash all commits since base_commit into one
+        logger.debug(f"Squashing commits since {base_commit} into one")
+
+        # Create a combined commit message from all individual commit messages
+        combined_msg_lines = []
+        for patch_path in patch_paths:
+            orig_msg = _extract_commit_message_from_patch(patch_path)
+            combined_msg_lines.append(orig_msg)
+            combined_msg_lines.append("\n---\n")
+        combined_commit_msg = f"[rocm-libraries] {monorepo_url}#{monorepo_pr} (commit {merge_sha[:7]})\n\n" + "".join(combined_msg_lines).strip()
+
+        # Perform squash via git reset + commit
+        _run_git(["reset", "--soft", base_commit], cwd=subrepo_path)
+        _run_git(["commit", "-m", combined_commit_msg, "--author", f"{author_name} <{author_email}>"], cwd=subrepo_path)
+
         _set_authenticated_remote(subrepo_path, entry.url)
         _push_changes(subrepo_path, entry.branch)
-        logger.info(f"Patch applied, committed, and pushed to {entry.url} as {author_name} <{author_email}>")
+        logger.info(f"Applied and squashed patches, then pushed to {entry.url} as {author_name} <{author_email}>")
 
 def main(argv: Optional[List[str]] = None) -> None:
     """Main function to apply patches to sub-repositories."""
@@ -209,12 +280,15 @@ def main(argv: Optional[List[str]] = None) -> None:
         prefix = f"{entry.category}/{entry.name}"
         logger.debug(f"Processing subtree {prefix}")
         with tempfile.TemporaryDirectory() as tmpdir:
-            patch_file = Path(tmpdir) / f"{entry.name}.patch"
-            generate_patch(prefix, merge_sha, patch_file)
+            patch_dir = Path(tmpdir)
+            patch_files = generate_file_level_patches(prefix, merge_sha, patch_dir)
+            if not patch_files:
+                logger.info(f"No changed files detected for subtree {prefix}, skipping.")
+                continue
             author_name, author_email = resolve_patch_author(client, args.repo, args.pr)
-            apply_patch_to_subrepo(entry, args.repo, args.pr,
-                                   patch_file, author_name, author_email,
-                                   merge_sha, args.dry_run)
+            apply_patches_and_squash(entry, args.repo, args.pr,
+                                     patch_files, author_name, author_email,
+                                     merge_sha, args.dry_run)
 
 if __name__ == "__main__":
     main()
