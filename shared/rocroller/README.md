@@ -18,7 +18,6 @@ rocRoller is a software library for generating AMDGPU kernels.
     - [Cmake and make commands](#cmake-and-make-commands)
       - [CMake Options](#cmake-options)
     - [Running the tests](#running-the-tests)
-    - [Updating pregenerated GPUArchitecture yaml files](#updating-pregenerated-gpuarchitecture-yaml-files)
   - [GEMM client](#gemm-client)
   - [File Structure](#file-structure)
   - [Coding Practices](#coding-practices)
@@ -202,9 +201,9 @@ mkdir ./build
 cd ./build
 cmake -DROCROLLER_USE_PREGENERATED_ARCH_DEF=OFF ../
 make -j GPUArchitecture_def
+find ./share/rocRoller/split_yamls/ -type f -name "*.yaml" -exec realpath {} \; | xargs -I {} ../scripts/format_yaml.py -f {} {}
+rm -rf ../GPUArchitectureGenerator/pregenerated/*.yaml
 cp ./share/rocRoller/split_yamls/*.yaml ../GPUArchitectureGenerator/pregenerated/
-cd ../GPUArchitectureGenerator/pregenerated/
-../../scripts/format_yaml.py -I *.yaml
 ```
 
 ## GEMM client
@@ -216,7 +215,7 @@ library by default.
 To run the GEMM client from your build directory:
 
 ```
-./bin/client/rocRoller_gemm --help
+./bin/client/gemm --help
 ```
 
 ## File Structure
@@ -292,7 +291,7 @@ Each new feature is required to have a test.
 - Test sources are placed in the `test` folder.
 - CPP Files for Unit Tests should be included in the `rocRollerTests` executable in [CMakeLists.txt](https://github.com/ROCm/rocRoller/blob/master/test/CMakeLists.txt).
 
-Some tests require multiple threads for properly testing a desired or undesired behaviour (e.g. thread-safety) or to benefit from faster execution. Therefore, it is recommended to set `OMP_NUM_THREADS` appropriately. A value between `[NUM_PHYSICAL_CORES/2, NUM_PHYSICAL_CORES)` is recommended. Setting `OMP_NUM_THREADS` to the number of available cores or higher can cause test to run slower due to oversubscription (e.g. increased contention).
+Some tests require multiple threads for properly testing a desired or undesired behaviour (e.g. thread-safety) or to benefit from faster execution. Therfore, it is recommended to set `OMP_NUM_THREADS` appropriately. A value between `[NUM_PHYSICAL_CORES/2, NUM_PHYSICAL_CORES)` is recommended. Setting `OMP_NUM_THREADS` to the number of available cores or higher can cause test to run slower due to oversubscription (e.g. increased contention).
 
 Note a few conditions:
 - If your test requires a context but does not actually need to run on a GPU, inherit from `GenericContextFixture`.
@@ -320,12 +319,8 @@ Additionally, there are tests that run against guidepost kernels that have been 
 - Setting the environment variable `ROCROLLER_RANDOM_SEED` to an unsigned integer value will set the seed of the `RandomGenerator` used by the unit tests.
 - Setting the environment variable `ROCROLLER_BREAK_ON_THROW=1` will cause exceptions thrown directly by library code to cause a segfault. This causes GDB to break at the original point of failure, instead of at the point where it is rethrown by the Generator class.
    - You can also set a breakpoint at the constructor of an exception class (e.g. `b std::bad_variant_access::bad_variant_access()` ), and GDB will more reliably break there than on `catch throw`.
-   - STL exceptions will not be affected by this.  Sometimes a better stack trace can be obtained by placing a breakpoint in the constructor of the particular exception that is being thrown.
 - Setting `ROCROLLER_ARCHITECTURE_FILE` will overwrite the default GPU architecture file generated at `source/rocRoller/GPUArchitecture_def.msgpack`. Currently supported file formats are YAML and Msgpack.
-- If your kernel is running out of registers and you want to know how close you are to fitting, setting `ROCROLLER_IGNORE_OUT_OF_REGISTERS=1` will let you generate the complete kernel and look at where the peak register usage is and how high it is.
-- `ROCROLLER_ENFORCE_GRAPH_CONSTRAINTS` and `ROCROLLER_AUDIT_CONTROL_TRACERS` will enable some checks during graph creation and code generation that may expose some issues earlier. These are enabled by default in gtest/catch tests and in `rrperf run`.
-- Setting `AMD_COMGR_SAVE_TEMPS=1` `AMD_COMGR_EMIT_VERBOSE_LOGS=1` `AMD_COMGR_REDIRECT_LOGS=stderr` can help provide more assembler debug output.
-- Set `ROCROLLER_ASSEMBLER=Subprocess` and `ROCROLLER_DEBUG_ASSEMBLER_PATH=<assembler like amdclang>` to use an external assembler.
+- STL exceptions will not be affected by this.  Sometimes a better stack trace can be obtained by placing a breakpoint in the constructor of the particular exception that is being thrown.
 
 
 To explicitly enable/disable some of the mentioned environment variables, `ROCROLLER_DEBUG` can be set accordingly. `ROCROLLER_DEBUG` is a bit field that aggregates options together. The following options are covered by `ROCROLLER_DEBUG`:
@@ -393,7 +388,7 @@ To see how this works, check rrperf's help documentation:
 
 ## Kernel Analysis
 
-Setting the environment variable `ROCROLLER_KERNEL_ANALYSIS=1` will enable the following kernel analysis features built into rocRoller.
+Setting the environment variable `ROCROLLER_KERNEL_ANALYSIS=1` will enable the following kernel analysis features built into rocRoler.
 
 - Register Liveness
   - The file `${ROCROLLER_ASSEMBLY_FILE}.live` is created which reports register liveness.
@@ -447,7 +442,7 @@ The following commands can be used to visualize memory access patterns to png fi
 ```console
 $ cd ${build_dir}
 
-$ ./bin/client/rocRoller_gemm --M=512 --N=768 --K=512 --mac_m=128 --mac_n=256 --mac_k=16 --alpha=2.0 --beta=0.5 --workgroup_size_x=256 --workgroup_size_y=1 --type_A=half --type_B=half --type_C=half --type_D=half --type_acc=float --num_warmup=2 --num_outer=10 --num_inner=1 --trans_A=N --trans_B=T --loadLDS_A=True --loadLDS_B=True --storeLDS_D=False --scheduler=Priority --visualize=True --match_memory_access=False
+$ ./bin/client/gemm --M=512 --N=768 --K=512 --mac_m=128 --mac_n=256 --mac_k=16 --alpha=2.0 --beta=0.5 --workgroup_size_x=256 --workgroup_size_y=1 --type_A=half --type_B=half --type_C=half --type_D=half --type_acc=float --num_warmup=2 --num_outer=10 --num_inner=1 --trans_A=N --trans_B=T --loadLDS_A=True --loadLDS_B=True --storeLDS_D=False --scheduler=Priority --visualize=True --match_memory_access=False
 
 Visualizing to gemm.vis
 Wrote workitem_A.dat
