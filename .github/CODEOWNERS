@@ -12,6 +12,7 @@
 /projects/miopen/ @BrianHarrisonAMD @BradPepersAMD @adickin-amd @JonathanLichtnerAMD
 /projects/composablekernel/ @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @tenpercent @ThomasNing @coderfeli
 /projects/hipblas-common/ @bnemanich @daineAMD @TorreZuk
+/projects/hipblas-common/**/CMakeLists.txt @ROCm/rocm-math-lib-build-infra
 /projects/hipblas/ @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
 /projects/hipblaslt/ @jichangjichang @KKyang @vin-huang @imcarsonliao @hcman2 @Serge45 @Jinp800125 @TonyYHsieh @solaslin @aazz44ss
 /projects/hipcub/ @stanleytsang-amd @umfranzw @RobsonRLemos
