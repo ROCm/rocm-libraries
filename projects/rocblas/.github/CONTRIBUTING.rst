@@ -597,7 +597,7 @@ Coding Style
     for an example, and how it's handled there.
 
 #.  For reduction operations, the file
-    `reduction.hpp <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/library/src/blas1/reduction.hpp>`
+    `reduction.hpp <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/library/src/blas1/reduction.hpp>`_
     has been created to systematize reductions and perform their device
     kernels in one place. This works for ``amax``, ``amin``, ``asum``,
     ``nrm2``, and (partially) ``dot`` and ``gemv``.
