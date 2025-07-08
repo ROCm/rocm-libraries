@@ -128,40 +128,53 @@ namespace rocRoller
             auto typeB = matB->variableType().dataType;
 
             std::string mi;
-            std::string modifiers;
+	    std::string aType, bType;
 
-            if(arch.HasCapability(GPUCapability::HasMFMA_scale_f8f6f4))
+	    AssertFatal(arch.HasCapability(GPUCapability::HasMFMA_scale_f8f6f4),
+                        "Scaled Matrix Multiplication is not supported for",
+                        arch.target().toString());
+
+	    auto M = miSizes.m;
+	    auto N = miSizes.n;
+	    auto K = miSizes.k;
+
+            AssertFatal((M == 16 && N == 16 && K == 128) || (M == 32 && N == 32 && K == 64),
+                        "Invalid wavetile {}x{}x{} for scaled MFMA instruction for {}.",
+                        M,
+                        N,
+                        K,
+                        arch.target().toString());
+
+            if(maybeScaleBlockSize)
             {
-                AssertFatal((miSizes.m == 16 && miSizes.n == 16 && miSizes.k == 128)
-                                || (miSizes.m == 32 && miSizes.n == 32 && miSizes.k == 64),
-                            "Invalid wavetile {}x{}x{} for scaled MFMA instruction for {}.",
-                            miSizes.m,
-                            miSizes.n,
-                            miSizes.k,
-                            arch.target().toString());
-
-                if(maybeScaleBlockSize)
-                {
-                    auto scaleBlockSize = maybeScaleBlockSize.value();
-                    AssertFatal(scaleBlockSize == 32,
-                                fmt::format("Scale block size expected: 32, got: {}, on: {}",
-                                            scaleBlockSize,
-                                            arch.target().toString()));
-                }
-
-                mi = concatenate(
-                    "v_mfma_scale_f32_", miSizes.m, "x", miSizes.n, "x", miSizes.k, "_f8f6f4");
-
-                modifiers += "cbsz:" + Arithmetic::getModifier(typeA);
-                modifiers += " blgp:" + Arithmetic::getModifier(typeB);
-            }
-            else
-            {
-                Throw<FatalError>("Scaled Matrix Multiplication is not supported for",
-                                  arch.target().toString());
+		auto scaleBlockSize = maybeScaleBlockSize.value();
+                AssertFatal(scaleBlockSize == 32,
+                            fmt::format("Scale block size expected: 32, got: {}, on: {}",
+                                        scaleBlockSize,
+                                        arch.target().toString()));
             }
 
-            co_yield_(Instruction(mi, {dest}, {matA, matB, matC, scaleA, scaleB}, {modifiers}, ""));
+	    mi = concatenate("v_mfma_scale_f32_", M, "x", N, "x", K, "_f8f6f4");
+
+            aType = "cbsz:" + Arithmetic::getModifier(typeA);
+            bType = "blgp:" + Arithmetic::getModifier(typeB);
+
+            AssertFatal(scaleA->getBitOffset() % 8 == 0 && scaleA->getBitOffset() < 32,
+                        ShowValue(scaleA->getBitOffset()));
+
+            AssertFatal(scaleB->getBitOffset() % 8 == 0 && scaleB->getBitOffset() < 32,
+                        ShowValue(scaleB->getBitOffset()));
+
+            auto aScaleByte = scaleA->getBitOffset() / 8;
+            auto bScaleByte = scaleB->getBitOffset() / 8;
+
+            auto [opselLo, opselHi] = Arithmetic::getOpselModifiers2xByte(aScaleByte, bScaleByte);
+
+            co_yield_(Instruction(mi,
+                                  {dest},
+                                  {matA, matB, matC, scaleA, scaleB},
+                                  {opselLo, opselHi, aType, bType},
+                                  ""));
         }
     }
 }

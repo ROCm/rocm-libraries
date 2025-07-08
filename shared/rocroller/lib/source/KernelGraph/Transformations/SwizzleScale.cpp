@@ -641,13 +641,14 @@ namespace rocRoller
                 graph.coordinates.addElement(Index(0), {exchangeTileTag}, {tileTag});
                 graph.mapper.connect<MacroTile>(exchange, exchangeTileTag);
 
-                auto destMacTileTag = graph.coordinates.addElement(MacroTile());
+                //auto destMacTileTag = graph.coordinates.addElement(MacroTile());
+		auto destMacTileTag = exchangeTileTag;
                 graph.mapper.connect(exchange, destMacTileTag, NaryArgument::DEST);
 
                 // add index edge to point to exchange output tile.
                 int index = 0;
                 graph.coordinates.addElement(
-                    Index(index++), {scaleLoads.at(load.first)}, {destMacTileTag});
+                    Segment(index++), {scaleLoads.at(load.first)}, {destMacTileTag});
 
                 // merge the loads
                 for(auto const merge : load.second)
@@ -676,7 +677,8 @@ namespace rocRoller
                             Index(merge.second), {exchangeTileTag}, {tileTag});
                         graph.mapper.connect<MacroTile>(replaceOp, exchangeTileTag);
 
-                        destMacTileTag = graph.coordinates.addElement(MacroTile());
+                        //destMacTileTag = graph.coordinates.addElement(MacroTile());
+			destMacTileTag = exchangeTileTag;
                         graph.mapper.connect(replaceOp, destMacTileTag, NaryArgument::DEST);
 
                         // reset the index
@@ -690,7 +692,7 @@ namespace rocRoller
                     purgeNodeAndChildren(graph, mergeTopOp);
 
                     graph.coordinates.addElement(
-                        Index(index++), {scaleLoads.at(merge.first)}, {destMacTileTag});
+                        Segment(index++), {scaleLoads.at(merge.first)}, {destMacTileTag});
                 }
 
                 // update the SetCoordinate value and its Unroll coordinate connection

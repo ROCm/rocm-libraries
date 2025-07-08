@@ -488,7 +488,7 @@ namespace rocRoller
             {
                 auto destTileTag = graph.mapper.get(exchangeTag, NaryArgument::DEST);
                 auto tileTags
-                    = graph.coordinates.getInputNodeIndices(destTileTag, CT::isEdge<Index>)
+                    = graph.coordinates.getInputNodeIndices(destTileTag, CT::isEdge<Segment>)
                           .to<std::vector>();
                 AssertFatal(!tileTags.empty(), "swizzle indexed tiles not found");
                 for(auto tileTag : tileTags)
@@ -982,7 +982,7 @@ namespace rocRoller
         std::optional<int>
             getExchangeForMultiply(KernelGraph const& graph, int multiplyTag, NaryArgument arg)
         {
-            auto isIndexPredicate    = rocRoller::KernelGraph::CoordinateGraph::isEdge<Index>;
+            auto isSegmentPredicate = rocRoller::KernelGraph::CoordinateGraph::isEdge<Segment>;
             auto isExchangePredicate = [&](int operation) -> bool {
                 auto maybeExchange = graph.control.get<Exchange>(operation);
                 return maybeExchange.has_value();
@@ -992,7 +992,7 @@ namespace rocRoller
             if(scale == -1)
                 return {};
 
-            auto tileTag = only(graph.coordinates.getOutputNodeIndices(scale, isIndexPredicate));
+            auto tileTag = only(graph.coordinates.getOutputNodeIndices(scale, isSegmentPredicate));
             if(not tileTag)
                 return {};
 
