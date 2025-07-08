@@ -38,7 +38,22 @@ trigger:
     - projects/rocprim/LICENSE.txt
     - projects/rocprim/NOTICES.txt
 
-pr: none
+pr:
+  branches:
+    include:
+    - users/geomin12/azure-pipelines-gate
+  paths:
+    include:
+    - projects/rocprim
+    exclude:
+    - projects/rocprim/.githooks
+    - projects/rocprim/.github
+    - projects/rocprim/.gitlab
+    - projects/rocprim/.jenkins
+    - projects/rocprim/docs
+    - projects/rocprim/.*.y*ml
+    - projects/rocprim/LICENSE.txt
+    - projects/rocprim/NOTICES.txt
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/rocPRIM.yml@pipelines_repo
