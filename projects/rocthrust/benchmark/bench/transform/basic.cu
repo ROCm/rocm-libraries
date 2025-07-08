@@ -286,9 +286,19 @@ struct nstream_stable
 template <typename Benchmark, class T>
 void run_babelstream(benchmark::State& state, const std::size_t n)
 {
-  thrust::device_vector<T> a = thrust::device_vector<T>(n);
-  thrust::device_vector<T> b = thrust::device_vector<T>(n);
-  thrust::device_vector<T> c = thrust::device_vector<T>(n);
+  thrust::device_vector<T> a, b, c;
+  try
+  {
+    a = thrust::device_vector<T>(n);
+    b = thrust::device_vector<T>(n);
+    c = thrust::device_vector<T>(n);
+  }
+  catch (const ::thrust::system::detail::bad_alloc& e)
+  {
+    (void) hipGetLastError();
+    state.SkipWithError(("thrust::system::detail::bad_alloc: " + std::string(e.what())).c_str());
+    return;
+  }
 
   std::vector<double> gpu_times;
   for (auto _ : state)
@@ -318,12 +328,19 @@ void run_babelstream(benchmark::State& state, const std::size_t n)
     Elements)
 
 // clang-format off
+// Different benchmarks use a different number of buffers. H200/B200 can fit 2^31 elements for all benchmarks and types.
+// Upstream BabelStream uses 2^25. Allocation failure just skips the benchmark
 #define BENCHMARK_BABELSTREAM_TYPE(type)              \
   CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, mul),   \
+  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 31, mul),   \
   CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, add),   \
+  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 31, add),   \
   CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, triad), \
+  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 31, triad), \
   CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, nstream), \
-  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, nstream_stable)
+  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 31, nstream), \
+  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 25, nstream_stable), \
+  CREATE_BABELSTREAM_BENCHMARK(type, 1 << 31, nstream_stable)
 // clang-format on
 
 void add_benchmarks(const std::string& name, std::vector<benchmark::internal::Benchmark*>& benchmarks)
