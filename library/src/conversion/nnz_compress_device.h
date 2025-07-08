@@ -47,7 +47,6 @@ namespace rocsparse
     template <rocsparse_int BLOCK_SIZE,
               rocsparse_int SEGMENTS_PER_BLOCK,
               rocsparse_int SEGMENT_SIZE,
-              rocsparse_int WF_SIZE,
               typename T>
     ROCSPARSE_DEVICE_ILF void nnz_compress_device(rocsparse_int        m,
                                                   rocsparse_index_base idx_base_A,
