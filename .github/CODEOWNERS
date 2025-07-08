@@ -28,6 +28,6 @@
 /projects/rocrand/ @stanleytsang-amd @umfranzw @RobsonRLemos
 /projects/rocsolver/ @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
 /projects/rocsparse/ @ntrost57 @YvanMokwinski @jsandham @kliegeois
-/shared/mxdatagenerator @ROCm/rocroller-developers
+/shared/mxdatagenerator/ @ROCm/rocroller-developers
 /shared/rocroller/ @ROCm/rocroller-developers
 /shared/tensile/ @babakpst @yoichiyoshida @bragadeesh @AlexBrownAMD @nakajee
