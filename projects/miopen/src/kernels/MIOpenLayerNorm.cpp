@@ -33,30 +33,31 @@
 
 using load_t = int4;
 
-template<typename T, size_t n>
+template <typename T, size_t n>
 struct array
 {
     T data[n];
 };
 
-template<typename T, bool contiguous = false, bool use_default = false>
+template <typename T, bool contiguous = false, bool use_default = false>
 struct loader
 {
     static const auto load_factor = sizeof(load_t) / sizeof(T);
-    using vec_t = array<T, load_factor>;
-    __device__ static auto load(uint64_t i, const T* __restrict__ src, const FLOAT default_value = CVT_FP32_2FLOAT(0.0f))
+    using vec_t                   = array<T, load_factor>;
+    __device__ static auto
+    load(uint64_t i, const T* __restrict__ src, const FLOAT default_value = CVT_FP32_2FLOAT(0.0f))
     {
         const unsigned int gid = blockIdx.x;
         const uint64_t o       = gid / STRIDE;
         const uint64_t s       = gid % STRIDE;
-        int lid                = threadIdx.x; // Cannot be unsigned or it will not work for some reason
+        int lid = threadIdx.x;        // Cannot be unsigned or it will not work for some reason
         asm volatile("" : "+v"(lid)); // Due to compiler bug of unknown cause
         // const unsigned int lid = threadIdx.x;
         const auto j = i + lid * load_factor;
         if(!use_default && (STRIDE == 1 || contiguous) && j + load_factor < INNER_SIZE)
         {
-            const size_t idx = o * INNER_SIZE * STRIDE + j * STRIDE + s;
-            const auto value = *reinterpret_cast<const load_t*>(&src[contiguous ? j : idx]);
+            const size_t idx  = o * INNER_SIZE * STRIDE + j * STRIDE + s;
+            const auto value  = *reinterpret_cast<const load_t*>(&src[contiguous ? j : idx]);
             const auto values = *reinterpret_cast<const vec_t*>(&value);
 
             return values;
@@ -64,14 +65,15 @@ struct loader
         else
         {
             vec_t values = {{}};
-            #pragma unroll
+#pragma unroll
             for(int k = 0; k < load_factor; ++k)
             {
                 if(j + k < INNER_SIZE)
                 {
                     size_t idx = o * INNER_SIZE * STRIDE + (j + k) * STRIDE + s;
 
-                    values.data[k] = use_default ? static_cast<T>(default_value) : src[contiguous ? j + k : idx];
+                    values.data[k] =
+                        use_default ? static_cast<T>(default_value) : src[contiguous ? j + k : idx];
                 }
             }
             return values;
@@ -79,7 +81,7 @@ struct loader
     }
 };
 
-template<typename TI, typename TO>
+template <typename TI, typename TO>
 struct storer
 {
     __device__ static auto store(uint64_t i, TO* __restrict__ dst, loader<TI>::vec_t& data)
@@ -93,12 +95,12 @@ struct storer
         {
             const size_t idx = o * INNER_SIZE * STRIDE + j * STRIDE + s;
 
-            const auto value = *reinterpret_cast<load_t*>(&data);
+            const auto value                      = *reinterpret_cast<load_t*>(&data);
             *reinterpret_cast<load_t*>(&dst[idx]) = value;
         }
         else
         {
-            #pragma unroll
+#pragma unroll
             for(size_t k = 0; k < loader<TI>::load_factor; ++k)
             {
                 if(j + k < INNER_SIZE)
@@ -147,13 +149,13 @@ __device__ void layernormfwd(const TI* __restrict__ x,
 
     // reduce sum for mean and var
     uint64_t i = 0;
-    auto tmpx = loader<TI>::load(i, x);
+    auto tmpx  = loader<TI>::load(i, x);
     i += LOCAL_SIZE * loader<TI>::load_factor;
     for(; i < INNER_SIZE; i += LOCAL_SIZE * loader<TI>::load_factor)
     {
         auto tmp = loader<TI>::load(i, x);
         __builtin_amdgcn_sched_barrier(0);
-        #pragma unroll
+#pragma unroll
         for(int k = 0; k < loader<TI>::load_factor; ++k)
         {
             FLOAT_ACCUM px = CVT_FLOAT2ACCUM(tmpx.data[k]);
@@ -166,7 +168,7 @@ __device__ void layernormfwd(const TI* __restrict__ x,
         __builtin_amdgcn_sched_barrier(0);
         tmpx = tmp;
     }
-    #pragma unroll
+#pragma unroll
     for(int k = 0; k < loader<TI>::load_factor; ++k)
     {
         FLOAT_ACCUM px = CVT_FLOAT2ACCUM(tmpx.data[k]);
@@ -204,12 +206,14 @@ __device__ void layernormfwd(const TI* __restrict__ x,
         if(rstd)
             rstd[gid] = CVT_ACCUM2FLOAT(prstd);
     }
-    
+
     // forward calculation
-    i              = 0;
-    tmpx           = loader<TI>::load(i, x);
-    auto tmpweight = loader<TI, true, MODE == MIOPEN_ELEMENTWISE_AFFINE>::load(i, weight, CVT_FP32_2FLOAT(1.0f));
-    auto tmpbias   = loader<TI, true, MODE == MIOPEN_ELEMENTWISE_AFFINE>::load(i, bias, CVT_FP32_2FLOAT(0.0f));
+    i    = 0;
+    tmpx = loader<TI>::load(i, x);
+    auto tmpweight =
+        loader<TI, true, MODE == MIOPEN_ELEMENTWISE_AFFINE>::load(i, weight, CVT_FP32_2FLOAT(1.0f));
+    auto tmpbias =
+        loader<TI, true, MODE == MIOPEN_ELEMENTWISE_AFFINE>::load(i, bias, CVT_FP32_2FLOAT(0.0f));
     typename loader<TI>::vec_t tmpy = {{}};
     i += LOCAL_SIZE * loader<TI>::load_factor;
     for(; i < INNER_SIZE; i += LOCAL_SIZE * loader<TI>::load_factor)
@@ -219,7 +223,7 @@ __device__ void layernormfwd(const TI* __restrict__ x,
         auto tmp3 = loader<TI, true, MODE == MIOPEN_ELEMENTWISE_AFFINE>::load(i, bias, 0);
         typename loader<TI>::vec_t tmp4 = {{}};
         __builtin_amdgcn_sched_barrier(0);
-        #pragma unroll
+#pragma unroll
         for(size_t k = 0; k < loader<TI>::load_factor; ++k)
         {
             FLOAT_ACCUM px      = CVT_FLOAT2ACCUM(tmpx.data[k]);
@@ -236,7 +240,7 @@ __device__ void layernormfwd(const TI* __restrict__ x,
         storer<TI, TO>::store(i - LOCAL_SIZE * loader<TI>::load_factor, y, tmpy);
     }
     tmpy = {{}};
-    #pragma unroll
+#pragma unroll
     for(size_t k = 0; k < loader<TI>::load_factor; ++k)
     {
         FLOAT_ACCUM px      = CVT_FLOAT2ACCUM(tmpx.data[k]);
@@ -256,35 +260,57 @@ __device__ void layernormbwd(const TI* __restrict__ dy,
                              const TI* __restrict__ rstd,
                              TO* __restrict__ dx)
 {
-    const uint64_t gid = blockIdx.x;
-    const uint64_t lid = threadIdx.x;
-    const uint64_t o   = gid / STRIDE;
-    const uint64_t s   = gid % STRIDE;
-
-    __shared__ FLOAT_ACCUM ltmp1[LOCAL_SIZE];
-    __shared__ FLOAT_ACCUM ltmp2[LOCAL_SIZE];
-    FLOAT_ACCUM sum_dy_weight   = 0;
-    FLOAT_ACCUM sum_dy_weight_x = 0;
+    FLOAT_ACCUM sum_dy_weight   = static_cast<FLOAT_ACCUM>(0);
+    FLOAT_ACCUM sum_dy_weight_x = static_cast<FLOAT_ACCUM>(0);
 
     // Reduce sums
     if(dy)
     {
-        for(uint64_t i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
+        uint64_t i     = 0;
+        auto tmpdy     = loader<TI>::load(i, dy);
+        auto tmpweight = loader<TI, true, MODE == MIOPEN_ELEMENTWISE_AFFINE>::load(
+            i, weight, CVT_FP32_2FLOAT(1.0f));
+        auto tmpx = loader<TI>::load(i, x);
+        i += LOCAL_SIZE * loader<TI>::load_factor;
+        for(; i < INNER_SIZE; i += LOCAL_SIZE * loader<TI>::load_factor)
         {
-            size_t x_idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
+            auto tmp1 = loader<TI>::load(i, dy);
+            auto tmp2 = loader<TI, true, MODE == MIOPEN_ELEMENTWISE_AFFINE>::load(
+                i, weight, CVT_FP32_2FLOAT(1.0f));
+            auto tmp3 = loader<TI>::load(i, x);
+            __builtin_amdgcn_sched_barrier(0);
+#pragma unroll
+            for(size_t k = 0; k < loader<TI>::load_factor; ++k)
+            {
+                FLOAT_ACCUM pdy     = CVT_FLOAT2ACCUM(tmpdy.data[k]);
+                FLOAT_ACCUM pweight = CVT_FLOAT2ACCUM(tmpweight.data[k]);
+                FLOAT_ACCUM px      = CVT_FLOAT2ACCUM(tmpx.data[k]);
 
-            FLOAT_ACCUM pdy_pweight =
-                CVT_FLOAT2ACCUM(dy[x_idx]) * ((MODE == MIOPEN_ELEMENTWISE_AFFINE)
-                                                  ? CVT_FP32_2ACCUM(1.0f)
-                                                  : CVT_FLOAT2ACCUM(weight[i]));
+                sum_dy_weight += pdy * pweight;
+                sum_dy_weight_x += pdy * pweight * px;
+            }
+            __builtin_amdgcn_sched_barrier(0);
+            tmpdy     = tmp1;
+            tmpweight = tmp2;
+            tmpx      = tmp3;
+        }
+#pragma unroll
+        for(size_t k = 0; k < loader<TI>::load_factor; ++k)
+        {
+            FLOAT_ACCUM pdy     = CVT_FLOAT2ACCUM(tmpdy.data[k]);
+            FLOAT_ACCUM pweight = CVT_FLOAT2ACCUM(tmpweight.data[k]);
+            FLOAT_ACCUM px      = CVT_FLOAT2ACCUM(tmpx.data[k]);
 
-            sum_dy_weight += pdy_pweight;
-            sum_dy_weight_x += pdy_pweight * CVT_FLOAT2ACCUM(x[x_idx]);
+            sum_dy_weight += pdy * pweight;
+            sum_dy_weight_x += pdy * pweight * px;
         }
     }
 
-    ltmp1[lid] = sum_dy_weight;
-    ltmp2[lid] = sum_dy_weight_x;
+    __shared__ FLOAT_ACCUM ltmp1[LOCAL_SIZE];
+    __shared__ FLOAT_ACCUM ltmp2[LOCAL_SIZE];
+    const uint64_t lid = threadIdx.x;
+    ltmp1[lid]         = sum_dy_weight;
+    ltmp2[lid]         = sum_dy_weight_x;
     __syncthreads();
     for(uint32_t i = LOCAL_SIZE >> 1; i > 0; i >>= 1)
     {
@@ -296,26 +322,58 @@ __device__ void layernormbwd(const TI* __restrict__ dy,
         __syncthreads();
     }
 
-    sum_dy_weight     = ltmp1[0];
-    sum_dy_weight_x   = ltmp2[0];
-    FLOAT_ACCUM scale = 1.0f / INNER_SIZE;
-    FLOAT_ACCUM prstd = CVT_FLOAT2ACCUM(rstd[gid]);
-    FLOAT_ACCUM pmean = CVT_FLOAT2ACCUM(mean[gid]);
-    FLOAT_ACCUM a     = prstd * prstd * prstd * scale * (sum_dy_weight_x - sum_dy_weight * pmean);
-    FLOAT_ACCUM b     = prstd * sum_dy_weight * scale - a * pmean;
+    const uint64_t gid = blockIdx.x;
+    sum_dy_weight      = ltmp1[0];
+    sum_dy_weight_x    = ltmp2[0];
+    FLOAT_ACCUM scale  = 1.0f / INNER_SIZE;
+    FLOAT_ACCUM prstd  = CVT_FLOAT2ACCUM(rstd[gid]);
+    FLOAT_ACCUM pmean  = CVT_FLOAT2ACCUM(mean[gid]);
+    FLOAT_ACCUM a      = prstd * prstd * prstd * scale * (sum_dy_weight_x - sum_dy_weight * pmean);
+    FLOAT_ACCUM b      = prstd * sum_dy_weight * scale - a * pmean;
 
     // Backward calculation
-    for(uint64_t i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
+    uint64_t i = 0;
+    auto tmpdy = loader<TI>::load(i, dy);
+    auto tmpweight =
+        loader<TI, true, MODE == MIOPEN_ELEMENTWISE_AFFINE>::load(i, weight, CVT_FP32_2FLOAT(1.0f));
+    auto tmpx                        = loader<TI>::load(i, x);
+    typename loader<TI>::vec_t tmpdx = {{}};
+    i += LOCAL_SIZE * loader<TI>::load_factor;
+    for(; i < INNER_SIZE; i += LOCAL_SIZE * loader<TI>::load_factor)
     {
-        size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
+        auto tmp1 = loader<TI>::load(i, dy);
+        auto tmp2 = loader<TI, true, MODE == MIOPEN_ELEMENTWISE_AFFINE>::load(
+            i, weight, CVT_FP32_2FLOAT(1.0f));
+        auto tmp3                       = loader<TI>::load(i, x);
+        typename loader<TI>::vec_t tmp4 = {{}};
+        __builtin_amdgcn_sched_barrier(0);
+#pragma unroll
+        for(size_t k = 0; k < loader<TI>::load_factor; ++k)
+        {
+            FLOAT_ACCUM pdy     = CVT_FLOAT2ACCUM(tmpdy.data[k]);
+            FLOAT_ACCUM pweight = CVT_FLOAT2ACCUM(tmpweight.data[k]);
+            FLOAT_ACCUM px      = CVT_FLOAT2ACCUM(tmpx.data[k]);
 
-        FLOAT_ACCUM pdy     = dy ? CVT_FLOAT2ACCUM(dy[idx]) : 0;
-        FLOAT_ACCUM pweight = (MODE == MIOPEN_ELEMENTWISE_AFFINE) ? CVT_FP32_2ACCUM(1.0f)
-                                                                  : CVT_FLOAT2ACCUM(weight[i]);
-
-        FLOAT_ACCUM val = prstd * pdy * pweight - a * CVT_FLOAT2ACCUM(x[idx]) - b;
-        dx[idx]         = CVT_ACCUM2FLOAT(val);
+            tmp4.data[k] = CVT_ACCUM2FLOAT(prstd * pdy * pweight - a * px - b);
+        }
+        __builtin_amdgcn_sched_barrier(0);
+        tmpdy     = tmp1;
+        tmpweight = tmp2;
+        tmpx      = tmp3;
+        tmpdx     = tmp4;
+        storer<TI, TO>::store(i - LOCAL_SIZE * loader<TI>::load_factor, dx, tmpdx);
     }
+    tmpdx = {{}};
+#pragma unroll
+    for(size_t k = 0; k < loader<TI>::load_factor; ++k)
+    {
+        FLOAT_ACCUM pdy     = CVT_FLOAT2ACCUM(tmpdy.data[k]);
+        FLOAT_ACCUM pweight = CVT_FLOAT2ACCUM(tmpweight.data[k]);
+        FLOAT_ACCUM px      = CVT_FLOAT2ACCUM(tmpx.data[k]);
+
+        tmpdx.data[k] = CVT_ACCUM2FLOAT(prstd * pdy * pweight - a * px - b);
+    }
+    storer<TI, TO>::store(i - LOCAL_SIZE * loader<TI>::load_factor, dx, tmpdx);
 }
 
 template <typename TI, typename TO>
