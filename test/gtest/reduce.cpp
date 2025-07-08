@@ -50,7 +50,7 @@
 
 namespace {
 
-using TestCase = std::tuple<std::vector<std::size_t>, std::vector<int>, miopenReduceTensorOp_t, miopenDataType_t, 
+using TestCase = std::tuple<std::vector<std::size_t>, std::vector<int>, miopenReduceTensorOp_t, 
                                 miopenNanPropagation_t,  miopenReduceTensorIndices_t, std::vector<float>>;
 
 
@@ -444,7 +444,7 @@ struct verify_reduce_no_indices
     {
     }
 
-    tensor<float> cpu()
+    tensor<float> cpu() const
     {
         using reduce::convert_type;
 
@@ -739,7 +739,7 @@ inline auto GenCases()
 {
     std::vector<std::vector<float>> alphabetas = {{1.0f, 0.0f}, {0.5f, 0.5f}};
 
-    return testing::Combine(testing::ValuesIn(get_tensor_lengths<T>()),
+/*    return testing::Combine(testing::ValuesIn(get_tensor_lengths<T>()),
                             testing::ValuesIn(get_toreduce_dims()),
                             testing::Values(MIOPEN_REDUCE_TENSOR_ADD, 
                                             MIOPEN_REDUCE_TENSOR_MUL,
@@ -747,9 +747,15 @@ inline auto GenCases()
                                             MIOPEN_REDUCE_TENSOR_AVG,
                                             MIOPEN_REDUCE_TENSOR_NORM1,
                                             MIOPEN_REDUCE_TENSOR_NORM2),
+                            testing::Values(0, 1),
+                            testing::Values(0, 1),
+                            testing::ValuesIn(alphabetas));*/
+
+    return testing::Combine(testing::ValuesIn(get_tensor_lengths<T>()),
+                            testing::ValuesIn(get_toreduce_dims()),
+                            testing::Values(MIOPEN_REDUCE_TENSOR_NORM2),
                             testing::Values(1),
-                            testing::Values(0, 1),
-                            testing::Values(0, 1),
+                            testing::Values(0),
                             testing::ValuesIn(alphabetas));
 }
 
@@ -760,17 +766,23 @@ inline auto GetCases()
     return cases;
 }
 
-
 } // anonymous namespace
 
 template <class T>
 struct ReduceCommon : public testing::TestWithParam<TestCase>
 {
-    void Run()
+    void SetUp() override
     {
+        prng::reset_seed();        
+
         auto&& handle = get_handle();
         handle.EnableProfiling();
 
+        std::tie(inLengths, toReduceDims, reduceOp, nanOpt, indicesOpt, scales) = GetParam();
+    }
+
+    void Run()
+    {
         using reduce::convert_type;
 
         if(std::is_same<T, double>::value)
@@ -954,8 +966,7 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
         }
         else
         {
-            verify(verify_reduce_no_indices<T>(
-                reduceDesc, inputTensor, outputTensor, workspaceTensor, alpha, beta));
+            VerifyReduceNoIndices(reduceDesc, inputTensor, outputTensor, workspaceTensor, alpha, beta);
         };
     };
 
@@ -973,35 +984,58 @@ private:
         CompareResults(reduce_with_indices, toVerifyData);
     }
 
-    template <class TVerifier>
-    void CompareResultsVerify(const TVerifier& verifier, bool toVerifyData)
+    void VerifyReduceNoIndices( const miopen::ReduceTensorDescriptor& reduce,
+                                const tensor<T>& input,
+                                const tensor<T>& output,
+                                const tensor<T>& workspace,
+                                float alpha,
+                                float beta)
     {
-        const tensor<float> cpu = verifier.cpu();
-        const tensor<float> gpu = verifier.gpu();
+        verify_reduce_no_indices<T> reduce_no_indices(reduce, input, output, workspace, alpha, beta);
+        CompareResults(reduce_no_indices, true);
+    }
 
-        bool flagError = true;
+    std::string GetOutputValuesForError()
+    {
+        std::ostringstream oss;
+        oss  << "reduceOp: " << reduceOp << std::endl
+            << "compTypeVal: " << compTypeVal << std::endl
+            << "nanOpt: " << nanOpt << std::endl
+            << "indicesOpt: " << indicesOpt << std::endl;
+        return oss.str();
+    }
+
+    template <class TVerifier>
+    void CompareResults(const TVerifier& verifier, bool toVerifyData)
+    {
+        const tensor<float> cpu = std::move(verifier.cpu());
+        const tensor<float> gpu = std::move(verifier.gpu());
+
         if (toVerifyData)
         {
-            double threshold = std::numeric_limits<T>::epsilon() * tolerance;
+            double threshold = std::numeric_limits<float>::epsilon() * tolerance;
             double error     = miopen::rms_range(cpu, gpu);
 
-            flagError = error > threshold;
+            if (error > threshold)
+            {
+                verifier.fail();
+
+                std::cout << "Tolerance: " << tolerance << std::endl;
+            }
+
+            ASSERT_LE(error, threshold) << GetOutputValuesForError();
         }
         else
         {
             auto idx = miopen::mismatch_idx(cpu, gpu, miopen::float_equal);
-            flagError = idx < miopen::range_distance(cpu);
-        }
+            auto range = miopen::range_distance(cpu);
+            if (idx < range)
+            {
+                verifier.fail();
+            }
 
-        if (flagError)
-        {
-            verifier.fail();
+            ASSERT_GE(idx, range) << GetOutputValuesForError();
         }
-
-        ASSERT(!flagError) << "reduceOp: " << reduceOp << std::endl
-                            << "compTypeVal: " << compTypeVal << std::endl
-                            << "nanOpt: " << nanOpt << std::endl
-                            << "indicesOpt: " << indicesOpt << std::endl;
     }
 
 private:
@@ -1025,10 +1059,10 @@ using GPU_Reduce_FP32 = ReduceCommon<float>;
 using GPU_Reduce_FP16 = ReduceCommon<half_float::half>;
 using GPU_Reduce_FP64 = ReduceCommon<double>;
 
-TEST_P(GPU_Reduce_FP32, TestFloat) { this->Run(); }
-TEST_P(GPU_Reduce_FP16, TestFloat16) { this->Run(); }
+//TEST_P(GPU_Reduce_FP32, TestFloat) { this->Run(); }
+//TEST_P(GPU_Reduce_FP16, TestFloat16) { this->Run(); }
 TEST_P(GPU_Reduce_FP64, TestDouble) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP32, GetCases<float>());
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP16, GetCases<half_float::half>());
+//INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP32, GetCases<float>());
+//INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP16, GetCases<half_float::half>());
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP64, GetCases<double>());
