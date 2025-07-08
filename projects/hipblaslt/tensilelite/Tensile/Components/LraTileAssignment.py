@@ -164,7 +164,7 @@ class LraTileAssignmentTransposedMFMA(LraTileAssignment):
         tile01           = tP["tile01Idx"]
         waveWidth        = writer.states.kernel["WavefrontSize"]
         #FIXME: tail loop with transposed load b128
-        inputPerThread   = kernel["LocalReadVectorWidth"]
+        inputPerThread   = kernel[f"LocalReadVectorWidth{tc}"]
 
         isSparseDenseMatrix = False
         if kernel["ProblemType"]["Sparse"]:
@@ -310,7 +310,7 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
         tile01           = tP["tile01Idx"]
         waveWidth        = writer.states.kernel["WavefrontSize"]
         #FIXME: tail loop with transposed load b128
-        inputPerThread   = kernel["LocalReadVectorWidth"]
+        inputPerThread   = kernel[f"LocalReadVectorWidth{tc}"]
 
         isSparseDenseMatrix = False
         if kernel["ProblemType"]["Sparse"]:
@@ -423,7 +423,8 @@ class LraTileAssignmentTransposedMFMA_FP8(LraTileAssignmentTransposedMFMAB8):
               "DirectToVgprA": False,
               "DirectToVgprB": False,
               "ProblemType": {
-                  "DataType": DataType("F8")
+                  "DataType": DataType("F8"),
+                  "isMixMode": False,
               }}
     asmCaps = {
         "HasLDSTrB64B8": True
@@ -434,7 +435,8 @@ class LraTileAssignmentTransposedMFMA_BF8(LraTileAssignmentTransposedMFMA_FP8):
               "DirectToVgprA": False,
               "DirectToVgprB": False,
               "ProblemType": {
-                  "DataType": DataType("B8")
+                  "DataType": DataType("B8"),
+                  "isMixMode": False,
               }}
     asmCaps = {
         "HasLDSTrB64B8": True
@@ -445,7 +447,8 @@ class LraTileAssignmentTransposedMFMA_FP8BF8(LraTileAssignmentTransposedMFMA_FP8
               "DirectToVgprA": False,
               "DirectToVgprB": False,
               "ProblemType": {
-                  "DataType": DataType("F8B8")
+                  "DataType": DataType("F8B8"),
+                  "isMixMode": False,
               }}
     asmCaps = {
         "HasLDSTrB64B8": True
@@ -456,18 +459,50 @@ class LraTileAssignmentTransposedMFMA_BF8FP8(LraTileAssignmentTransposedMFMA_FP8
               "DirectToVgprA": False,
               "DirectToVgprB": False,
               "ProblemType": {
-                  "DataType": DataType("B8F8")
+                  "DataType": DataType("B8F8"),
+                  "isMixMode": False,
               }}
     asmCaps = {
         "HasLDSTrB64B8": True
     }
+      
+class LraTileAssignmentTransposedMFMAMixMode(LraTileAssignmentTransposedMFMAB8):
+    kernel = {"EnableMatrixInstruction": True,
+              "DirectToVgprA": False,
+              "DirectToVgprB": False,
+              "ProblemType": {
+                  "isMixMode": True,
+              }}
+    asmCaps = {
+        "HasLDSTrB64B8": True,
+        "HasLDSTrB64B4": True,
+        "HasLDSTrB96B6": True,
+    }
+    def __call__(self, writer, kernel, tP):
+        # TODO: check correctness of this condition
+        MacDataType = f"MacDataType{tP["tensorChar"]}" if(tP["tensorChar"]=="A" or tP["tensorChar"]=="B") else "DataType"
+        if not tP["enableLDSTr"]:
+            comp = LraTileAssignmentMFMA()
+            return comp(writer, kernel, tP)
+        if kernel["ProblemType"][MacDataType].numBytes() == 0.5:
+            comp = LraTileAssignmentTransposedMFMAF4()
+            return comp(writer, kernel, tP)
+        if kernel["ProblemType"][MacDataType].numBytes() == 0.75:
+            comp = LraTileAssignmentTransposedMFMAF6()
+            return comp(writer, kernel, tP)
+        if kernel["ProblemType"][MacDataType].numBytes() == 1:
+            comp = LraTileAssignmentTransposedMFMAB8()
+            return comp(writer, kernel, tP)
+        comp = LraTileAssignmentTransposedMFMAB8()
+        return comp(writer, kernel, tP)
 
 class LraTileAssignmentTransposedMFMAF4(LraTileAssignmentTransposedMFMA):
     kernel = {"EnableMatrixInstruction": True,
               "DirectToVgprA": False,
               "DirectToVgprB": False,
               "ProblemType": {
-                  "DataType": DataType("F4")
+                  "DataType": DataType("F4"),
+                  "isMixMode": False,
               }}
     asmCaps = {
         "HasLDSTrB64B4": True
@@ -501,7 +536,7 @@ class LraTileAssignmentTransposedMFMAF4(LraTileAssignmentTransposedMFMA):
         tile01           = tP["tile01Idx"]
         waveWidth        = writer.states.kernel["WavefrontSize"]
         #FIXME: tail loop with transposed load b128
-        inputPerThread   = kernel["LocalReadVectorWidth"]
+        inputPerThread   = kernel[f"LocalReadVectorWidth{tc}"]
 
         if kernel["ProblemType"]["Sparse"]:
           if (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and  tP["isA"]):
@@ -576,7 +611,8 @@ class LraTileAssignmentTransposedMFMAF6(LraTileAssignmentTransposedMFMA):
               "DirectToVgprA": False,
               "DirectToVgprB": False,
               "ProblemType": {
-                  "DataType": DataType("F6")
+                  "DataType": DataType("F6"),
+                  "isMixMode": False,
               }}
     asmCaps = {
         "HasLDSTrB96B6": True
@@ -610,7 +646,7 @@ class LraTileAssignmentTransposedMFMAF6(LraTileAssignmentTransposedMFMA):
         tile01           = tP["tile01Idx"]
         waveWidth        = writer.states.kernel["WavefrontSize"]
         #FIXME: tail loop with transposed load b128
-        inputPerThread   = kernel["LocalReadVectorWidth"]
+        inputPerThread   = kernel[f"LocalReadVectorWidth{tc}"]
 
         if kernel["ProblemType"]["Sparse"]:
           if (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and  tP["isA"]):
@@ -682,7 +718,8 @@ class LraTileAssignmentTransposedMFMAB6(LraTileAssignmentTransposedMFMAF6):
               "DirectToVgprA": False,
               "DirectToVgprB": False,
               "ProblemType": {
-                  "DataType": DataType("B6")
+                  "DataType": DataType("B6"),
+                  "isMixMode": False,
               }}
     asmCaps = {
         "HasLDSTrB96B6": True
@@ -731,7 +768,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         tc               = tP["tensorChar"]
         tile01           = tP["tile01Idx"]
         waveWidth        = writer.states.kernel["WavefrontSize"]
-        lrvw             = kernel["LocalReadVectorWidthMXS"] if ("MXS" in tc) else kernel["LocalReadVectorWidth"]
+        lrvw             = kernel["LocalReadVectorWidthMXS"] if ("MXS" in tc) else kernel[f"LocalReadVectorWidth{tc}"]
         inputPerThread   = lrvw if not writer.states.inTailLoop else kernel["MIInputPerThread%s"%tc]
         if kernel["ProblemType"]["Sparse"]:
           if (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]):

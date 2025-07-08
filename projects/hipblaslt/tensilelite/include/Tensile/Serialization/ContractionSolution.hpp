@@ -180,7 +180,8 @@ namespace TensileLite
                 iot::mapRequired(io, "cType", s.cType);
                 iot::mapRequired(io, "dType", s.dType);
                 iot::mapOptional(io, "eType", s.eType);
-                iot::mapRequired(io, "computeInputType", s.computeInputType);
+                iot::mapRequired(io, "computeInputTypeA", s.computeInputTypeA);
+                iot::mapRequired(io, "computeInputTypeB", s.computeInputTypeB);
                 iot::mapRequired(io, "computeType", s.computeType);
                 iot::mapOptional(io, "useGradient", s.useGradient);
                 iot::mapRequired(io, "useBeta", s.useBeta);

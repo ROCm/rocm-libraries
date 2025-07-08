@@ -152,7 +152,7 @@ class DataType:
         {   # NANOO E4M3
             'enum': DataTypeEnum.Float8_fnuz,
             'char': 'F8N',
-            'nameAbbrev': 'fp8_fp8',               # to match v_mfma inst
+            'nameAbbrev': 'fp8',               # to match v_mfma inst
             'miOutTypeNameAbbrev': 'f32',
             'reg': 0.25,
             'hip': 'tensile_float8_fnuz',
@@ -161,7 +161,7 @@ class DataType:
         {   # NANOO E5M2
             'enum': DataTypeEnum.BFloat8_fnuz,
             'char': 'B8N',
-            'nameAbbrev': 'bf8_bf8',               # to match v_mfma inst
+            'nameAbbrev': 'bf8',               # to match v_mfma inst
             'miOutTypeNameAbbrev': 'f32',
             'reg': 0.25,
             'hip': 'tensile_bfloat8_fnuz',
@@ -188,7 +188,7 @@ class DataType:
         {   # OCP E4M3
             'enum': DataTypeEnum.Float8,
             'char': 'F8',
-            'nameAbbrev': 'fp8_fp8',               # to match v_mfma inst
+            'nameAbbrev': 'fp8',               # to match v_mfma inst
             'miOutTypeNameAbbrev': 'f32',
             'reg': 0.25,
             'hip': 'tensile_float8',
@@ -197,7 +197,7 @@ class DataType:
         {   # OCP E5M2
             'enum': DataTypeEnum.BFloat8,
             'char': 'B8',
-            'nameAbbrev': 'bf8_bf8',               # to match v_mfma inst
+            'nameAbbrev': 'bf8',               # to match v_mfma inst
             'miOutTypeNameAbbrev': 'f32',
             'reg': 0.25,
             'hip': 'tensile_bfloat8',
@@ -224,7 +224,7 @@ class DataType:
         {
             'enum': DataTypeEnum.Float6,
             'char': 'F6',
-            'nameAbbrev': 'fp6_fp6',
+            'nameAbbrev': 'fp6',
             'miOutTypeNameAbbrev': 'f32',
             'reg': 0.1875,
             'hip': 'tensile_Float6x16',
@@ -233,7 +233,7 @@ class DataType:
         {
             'enum': DataTypeEnum.BFloat6,
             'char': 'B6',
-            'nameAbbrev': 'bf6_bf6',
+            'nameAbbrev': 'bf6',
             'miOutTypeNameAbbrev': 'f32',
             'reg': 0.1875,
             'hip': 'tensile_bFloat6x16',
@@ -242,7 +242,7 @@ class DataType:
         {
             'enum': DataTypeEnum.Float4,
             'char': 'F4',
-            'nameAbbrev': 'fp4_fp4',
+            'nameAbbrev': 'fp4',
             'miOutTypeNameAbbrev': 'f32',
             'reg': 0.125,
             'hip': 'tensile_float4x2',

@@ -246,14 +246,24 @@ namespace TensileLite
             return m_f32XdlMathOp;
         }
 
-        void setComputeInputType(rocisa::DataType value)
+        void setComputeInputTypeA(rocisa::DataType value)
         {
-            m_computeInputType = value;
+            m_computeInputTypeA = value;
         }
 
-        rocisa::DataType computeInputType() const
+        rocisa::DataType computeInputTypeA() const
         {
-            return m_computeInputType;
+            return m_computeInputTypeA;
+        }
+
+        void setComputeInputTypeB(rocisa::DataType value)
+        {
+            m_computeInputTypeB = value;
+        }
+
+        rocisa::DataType computeInputTypeB() const
+        {
+            return m_computeInputTypeB;
         }
 
         void setUseDeviceUserArguments(bool use)
@@ -275,7 +285,8 @@ namespace TensileLite
         size_t m_workspaceSizeGroupedGemm = std::numeric_limits<size_t>::max();
 
         rocisa::DataType m_f32XdlMathOp;
-        rocisa::DataType m_computeInputType;
+        rocisa::DataType m_computeInputTypeA;
+        rocisa::DataType m_computeInputTypeB;
 
         bool m_useDeviceUserArguments = false;
     };
@@ -1291,7 +1302,8 @@ namespace TensileLite
                                  rocisa::DataType               typeD,
                                  rocisa::DataType               typeAlpha,
                                  rocisa::DataType               typeBeta,
-                                 rocisa::DataType               typeComputeInput,
+                                 rocisa::DataType               typeComputeInputA,
+                                 rocisa::DataType               typeComputeInputB,
                                  rocisa::DataType               typeCompute,
                                  double                         alpha,
                                  double                         beta,

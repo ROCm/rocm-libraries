@@ -3408,7 +3408,7 @@ namespace TensileLite
                 .batch    = batch,
                 .a_dtype  = datatypeToAnalyticalDatatype(problem.alphaType()),
                 .b_dtype  = datatypeToAnalyticalDatatype(problem.betaType()),
-                .mi_dtype = datatypeToAnalyticalDatatype(problem.computeInputType()),
+                .mi_dtype = datatypeToAnalyticalDatatype(problem.computeInputTypeA()),
             };
             origami::config_t origami_config = {
                 .mt                        = {static_cast<size_t>(sizeMapping.macroTile.x),

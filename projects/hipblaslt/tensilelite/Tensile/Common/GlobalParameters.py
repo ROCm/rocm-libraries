@@ -367,6 +367,8 @@ defaultBenchmarkCommonParameters = [
     {"GlobalReadVectorWidthA": [-1]},
     {"GlobalReadVectorWidthB": [-1]},
     {"LocalReadVectorWidth": [-1]},
+    {"LocalReadVectorWidthA": [-1]},
+    {"LocalReadVectorWidthB": [-1]},
     {"WaveSeparateGlobalReadA": [0]},
     {"WaveSeparateGlobalReadB": [0]},
     {"WaveSeparateGlobalReadMetadata": [0]},

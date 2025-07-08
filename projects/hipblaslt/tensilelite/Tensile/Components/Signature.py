@@ -64,34 +64,17 @@ class UserArgumentsInfo:
 
 def getSrcValueType(kernel, isTypeA):
     # special cases for F8 datatypes
-    if kernel["ProblemType"]["DataType"].isAnyFloat8():
+    tc='A' if isTypeA else 'B'
+    if kernel["ProblemType"]["MacDataType%s"%tc].isAnyFloat8():
         srcValueType = "FP8"
-    elif kernel["ProblemType"]["DataType"].isAnyBFloat8():
+    elif kernel["ProblemType"]["MacDataType%s"%tc].isAnyBFloat8():
         srcValueType = "BF8"
-    elif kernel["ProblemType"]["DataType"].isAnyFloat8BFloat8():
-        srcValueType = "FP8" if isTypeA else "BF8"
-    elif kernel["ProblemType"]["DataType"].isAnyBFloat8Float8():
-        srcValueType = "BF8" if isTypeA else "FP8"
     else:
-        if isTypeA:
-            srcValueType = kernel["ProblemType"]["DataTypeA"].toNameAbbrev().upper()
-        else:
-            srcValueType = kernel["ProblemType"]["DataTypeB"].toNameAbbrev().upper()
+        srcValueType = kernel["ProblemType"]["DataType%s"%tc].toNameAbbrev().upper()
 
     srcValueType = srcValueType.lower()
     return srcValueType
 
-def getDstValueType(kernel):
-    # special cases for F8 datatypes
-    if kernel["ProblemType"]["DataType"].isAnyFloat8():
-        dstValueType = "FP8"
-    elif kernel["ProblemType"]["DataType"].isAnyBFloat8():
-        dstValueType = "BF8"
-    else:
-        dstValueType = kernel["ProblemType"]["DataType"].toNameAbbrev().upper()
-
-    dstValueType = dstValueType.lower()
-    return dstValueType
 
 # Creates kernel header, compatible with code object version 4 and up. V2 and V3 no longer supported.
 class SignatureDefault(Signature):
@@ -104,7 +87,9 @@ class SignatureDefault(Signature):
         # kern arg size
         kernArgReg = 0
         kernArgReg += 3*writer.states.rpga
-        kernArgReg += max(1,int(writer.states.bpeAB/4)) # alpha
+        # TODO: Check correctness of the following
+        kernArgReg += max(1,int(writer.states.bpeA/4)) # alpha
+        # TODO: alpha and beta should be computeType
         if kernel["ProblemType"]["UseBeta"]:
             kernArgReg += max(1,int(writer.states.bpeCexternal/4)) # beta
         kernArgReg += kernel["ProblemType"]["NumIndicesC"] # strides

@@ -16,7 +16,7 @@ GlobalParameters:
   DataInitTypeD: 3
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
-  NumWarmups: 1
+  NumWarmups: 0
   EnqueuesPerSync: 1
   PrintWinnersOnly: False
   MinKForGSU: 1

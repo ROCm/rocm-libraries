@@ -1311,6 +1311,9 @@ std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Argum
         HIP_R_8F_E5M2,
         HIP_R_8F_E4M3_FNUZ,
         HIP_R_8F_E5M2_FNUZ,
+        static_cast<hipDataType>(HIP_R_6F_E2M3_EXT),
+        static_cast<hipDataType>(HIP_R_6F_E3M2_EXT),
+        static_cast<hipDataType>(HIP_R_4F_E2M1_EXT),
     };
 
     hipDataType real_compute_input_typeA = arg.compute_input_typeA;

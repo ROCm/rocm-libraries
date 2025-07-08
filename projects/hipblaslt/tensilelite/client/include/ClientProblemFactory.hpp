@@ -93,7 +93,8 @@ namespace TensileLite
             bool                             m_activationNoGuard;
             std::vector<ActivationType>      m_activationEnumArg;
             size_t                           m_maxWorkspaceSize = 0;
-            rocisa::DataType                 m_computeInputType;
+            rocisa::DataType                 m_computeInputTypeA;
+            rocisa::DataType                 m_computeInputTypeB;
             rocisa::DataType                 m_f32XdlMathOp;
             rocisa::DataType                 m_activationComputeType;
             std::vector<std::vector<size_t>> m_problemSizes;
