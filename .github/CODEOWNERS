@@ -30,4 +30,4 @@
 /projects/rocsparse/ @ntrost57 @YvanMokwinski @jsandham @kliegeois
 /shared/mxdatagenerator/ @ROCm/rocroller-developers
 /shared/rocroller/ @ROCm/rocroller-developers
-/shared/tensile/ @babakpst @yoichiyoshida @bragadeesh @AlexBrownAMD @nakajee
+/shared/tensile/ @babakpst @yoichiyoshida @bragadeesh @AlexBrownAMD @ellosel @bstefanuk
