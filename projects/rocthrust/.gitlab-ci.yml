@@ -228,6 +228,7 @@ build:windows:
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLE=OFF
       -D BUILD_BENCHMARK=OFF
+      -D CMAKE_TOOLCHAIN_FILE=$CI_PROJECT_DIR/toolchain-windows.cmake
       -D CMAKE_CXX_FLAGS=-Wno-deprecated-declarations
       -D CMAKE_CXX_COMPILER:FILEPATH="${env:HIP_PATH}/bin/clang++.exe"
       -D CMAKE_INSTALL_PREFIX:PATH="$CI_PROJECT_DIR/build/install"
@@ -378,6 +379,8 @@ test-bitwise-repro:
 
 .rocm-windows:test:
   extends:
+    - .deps:rocm-windows
+    - .deps:visual-studio-devshell
     - .gpus:rocm-windows
     - .rules:test
   stage: test
