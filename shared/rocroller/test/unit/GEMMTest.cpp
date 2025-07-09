@@ -1206,12 +1206,6 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamKSmall)
     {
-        // TODO: Update this when the bug is fixed.
-        if(m_context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize) == 1 << 16)
-        {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
-        }
-
         GEMMProblem gemm;
 
         hipDeviceProp_t deviceProperties;

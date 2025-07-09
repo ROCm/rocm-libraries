@@ -1868,7 +1868,7 @@ namespace rocRoller
             if(!m_context->registerTagManager()->hasRegister(ldsTag))
             {
                 ldsAllocation
-                    = Register::Value::AllocateLDS(m_context, varType, macrotileNumElements);
+                    = Register::Value::AllocateLDS(m_context, varType, macrotileNumElements / 2);
                 m_context->registerTagManager()->addRegister(ldsTag, ldsAllocation);
             }
             else
