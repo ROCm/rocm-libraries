@@ -76,7 +76,7 @@ def runTestCommand (platform, project)
 {
     String testExclude = platform.jenkinsLabel.contains('compile') ? '-LE GPU' : ''
 
-    def numThreads = platform.jenkinsLabel.contains('gfx12') ? "8" : "`nproc`"
+    def numThreads = 8
 
     def command = """#!/usr/bin/env bash
                 set -ex
