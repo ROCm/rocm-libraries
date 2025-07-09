@@ -372,7 +372,7 @@ struct get_default_limits<T, std::enable_if_t<std::is_floating_point<T>::value>>
 
 template <class T>
 inline auto get_random_data(size_t size, T, T, seed_type seed) ->
-  typename std::enable_if<std::is_same<T, bool>::value, thrust::host_vector<T>>::type
+  typename std::enable_if_t<std::is_same_v<T, bool>, thrust::host_vector<T>>
 {
   std::random_device rd;
   std::default_random_engine gen(rd());
@@ -385,9 +385,48 @@ inline auto get_random_data(size_t size, T, T, seed_type seed) ->
   return data;
 }
 
+#if defined(_MSC_VER)
 template <class T>
 inline auto get_random_data(size_t size, T min, T max, seed_type seed) ->
-  typename std::enable_if<rocprim::is_integral<T>::value && !std::is_same<T, bool>::value, thrust::host_vector<T>>::type
+  typename std::enable_if_t<std::is_same_v<T, signed char> || (std::is_same_v<T, char> && std::is_signed_v<char>),
+                            thrust::host_vector<T>>
+{
+  std::random_device rd;
+  std::default_random_engine gen(rd());
+  gen.seed(seed);
+  std::uniform_int_distribution<int> distribution(static_cast<int>(min), static_cast<int>(max));
+  thrust::host_vector<T> data(size);
+  std::generate(data.begin(), data.end(), [&]() {
+    return static_cast<T>(distribution(gen));
+  });
+  return data;
+}
+
+template <class T>
+inline auto get_random_data(size_t size, T min, T max, seed_type seed) ->
+  typename std::enable_if_t<std::is_same_v<T, unsigned char> || (std::is_same_v<T, char> && std::is_unsigned_v<char>),
+                            thrust::host_vector<T>>
+{
+  std::random_device rd;
+  std::default_random_engine gen(rd());
+  gen.seed(seed);
+  std::uniform_int_distribution<int> distribution(static_cast<unsigned int>(min), static_cast<unsigned int>(max));
+  thrust::host_vector<T> data(size);
+  std::generate(data.begin(), data.end(), [&]() {
+    return static_cast<T>(distribution(gen));
+  });
+  return data;
+}
+#endif
+
+template <class T>
+inline auto get_random_data(size_t size, T min, T max, seed_type seed) -> typename std::enable_if_t<
+  rocprim::is_integral<T>::value && !std::is_same_v<T, bool>
+#if defined(_MSC_VER)
+    && !std::is_same_v<T, signed char> && !std::is_same_v<T, unsigned char> && !std::is_same_v<T, char>
+#endif
+  ,
+  thrust::host_vector<T>>
 {
   std::random_device rd;
   std::default_random_engine gen(rd());
@@ -402,7 +441,7 @@ inline auto get_random_data(size_t size, T min, T max, seed_type seed) ->
 
 template <class T>
 inline auto get_random_data(size_t size, T min, T max, seed_type seed) ->
-  typename std::enable_if<rocprim::is_floating_point<T>::value, thrust::host_vector<T>>::type
+  typename std::enable_if_t<rocprim::is_floating_point<T>::value, thrust::host_vector<T>>
 {
   std::random_device rd;
   std::default_random_engine gen(rd());
@@ -414,38 +453,6 @@ inline auto get_random_data(size_t size, T min, T max, seed_type seed) ->
   });
   return data;
 }
-
-#if defined(_WIN32) && defined(__clang__)
-template <>
-inline thrust::host_vector<unsigned char>
-get_random_data(size_t size, unsigned char min, unsigned char max, seed_type seed_value)
-{
-  std::random_device rd;
-  std::default_random_engine gen(rd());
-  gen.seed(seed_value);
-  std::uniform_int_distribution<int> distribution(static_cast<unsigned int>(min), static_cast<unsigned int>(max));
-  thrust::host_vector<unsigned char> data(size);
-  std::generate(data.begin(), data.end(), [&]() {
-    return static_cast<unsigned char>(distribution(gen));
-  });
-  return data;
-}
-
-template <>
-inline thrust::host_vector<signed char>
-get_random_data(size_t size, signed char min, signed char max, seed_type seed_value)
-{
-  std::random_device rd;
-  std::default_random_engine gen(rd());
-  gen.seed(seed_value);
-  std::uniform_int_distribution<int> distribution(static_cast<int>(min), static_cast<int>(max));
-  thrust::host_vector<signed char> data(size);
-  std::generate(data.begin(), data.end(), [&]() {
-    return static_cast<signed char>(distribution(gen));
-  });
-  return data;
-}
-#endif
 
 template <class T>
 struct custom_compare_less
@@ -818,28 +825,31 @@ __host__ void test_future_value_retrieval(Future&& f, decltype(f.extract())& ret
   return_value = r2;
 }
 
+namespace
+{
 // Values of relative error for non-assotiative operations
 // (+, -, *) and type conversions for floats
 // They are doubled from 1 / (1 << mantissa_bits) as we compare in tests
 // the results of _two_ sequences of operations with different order
 // For all other operations (i.e. integer arithmetics) default 0 is used
 template <class T>
-static constexpr float precision = 0;
+constexpr float precision = 0;
 
 template <>
-static constexpr float precision<double> = 2.0f / (1ll << 52);
+constexpr float precision<double> = 2.0f / (1ll << 52);
 
 template <>
-static constexpr float precision<float> = 2.0f / (1ll << 23);
+constexpr float precision<float> = 2.0f / (1ll << 23);
 
 template <>
-static constexpr float precision<rocprim::half> = 2.0f / (1ll << 10);
+constexpr float precision<rocprim::half> = 2.0f / (1ll << 10);
 
 template <>
-static constexpr float precision<rocprim::bfloat16> = 2.0f / (1ll << 7);
+constexpr float precision<rocprim::bfloat16> = 2.0f / (1ll << 7);
 
 template <class T>
-static constexpr float precision<const T> = precision<T>;
+constexpr float precision<const T> = precision<T>;
+} // namespace
 
 template <class T, typename std::enable_if_t<std::is_floating_point<T>::value>* = nullptr>
 inline void test_equality(const T& hvalue, const T& dvalue, const size_t ops = 1)

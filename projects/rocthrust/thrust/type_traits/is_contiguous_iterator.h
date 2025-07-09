@@ -157,7 +157,7 @@ struct is_libstdcxx_normal_iterator<::__gnu_cxx::__normal_iterator<Iterator, Con
 {};
 #endif
 
-#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && _MSC_VER >= 1916 // MSVC 2017 version 15.9.
+#if defined(_MSC_VER) && _MSC_VER >= 1916 // MSVC 2017 version 15.9.
 template <typename Iterator>
 #  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 struct is_msvc_contiguous_iterator : ::cuda::std::is_pointer<::std::_Unwrapped_t<Iterator>>
@@ -165,7 +165,7 @@ struct is_msvc_contiguous_iterator : ::cuda::std::is_pointer<::std::_Unwrapped_t
 struct is_msvc_contiguous_iterator : ::std::is_pointer<::std::_Unwrapped_t<Iterator>>
 #  endif
 {};
-#elif THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && _MSC_VER >= 1700 // MSVC 2012.
+#elif defined(_MSC_VER) && _MSC_VER >= 1700 // MSVC 2012.
 template <typename Iterator>
 struct is_msvc_contiguous_iterator : false_type
 {};
