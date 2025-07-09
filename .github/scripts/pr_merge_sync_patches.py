@@ -98,7 +98,7 @@ def _configure_git_user(repo_path: Path) -> None:
 
 def _apply_patch(repo_path: Path, patch_path: Path) -> None:
     """Apply a patch file to the working tree."""
-    _run_git(["apply", str(patch_path)], cwd=repo_path)
+    _run_git(["am", str(patch_path)], cwd=repo_path)
     logger.info(f"Applied patch to working tree at {repo_path}")
 
 def _stage_changes(repo_path: Path) -> None:
