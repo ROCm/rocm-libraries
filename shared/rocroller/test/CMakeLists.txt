@@ -19,8 +19,8 @@ if(NOT mxDataGenerator_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
         FetchContent_Declare(
             mxDataGenerator
-            GIT_REPOSITORY "https://github.com/ROCm/mxDataGenerator.git"
-            GIT_TAG 3ac153eec4c1a1e0da7546abc9c0c4f54e180f43
+            GIT_REPOSITORY ${MXDATAGENERATOR_GIT_URL}
+            GIT_TAG ${MXDATAGENERATOR_GIT_TAG}
         )
         FetchContent_MakeAvailable(mxDataGenerator)
     else()

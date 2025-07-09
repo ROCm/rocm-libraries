@@ -41,6 +41,8 @@ option(ROCROLLER_ENABLE_LLD "Build rocroller functionality requiring LLD" OFF)
 option(ROCROLLER_ENABLE_TIMERS "Enable rocRoller timer code." OFF)
 option(ROCROLLER_ENABLE_CPPCHECK "Enable cppcheck." OFF)
 option(ROCROLLER_ENABLE_ASAN "Enable addresss sanitizers." OFF)
+option(MXDATAGENERATOR_GIT_TAG "mxDataGenerator tag/commit hash to checkout" "3ac153eec4c1a1e0da7546abc9c0c4f54e180f43")
+set(MXDATAGENERATOR_GIT_URL "https://github.com/ROCm/mxDataGenerator.git" CACHE STRING "Base Git URL to fetch mxDataGenerator from.")
 
 if(ROCROLLER_ENABLE_TEST_DISCOVERY)
     enable_testing()
