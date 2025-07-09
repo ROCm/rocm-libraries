@@ -1,0 +1,99 @@
+jobs:
+- job: report-summary-check
+  displayName: Report CI status to GitHub PR Summary Check
+  condition: always()
+  variables:
+  - group: assistant-librarian
+  pool:
+    vmImage: ubuntu-latest
+  steps:
+  - checkout: none
+  - task: Bash@3
+    displayName: Install GitHub CLI
+    inputs:
+      targetType: 'inline'
+      script: |
+        (type -p wget >/dev/null || (sudo apt update && sudo apt install wget -y)) \
+          && sudo mkdir -p -m 755 /etc/apt/keyrings \
+          && out=$(mktemp) && wget -nv -O$out https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+          && cat $out | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+          && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+          && sudo mkdir -p -m 755 /etc/apt/sources.list.d \
+          && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+          && sudo apt update \
+          && sudo apt install gh -y
+  - task: Bash@3
+    displayName: Report CI status to GitHub PR Summary Check
+    env:
+      APP_ID: $(APP_ID)
+      APP_INSTALLATION_ID: $(APP_INSTALLATION_ID)
+      APP_PRIVATE_KEY: $(APP_PRIVATE_KEY)
+    inputs:
+      targetType: 'inline'
+      script: |
+        if [[ ! "$(Build.SourceBranchName)" =~ ^refs/pull/ ]]; then
+          echo "This is not a PR build. Exiting."
+          exit 0
+        fi
+
+        create_jwt() {
+          local header=$(echo -n '{"alg":"RS256","typ":"JWT"}' | openssl base64 -e | tr -d '=' | tr '/+' '_-' | tr -d '\n')
+          local payload=$(echo -n "{\"iat\":$(date +%s),\"exp\":$(($(date +%s) + 600)),\"iss\":\"$APP_ID\"}" | openssl base64 -e | tr -d '=' | tr '/+' '_-' | tr -d '\n')
+          local unsigned_token="${header}.${payload}"
+          local signature=$(echo -n "$unsigned_token" | openssl dgst -sha256 -sign <(echo -n "$APP_PRIVATE_KEY") | openssl base64 -e | tr -d '=' | tr '/+' '_-' | tr -d '\n')
+          echo "${unsigned_token}.${signature}"
+        }
+        JWT=$(create_jwt)
+        GH_TOKEN=$(curl -sSX POST \
+          -H "Authorization: Bearer $JWT" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/app/installations/$APP_INSTALLATION_ID/access_tokens" | jq -r .token)
+
+        PR_HEAD_SHA=$(curl -s "https://api.github.com/repos/ROCm/rocm-libraries/branches/$(Build.SourceBranchName)" | jq -r '.commit.sha')
+        CHECK=$(curl -s "https://api.github.com/repos/ROCm/rocm-libraries/commits/$PR_HEAD_SHA/check-runs" | jq -r '.check_runs[] | select(.name == "Azure CI Summary")')
+        CHECK_ID=$(echo "$CHECK" | jq -r '.id')
+        CHECK_SUMMARY=$(echo "$CHECK" | jq -r '.output.summary')
+        CHECK_TEXT=$(echo "$CHECK" | jq -r '.output.text')
+
+        if [ -z "$CHECK_ID" ]; then
+          echo "No Azure CI Summary check found for commit $PR_HEAD_SHA"
+          exit 0
+        fi
+
+        # also update the summary table with the build status
+        # the summary table is in the format
+        # | Project | Run ID | Status |
+        # |--------------|--------|--------|
+        # where the Run ID is the Azure DevOps build ID
+        # "| ${project_names[i]} | [${run_ids[i]}](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=${run_ids[i]}) | Pending |${newline}"
+        # replace the status of the current build in the summary table
+
+        if [[ "$CHECK_SUMMARY" == *"$(Build.BuildId)"* ]]; then
+          CHECK_SUMMARY=$(echo "$CHECK_SUMMARY" | sed "s/.*$(Build.BuildId)=[^|]*/| $(Build.DefinitionName) | [$(Build.BuildId)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$(Build.BuildId)) | $(variables['Agent.JobStatus']) |/")
+        fi
+
+        echo "updated check summary"
+        echo $CHECK_SUMMARY
+
+        # the check test is in the format
+        # <build-id-1>=<status-1>;<build-id-2>=<status-2>;...
+        # where <status> is one of "pending", "success", "failure", "error"
+        # replace the status of the current build with variables['Agent.JobStatus']
+
+        if [[ "$CHECK_TEXT" == *"$(Build.BuildId)="* ]]; then
+          CHECK_TEXT=$(echo "$CHECK_TEXT" | sed "s/.*$(Build.BuildId)=[^;]*/$CURRENT_BUILD_ID=$(variables['Agent.JobStatus'])/")
+        fi
+
+        echo "updated check text"
+        echo $CHECK_TEXT
+
+        CHECK_STATUS=$(echo "$CHECK_TEXT" | grep -q 'pending' && echo "in_progress" || echo "completed")
+
+        gh api repos/ROCm/rocm-libraries/check-runs/$CHECK_ID \
+          -X PATCH \
+          -f 'name=Azure CI Summary' \
+          -f "head_sha=$PR_HEAD_SHA" \
+          -f 'status=$CHECK_STATUS' \
+          -f "output[title]=Azure CI Summary" \
+          -f "output[summary]=$CHECK_SUMMARY" \
+          -f "output[text]=$CHECK_TEXT"
