@@ -38,8 +38,37 @@ trigger:
 
 pr: none
 
-jobs:
-  - template: ${{ variables.CI_COMPONENT_PATH }}/rocRAND.yml@pipelines_repo
+stages:
+# - stage: rocrand
+#   jobs:
+#   - template: ${{ variables.CI_COMPONENT_PATH }}/rocRAND.yml@pipelines_repo
+#     parameters:
+#       sparseCheckoutDir: projects/rocrand
+#       triggerDownstreamJobs: false # todo: revert
+- stage: temp_test
+  jobs:
+  - job: temp_test
+    displayName: 'Temporary test stage'
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - checkout: none
+    - script: exit 0
+- stage: report_successful
+  condition: succeeded()
+  jobs:
+  - template: templates/report-summary-check.yml
     parameters:
-      sparseCheckoutDir: projects/rocrand
-      triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
+      checkConclusion: success
+- stage: report_failed
+  condition: failed()
+  jobs:
+  - template: templates/report-summary-check.yml
+    parameters:
+      checkConclusion: failure
+- stage: report_cancelled
+  condition: canceled() # note: only 1 L in canceled()
+  jobs:
+  - template: templates/report-summary-check.yml
+    parameters:
+      checkConclusion: cancelled

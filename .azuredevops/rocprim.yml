@@ -40,8 +40,37 @@ trigger:
 
 pr: none
 
-jobs:
-  - template: ${{ variables.CI_COMPONENT_PATH }}/rocPRIM.yml@pipelines_repo
+stages:
+# - stage: rocprim
+#   jobs:
+#   - template: ${{ variables.CI_COMPONENT_PATH }}/rocPRIM.yml@pipelines_repo
+#     parameters:
+#       sparseCheckoutDir: projects/rocprim
+#       triggerDownstreamJobs: false # todo: revert
+- stage: temp_test
+  jobs:
+  - job: temp_test
+    displayName: 'Temporary test stage'
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - checkout: none
+    - script: exit 1
+- stage: report_successful
+  condition: succeeded()
+  jobs:
+  - template: templates/report-summary-check.yml
     parameters:
-      sparseCheckoutDir: projects/rocprim
-      triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
+      checkConclusion: success
+- stage: report_failed
+  condition: failed()
+  jobs:
+  - template: templates/report-summary-check.yml
+    parameters:
+      checkConclusion: failure
+- stage: report_cancelled
+  condition: canceled() # note: only 1 L in canceled()
+  jobs:
+  - template: templates/report-summary-check.yml
+    parameters:
+      checkConclusion: cancelled
