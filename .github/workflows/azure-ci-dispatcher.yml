@@ -167,9 +167,7 @@ jobs:
           -F name='Azure CI Summary' \
           -F head_sha='${{ github.event.pull_request.head.sha }}' \
           -F status='in_progress' \
-          -F output.title='Azure CI Summary' \
-          -F output.summary="$summary" \
-          -F output.text='This check run serves as a summary of Azure CI runs.'
+          -F output='{"title":"Azure CI Summary","summary":"$summary","text":"$text"}'
 
     - name: Cancel Azure CI runs
       if: ${{ cancelled() }}
