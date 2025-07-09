@@ -43,10 +43,10 @@ This table provides the current status of the migration of specific ROCm librari
 | `hipSparseLt`       | 7/11           |
 | `rocSparse`         | 7/14           |
 | `hipSparse`         | 7/16           |
-| `hipSolver`         | 7/18           |
 | `hipBLAS`           | 7/21           |
 | `Origami`           | 7/23           |
 | `composable_kernel` | 7/25           |
+| `hipSolver`         | 7/28           |
 | `rocSolver`         | 7/28           |
 | `MIOpen`            | 7/30           |
 
