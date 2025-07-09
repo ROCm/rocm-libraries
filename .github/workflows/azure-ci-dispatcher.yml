@@ -71,6 +71,41 @@ jobs:
           --config ".github/repos-config.json" \
           --require-auto-push
 
+    - name: Cancel previous runs
+      if: steps.detect.outputs.subtrees
+      run: |
+        pr_number=${{ github.event.pull_request.number }}
+        res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?statusFilter=inProgress&$top=100&api-version=7.1" \
+          -H "Content-Type: application/json")
+
+        if [ $? -ne 0 ]; then
+          echo "Failed to fetch Azure runs"
+          exit 1
+        fi
+
+        runs=$(echo "$res" | jq -r '.value[] | select(.sourceBranch | contains("refs/pull/'"$pr_number"'/merge")) | .id')
+
+        if [ -z "$runs" ]; then
+          echo "No in-progress runs found for PR #$pr_number"
+          exit 0
+        fi
+
+        echo "Found in-progress runs for PR #$pr_number: $runs"
+
+        for run_id in $runs; do
+          echo "Cancelling run ID: $run_id"
+          response=$(curl -sSX PATCH "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds/$run_id?api-version=7.1" \
+            -u ":${{ secrets.AZ_PAT }}" \
+            -H "Content-Type: application/json" \
+            -d '{"status": "cancelling"}')
+
+          if [ $? -ne 0 ]; then
+            echo "Failed to cancel run ID: $run_id"
+          else
+            echo "Cancelled run ID: $run_id"
+          fi
+        done
+
     - name: Dispatch Azure CI runs
       id: dispatch
       if: steps.detect.outputs.subtrees
@@ -172,17 +207,3 @@ jobs:
           -f 'output[title]=Azure CI Summary' \
           -f "output[summary]=$summary" \
           -f "output[text]=$text"
-
-    - name: Cancel Azure CI runs
-      if: ${{ cancelled() }}
-      run: |
-        run_ids=(${{ steps.dispatch.outputs.run_ids }})
-        echo "Cancelling runs: ${run_ids[*]}"
-
-        for run_id in "${run_ids[@]}"; do
-          response=$(curl -sSX PATCH https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds/$run_id?api-version=7.1 \
-            -u ":${{ secrets.AZ_PAT }}" \
-            -H "Content-Type: application/json" \
-            -d '{"status": "cancelling"}')
-          echo $response | jq -r '.status' || echo "Failed to cancel run $run_id"
-        done
