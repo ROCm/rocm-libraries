@@ -48,7 +48,9 @@ def runCI =
     {
         platform, project->
 
-        runCompileCommand(platform, project, jobName, false)
+        String mxDataGeneratorGitURL = params?.ROCROLLER_MXDATAGENERATOR_GIT_URL ?: baseParams?.ROCROLLER_MXDATAGENERATOR_GIT_URL
+        String mxDataGeneratorGitTag = params?.ROCROLLER_MXDATAGENERATOR_GIT_TAG ?: baseParams?.ROCROLLER_MXDATAGENERATOR_GIT_TAG
+        runCompileCommand(platform, project, jobName, jobParams, mxDataGeneratorGitURL, mxDataGeneratorGitTag, false)
     }
 
     buildProject(prj, formatCheck, nodes.dockerArray, null, null, null, staticAnalysis)
@@ -86,6 +88,18 @@ ci: {
             defaultValue: params?.ROCROLLER_AMDGPU_BUILD_URI ?: "",
             trim: true,
             description: "Specify the specific artifact path for AMDGPU"
+        ),
+        string(
+            name: "ROCROLLER_MXDATAGENERATOR_GIT_URL",
+            defaultValue: params?.ROCROLLER_MXDATAGENERATOR_GIT_URL ?: "",
+            trim: true,
+            description: "Specify the specific mxDataGenerator Git URL"
+        ),
+        string(
+            name: "ROCROLLER_MXDATAGENERATOR_GIT_TAG",
+            defaultValue: params?.ROCROLLER_MXDATAGENERATOR_GIT_TAG ?: "",
+            trim: true,
+            description: "Specify the specific mxDataGenerator tag/commit hash"
         ),
         booleanParam(
             name: "Unique Docker image tag",

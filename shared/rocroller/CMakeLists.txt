@@ -123,8 +123,8 @@ option(BUILD_DOCS "Build rocRoller documentation" ON)
 option(BUILD_VERBOSE "Output additional build information" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build rocRoller with address sanitizer enabled (clang only)" OFF)
 
-option(MXDATAGENERATOR_SSH "Fetch mxDataGenerator via SSH" OFF)
-set(MXDATAGENERATOR_GIT_URL "github.com" CACHE STRING "Base Git URL to fetch mxDataGenerator from.")
+option(MXDATAGENERATOR_GIT_TAG "mxDataGenerator tag/commit hash to checkout" "3ac153eec4c1a1e0da7546abc9c0c4f54e180f43")
+set(MXDATAGENERATOR_GIT_URL "https://github.com/ROCm/mxDataGenerator.git" CACHE STRING "Base Git URL to fetch mxDataGenerator from.")
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)

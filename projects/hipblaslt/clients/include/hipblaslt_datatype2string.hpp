@@ -47,6 +47,7 @@ typedef enum class _hipblaslt_activation_type
     relu  = 1,
     gelu  = 2,
     swish = 3,
+    clamp = 4,
 } hipblaslt_activation_type;
 
 typedef enum class _hipblaslt_bias_source
@@ -80,6 +81,9 @@ inline hipblaslt_internal_ostream& operator<<(hipblaslt_internal_ostream& os,
         break;
     case hipblaslt_activation_type::swish:
         os << "swish";
+        break;
+    case hipblaslt_activation_type::clamp:
+        os << "clamp";
         break;
     }
     return os;
@@ -147,6 +151,7 @@ inline const hipblaslt_activation_type string_to_hipblaslt_activation_type(const
            : value == "gelu"  ? hipblaslt_activation_type::gelu
            : value == "relu"  ? hipblaslt_activation_type::relu
            : value == "swish" ? hipblaslt_activation_type::swish
+           : value == "clamp" ? hipblaslt_activation_type::clamp
                               : static_cast<hipblaslt_activation_type>(-1);
 }
 
@@ -169,6 +174,8 @@ inline const char* hipblaslt_activation_type_to_string(hipblaslt_activation_type
         return "relu";
     case hipblaslt_activation_type::swish:
         return "swish";
+    case hipblaslt_activation_type::clamp:
+        return "clamp";
     case hipblaslt_activation_type::none:
         return "none";
     default:

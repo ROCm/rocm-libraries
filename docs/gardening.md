@@ -51,7 +51,9 @@ As an example to include an admin: *we have a critical feature but develop is br
 Week | North America | Europe / India / APAC
 ---- | ------- | ---------
 Jun 30, 2025 | ellosel | marbre
-July 7, 2025 | <placeholder1> | <placeholder2>
+July 7, 2025 | geomin12 | kkyang
+
+It is the responsibility of the current gardeners to update the table when the gardeners rotate.
 
 ### Log
 

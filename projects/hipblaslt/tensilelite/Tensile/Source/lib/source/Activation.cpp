@@ -57,6 +57,8 @@ namespace TensileLite
             return "Silu";
         case ActivationType::Swish:
             return "Swish";
+        case ActivationType::Clamp:
+            return "Clamp";
         case ActivationType::All:
             return "All";
         case ActivationType::Hipblaslt_all:
@@ -124,6 +126,10 @@ namespace TensileLite
         else if(strValue == ToString(ActivationType::Swish))
         {
             t = ActivationType::Swish;
+        }
+        else if(strValue == ToString(ActivationType::Clamp))
+        {
+            t = ActivationType::Clamp;
         }
         else if(strValue == ToString(ActivationType::All))
         {
