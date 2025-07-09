@@ -37,6 +37,10 @@
 #include <tbb/blocked_range.h>
 #include <tbb/parallel_scan.h>
 
+#ifndef _CCCL_IF_CONSTEXPR
+#  define _CCCL_IF_CONSTEXPR(x) if constexpr (x)
+#endif
+
 THRUST_NAMESPACE_BEGIN
 namespace system
 {
@@ -106,7 +110,7 @@ struct inclusive_body
 
     if (first_call)
     {
-      if constexpr (HasInit)
+      _CCCL_IF_CONSTEXPR (HasInit)
       {
         *iter2 = sum = binary_op(sum, *iter1);
       }
