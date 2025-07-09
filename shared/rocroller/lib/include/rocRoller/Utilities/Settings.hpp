@@ -146,7 +146,7 @@ namespace rocRoller
         static inline const SettingsOption<Scheduling::SchedulerProcedure> Scheduler{
             "ROCROLLER_SCHEDULER",
             "Scheduler used when scheduling independent instruction streams.",
-            Scheduling::SchedulerProcedure::Sequential,
+            Scheduling::SchedulerProcedure::Priority,
             -1};
 
         static inline const SettingsOption<Scheduling::CostFunction> SchedulerCost{
