@@ -62,6 +62,21 @@ namespace detail
         while(0)
 #endif // ROCPRIM_RETURN_ON_ERROR
 
+#ifndef ROCPRIM_RETURN_ON_ERROR2
+    #define ROCPRIM_RETURN_ON_ERROR2(line, ...)      \
+        do                                    \
+        {                                     \
+            hipError_t error = (__VA_ARGS__); \
+            if(error != hipSuccess)           \
+            {                                 \
+                std::cout << "ROCPRIM_RETURN_ON_ERROR2 encountered error: " << error << std::endl; \
+                std::cout << "Called from line " << line << std::endl; \
+                return error;                 \
+            }                                 \
+        }                                     \
+        while(0)
+#endif // ROCPRIM_RETURN_ON_ERROR
+
 } // namespace detail
 
 #endif // ROCPRIM_COMMON_HPP_

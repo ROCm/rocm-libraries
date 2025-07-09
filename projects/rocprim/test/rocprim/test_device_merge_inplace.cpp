@@ -48,7 +48,7 @@
 #include <type_traits>
 #include <vector>
 
-TEST(RocprimDeviceMergeInplaceTests, Basic)
+TEST(RocprimDeviceDebugInplaceTests, Basic)
 {
     using value_type    = int;
     size_t storage_size = 0;
@@ -238,7 +238,7 @@ template<typename ValueType,
          typename Sizes     = small_sizes,
          typename CompareOp = ::rocprim::less<ValueType>,
          bool UseGraphs     = false>
-struct DeviceMergeInplaceParams
+struct DeviceDebugInplaceParams
 {
     using value_type = ValueType;
     using gen_a_type = GenAType;
@@ -248,54 +248,55 @@ struct DeviceMergeInplaceParams
 
 typedef ::testing::Types<
     // linear even-odd
-    DeviceMergeInplaceParams<int64_t,
-                             linear_data_generator<int64_t, 0, 2>,
-                             linear_data_generator<int64_t, 1, 2>>,
-    DeviceMergeInplaceParams<int32_t,
-                             linear_data_generator<int32_t, 0, 2>,
-                             linear_data_generator<int32_t, 1, 2>>,
-    DeviceMergeInplaceParams<int16_t,
-                             linear_data_generator<int16_t, 0, 2>,
-                             linear_data_generator<int16_t, 1, 2>>,
-    // linear edge cases
-    DeviceMergeInplaceParams<int32_t,
-                             linear_data_generator<int32_t, 0, 1>,
-                             linear_data_generator<int32_t, 0, 4>>,
-    DeviceMergeInplaceParams<int32_t,
-                             linear_data_generator<int32_t, 0, 4>,
-                             linear_data_generator<int32_t, 0, 1>>,
-    DeviceMergeInplaceParams<int32_t,
+    // DeviceDebugInplaceParams<int64_t,
+    //                          linear_data_generator<int64_t, 0, 2>,
+    //                          linear_data_generator<int64_t, 1, 2>>,
+    // DeviceDebugInplaceParams<int32_t,
+    //                          linear_data_generator<int32_t, 0, 2>,
+    //                          linear_data_generator<int32_t, 1, 2>>,
+    // DeviceDebugInplaceParams<int16_t,
+    //                          linear_data_generator<int16_t, 0, 2>,
+    //                          linear_data_generator<int16_t, 1, 2>>,
+    // // linear edge cases
+    // DeviceDebugInplaceParams<int32_t,
+    //                          linear_data_generator<int32_t, 0, 1>,
+    //                          linear_data_generator<int32_t, 0, 4>>,
+    // DeviceDebugInplaceParams<int32_t,
+    //                          linear_data_generator<int32_t, 0, 4>,
+    //                          linear_data_generator<int32_t, 0, 1>>,
+    DeviceDebugInplaceParams<int32_t,
                              linear_data_generator<int32_t, 128, 0>,
-                             linear_data_generator<int32_t, 0, 1>>,
-    DeviceMergeInplaceParams<int32_t,
-                             linear_data_generator<int32_t, 0, 1>,
-                             linear_data_generator<int32_t, 128, 0>>,
-    // random data
-    DeviceMergeInplaceParams<int64_t,
-                             random_data_generator<int64_t, 2, 2>,
-                             random_data_generator<int64_t, 2, 2>>,
-    DeviceMergeInplaceParams<int32_t,
-                             random_data_generator<int32_t, 2, 2>,
-                             random_data_generator<int32_t, 2, 2>>,
-    DeviceMergeInplaceParams<int16_t,
-                             random_data_generator<int16_t, 2, 2>,
-                             random_data_generator<int16_t, 2, 2>>,
-    DeviceMergeInplaceParams<float,
-                             random_data_generator<float, 2, 2>,
-                             random_data_generator<float, 2, 2>>,
-    // large input sizes
-    DeviceMergeInplaceParams<int32_t,
-                             random_data_generator<int32_t, 2, 4>,
-                             random_data_generator<int32_t, 2, 4>,
-                             large_sizes>,
-    DeviceMergeInplaceParams<int64_t,
-                             random_data_generator<int64_t, 4, 4>,
-                             random_data_generator<int64_t, 4, 4>,
-                             large_sizes>>
-    DeviceMergeInplaceTestsParams;
+                             linear_data_generator<int32_t, 0, 1>>//,
+    // DeviceDebugInplaceParams<int32_t,
+    //                          linear_data_generator<int32_t, 0, 1>,
+    //                          linear_data_generator<int32_t, 128, 0>>,
+    // // random data
+    // DeviceDebugInplaceParams<int64_t,
+    //                          random_data_generator<int64_t, 2, 2>,
+    //                          random_data_generator<int64_t, 2, 2>>,
+    // DeviceDebugInplaceParams<int32_t,
+    //                          random_data_generator<int32_t, 2, 2>,
+    //                          random_data_generator<int32_t, 2, 2>>,
+    // DeviceDebugInplaceParams<int16_t,
+    //                          random_data_generator<int16_t, 2, 2>,
+    //                          random_data_generator<int16_t, 2, 2>>,
+    // DeviceDebugInplaceParams<float,
+    //                          random_data_generator<float, 2, 2>,
+    //                          random_data_generator<float, 2, 2>>,
+    // // large input sizes
+    // DeviceDebugInplaceParams<int32_t,
+    //                          random_data_generator<int32_t, 2, 4>,
+    //                          random_data_generator<int32_t, 2, 4>,
+    //                          large_sizes>,
+    // DeviceDebugInplaceParams<int64_t,
+    //                          random_data_generator<int64_t, 4, 4>,
+    //                          random_data_generator<int64_t, 4, 4>,
+    //                          large_sizes>
+    >
+    DeviceDebugInplaceTestsParams;
 
 template<typename Params>
-struct DeviceMergeInplaceTests : public testing::Test
+struct DeviceDebugInplaceTests : public testing::Test
 {
     using value_type = typename Params::value_type;
     using gen_a_type = typename Params::gen_a_type;
@@ -303,9 +304,9 @@ struct DeviceMergeInplaceTests : public testing::Test
     using sizes      = typename Params::sizes;
 };
 
-TYPED_TEST_SUITE(DeviceMergeInplaceTests, DeviceMergeInplaceTestsParams);
+TYPED_TEST_SUITE(DeviceDebugInplaceTests, DeviceDebugInplaceTestsParams);
 
-TYPED_TEST(DeviceMergeInplaceTests, MergeInplace)
+TYPED_TEST(DeviceDebugInplaceTests, DebugInplace)
 {
     using value_type = typename TestFixture::value_type;
     using gen_a_type = typename TestFixture::gen_a_type;

@@ -720,7 +720,7 @@ inline hipError_t merge_inplace(void*             temporary_storage,
 
     size_t num_divisions = impl::get_num_global_divisions(left_size, right_size);
 
-    ROCPRIM_RETURN_ON_ERROR(detail::temp_storage::partition(
+    ROCPRIM_RETURN_ON_ERROR2(__LINE__, detail::temp_storage::partition(
         temporary_storage,
         storage_size,
         detail::temp_storage::make_linear_partition(
@@ -757,12 +757,12 @@ inline hipError_t merge_inplace(void*             temporary_storage,
     bool is_large_merge               = left_size + right_size > impl::block_merge_items_per_block;
     typename impl::offset_t iteration = 0;
 
-    ROCPRIM_RETURN_ON_ERROR(hipMemcpyAsync(&work_storage[1],
+    ROCPRIM_RETURN_ON_ERROR2(__LINE__, hipMemcpyAsync(&work_storage[1],
                                            &left_size,
                                            sizeof(decltype(*work_storage)),
                                            hipMemcpyHostToDevice,
                                            stream));
-    ROCPRIM_RETURN_ON_ERROR(hipMemcpyAsync(&scratch_storage->iteration,
+    ROCPRIM_RETURN_ON_ERROR2(__LINE__, hipMemcpyAsync(&scratch_storage->iteration,
                                            &iteration,
                                            sizeof(decltype(scratch_storage->iteration)),
                                            hipMemcpyHostToDevice,
@@ -780,9 +780,9 @@ inline hipError_t merge_inplace(void*             temporary_storage,
     while(is_large_merge)
     {
         // clear this flag
-        ROCPRIM_RETURN_ON_ERROR(hipMemset(&scratch_storage->is_large_merge, false, sizeof(bool)));
+        ROCPRIM_RETURN_ON_ERROR2(__LINE__, hipMemset(&scratch_storage->is_large_merge, false, sizeof(bool)));
 
-        ROCPRIM_RETURN_ON_ERROR(detail::grid_dim_for_max_active_blocks(grid_dim,
+        ROCPRIM_RETURN_ON_ERROR2(__LINE__, detail::grid_dim_for_max_active_blocks(grid_dim,
                                                                        global_block_size,
                                                                        impl::find_pivots_kernel,
                                                                        stream));
@@ -793,7 +793,7 @@ inline hipError_t merge_inplace(void*             temporary_storage,
                                                                   work_storage,
                                                                   pivot_storage,
                                                                   scratch_storage);
-        ROCPRIM_RETURN_ON_ERROR(hipGetLastError());
+        ROCPRIM_RETURN_ON_ERROR2(__LINE__, hipGetLastError());
         if(debug_synchronous)
         {
             ROCPRIM_RETURN_ON_ERROR(hipStreamSynchronize(stream));
@@ -802,7 +802,7 @@ inline hipError_t merge_inplace(void*             temporary_storage,
             std::cout << "  find_pivots_kernel: " << delta << "ms\n";
         }
 
-        ROCPRIM_RETURN_ON_ERROR(detail::grid_dim_for_max_active_blocks(grid_dim,
+        ROCPRIM_RETURN_ON_ERROR2(__LINE__, detail::grid_dim_for_max_active_blocks(grid_dim,
                                                                        global_block_size,
                                                                        impl::rotate_p1_kernel,
                                                                        stream));
@@ -813,7 +813,7 @@ inline hipError_t merge_inplace(void*             temporary_storage,
                                                                 work_storage,
                                                                 pivot_storage,
                                                                 scratch_storage);
-        ROCPRIM_RETURN_ON_ERROR(hipGetLastError());
+        ROCPRIM_RETURN_ON_ERROR2(__LINE__, hipGetLastError());
         if(debug_synchronous)
         {
             ROCPRIM_RETURN_ON_ERROR(hipStreamSynchronize(stream));
@@ -822,7 +822,7 @@ inline hipError_t merge_inplace(void*             temporary_storage,
             std::cout << "  rotate_p1_kernel: " << delta << "ms\n";
         }
 
-        ROCPRIM_RETURN_ON_ERROR(detail::grid_dim_for_max_active_blocks(grid_dim,
+        ROCPRIM_RETURN_ON_ERROR2(__LINE__, detail::grid_dim_for_max_active_blocks(grid_dim,
                                                                        global_block_size,
                                                                        impl::rotate_p2_kernel,
                                                                        stream));
@@ -833,7 +833,7 @@ inline hipError_t merge_inplace(void*             temporary_storage,
                                                                 work_storage,
                                                                 pivot_storage,
                                                                 scratch_storage);
-        ROCPRIM_RETURN_ON_ERROR(hipGetLastError());
+        ROCPRIM_RETURN_ON_ERROR2(__LINE__, hipGetLastError());
         if(debug_synchronous)
         {
             ROCPRIM_RETURN_ON_ERROR(hipStreamSynchronize(stream));
@@ -842,7 +842,7 @@ inline hipError_t merge_inplace(void*             temporary_storage,
             std::cout << "  rotate_p2_kernel: " << delta << "ms\n";
         }
 
-        ROCPRIM_RETURN_ON_ERROR(
+        ROCPRIM_RETURN_ON_ERROR2(__LINE__,
             detail::grid_dim_for_max_active_blocks(grid_dim,
                                                    global_block_size,
                                                    impl::update_work_tree_kernel,
@@ -854,20 +854,20 @@ inline hipError_t merge_inplace(void*             temporary_storage,
                                                                        work_storage,
                                                                        pivot_storage,
                                                                        scratch_storage);
-        ROCPRIM_RETURN_ON_ERROR(hipGetLastError());
+        ROCPRIM_RETURN_ON_ERROR2(__LINE__, hipGetLastError());
         if(debug_synchronous)
         {
             float delta = rocprim::detail::update_time_point(t_time);
             std::cout << "  update_work_tree_kernel: " << delta << "ms\n";
         }
 
-        ROCPRIM_RETURN_ON_ERROR(hipMemcpy(&is_large_merge,
+        ROCPRIM_RETURN_ON_ERROR2(__LINE__, hipMemcpy(&is_large_merge,
                                           &scratch_storage->is_large_merge,
                                           sizeof(bool),
                                           hipMemcpyDeviceToHost));
 
         ++iteration;
-        ROCPRIM_RETURN_ON_ERROR(hipMemcpy(&scratch_storage->iteration,
+        ROCPRIM_RETURN_ON_ERROR2(__LINE__, hipMemcpy(&scratch_storage->iteration,
                                           &iteration,
                                           sizeof(typename impl::offset_t),
                                           hipMemcpyHostToDevice));
@@ -881,7 +881,7 @@ inline hipError_t merge_inplace(void*             temporary_storage,
     // since we potentially may have more blocks than is legally
     // allowed on, we simplify launching by doing grid stride per block
     int block_merge_grid_size = 0;
-    ROCPRIM_RETURN_ON_ERROR(detail::grid_dim_for_max_active_blocks(block_merge_grid_size,
+    ROCPRIM_RETURN_ON_ERROR2(__LINE__, detail::grid_dim_for_max_active_blocks(block_merge_grid_size,
                                                                    block_block_size,
                                                                    impl::block_merge_kernel,
                                                                    stream));
@@ -903,7 +903,7 @@ inline hipError_t merge_inplace(void*             temporary_storage,
                                                                              compare_function,
                                                                              work_storage,
                                                                              scratch_storage);
-    ROCPRIM_RETURN_ON_ERROR(hipGetLastError());
+    ROCPRIM_RETURN_ON_ERROR2(__LINE__, hipGetLastError());
     if(debug_synchronous)
     {
         ROCPRIM_RETURN_ON_ERROR(hipStreamSynchronize(stream));
