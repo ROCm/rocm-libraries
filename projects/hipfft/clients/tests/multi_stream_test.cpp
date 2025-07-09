@@ -310,14 +310,14 @@ static void init_data(hostbuf&                       hostbuffer,
     real_data_type pre_factor = 1.0 / product(params.lengths.begin(), params.lengths.end());
     if(params.transform_type == fft_transform_type_real_forward)
     {
-        bool harmonic_component_is_unique = true;
-        for(size_t i = 0; i < harmonic.size() && harmonic_component_is_unique; i++)
+        auto length_it = params.lengths.begin();
+        // multiply by 2 if the chosen harmonic component is not its own hermitian symmetric
+        if(std::any_of(harmonic.begin(), harmonic.end(), [&](decltype(harmonic[0])& h) {
+               return h != (*length_it - h) % *length_it++;
+           }))
         {
-            const size_t li = params.lengths[i];
-            harmonic_component_is_unique &= (harmonic[i] == (li - harmonic[i]) % li);
-        }
-        if(!harmonic_component_is_unique)
             pre_factor *= 2.0;
+        }
     }
     std::vector<size_t> multi_index(params.dim(), 0);
     for(size_t k = 0; k < (params.dim() == 2 ? 1 : params.lengths[0]); k++)
@@ -372,12 +372,11 @@ static real_data_type max_error(const hostbuf&                 hostbuffer,
         if(!ret && params.transform_type == fft_transform_type_real_forward)
         {
             // could be the hermitian symmetry of the expected one
-            ret = true;
-            for(size_t i = 0; i < harmonic.size(); i++)
-            {
-                const size_t li = params.lengths[i];
-                ret &= ((li - multi_index[i]) % li == harmonic[i]);
-            }
+            auto length_it    = params.lengths.begin();
+            auto multi_idx_it = multi_index.begin();
+            ret = std::all_of(harmonic.begin(), harmonic.end(), [&](decltype(harmonic[0])& h) {
+                return h == (*length_it - *multi_idx_it++) % *length_it++;
+            });
         }
         return ret;
     };
