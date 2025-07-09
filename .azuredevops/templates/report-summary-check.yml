@@ -86,19 +86,57 @@ jobs:
         # replace the status of the current build with variables['Agent.JobStatus']
 
         if [[ "$CHECK_TEXT" == *"$(Build.BuildId)="* ]]; then
-          CHECK_TEXT=$(echo "$CHECK_TEXT" | sed "s/.*$(Build.BuildId)=[^;]*/$CURRENT_BUILD_ID=$(Agent.JobStatus)/")
+          CHECK_TEXT=$(echo "$CHECK_TEXT" | sed "s/;$(Build.BuildId)=[^;]*;/;$CURRENT_BUILD_ID=$(Agent.JobStatus);/")
         fi
 
         echo "updated check text"
         echo $CHECK_TEXT
 
+        map_status() {
+          local azure_status="$1"
+          local gh_conclusion
+          case "$azure_status" in
+            "Canceled")
+              gh_conclusion="cancelled"
+              ;;
+            "Failed")
+              gh_conclusion="failure"
+              ;;
+            "Succeeded")
+              gh_conclusion="success"
+              ;;
+            "SucceededWithIssues")
+              gh_conclusion="success"
+              ;;
+            "Skipped")
+              gh_conclusion="skipped"
+              ;;
+            *)
+              gh_conclusion="neutral" # Default mapping for any unknown status
+              ;;
+          esac
+          echo "$gh_conclusion"
+        }
+
         CHECK_STATUS=$(echo "$CHECK_TEXT" | grep -q "pending" && echo "in_progress" || echo "completed")
 
-        gh api repos/ROCm/rocm-libraries/check-runs/$CHECK_ID \
-          -X PATCH \
-          -f "name=Azure CI Summary" \
-          -f "head_sha=$PR_HEAD_SHA" \
-          -f "status=$CHECK_STATUS" \
-          -f "output[title]=Azure CI Summary" \
-          -f "output[summary]=$CHECK_SUMMARY" \
-          -f "output[text]=$CHECK_TEXT"
+        if [[ "$CHECK_STATUS" == "completed" ]]; then
+          CHECK_CONCLUSION=$(map_status "$(Agent.JobStatus)")
+          gh api repos/ROCm/rocm-libraries/check-runs/$CHECK_ID \
+            -X PATCH \
+            -f "name=Azure CI Summary" \
+            -f "head_sha=$PR_HEAD_SHA" \
+            -f "status=$CHECK_STATUS" \
+            -f "conclusion=$CHECK_CONCLUSION" \
+            -f "output[title]=Azure CI Summary" \
+            -f "output[summary]=$CHECK_SUMMARY" \
+            -f "output[text]=$CHECK_TEXT"
+        else
+          gh api repos/ROCm/rocm-libraries/check-runs/$CHECK_ID \
+            -X PATCH \
+            -f "name=Azure CI Summary" \
+            -f "head_sha=$PR_HEAD_SHA" \
+            -f "output[title]=Azure CI Summary" \
+            -f "output[summary]=$CHECK_SUMMARY" \
+            -f "output[text]=$CHECK_TEXT"
+        fi
