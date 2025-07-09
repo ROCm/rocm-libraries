@@ -142,6 +142,7 @@ class StreamK(Component):
         return module
 
     def skIndexToWG(self, writer, kernel, sTmp):
+        # Note: There's one unused sgpr passed with sTmp.
         module = Module("StreamK skIndexToWG")
 
         # Map StreamK tile index to wg0/1
