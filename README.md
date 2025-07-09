@@ -32,7 +32,7 @@ This table provides the current status of the migration of specific ROCm librari
 | `rocsolver`         | Pending     |  |
 | `rocsparse`         | Pending     |  |
 | `rocthrust`         | Completed   | [![Azure CI](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Fmonorepo%2FrocThrust?repoName=ROCm%2Frocm-libraries&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=276&repoName=ROCm%2Frocm-libraries&branchName=develop) |[![Math-CI](https://pcue-math-rocm-ci-apim.azure-api.net/buildstatus?job=/rocm-libraries/precheckin/rocthrust/develop&subject=MathCI)](http://math-ci.amd.com/job/rocm-libraries/job/precheckin/job/rocthrust/job/develop/lastBuild/) |
-| `rocroller`         | Pending     | Next in line. |
+| `rocroller`         | Completed     |  |[![Math-CI](https://pcue-math-rocm-ci-apim.azure-api.net/buildstatus?job=/rocm-libraries/precheckin/rocroller/develop&subject=MathCI)](http://math-ci.amd.com/job/rocm-libraries/job/precheckin/job/rocroller/job/develop/lastBuild/) |
 | `tensile`           | Completed   | [![Azure CI](https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Fmonorepo%2FTensile?repoName=ROCm%2Frocm-libraries&branchName=develop)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=305&repoName=ROCm%2Frocm-libraries&branchName=develop) |[![Math-CI](https://pcue-math-rocm-ci-apim.azure-api.net/buildstatus?job=/rocm-libraries/precheckin/tensile/develop&subject=MathCI)](http://math-ci.amd.com/job/rocm-libraries/job/precheckin/job/tensile/job/develop/lastBuild/) |
 
 
@@ -40,8 +40,6 @@ This table provides the current status of the migration of specific ROCm librari
 
 | Component           | Tentative Date |
 |---------------------|----------------|
-| `rocBLAS`           | 6/30           |
-| `rocRoller`         | 7/7            |
 | `rocSparse`         | 7/11           |
 | `hipSparse`         | 7/14           |
 | `rocSolver`         | 7/18           |

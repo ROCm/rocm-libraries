@@ -478,15 +478,15 @@ try
 
         ("activation_type",
          value<std::string>(&activation_type)->default_value("none"),
-         "Options: none, gelu, relu, swish")
+         "Options: none, gelu, relu, swish, clamp")
 
         ("activation_arg1",
          value<float>(&arg.activation_arg1)->default_value(0),
-         "Reserved.")
+         "First extra argument for activation function if needed.")
 
         ("activation_arg2",
          value<float>(&arg.activation_arg2)->default_value(std::numeric_limits<float>::infinity()),
-         "Reserved.")
+         "Second extra argument for activation function if needed.")
 
         ("bias_type",
          value<std::string>(&bias_type), "Precision of bias vector."
