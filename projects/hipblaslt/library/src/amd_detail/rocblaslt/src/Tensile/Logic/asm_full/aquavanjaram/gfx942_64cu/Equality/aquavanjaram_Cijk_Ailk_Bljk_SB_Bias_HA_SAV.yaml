@@ -1,4 +1,4 @@
-- {MinimumRequiredVersion: 4.33.0}
+- {MinimumRequiredVersion: 5.0.0}
 - aquavanjaram
 - {Architecture: gfx942, CUCount: 64}
 - [Device 0049]
@@ -206,63 +206,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -470,63 +413,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -734,63 +620,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -998,63 +827,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -1262,63 +1034,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -1526,63 +1241,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -1790,63 +1448,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -2054,63 +1655,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -2318,63 +1862,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -2582,63 +2069,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -2846,63 +2276,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -3110,63 +2483,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -3374,63 +2690,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -3638,63 +2897,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -3902,63 +3104,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -4166,63 +3311,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -4430,63 +3518,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -4694,63 +3725,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -4958,63 +3932,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -5222,63 +4139,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -5486,63 +4346,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -5750,63 +4553,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -6014,63 +4760,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -6278,63 +4967,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -6542,63 +5174,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -6806,63 +5381,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -7070,63 +5588,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -7334,63 +5795,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -7598,63 +6002,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -7859,63 +6206,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: false
-      TransposeB: false
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -8119,63 +6409,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -8383,63 +6616,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -8647,63 +6823,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -8911,63 +7030,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -9175,63 +7237,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -9439,63 +7444,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -9703,63 +7651,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -9967,63 +7858,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -10231,63 +8065,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -10495,63 +8272,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -10759,63 +8479,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -11023,63 +8686,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -11287,63 +8893,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -11551,63 +9100,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -11815,63 +9307,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
@@ -12079,63 +9514,6 @@
     PrefetchAcrossPersistentMode: 0
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 1
-    ProblemType:
-      Activation: true
-      ActivationComputeDataType: 0
-      ActivationType: hipblaslt_all
-      AllowNoFreeDims: false
-      AssignedDerivedParameters: true
-      Batched: true
-      BetaOnlyUseBias: true
-      ComplexConjugateA: false
-      ComplexConjugateB: false
-      ComputeDataType: 0
-      ConvolutionConfig: []
-      DataType: 0
-      DestDataType: 0
-      HighPrecisionAccumulate: false
-      Index0: 0
-      Index01A: 0
-      Index01B: 1
-      Index1: 1
-      IndexAssignmentsA: [0, 3, 2]
-      IndexAssignmentsB: [3, 1, 2]
-      IndexAssignmentsLD: [4, 5, 6, 7]
-      IndexUnroll: 3
-      IndexUnrollA: 1
-      IndexUnrollB: 0
-      IndicesBatch: [2]
-      IndicesFree: [0, 1]
-      IndicesSummation: [3]
-      MirrorDimsA: []
-      MirrorDimsB: []
-      NumIndicesBatch: 1
-      NumIndicesC: 3
-      NumIndicesFree: 2
-      NumIndicesLD: 4
-      NumIndicesSummation: 1
-      OperationType: GEMM
-      SetConstStrideA: []
-      SetConstStrideB: []
-      SilentHighPrecisionAccumulate: false
-      StridedBatched: true
-      TLUA: true
-      TLUB: false
-      Tensor0: 0
-      Tensor1: 1
-      TileA: 0
-      TileAwareSelection: false
-      TileB: 1
-      TotalIndices: 4
-      TransposeA: 0
-      TransposeB: 0
-      UseBeta: true
-      UseBias: 1
-      UseInitialStridesAB: false
-      UseInitialStridesCD: false
-      UseScaleAlphaVec: 1
-      ZeroPadA: []
-      ZeroPadB: []
     ReplacementKernel: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3

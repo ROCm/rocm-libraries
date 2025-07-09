@@ -31,7 +31,9 @@ extern int                    mp_ranks;
 
 static const std::vector<std::vector<size_t>> multi_gpu_sizes = {
     {128, 256},
+    {192, 768},
     {64, 128, 256},
+    {96, 160, 192},
 };
 static const std::vector<size_t>        multi_gpu_batch_range = {10, 1};
 static std::vector<std::vector<size_t>> ioffset_range_zero    = {{0, 0}};

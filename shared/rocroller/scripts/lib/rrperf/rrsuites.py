@@ -1463,7 +1463,9 @@ def fp4_target_d2lds_mi32x32x64_pf2x1_wgm():
 def fp4_target_d2lds_mi32x32x64_pf4x1_sweep_wgms():
     for wgm_dim in [0, 1]:
         for wgm_value in range(1, 50):
-            yield from add_wgm((wgm_dim, wgm_value), fp4_target_d2lds_mi32x32x64_pf2x1())
+            yield from add_wgm(
+                (wgm_dim, wgm_value), fp4_target_d2lds_mi32x32x64_pf2x1()
+            )
 
 
 def fp4_target_d2lds_mi32x32x64_pf4x1():
@@ -1653,7 +1655,9 @@ def fp4_kernels():
 def fp4_target_sweep_wgms():
     for wgm_dim in [0, 1]:
         for wgm_value in range(1, 50):
-            yield from add_wgm((wgm_dim, wgm_value), fp4_no_scale_target_d2lds_mi16x16x128_pf4x1())
+            yield from add_wgm(
+                (wgm_dim, wgm_value), fp4_no_scale_target_d2lds_mi16x16x128_pf4x1()
+            )
 
 
 def generate_gfx950():

@@ -774,6 +774,17 @@ public:
         }
     }
 
+    bool is_inverse() const
+    {
+        return transform_type == fft_transform_type_complex_inverse
+               || transform_type == fft_transform_type_real_inverse;
+    }
+
+    bool is_forward() const
+    {
+        return !is_inverse();
+    }
+
     // Convert to string for output.
     std::string str(const std::string& separator = ", ") const
     {
@@ -2286,6 +2297,7 @@ public:
         ooffset   = params_forward.ioffset;
 
         run_callbacks = params_forward.run_callbacks;
+        multiGPU      = params_forward.multiGPU;
 
         check_output_strides = params_forward.check_output_strides;
 

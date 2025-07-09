@@ -821,6 +821,53 @@ namespace ExpressionTest
         }
     }
 
+    TEST_CASE("Run ConvertPropagation kernel ternary",
+              "[expression][expression-transformation][gpu]")
+    {
+        using InputType           = int64_t;
+        using ResultType          = int32_t;
+        using ShiftType           = int;
+        constexpr auto inputType  = TypeInfo<InputType>::Var.dataType;
+        constexpr auto resultType = TypeInfo<ResultType>::Var.dataType;
+        constexpr auto shiftType  = TypeInfo<ShiftType>::Var.dataType;
+
+        using CPUExpressionFunc = std::function<ResultType(InputType, InputType, ShiftType)>;
+
+        auto [gpu_expr, cpu_expr] = GENERATE(
+            as<std::pair<TernaryExpressionKernel::ExpressionFunc, CPUExpressionFunc>>{},
+            std::make_pair(
+                [](auto a, auto b, auto c) {
+                    return Expression::convert(resultType, (a + b) << c);
+                },
+                [](auto a, auto b, auto c) { return static_cast<ResultType>((a + b) << c); }));
+
+        TernaryExpressionKernel kernel(TestContext::ForTestDevice().get(),
+                                       gpu_expr,
+                                       resultType,
+                                       inputType,
+                                       inputType,
+                                       shiftType);
+
+        auto result = make_shared_device<int32_t>();
+
+        for(auto a : TestValues::int64Values)
+        {
+            for(auto b : TestValues::int64Values)
+            {
+                for(auto c : TestValues::shiftValues)
+                {
+                    CAPTURE(a, b, c);
+
+                    int32_t r = cpu_expr(a, b, c);
+
+                    kernel({}, result.get(), a, b, c);
+
+                    CHECK_THAT(result, HasDeviceScalarEqualTo(r));
+                }
+            }
+        }
+    }
+
     struct Less
     {
         static constexpr auto name = "<";
