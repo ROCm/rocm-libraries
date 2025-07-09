@@ -50,11 +50,10 @@ def runCI =
 
         String mxDataGeneratorGitURL = params?.ROCROLLER_MXDATAGENERATOR_GIT_URL ?: baseParams?.ROCROLLER_MXDATAGENERATOR_GIT_URL
         String mxDataGeneratorGitTag = params?.ROCROLLER_MXDATAGENERATOR_GIT_TAG ?: baseParams?.ROCROLLER_MXDATAGENERATOR_GIT_TAG
-        runCompileCommand(platform, project, jobName, jobParams, mxDataGeneratorGitURL, mxDataGeneratorGitTag, false)
+        runCompileCommand(platform, project, jobName, jobParams, mxDataGeneratorGitURL, mxDataGeneratorGitTag, false, false, '', true, true)
     }
 
-    buildProject(prj, formatCheck, nodes.dockerArray, null, null, null, staticAnalysis)
-
+    buildProject(prj, formatCheck, nodes.dockerArray, compileCommand, null, staticAnalysis)
 }
 
 def rocRollerGetBaseParameters() {
