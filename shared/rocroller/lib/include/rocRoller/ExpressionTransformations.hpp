@@ -146,6 +146,14 @@ namespace rocRoller
         ExpressionPtr lowerExponential(ExpressionPtr expr);
 
         /**
+         * @brief Propagate converts to input values
+         *
+         * @param expr Input expression
+         * @return ExpressionPtr Transformed expression
+         */
+        ExpressionPtr convertPropagation(ExpressionPtr expr);
+
+        /**
          * @brief Replace unsigned ArithmeticShiftR with LogicalShiftR
          *
          */

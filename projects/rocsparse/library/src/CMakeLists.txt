@@ -43,6 +43,7 @@ set(rocsparse_source
   src/common/rocsparse_envariables.cpp
   src/common/rocsparse_memstat.cpp
   src/common/rocsparse_debug.cpp
+  src/common/rocsparse_roctx.cpp
   src/common/rocsparse_argdescr.cpp
   src/common/rocsparse_message.cpp
   src/common/rocsparse_determine_indextype.cpp

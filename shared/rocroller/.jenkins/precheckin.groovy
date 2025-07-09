@@ -47,8 +47,10 @@ def runCI =
         platform, project->
 
         commonGroovy = load "${project.paths.project_src_prefix}/.jenkins/common.groovy"
+        String mxDataGeneratorGitURL = params?.ROCROLLER_MXDATAGENERATOR_GIT_URL ?: baseParams?.ROCROLLER_MXDATAGENERATOR_GIT_URL
+        String mxDataGeneratorGitTag = params?.ROCROLLER_MXDATAGENERATOR_GIT_TAG ?: baseParams?.ROCROLLER_MXDATAGENERATOR_GIT_TAG
         def useYAMLCPP = !platform.jenkinsLabel.contains('clang')
-        commonGroovy.runCompileCommand(platform, project, jobName, false, false, '', useYAMLCPP)
+        commonGroovy.runCompileCommand(platform, project, jobName, mxDataGeneratorGitURL, mxDataGeneratorGitTag, false, false, '', useYAMLCPP)
     }
 
     def testCommand =
@@ -93,6 +95,18 @@ ci: {
             trim: true,
             description: "Specify the specific artifact path for AMDGPU"
         ),
+        string(
+            name: "ROCROLLER_MXDATAGENERATOR_GIT_URL",
+            defaultValue: params?.ROCROLLER_MXDATAGENERATOR_GIT_URL ?: "",
+            trim: true,
+            description: "Specify the specific mxDataGenerator Git URL"
+        ),
+        string(
+            name: "ROCROLLER_MXDATAGENERATOR_GIT_TAG",
+            defaultValue: params?.ROCROLLER_MXDATAGENERATOR_GIT_TAG ?: "",
+            trim: true,
+            description: "Specify the specific mxDataGenerator tag/commit hash"
+        ),
         booleanParam(
             name: "Unique Docker image tag",
             defaultValue: false,
@@ -101,11 +115,22 @@ ci: {
     ]
     auxiliary.registerAdditionalParameters(additionalParameters)
 
-    def propertyList = ["enterprise":[pipelineTriggers([cron('0 1 * * 0')])]]
+    def propertyList = [
+        "enterprise":[pipelineTriggers([cron('0 1 * * 0')])],
+        "rocm-libraries":[pipelineTriggers([cron('0 1 * * 0')])]
+    ]
     propertyList = auxiliary.appendPropertyList(propertyList)
 
-    def jobNameList = ["enterprise":(["rocroller-ubuntu20-clang":['rocroller-compile', 'rocroller-gfx90a'],
-                                  "rocroller-ubuntu20-gcc":['rocroller-compile', 'rocroller-gfx90a']])]
+    def jobNameList = [
+        "enterprise":([
+            "rocroller-ubuntu20-clang":['rocroller-compile', 'rocroller-gfx90a'],
+            "rocroller-ubuntu20-gcc":['rocroller-compile', 'rocroller-gfx90a']
+        ]),
+        "rocm-libraries":([
+            "rocroller-ubuntu20-clang":['rocroller-compile', 'rocroller-gfx90a'],
+            "rocroller-ubuntu20-gcc":['rocroller-compile', 'rocroller-gfx90a']
+        ])
+    ]
     jobNameList = auxiliary.appendJobNameList(jobNameList)
 
     propertyList.each
