@@ -237,7 +237,14 @@ install(
 )
 
 if ( NOT BUILD_CUDA )
-    set( HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipblaslt" CACHE PATH "path to tensile library" )
+    if (WIN32)
+      # Put files used at runtime adjacent to '.dll's and '.exe's in bin/.
+      set( HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_BINDIR}/hipblaslt" CACHE PATH "path to tensile library" )
+    else()
+      # Put files used at runtime adjacent to shared libraries ('.so') in
+      # lib/, separate from executables (no extension) in bin/.
+      set( HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipblaslt" CACHE PATH "path to tensile library" )
+    endif()
 # For ASAN package, Tensile library files are not required
     if( NOT ENABLE_ASAN_PACKAGING )
     if( BUILD_SHARED_LIBS )
