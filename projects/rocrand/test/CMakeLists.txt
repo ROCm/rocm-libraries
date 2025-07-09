@@ -121,6 +121,7 @@ function(add_test_target test_src is_internal)
   endif()
 endfunction()
 
+# This should expose a target called test so we can run `make test`
 foreach(test_src ${rocRAND_TEST_SRCS})
   add_test_target(${test_src} OFF)
 endforeach()
