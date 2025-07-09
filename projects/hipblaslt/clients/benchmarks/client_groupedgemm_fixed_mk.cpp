@@ -77,6 +77,7 @@ typedef enum _ActivationType
     RELU  = 1,
     GELU  = 2,
     SWISH = 3,
+    CLAMP = 4,
 } ActivationType;
 
 inline const char* ToString(ActivationType act)
@@ -91,6 +92,8 @@ inline const char* ToString(ActivationType act)
         return "gelu";
     case SWISH:
         return "swish";
+    case CLAMP:
+        return "clamp";
     default:
         return "[Unknown Activation Type]";
     }
@@ -116,6 +119,13 @@ auto _silu = [](auto in) -> decltype(in) {
     using Tc = float;
     Tc in_Tc = static_cast<Tc>(in);
     return static_cast<decltype(in)>(in_Tc / (1.f + exp(-in_Tc)));
+};
+
+// clamp with -1, 1
+auto _clamp = [](auto in) -> decltype(in) {
+    using Tc = float;
+    Tc in_Tc = static_cast<Tc>(in);
+    return static_cast<decltype(in)>(std::max(-1.f, std::min(in_Tc, 1.f)));
 };
 
 template <typename T>
@@ -172,6 +182,8 @@ void mat_mul_bias_activation(Tc             alpha,
         actFunc = _gelu;
     else if(actType == ActivationType::SWISH)
         actFunc = _silu;
+    else if(actType == ActivationType::CLAMP)
+        actFunc = _clamp;
 
     for(int batch = 0; batch < batch_count; batch++)
     {
@@ -230,7 +242,7 @@ static void show_usage(char* argv[])
         << "\t--stride_d \t\tstride_d \tGEMM_STRIDED argument stride_d\n"
         << "\t--alpha \t\talpha \t\tGEMM_STRIDED argument alpha (default is 1)\n"
         << "\t--beta \t\t\tbeta \t\tGEMM_STRIDED argument beta (default is 0)\n"
-        << "\t--act \t\t\tact \t\tGEMM_STRIDED set activation type: relu, gelu, swish, none "
+        << "\t--act \t\t\tact \t\tGEMM_STRIDED set activation type: relu, gelu, swish, clamp, none "
            "(default is "
            "none)\n"
         << "\t--bias \t\t\tbias \t\tGEMM_STRIDED set bias: 0 or 1 (default is 0)\n"
@@ -373,6 +385,8 @@ static int parse_arguments(int                          argc,
                         actType.push_back(ActivationType::GELU);
                     else if(strncmp(argv[i], "swish", 5) == 0)
                         actType.push_back(ActivationType::SWISH);
+                    else if(strncmp(argv[i], "clamp", 5) == 0)
+                        actType.push_back(ActivationType::CLAMP);
                     else if(strncmp(argv[i], "none", 4) == 0)
                         actType.push_back(ActivationType::NONE);
                     else
@@ -830,6 +844,8 @@ int test_hipblaslt(hipDataType                 in_datatype,
             epilogue[i] = HIPBLASLT_EPILOGUE_GELU_BIAS;
         else if(enable_bias[i] && actType[i] == ActivationType::SWISH)
             epilogue[i] = HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT;
+        else if(enable_bias[i] && actType[i] == ActivationType::CLAMP)
+            epilogue[i] = HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT;
         else if(!enable_bias[i] && actType[i] == ActivationType::NONE)
             epilogue[i] = HIPBLASLT_EPILOGUE_DEFAULT;
         else if(!enable_bias[i] && actType[i] == ActivationType::RELU)
@@ -838,8 +854,15 @@ int test_hipblaslt(hipDataType                 in_datatype,
             epilogue[i] = HIPBLASLT_EPILOGUE_GELU;
         else if(!enable_bias[i] && actType[i] == ActivationType::SWISH)
             epilogue[i] = HIPBLASLT_EPILOGUE_SWISH_EXT;
+        else if(!enable_bias[i] && actType[i] == ActivationType::CLAMP)
+            epilogue[i] = HIPBLASLT_EPILOGUE_CLAMP_EXT;
         gemmEpilogue[i].setMode(epilogue[i]);
         gemmEpilogue[i].setBiasDataType(static_cast<hipDataType>(HIP_R_32F));
+        if(actType[i] == ActivationType::CLAMP)
+        {
+            gemmEpilogue[i].setAct0(-1.f);
+            gemmEpilogue[i].setAct1(1.f);
+        }
         gemmInputs[i].setA(da[i]);
         gemmInputs[i].setB(db[i]);
         gemmInputs[i].setC(dc[i]);

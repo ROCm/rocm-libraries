@@ -32,7 +32,7 @@ import subprocess
 import logging
 import tempfile
 import re
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from pathlib import Path
 from github_cli_client import GitHubCLIClient
 from config_loader import load_repo_config
@@ -155,32 +155,38 @@ def _push_changes(repo_path: Path, branch: str) -> None:
     _run_git(["push", "origin", branch], cwd=repo_path)
     logger.debug(f"Pushed changes from {repo_path} to origin")
 
-def generate_file_level_patches(prefix: str, merge_sha: str, output_dir: Path) -> List[Path]:
+def generate_file_level_patches(prefix: str, merge_sha: str, output_dir: Path) -> Tuple[List[Path], List[str]]:
     """
     Generate one patch file per changed file in the given subtree prefix from a merge commit.
-    Returns list of Path objects to the generated patch files.
+    Returns:
+      - List of Path objects to the generated patch files (for added/modified files).
+      - List of deleted file paths (strings).
     """
-    # Get changed files in that subtree for the merge commit
+    # Get changed files and their status in that subtree for the merge commit
     files_str = _run_git([
-        "diff-tree", "--no-commit-id", "--name-only", "-r", merge_sha, "--", prefix
+        "diff-tree", "--no-commit-id", "--name-status", "-r", merge_sha, "--", prefix
     ])
-    files = [line.strip() for line in files_str.splitlines() if line.strip()]
     patch_files = []
+    deleted_files = []
 
-    for changed_file in files:
-        # Generate patch for each file relative to subtree prefix
-        # Note: format-patch does not have an easy single-file option, so fallback to git diff output to patch file
-        patch_path = output_dir / (changed_file.replace("/", "_") + ".patch")
-        diff_output = _run_git([
-            "diff", f"{merge_sha}^!", f"--relative={prefix}", "--", changed_file
-        ])
-        # Write patch to file, but rewrite paths to be relative to subtree prefix by removing prefix/
-        # Since changed_file is under prefix, strip prefix + slash from paths in patch header
-        patch_path.write_text(diff_output, encoding="utf-8")
-        patch_files.append(patch_path)
+    for line in files_str.splitlines():
+        status, file_path = line.split('\t', 1)
+        if status == 'D':
+            deleted_files.append(file_path)
+        else:
+            # Generate patch for each file relative to subtree prefix
+            # Note: format-patch does not have an easy single-file option, so fallback to git diff output to patch file
+            patch_path = output_dir / (file_path.replace("/", "_") + ".patch")
+            diff_output = _run_git([
+                "diff", f"{merge_sha}^!", f"--relative={prefix}", "--", file_path
+            ])
+            # Write patch to file, but rewrite paths to be relative to subtree prefix by removing prefix/
+            # Since changed_file is under prefix, strip prefix + slash from paths in patch header
+            patch_path.write_text(diff_output, encoding="utf-8")
+            patch_files.append(patch_path)
 
-    logger.debug(f"Generated {len(patch_files)} file-level patches for prefix '{prefix}'")
-    return patch_files
+    logger.debug(f"Generated {len(patch_files)} file-level patches and found {len(deleted_files)} deleted files for prefix '{prefix}'")
+    return patch_files, deleted_files
 
 def resolve_patch_author(client: GitHubCLIClient, repo: str, pr: int) -> tuple[str, str]:
     """Determine the appropriate author for the patch
@@ -198,50 +204,60 @@ def resolve_patch_author(client: GitHubCLIClient, repo: str, pr: int) -> tuple[s
     return name or username, email
 
 def apply_patches_and_squash(entry: RepoEntry, monorepo_url: str, monorepo_pr: int,
-                            patch_paths: List[Path], author_name: str, author_email: str,
-                            merge_sha: str, dry_run: bool = False) -> None:
+                             patch_paths: List[Path], deleted_files: List[str],
+                             author_name: str, author_email: str,
+                             merge_sha: str, dry_run: bool = False) -> None:
     """
     Clone the subrepo, apply multiple file-level patches each as a commit,
-    then squash all new commits into one before pushing.
+    delete files with git rm, then squash all new commits into one before pushing.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         subrepo_path = Path(tmpdir) / entry.name
         _clone_subrepo(entry.url, entry.branch, subrepo_path)
         if dry_run:
-            logger.info(f"[Dry-run] Would apply {len(patch_paths)} patches to {entry.url} as {author_name} <{author_email}>")
+            logger.info(f"[Dry-run] Would apply {len(patch_paths)} patches and delete {len(deleted_files)} files to {entry.url} as {author_name} <{author_email}>")
             return
 
         _configure_git_user(subrepo_path)
 
         # Get current HEAD commit (before applying patches)
         base_commit = _run_git(["rev-parse", "HEAD"], cwd=subrepo_path)
+        prefix = f"{entry.category}/{entry.name}"
+
+        # Handle deleted files
+        for file_path in deleted_files:
+            if file_path.startswith(prefix + "/"):
+                relative_path = file_path[len(prefix) + 1:]
+            else:
+                relative_path = file_path
+            logger.debug(f"Deleting file {relative_path} in subrepo {entry.name}")
+            _run_git(["rm", relative_path], cwd=subrepo_path)
+
+        if deleted_files:
+            delete_commit_msg = f"[rocm-libraries] {monorepo_url}#{monorepo_pr} (commit {merge_sha[:7]})\n\nDeleted files sync."
+            _run_git([
+                "commit",
+                "--author", f"{author_name} <{author_email}>",
+                "-m", delete_commit_msg
+            ], cwd=subrepo_path)
 
         for patch_path in patch_paths:
             logger.debug(f"Applying patch {patch_path.name} to {entry.name}")
             _apply_patch(subrepo_path, patch_path)
             _stage_changes(subrepo_path)
-            original_commit_msg = _extract_commit_message_from_patch(patch_path)
-            commit_msg = _format_commit_message(monorepo_url, monorepo_pr, merge_sha, original_commit_msg)
-            _commit_changes(subrepo_path, commit_msg, author_name, author_email)
+            simple_commit_msg = f"[rocm-libraries] Applying patch {patch_path.name}"
+            _commit_changes(subrepo_path, simple_commit_msg, author_name, author_email)
 
-        # Squash all commits since base_commit into one
         logger.debug(f"Squashing commits since {base_commit} into one")
+        full_squash_msg = _run_git(["log", "-1", "--pretty=%B", merge_sha])
+        combined_commit_msg = f"[rocm-libraries] {monorepo_url}#{monorepo_pr} (commit {merge_sha[:7]})\n\n{full_squash_msg.strip()}"
 
-        # Create a combined commit message from all individual commit messages
-        combined_msg_lines = []
-        for patch_path in patch_paths:
-            orig_msg = _extract_commit_message_from_patch(patch_path)
-            combined_msg_lines.append(orig_msg)
-            combined_msg_lines.append("\n---\n")
-        combined_commit_msg = f"[rocm-libraries] {monorepo_url}#{monorepo_pr} (commit {merge_sha[:7]})\n\n" + "".join(combined_msg_lines).strip()
-
-        # Perform squash via git reset + commit
         _run_git(["reset", "--soft", base_commit], cwd=subrepo_path)
         _run_git(["commit", "-m", combined_commit_msg, "--author", f"{author_name} <{author_email}>"], cwd=subrepo_path)
 
         _set_authenticated_remote(subrepo_path, entry.url)
         _push_changes(subrepo_path, entry.branch)
-        logger.info(f"Applied and squashed patches, then pushed to {entry.url} as {author_name} <{author_email}>")
+        logger.info(f"Applied patches, deleted files, squashed commits, then pushed to {entry.url} as {author_name} <{author_email}>")
 
 def main(argv: Optional[List[str]] = None) -> None:
     """Main function to apply patches to sub-repositories."""
@@ -260,13 +276,14 @@ def main(argv: Optional[List[str]] = None) -> None:
         logger.debug(f"Processing subtree {prefix}")
         with tempfile.TemporaryDirectory() as tmpdir:
             patch_dir = Path(tmpdir)
-            patch_files = generate_file_level_patches(prefix, merge_sha, patch_dir)
-            if not patch_files:
-                logger.info(f"No changed files detected for subtree {prefix}, skipping.")
+            patch_files, deleted_files = generate_file_level_patches(prefix, merge_sha, patch_dir)
+            if not patch_files and not deleted_files:
+                logger.info(f"No changed files or deletions detected for subtree {prefix}, skipping.")
                 continue
             author_name, author_email = resolve_patch_author(client, args.repo, args.pr)
             apply_patches_and_squash(entry, args.repo, args.pr,
-                                     patch_files, author_name, author_email,
+                                     patch_files, deleted_files,
+                                     author_name, author_email,
                                      merge_sha, args.dry_run)
 
 if __name__ == "__main__":
