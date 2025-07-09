@@ -1,0 +1,36 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "opt-rocm",
+      "displayName": "/opt/rocm Config",
+      "description": "Sets compiler and prefix path for /opt/rocm install",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
+        "ROCROLLER_ENABLE_FETCH": "ON",
+        "CMAKE_PREFIX_PATH": "/opt/rocm;/opt/rocm/llvm"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "Address Sanitizer",
+      "description": "Build with asan",
+      "inherits": "opt-rocm",
+      "cacheVariables": {
+        "ROCROLLER_ENABLE_ASAN": "ON"
+      }
+    },
+    {
+      "name": "precheckin",
+      "displayName": "Precheckin Config",
+      "description": "Config used in precheckin build",
+      "inherits": "opt-rocm",
+      "cacheVariables": {
+        "ROCROLLER_ENABLE_CPPCHECK": "ON",
+        "ROCROLLER_ENABLE_YAML_CPP": "OFF",
+        "CMAKE_BUILD_TYPE": "Release",
+        "ROCROLLER_TESTS_SKIP_SLOW": "OFF"
+      }
+    }
+]
+}

@@ -1,10 +1,8 @@
-#!/bin/bash -ex
-
 ################################################################################
 #
 # MIT License
 #
-# Copyright 2024-2025 AMD ROCm(TM) Software
+# Copyright 2025 AMD ROCm(TM) Software
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -25,35 +23,10 @@
 #
 ################################################################################
 
-
-# export PATH=$PATH:/opt/codeql/codeql
-
-# Creates a CodeQL database based on our code in build/rr-database.
-# Unfortunately the DB cannot be incrementally rebuilt so the build dir should just be deleted if you want to
-# re-run based on code changes.
-
-DIR="codeql/build/"
-rm -rf "${DIR}rr-database-new/"
-rm -rf "${DIR}rr-build-new/"
-
-export CCACHE_DISABLE=1
-
-mkdir -p "${DIR}rr-database-new"
-mkdir -p "${DIR}rr-build-new"
-CXX=/opt/rocm/amdclang++ cmake -G Ninja -S . -B "${DIR}rr-build-new" \\
-  -DROCROLLER_ENABLE_TEST_DISCOVERY=ON \\
-  -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm"
-
-codeql database create "${DIR}rr-database-new" --source-root="$(readlink -f .)" \
-  --codescanning-config=codeql/scanning.yml \
-  --language=cpp \
-  -j$(nproc) \
-  --search-path="${DIR}codeql-cli" \
-  --command="ninja" \
-  --working-dir="${DIR}rr-build-new"
-
-# Only overwrite old dirs at end
-rm -rf "${DIR}rr-database"
-rm -rf "${DIR}rr-build" 
-mv -f "${DIR}rr-database-new" "${DIR}rr-database"
-mv -f "${DIR}rr-build-new" "${DIR}rr-build"
+target_sources(common-test-utilities
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/CommonGraphs.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/mxDataGen.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Utilities.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/WidenAddrExprTo64bit.cpp"
+)
