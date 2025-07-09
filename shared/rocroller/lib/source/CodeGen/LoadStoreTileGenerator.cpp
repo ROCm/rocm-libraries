@@ -60,6 +60,61 @@ namespace rocRoller
         using namespace Expression;
         using namespace LowerTileDetails;
 
+        int getNumLDSElements(KernelGraphPtr const& graph, int tileTag, int ldsTag)
+        {
+            auto maybeParentLDS
+                = only(graph->coordinates.getOutputNodeIndices(ldsTag, CT::isEdge<Duplicate>));
+            if(maybeParentLDS)
+                ldsTag = *maybeParentLDS;
+
+            // If LDS is Flattened
+            {
+                auto incoming = graph->coordinates.getInputNodeIndices(ldsTag, CT::isEdge<Flatten>)
+                                    .to<std::vector>();
+
+                if(incoming.size() == 2)
+                {
+                    auto lhs     = graph->coordinates.getNode(incoming[0]);
+                    auto rhs     = graph->coordinates.getNode(incoming[1]);
+                    auto sizeLHS = getUnsignedInt(evaluate(getSize(lhs)));
+                    auto sizeRHS = getUnsignedInt(evaluate(getSize(rhs)));
+                    return sizeLHS * sizeRHS;
+                }
+            }
+
+            // If LDS is Joined...
+
+            // Look upstream of LDS to find incoming strides
+            auto incoming = graph->coordinates.getInputNodeIndices(ldsTag, CT::isEdge<Join>)
+                                .to<std::vector>();
+
+            AssertFatal(incoming.size() == 2,
+                        "KernelGraph::LoadStoreTileGenerator::getNumLDSElements: "
+                        "LDS tag {} has {} incoming edges, expected 2",
+                        ldsTag,
+                        incoming.size());
+
+            auto lhs       = graph->coordinates.getNode(incoming[0]);
+            auto rhs       = graph->coordinates.getNode(incoming[1]);
+            auto sizeLHS   = getUnsignedInt(evaluate(getSize(lhs)));
+            auto sizeRHS   = getUnsignedInt(evaluate(getSize(rhs)));
+            auto strideLHS = getUnsignedInt(evaluate(getStride(lhs)));
+            auto strideRHS = getUnsignedInt(evaluate(getStride(rhs)));
+
+            auto numElements = std::max(sizeLHS * strideLHS, sizeRHS * strideRHS);
+
+            Log::debug("KernelGraph::LoadStoreTileGenerator::getNumLDSElements(ldsTag: {}): "
+                       "sizeLHS: {}, strideLHS: {}, sizeRHS: {}, strideRHS: {}, numElements: {}",
+                       ldsTag,
+                       sizeLHS,
+                       strideLHS,
+                       sizeRHS,
+                       strideRHS,
+                       numElements);
+
+            return numElements;
+        }
+
         std::string toString(LoadStoreTileGenerator::LoadStoreTileInfo const& info)
         {
 #define ShowReg(reg)                                              \
@@ -1473,13 +1528,13 @@ namespace rocRoller
             co_yield Instruction::Comment(concatenate(
                 "GEN: loadMacroTileDirect2LDS OP ", tag, " LDS ", ldsTag, " MacroTile ", tileTag));
 
-            auto numElements = product(tile.subTileSizes) * m_workgroupSizeTotal;
-
             // Allocate LDS memory, and store the offset of the beginning of the allocation
             // into ldsOffset.
             Register::ValuePtr ldsAllocation;
             if(!m_context->registerTagManager()->hasRegister(ldsTag))
             {
+                auto numElements = getNumLDSElements(m_graph, tileTag, ldsTag);
+
                 ldsAllocation = Register::Value::AllocateLDS(m_context, dataType, numElements);
                 m_context->registerTagManager()->addRegister(ldsTag, ldsAllocation);
             }
@@ -1755,14 +1810,14 @@ namespace rocRoller
             auto vgpr    = m_context->registerTagManager()->getRegister(tileTag);
             auto varType = store.varType;
 
-            auto numElements  = product(tile.subTileSizes) * m_workgroupSizeTotal;
             auto paddingBytes = tile.paddingBytes();
             // Allocate LDS memory, and store the offset of the beginning of the allocation
             // into ldsOffset.
             Register::ValuePtr ldsAllocation;
             if(!m_context->registerTagManager()->hasRegister(ldsTag))
             {
-                ldsAllocation = Register::Value::AllocateLDS(
+                auto numElements = getNumLDSElements(m_graph, tileTag, ldsTag);
+                ldsAllocation    = Register::Value::AllocateLDS(
                     m_context, varType, numElements / packing, /*alignment*/ 4, paddingBytes);
                 m_context->registerTagManager()->addRegister(ldsTag, ldsAllocation);
             }
@@ -1841,7 +1896,6 @@ namespace rocRoller
         {
             auto [ldsTag, lds]           = m_graph->getDimension<LDS>(tag);
             auto [macTileTag, macTile]   = m_graph->getDimension<MacroTile>(tag);
-            auto macrotileNumElements    = product(macTile.sizes);
             auto [waveTileTag, waveTile] = m_graph->getDimension<WaveTile>(tag);
             uint waveTileNumElements     = waveTile.sizes[0] * waveTile.sizes[1];
             auto varType                 = store.varType;
@@ -1867,8 +1921,9 @@ namespace rocRoller
             Register::ValuePtr ldsAllocation;
             if(!m_context->registerTagManager()->hasRegister(ldsTag))
             {
-                ldsAllocation
-                    = Register::Value::AllocateLDS(m_context, varType, macrotileNumElements);
+                auto numElements = getNumLDSElements(m_graph, macTileTag, ldsTag);
+
+                ldsAllocation = Register::Value::AllocateLDS(m_context, varType, numElements);
                 m_context->registerTagManager()->addRegister(ldsTag, ldsAllocation);
             }
             else

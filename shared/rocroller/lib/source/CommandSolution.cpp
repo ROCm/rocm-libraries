@@ -346,6 +346,7 @@ namespace rocRoller
         transforms.push_back(
             std::make_shared<KernelGraph::LowerTensorContraction>(m_commandParameters, m_context));
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
+        transforms.push_back(std::make_shared<KernelGraph::AddLDSPadding>(m_commandParameters));
 
         // TODO: simplify the condition by making ConstantPropagation and
         // Streamk work simultaneously

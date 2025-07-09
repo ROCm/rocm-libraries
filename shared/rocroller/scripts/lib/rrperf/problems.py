@@ -128,6 +128,9 @@ class GEMMSolution:
     storeLDS_D: bool = True
     betaInFma: bool = True
 
+    padLDS_A: int = -1
+    padLDS_B: int = -1
+
     direct2LDS_A: bool = False
     direct2LDS_B: bool = False
 

@@ -177,6 +177,8 @@ struct rocRoller::Serialization::MappingTraits<Client::GEMMClient::SolutionParam
         iot::mapRequired(io, "unroll_y", params.unrollY);
         iot::mapRequired(io, "loadLDS_A", params.loadLDSA);
         iot::mapRequired(io, "loadLDS_B", params.loadLDSB);
+        iot::mapRequired(io, "padLDS_A", params.padLDSA);
+        iot::mapRequired(io, "padLDS_B", params.padLDSB);
         iot::mapRequired(io, "storeLDS_D", params.storeLDSD);
         iot::mapRequired(io, "direct2LDS_A", params.direct2LDSA);
         iot::mapRequired(io, "direct2LDS_B", params.direct2LDSB);
@@ -1177,6 +1179,9 @@ int main(int argc, const char* argv[])
         .loadLDSB  = true,
         .storeLDSD = true,
 
+        .padLDSA = -1,
+        .padLDSB = -1,
+
         .direct2LDSA = false,
         .direct2LDSB = false,
 
@@ -1356,6 +1361,12 @@ int main(int argc, const char* argv[])
     app.add_option("--unroll_y", solution.unrollY, "Unroll size in Y.");
     app.add_flag("--loadLDS_A", solution.loadLDSA, "Use LDS when loading A.");
     app.add_flag("--loadLDS_B", solution.loadLDSB, "Use LDS when loading B.");
+    app.add_option("--padLDS_A",
+                   solution.padLDSA,
+                   "Element padding for A LDS buffer: -1 means automatic.  Default is -1.");
+    app.add_option("--padLDS_B",
+                   solution.padLDSB,
+                   "Element padding for B LDS buffer: -1 means automatic.  Default is -1.");
     app.add_flag("--storeLDS_D", solution.storeLDSD, "Use LDS when storing D.");
     app.add_flag("--direct2LDS_A", solution.direct2LDSA, "Use direct-to-LDS when loading A.");
     app.add_flag("--direct2LDS_B", solution.direct2LDSB, "Use direct-to-LDS when loading B.");

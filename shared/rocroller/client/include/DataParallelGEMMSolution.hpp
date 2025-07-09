@@ -362,6 +362,9 @@ namespace rocRoller
                     else if(solutionParams.loadLDSB)
                         memoryTypeB = MemoryType::LDS;
 
+		    params->padLDS[LayoutType::MATRIX_A] = solutionParams.padLDSA;
+		    params->padLDS[LayoutType::MATRIX_B] = solutionParams.padLDSB;
+
                     auto macTileA = KernelGraph::CoordinateGraph::MacroTile(
                         {solutionParams.macM, solutionParams.macK},
                         LayoutType::MATRIX_A,

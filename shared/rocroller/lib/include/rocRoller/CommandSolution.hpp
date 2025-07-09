@@ -144,6 +144,19 @@ namespace rocRoller
         std::optional<std::pair<int, Expression::ExpressionPtr>> workgroupMapping  = {};
         std::optional<int>                                       workgroupRemapXCC = {};
 
+        /**
+	 * @brief Padding for LDS.
+	 *
+	 * Map from LayoutType to number of LDS padding elements (not bytes!).
+	 *
+	 * A value of -1 means rocRoller will compute a padding value
+	 * automatically.  This is the default behaviour for MATRIX_A
+	 * and MATRIX_B layouts.  See `computeDefaultLDSPaddingElements()`.
+	 *
+	 * A value of 0 means no padding.
+	 */
+        std::map<LayoutType, int> padLDS = {{LayoutType::MATRIX_A, -1}, {LayoutType::MATRIX_B, -1}};
+
     private:
         std::map<Operations::OperationTag, KernelGraph::CoordinateGraph::Dimension> m_dimInfo;
         std::optional<std::array<unsigned int, 3>>                                  m_workgroupSize;

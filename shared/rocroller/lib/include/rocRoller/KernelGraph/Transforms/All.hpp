@@ -32,6 +32,7 @@
 #include <rocRoller/KernelGraph/Transforms/AddDirect2LDS.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddF6LDSPadding.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddLDS.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddLDSPadding.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddPRNG.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddPrefetch.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddStreamK.hpp>

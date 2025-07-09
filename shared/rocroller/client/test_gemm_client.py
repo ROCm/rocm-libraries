@@ -248,6 +248,8 @@ unroll_x: 0
 unroll_y: 0
 loadLDS_A: true
 loadLDS_B: true
+padLDS_A: -1
+padLDS_B: -1
 storeLDS_D: true
 direct2LDS_A: false
 direct2LDS_B: false
@@ -302,6 +304,8 @@ unroll_x: 0
 unroll_y: 0
 loadLDS_A: true
 loadLDS_B: true
+padLDS_A: -1
+padLDS_B: -1
 storeLDS_D: true
 direct2LDS_A: false
 direct2LDS_B: false
@@ -355,6 +359,8 @@ unroll_x: 0
 unroll_y: 0
 loadLDS_A: true
 loadLDS_B: true
+padLDS_A: -1
+padLDS_B: -1
 storeLDS_D: true
 direct2LDS_A: false
 direct2LDS_B: false

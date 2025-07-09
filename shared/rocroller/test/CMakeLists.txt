@@ -156,6 +156,7 @@ set(
     catch/TestKernels.cpp
 
     catch/AddDeallocateTest.cpp
+    catch/AddLDSPaddingTest.cpp
     catch/AddPrefetchTest.cpp
     catch/AliasDataFlowTagsTest.cpp
     catch/AnnotateInstructionsTest.cpp

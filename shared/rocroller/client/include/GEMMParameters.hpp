@@ -148,6 +148,9 @@ namespace rocRoller
                 bool loadLDSB  = true;
                 bool storeLDSD = true;
 
+                int padLDSA = -1;
+                int padLDSB = -1;
+
                 bool direct2LDSA = false;
                 bool direct2LDSB = false;
 
