@@ -83,7 +83,7 @@ jobs:
           exit 1
         fi
 
-        runs=$(echo "$res" | jq -r '.value[] | select(.sourceBranch | contains("refs/pull/'"$pr_number"'/merge")) | .id')
+        runs=$(echo "$res" | jq -r '.value[] | select((.sourceBranch | contains("refs/pull/'"$pr_number"'/merge")) and (.repository.id == "ROCm/rocm-libraries")) | .id')
 
         if [ -z "$runs" ]; then
           echo "No in-progress runs found for PR #$pr_number"
