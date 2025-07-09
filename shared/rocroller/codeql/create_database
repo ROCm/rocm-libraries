@@ -40,9 +40,7 @@ export CCACHE_DISABLE=1
 
 mkdir -p "${DIR}rr-database-new"
 mkdir -p "${DIR}rr-build-new"
-CXX=/opt/rocm/amdclang++ cmake -G Ninja -S . -B "${DIR}rr-build-new" \\
-  -DROCROLLER_ENABLE_TEST_DISCOVERY=ON \\
-  -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm"
+cmake --preset opt-rocm -G Ninja -S . -B "${DIR}rr-build-new"
 
 codeql database create "${DIR}rr-database-new" --source-root="$(readlink -f .)" \
   --codescanning-config=codeql/scanning.yml \

@@ -7,8 +7,9 @@
       "description": "Sets compiler and prefix path for /opt/rocm install",
       "cacheVariables": {
         "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
-        "ROCROLLER_ENABLE_FETCH": "ON",
-        "CMAKE_PREFIX_PATH": "/opt/rocm;/opt/rocm/llvm"
+        "CMAKE_PREFIX_PATH": "/opt/rocm;/opt/rocm/llvm",
+        "CMAKE_BUILD_TYPE": "Release",
+        "ROCROLLER_ENABLE_FETCH": "ON"
       }
     },
     {
@@ -26,9 +27,8 @@
       "description": "Config used in precheckin build",
       "inherits": "opt-rocm",
       "cacheVariables": {
-        "ROCROLLER_ENABLE_CPPCHECK": "ON",
-        "ROCROLLER_ENABLE_YAML_CPP": "OFF",
         "CMAKE_BUILD_TYPE": "Release",
+        "ROCROLLER_ENABLE_YAML_CPP": "OFF",
         "ROCROLLER_TESTS_SKIP_SLOW": "OFF"
       }
     },
@@ -38,8 +38,7 @@
       "description": "Do not use pregenerated arch defs",
       "inherits": "opt-rocm",
       "cacheVariables": {
-        "ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF": "OFF",
-        "CMAKE_BUILD_TYPE": "Release"
+        "ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF": "OFF"
       }
     }
 ]
