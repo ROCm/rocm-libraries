@@ -78,12 +78,12 @@ TEST_P(accuracy_test, vs_fftw)
     {
     case fft_params::fft_mp_lib_none:
     {
-        // only do round trip for single-GPU FFTs
-        bool round_trip = params.multiGPU <= 1;
+        // only do round trip for forward FFTs
+        const bool do_round_trip = params.is_forward();
 
         try
         {
-            fft_vs_reference(params, round_trip);
+            fft_vs_reference(params, do_round_trip);
         }
         catch(HOSTBUF_MEM_USAGE& e)
         {

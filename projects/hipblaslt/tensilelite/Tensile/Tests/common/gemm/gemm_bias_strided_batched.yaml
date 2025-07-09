@@ -10,7 +10,7 @@ GlobalParameters:
   PrintWinnersOnly: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
   ValidationPrintValids: False # print matches too
-  DataInitValueActivationArgs: [0.5, -1]
+  DataInitValueActivationArgs: [-0.5, 0.5]
   PruneSparseMode: 0
   MinKForGSU: 1
 
@@ -80,6 +80,7 @@ BenchmarkProblems:
           - [Enum: none]
           - [Enum: relu]
           - [Enum: silu]
+          - [Enum: clamp]
 
   #######################################
   # TN - standard
@@ -146,6 +147,7 @@ BenchmarkProblems:
           - [Enum: none]
           - [Enum: relu]
           - [Enum: silu]
+          - [Enum: clamp]
 
   #######################################
   # NN - standard
@@ -212,6 +214,7 @@ BenchmarkProblems:
           - [Enum: none]
           - [Enum: relu]
           - [Enum: silu]
+          - [Enum: clamp]
 
   #######################################
   # TN - standard
@@ -278,6 +281,7 @@ BenchmarkProblems:
           - [Enum: none]
           - [Enum: relu]
           - [Enum: silu]
+          - [Enum: clamp]
 
   #######################################
   # NN - standard
@@ -344,6 +348,7 @@ BenchmarkProblems:
           - [Enum: none]
           - [Enum: relu]
           - [Enum: silu]
+          - [Enum: clamp]
 
   #######################################
   # TN - standard
@@ -410,6 +415,7 @@ BenchmarkProblems:
           - [Enum: none]
           - [Enum: relu]
           - [Enum: silu]
+          - [Enum: clamp]
 
   #######################################
   # NN - standard
@@ -476,6 +482,7 @@ BenchmarkProblems:
           - [Enum: none]
           - [Enum: relu]
           - [Enum: silu]
+          - [Enum: clamp]
 
   #######################################
   # TN - standard
@@ -542,6 +549,7 @@ BenchmarkProblems:
           - [Enum: none]
           - [Enum: relu]
           - [Enum: silu]
+          - [Enum: clamp]
 
 
   #######################################
@@ -610,6 +618,7 @@ BenchmarkProblems:
           - [Enum: none]
           - [Enum: relu]
           - [Enum: silu]
+          - [Enum: clamp]
 
   #######################################
   # TN - standard
@@ -677,3 +686,4 @@ BenchmarkProblems:
           - [Enum: none]
           - [Enum: relu]
           - [Enum: silu]
+          - [Enum: clamp]

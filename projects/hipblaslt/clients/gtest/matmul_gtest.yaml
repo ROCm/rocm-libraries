@@ -557,6 +557,23 @@ Tests:
   unit_check: 0
   norm_check: 1
 
+- name: matmul_bias_clamp
+  category: pre_checkin
+  function:
+    matmul: *real_precisions
+  M: [128, 129]
+  N: [128, 129]
+  K: [128, 129]
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  activation_type: clamp
+  activation_arg1: -1.5
+  activation_arg2: 1.5
+  bias_vector: [0, 1]
+  unit_check: 0
+  norm_check: 1
+
 - name: matmul_bias_only
   category: pre_checkin
   function:

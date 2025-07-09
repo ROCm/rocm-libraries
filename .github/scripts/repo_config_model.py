@@ -4,8 +4,7 @@
 Repository Config Model
 ------------------------
 
-This module defines Pydantic data models for validating and parsing the
-repos-config.json file used by the PR fanout system.
+This module defines Pydantic data models for validating and parsing the repos-config.json file.
 
 Structure of the expected JSON:
 
@@ -41,7 +40,6 @@ class RepoEntry(BaseModel):
     category: str
     auto_subtree_pull: bool
     auto_subtree_push: bool
-    enable_pr_fanout: bool
 
 class RepoConfig(BaseModel):
     """
