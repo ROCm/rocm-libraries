@@ -124,3 +124,4 @@ jobs:
             --pr "${{ steps.pr-check.outputs.pr }}" \
             --subtrees "${{ steps.detect.outputs.subtrees }}" \
             --config ".github/repos-config.json"
+            --debug

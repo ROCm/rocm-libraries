@@ -149,10 +149,13 @@ def generate_file_level_patches(prefix: str, merge_sha: str, output_dir: Path) -
         elif status == 'M':
             file_path = parts[1]
             patch_path = output_dir / (file_path.replace("/", "_") + ".patch")
-            diff_text = _run_git([
-                "diff", f"{merge_sha}^!", "--", file_path
+            _run_git([
+                "format-patch",
+                "-1", merge_sha,
+                f"--relative={prefix}",
+                "--output", str(patch_path),
+                "--", file_path
             ])
-            patch_path.write_text(diff_text, encoding="utf-8")
             patch_files.append(patch_path)
         elif status == 'D':
             deleted_files.append(parts[1])
