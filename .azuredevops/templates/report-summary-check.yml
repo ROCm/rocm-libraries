@@ -37,8 +37,7 @@ jobs:
           exit 0
         fi
 
-        newline=$'\n'
-        echo $(echo $APP_PRIVATE_KEY | sed 's/\\n/${newline}/g') > app_private_key.pem
+        echo "$APP_PRIVATE_KEY" | base64 -d > app_private_key.pem
         chmod 600 app_private_key.pem
         create_jwt() {
           local header=$(echo -n '{"alg":"RS256","typ":"JWT"}' | openssl base64 -e | tr -d '=' | tr '/+' '_-' | tr -d '\n')
