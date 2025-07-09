@@ -37,6 +37,7 @@ jobs:
           exit 0
         fi
 
+        # APP_PRIVATE_KEY is generated with `base64 app_private_key.pem | tr -d '\n'`
         echo "$APP_PRIVATE_KEY" | base64 -d > app_private_key.pem
         chmod 600 app_private_key.pem
         create_jwt() {
@@ -47,7 +48,7 @@ jobs:
           echo "${unsigned_token}.${signature}"
         }
         JWT=$(create_jwt)
-        GH_TOKEN=$(curl -sSX POST \
+        export GH_TOKEN=$(curl -sSX POST \
           -H "Authorization: Bearer $JWT" \
           -H "Accept: application/vnd.github+json" \
           "https://api.github.com/app/installations/$APP_INSTALLATION_ID/access_tokens" | jq -r .token)
@@ -73,7 +74,7 @@ jobs:
         # replace the status of the current build in the summary table
 
         if [[ "$CHECK_SUMMARY" == *"$(Build.BuildId)"* ]]; then
-          CHECK_SUMMARY=$(echo "$CHECK_SUMMARY" | sed "s/.*$(Build.BuildId)=[^|]*/| $(Build.DefinitionName) | [$(Build.BuildId)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$(Build.BuildId)) | $(variables['Agent.JobStatus']) |/")
+          CHECK_SUMMARY=$(echo "$CHECK_SUMMARY" | sed "s/.*$(Build.BuildId)=[^|]*/| $(Build.DefinitionName) | [$(Build.BuildId)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$(Build.BuildId)) | $(Agent.JobStatus) |/")
         fi
 
         echo "updated check summary"
@@ -85,7 +86,7 @@ jobs:
         # replace the status of the current build with variables['Agent.JobStatus']
 
         if [[ "$CHECK_TEXT" == *"$(Build.BuildId)="* ]]; then
-          CHECK_TEXT=$(echo "$CHECK_TEXT" | sed "s/.*$(Build.BuildId)=[^;]*/$CURRENT_BUILD_ID=$(variables['Agent.JobStatus'])/")
+          CHECK_TEXT=$(echo "$CHECK_TEXT" | sed "s/.*$(Build.BuildId)=[^;]*/$CURRENT_BUILD_ID=$(Agent.JobStatus)/")
         fi
 
         echo "updated check text"
