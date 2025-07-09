@@ -52,7 +52,8 @@ jobs:
           -H "Accept: application/vnd.github+json" \
           "https://api.github.com/app/installations/$APP_INSTALLATION_ID/access_tokens" | jq -r .token)
 
-        PR_HEAD_SHA=$(curl -s "https://api.github.com/repos/ROCm/rocm-libraries/branches/$(Build.SourceBranchName)" | jq -r '.commit.sha')
+        PR_NUMBER=$(echo "$(Build.SourceBranch)" | sed 's|refs/pull/\([0-9]*\)/.*|\1|')
+        PR_HEAD_SHA=$(curl -s "https://api.github.com/repos/ROCm/rocm-libraries/pulls/$PR_NUMBER" | jq -r '.head.sha')
         CHECK=$(curl -s "https://api.github.com/repos/ROCm/rocm-libraries/commits/$PR_HEAD_SHA/check-runs" | jq -r '.check_runs[] | select(.name == "Azure CI Summary")')
         CHECK_ID=$(echo "$CHECK" | jq -r '.id')
         CHECK_SUMMARY=$(echo "$CHECK" | jq -r '.output.summary')
