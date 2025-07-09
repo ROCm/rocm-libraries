@@ -37,12 +37,12 @@ jobs:
           exit 0
         fi
 
-        echo $APP_PRIVATE_KEY | /tmp/app_private_key.pem
+        echo $APP_PRIVATE_KEY > app_private_key.pem
         create_jwt() {
           local header=$(echo -n '{"alg":"RS256","typ":"JWT"}' | openssl base64 -e | tr -d '=' | tr '/+' '_-' | tr -d '\n')
           local payload=$(echo -n "{\"iat\":$(date +%s),\"exp\":$(($(date +%s) + 600)),\"iss\":\"$APP_ID\"}" | openssl base64 -e | tr -d '=' | tr '/+' '_-' | tr -d '\n')
           local unsigned_token="${header}.${payload}"
-          local signature=$(echo -n "$unsigned_token" | openssl dgst -sha256 -sign "/tmp/app_private_key.pem" | openssl base64 -e | tr -d '=' | tr '/+' '_-' | tr -d '\n')
+          local signature=$(echo -n "$unsigned_token" | openssl dgst -sha256 -sign "app_private_key.pem" | openssl base64 -e | tr -d '=' | tr '/+' '_-' | tr -d '\n')
           echo "${unsigned_token}.${signature}"
         }
         JWT=$(create_jwt)
