@@ -146,7 +146,7 @@ jobs:
           https://api.github.com/repos/ROCm/rocm-libraries/check-runs \
           -d '{
             "name": "Azure CI Summary",
-            "head_sha": "${{ github.sha }}",
+            "head_sha": "${{ github.event.pull_request.head.sha }}",
             "status": "in_progress",
             "output": {
               "title": "Azure CI Summary",
