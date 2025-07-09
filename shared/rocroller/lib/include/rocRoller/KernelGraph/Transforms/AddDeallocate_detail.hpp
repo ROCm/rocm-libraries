@@ -38,11 +38,6 @@ namespace rocRoller
         namespace AddDeallocateDetail
         {
             /**
-             * @brief Delete a control node from the graph.
-             */
-            void deleteControlNode(KernelGraph& graph, int nodeIdx);
-
-            /**
              * @brief Add the next downstream Barrier to the list of dependencies.
              *
              * @param dependencies The set of dependencies for the Deallocate operation.

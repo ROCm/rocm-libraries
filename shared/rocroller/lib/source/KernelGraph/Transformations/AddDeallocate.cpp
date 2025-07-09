@@ -214,26 +214,6 @@ namespace rocRoller::KernelGraph
 
             removeRedundantSequenceEdges(graph);
         }
-
-        void deleteControlNode(KernelGraph& graph, int nodeIdx)
-        {
-            {
-                auto incomingNodes
-                    = graph.control.getInputNodeIndices<ControlEdge>(nodeIdx).to<std::vector>();
-                for(auto inc : incomingNodes)
-                    graph.control.deleteElement(graph.control.findEdge(inc, nodeIdx).value());
-            }
-
-            {
-                auto outgoingNodes
-                    = graph.control.getOutputNodeIndices<ControlEdge>(nodeIdx).to<std::vector>();
-                for(auto out : outgoingNodes)
-                    graph.control.deleteElement(graph.control.findEdge(nodeIdx, out).value());
-            }
-
-            graph.control.deleteElement(nodeIdx);
-            graph.mapper.purge(nodeIdx);
-        }
     }
 
     using namespace AddDeallocateDetail;
