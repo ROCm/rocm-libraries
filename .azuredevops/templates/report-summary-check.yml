@@ -74,7 +74,7 @@ jobs:
         # replace the status of the current build in the summary table
 
         if [[ "$CHECK_SUMMARY" == *"$(Build.BuildId)"* ]]; then
-          CHECK_SUMMARY=$(echo "$CHECK_SUMMARY" | sed "s/.*$(Build.BuildId)=[^|]*/| $(Build.DefinitionName) | [$(Build.BuildId)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$(Build.BuildId)) | $(Agent.JobStatus) |/")
+          CHECK_SUMMARY=$(echo "$CHECK_SUMMARY" | sed "s/buildId=$(Build.BuildId)[^|]*|[^|]*|/buildId=$(Build.BuildId)) | $(Agent.JobStatus) |/")
         fi
 
         echo "updated check summary"
@@ -92,13 +92,13 @@ jobs:
         echo "updated check text"
         echo $CHECK_TEXT
 
-        CHECK_STATUS=$(echo "$CHECK_TEXT" | grep -q 'pending' && echo "in_progress" || echo "completed")
+        CHECK_STATUS=$(echo "$CHECK_TEXT" | grep -q "pending" && echo "in_progress" || echo "completed")
 
         gh api repos/ROCm/rocm-libraries/check-runs/$CHECK_ID \
           -X PATCH \
-          -f 'name=Azure CI Summary' \
+          -f "name=Azure CI Summary" \
           -f "head_sha=$PR_HEAD_SHA" \
-          -f 'status=$CHECK_STATUS' \
+          -f "status=$CHECK_STATUS" \
           -f "output[title]=Azure CI Summary" \
           -f "output[summary]=$CHECK_SUMMARY" \
           -f "output[text]=$CHECK_TEXT"
