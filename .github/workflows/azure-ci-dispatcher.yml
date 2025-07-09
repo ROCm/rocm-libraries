@@ -51,6 +51,8 @@ jobs:
 
     - name: Detect changed subtrees
       id: detect
+      env:
+        GH_TOKEN: ${{ env.GITHUB_TOKEN }}
       run: |
         python .github/scripts/pr_detect_changed_subtrees.py \
           --repo "${{ github.repository }}" \
