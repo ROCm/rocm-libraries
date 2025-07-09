@@ -1,14 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-if(ROCROLLER_ENABLE_FETCH)
-    FetchContent_Declare(
-        mrisa_xml
-        URL https://gpuopen.com/download/machine-readable-isa/AMD_GPU_MR_ISA_XML-2024_08_22.zip
-    )
-    FetchContent_MakeAvailable(mrisa_xml)
-endif()
-
 add_library(isa-spec-manager OBJECT)
 target_sources(isa-spec-manager
     PRIVATE
@@ -72,21 +64,51 @@ if(ROCROLLER_ENABLE_TIMERS)
     target_compile_options(GPUArchitectureGenerator PRIVATE -pg -fno-omit-frame-pointer)
 endif()
 
-file(GLOB YAML_FILES "${CMAKE_CURRENT_SOURCE_DIR}/pregenerated/*.yaml")
-set(YAML_ARGS "")
-foreach(YAML_FILE ${YAML_FILES})
-    list(APPEND YAML_ARGS --yaml "${YAML_FILE}")
-endforeach()
+if(NOT ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF)
+    add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/amd-mrisa.stamp"
+        COMMAND wget https://gpuopen.com/download/machine-readable-isa/AMD_GPU_MR_ISA_XML-2024_08_22.zip
+        COMMAND unzip AMD_GPU_MR_ISA_XML-2024_08_22.zip -d ${ROCROLLER_MRISAS_DIR}
+        COMMAND touch "${CMAKE_CURRENT_BINARY_DIR}/amd-mrisa.stamp"
+    )
+    add_custom_target(amd-mrisa
+        DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/amd-mrisa.stamp"
+    )
+    add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.yaml"
+        COMMAND
+            $<TARGET_FILE:GPUArchitectureGenerator>
+            "${CMAKE_CURRENT_BINARY_DIR}/split_yamls/GPUArchitecture_def.yaml"
+            ${CMAKE_CXX_COMPILER}
+            -Y
+            --split
+            --xml_dir
+            ${ROCROLLER_MRISAS_DIR}
+        COMMAND
+            $<TARGET_FILE:GPUArchitectureGenerator>
+            "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.yaml"
+            ${CMAKE_CXX_COMPILER}
+            -Y
+            --xml_dir ${ROCROLLER_MRISAS_DIR}
+        DEPENDS GPUArchitectureGenerator amd-mrisa
+    )
+else()
+    file(GLOB YAML_FILES "${CMAKE_CURRENT_SOURCE_DIR}/pregenerated/*.yaml")
+    set(YAML_ARGS "")
+    foreach(YAML_FILE ${YAML_FILES})
+        list(APPEND YAML_ARGS --yaml "${YAML_FILE}")
+    endforeach()
 
-add_custom_command(
-    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.yaml"
-    COMMAND
-        $<TARGET_FILE:GPUArchitectureGenerator>
-        "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.yaml"
-        ${CMAKE_CXX_COMPILER}
-        -Y ${YAML_ARGS}
-    DEPENDS GPUArchitectureGenerator "${YAML_FILES}"
-)
+    add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.yaml"
+        COMMAND
+            $<TARGET_FILE:GPUArchitectureGenerator>
+            "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.yaml"
+            ${CMAKE_CXX_COMPILER}
+            -Y ${YAML_ARGS}
+        DEPENDS GPUArchitectureGenerator "${YAML_FILES}"
+    )
+endif()
 
 add_custom_command(
     DEPENDS GPUArchitectureGenerator "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.yaml"

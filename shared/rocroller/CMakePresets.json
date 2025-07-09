@@ -31,6 +31,16 @@
         "CMAKE_BUILD_TYPE": "Release",
         "ROCROLLER_TESTS_SKIP_SLOW": "OFF"
       }
+    },
+    {
+      "name": "amd-mrisa",
+      "displayName": "AMD MR ISAs",
+      "description": "Do not use pregenerated arch defs",
+      "inherits": "opt-rocm",
+      "cacheVariables": {
+        "ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF": "OFF",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     }
 ]
 }

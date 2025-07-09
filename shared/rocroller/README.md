@@ -166,10 +166,6 @@ make -j$(nproc)
 - `-DINTERNAL_MRISAS=<CUSTOM_MRISA_XML_FILES>` where `<CUSTOM_MRISA_XML_FILES>`
   is a semi-colon delimitted list of paths to MRISA XML files. Allows the user
   to specify additional MRISA XML files to use during compilation.
-- To see what options your build directory was configured with, run `cmake -LAH`
-- It is highly recommended _not_ to reconfigure a build directory with cmake.
-  Doing so can lead to caching problems with the configuration.  When in doubt,
-  remove your build directory and start fresh.
 - `-DROCROLLER_USE_PREGENERATED_ARCH_DEF=OFF` will not use the
   [GPUArchitecture yaml file(s)](GPUArchitectureGenerator/pregenerated) checked
   into the repo, and will instead generate them from scratch using the MRISA XML
