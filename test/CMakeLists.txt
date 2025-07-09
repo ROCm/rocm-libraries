@@ -29,12 +29,24 @@ if(NOT mxDataGenerator_FOUND)
 endif()
 
 add_executable(rocroller-tests)
+
+if(ROCROLLER_ENABLE_ASAN)
+    rocroller_target_configure_sanitizers(rocroller-tests PRIVATE)
+endif()
+
 if(ROCROLLER_ENABLE_CATCH AND (ROCROLLER_BUILD_TESTING OR BUILD_TESTING))
     add_executable(rocroller-tests-catch)
+    if(ROCROLLER_ENABLE_ASAN)
+        rocroller_target_configure_sanitizers(rocroller-tests-catch PRIVATE)
+    endif()
 endif()
 
 # Component stand-alone test
 add_executable(component-test)
+
+if(ROCROLLER_ENABLE_ASAN)
+    rocroller_target_configure_sanitizers(component-test PRIVATE)
+endif()
 
 if(ROCROLLER_ENABLE_ARCH_GEN_TEST)
     if(NOT ROCROLLER_ENABLE_LLD)
@@ -61,6 +73,9 @@ if(ROCROLLER_ENABLE_ARCH_GEN_TEST)
             SKIP_REGULAR_EXPRESSION ${rocroller_skip_regex}
     )
     add_executable(arch-gen-tests)
+    if(ROCROLLER_ENABLE_ASAN)
+        rocroller_target_configure_sanitizers(arch-gen-tests PRIVATE)
+    endif()
 endif()
 
 find_package(BLAS REQUIRED)

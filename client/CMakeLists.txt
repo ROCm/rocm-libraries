@@ -47,6 +47,10 @@ if(ROCROLLER_BUILD_SHARED_LIBS) # why?
     target_link_libraries(rocroller-gemm PUBLIC ${llvm_yaml_libs})
 endif()
 
+if(ROCROLLER_ENABLE_ASAN)
+    rocroller_target_configure_sanitizers(rocroller-gemm PRIVATE)
+endif()
+
 add_executable(rocroller-codegen-stress "${CMAKE_CURRENT_SOURCE_DIR}/src/codegen_stress_test.cpp")
 target_link_libraries(rocroller-codegen-stress
     PUBLIC
@@ -57,4 +61,8 @@ target_link_libraries(rocroller-codegen-stress
 )
 if(ROCROLLER_BUILD_SHARED_LIBS) # why are we using this logic
     target_link_libraries(rocroller-codegen-stress PUBLIC ${llvm_yaml_libs})
+endif()
+
+if(ROCROLLER_ENABLE_ASAN)
+    rocroller_target_configure_sanitizers(rocroller-codegen-stress PRIVATE)
 endif()
