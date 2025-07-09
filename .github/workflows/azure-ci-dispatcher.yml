@@ -144,7 +144,6 @@ jobs:
                   }
                 }
               }')
-            echo $response
 
             if [ $? -eq 0 ]; then
               success=true
