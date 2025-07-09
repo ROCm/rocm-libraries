@@ -68,6 +68,8 @@ def build_rocroller(
     subprocess.run(
         [
             "cmake",
+            f"-B {build_dir}",
+            f"-S {project_dir}",
             "-DCMAKE_BUILD_TYPE=Release",
             "-DROCROLLER_ENABLE_TIMERS=ON",
             "-DROCROLLER_ENABLE_FETCH=ON",
@@ -75,7 +77,6 @@ def build_rocroller(
             "-DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++",
             "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
             "-DROCROLLER_ENABLE_CPPCHECK=OFF",
-            "../",
         ],
         cwd=str(build_dir),
         check=True,
