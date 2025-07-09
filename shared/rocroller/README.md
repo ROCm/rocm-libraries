@@ -163,13 +163,10 @@ make -j$(nproc)
 - `ROCROLLER_ENABLE_LLD`: Build rocroller functionality requiring LLD (default OFF)
 - `ROCROLLER_ENABLE_TIMERS`: Enable rocRoller timer code (default OFF)
 - `ROCROLLER_ENABLE_CPPCHECK`: Enable cppcheck (default OFF)
-- `-DINTERNAL_MRISAS=<CUSTOM_MRISA_XML_FILES>` where `<CUSTOM_MRISA_XML_FILES>`
-  is a semi-colon delimitted list of paths to MRISA XML files. Allows the user
-  to specify additional MRISA XML files to use during compilation.
-- `-DROCROLLER_USE_PREGENERATED_ARCH_DEF=OFF` will not use the
-  [GPUArchitecture yaml file(s)](GPUArchitectureGenerator/pregenerated) checked
-  into the repo, and will instead generate them from scratch using the MRISA XML
-  files and [GPUArchitecture_def](GPUArchitectureGenerator/include/GPUArchitectureGenerator/GPUArchitectureGenerator_defs.hpp) file.
+- `ROCROLLER_MRISAS_DIR`: Path to directory containing MRISA XML files (default `<build dir>/GPUArchitectureGenerator/amd-mrisa`)
+- `ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF`: Use the pregenerates GPU architecture definition YAML file(s) in the repository (default ON)
+- `MXDATAGENERATOR_GIT_TAG`: "mxDataGenerator tag/commit hash to checkout (default see root CMakeLists.txt)
+- `MXDATAGENERATOR_GIT_URL`:Base Git URL to fetch mxDataGenerator from (default https://github.com/ROCm/mxDataGenerator.git)
 
 ### Running the tests
 
@@ -232,13 +229,11 @@ Updated yaml files can be copied from `./build/share/rocRoller/split_yamls/` aft
 building with `-DROCROLLER_USE_PREGENERATED_ARCH_DEF=OFF`.
 
 ```bash
-mkdir ./build
-cd ./build
-cmake -DROCROLLER_USE_PREGENERATED_ARCH_DEF=OFF ../
-make -j GPUArchitecture_def
-cp ./share/rocRoller/split_yamls/*.yaml ../GPUArchitectureGenerator/pregenerated/
-cd ../GPUArchitectureGenerator/pregenerated/
-../../scripts/format_yaml.py -I *.yaml
+cmake --preset amd-mrisa -B build -S .
+cmake --build build --target GPUArchitecture_def
+cp build/GPUArchitectureGenerator/split_yamls/*.yaml GPUArchitectureGenerator/pregenerated/
+cd GPUArchitectureGenerator/pregenerated/
+../scripts/format_yaml.py -I *.yaml
 ```
 
 ## GEMM client

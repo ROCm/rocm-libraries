@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.21.0)
+cmake_minimum_required(VERSION 3.24.4)
 project(rocroller VERSION 1.0.0 LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -16,7 +16,6 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
     GIT_TAG rocm-6.3.0
     SOURCE_SUBDIR "DISABLE ADDING TO BUILD"
-    # Don't consume the build/test targets of ROCmCMakeBuildTools
 )
 FetchContent_MakeAvailable(ROCmCMakeBuildTools)
 list(
