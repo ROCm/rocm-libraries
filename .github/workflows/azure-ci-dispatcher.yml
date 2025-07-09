@@ -44,6 +44,8 @@ jobs:
         app-id: ${{ secrets.APP_ID }}
         private-key: ${{ secrets.APP_PRIVATE_KEY }}
         owner: ${{ github.repository_owner }}
+        repositories: |
+          ROCm/rocm-libraries
 
     - name: Checkout code
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -82,6 +84,7 @@ jobs:
           > resolved_subtrees.txt
 
         run_ids=()
+        project_names=()
 
         while IFS= read -r line; do
           IFS='=' read -r project_name definition_id <<< "$line"
@@ -122,6 +125,7 @@ jobs:
               echo "Run ID for $project_name: $run_id"
               echo "Run URL: https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
               run_ids+=("$run_id")
+              project_names+=("$project_name")
             else
               echo "Failed to request run for $project_name"
             fi
@@ -133,27 +137,36 @@ jobs:
         done < resolved_subtrees.txt
 
         echo "run_ids=${run_ids[*]}" >> $GITHUB_OUTPUT
+        echo "project_names=${project_names[*]}" >> $GITHUB_OUTPUT
+        echo "Outputted run IDs: ${run_ids[*]}"
+        echo "Outputted project names: ${project_names[*]}"
 
     - name: Create summary check
-      if: steps.dispatch.outputs.run_ids
+      if: steps.dispatch.outputs.run_ids && steps.dispatch.outputs.project_names
+      env:
+        GH_TOKEN: ${{ steps.generate-token.outputs.token }}
       run: |
         run_ids=(${{ steps.dispatch.outputs.run_ids }})
-        echo "Creating summary check for runs: ${run_ids[*]}"
+        project_names=(${{ steps.dispatch.outputs.project_names }})
 
-        curl -sSX POST \
-          -H "Authorization: token ${{ steps.generate-token.outputs.token }}" \
-          -H "Accept: application/vnd.github.v3+json" \
-          https://api.github.com/repos/ROCm/rocm-libraries/check-runs \
-          -d '{
-            "name": "Azure CI Summary",
-            "head_sha": "${{ github.event.pull_request.head.sha }}",
-            "status": "in_progress",
-            "output": {
-              "title": "Azure CI Summary",
-              "summary": "## Azure CI Runs\n\nThis is a summary of Azure CI runs.\n\n- CI Run 1: Pending\n- CI Run 2: Pending",
-              "text": "This check run serves as a summary of Azure CI runs."
-            }
-          }'
+        summary="| Project | Run ID | Status |\n"
+        summary+="|--------------|--------|--------|\n"
+        for i in "${!project_names[@]}"; do
+          summary+="| ${project_names[i]} | [${run_ids[i]}](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=${run_ids[i]}) | Pending |\n"
+        done
+
+        text=""
+        for i in "${!project_names[@]}"; do
+          text+="${run_ids[i]}=pending;"
+        done
+
+        gh api repos/ROCm/rocm-libraries/check-runs \
+          -F name='Azure CI Summary' \
+          -F head_sha='${{ github.event.pull_request.head.sha }}' \
+          -F status='in_progress' \
+          -F output.title='Azure CI Summary' \
+          -F output.summary="$summary" \
+          -F output.text='This check run serves as a summary of Azure CI runs.'
 
     - name: Cancel Azure CI runs
       if: ${{ cancelled() }}
