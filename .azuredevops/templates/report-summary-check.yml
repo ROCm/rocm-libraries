@@ -31,6 +31,7 @@ jobs:
     inputs:
       targetType: 'inline'
       script: |
+        echo $(Build.SourceBranchName)
         if [[ ! "$(Build.SourceBranchName)" =~ ^refs/pull/ ]]; then
           echo "This is not a PR build. Exiting."
           exit 0
