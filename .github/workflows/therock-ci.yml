@@ -36,6 +36,7 @@ jobs:
     steps:
       - name: Generate a token
         id: generate-token
+        if: ${{ !github.event.pull_request.head.repo.fork }}
         uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
         with:
           app-id: ${{ secrets.APP_ID }}
