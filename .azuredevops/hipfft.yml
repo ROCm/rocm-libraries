@@ -35,7 +35,20 @@ trigger:
     - projects/hipfft/.*.y*ml
     - projects/hipfft/*.md
 
-pr: none
+pr:
+  branches:
+    include:
+    - develop
+  paths:
+    include:
+    - projects/hipfft
+    exclude:
+    - projects/hipfft/.githooks
+    - projects/hipfft/.github
+    - projects/hipfft/.jenkins
+    - projects/hipfft/docs
+    - projects/hipfft/.*.y*ml
+    - projects/hipfft/*.md
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/hipFFT.yml@pipelines_repo

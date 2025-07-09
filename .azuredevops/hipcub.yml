@@ -38,7 +38,23 @@ trigger:
     - projects/hipcub/LICENSE.txt
     - projects/hipcub/NOTICES.txt
 
-pr: none
+pr:
+  branches:
+    include:
+    - develop
+  paths:
+    include:
+    - projects/hipcub
+    exclude:
+    - projects/hipcub/.githooks
+    - projects/hipcub/.github
+    - projects/hipcub/.gitlab
+    - projects/hipcub/.jenkins
+    - projects/hipcub/docs
+    - projects/hipcub/.*.y*ml
+    - projects/hipcub/*.md
+    - projects/hipcub/LICENSE.txt
+    - projects/hipcub/NOTICES.txt
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/hipCUB.yml@pipelines_repo

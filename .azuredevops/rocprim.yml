@@ -41,7 +41,7 @@ trigger:
 pr:
   branches:
     include:
-    - users/geomin12/azure-pipelines-gate
+    - develop
   paths:
     include:
     - projects/rocprim
@@ -52,6 +52,7 @@ pr:
     - projects/rocprim/.jenkins
     - projects/rocprim/docs
     - projects/rocprim/.*.y*ml
+    - projects/rocprim/*.md
     - projects/rocprim/LICENSE.txt
     - projects/rocprim/NOTICES.txt
 

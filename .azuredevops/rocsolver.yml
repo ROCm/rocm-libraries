@@ -34,7 +34,19 @@ trigger:
     - projects/rocsolver/.*.y*ml
     - projects/rocsolver/*.md
 
-pr: none
+pr:
+  branches:
+    include:
+    - develop
+  paths:
+    include:
+    - projects/rocsolver
+    exclude:
+    - projects/rocsolver/.github
+    - projects/rocsolver/.jenkins
+    - projects/rocsolver/docs
+    - projects/rocsolver/.*.y*ml
+    - projects/rocsolver/*.md
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/rocSOLVER.yml@pipelines_repo

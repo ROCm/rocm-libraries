@@ -35,7 +35,20 @@ trigger:
     - projects/hipblaslt/.*.y*ml
     - projects/hipblaslt/*.md
 
-pr: none
+pr:
+  branches:
+    include:
+    - develop
+  paths:
+    include:
+    - projects/hipblaslt
+    exclude:
+    - projects/hipblaslt/.githooks
+    - projects/hipblaslt/.github
+    - projects/hipblaslt/docs
+    - projects/hipblaslt/CODEOWNERS
+    - projects/hipblaslt/.*.y*ml
+    - projects/hipblaslt/*.md
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/hipBLASLt.yml@pipelines_repo

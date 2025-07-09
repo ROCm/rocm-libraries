@@ -36,7 +36,21 @@ trigger:
     - projects/hiprand/*.md
     - projects/hiprand/LICENSE.txt
 
-pr: none
+pr:
+  branches:
+    include:
+    - develop
+  paths:
+    include:
+    - projects/hiprand
+    exclude:
+    - projects/hiprand/.githooks
+    - projects/hiprand/.github
+    - projects/hiprand/.jenkins
+    - projects/hiprand/docs
+    - projects/hiprand/.*.y*ml
+    - projects/hiprand/*.md
+    - projects/hiprand/LICENSE.txt
 
 jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/hipRAND.yml@pipelines_repo
