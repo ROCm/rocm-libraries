@@ -149,10 +149,12 @@ jobs:
         run_ids=(${{ steps.dispatch.outputs.run_ids }})
         project_names=(${{ steps.dispatch.outputs.project_names }})
 
-        summary=$"| Project | Run ID | Status |\n"
-        summary+=$"|--------------|--------|--------|\n"
+        newline=$'\n'
+
+        summary="| Project | Run ID | Status |${newline}"
+        summary+="|--------------|--------|--------|${newline}"
         for i in "${!project_names[@]}"; do
-          summary+=$"| ${project_names[i]} | [${run_ids[i]}](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=${run_ids[i]}) | Pending |\n"
+          summary+="| ${project_names[i]} | [${run_ids[i]}](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=${run_ids[i]}) | Pending |${newline}"
         done
 
         text=""
