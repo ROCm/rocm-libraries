@@ -75,7 +75,7 @@ jobs:
       if: steps.detect.outputs.subtrees
       run: |
         pr_number=${{ github.event.pull_request.number }}
-        res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?statusFilter=inProgress&$top=100&api-version=7.1" \
+        res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?statusFilter=inProgress&api-version=7.1" \
           -H "Content-Type: application/json")
 
         if [ $? -ne 0 ]; then
