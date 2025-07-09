@@ -180,11 +180,8 @@ def runBuildDocsCommand(platform, project)
                     cd ${project.paths.project_build_prefix}
 
                     ${sshBlock}
-
-                    mkdir -p build
-                    cd build
-                    cmake ../
-                    make -j docs
+                    cmake --preset opt-rocm -B build -S .
+                    cmake --build build --target docs
                     """
         platform.runCommand(this, command)
     }
