@@ -86,14 +86,15 @@ jobs:
         runs=$(echo "$res" | jq -r '.value[] | select((.sourceBranch | contains("refs/pull/'"$pr_number"'/merge")) and (.repository.id == "ROCm/rocm-libraries")) | .id')
 
         if [ -z "$runs" ]; then
-          echo "No in-progress runs found for PR #$pr_number"
+          echo "No in-progress runs found for ROCm/rocm-libraries PR #$pr_number"
           exit 0
         fi
 
-        echo "Found in-progress runs for PR #$pr_number: $runs"
+        echo "Found in-progress runs for ROCm/rocm-libraries PR #$pr_number: $runs"
 
         for run_id in $runs; do
           echo "Cancelling run ID: $run_id"
+          echo "Run URL: https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
           response=$(curl -sSX PATCH "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds/$run_id?api-version=7.1" \
             -u ":${{ secrets.AZ_PAT }}" \
             -H "Content-Type: application/json" \
