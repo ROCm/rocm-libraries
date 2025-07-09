@@ -30,7 +30,6 @@
 #include "../shared/concurrency.h"
 #include "../shared/fft_params.h"
 #include "../shared/hipfft_brick.h"
-#include "../shared/test_params.h"
 #include "hipfft/hipfft.h"
 #include "hipfft/hipfftXt.h"
 #include <random>
@@ -45,8 +44,10 @@ template <typename T,
           std::enable_if_t<std::is_integral_v<T> && (std::is_same_v<T, Args> && ...), bool> = true>
 static void set_with_random_nonnegative_values(const std::string& token, T& val, Args&... args)
 {
+    // using a hash of the token as random seed to avoid
+    // dependencies on externally-defined variables
     std::hash<std::string>           hasher;
-    std::ranlux24_base               gen(random_seed + hasher(token));
+    std::ranlux24_base               gen(hasher(token));
     std::uniform_int_distribution<T> dis(static_cast<T>(0), std::numeric_limits<T>::max());
     val = dis(gen);
     ((args = dis(gen)), ...);
