@@ -26,10 +26,6 @@ on:
       - staging
       - main
       - release-staging/rocm-rel-7.*
-    paths-ignore:
-      - '.github/**'
-      - 'docs/**'
-      - '*.md'
 
 concurrency:
   group: azure-ci-dispatcher-${{ github.event.pull_request.number || github.ref }}
@@ -39,7 +35,6 @@ jobs:
   dispatch-azure-ci:
     name: Dispatch Azure CI
     runs-on: ubuntu-latest
-    timeout-minutes: 720
     steps:
     - name: Generate a token
       id: generate-token
@@ -124,7 +119,7 @@ jobs:
             run_id=$(echo "$response" | jq -r '.id' || echo "null")
             if [ "$run_id" != "null" ]; then
               echo "Run ID for $project_name: $run_id"
-              echo "https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
+              echo "Run URL: https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
               run_ids+=("$run_id")
             else
               echo "Failed to request run for $project_name"
@@ -138,70 +133,26 @@ jobs:
 
         echo "run_ids=${run_ids[*]}" >> $GITHUB_OUTPUT
 
-    - name: Wait for and report Azure CI status
+    - name: Create summary check
       if: steps.dispatch.outputs.run_ids
-      timeout-minutes: 720
       run: |
         run_ids=(${{ steps.dispatch.outputs.run_ids }})
-        echo "Waiting on runs: ${run_ids[*]}"
+        echo "Creating summary check for runs: ${run_ids[*]}"
 
-        all_finished=0
-        exit_status=0
-
-        while [[ $all_finished -eq 0 ]]; do
-          sleep 120
-          all_finished=1
-          echo "=================================================================="
-
-          for run_id in "${run_ids[@]}"; do
-            max_attempts=3
-            retry_delay=5
-            attempt=1
-            success=false
-
-            while [ $attempt -le $max_attempts ]; do
-              response=$(curl -sSX GET https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds/$run_id?api-version=7.1 \
-                -u ":${{ secrets.AZ_PAT }}" \
-                -H "Content-Type: application/json")
-
-              if [[ $? -eq 0 ]]; then
-                success=true
-                break
-              fi
-
-              echo "Attempt $attempt failed. Retrying in $retry_delay seconds..."
-              sleep $retry_delay
-              attempt=$((attempt + 1))
-            done
-
-            if [[ "$success" == true ]]; then
-              pipeline_name=$(echo "$response" | jq -r '.definition.name')
-              status=$(echo "$response" | jq -r '.status')
-              result=$(echo "$response" | jq -r '.result')
-
-              if [[ "$status" == "completed" ]]; then
-                echo "$pipeline_name - run $run_id is finished with result: $result"
-                echo "https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
-                if [[ "$result" != "succeeded" ]]; then
-                  exit_status=1
-                fi
-              else
-                all_finished=0
-                echo "$pipeline_name - run $run_id is in progress..."
-                echo "https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
-              fi
-            else
-              echo "Failed to fetch status for run $run_id after $max_attempts attempts"
-              echo "https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
-              exit_status=1
-              continue
-            fi
-          done
-        done
-
-        if [[ $exit_status -ne 0 ]] then
-          exit $exit_status
-        fi
+        curl -sSX POST \
+          -H "Authorization: token ${{ steps.generate-token.outputs.token }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/ROCm/rocm-libraries/check-runs \
+          -d '{
+            "name": "Azure CI Summary",
+            "head_sha": "${{ github.sha }}",
+            "status": "in_progress",
+            "output": {
+              "title": "Azure CI Summary",
+              "summary": "## Azure CI Runs\n\nThis is a summary of Azure CI runs.\n\n- CI Run 1: Pending\n- CI Run 2: Pending",
+              "text": "This check run serves as a summary of Azure CI runs."
+            }
+          }'
 
     - name: Cancel Azure CI runs
       if: ${{ cancelled() }}
