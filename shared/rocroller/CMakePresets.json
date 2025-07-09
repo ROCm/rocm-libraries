@@ -12,17 +12,24 @@
       }
     },
     {
+      "name": "asan",
+      "displayName": "Address Sanitizer",
+      "description": "Build with asan",
+      "inherits": "opt-rocm",
+      "cacheVariables": {
+        "ROCROLLER_ENABLE_ASAN": "ON"
+      }
+    },
+    {
       "name": "precheckin",
       "displayName": "Precheckin Config",
       "description": "Config used in precheckin build",
+      "inherits": "opt-rocm",
       "cacheVariables": {
         "ROCROLLER_ENABLE_CPPCHECK": "ON",
         "ROCROLLER_ENABLE_YAML_CPP": "OFF",
-        "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
         "CMAKE_BUILD_TYPE": "Release",
-        "ROCROLLER_ENABLE_FETCH": "ON",
-        "ROCROLLER_TESTS_SKIP_SLOW": "OFF",
-        "CMAKE_PREFIX_PATH": "/opt/rocm;/opt/rocm/llvm"
+        "ROCROLLER_TESTS_SKIP_SLOW": "OFF"
       }
     }
 ]

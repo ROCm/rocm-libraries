@@ -9,6 +9,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(CMakeRC)
 include(FetchContent)
 include(CMakeDependentOption)
+include(rocroller_target_configure_sanitizers)
 
 FetchContent_Declare(
     ROCmCMakeBuildTools
@@ -39,6 +40,7 @@ option(ROCROLLER_ENABLE_FETCH "Enable fetch content for dependencies if find_pac
 option(ROCROLLER_ENABLE_LLD "Build rocroller functionality requiring LLD" OFF)
 option(ROCROLLER_ENABLE_TIMERS "Enable rocRoller timer code." OFF)
 option(ROCROLLER_ENABLE_CPPCHECK "Enable cppcheck." OFF)
+option(ROCROLLER_ENABLE_ASAN "Enable addresss sanitizers." ON)
 
 if(ROCROLLER_ENABLE_TEST_DISCOVERY)
     enable_testing()
@@ -161,6 +163,10 @@ add_library(roc::rocroller ALIAS rocroller)
 
 add_library(rocroller-interface INTERFACE)
 add_library(roc::rocroller-interface ALIAS rocroller-interface)
+
+if(ROCROLLER_ENABLE_ASAN)
+    rocroller_target_configure_sanitizers(rocroller PRIVATE)
+endif()
 
 if(ROCROLLER_BUILD_SHARED_LIBS)
     target_link_libraries(rocroller-interface INTERFACE roc::rocroller)
