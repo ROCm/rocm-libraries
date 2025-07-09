@@ -280,6 +280,8 @@ def main(argv: Optional[List[str]] = None) -> None:
     relevant_subtrees = get_subtree_info(config, subtrees)
     merge_sha = client.get_squash_merge_commit(args.repo, args.pr)
     logger.debug(f"Merge commit for PR #{args.pr} in {args.repo}: {merge_sha}")
+    _run_git(["checkout", merge_sha])
+    logger.info(f"Checked out merge commit {merge_sha} for patch operations")
     for entry in relevant_subtrees:
         prefix = f"{entry.category}/{entry.name}"
         logger.debug(f"Processing subtree {prefix}")
