@@ -25,6 +25,10 @@ def set_github_output(d: Mapping[str, str]):
         
         
 def retrieve_projects(args):
+    # TODO(geomin12): Enable TheRock CI for forked PRs
+    if args.get("is_forked_pr"):
+        return []
+    
     if args.get("is_pull_request"):
         subtrees = args.get("input_subtrees").split("\n")
     
@@ -60,11 +64,14 @@ def run(args):
 
 
 if __name__ == "__main__":
-    github_event_name = os.getenv("GITHUB_EVENT_NAME")
     args = {}
+    github_event_name = os.getenv("GITHUB_EVENT_NAME")
     args["is_pull_request"] = github_event_name == "pull_request"
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
+    
+    is_forked_pr = os.getenv("IS_FORKED_PR")
+    args["is_forked_pr"] = is_forked_pr
     
     input_subtrees = os.getenv("SUBTREES", "")
     args["input_subtrees"] = input_subtrees
