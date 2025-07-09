@@ -909,7 +909,7 @@ std::string genKernelName(std::shared_ptr<SolutionParameters> gemm)
 
     if (gemm->workgroupMappingDim != -1)
     {
-        rv <<"_WGM_" << std::endl;
+        rv <<"_WGM_";
     }
 
     return rv.str();
