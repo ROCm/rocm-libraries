@@ -160,6 +160,9 @@ jobs:
           text+="${run_ids[i]}=pending;"
         done
 
+        echo $summary
+        echo $text
+
         gh api repos/ROCm/rocm-libraries/check-runs \
           -F name='Azure CI Summary' \
           -F head_sha='${{ github.event.pull_request.head.sha }}' \
