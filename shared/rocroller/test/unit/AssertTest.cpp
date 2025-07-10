@@ -38,6 +38,7 @@
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
+#include <rocRoller/KernelGraph/Transforms/RemoveSetCoordinate.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
@@ -114,6 +115,8 @@ namespace AssertTest
             kgraph.control.addElement(Body(), {kernelNode}, {setToZero});
             kgraph.control.addElement(Sequence(), {setToZero}, {assertOp});
             kgraph.control.addElement(Sequence(), {assertOp}, {assignOne});
+
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
 
             m_context->schedule(rocRoller::KernelGraph::generate(kgraph, k));
 
@@ -269,6 +272,8 @@ namespace AssertTest
             kgraph.control.addElement(Body(), {kernelNode}, {setToZero});
             kgraph.control.addElement(Sequence(), {setToZero}, {assertOp});
             kgraph.control.addElement(Sequence(), {assertOp}, {assignOne});
+
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
 
             m_context->schedule(rocRoller::KernelGraph::generate(kgraph, k));
 

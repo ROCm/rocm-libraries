@@ -34,6 +34,7 @@
 #include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
 #include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph_fwd.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform_fwd.hpp>
 
@@ -65,6 +66,9 @@ namespace rocRoller
             ControlGraph::ControlGraph       control;
             CoordinateGraph::CoordinateGraph coordinates;
             ControlToCoordinateMapper        mapper;
+
+            std::unordered_map<int, rocRoller::KernelGraph::CoordinateGraph::Transformer>
+                transformers;
 
             std::string toDOT(bool drawMappings = false, std::string title = "") const;
 

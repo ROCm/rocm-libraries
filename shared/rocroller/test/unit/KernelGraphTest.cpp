@@ -2769,6 +2769,8 @@ namespace KernelGraphTest
         kgraph.mapper.connect(trueOp, destReg, NaryArgument::DEST);
         kgraph.mapper.connect(falseOp, destReg, NaryArgument::DEST);
 
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
+
         m_context->schedule(m_context->kernel()->preamble());
         m_context->schedule(m_context->kernel()->prolog());
 
@@ -2849,6 +2851,8 @@ namespace KernelGraphTest
         kgraph.control.addElement(Body(), {secondConditional}, {assignTrueBranch2});
         kgraph.control.addElement(Else(), {secondConditional}, {assignFalseBranch});
         kgraph.control.addElement(Sequence(), {firstConditional}, {storeIndex});
+
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
 
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
@@ -2942,6 +2946,8 @@ namespace KernelGraphTest
         kgraph.control.addElement(Body(), {doWhile}, {assignBody});
         kgraph.control.addElement(Sequence(), {doWhile}, {storeIndex});
 
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
+
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
         m_context->schedule(k->postamble());
@@ -2984,6 +2990,8 @@ namespace KernelGraphTest
         auto kernel = kgraph.control.addElement(Kernel());
         auto wait   = kgraph.control.addElement(WaitZero());
         kgraph.control.addElement(Body(), {kernel}, {wait});
+
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
 
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
