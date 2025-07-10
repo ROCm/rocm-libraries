@@ -134,12 +134,12 @@ extern "C" {
 *    hipFree(dy);
 *  \endcode
 */
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScatter(hipsparseHandle_t          handle,
                                    hipsparseConstSpVecDescr_t vecX,
                                    hipsparseDnVecDescr_t      vecY);
-#elif (CUDART_VERSION >= 11000)
+#elif(CUDART_VERSION >= 11000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseScatter(hipsparseHandle_t     handle,
                                    hipsparseSpVecDescr_t vecX,

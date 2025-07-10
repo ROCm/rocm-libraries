@@ -52,14 +52,14 @@ extern "C" {
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, or \p pBufferSizeInBytes
 *               pointer is invalid.
 */
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSparseToDense_bufferSize(hipsparseHandle_t           handle,
                                                     hipsparseConstSpMatDescr_t  matA,
                                                     hipsparseDnMatDescr_t       matB,
                                                     hipsparseSparseToDenseAlg_t alg,
                                                     size_t*                     pBufferSizeInBytes);
-#elif (CUDART_VERSION >= 11020)
+#elif(CUDART_VERSION >= 11020)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSparseToDense_bufferSize(hipsparseHandle_t           handle,
                                                     hipsparseSpMatDescr_t       matA,
@@ -203,14 +203,14 @@ hipsparseStatus_t hipsparseSparseToDense_bufferSize(hipsparseHandle_t           
 *    hipFree(tempBuffer);
 *  \endcode
 */
-#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSparseToDense(hipsparseHandle_t           handle,
                                          hipsparseConstSpMatDescr_t  matA,
                                          hipsparseDnMatDescr_t       matB,
                                          hipsparseSparseToDenseAlg_t alg,
                                          void*                       externalBuffer);
-#elif (CUDART_VERSION >= 11020)
+#elif(CUDART_VERSION >= 11020)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSparseToDense(hipsparseHandle_t           handle,
                                          hipsparseSpMatDescr_t       matA,
