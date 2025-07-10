@@ -177,7 +177,7 @@ jobs:
         fi
 
         for run_id in "${run_ids[@]}"; do
-          if [[ "$check_summary" == *"$(Build.BuildId)"* ]]; then
+          if [[ "$check_summary" == *"$run_id"* ]]; then
             check_summary=$(echo "$check_summary" | sed "s/buildId=$run_id[^|]*|[^|]*|/buildId=$run_id) | pending |/")
           fi
           if [[ "$check_text" == *"$run_id="* ]]; then
