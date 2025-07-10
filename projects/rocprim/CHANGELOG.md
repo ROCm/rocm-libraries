@@ -110,23 +110,24 @@ when the input or inital type was smaller than the output type.
   * `rocprim::warp_size()`
   * `ROCPRIM_WAVEFRONT_SIZE`
   
-* The default scan accumulator types for device-level scan algorithms will be changed. This is a breaking change. 
-  * Previously, the default accumulator type was set to the input type for inclusive scans and to the initial value type for exclusive scans. These default types could cause unexpected overflow in situations where the input or initial type is smaller than the output type when the user doesn't explicitly set an accumulator type using the `AccType` template parameter. 
-  * The new default types will be set to the type that results when the input or initial value type is applied to the scan operator.  
-  * The following is the complete list of affected functions and how their default accumulator types are changing:
-  * `rocprim::inclusive_scan`
-    * current default: `class AccType = typename std::iterator_traits<InputIterator>::value_type>`
-    * future default: `class AccType = rocprim::invoke_result_binary_op_t<typename std::iterator_traits<InputIterator>::value_type, BinaryFunction>`
-  * `rocprim::deterministic_inclusive_scan`
-    * current default: `class AccType = typename std::iterator_traits<InputIterator>::value_type>`
-    * future default: `class AccType = rocprim::invoke_result_binary_op_t<typename std::iterator_traits<InputIterator>::value_type, BinaryFunction>`
-  * `rocprim::exclusive_scan`
-    * current default: `class AccType = detail::input_type_t<InitValueType>>`
-    * future default: `class AccType = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueType>, BinaryFunction>`
-  * `rocprim::deterministic_exclusive_scan`
-    * current default: `class AccType = detail::input_type_t<InitValueType>>`
-    * future default: `class AccType = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueType>, BinaryFunction>`
-* `rocprim::load_cs` and `rocprim::store_cs` are deprecated. Please use `rocprim::load_nontemporal` and `rocprim::store_nontemporal` instead.
+* The default scan accumulator types for device-level scan algorithms will be changed in an upcoming release, resulting in a breaking change. Previously, the default accumulator type was set to the input type for the inclusive scans and to the initial value type for the exclusive scans. This could lead to unexpected overflow if the input or initial type is smaller than the output type when the accumulator type isn't explicitly set using the `AccType` template parameter. The new default accumulator types will be set to the type that results when the input or initial value type is applied to the scan operator.  
+
+    The following is the complete list of affected functions and how their default accumulator types are changing:
+    
+    * `rocprim::inclusive_scan`
+        * current default: `class AccType = typename std::iterator_traits<InputIterator>::value_type>`
+        * future default: `class AccType = rocprim::invoke_result_binary_op_t<typename std::iterator_traits<InputIterator>::value_type, BinaryFunction>`
+    * `rocprim::deterministic_inclusive_scan`
+        * current default: `class AccType = typename std::iterator_traits<InputIterator>::value_type>`
+        * future default: `class AccType = rocprim::invoke_result_binary_op_t<typename std::iterator_traits<InputIterator>::value_type, BinaryFunction>`
+    * `rocprim::exclusive_scan`
+        * current default: `class AccType = detail::input_type_t<InitValueType>>`
+        * future default: `class AccType = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueType>, BinaryFunction>`
+    * `rocprim::deterministic_exclusive_scan`
+        * current default: `class AccType = detail::input_type_t<InitValueType>>`
+        * future default: `class AccType = rocprim::invoke_result_binary_op_t<rocprim::detail::input_type_t<InitValueType>, BinaryFunction>`
+
+* `rocprim::load_cs` and `rocprim::store_cs` are deprecated and will be removed in an upcoming release. Alternatively, you can use `rocprim::load_nontemporal` and `rocprim::store_nontemporal` to load and store values in specific conditions (like bypassing the cache) for `rocprim::thread_load` and `rocprim::thread_store`.
 
 ## rocPRIM 3.4.0 for ROCm 6.4.0
 
