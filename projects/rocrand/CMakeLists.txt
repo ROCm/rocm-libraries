@@ -32,7 +32,7 @@ option(BUILD_BENCHMARK "Build benchmarks" OFF)
 cmake_dependent_option(BUILD_BENCHMARK_TUNING
 "Build extra benchmarks for kernel configuration tuning" OFF "BUILD_BENCHMARK" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
-option(CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)
+option(ROCRAND_ENABLE_COVERAGE "Build with code coverage flags (clang only)" OFF)
 option(DEPENDENCIES_FORCE_DOWNLOAD "Don't search the system for dependencies, always download them" OFF)
 cmake_dependent_option(RUN_SLOW_TESTS "Run extra tests with CTest. These cover niche functionality and take long time" OFF "BUILD_TEST" OFF)
 
@@ -152,7 +152,7 @@ if(DISABLE_WERROR)
 else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 endif()
-if(CODE_COVERAGE)
+if(ROCRAND_ENABLE_COVERAGE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
 endif()
 
