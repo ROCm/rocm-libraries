@@ -41,12 +41,12 @@ namespace rocRoller
 	     */
             struct LDSPaddingInfo
             {
-                int              ldsTag;
-                int              upstreamEdge, downstreamEdge;
-                std::vector<int> upstreamTags;
-                std::vector<int> downstreamTags;
-                DataType         dataType;
-                LayoutType       layoutType;
+                int                ldsTag;
+                int                upstreamEdge, downstreamEdge;
+                std::array<int, 2> upstreamTags;
+                std::array<int, 2> downstreamTags;
+                DataType           dataType;
+                LayoutType         layoutType;
             };
 
             /**

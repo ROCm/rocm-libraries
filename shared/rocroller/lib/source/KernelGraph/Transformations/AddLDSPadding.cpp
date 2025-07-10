@@ -85,10 +85,13 @@ will be transformed to:
 
 Note that the size of the LDS allocation is computed in `getNumLDSElements()`.
 
+For direct-to-LDS loads... TODO
+
 */
 
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddLDSPadding.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddLDSPadding_detail.hpp>
@@ -122,10 +125,97 @@ namespace rocRoller
 
         using namespace AddLDSPaddingDetail;
 
-        void
-            updateStrides(KernelGraph& graph, std::vector<int> const& tags, auto numPaddingElements)
+        /**
+	 * @brief Get the upstream Flatten edge coming in to an LDS node.
+	 */
+        std::optional<int> getFlattenEdgeTag(KernelGraph const& graph, int tag)
+        {
+            for(auto elem : graph.coordinates.getNeighbours<GD::Upstream>(tag))
+            {
+                auto maybeFlatten = graph.coordinates.get<Flatten>(elem);
+                if(maybeFlatten)
+                    return elem;
+            }
+            return {};
+        }
+
+        /**
+	 * @brief Get the downstream Tile edge coming out of an LDS node.
+	 */
+        std::optional<int> getTileEdgeTag(KernelGraph const& graph, int tag)
+        {
+            for(auto elem : graph.coordinates.getNeighbours<GD::Downstream>(tag))
+            {
+                auto maybeTile = graph.coordinates.get<Tile>(elem);
+                if(maybeTile)
+                    return elem;
+            }
+            return {};
+        }
+
+        /**
+	 * @brief Propagate the size and stride of the slow dimension
+	 * to upstream/downstream node.
+	 *
+	 * For example, after padding the slow dimension's stride, the
+	 * joined dimension size needs to be updated.
+	 *
+	 *     Slow Dimension     Fast Dimension
+	 *        size=256           size=128
+	 *    stride=128+padding     stride=1
+	 *	     \              /
+	 *	      --------------
+	 *	              |
+	 *	            Join
+	 *	              |
+	 *	          Dimension
+	 *               size=256*128   <--- should be updated to 256*(128+padding)
+	 */
+        void propagateSize(KernelGraph& graph, int slowTag, Graph::Direction propagateDirection)
+        {
+            auto truePredicate = [](auto x) { return true; };
+
+            auto slow       = graph.coordinates.getNode(slowTag);
+            auto slowSize   = getUnsignedInt(evaluate(getSize(slow)));
+            auto slowStride = getUnsignedInt(evaluate(getStride(slow)));
+
+            int propagateToTag;
+            if(propagateDirection == GD::Upstream)
+            {
+                propagateToTag = *only(graph.coordinates.getConnectedNodeIndices<GD::Upstream>(
+                    slowTag, truePredicate));
+            }
+            else
+            {
+                propagateToTag = *only(graph.coordinates.getConnectedNodeIndices<GD::Downstream>(
+                    slowTag, truePredicate));
+            }
+
+            auto propagateTo = graph.coordinates.getNode(propagateToTag);
+            setSize(propagateTo, literal(slowSize * slowStride));
+            graph.coordinates.setElement(propagateToTag, propagateTo);
+
+            Log::info("KernelGraph::AddLDSPadding::propagateSize: updating tag {}, new size {}",
+                      propagateToTag,
+                      toString(getSize(propagateTo)));
+        }
+
+        /**
+	 * @brief Update the strides of the slow and fast dimensions.
+	 *
+	 * The slow dimension's stride is set to the size of the fast
+	 * dimension plus padding.
+	 *
+	 * The fast dimension's stride is set to 1.
+	 */
+        void updateStrides(KernelGraph&              graph,
+                           std::array<int, 2> const& tags,
+                           uint                      numPaddingElements)
         {
             AssertFatal(tags.size() == 2, ShowValue(tags));
+
+            auto getCoordinateSize
+                = [&](auto tag) { return getSize(graph.coordinates.getNode(tag)); };
 
             auto slowerTag = tags[0];
             auto fasterTag = tags[1];
@@ -133,20 +223,147 @@ namespace rocRoller
             auto slowerDim = graph.coordinates.getNode(slowerTag);
             auto fasterDim = graph.coordinates.getNode(fasterTag);
 
-            // New slow stride is: size of the faster dimension plus padding
-            auto slowStride = getSize(fasterDim) + literal(numPaddingElements);
+            auto slowStride = simplify(getSize(fasterDim) + literal(numPaddingElements));
             setStride(slowerDim, slowStride);
             setStride(fasterDim, literal(1u));
 
             graph.coordinates.setElement(slowerTag, slowerDim);
             graph.coordinates.setElement(fasterTag, fasterDim);
 
-            Log::debug("KernelGraph::AddLDSPadding::updateStrides: slow {}, fast {}, "
-                       "numPaddingElements {}, new slow stride {}",
-                       slowerTag,
-                       fasterTag,
-                       numPaddingElements,
-                       toString(slowStride));
+            Log::info("KernelGraph::AddLDSPadding::updateStrides: slow {}, fast {}, "
+                      "numPaddingElements {}, new slow stride {}",
+                      slowerTag,
+                      fasterTag,
+                      numPaddingElements,
+                      toString(slowStride));
+        }
+
+        /**
+	 * @brief Match the transform coming out of an LDS node to the
+	 * same pattern as the transform coming into the LDS node.
+	 *
+	 * This is used when Direct2LDS loads are padded.
+	 *
+	 * For example, consider the following transforms in and out
+	 * of LDS:
+	 *
+	 *                               TileNumber     TileIndex   <---- sister tags
+	 *                                 size=64       size=4
+	 *                                       \       /
+	 *                                        Flatten
+	 *                                           |
+	 *     MacroTileIndex                  MacroTileIndex
+	 *        size=256                       size=128
+	 *               \		        /
+	 *		  ----------------------
+	 * 			     |
+	 * 			  Flatten
+	 * 			     |
+	 * 			    LDS
+	 * 			     |
+	 *    	                   Tile
+	 * 			     |
+	 * 		  ----------------------
+	 *               /		        \
+	 *     MacroTileIndex                  MacroTileIndex
+	 *  	  size=256                       size=128
+	 *           |
+	 *         Tile     <---- edge
+	 *        /    \
+	 *  TileNumber  TileIndex    <---- tags
+	 *   size=32       size=8
+	 *
+	 * Note that above the LDS node, the small tile is 64x4; but
+	 * below the LDS the small tile is 32x8.  These are compatible
+	 * when there is no padding, and all edges are either Flatten or
+	 * Tile edges.
+	 *
+	 * If we pad one of the early dimensions, the compatibility
+	 * may be broken.  We can fix it by matching the downstream
+	 * transform to the upstream "sister" transform:
+	 *
+	 *                               TileNumber     TileIndex    <---- sister tags
+	 *                                 size=64       size=4
+	 *			      stride=64+padding   |
+	 *                                       \       /
+	 *                                         Join
+	 *                                           |
+	 *     MacroTileIndex                  MacroTileIndex
+	 *        size=128                   size=256+4*padding
+	 *               \		        /
+	 *		  ----------------------
+	 * 			     |
+	 * 			  Flatten
+	 * 			     |
+	 * 			    LDS
+	 * 			     |
+	 *    	                   Tile
+	 * 			     |
+	 * 		  ----------------------
+	 *               /		        \
+	 *     MacroTileIndex                  MacroTileIndex
+	 *   size=256+4*padding                   size=128
+	 *           |
+	 *         Split   <---- new edge (overwrites edge)
+	 *           |
+	 *         -------------
+	 *        /             \
+	 *  TileNumber           TileIndex    <---- new tags (overwrites tags)
+	 *   size=64              size=4
+	 *  stride=64+padding    stride=1
+	 *       \              /
+	 *        --------------
+	 * 	      |
+	 *	   Flatten
+	 * 	      |
+	 * 	    Linear
+	 *         size=256
+	 * 	      |
+	 *          Tile
+	 *         /    \
+	 *  TileNumber  TileIndex
+	 *   size=32      size=8
+	 *	 
+	 */
+        bool matchTransforms(KernelGraph&              graph,
+                             int&                      edge,
+                             std::array<int, 2>&       tags,
+                             std::array<int, 2> const& sisterTags,
+                             auto                      numPaddingElements)
+        {
+            auto getCoordinateSize
+                = [&](int tag) { return getSize(graph.coordinates.getNode(tag)); };
+
+            auto slowSize       = getCoordinateSize(tags[0]);
+            auto slowSisterSize = getCoordinateSize(sisterTags[0]);
+
+            if(identical(slowSize, slowSisterSize))
+                return false;
+
+            auto one = literal(1u);
+
+            auto fastSize       = getCoordinateSize(tags[1]);
+            auto fastSisterSize = getCoordinateSize(sisterTags[1]);
+
+            auto newSlowStride = fastSisterSize;
+            auto linearSlow = graph.coordinates.addElement(Linear(slowSisterSize, newSlowStride));
+            auto linearFast = graph.coordinates.addElement(Linear(fastSisterSize, one));
+
+            auto linearFlat
+                = graph.coordinates.addElement(Linear(simplify(slowSize * fastSize), one));
+
+            auto topTag = *only(graph.coordinates.getNeighbours<GD::Upstream>(edge));
+            graph.coordinates.deleteElement(edge);
+
+            edge = graph.coordinates.addElement(Split(), {topTag}, {linearSlow, linearFast});
+
+            graph.coordinates.addElement(Flatten(), {linearSlow, linearFast}, {linearFlat});
+            graph.coordinates.addElement(
+                Tile(), std::vector<int>{linearFlat}, std::vector<int>{tags[0], tags[1]});
+
+            tags = {linearSlow, linearFast};
+
+            return true;
         }
 
         std::optional<std::pair<LayoutType, DataType>>
@@ -235,30 +452,26 @@ namespace rocRoller
          */
         void AddLDSPaddingVisitor::stage(KernelGraph const& graph, int ldsTag)
         {
-            std::optional<int> flattenEdgeTag;
-            {
-                for(auto elem : graph.coordinates.getNeighbours<GD::Upstream>(ldsTag))
-                {
-                    auto maybeFlatten = graph.coordinates.get<Flatten>(elem);
-                    if(!maybeFlatten)
-                        continue;
-                    flattenEdgeTag = elem;
-                }
-            }
-            if(not flattenEdgeTag)
-                return;
+            // TODO FIX THIS
+            bool isDirect2LDS = false;
 
-            std::optional<int> tileEdgeTag;
+            auto flattenEdgeTag = getFlattenEdgeTag(graph, ldsTag);
+            auto tileEdgeTag    = getTileEdgeTag(graph, ldsTag);
+
+            if(isDirect2LDS)
             {
-                for(auto elem : graph.coordinates.getNeighbours<GD::Downstream>(ldsTag))
-                {
-                    auto maybeTile = graph.coordinates.get<Tile>(elem);
-                    if(!maybeTile)
-                        continue;
-                    tileEdgeTag = elem;
-                }
+                // Look for Flatten/Tile above/below the slower moving
+                // dimension; add padding there.  This means padding
+                // is applied to M0.
+                auto slowFlattenTag = *only(
+                    take(1, graph.coordinates.getNeighbours<GD::Upstream>(*flattenEdgeTag)));
+                flattenEdgeTag = getFlattenEdgeTag(graph, slowFlattenTag);
+                auto slowTileTag
+                    = *only(take(1, graph.coordinates.getNeighbours<GD::Downstream>(*tileEdgeTag)));
+                tileEdgeTag = getTileEdgeTag(graph, slowTileTag);
             }
-            if(not tileEdgeTag)
+
+            if((not flattenEdgeTag) || (not tileEdgeTag))
                 return;
 
             auto maybeLayoutTypeAndDataType = getLayoutTypeAndDataType(graph, ldsTag);
@@ -278,8 +491,8 @@ namespace rocRoller
             m_ldsTags[ldsTag] = LDSPaddingInfo{ldsTag,
                                                *flattenEdgeTag,
                                                *tileEdgeTag,
-                                               upstreamTags,
-                                               downstreamTags,
+                                               {upstreamTags[0], upstreamTags[1]},
+                                               {downstreamTags[0], downstreamTags[1]},
                                                maybeLayoutTypeAndDataType->second,
                                                maybeLayoutTypeAndDataType->first};
         }
@@ -292,19 +505,25 @@ namespace rocRoller
          */
         void AddLDSPaddingVisitor::commit(KernelGraph& graph)
         {
-            for(auto const& [ldsTag, info] : m_ldsTags)
+            for(auto& [ldsTag, info] : m_ldsTags)
             {
                 uint paddingElements = getLDSPaddingElements(graph, info);
 
-                Log::debug("KernelGraph::AddLDSPadding: ldsTag {}, upstreamEdge {}, "
-                           "downstreamEdge {}, paddingElements {}",
-                           info.ldsTag,
-                           info.upstreamEdge,
-                           info.downstreamEdge,
-                           paddingElements);
+                Log::info("KernelGraph::AddLDSPadding: ldsTag {}, upstreamEdge {}, "
+                          "downstreamEdge {}, paddingElements {}",
+                          info.ldsTag,
+                          info.upstreamEdge,
+                          info.downstreamEdge,
+                          paddingElements);
 
                 if(paddingElements == 0)
                     continue;
+
+                bool needsPropagateSize = matchTransforms(graph,
+                                                          info.downstreamEdge,
+                                                          info.downstreamTags,
+                                                          info.upstreamTags,
+                                                          paddingElements);
 
                 // Change upstream edge to Join
                 graph.coordinates.setElement(info.upstreamEdge, Join());
@@ -312,9 +531,14 @@ namespace rocRoller
                 // Change downstream edge to Split
                 graph.coordinates.setElement(info.downstreamEdge, Split());
 
-                // Change upstream and downstream tags
                 updateStrides(graph, info.upstreamTags, paddingElements);
                 updateStrides(graph, info.downstreamTags, paddingElements);
+
+                if(needsPropagateSize)
+                {
+                    propagateSize(graph, info.upstreamTags[0], GD::Downstream);
+                    propagateSize(graph, info.downstreamTags[0], GD::Upstream);
+                }
             }
         }
 
