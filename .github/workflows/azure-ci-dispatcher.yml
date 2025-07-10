@@ -125,8 +125,8 @@ jobs:
         cancelled_res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?resultFilter=canceled&$pr_filter_query" \
           -H "Content-Type: application/json")
 
-        failed_runs=$(echo "$failed_res" | jq -r '.value[] | select(.sourceVersion | contains("$pr_merge_sha")) | .id')
-        cancelled_runs=$(echo "$cancelled_res" | jq -r '.value[] | select(.sourceVersion | contains("$pr_merge_sha")) | .id')
+        failed_runs=$(echo "$failed_res" | jq -r ".value[] | select(.sourceVersion | contains(\"$pr_merge_sha\")) | .id")
+        cancelled_runs=$(echo "$cancelled_res" | jq -r ".value[] | select(.sourceVersion | contains(\"$pr_merge_sha\")) | .id")
         runs=$(echo -e "$failed_runs\n$cancelled_runs" | sort -u)
 
         if [ -z "$runs" ]; then
