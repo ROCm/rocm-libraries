@@ -54,7 +54,7 @@ namespace rocRoller
                        || std::holds_alternative<CG::ForLoopIncrement>(graph.getEdge(edge)));
         }
 
-        static void findParents(int                           tag,
+        static void buildControlStack(int                           tag,
                                 std::unordered_map<int, int>& controlStack,
                                 CG::ControlGraph const&       graph)
         {
@@ -75,7 +75,7 @@ namespace rocRoller
                 else
                 {
                     if(not controlStack.contains(*node))
-                        findParents(*node, controlStack, graph);
+                        buildControlStack(*node, controlStack, graph);
                     parent = controlStack.at(*node);
                 }
             }
@@ -90,7 +90,7 @@ namespace rocRoller
             for(auto const node : kg.control.getNodes())
             {
                 if(not controlStack.contains(node))
-                    findParents(node, controlStack, kg.control);
+                    buildControlStack(node, controlStack, kg.control);
             }
 
             return controlStack;
