@@ -249,12 +249,6 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         help="Loads libraries when needed instead of eagerly.",
     )
     parser.add_argument(
-        "--build-client",
-        dest="BuildClient",
-        action="store_true",
-        help="Build Tensile client executable; used for stand alone benchmarking.",
-    )
-    parser.add_argument(
         "--client-config",
         dest="ClientConfig",
         action="store_true",
@@ -312,7 +306,6 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         "PrintLevel": args.PrintLevel,
         "SeparateArchitectures": args.SeparateArchitectures,
         "LazyLibraryLoading": args.LazyLibraryLoading,
-        "BuildClient": args.BuildClient,
         "ClientConfig": args.ClientConfig,
         "IgnoreAsmCapCache": args.IgnoreAsmCapCache,
         "WriteMasterSolutionIndex": args.WriteMasterSolutionIndex,

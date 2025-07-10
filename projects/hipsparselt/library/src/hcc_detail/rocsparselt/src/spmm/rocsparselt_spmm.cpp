@@ -83,7 +83,10 @@ rocsparselt_status rocsparselt_matmul_get_workspace(const rocsparselt_handle*   
         else
         {
             *workspaceSize = _plan->alg_selection->configs[_plan->alg_selection->config_id]
-                                 .max_workspace_bytes;
+                                 .max_workspace_bytes
+                            + _plan->alg_selection->configs[_plan->alg_selection->config_id]
+                                 .synchronizer_bytes;
+
         }
         log_api(_handle, __func__, *workspaceSize);
         return rocsparselt_status_success;
@@ -171,14 +174,17 @@ rocsparselt_status rocsparselt_matmul_impl(const char*                    caller
     {
         for(int id = 0; id < _plan->alg_selection->config_max_id; id++)
         {
-            workspaceSize = max(workspaceSize, _plan->alg_selection->configs[id].max_workspace_bytes);
+            workspaceSize = max(workspaceSize, _plan->alg_selection->configs[id].max_workspace_bytes \
+                            + _plan->alg_selection->configs[id].synchronizer_bytes);
         }
     }
     else
     {
-        workspaceSize = _plan->alg_selection->config_max_id == 0
-                    ? 0
-                    : _plan->alg_selection->configs[_plan->alg_selection->config_id].max_workspace_bytes;
+        if (_plan->alg_selection->config_max_id != 0)
+        {
+            workspaceSize = _plan->alg_selection->configs[_plan->alg_selection->config_id].max_workspace_bytes \
+                            + _plan->alg_selection->configs[_plan->alg_selection->config_id].synchronizer_bytes;
+        }
     }
 
     size_t workspaceSizeIn = 0;
@@ -190,13 +196,28 @@ rocsparselt_status rocsparselt_matmul_impl(const char*                    caller
     }
 
     // If search is enabled, it will search avaiable solutions with input workspace size.
-    if(!search && workspaceSizeIn < workspaceSize)
+    if(workspaceSizeIn && workspaceSizeIn < workspaceSize)
     {
-        hipsparselt_cerr << "The parameter number 9 (workspace) had an illegal value "
-                            "expected a device memroy with "
-                         << workspaceSize << " bytes, but current is " << workspaceSizeIn << " bytes."<< std::endl;
-        log_error(_handle, caller, "expected workspace is not a NULL pointer");
-        return rocsparselt_status_invalid_value;
+        if(search)
+        {
+            std::ostringstream stringStream;
+            stringStream << "The parameter number 9 (workspace) required a device memroy with ";
+            stringStream << workspaceSize  << " bytes, but current is " << workspaceSizeIn << " bytes.\n";
+            stringStream << "Some of the solutions will be skiped during the Search.";
+            auto msg = stringStream.str();
+            hipsparselt_cout << msg << std::endl;
+            log_info(_handle, caller, msg);
+        }
+        else
+        {
+            std::ostringstream stringStream;
+            stringStream << "The parameter number 9 (workspace) had an illegal value expected a device memroy with ";
+            stringStream << workspaceSize  << " bytes, but current is " << workspaceSizeIn << " bytes.";
+            auto msg = stringStream.str();
+            hipsparselt_cerr << msg << std::endl;
+            log_error(_handle, caller, msg);
+            return rocsparselt_status_invalid_value;
+        }
     }
 
     if(numStreams < 0)
