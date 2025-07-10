@@ -25,7 +25,7 @@
 ################################################################################
 
 rocroller_add_dependency(
-    mxDataGenerator HASH 3ac153eec4c1a1e0da7546abc9c0c4f54e180f43
+  mxDataGenerator HASH ${MXDATAGENERATOR_GIT_TAG}
 )
 rocroller_add_dependency(boost)
 

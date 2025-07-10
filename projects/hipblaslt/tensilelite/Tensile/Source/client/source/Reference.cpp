@@ -464,6 +464,11 @@ namespace TensileLite
                         std::min(static_cast<castT>(val), static_cast<castT>(args[1])));
                 return static_cast<T>(0.0);
             }
+            else if(new_type == ActivationType::Clamp)
+            {
+	      return static_cast<T>(
+                  std::max(static_cast<castT>(args[0]), std::min(static_cast<castT>(val), static_cast<castT>(args[1]))));
+            }
             else if(new_type == ActivationType::Exp)
             {
                 return static_cast<T>(exp(static_cast<castT>(val)));
