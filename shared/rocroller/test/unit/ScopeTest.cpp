@@ -105,10 +105,12 @@ namespace ScopeTest
         auto kexpected = R"(
             // CodeGeneratorVisitor::generate() begin
             // generate({1})
+            // BEGIN Scheduler for operations {1}
             // Kernel(1) BEGIN
             // (op 1) generate({})
             // (op 1) end: generate({})
             // (op 1) generate({4})
+            // (op 1) BEGIN Scheduler for operations {4}
             // (op 1) Assign VGPR 11:U32(4) BEGIN
             // (op 4) Assign dim(1) = 11:U32
             // tag 1: v**UNALLOCATED**
@@ -116,12 +118,16 @@ namespace ScopeTest
             // Allocated DataFlowTag1: 1 VGPR (Value: UInt32) (op 4): v0
             v_mov_b32 v0, 11 // (op 4) call()
             // (op 1) Assign VGPR 11:U32(4) END
+            // (op 1) END Scheduler for operations {4}
+            // (op 1) BEGIN Scheduler for operations {2}
             // (op 1) Scope(2) BEGIN
             // (op 2) Lock Scope 2
             // (op 2) generate({3})
+            // (op 2) BEGIN Scheduler for operations {3}
             // (op 2) Scope(3) BEGIN
             // (op 3) Lock Scope 3
             // (op 3) generate({6})
+            // (op 3) BEGIN Scheduler for operations {6}
             // (op 3) Assign VGPR 33:U32(6) BEGIN
             // (op 6) Assign dim(3) = 33:U32
             // tag 3: v**UNALLOCATED**
@@ -129,16 +135,22 @@ namespace ScopeTest
             // Allocated DataFlowTag3: 1 VGPR (Value: UInt32) (op 6): v1
             v_mov_b32 v1, 33 // (op 6) call()
             // (op 3) Assign VGPR 33:U32(6) END
+            // (op 3) END Scheduler for operations {6}
+            // (op 3) BEGIN Scheduler for operations {7}
             // (op 3) Assign VGPR 44:U32(7) BEGIN
             // (op 7) Assign dim(1) = 44:U32
             // (op 7) Generate 44:U32 into DataFlowTag1: VGPR Value: UInt32 x 1: v0
             v_mov_b32 v0, 44 // (op 7) call()
             // (op 3) Assign VGPR 44:U32(7) END
+            // (op 3) END Scheduler for operations {7}
             // (op 3) end: generate({6})
             // Freeing DataFlowTag3: 1 VGPR (Value: UInt32) (op 6): v1
+
             // Deleting tag 3
             // (op 3) Unlock Scope 3
             // (op 2) Scope(3) END
+            // (op 2) END Scheduler for operations {3}
+            // (op 2) BEGIN Scheduler for operations {5}
             // (op 2) Assign VGPR 22:U32(5) BEGIN
             // (op 5) Assign dim(2) = 22:U32
             // tag 2: v**UNALLOCATED**
@@ -146,15 +158,20 @@ namespace ScopeTest
             // Allocated DataFlowTag2: 1 VGPR (Value: UInt32) (op 5): v1
             v_mov_b32 v1, 22 // (op 5) call()
             // (op 2) Assign VGPR 22:U32(5) END
+            // (op 2) END Scheduler for operations {5}
             // (op 2) end: generate({3})
             // Freeing DataFlowTag2: 1 VGPR (Value: UInt32) (op 5): v1
+
             // Deleting tag 2
             // (op 2) Unlock Scope 2
             // (op 1) Scope(2) END
+            // (op 1) END Scheduler for operations {2}
             // (op 1) end: generate({4})
             // Freeing DataFlowTag1: 1 VGPR (Value: UInt32) (op 4): v0
+
             // Deleting tag 1
             // Kernel(1) END
+            // END Scheduler for operations {1}
             // end: generate({1})
             // CodeGeneratorVisitor::generate() end
         )";

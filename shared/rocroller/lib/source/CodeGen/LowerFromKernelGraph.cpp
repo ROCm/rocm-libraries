@@ -1286,7 +1286,14 @@ namespace rocRoller
 
             auto visitor = CodeGeneratorVisitor(graphPtr, kernel, std::move(argTracer));
 
-            co_yield visitor.generate();
+            for(auto what : visitor.generate())
+            {
+                //if(!(what.getOpCode().empty()))
+                //    std::cout << what.getOpCode() << std::endl;
+                if(what.getLockValue() != Scheduling::LockOperation::None)
+                    std::cout << what.getLockValue() << " " << what.getDependency() << std::endl;
+                co_yield what;
+            }
         }
 
         Generator<Instruction> generate(KernelGraph graph, AssemblyKernelPtr kernel)
