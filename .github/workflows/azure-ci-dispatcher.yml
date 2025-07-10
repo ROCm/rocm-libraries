@@ -138,6 +138,8 @@ jobs:
         echo "Found failed/cancelled runs for ROCm/rocm-libraries PR #$pr_number at merge commit $pr_merge_sha: $runs"
         echo "status=true" >> $GITHUB_OUTPUT
 
+        run_ids=()
+
         for run_id in $runs; do
           echo "Rerunning failed run ID: $run_id"
           echo "Run URL: https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
@@ -149,14 +151,19 @@ jobs:
             echo "Failed to rerun run ID: $run_id"
           else
             echo "Rerun requested for run ID: $run_id"
+            run_ids+=("$run_id")
           fi
         done
+
+        echo "run_ids=${run_ids[*]}" >> $GITHUB_OUTPUT
 
     - name: Update existing summary check for rerun jobs
       if: steps.rerun-failed.outputs.status == 'true'
       env:
         GH_TOKEN: ${{ steps.generate-token.outputs.token }}
       run: |
+        run_ids=(${{ steps.rerun-failed.outputs.run_ids }})
+
         pr_number=${{ github.event.pull_request.number }}
         pr_head_sha=$(curl -s "https://api.github.com/repos/ROCm/rocm-libraries/pulls/$pr_number" | jq -r '.head.sha')
         check=$(curl -s "https://api.github.com/repos/ROCm/rocm-libraries/commits/$pr_head_sha/check-runs" | jq -r '.check_runs[] | select(.name == "Azure CI Summary")')
@@ -169,13 +176,14 @@ jobs:
           exit 0
         fi
 
-        if [[ "$check_summary" == *"$(Build.BuildId)"* ]]; then
-          check_summary=$(echo "$check_summary" | sed "s/buildId=$(Build.BuildId)[^|]*|[^|]*|/buildId=$(Build.BuildId)) | pending |/")
-        fi
-
-        if [[ "$check_text" == *"$(Build.BuildId)="* ]]; then
-          check_text=$(echo "$check_text" | sed "s/$(Build.BuildId)=[^;]*;/$(Build.BuildId)=pending;/")
-        fi
+        for run_id in "${run_ids[@]}"; do
+          if [[ "$check_summary" == *"$(Build.BuildId)"* ]]; then
+            check_summary=$(echo "$check_summary" | sed "s/buildId=$run_id[^|]*|[^|]*|/buildId=$run_id) | pending |/")
+          fi
+          if [[ "$check_text" == *"$run_id="* ]]; then
+            check_text=$(echo "$check_text" | sed "s/$run_id=[^;]*;/$run_id=pending;/")
+          fi
+        done
 
         gh_output=$(gh api repos/ROCm/rocm-libraries/check-runs/$check_id \
           -X PATCH \
