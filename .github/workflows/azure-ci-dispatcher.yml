@@ -258,10 +258,10 @@ jobs:
           summary+="| ${project_names[i]} | [${run_ids[i]}](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=${run_ids[i]}) | pending |${newline}"
         done
         summary+="${newline}${newline}"
-        summary+="To request Azure to rerun jobs, click the \"Re-run all jobs\" button on the [corresponding \`Trigger Azure CI\` run](https://github.com/ROCm/rocm-libraries/actions/runs/${{ github.run_id }})".
-        summary+="If there are any pending runs for this PR, they will be cancelled, and new runs will be started."
-        summary+="If there are no pending runs, but there are existing failed or cancelled runs for this PR and merge SHA, those existing runs will be rerun."
-        summary+="Otherwise, new runs will be started."
+        summary+="To request Azure to rerun jobs, click the \"Re-run all jobs\" button on the [corresponding \`Trigger Azure CI\` run](https://github.com/ROCm/rocm-libraries/actions/runs/${{ github.run_id }}).${newline}${newline}"
+        summary+="If there are any pending runs for this PR, they will be cancelled, and new runs will be started.${newline}${newline}"
+        summary+="If there are no pending runs, but there are existing failed or cancelled runs for this PR and merge SHA, those existing runs will be rerun.${newline}${newline}"
+        summary+="Otherwise, new runs will be started.${newline}${newline}"
 
         text=""
         for i in "${!project_names[@]}"; do
