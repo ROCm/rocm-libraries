@@ -178,9 +178,8 @@ def runBuildDocsCommand(platform, project)
         def command = """#!/usr/bin/env bash
                     set -ex
                     cd ${project.paths.project_build_prefix}
-
                     ${sshBlock}
-                    cmake --preset opt-rocm -B build -S .
+                    cmake --preset docs -B build -S .
                     cmake --build build --target docs
                     """
         platform.runCommand(this, command)

@@ -43,15 +43,22 @@
     },
     {
       "name": "coverage",
-      "displayName": "AMD MR ISAs",
-      "description": "Do not use pregenerated arch defs",
+      "displayName": "Coverage",
+      "description": "Build with coverage",
       "inherits": "opt-rocm",
       "cacheVariables": {
         "ROCROLLER_BUILD_SHARED_LIBS": "OFF",
         "ROCROLLER_ENABLE_COVERAGE": "ON"
-
+      }
+    },
+    {
+      "name": "docs",
+      "displayName": "Documentation",
+      "description": "Build documentation",
+      "inherits": "opt-rocm",
+      "cacheVariables": {
+        "ROCROLLER_ENABLE_DOCS": "ON"
       }
     }
-
 ]
 }
