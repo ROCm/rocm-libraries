@@ -96,39 +96,33 @@ namespace rocRoller
             return controlStack;
         }
 
-        template <typename... OperationTypes>
-        static void collectOrderedNodes(KernelGraph const&       graph,
+        static void collectSetCoordinates(KernelGraph const&       graph,
                                         std::unordered_set<int>& visited,
                                         int                      tag,
                                         std::vector<int>&        result)
         {
-            auto traverse = [&]<typename EdgeType>() {
-                for(auto child : graph.control.getOutputNodeIndices<EdgeType>(tag))
-                {
-                    if(not visited.contains(child))
-                    {
-                        visited.insert(child);
-                        collectOrderedNodes<OperationTypes...>(graph, visited, child, result);
-                    }
-                }
-            };
-            traverse.template operator()<ControlGraph::Sequence>();
-            traverse.template operator()<ControlGraph::ForLoopIncrement>();
-            traverse.template operator()<ControlGraph::Else>();
-            traverse.template operator()<ControlGraph::Body>();
-            traverse.template operator()<ControlGraph::Initialize>();
-
-            bool const isTargetOperation
-                = (graph.control.get<OperationTypes>(tag).has_value() || ...);
-
-            if(isTargetOperation)
+            auto traverse = [&]<typename ...EdgeTypes>()
             {
+                auto traverse = [&]<typename EdgeType>() {
+                    for(auto child : graph.control.getOutputNodeIndices<EdgeType>(tag))
+                    {
+                        if(not visited.contains(child))
+                        {
+                            visited.insert(child);
+                            collectSetCoordinates(graph, visited, child, result);
+                        }
+                    }
+                };
+                (traverse.template operator()<EdgeTypes>(), ...);
+            };
+
+            traverse.template operator()<CG::Sequence, CG::ForLoopIncrement, CG::Else, CG::Body, CG::Initialize>();
+
+            if(graph.control.get<CG::SetCoordinate>(tag).has_value())
                 result.push_back(tag);
-            }
         }
 
-        template <typename... OperationTypes>
-        static std::vector<int> getOrderedNodes(KernelGraph const& graph)
+        static std::vector<int> collectSetCoordinates(KernelGraph const& graph)
         {
             auto roots = graph.control.roots().to<std::vector>();
 
@@ -140,7 +134,7 @@ namespace rocRoller
             for(auto const& node : roots)
             {
                 visited.insert(node);
-                collectOrderedNodes<OperationTypes...>(graph, visited, node, result);
+                collectSetCoordinates(graph, visited, node, result);
             }
             return result;
         }
@@ -219,7 +213,7 @@ namespace rocRoller
             if(hasChildren)
             {
                 // This might not be necessary
-                // Consider reusing visited for traversal instead of calling DFS
+                // Consider reusing visited for direct traversal instead of calling DFS
                 for(auto child : kg.control.getOutputNodeIndices<CG::Body>(tag))
                     for(auto node : kg.control.depthFirstVisit(child))
                         visited.insert(node);
@@ -244,8 +238,8 @@ namespace rocRoller
         }
 
         static void connect(bool const        isSequenceEdge,
-                            std::vector<int>& A,
-                            std::vector<int>& B,
+                            std::vector<int> const& A,
+                            std::vector<int> const& B,
                             KernelGraph&      kg)
         {
             if(A.empty() or B.empty())
@@ -267,7 +261,7 @@ namespace rocRoller
         {
             using GD = rocRoller::Graph::Direction;
 
-            auto setCoordinates = getOrderedNodes<CG::SetCoordinate>(kg);
+            auto setCoordinates = collectSetCoordinates(kg);
             for(auto sc : setCoordinates)
             {
                 auto inputNodes = kg.control.getInputNodeIndices(sc, [](auto) { return true; })
@@ -300,8 +294,7 @@ namespace rocRoller
                 if(not bodyNodes.empty())
                 {
                     connect(isSequenceEdge, inputNodes, bodyNodes, kg);
-                    auto leaves = findLeaves(bodyNodes, kg);
-                    connect(true, leaves, sequenceNodes, kg);
+                    connect(true, findLeaves(bodyNodes, kg), sequenceNodes, kg);
                 }
                 else
                     connect(isSequenceEdge, inputNodes, sequenceNodes, kg);
