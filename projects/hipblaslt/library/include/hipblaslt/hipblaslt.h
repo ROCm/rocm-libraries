@@ -97,6 +97,8 @@ typedef enum {
   HIPBLASLT_EPILOGUE_BGRADB = 512,              /**<Apply bias gradient to B and output gemm result. */
   HIPBLASLT_EPILOGUE_SWISH_EXT = 65536,         /**<Apply Swish point-wise transform to the results (x:=Swish(x, 1)).*/
   HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT = 65540,    /**<Apply Bias and then Swish transform.*/
+  HIPBLASLT_EPILOGUE_CLAMP_EXT = 131072,        /**<Apply point-wise clamp to the results (x:=max(alpha, min(x, beta))).*/
+  HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT = 131076,   /**<Apply Bias and then clamp.*/
 } hipblasLtEpilogue_t;
 
 /*! \ingroup types_module
@@ -192,6 +194,8 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_B_SCALE_MODE = 32,                   /**<Scaling mode that defines how the matrix scaling factor for matrix B is interpreted. See hipblasLtMatmulMatrixScale_t */
   HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT = 100,     /**<Compute input A types. Defines the data type used for the input A of matrix multiply. */
   HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,           /**<Compute input B types. Defines the data type used for the input B of matrix multiply. */
+  HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,              /**<first extra argument for the activation function. Data Type: float*/
+  HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,              /**<second extra argument for the activation function. Data Type: float*/
   HIPBLASLT_MATMUL_DESC_MAX,
 } hipblasLtMatmulDescAttributes_t;
 

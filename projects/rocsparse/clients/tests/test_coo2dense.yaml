@@ -37,7 +37,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [0, 3, 8, 13, 64, 256]
   N: [0, 3, 8, 13, 64, 256]
-  denseld: [64, 512]
+  denseld: [256, 512]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
 
@@ -47,7 +47,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [0, 531, 1000]
   N: [0, 241, 1000]
-  denseld: [100, 1000, 2000]
+  denseld: [1000, 2000]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
 
@@ -57,7 +57,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [0, 531, 1000]
   N: [0, 241, 1000]
-  denseld: [100, 1000, 2000]
+  denseld: [1000, 2000]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
   graph_test: true

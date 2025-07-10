@@ -14,8 +14,11 @@ where it marshals inputs to the backend and results to the application. hipRAND 
 require the client to change, regardless of the chosen backend.
 It uses rocRAND in a ROCm environment and cuRAND in a CUDA environment and provides C, C++, and Python API wrappers.
 
-The hipRAND public repository is located at `<https://github.com/ROCm/hipRAND>`_.
+The hipRAND public repository is located at `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/hiprand>`_.
 
+.. note::
+
+   The hipRAND repository for ROCm 6.4 and earlier is located at `<https://github.com/ROCm/hipRAND>`_.
 
 .. grid:: 2
   :gutter: 3
@@ -30,7 +33,7 @@ The hipRAND public repository is located at `<https://github.com/ROCm/hipRAND>`_
 
   .. grid-item-card:: Examples
 
-    * `Examples <https://github.com/ROCm/hipRAND/tree/develop/python/hiprand/examples>`_
+    * `Examples <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hiprand/python/hiprand/examples>`_
 
   .. grid-item-card:: API reference
 

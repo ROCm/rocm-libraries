@@ -262,6 +262,8 @@ constexpr hipblasLtEpilogue_t string_to_epilogue_type(const std::string& value)
         value == "HIPBLASLT_EPILOGUE_BGRADB" ? HIPBLASLT_EPILOGUE_BGRADB :
         value == "HIPBLASLT_EPILOGUE_SWISH_EXT" ? HIPBLASLT_EPILOGUE_SWISH_EXT :
         value == "HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT" ? HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT :
+        value == "HIPBLASLT_EPILOGUE_CLAMP_EXT" ? HIPBLASLT_EPILOGUE_CLAMP_EXT :
+        value == "HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT" ? HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT :
         value == "HIPBLASLT_EPILOGUE_DEFAULT" || value == "" ? HIPBLASLT_EPILOGUE_DEFAULT :
         static_cast<hipblasLtEpilogue_t>(0);
 }
