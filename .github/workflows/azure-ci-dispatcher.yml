@@ -153,7 +153,7 @@ jobs:
           else
             echo "Rerun requested for run ID: $run_id"
             run_ids+=("$run_id")
-            project_name+=($(echo "$response" | jq -r '.definition.name'))
+            project_names+=($(echo "$response" | jq -r '.definition.name'))
           fi
         done
 
