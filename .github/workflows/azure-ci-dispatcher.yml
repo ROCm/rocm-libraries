@@ -108,7 +108,7 @@ jobs:
           fi
         done
 
-    - name: Rerun previous failed runs for current PR HEAD
+    - name: Rerun previous failed/cancelled runs for current PR HEAD
       id: rerun-failed
       if: steps.detect.outputs.subtrees && steps.cancel-in-progress.outputs.status == 'false'
       run: |
@@ -125,12 +125,12 @@ jobs:
         runs=$(echo -e "$failed_runs\n$cancelled_runs" | sort -u)
 
         if [ -z "$runs" ]; then
-          echo "No failed runs found for ROCm/rocm-libraries PR #$pr_number"
+          echo "No failed/cancelled runs found for ROCm/rocm-libraries PR #$pr_number"
           echo "status=false" >> $GITHUB_OUTPUT
           exit 0
         fi
 
-        echo "Found failed runs for ROCm/rocm-libraries PR #$pr_number: $runs"
+        echo "Found failed/cancelled runs for ROCm/rocm-libraries PR #$pr_number: $runs"
         echo "status=true" >> $GITHUB_OUTPUT
 
         for run_id in $runs; do
@@ -147,9 +147,9 @@ jobs:
           fi
         done
 
-    - name: Trigger Azure CI runs
+    - name: Start new Azure CI runs
       id: dispatch
-      if: steps.detect.outputs.subtrees && steps.rerun-failed.outputs.status == 'false'
+      if: steps.detect.outputs.subtrees && (steps.cancel-in-progress.outputs.status == 'true' || steps.rerun-failed.outputs.status == 'false')
       env:
         GH_TOKEN: ${{ steps.generate-token.outputs.token }}
       run: |
