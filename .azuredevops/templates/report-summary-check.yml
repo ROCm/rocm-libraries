@@ -1,3 +1,12 @@
+parameters:
+- name: checkConclusion
+  type: string
+  default: success
+  values:
+  - success
+  - failure
+  - cancelled
+
 jobs:
 - job: report_summary_check
   displayName: Report CI status to GitHub PR Summary Check
@@ -8,27 +17,27 @@ jobs:
   steps:
   - checkout: none
 
-  - task: Bash@3
-    displayName: Run is successful
-    condition: succeeded()
-    inputs:
-      targetType: 'inline'
-      script: |
-        echo "##vso[task.setvariable variable=CHECK_CONCLUSION]success"
-  - task: Bash@3
-    displayName: Run is failed
-    condition: failed()
-    inputs:
-      targetType: 'inline'
-      script: |
-        echo "##vso[task.setvariable variable=CHECK_CONCLUSION]failure"
-  - task: Bash@3
-    displayName: Run is cancelled
-    condition: canceled()
-    inputs:
-      targetType: 'inline'
-      script: |
-        echo "##vso[task.setvariable variable=CHECK_CONCLUSION]cancelled"
+  # - task: Bash@3
+  #   displayName: Run is successful
+  #   condition: succeeded()
+  #   inputs:
+  #     targetType: 'inline'
+  #     script: |
+  #       echo "##vso[task.setvariable variable=CHECK_CONCLUSION]success"
+  # - task: Bash@3
+  #   displayName: Run is failed
+  #   condition: failed()
+  #   inputs:
+  #     targetType: 'inline'
+  #     script: |
+  #       echo "##vso[task.setvariable variable=CHECK_CONCLUSION]failure"
+  # - task: Bash@3
+  #   displayName: Run is cancelled
+  #   condition: canceled()
+  #   inputs:
+  #     targetType: 'inline'
+  #     script: |
+  #       echo "##vso[task.setvariable variable=CHECK_CONCLUSION]cancelled"
 
   - task: Bash@3
     displayName: Install GitHub CLI
@@ -124,7 +133,7 @@ jobs:
             -f "name=Azure CI Summary" \
             -f "head_sha=$PR_HEAD_SHA" \
             -f "status=$CHECK_STATUS" \
-            -f "conclusion=$(CHECK_CONCLUSION)" \
+            -f "conclusion=${{ parameters.checkConclusion }}" \
             -f "output[title]=Azure CI Summary" \
             -f "output[summary]=$CHECK_SUMMARY" \
             -f "output[text]=$CHECK_TEXT"

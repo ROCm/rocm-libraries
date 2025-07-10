@@ -45,7 +45,15 @@ stages:
     parameters:
       sparseCheckoutDir: projects/rocrand
       triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
-- stage: report_summary_check
-  condition: always()
+- stage: report_summary_check_successful
+  condition: succeeded()
+  jobs:
+  - template: templates/report-summary-check.yml
+- stage: report_summary_check_failed
+  condition: failed()
+  jobs:
+  - template: templates/report-summary-check.yml
+- stage: report_summary_check_canceled
+  condition: canceled()
   jobs:
   - template: templates/report-summary-check.yml
