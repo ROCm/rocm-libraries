@@ -269,7 +269,7 @@ jobs:
         done
 
         gh_output=$(gh api repos/ROCm/rocm-libraries/check-runs \
-          -f "name=Azure CI Summary (click me!)"" \
+          -f "name=Azure CI Summary (click me!)" \
           -f "head_sha=$pr_head_sha" \
           -f "status=in_progress" \
           -f "output[title]=Azure CI Summary" \
