@@ -219,8 +219,8 @@ def runPerformanceCommand (platform, project, mxDataGeneratorGitURL, mxDataGener
 {
     String masterURL = env.CHANGE_ID ? env.JOB_URL.replace("PR-${env.CHANGE_ID}", env.CHANGE_TARGET) : env.JOB_URL
 
-    mxDataGeneratorGitURL = mxDataGeneratorGitURL?.trim();
-    mxDataGeneratorGitTag = mxDataGeneratorGitTag?.trim();
+    mxDataGeneratorGitURL = mxDataGeneratorGitURL?.trim() ?: "";
+    mxDataGeneratorGitTag = mxDataGeneratorGitTag?.trim() ?: "";
 
     withSSH(platform){
         sshBlock ->
@@ -453,8 +453,8 @@ def runCodeQLCompileCommand (platform, project, jobName, mxDataGeneratorGitURL, 
 {
     project.paths.construct_build_prefix()
 
-    mxDataGeneratorGitURL = mxDataGeneratorGitURL?.trim();
-    mxDataGeneratorGitTag = mxDataGeneratorGitTag?.trim();
+    mxDataGeneratorGitURL = mxDataGeneratorGitURL?.trim() ?: "";
+    mxDataGeneratorGitTag = mxDataGeneratorGitTag?.trim() ?: "";
 
     withSSH(platform) {
         sshBlock ->
