@@ -107,7 +107,7 @@ jobs:
         # replace the status of the current build in the summary table
 
         if [[ "$CHECK_SUMMARY" == *"$(Build.BuildId)"* ]]; then
-          CHECK_SUMMARY=$(echo "$CHECK_SUMMARY" | sed "s/buildId=$(Build.BuildId)[^|]*|[^|]*|/buildId=$(Build.BuildId)) | $(Agent.JobStatus) |/")
+          CHECK_SUMMARY=$(echo "$CHECK_SUMMARY" | sed "s/buildId=$(Build.BuildId)[^|]*|[^|]*|/buildId=$(Build.BuildId)) | ${{ parameters.checkConclusion }} |/")
         fi
 
         echo "updated check summary"
@@ -119,7 +119,7 @@ jobs:
         # replace the status of the current build with variables['Agent.JobStatus']
 
         if [[ "$CHECK_TEXT" == *"$(Build.BuildId)="* ]]; then
-          CHECK_TEXT=$(echo "$CHECK_TEXT" | sed "s/$(Build.BuildId)=[^;]*;/$(Build.BuildId)=$(Agent.JobStatus);/")
+          CHECK_TEXT=$(echo "$CHECK_TEXT" | sed "s/$(Build.BuildId)=[^;]*;/$(Build.BuildId)=${{ parameters.checkConclusion }};/")
         fi
 
         echo "updated check text"
