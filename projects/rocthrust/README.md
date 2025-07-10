@@ -48,7 +48,7 @@ cd rocThrust; mkdir build; cd build
 #   DISABLE_WERROR        - ON  by default, This flag disable the -Werror compiler flag
 #   BUILD_TEST            - OFF by default,
 #   BUILD_HIPSTDPAR_TEST  - OFF by default,
-#   BUILD_EXAMPLES        - OFF by default,
+#   BUILD_EXAMPLE         - OFF by default,
 #   BUILD_BENCHMARK       - OFF by default,
 #   DOWNLOAD_ROCPRIM      - OFF by default, when ON rocPRIM will be downloaded to the build folder,
 #   RNG_SEED_COUNT        - 0 by default, controls non-repeatable random dataset count
@@ -119,7 +119,7 @@ target_link_libraries(<your_target> roc::rocthrust)
 # Go to rocThrust build directory
 cd rocThrust; cd build
 
-# Configure with examples flag on
+# Configure with test flag on
 CXX=hipcc cmake -DBUILD_TEST=ON ..
 
 # Build tests
@@ -216,8 +216,8 @@ There are two CMake configuration-time options that control random data fed to u
 # Go to rocThrust build directory
 cd rocThrust; cd build
 
-# Configure with examples flag on
-CXX=hipcc cmake -DBUILD_EXAMPLES=ON ..
+# Configure with example flag on
+CXX=hipcc cmake -DBUILD_EXAMPLE=ON ..
 
 # Build examples
 make -j4
