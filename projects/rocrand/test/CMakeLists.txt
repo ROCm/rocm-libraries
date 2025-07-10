@@ -149,3 +149,30 @@ rocm_install(
     COMPONENT tests
     RENAME "CTestTestfile.cmake"
 )
+
+if (ROCRAND_ENABLE_COVERAGE)
+  find_program(
+    LLVM_PROFDATA
+    llvm-profdata
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  find_program(
+    LLVM_COV
+    llvm-cov
+    REQUIRED
+    HINTS ${ROCM_PATH}/llvm/bin
+    PATHS /opt/rocm/llvm/bin
+  )
+
+  add_custom_target(
+    coverage
+    DEPENDS test
+    COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocrand-coverage-*.profraw -o ./coverage-report/rocrand.profdata
+    COMMAND ${LLVM_COV} report -object ./library/src/librocrand.so -instr-profile=./coverage-report/rocrand.profdata
+    COMMAND ${LLVM_COV} show -object ./library/src/librocrand.so -instr-profile=./coverage-report/rocrand.profdata -format=html -output-dir=coverage-report
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+  )
+endif()
