@@ -160,6 +160,9 @@ jobs:
         echo "run_ids=${run_ids[*]}" >> $GITHUB_OUTPUT
         echo "project_names=${project_names[*]}" >> $GITHUB_OUTPUT
 
+        echo "Rerun IDs: ${run_ids[*]}"
+        echo "Project Names: ${project_names[*]}"
+
     - name: Start new Azure CI runs
       id: dispatch
       if: steps.detect.outputs.subtrees && (steps.cancel-in-progress.outputs.status == 'true' || steps.rerun-failed.outputs.status == 'false')
@@ -228,17 +231,24 @@ jobs:
         echo "run_ids=${run_ids[*]}" >> $GITHUB_OUTPUT
         echo "project_names=${project_names[*]}" >> $GITHUB_OUTPUT
 
-    - name: Create new summary check
-      if: steps.dispatch.outputs.run_ids && steps.dispatch.outputs.project_names
+    - name: Create summary check
       env:
         GH_TOKEN: ${{ steps.generate-token.outputs.token }}
       run: |
-        run_ids=(${{ steps.dispatch.outputs.run_ids }})
-        project_names=(${{ steps.dispatch.outputs.project_names }})
+        if [[ -n "${{ steps.dispatch.outputs.run_ids }}" && -n "${{ steps.dispatch.outputs.project_names }}" ]]; then
+          run_ids=(${{ steps.dispatch.outputs.run_ids }})
+          project_names=(${{ steps.dispatch.outputs.project_names }})
+        elif [[ -n "${{ steps.rerun-failed.outputs.run_ids }}" && -n "${{ steps.rerun-failed.outputs.project_names }}" ]]; then
+          run_ids=(${{ steps.rerun-failed.outputs.run_ids }})
+          project_names=(${{ steps.rerun-failed.outputs.project_names }})
+        else
+          echo "No run IDs or project names found, skipping summary check creation."
+          exit 0
+        fi
 
         newline=$'\n'
 
-        summary="### Azure CI Summary for [PR #${{ github.event.pull_request.number }}](${{ github.event.pull_request.html_url }})${newline}${newline}"
+        summary="### Summary for [PR #${{ github.event.pull_request.number }} - ${{ github.event.pull_request.title }}](${{ github.event.pull_request.html_url }})${newline}${newline}"
         summary+="| Project | Run ID | Status |${newline}"
         summary+="|--------------|--------|--------|${newline}"
         for i in "${!project_names[@]}"; do
@@ -261,35 +271,3 @@ jobs:
         echo "Created summary check with ID: $(echo "$gh_output" | jq -r '.id')"
         echo "Summary check URL: https://github.com/ROCm/rocm-libraries/pull/561/checks?check_run_id=$(echo "$gh_output" | jq -r '.id')"
 
-    - name: Create rerun summary check
-      if: steps.rerun-failed.outputs.run_ids && steps.rerun-failed.outputs.project_names
-      env:
-        GH_TOKEN: ${{ steps.generate-token.outputs.token }}
-      run: |
-        run_ids=(${{ steps.rerun-failed.outputs.run_ids }})
-        project_names=(${{ steps.rerun-failed.outputs.project_names }})
-
-        newline=$'\n'
-
-        summary="### Summary for [PR #${{ github.event.pull_request.number }} - ${{ github.event.pull_request.title}}](${{ github.event.pull_request.html_url }})${newline}${newline}"
-        summary+="| Project | Run ID | Status |${newline}"
-        summary+="|--------------|--------|--------|${newline}"
-        for i in "${!project_names[@]}"; do
-          summary+="| ${project_names[i]} | [${run_ids[i]}](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=${run_ids[i]}) | pending |${newline}"
-        done
-
-        text=""
-        for i in "${!project_names[@]}"; do
-          text+="${run_ids[i]}=pending;"
-        done
-
-        gh_output=$(gh api repos/ROCm/rocm-libraries/check-runs \
-          -f 'name=Azure CI Summary' \
-          -f 'head_sha=${{ github.event.pull_request.head.sha }}' \
-          -f 'status=in_progress' \
-          -f 'output[title]=Azure CI Summary' \
-          -f "output[summary]=$summary" \
-          -f "output[text]=$text")
-
-        echo "Created summary check with ID: $(echo "$gh_output" | jq -r '.id')"
-        echo "Summary check URL: https://github.com/ROCm/rocm-libraries/pull/561/checks?check_run_id=$(echo "$gh_output" | jq -r '.id')"
