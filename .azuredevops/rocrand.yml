@@ -44,7 +44,7 @@ stages:
   - template: ${{ variables.CI_COMPONENT_PATH }}/rocRAND.yml@pipelines_repo
     parameters:
       sparseCheckoutDir: projects/rocrand
-      triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
+      triggerDownstreamJobs: false # todo: revert
 - stage: report_summary_check_successful
   condition: succeeded()
   jobs:
