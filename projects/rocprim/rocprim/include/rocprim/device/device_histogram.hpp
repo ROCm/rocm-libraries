@@ -240,32 +240,14 @@ inline hipError_t histogram_impl(void*          temporary_storage,
         const auto items_per_block = params.histogram_global_config.block_size
                                      * params.histogram_global_config.items_per_thread;
 
-        hipDevice_t default_device;
-        ROCPRIM_RETURN_ON_ERROR(hipStreamGetDevice(0, &default_device));
+        int device_id = hipGetStreamDeviceId(stream);
 
-        hipDevice_t stream_device;
-        ROCPRIM_RETURN_ON_ERROR(hipStreamGetDevice(stream, &stream_device));
-
-        // After setting device, we can't just exit on non-success.
-        hipError_t result = hipSetDevice(stream_device);
-
-        int num_multi_processors;
-        if(result == hipSuccess)
-        {
-            result
-                = hipDeviceGetAttribute(&num_multi_processors,
-                                        hipDeviceAttribute_t::hipDeviceAttributeMultiprocessorCount,
-                                        stream_device);
-            // Sanity check.
-            if(num_multi_processors == 0)
-            {
-                result = hipErrorUnknown;
-            }
-        }
-        // Always attempt to restore to default device.
-        hipError_t set_result = hipSetDevice(default_device);
-        ROCPRIM_RETURN_ON_ERROR(set_result);
-        ROCPRIM_RETURN_ON_ERROR(result);
+        // Get the number of multiprocessors
+        int num_multi_processors{};
+        ROCPRIM_RETURN_ON_ERROR(
+            hipDeviceGetAttribute(&num_multi_processors,
+                                  hipDeviceAttribute_t::hipDeviceAttributeMultiprocessorCount,
+                                  device_id));
 
         global_histogram_grid_size = num_multi_processors;
 
