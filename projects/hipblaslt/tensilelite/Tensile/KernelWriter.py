@@ -4676,11 +4676,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["StreamK"]:
       # StreamK args
       self.defineSgpr("ItersPerTile", 1)
-      self.defineSgpr("MagicNumberItersPerTile", 1)
-      self.defineSgpr("MagicShiftItersPerTile", 1)
       self.defineSgpr("TotalIters", 1)
       self.defineSgpr("SKItersPerWG", 1)
-      self.states.numSgprStreamK += 5
+      self.states.numSgprStreamK += 3
       if kernel["StreamK"] >= 2: # Two-tile SK
         self.defineSgpr("skGrid", 1)
         self.defineSgpr("skTiles", 1)

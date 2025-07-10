@@ -128,7 +128,11 @@ class StreamK(Component):
         module.addComment0("StreamK calculate tile idx and map to WG")
 
         # sTmp = tile index
-        module.add(sMagicDiv2(sgpr(sTmp), sgpr(sTmp+1), sgpr("StreamKIter"), sgpr("MagicNumberItersPerTile"), sgpr("MagicShiftItersPerTile"), sgpr(sTmp+2)))
+        tmpVgpr = writer.vgprPool.checkOut(2, "div")
+        tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
+        module.add(scalarUInt32DivideAndRemainder(qReg=sTmp, dReg="StreamKIter", divReg="ItersPerTile", rReg=-1, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=False, comment="StreamKIter // ItersPerTile"))
+        tmpVgprRes = None
+        writer.vgprPool.checkIn(tmpVgpr)
         # sTmp+1 = tile start
         module.add(SMulI32(dst=sgpr(sTmp+1), src0=sgpr(sTmp), src1=sgpr("ItersPerTile"), comment="Tile start iteration"))
         # sTmp+2 = tile end
@@ -300,9 +304,11 @@ class StreamK(Component):
             module.add(SAddU32(dst=sgpr(sCtaIdx), src0=sgpr("StreamKIdx"), src1=1, comment="input partial tile index"))
 
             sFixupEnd = writer.sgprPool.checkOut(1, "FixupEnd", preventOverflow=False) # self.defineSgpr("CtaEnd", 1)
-            module.add(sMagicDiv2(sgpr(tmpSgpr), sgpr(tmpSgpr+1), sgpr("StreamKIterEnd"), sgpr("MagicNumberItersPerTile"), sgpr("MagicShiftItersPerTile"), sgpr(tmpSgpr+2)))
-            module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=sgpr("ItersPerTile"), comment="start iteration of partial tile"))
-            module.add(SSubU32(dst=sgpr(sFixupEnd), src0=sgpr("StreamKIterEnd"), src1=sgpr(tmpSgpr), comment="calc iterations completed by this WG"))
+            tmpVgpr = writer.vgprPool.checkOut(2, "div")
+            tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
+            module.add(scalarUInt32DivideAndRemainder(qReg=tmpSgpr, dReg="StreamKIterEnd", divReg="ItersPerTile", rReg=sFixupEnd, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True, comment="StreamKIterEnd // ItersPerTile"))
+            tmpVgprRes = None
+            writer.vgprPool.checkIn(tmpVgpr)
 
             module.add(skFixupLabel)
 
