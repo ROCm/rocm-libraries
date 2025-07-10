@@ -1,15 +1,38 @@
 jobs:
 - job: report_summary_check
   displayName: Report CI status to GitHub PR Summary Check
-  condition: always()
   variables:
   - group: assistant-librarian
   pool:
     vmImage: ubuntu-latest
   steps:
   - checkout: none
+
+  - task: Bash@3
+    displayName: Run is successful
+    condition: succeeded()
+    inputs:
+      targetType: 'inline'
+      script: |
+        echo "##vso[task.setvariable variable=CHECK_CONCLUSION]success"
+  - task: Bash@3
+    displayName: Run is failed
+    condition: failed()
+    inputs:
+      targetType: 'inline'
+      script: |
+        echo "##vso[task.setvariable variable=CHECK_CONCLUSION]failure"
+  - task: Bash@3
+    displayName: Run is cancelled
+    condition: cancelled()
+    inputs:
+      targetType: 'inline'
+      script: |
+        echo "##vso[task.setvariable variable=CHECK_CONCLUSION]cancelled"
+
   - task: Bash@3
     displayName: Install GitHub CLI
+    condition: always()
     inputs:
       targetType: 'inline'
       script: |
@@ -24,6 +47,7 @@ jobs:
           && sudo apt install gh -y
   - task: Bash@3
     displayName: Report CI status to GitHub PR Summary Check
+    condition: always()
     env:
       APP_ID: $(APP_ID)
       APP_INSTALLATION_ID: $(APP_INSTALLATION_ID)
@@ -92,42 +116,15 @@ jobs:
         echo "updated check text"
         echo $CHECK_TEXT
 
-        map_status() {
-          local azure_status="$1"
-          local gh_conclusion
-          case "$azure_status" in
-            "Canceled")
-              gh_conclusion="cancelled"
-              ;;
-            "Failed")
-              gh_conclusion="failure"
-              ;;
-            "Succeeded")
-              gh_conclusion="success"
-              ;;
-            "SucceededWithIssues")
-              gh_conclusion="success"
-              ;;
-            "Skipped")
-              gh_conclusion="skipped"
-              ;;
-            *)
-              gh_conclusion="neutral" # Default mapping for any unknown status
-              ;;
-          esac
-          echo "$gh_conclusion"
-        }
-
         CHECK_STATUS=$(echo "$CHECK_TEXT" | grep -q "pending" && echo "in_progress" || echo "completed")
 
         if [[ "$CHECK_STATUS" == "completed" ]]; then
-          CHECK_CONCLUSION=$(map_status "$(Agent.JobStatus)")
           gh api repos/ROCm/rocm-libraries/check-runs/$CHECK_ID \
             -X PATCH \
             -f "name=Azure CI Summary" \
             -f "head_sha=$PR_HEAD_SHA" \
             -f "status=$CHECK_STATUS" \
-            -f "conclusion=$CHECK_CONCLUSION" \
+            -f "conclusion=$(CHECK_CONCLUSION)" \
             -f "output[title]=Azure CI Summary" \
             -f "output[summary]=$CHECK_SUMMARY" \
             -f "output[text]=$CHECK_TEXT"
