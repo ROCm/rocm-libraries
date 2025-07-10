@@ -165,8 +165,8 @@ std::string config_name()
            + ",max_grid_size:" + std::to_string(config.max_grid_size)
            + ",shared_impl_max_bins:" + std::to_string(config.shared_impl_max_bins)
            + ",shared_impl_histograms:" + std::to_string(config.shared_impl_histograms)
-           + ",private_hist_bs:" + std::to_string(config.histogram_private_config.block_size)
-           + ",private_hist_ipt:" + std::to_string(config.histogram_private_config.items_per_thread)
+           + ",global_hist_bs:" + std::to_string(config.histogram_global_config.block_size)
+           + ",global_hist_ipt:" + std::to_string(config.histogram_global_config.items_per_thread)
            + "}";
 }
 

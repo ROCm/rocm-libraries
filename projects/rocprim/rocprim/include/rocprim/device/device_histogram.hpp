@@ -128,7 +128,7 @@ template<class Config,
          class Counter,
          class SampleToBinOp>
 ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>()
-                                         .histogram_private_config.block_size) void
+                                         .histogram_global_config.block_size) void
     histogram_private_global_kernel(SampleIterator                             samples,
                                     unsigned int                               columns,
                                     unsigned int                               rows,
@@ -143,8 +143,8 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>()
 {
     static constexpr histogram_config_params params = device_params<Config>();
 
-    histogram_private_global<params.histogram_private_config.block_size,
-                             params.histogram_private_config.items_per_thread,
+    histogram_private_global<params.histogram_global_config.block_size,
+                             params.histogram_global_config.items_per_thread,
                              Channels,
                              ActiveChannels>(samples,
                                              columns,
@@ -237,8 +237,8 @@ inline hipError_t histogram_impl(void*          temporary_storage,
     }
     else
     {
-        const auto items_per_block = params.histogram_private_config.block_size
-                                     * params.histogram_private_config.items_per_thread;
+        const auto items_per_block = params.histogram_global_config.block_size
+                                     * params.histogram_global_config.items_per_thread;
 
         hipDevice_t default_device;
         ROCPRIM_RETURN_ON_ERROR(hipStreamGetDevice(0, &default_device));
@@ -406,7 +406,7 @@ inline hipError_t histogram_impl(void*          temporary_storage,
             }
             histogram_private_global_kernel<config, Channels, ActiveChannels>
                 <<<dim3(global_histogram_grid_size),
-                   dim3(params.histogram_private_config.block_size),
+                   dim3(params.histogram_global_config.block_size),
                    0,
                    stream>>>(samples,
                              columns,
