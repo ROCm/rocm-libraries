@@ -2762,6 +2762,8 @@ namespace KernelGraphTest
         auto falseOp   = kgraph.control.addElement(Assign{Register::Type::Vector, zero});
         auto falseBody = kgraph.control.addElement(Else(), {conditional}, {falseOp});
 
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
+
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
         EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s0, 1")); //Conditional Test
@@ -2832,6 +2834,8 @@ namespace KernelGraphTest
         kgraph.control.addElement(Body(), {secondConditional}, {assignTrueBranch2});
         kgraph.control.addElement(Else(), {secondConditional}, {assignFalseBranch});
         kgraph.control.addElement(Sequence(), {firstConditional}, {storeIndex});
+
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
 
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
@@ -2925,6 +2929,8 @@ namespace KernelGraphTest
         kgraph.control.addElement(Body(), {doWhile}, {assignBody});
         kgraph.control.addElement(Sequence(), {doWhile}, {storeIndex});
 
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
+
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
         m_context->schedule(k->postamble());
@@ -2967,6 +2973,8 @@ namespace KernelGraphTest
         auto kernel = kgraph.control.addElement(Kernel());
         auto wait   = kgraph.control.addElement(WaitZero());
         kgraph.control.addElement(Body(), {kernel}, {wait});
+
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
 
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
