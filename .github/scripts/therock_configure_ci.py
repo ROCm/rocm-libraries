@@ -73,7 +73,7 @@ if __name__ == "__main__":
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
     
     is_forked_pr = os.getenv("IS_FORKED_PR")
-    args["is_forked_pr"] = is_forked_pr
+    args["is_forked_pr"] = is_forked_pr == "true"
     
     input_subtrees = os.getenv("SUBTREES", "")
     args["input_subtrees"] = input_subtrees
