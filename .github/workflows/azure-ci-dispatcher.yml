@@ -141,7 +141,7 @@ jobs:
         for run_id in $runs; do
           echo "Rerunning failed run ID: $run_id"
           echo "Run URL: https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
-          response=$(curl -sSX PATCH "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds/$run_id/retry=true?api-version=7.1" \
+          response=$(curl -sSX PATCH "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds/$run_id?retry=true&api-version=7.1" \
             -u ":${{ secrets.AZ_PAT }}" \
             -H "Content-Type: application/json")
 
