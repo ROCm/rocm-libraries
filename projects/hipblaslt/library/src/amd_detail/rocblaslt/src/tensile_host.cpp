@@ -178,6 +178,7 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , gradient(gradient)
     , compute_type(compute_type)
     , bias(bias)
+    , scale_type(scale_type)
     , scaleA(scaleA)
     , scaleB(scaleB)
     , scaleC(scaleC)
