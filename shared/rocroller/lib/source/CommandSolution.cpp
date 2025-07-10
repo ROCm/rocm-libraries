@@ -41,7 +41,6 @@
 
 #include <rocRoller/KernelGraph/Transforms/MemoryTracer.hpp>
 
-
 namespace rocRoller
 {
 
@@ -602,14 +601,43 @@ namespace rocRoller
         auto kargs = getKernelArguments(args);
         auto inv   = getKernelInvocation(args);
 
-        loadKernel();
+        KernelGraph::memoryTrace(*m_kernelGraph, inv, kargs);
 
-	memoryTrace(*m_kernelGraph, inv, kargs);
+        loadKernel();
 
         if(timer)
             m_executableKernel->executeKernel(kargs, inv, timer, iteration);
         else
             m_executableKernel->executeKernel(kargs, inv, stream);
+    }
+
+    std::pair<KernelArguments, KernelInvocation>
+        CommandKernel::prepKernel(RuntimeArguments const& args)
+    {
+        AssertFatal(m_context, "Unable to launch kernel: CommandKernel must have a Context.");
+        AssertFatal(m_context->kernel(),
+                    "Unable to launch kernel: Context must have an AssemblyKernel.");
+        AssertFatal(matchesPredicates(args, LogLevel::Error),
+                    "Unable to launch kernel: all CommandKernel predicates must match.");
+
+        if(m_launchParameters)
+        {
+            if(m_launchParameters->getManualWorkitemCount())
+                m_context->kernel()->setWorkitemCount(
+                    *m_launchParameters->getManualWorkitemCount());
+        }
+
+        auto kargs = getKernelArguments(args);
+        auto inv   = getKernelInvocation(args);
+
+        return {kargs, inv};
+    }
+
+    void CommandKernel::memoryTrace(RuntimeArguments const& args)
+    {
+        auto [kargs, inv] = prepKernel(args);
+
+        KernelGraph::memoryTrace(*m_kernelGraph, inv, kargs);
     }
 
     void CommandKernel::loadKernelFromAssembly(const std::string& fileName,

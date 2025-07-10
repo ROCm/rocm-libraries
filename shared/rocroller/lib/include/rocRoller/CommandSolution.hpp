@@ -279,6 +279,14 @@ namespace rocRoller
          */
         void launchKernel(RuntimeArguments const& args, hipStream_t stream = 0);
 
+        /**
+         * @brief Only do memory trace analysis on kernel
+         *
+         * @param args The runtime arguments being passed to the kernel
+         *
+         */
+        void memoryTrace(RuntimeArguments const& args);
+
         KernelGraph::KernelGraphPtr getKernelGraph() const;
 
         std::string getInstructions() const;
@@ -355,6 +363,8 @@ namespace rocRoller
                           std::shared_ptr<HIPTimer> timer,
                           int                       iteration,
                           hipStream_t               stream);
+
+        std::pair<KernelArguments, KernelInvocation> prepKernel(RuntimeArguments const& args);
     };
 
     class CommandSolution

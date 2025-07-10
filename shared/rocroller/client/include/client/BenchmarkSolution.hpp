@@ -44,6 +44,7 @@ namespace rocRoller
 
             bool check;
             bool visualize;
+            bool memoryTraceOnly;
 
             int numWGs;
         };
