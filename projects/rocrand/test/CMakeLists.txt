@@ -104,6 +104,13 @@ function(add_test_target test_src is_internal)
           RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
   )
   add_relative_test(${test_name} ${test_name})
+
+  if(ROCRAND_ENABLE_COVERAGE)
+    set_tests_properties(${test_name} PROPERTIES
+      ENVIRONMENT "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage-report/profraw/rocrand-coverage-${test_name}-%p.profraw"
+    )
+  endif()
+
   rocm_install(TARGETS ${test_name} COMPONENT tests)
   if (WIN32 AND NOT DEFINED DLLS_COPIED_TESTS)
     set(DLLS_COPIED_TESTS "YES")
