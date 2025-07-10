@@ -130,12 +130,12 @@ jobs:
         runs=$(echo -e "$failed_runs\n$cancelled_runs" | sort -u)
 
         if [ -z "$runs" ]; then
-          echo "No failed/cancelled runs found for ROCm/rocm-libraries PR #$pr_number"
+          echo "No failed/cancelled runs found for ROCm/rocm-libraries PR #$pr_number at merge commit $pr_merge_sha"
           echo "status=false" >> $GITHUB_OUTPUT
           exit 0
         fi
 
-        echo "Found failed/cancelled runs for ROCm/rocm-libraries PR #$pr_number: $runs"
+        echo "Found failed/cancelled runs for ROCm/rocm-libraries PR #$pr_number at merge commit $pr_merge_sha: $runs"
         echo "status=true" >> $GITHUB_OUTPUT
 
         for run_id in $runs; do
@@ -151,6 +151,40 @@ jobs:
             echo "Rerun requested for run ID: $run_id"
           fi
         done
+
+    - name: Update existing summary check for rerun jobs
+      if: steps.rerun-failed.outputs.status == 'true'
+      env:
+        GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+      run: |
+        pr_number=${{ github.event.pull_request.number }}
+        pr_head_sha=$(curl -s "https://api.github.com/repos/ROCm/rocm-libraries/pulls/$pr_number" | jq -r '.head.sha')
+        check=$(curl -s "https://api.github.com/repos/ROCm/rocm-libraries/commits/$pr_head_sha/check-runs" | jq -r '.check_runs[] | select(.name == "Azure CI Summary")')
+        check_id=$(echo "$check" | jq -r '.id')
+        check_summary=$(echo "$check" | jq -r '.output.summary')
+        check_text=$(echo "$check" | jq -r '.output.text')
+
+        if [[ -z "$check_id" ]]; then
+          echo "No Azure CI Summary check found for commit $pr_head_sha"
+          exit 0
+        fi
+
+        if [[ "$check_summary" == *"$(Build.BuildId)"* ]]; then
+          check_summary=$(echo "$check_summary" | sed "s/buildId=$(Build.BuildId)[^|]*|[^|]*|/buildId=$(Build.BuildId)) | pending |/")
+        fi
+
+        if [[ "$check_text" == *"$(Build.BuildId)="* ]]; then
+          check_text=$(echo "$check_text" | sed "s/$(Build.BuildId)=[^;]*;/$(Build.BuildId)=pending;/")
+        fi
+
+        gh_output=$(gh api repos/ROCm/rocm-libraries/check-runs/$check_id \
+          -X PATCH \
+          -f "name=Azure CI Summary" \
+          -f "head_sha=$pr_head_sha" \
+          -f "status=in_progress" \
+          -f "output[title]=Azure CI Summary" \
+          -f "output[summary]=$check_summary" \
+          -f "output[text]=$check_text")
 
     - name: Start new Azure CI runs
       id: dispatch
@@ -220,7 +254,7 @@ jobs:
         echo "run_ids=${run_ids[*]}" >> $GITHUB_OUTPUT
         echo "project_names=${project_names[*]}" >> $GITHUB_OUTPUT
 
-    - name: Create summary check
+    - name: Create new summary check
       if: steps.dispatch.outputs.run_ids && steps.dispatch.outputs.project_names
       env:
         GH_TOKEN: ${{ steps.generate-token.outputs.token }}
@@ -230,10 +264,11 @@ jobs:
 
         newline=$'\n'
 
-        summary="| Project | Run ID | Status |${newline}"
+        summary="### Azure CI Summary for [PR #${{ github.event.pull_request.number }}](${{ github.event.pull_request.html_url }})${newline}${newline}"
+        summary+="| Project | Run ID | Status |${newline}"
         summary+="|--------------|--------|--------|${newline}"
         for i in "${!project_names[@]}"; do
-          summary+="| ${project_names[i]} | [${run_ids[i]}](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=${run_ids[i]}) | Pending |${newline}"
+          summary+="| ${project_names[i]} | [${run_ids[i]}](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=${run_ids[i]}) | pending |${newline}"
         done
 
         text=""
