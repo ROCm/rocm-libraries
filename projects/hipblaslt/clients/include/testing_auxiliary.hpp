@@ -89,30 +89,126 @@ void testing_aux_mat_set_attr_bad_arg(const Arguments& arg)
     const int64_t col = 128;
     const int64_t ld  = 128;
 
-    int     data;
+    int32_t data32;
     int64_t data64;
+    uint32_t udata32;
+    uint64_t udata64;
 
     hipblaslt_local_matrix_layout mat(row, col, ld, arg.a_type);
     EXPECT_HIPBLAS_STATUS(mat.status(), HIPBLAS_STATUS_SUCCESS);
+    // Test with null matrix layout
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                            nullptr, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &data32, sizeof(int32_t)),
+                        HIPBLAS_STATUS_NOT_INITIALIZED);
 
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
-                              mat, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, nullptr, sizeof(int)),
-                          HIPBLAS_STATUS_INVALID_VALUE);
+                            mat, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, nullptr, sizeof(int32_t)),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+    
 
-    data = 1;
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatrixLayoutSetAttribute(mat, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &data, 1),
+    // Test with zero size
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+        mat, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &data32, 0),
+    HIPBLAS_STATUS_INVALID_VALUE);
+
+    // Test HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT with insufficient buffer size
+    data32 = 1;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &data32, sizeof(int32_t)/2),
         HIPBLAS_STATUS_INVALID_VALUE);
 
-    EXPECT_HIPBLAS_STATUS(
-        hipblasLtMatrixLayoutSetAttribute(
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &data32, 1),
+        HIPBLAS_STATUS_INVALID_VALUE);
+
+    // Test HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET with insufficient buffer size
+    data64 = ld * col;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &data64, sizeof(int64_t)/2),
+        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &data64, 1),
+        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
             mat, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, nullptr, sizeof(int64_t)),
         HIPBLAS_STATUS_INVALID_VALUE);
 
-    data64 = ld * col;
+    // Test HIPBLASLT_MATRIX_LAYOUT_TYPE with insufficient buffer size
+    udata32 = static_cast<uint32_t>(arg.a_type);
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
-                              mat, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &data64, 1),
-                          HIPBLAS_STATUS_INVALID_VALUE);
+            mat, HIPBLASLT_MATRIX_LAYOUT_TYPE, &udata32, sizeof(uint32_t)/2),
+        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_TYPE, &udata32, 1),
+        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+            mat, HIPBLASLT_MATRIX_LAYOUT_TYPE, nullptr, sizeof(uint32_t)),
+        HIPBLAS_STATUS_INVALID_VALUE);
+
+    // Test HIPBLASLT_MATRIX_LAYOUT_ORDER with insufficient buffer size
+    data32 = HIPBLASLT_ORDER_COL;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                            mat, HIPBLASLT_MATRIX_LAYOUT_ORDER, &data32, sizeof(int32_t)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                            mat, HIPBLASLT_MATRIX_LAYOUT_ORDER, &data32, 1),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                            mat, HIPBLASLT_MATRIX_LAYOUT_ORDER, nullptr, sizeof(int32_t)),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    // Test HIPBLASLT_MATRIX_LAYOUT_ROWS with insufficient buffer size
+    udata64 = static_cast<uint64_t>(row);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                            mat, HIPBLASLT_MATRIX_LAYOUT_ROWS, &udata64, sizeof(uint64_t)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                            mat, HIPBLASLT_MATRIX_LAYOUT_ROWS, &udata64, 1),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                            mat, HIPBLASLT_MATRIX_LAYOUT_ROWS, nullptr, sizeof(uint64_t)),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    // Test HIPBLASLT_MATRIX_LAYOUT_COLS with insufficient buffer size
+    udata64 = static_cast<uint64_t>(col);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                            mat, HIPBLASLT_MATRIX_LAYOUT_COLS, &udata64, sizeof(uint64_t)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                            mat, HIPBLASLT_MATRIX_LAYOUT_COLS, &udata64, 1),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                            mat, HIPBLASLT_MATRIX_LAYOUT_COLS, nullptr, sizeof(uint64_t)),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    // Test HIPBLASLT_MATRIX_LAYOUT_LD with insufficient buffer size
+    data64 = ld;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                            mat, HIPBLASLT_MATRIX_LAYOUT_LD, &data64, sizeof(int64_t)/2),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                            mat, HIPBLASLT_MATRIX_LAYOUT_LD, &data64, 1),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                            mat, HIPBLASLT_MATRIX_LAYOUT_LD, nullptr, sizeof(int64_t)),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    // Test with invalid attribute (assuming there's a MAX value for bounds checking)
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
+                            mat, static_cast<hipblasLtMatrixLayoutAttribute_t>(999), &data32, sizeof(int32_t)),
+                        HIPBLAS_STATUS_INVALID_VALUE);
 }
 
 void testing_aux_mat_get_attr_bad_arg(const Arguments& arg)
@@ -137,6 +233,12 @@ void testing_aux_mat_get_attr_bad_arg(const Arguments& arg)
         hipblasLtMatrixLayoutGetAttribute(
             mat, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, nullptr, sizeof(int), &sizeWritten),
         HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatrixLayoutGetAttribute(
+                mat, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, nullptr, 0, nullptr),
+            HIPBLAS_STATUS_INVALID_VALUE);
+    
     EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutGetAttribute(
                               mat, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &data, 1, &sizeWritten),
                           HIPBLAS_STATUS_INVALID_VALUE);
@@ -284,7 +386,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     int64_t n = 1;
     int64_t k = 1;
     
-    // For ROCBLASLT_MATMUL_DESC_TRANSA
+    // For HIPBLASLT_MATMUL_DESC_TRANSA
     hipblasOperation_t transA = HIPBLAS_OP_T;
     hipblasOperation_t transA_r = HIPBLAS_OP_N;
 
@@ -317,7 +419,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     
     ASSERT_TRUE(transA_r == transA); // validate
 
-    // For ROCBLASLT_MATMUL_DESC_TRANSB
+    // For HIPBLASLT_MATMUL_DESC_TRANSB
     
     hipblasOperation_t transB = HIPBLAS_OP_N;
     hipblasOperation_t transB_r = HIPBLAS_OP_T;
@@ -340,7 +442,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
 
     ASSERT_TRUE(transB_r == transB); // validate
 
-    // for ROCBLASLT_MATMUL_DESC_EPILOGUE
+    // for HIPBLASLT_MATMUL_DESC_EPILOGUE
     hipblasLtEpilogue_t data   = HIPBLASLT_EPILOGUE_DEFAULT; 
     hipblasLtEpilogue_t data_r = HIPBLASLT_EPILOGUE_RELU; 
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute( 
@@ -352,10 +454,14 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     ASSERT_TRUE(data_r == data);
 
 
-    // for ROCBLASLT_MATMUL_DESC_BIAS_POINTER set and get
+    // for HIPBLASLT_MATMUL_DESC_BIAS_POINTER set and get
     void*                      d_bias;
     void*                      d_bias_r;
     CHECK_HIP_ERROR(hipMalloc(&d_bias, k * sizeof(hipblasLtHalf)));
+    
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                            matmul, HIPBLASLT_MATMUL_DESC_BIAS_POINTER, &d_bias, sizeof(void*)/2), 
+                        HIPBLAS_STATUS_INVALID_VALUE);
     
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
                             matmul, HIPBLASLT_MATMUL_DESC_BIAS_POINTER, &d_bias, sizeof(void*)), 
@@ -368,7 +474,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     ASSERT_TRUE(d_bias_r == d_bias);
 
     // for HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER
-    // We create a new matmul_descr becasue we don't dont want to set matmulDesc->scaleAType as Scalar in advance.
+    // We create a new matmul_descr becasue we don't want to set matmulDesc->scaleAType as Scalar in advance.
     // If we set it as Scalar, it will skip some cases, which is not what we desire for.
     const hipblasOperation_t opA = HIPBLAS_OP_T;
     const hipblasOperation_t opB = HIPBLAS_OP_N;
@@ -381,6 +487,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     float* d_scale_a_r;
     CHECK_HIP_ERROR(hipMalloc(&d_scale_a, sizeof(float)));
     CHECK_HIP_ERROR(hipMemcpy(d_scale_a, &h_scale_a_for_desc_a_scale_pointer, sizeof(float), hipMemcpyHostToDevice));
+
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
                             matmul_descr, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &d_scale_a, sizeof(float*)/2),
                         HIPBLAS_STATUS_INVALID_VALUE);
@@ -398,7 +505,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
                         HIPBLAS_STATUS_SUCCESS);
     ASSERT_TRUE(d_scale_a_r == d_scale_a); // validate
 
-    // ROCBLASLT_MATMUL_DESC_A_SCALE_MODE
+    // HIPBLASLT_MATMUL_DESC_A_SCALE_MODE
 
     hipblasLtMatmulMatrixScale_t scale_mode_a = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
     hipblasLtMatmulMatrixScale_t scale_mode_a_r = HIPBLASLT_MATMUL_MATRIX_SCALE_END;
@@ -425,7 +532,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     
     ASSERT_TRUE(scale_mode_a_r == scale_mode_a); // validate
 
-    // ROCBLASLT_MATMUL_DESC_B_SCALE_MODE
+    // HIPBLASLT_MATMUL_DESC_B_SCALE_MODE
 
     hipblasLtMatmulMatrixScale_t scale_mode_b = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0;
     hipblasLtMatmulMatrixScale_t scale_mode_b_r = HIPBLASLT_MATMUL_MATRIX_SCALE_END;
@@ -525,7 +632,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     hipStream_t        stream;
     CHECK_HIP_ERROR(hipStreamCreate(&stream));
 
-    // for HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER
+    // for HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER 
     float h_scale_b = 3.f;
     float* d_scale_b;
     float* d_scale_b_r;
@@ -550,7 +657,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
 
     ASSERT_TRUE(d_scale_b == d_scale_b_r); // validate
 
-    // for ROCBLASLT_MATMUL_DESC_C_SCALE_POINTER & ROCBLASLT_MATMUL_DESC_D_SCALE_POINTER
+    // for HIPBLASLT_MATMUL_DESC_C_SCALE_POINTER & HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER
     float h_scale_c = 3.f;
     float h_scale_d = 3.f;
     float* d_scale_c;
@@ -577,7 +684,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
                         HIPBLAS_STATUS_SUCCESS);
 
     
-    // for ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER
+    // for HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER
     float h_scale_e = 3.f;
     float* d_scale_e;
     CHECK_HIP_ERROR(hipMalloc(&d_scale_e, sizeof(float)));
@@ -591,7 +698,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
                             matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER, &d_scale_e, sizeof(float*)),
                         HIPBLAS_STATUS_SUCCESS);
     
-    // For ROCBLASLT_MATMUL_DESC_POINTER_MODE
+    // For HIPBLASLT_MATMUL_DESC_POINTER_MODE
     hipblasLtPointerMode_t pMode = HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST;
     hipblasLtPointerMode_t pMode_r = HIPBLASLT_POINTER_MODE_HOST;
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
@@ -609,7 +716,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
 
     ASSERT_TRUE(pMode_r == pMode); // validate
 
-    // For ROCBLASLT_MATMUL_DESC_BIAS_DATA_TYPE Set Desc Bias Data Type
+    // For HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE Set Desc Bias Data Type
     int32_t bias_data_type = HIP_R_16F;
     int32_t bias_data_type_r = HIP_R_32F;
     
@@ -633,7 +740,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     ASSERT_TRUE(bias_data_type_r == bias_data_type); // validate
 
 
-    // For ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER Set auxiliary buffer
+    // For HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER Set auxiliary buffer
     void* d_aux_buffer;
     CHECK_HIP_ERROR(hipMalloc(&d_aux_buffer, m * n * sizeof(hipblasLtHalf)));
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
@@ -644,7 +751,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
                         HIPBLAS_STATUS_SUCCESS);
 
     
-    // For ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER Set auxiliary leading dimension (ld)
+    // For HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD Set auxiliary leading dimension (ld)
     const int64_t aux_ld = m;
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
                             matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD, &aux_ld, sizeof(aux_ld)/2),
@@ -654,17 +761,17 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
                             matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD, &aux_ld, sizeof(aux_ld)),
                         HIPBLAS_STATUS_SUCCESS);
     
-    // for ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE & Set Epilogue Aux Batch Stride
+    // for HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE & Set Epilogue Aux Batch Stride
     const int64_t aux_batch_stride = m * n;
     EXPECT_HIPBLAS_STATUS( hipblasLtMatmulDescSetAttribute(
-                            matmul,HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE, &aux_batch_stride, sizeof(aux_batch_stride)/2), 
+                            matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE, &aux_batch_stride, sizeof(aux_batch_stride)/2), 
                         HIPBLAS_STATUS_INVALID_VALUE);
     
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
                             matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_BATCH_STRIDE, &aux_batch_stride, sizeof(aux_batch_stride)),
                         HIPBLAS_STATUS_SUCCESS);
 
-    // for ROCBLASLT_MATMUL_DESC_AMAX_D_POINTER
+    // for HIPBLASLT_MATMUL_DESC_AMAX_D_POINTER
     void *d_out_amax;
     void *d_out_amax_r;
     CHECK_HIP_ERROR(hipMalloc(&d_out_amax, 1 * sizeof(float)));
@@ -687,7 +794,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
 
     ASSERT_TRUE(d_out_amax == d_out_amax_r); // validate
 
-    // for ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE
+    // for HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE
     hipDataType aux_type_r;
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
                             matmul, HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE, &arg.aux_type, sizeof(hipDataType)/2),
@@ -707,7 +814,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
 
     ASSERT_TRUE(arg.aux_type == aux_type_r); // validate
 
-    // for ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT & ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT
+    // for HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT & HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT
     hipDataType computeTypeA = HIP_R_16F;
     hipDataType computeTypeA_r = HIP_R_32F;
     hipDataType computeTypeB = HIP_R_16F;
@@ -820,6 +927,28 @@ void testing_aux_matmul_pref_get_attr(const Arguments& arg)
     uint64_t data_get = 0;
     size_t   sizeWritten;
 
+    // Test edge cases
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulPreferenceSetAttribute(nullptr, 
+                                            HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                            &data_set,
+                                            sizeof(data_set)),
+        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulPreferenceSetAttribute(pref, 
+                                            HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                            &data_set,
+                                            0),
+        HIPBLAS_STATUS_INVALID_VALUE);
+
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceGetAttribute(pref,
+                                            HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                            nullptr,
+                                            0,
+                                            &sizeWritten),
+        HIPBLAS_STATUS_INVALID_VALUE);
     // Set the attribute
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatmulPreferenceSetAttribute(
@@ -840,13 +969,35 @@ void testing_aux_matmul_pref_get_attr(const Arguments& arg)
     ASSERT_TRUE(sizeWritten == sizeof(data_get));
 
     // Test getting other attributes (assuming they have default values)
-    int32_t search_mode;
-    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceGetAttribute(pref,
+    int32_t search_mode = 0;
+    int32_t search_mode_r = 1;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceSetAttribute(pref,
                                                                 HIPBLASLT_MATMUL_PREF_SEARCH_MODE,
                                                                 &search_mode,
-                                                                sizeof(search_mode),
+                                                                sizeof(search_mode)),
+                        HIPBLAS_STATUS_SUCCESS);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceGetAttribute(pref,
+                                                                HIPBLASLT_MATMUL_PREF_SEARCH_MODE,
+                                                                &search_mode_r,
+                                                                sizeof(search_mode_r),
                                                                 &sizeWritten),
-                          HIPBLAS_STATUS_SUCCESS);
+                        HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(data_get == data_set);
+    
+    // Test default value
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                                HIPBLASLT_MATMUL_PREF_MAX,
+                                                                &search_mode,
+                                                                sizeof(search_mode)),
+                        HIPBLAS_STATUS_INVALID_VALUE);
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceGetAttribute(pref,
+                                                                HIPBLASLT_MATMUL_PREF_MAX,
+                                                                &search_mode_r,
+                                                                sizeof(search_mode_r),
+                                                                &sizeWritten),
+                        HIPBLAS_STATUS_INVALID_VALUE);
 
     // You might want to add more attribute tests here
 }
@@ -1218,4 +1369,176 @@ void testing_aux_matmul_pref_init(const Arguments& arg)
 {
     hipblaslt_local_preference pref;
     EXPECT_HIPBLAS_STATUS(pref.status(), HIPBLAS_STATUS_SUCCESS);
+}
+
+void testing_aux_mat_copy(const Arguments& arg)
+{
+    hipblasLtMatmulDesc_t matmul_src;
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(&matmul_src, arg.compute_type, arg.scale_type));
+    hipblasLtMatmulDesc_t matmul_dest;
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(&matmul_dest, HIPBLAS_COMPUTE_32F, HIP_R_32F));
+    
+    EXPECT_HIPBLAS_STATUS(hipblaslt_ext::copyMatmul(nullptr, matmul_dest), HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(hipblaslt_ext::copyMatmul(matmul_src, nullptr), HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(hipblaslt_ext::copyMatmul(matmul_src, matmul_dest), HIPBLAS_STATUS_SUCCESS);
+    
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul_src));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul_dest));
+}
+
+void testing_aux_auxiliary_func(const Arguments& arg)
+{
+    // Test gpu_arch_match
+    int             deviceId;
+    hipDeviceProp_t deviceProperties;
+    static_cast<void>(hipGetDevice(&deviceId));
+    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
+    ASSERT_TRUE(gpu_arch_match(deviceProperties.gcnArchName, ""));
+    ASSERT_TRUE(gpu_arch_match(deviceProperties.gcnArchName, "\\d"));
+
+    // Test hipblas_status_to_string
+    ASSERT_TRUE(hipblas_status_to_string(HIPBLAS_STATUS_SUCCESS) == "HIPBLAS_STATUS_SUCCESS");
+    ASSERT_TRUE(hipblas_status_to_string(HIPBLAS_STATUS_NOT_INITIALIZED) == "HIPBLAS_STATUS_NOT_INITIALIZED");
+    ASSERT_TRUE(hipblas_status_to_string(HIPBLAS_STATUS_ALLOC_FAILED) == "HIPBLAS_STATUS_ALLOC_FAILED");
+    ASSERT_TRUE(hipblas_status_to_string(HIPBLAS_STATUS_INVALID_VALUE) == "HIPBLAS_STATUS_INVALID_VALUE");
+    ASSERT_TRUE(hipblas_status_to_string(HIPBLAS_STATUS_MAPPING_ERROR) == "HIPBLAS_STATUS_MAPPING_ERROR");
+    ASSERT_TRUE(hipblas_status_to_string(HIPBLAS_STATUS_EXECUTION_FAILED) == "HIPBLAS_STATUS_EXECUTION_FAILED");
+    ASSERT_TRUE(hipblas_status_to_string(HIPBLAS_STATUS_INTERNAL_ERROR) == "HIPBLAS_STATUS_INTERNAL_ERROR");
+    ASSERT_TRUE(hipblas_status_to_string(HIPBLAS_STATUS_NOT_SUPPORTED) == "HIPBLAS_STATUS_NOT_SUPPORTED");
+    ASSERT_TRUE(hipblas_status_to_string(HIPBLAS_STATUS_ARCH_MISMATCH) == "HIPBLAS_STATUS_ARCH_MISMATCH");
+    ASSERT_TRUE(hipblas_status_to_string(HIPBLAS_STATUS_INVALID_ENUM) == "HIPBLAS_STATUS_INVALID_ENUM");
+    ASSERT_TRUE(hipblas_status_to_string(HIPBLAS_STATUS_UNKNOWN) == "HIPBLAS_STATUS_UNKNOWN");
+    ASSERT_TRUE(hipblas_status_to_string(static_cast<hipblasStatus_t>(12)) == "<undefined hipblasStatus_t value>");
+    
+    // Test hipblas_operation_to_string
+    
+    ASSERT_TRUE(hipblas_operation_to_string(HIPBLAS_OP_N) == "N");
+    ASSERT_TRUE(hipblas_operation_to_string(HIPBLAS_OP_T) == "T");
+    ASSERT_TRUE(hipblas_operation_to_string(HIPBLAS_OP_C) == "C");
+    ASSERT_TRUE(hipblas_operation_to_string(static_cast<hipblasOperation_t>(114)) == "invalid");
+
+    // Test char_to_hipblas_operation
+    ASSERT_TRUE(char_to_hipblas_operation('N') == HIPBLAS_OP_N);
+    ASSERT_TRUE(char_to_hipblas_operation('n') == HIPBLAS_OP_N);
+    ASSERT_TRUE(char_to_hipblas_operation('T') == HIPBLAS_OP_T);
+    ASSERT_TRUE(char_to_hipblas_operation('t') == HIPBLAS_OP_T);
+    ASSERT_TRUE(char_to_hipblas_operation('C') == HIPBLAS_OP_C);
+    ASSERT_TRUE(char_to_hipblas_operation('c') == HIPBLAS_OP_C);
+    ASSERT_TRUE(char_to_hipblas_operation('X') == HIPBLASLT_OPERATION_INVALID);
+
+    
+    // Test char_to_hipblas_operation
+    ASSERT_TRUE(char_to_hipblas_operation('N') == HIPBLAS_OP_N);
+    ASSERT_TRUE(char_to_hipblas_operation('n') == HIPBLAS_OP_N);
+    ASSERT_TRUE(char_to_hipblas_operation('T') == HIPBLAS_OP_T);
+    ASSERT_TRUE(char_to_hipblas_operation('t') == HIPBLAS_OP_T);
+    ASSERT_TRUE(char_to_hipblas_operation('C') == HIPBLAS_OP_C);
+    ASSERT_TRUE(char_to_hipblas_operation('c') == HIPBLAS_OP_C);
+    
+    // Test hip_datatype_to_string
+    ASSERT_TRUE(hip_datatype_to_string(HIP_R_32F) == "f32_r");
+    ASSERT_TRUE(hip_datatype_to_string(HIP_R_64F) == "f64_r");
+    ASSERT_TRUE(hip_datatype_to_string(HIP_R_16F) == "f16_r");
+    ASSERT_TRUE(hip_datatype_to_string(HIP_R_16BF) == "bf16_r");
+    ASSERT_TRUE(hip_datatype_to_string(HIP_R_8I) == "i8_r");
+    ASSERT_TRUE(hip_datatype_to_string(HIP_R_32I) == "i32_r");
+    ASSERT_TRUE(hip_datatype_to_string(HIP_R_8F_E4M3_FNUZ) == "f8_fnuz_r");
+    ASSERT_TRUE(hip_datatype_to_string(HIP_R_8F_E5M2_FNUZ) == "bf8_fnuz_r");
+    ASSERT_TRUE(hip_datatype_to_string(HIP_R_8F_E4M3) == "f8_r");
+    ASSERT_TRUE(hip_datatype_to_string(HIP_R_8F_E5M2) == "bf8_r");
+    ASSERT_TRUE(hip_datatype_to_string(static_cast<hipDataType>(HIP_R_6F_E2M3_EXT)) == "f6_r");
+    ASSERT_TRUE(hip_datatype_to_string(static_cast<hipDataType>(HIP_R_6F_E3M2_EXT)) == "bf6_r");
+    ASSERT_TRUE(hip_datatype_to_string(static_cast<hipDataType>(HIP_R_4F_E2M1_EXT)) == "f4_r");
+
+
+    // Test hipblas_computetype_to_string
+    hipblas_computetype_to_string(HIPBLAS_COMPUTE_16F);
+    ASSERT_TRUE(hipblas_computetype_to_string(HIPBLAS_COMPUTE_16F) == "f16_r");
+    ASSERT_TRUE(hipblas_computetype_to_string(HIPBLAS_COMPUTE_32F) == "f32_r");
+    ASSERT_TRUE(hipblas_computetype_to_string(HIPBLAS_COMPUTE_32F_FAST_TF32) == "xf32_r");
+    ASSERT_TRUE(hipblas_computetype_to_string(HIPBLAS_COMPUTE_64F) == "f64_r");
+    ASSERT_TRUE(hipblas_computetype_to_string(HIPBLAS_COMPUTE_32I) == "i32_r");
+    ASSERT_TRUE(hipblas_computetype_to_string(HIPBLAS_COMPUTE_32F_FAST_16F) == "f32_f16_r");
+    ASSERT_TRUE(hipblas_computetype_to_string(HIPBLAS_COMPUTE_32F_FAST_16BF) == "f32_bf16_r");
+    ASSERT_TRUE(hipblas_computetype_to_string(HIPBLAS_COMPUTE_64F_PEDANTIC) == "non-supported compute type");
+
+    // Test string_to_hip_datatype
+    ASSERT_TRUE(string_to_hip_datatype("f8_fnuz_r") == HIP_R_8F_E4M3_FNUZ);
+    ASSERT_TRUE(string_to_hip_datatype("bf8_fnuz_r") == HIP_R_8F_E5M2_FNUZ);
+    ASSERT_TRUE(string_to_hip_datatype("f8_r") == HIP_R_8F_E4M3);
+    ASSERT_TRUE(string_to_hip_datatype("bf8_r") == HIP_R_8F_E5M2);
+    ASSERT_TRUE(string_to_hip_datatype("f32_r") == HIP_R_32F);
+    ASSERT_TRUE(string_to_hip_datatype("f64_r") == HIP_R_64F);
+    ASSERT_TRUE(string_to_hip_datatype("f16_r") == HIP_R_16F);
+    ASSERT_TRUE(string_to_hip_datatype("bf16_r") == HIP_R_16BF);
+    ASSERT_TRUE(string_to_hip_datatype("i8_r") == HIP_R_8I  );
+    ASSERT_TRUE(string_to_hip_datatype("f6_r") == static_cast<hipDataType>(HIP_R_6F_E2M3_EXT));
+    ASSERT_TRUE(string_to_hip_datatype("bf6_r") == static_cast<hipDataType>(HIP_R_6F_E3M2_EXT));
+    ASSERT_TRUE(string_to_hip_datatype("f4_r") == static_cast<hipDataType>(HIP_R_4F_E2M1_EXT));
+    ASSERT_TRUE(string_to_hip_datatype("i32_r") == HIP_R_32I);
+    ASSERT_TRUE(string_to_hip_datatype("") == HIPBLASLT_DATATYPE_INVALID);
+
+    // Test string_to_hip_datatype_assert
+    string_to_hip_datatype_assert("f8_fnuz_r");
+
+    // Test string_to_hipblas_computetype
+    ASSERT_TRUE(string_to_hipblas_computetype("f32_r") == HIPBLAS_COMPUTE_32F);
+    ASSERT_TRUE(string_to_hipblas_computetype("xf32_r") == HIPBLAS_COMPUTE_32F_FAST_TF32);
+    ASSERT_TRUE(string_to_hipblas_computetype("f64_r") == HIPBLAS_COMPUTE_64F);
+    ASSERT_TRUE(string_to_hipblas_computetype("i32_r") == HIPBLAS_COMPUTE_32I);
+    ASSERT_TRUE(string_to_hipblas_computetype("f32_f16_r") == HIPBLAS_COMPUTE_32F_FAST_16F);
+    ASSERT_TRUE(string_to_hipblas_computetype("f32_bf16_r") == HIPBLAS_COMPUTE_32F_FAST_16BF);
+    ASSERT_TRUE(string_to_hipblas_computetype("") == HIPBLASLT_COMPUTE_TYPE_INVALID);
+
+    // Test string_to_hipblas_computetype_assert
+    string_to_hipblas_computetype_assert("f32_r");
+
+    // Test string_to_epilogue_type
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_RELU") == HIPBLASLT_EPILOGUE_RELU );
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_BIAS") == HIPBLASLT_EPILOGUE_BIAS);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_RELU_BIAS") == HIPBLASLT_EPILOGUE_RELU_BIAS);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_GELU") == HIPBLASLT_EPILOGUE_GELU);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_GELU_BIAS") == HIPBLASLT_EPILOGUE_GELU_BIAS);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_GELU_AUX") == HIPBLASLT_EPILOGUE_GELU_AUX);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_GELU_AUX_BIAS") == HIPBLASLT_EPILOGUE_GELU_AUX_BIAS);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DGELU") == HIPBLASLT_EPILOGUE_DGELU);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DGELU_BGRAD") == HIPBLASLT_EPILOGUE_DGELU_BGRAD);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_BGRADA") == HIPBLASLT_EPILOGUE_BGRADA);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_BGRADB") == HIPBLASLT_EPILOGUE_BGRADB);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SWISH_EXT") == HIPBLASLT_EPILOGUE_SWISH_EXT);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT") == HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT);
+    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DEFAULT") == HIPBLASLT_EPILOGUE_DEFAULT);
+    ASSERT_TRUE(string_to_epilogue_type("test") == static_cast<hipblasLtEpilogue_t>(0));
+
+    // Test string_to_epilogue_type_assert
+    ASSERT_TRUE(string_to_epilogue_type_assert("HIPBLASLT_EPILOGUE_RELU") == HIPBLASLT_EPILOGUE_RELU);
+
+    // Test hipblaslt_isnan
+    uint32_t other_type_value = 5;
+    ASSERT_FALSE(hipblaslt_isnan(other_type_value));
+
+    float non_integral_nan = std::numeric_limits<float>::quiet_NaN();
+    ASSERT_TRUE(hipblaslt_isnan(non_integral_nan));
+
+    hipblaslt_f8_fnuz arg_hipblaslt_f8_fnuz;
+    arg_hipblaslt_f8_fnuz.__x = 0x80;
+    ASSERT_TRUE(hipblaslt_isnan(arg_hipblaslt_f8_fnuz));
+
+    hipblaslt_bf8_fnuz arg_hipblaslt_bf8_fnuz;
+    arg_hipblaslt_bf8_fnuz.__x = 0x80;
+    ASSERT_TRUE(hipblaslt_isnan(arg_hipblaslt_bf8_fnuz));
+
+    hipblaslt_f8 arg_hipblaslt_f8;
+    arg_hipblaslt_f8.__x = 0x80;
+    ASSERT_TRUE(hipblaslt_isnan(arg_hipblaslt_f8));
+
+    hipblaslt_bf8 arg_hipblaslt_bf8;
+    arg_hipblaslt_bf8.__x = 0x7d;
+    ASSERT_TRUE(hipblaslt_isnan(arg_hipblaslt_bf8));
+
+    hipblasLtHalf pos_inf = static_cast<hipblasLtHalf>(INFINITY); 
+    ASSERT_TRUE(hipblaslt_isinf(pos_inf));
+
+    hipblasLtHalf nan = static_cast<hipblasLtHalf>(NAN);
+    ASSERT_TRUE(hipblaslt_isnan(nan));
 }
