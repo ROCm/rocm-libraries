@@ -24,7 +24,7 @@ jobs:
         echo "##vso[task.setvariable variable=CHECK_CONCLUSION]failure"
   - task: Bash@3
     displayName: Run is cancelled
-    condition: cancelled()
+    condition: canceled()
     inputs:
       targetType: 'inline'
       script: |
