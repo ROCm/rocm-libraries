@@ -1067,10 +1067,10 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       moduleVgprMacro.add(RegSet("v", "vgprG2LMetadata", "vgprBase", self.states.m.startVgprG2L - self.states.startVgpr))
 
-    if ((tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]) or                                                                    \
-        (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]) or                                                                    \
-        (kernel["ProblemType"]["Sparse"] and not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] == 4))  \
-        and (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()):
+    if (((tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]) or                                               \
+         (tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]))                                                 \
+        and (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat())) \
+        or (kernel["ProblemType"]["Sparse"] and not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] > 1):
       moduleVgprMacro.add(RegSet("v", "vgprPackTemp", "vgprBase", self.states.a.startVgprValuPackTemp - self.states.startVgpr))
 
     if self.states.globalReadIncsUseVgpr:
@@ -5296,10 +5296,10 @@ class KernelWriterAssembly(KernelWriter):
     imodMisc        = Module("tailLoopAllocValuMiscVgpr")
     vgprBaseMisc    = -1
     numVgprPackTemp = 0
-    if ((tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"])                                   \
-        or (tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"])                                \
-        or (kernel["ProblemType"]["Sparse"] and not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] == 4))             \
-        and (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat()):
+    if (((tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"])                                    \
+        or (tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]))                                 \
+        and (kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].is8bitFloat())) \
+       or (kernel["ProblemType"]["Sparse"] and not kernel["UnrollMajorLDSMetadata"] and kernel["MIInputPerThreadMetadata"] > 1):
       numVgprPackTemp = 1
     numVgprCvtTemp = 0
     if self.states.a.startVgprValuCvtTemp != -1 or self.states.b.startVgprValuCvtTemp != -1:
@@ -7219,6 +7219,7 @@ class KernelWriterAssembly(KernelWriter):
     dividerFortidInK = kernel["MatrixInstN"] * kernel["MatrixInstB"]
     numMIInputA      = kernel["MIInputPerThreadA"]
     numMIInputB      = kernel["MIInputPerThreadB"]
+    numMIInputM      = kernel["MIInputPerThreadMetadata"]
     numMIInput       = max(numMIInputA,numMIInputB)
     miInInstType, miOutInstType = dataTypeToMfmaInstTypePair(miInputType, kernel["SourceSwap"])
     neg_flag         = True if ((not is_mfma) and (miInInstType == InstType.INST_I8)) else False
@@ -7230,6 +7231,7 @@ class KernelWriterAssembly(KernelWriter):
 
     vgprPerInputA    = int(numMIInputA * numRegistersIn)
     vgprPerInputB    = int(numMIInputB * numRegistersIn)
+    vgprPerInputM    = int(ceil(numMIInputM // self.states.bpr))
     vgprPerInput     = max(vgprPerInputA,vgprPerInputB)
     shiftPerElement  = int(numRegistersIn * 32)
     s_nop            = 0
@@ -7257,7 +7259,6 @@ class KernelWriterAssembly(KernelWriter):
     # instead of using valuA_X1_I0, we use valuA_X0_I0+2 as mfma input
 
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-      vgprPerInputM    = 1
       vgprBufferM_new = (m//self.states.numIterPerCoalescedReadMetadata)*self.states.numIterPerCoalescedReadMetadata
       vgprBufferM_new_offset = m%self.states.numIterPerCoalescedReadMetadata*kernel["InnerUnroll"]*vgprPerInputM
 
@@ -7300,11 +7301,12 @@ class KernelWriterAssembly(KernelWriter):
                     # gfx950 sparse track only has one block for each thread group.
                     # TODO adjust this value for other arch.
                     blocksPerTGroupSMFMA = 1 if isSparseTrack else 2
+                    if self.states.asmCaps["HasSWMMAC_gfx1250"]: blocksPerTGroupSMFMA = 2
                     if blocksPerTGroupSMFMA > 1:
                         threadGroups = kernel["MatrixInstK"] // kernel["MIInputPerThread"]
-                        elementsPerBlockSMFMA = kernel["MIInputPerThread"] // blocksPerTGroupSMFMA
+                        elementsPerBlockSMFMA = kernel["MIInputPerThread%s" % ("A" if isA else "B")] // blocksPerTGroupSMFMA
                         blockStride = elementsPerBlockSMFMA * threadGroups
-                        blockOffsetSMFMA = blockStride - elementsPerBlockSMFMA
+                        blockOffsetSMFMA = (blockStride - elementsPerBlockSMFMA) * (2 if isSparseTrack else 1)
             return blocksPerTGroupSMFMA, elementsPerBlockSMFMA, blockOffsetSMFMA
 
           blocksPerTGroupSMFMAA, elementsPerBlockSMFMAA, blockOffsetSMFMAA = findSparseOffset(True)
@@ -7325,6 +7327,7 @@ class KernelWriterAssembly(KernelWriter):
             vgprPerSet0Group = 4
           else:
             vgprPerSet0Group = 2
+
           numSet0GroupA = vgprPerInputA//vgprPerSet0Group
           for group in range(0, numSet0GroupA):
             if numSet0GroupA > 1 or (is_wmma_v2 and vgprPerInputA > 2):
@@ -7341,7 +7344,7 @@ class KernelWriterAssembly(KernelWriter):
                 shiftK.add(vectorStaticMultiply(vgpr(kReg_first), vgpr(kReg_first), multiplyBy, tmpSgprInfo))
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), 0, ""))
               elif blocksPerTGroupSMFMAA == 2 and (group * vgprPerSet0Group) == (elementsPerBlockSMFMAA * numRegistersIn):
-                kIncA = blockOffsetSMFMAA + (numMIInput//numSet0GroupA) * max(group - 1, 0)
+                kIncA = blockOffsetSMFMAA + (numMIInput//numSet0GroupA)
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncA, "add part of K"))
               else:
                 kIncA = numMIInput // numSet0GroupA
@@ -7401,7 +7404,7 @@ class KernelWriterAssembly(KernelWriter):
                 shiftK.add(vectorStaticMultiply(vgpr(kReg_first), vgpr(kReg_first), multiplyBy, tmpSgprInfo))
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg_first), 0, ""))
               elif blocksPerTGroupSMFMAB == 2 and (group * vgprPerSet0Group) == (elementsPerBlockSMFMAB * numRegistersIn):
-                kIncB = blockOffsetSMFMAB + (numMIInput//numSet0GroupB) * max(group - 1, 0)
+                kIncB = blockOffsetSMFMAB + numMIInput//numSet0GroupB
                 shiftK.add(VAddU32(vgpr(kReg), vgpr(kReg), kIncB, "add part of K"))
               else:
                 kIncB = numMIInput//numSet0GroupB
@@ -7753,7 +7756,8 @@ class KernelWriterAssembly(KernelWriter):
             idxM     = idxB if kernel["ProblemType"]["Sparse"] == 2 else idxA
             m_new    = idxM*self.states.numReadsIterCoalescedMetadata
             mStr     = "ValuMetadata_X%u_I%u+%u+%u+%u" % (vgprBufferM_new, iuiM_new, m_new, vgprBufferM_new_offset, iuiM_new_offset)
-            mStr     = vgpr(mStr, vgprPerInputM)
+            # mStr     = vgpr(mStr, vgprPerInputM)
+            mStr     = vgpr(mStr, 1) # FIXME: workaround for sparse metadata, only 1 vgpr is used
 
           if kernel["ProblemType"]["DataType"].isComplex():
             # override because complex mul is emulated by 4 mfma insts
@@ -8881,8 +8885,9 @@ class KernelWriterAssembly(KernelWriter):
                   else:
                     loadVgpr = destVgprHi if ((hi16 or hi8) and destVgprHi != None) else destVgpr
                   self.vgprs.globalReadRegisters[tc][-1] = destVgprHi if ((hi16 or hi8) and destVgprHi != None) else self.vgprs.globalReadRegisters[tc][-1]
-                  if (kernel["ProblemType"]["DataType%s"%tcDataType].isInt8() or kernel["ProblemType"]["DataType%s"%tcDataType].is8bitFloat() or tP["isM"]) \
-                    and (not self.states.archCaps["HasEccHalf"]) and useBuffer:
+                  if ((kernel["ProblemType"]["DataType%s"%tcDataType].isInt8() or kernel["ProblemType"]["DataType%s"%tcDataType].is8bitFloat() or tP["isM"]) \
+                      and (not self.states.archCaps["HasEccHalf"]) and useBuffer) \
+                    or (tP["isM"] and self.states.asmCaps["HasSWMMAC_gfx1250"]):
                     module.add(VMovB32(dst=vgpr(loadVgpr), src=0, comment="set to zero to avoid unexpected value"))
 
                   if isTr:
@@ -10930,6 +10935,8 @@ class KernelWriterAssembly(KernelWriter):
                   offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"])
                 else:
                   offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadA"])
+                  if kernel["WavefrontSize"] == 32:
+                    offsetInc *= 2
               elif (self.states.localReadDoCntA)%(wlr):
                 offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * kernel["MIInputPerThreadA"]
               else:
@@ -10944,6 +10951,8 @@ class KernelWriterAssembly(KernelWriter):
               lrvw = kernel["LocalReadVectorWidth"] // 8
               if lrvw < kernel["MIInputPerThreadMetadata"]:
                 offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadMetadata"]) // 4
+                if kernel["WavefrontSize"] == 32:
+                  offsetInc *= 2
               elif (self.states.localReadDoCntMetadata)%(lrvw//kernel["MIInputPerThreadMetadata"]):
                 offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * kernel["MIInputPerThreadMetadata"]
               else:
@@ -10960,6 +10969,8 @@ class KernelWriterAssembly(KernelWriter):
                   offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"])
                 else:
                   offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * (kernel["MatrixInstK"]*lrvw//kernel["MIInputPerThreadB"])
+                  if kernel["WavefrontSize"] == 32:
+                    offsetInc *= 2
               elif (self.states.localReadDoCntB)%(wlr):
                 offsetInc = (kernel["MacroTile%s"%tP["tensorChar"]] + LdsPad) * kernel["MIInputPerThreadB"]
 
@@ -12559,7 +12570,7 @@ class KernelWriterAssembly(KernelWriter):
         if self.states.FactorDim == 3:
           with self.allocTmpSgpr(1,1) as tmpSgprRes:
             tmpSgpr = tmpSgprRes.idx
-            module.add(SCmpKEQU32(src=sgpr("FactorDim"), simm16=0, comment="FactorDim == 0"))
+            module.add(self.getSCMPKInstruction("EQU32", "FactorDim", 0, comment="FactorDim == 0"))
             module.add(SCSelectB32(dst=sgpr(tmpSgpr), src0=sgpr("SizeI"), src1=sgpr("SizeJ")))
             module.add(allocPostLoopSrdSuppress("ScaleAlphaVec", labelStr, sgprLength=sgpr(tmpSgpr)))
         elif self.states.FactorDim == 2:
