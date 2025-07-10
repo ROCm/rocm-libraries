@@ -28,6 +28,10 @@ set(BASE_ARCHITECTURES "")
 # All supported architectures including xnack variants - used for validation of GPU_TARGETS
 set(SUPPORTED_ARCHITECTURES "")
 
+# Note:
+# gfx10XX architectures (e.g., gfx1010, gfx1011, gfx1030, etc...) are technically supported by tensilelite,
+# but are NOT included in the default "all" build in hipBLASLt. This is because "extops" builds are not supported 
+# for legacy devices. Including these architectures would result in build failures or incomplete feature support.
 if(NOT BUILD_ADDRESS_SANITIZER)
     list(APPEND BASE_ARCHITECTURES 
         "gfx908"
