@@ -713,7 +713,11 @@ class LocalReadMFMA(LocalRead):
                         localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc,valuiIdx)))
                         localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds, comment=comment))
                         destVgpr = vgpr("Valu%s_X%u_I%u+%u+%u"%(tc,bufferIdx,iui, wtRegStride*tIdx, blockWidth), blockWidth)
-                        incrementBytes = int(2*UnrollStride*inputPerThread*tP["bpeDS"])
+                        incrementBytes = int(UnrollStride*inputPerThread*tP["bpeDS"])
+
+                        if not writer.states.inTailLoop:
+                            incrementBytes *= 2
+
                         offset_val = unpaddedOffset + incrementBytes
                         if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
                             offset_val += int((offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
