@@ -1304,6 +1304,9 @@ namespace rocRoller
             LoadStoreTileGenerator m_loadStoreTileGenerator;
 
             std::optional<ControlFlowArgumentTracer> m_argumentTracer;
+
+            std::unordered_map<int, Expression::ExpressionPtr> m_workgroupIndexes;
+            std::unordered_map<int, Expression::ExpressionPtr> m_workitemIndexes;
         };
 
         Generator<Instruction> generateImpl(KernelGraph                              graph,

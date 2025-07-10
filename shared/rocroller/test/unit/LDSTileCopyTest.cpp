@@ -285,6 +285,8 @@ namespace LDSCopyTest
         auto deallocateDF = std::make_shared<AddDeallocateDataFlow>();
         kgraph            = kgraph.transform(deallocateDF);
 
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
+
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));

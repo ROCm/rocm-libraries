@@ -41,6 +41,7 @@
 #include <rocRoller/KernelGraph/Visitors.hpp>
 #include <rocRoller/KernelGraph/Transforms/RemoveSetCoordinate.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
+#include <rocRoller/KernelGraph/Transforms/RemoveSetCoordinate.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
