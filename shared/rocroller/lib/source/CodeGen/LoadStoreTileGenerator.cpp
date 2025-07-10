@@ -1862,7 +1862,6 @@ namespace rocRoller
                                                       " WaveTile ",
                                                       waveTileTag));
 
-
             auto packing = DataTypeInfo::Get(store.varType).packing;
 
             // Allocate LDS memory, and store the offset of the beginning of the allocation
@@ -1870,8 +1869,8 @@ namespace rocRoller
             Register::ValuePtr ldsAllocation;
             if(!m_context->registerTagManager()->hasRegister(ldsTag))
             {
-                ldsAllocation
-                    = Register::Value::AllocateLDS(m_context, varType, macrotileNumElements / packing);
+                ldsAllocation = Register::Value::AllocateLDS(
+                    m_context, varType, macrotileNumElements / packing);
                 m_context->registerTagManager()->addRegister(ldsTag, ldsAllocation);
             }
             else
