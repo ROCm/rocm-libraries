@@ -32,10 +32,8 @@ namespace rocRoller
     namespace KernelGraph
     {
         /**
-         * @brief Performs the Loop Fusion transformation.
+         * @brief Remove all SetCoordinates from control graph
          *
-         * Fuses multiple loops together if they iterate over the same
-         * length.
          */
         class RemoveSetCoordinate : public GraphTransform
         {
