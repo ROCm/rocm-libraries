@@ -2006,7 +2006,8 @@ namespace TensileLite
                        && (problem.activationType() == ActivationType::DGelu
                            || problem.activationType() == ActivationType::Gelu
                            || problem.activationType() == ActivationType::Relu
-                           || problem.activationType() == ActivationType::Silu))
+                           || problem.activationType() == ActivationType::Silu
+                           || problem.activationType() == ActivationType::Clamp))
                         return true;
 
                     return false;

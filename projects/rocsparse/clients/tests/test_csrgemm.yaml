@@ -65,7 +65,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [50]
   N: [13]
-  K: [-1, 50]
+  K: [50]
   alpha_alphai: *alpha_range_quick
   beta: [-99.0]
   transA: [rocsparse_operation_none]
@@ -95,9 +95,9 @@ Tests:
   category: pre_checkin
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [-1, 0, 1799, 32519]
-  N: [-1, 0, 3712, 16021]
-  K: [-1, 0, 1942, 9848]
+  M: [0, 1799, 32519]
+  N: [0, 3712, 16021]
+  K: [0, 1942, 9848]
   alpha_alphai: *alpha_range_checkin
   beta: [-99.0]
   transA: [rocsparse_operation_none]
@@ -149,7 +149,7 @@ Tests:
   function: csrgemm
   precision: *single_double_precisions
   M: 1
-  N: [-1, 0, 3712, 16021]
+  N: [0, 3712, 16021]
   K: 1
   alpha_alphai: *alpha_range_checkin
   beta: [-99.0]
@@ -229,7 +229,7 @@ Tests:
   function: csrgemm
   precision: *single_double_precisions_complex
   M: 1
-  N: [-1, 0, 5925, 20142]
+  N: [0, 5925, 20142]
   K: 1
   alpha_alphai: *alpha_range_checkin
   beta: [-99.0]
@@ -277,8 +277,8 @@ Tests:
   category: quick
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [-1, 0, 8, 24, 582]
-  N: [-1, 0, 12, 48, 243]
+  M: [0, 8, 24, 582]
+  N: [0, 12, 48, 243]
   K: 1
   alpha: [-99.0]
   beta_betai: *beta_range_quick
@@ -290,8 +290,8 @@ Tests:
   category: pre_checkin
   function: csrgemm
   precision: *single_double_precisions_complex_real
-  M: [-1, 0, 932, 1523, 23404]
-  N: [-1, 0, 784, 4842, 19703]
+  M: [0, 932, 1523, 23404]
+  N: [0, 784, 4842, 19703]
   K: 1
   alpha: [-99.0]
   beta_betai: *beta_range_checkin

@@ -292,12 +292,14 @@ struct __attribute__((packed, aligned(8))) _rocsparselt_matmul_config
     {
         this->index               = rhs.index;
         this->max_workspace_bytes = rhs.max_workspace_bytes;
+        this->synchronizer_bytes  = rhs.synchronizer_bytes;
     }
 
     int    index;
     int    use_bias            = 0;
     int    use_scale_alpha_vec = 0;
     size_t max_workspace_bytes = 0;
+    size_t synchronizer_bytes  = 0;
 };
 
 /********************************************************************************

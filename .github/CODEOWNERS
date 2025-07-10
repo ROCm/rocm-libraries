@@ -4,8 +4,6 @@
 
 # Build ownership
 **/next-cmake/ @ROCm/rocm-math-lib-build-infra
-**/*.cmake @ROCm/rocm-math-lib-build-infra
-**/CMakeLists.txt @ROCm/rocm-math-lib-build-infra
 
 # CI ownership
 /.azuredevops/ @ROCm/external-ci
@@ -14,8 +12,9 @@
 /projects/miopen/ @BrianHarrisonAMD @BradPepersAMD @adickin-amd @JonathanLichtnerAMD
 /projects/composablekernel/ @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @tenpercent @ThomasNing @coderfeli
 /projects/hipblas-common/ @bnemanich @daineAMD @TorreZuk
+/projects/hipblas-common/**/CMakeLists.txt @ROCm/rocm-math-lib-build-infra
 /projects/hipblas/ @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
-/projects/hipblaslt/ @jichangjichang @KKyang @vin-huang @imcarsonliao @hcman2 @Serge45 @Jinp800125 @TonyYHsieh @solaslin @aazz44ss
+/projects/hipblaslt/ @jichangjichang @KKyang @vin-huang @imcarsonliao @hcman2 @Serge45 @Jinp800125 @TonyYHsieh @solaslin @aazz44ss @ellosel @AlexBrownAMD @bnemanich @msujon-AMD @babakpst
 /projects/hipcub/ @stanleytsang-amd @umfranzw @RobsonRLemos
 /projects/hipfft/ @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
 /projects/hiprand/ @stanleytsang-amd @umfranzw @RobsonRLemos
@@ -30,4 +29,4 @@
 /projects/rocsparse/ @ntrost57 @YvanMokwinski @jsandham @kliegeois
 /shared/mxdatagenerator/ @ROCm/rocroller-developers
 /shared/rocroller/ @ROCm/rocroller-developers
-/shared/tensile/ @babakpst @yoichiyoshida @bragadeesh @AlexBrownAMD @nakajee
+/shared/tensile/ @babakpst @yoichiyoshida @bragadeesh @AlexBrownAMD @ellosel @bstefanuk
