@@ -168,8 +168,22 @@ add_library(roc::rocroller ALIAS rocroller)
 add_library(rocroller-interface INTERFACE)
 add_library(roc::rocroller-interface ALIAS rocroller-interface)
 
-if(ROCROLLER_ENABLE_ASAN)
+if(ROCROLLER_ENABLE_ASAN AND NOT WIN32)
     rocroller_target_configure_sanitizers(rocroller PRIVATE)
+    set(ASAN_LIB_PATH "unset")
+    execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.asan-x86_64.so
+        OUTPUT_VARIABLE ASAN_LIB_PATH
+    )
+    # If ASAN_LIB_PATH is libclang_rt.asan-x86_64.so
+    # rather than /path/to/libclang_rt.asan-x86_64.so then
+    # we failed to locate it and HAS_PARENT_PATH is false.
+    string(STRIP ${ASAN_LIB_PATH} ASAN_LIB_PATH)
+    cmake_path(HAS_PARENT_PATH ASAN_LIB_PATH result)
+    if(NOT result)
+        message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so ")
+    endif()
+    set(asan_opts "LD_PRELOAD=${ASAN_LIB_PATH};ASAN_OPTIONS=detect_leaks=0")
 endif()
 
 if(ROCROLLER_BUILD_SHARED_LIBS)

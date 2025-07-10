@@ -62,6 +62,8 @@ options:
   5. ROCROLLER_ENABLE_FETCH: "ON"
   6. ROCROLLER_TESTS_SKIP_SLOW: "OFF"
   7. CMAKE_PREFIX_PATH: "/opt/rocm;/opt/rocm/llvm"
+3. asan (See CMakePresets.json for details)
+4. amd-mrisa (See CMakePresets.json for details)
 
 One can use the presets as follows:
 

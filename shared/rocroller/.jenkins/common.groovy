@@ -59,7 +59,7 @@ def runCompileCommand(platform, project, jobName, mxDataGeneratorGitURL, mxDataG
                 # Check that all tests are included.
                 ../scripts/check_included_tests.py
                 cmake ../ \\
-                    ${codeCovFlag} ${timerFlag} ${yamlBackendFlag} ${staticAnalysis}\\
+                    ${codeCovFlag} ${timerFlag} ${yamlBackendFlag} ${useCppCheck}\\
                     ${mxDataGeneratorGitURLFlag} ${mxDataGeneratorGitTagFlag}\\
                     -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \\
                     -DCMAKE_BUILD_TYPE=Release \\

@@ -30,14 +30,25 @@ endif()
 
 add_executable(rocroller-tests)
 
-if(ROCROLLER_ENABLE_ASAN)
-    rocroller_target_configure_sanitizers(rocroller-tests PRIVATE)
-endif()
-
 if(ROCROLLER_ENABLE_CATCH AND (ROCROLLER_BUILD_TESTING OR BUILD_TESTING))
     add_executable(rocroller-tests-catch)
+    # When detecting tests gtest and catch test discovery modules run
+    # something like:
+    # execute_process(COMMAND ${_TEST_EXECUTOR} "${_TEST_EXECUTABLE}" --gtest_list_tests ${filter})
+    # where TEST_EXECUTABLE is rocroller-tests-catch and TEST_EXECUTOR
+    # is a command to prepend primarily for the purposes of running in
+    # a cross compiled environment. As such, we can set the CROSSCOMPILING_EMULATOR
+    # property on the test targets to use the cmake -E -env command providing
+    # the LD_PRELOAD and ASAN_OPTIONS variables necessary to run sanitizer builds.
+    # Note that the entries in the string are semicolon separated which is necessary
+    # to ensure that the command supplied to execute_process is interpreted as a list
+    # of strings rather than one white space delimited string.
     if(ROCROLLER_ENABLE_ASAN)
-        rocroller_target_configure_sanitizers(rocroller-tests-catch PRIVATE)
+    rocroller_target_configure_sanitizers(rocroller-test-catch PRIVATE)
+        set_target_properties(rocroller-tests-catch
+            PROPERTIES 
+                CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
+        )
     endif()
 endif()
 
@@ -46,6 +57,15 @@ add_executable(component-test)
 
 if(ROCROLLER_ENABLE_ASAN)
     rocroller_target_configure_sanitizers(component-test PRIVATE)
+    set_target_properties(component-test
+        PROPERTIES 
+            CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
+    )
+    rocroller_target_configure_sanitizers(rocroller-tests PRIVATE)
+    set_target_properties(rocroller-tests
+        PROPERTIES 
+            CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
+    )
 endif()
 
 if(ROCROLLER_ENABLE_ARCH_GEN_TEST)
@@ -68,13 +88,17 @@ if(ROCROLLER_ENABLE_ARCH_GEN_TEST)
     pytest_discover_tests(
         GEMMClientTests
         WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/client"
-        ENVIRONMENT "ROCROLLER_BUILD_DIR=${PROJECT_BINARY_DIR}"
+        ENVIRONMENT "ROCROLLER_BUILD_DIR=${PROJECT_BINARY_DIR}" "LD_PRELOAD=${ASAN_LIB_PATH}" "ASAN_OPTIONS=detect_leaks=0"
         PROPERTIES
             SKIP_REGULAR_EXPRESSION ${rocroller_skip_regex}
     )
     add_executable(arch-gen-tests)
     if(ROCROLLER_ENABLE_ASAN)
         rocroller_target_configure_sanitizers(arch-gen-tests PRIVATE)
+        set_target_properties(arch-gen-tests
+            PROPERTIES 
+                CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
+        )
     endif()
 endif()
 
@@ -106,6 +130,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
         DISCOVERY_MODE PRE_TEST
         PROPERTIES
             SKIP_REGULAR_EXPRESSION "test/unit/ErrorTest.cpp:"
+            ENVIRONMENT "${asan_opts}"
     )
     gtest_discover_tests(
         rocroller-tests
@@ -115,12 +140,15 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
         DISCOVERY_MODE PRE_TEST
         PROPERTIES
             SKIP_REGULAR_EXPRESSION "test/unit/ErrorTest.cpp:"
+            ENVIRONMENT "${asan_opts}"
     )
     if(ROCROLLER_ENABLE_ARCH_GEN_TEST)
         gtest_discover_tests(
             arch-gen-tests
             XML_OUTPUT_DIR ${TEST_REPORT_DIR}
             DISCOVERY_MODE PRE_TEST
+            PROPERTIES
+                ENVIRONMENT "${asan_opts}"
         )
     endif()
 
@@ -140,10 +168,9 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
             DISCOVERY_MODE PRE_TEST
             EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
             TEST_SPEC "[gpu]"
-            PROPERTIES "LABELS"
-                       "CATCH"
-                       "LABELS"
-                       "GPU"
+            PROPERTIES "LABELS" "CATCH"
+                       "LABELS" "GPU"
+                       "ENVIRONMENT" "${asan_opts}"
             SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped"
         )
         catch_discover_tests(
@@ -155,6 +182,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
             EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
             TEST_SPEC "~[gpu]"
             PROPERTIES "LABELS" "CATCH"
+                       "ENVIRONMENT" "${asan_opts}"
             SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped"
         )
     endif()
