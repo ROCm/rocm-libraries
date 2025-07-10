@@ -110,7 +110,7 @@ jobs:
         # replace the status of the current build with variables['Agent.JobStatus']
 
         if [[ "$CHECK_TEXT" == *"$(Build.BuildId)="* ]]; then
-          CHECK_TEXT=$(echo "$CHECK_TEXT" | sed "s/$(Build.BuildId)=[^;]*;/;$CURRENT_BUILD_ID=$(Agent.JobStatus);/")
+          CHECK_TEXT=$(echo "$CHECK_TEXT" | sed "s/$(Build.BuildId)=[^;]*;/$(Build.BuildId)=$(Agent.JobStatus);/")
         fi
 
         echo "updated check text"
