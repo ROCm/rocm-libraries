@@ -6,26 +6,28 @@ Required environment variables:
 """
 
 import json
+import logging
 from therock_matrix import subtree_to_project_map, project_map
 from typing import Mapping
 import os
 
+logging.basicConfig(level=logging.INFO)
 
 def set_github_output(d: Mapping[str, str]):
     """Sets GITHUB_OUTPUT values.
     See https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/passing-information-between-jobs
     """
-    print(f"Setting github output:\n{d}")
+    logging.info(f"Setting github output:\n{d}")
     step_output_file = os.environ.get("GITHUB_OUTPUT", "")
     if not step_output_file:
-        print("Warning: GITHUB_OUTPUT env var not set, can't set github outputs")
+        logging.warning("Warning: GITHUB_OUTPUT env var not set, can't set github outputs")
         return
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
         
         
 def retrieve_projects(args):
-    # TODO(geomin12): Enable TheRock CI for forked PRs
+    # TODO(geomin12): #590 Enable TheRock CI for forked PRs
     if args.get("is_forked_pr"):
         return []
     
@@ -78,5 +80,7 @@ if __name__ == "__main__":
     
     input_projects = os.getenv("PROJECTS", "")
     args["input_projects"] = input_projects
+    
+    logging.info(f"Retrieved arguments {args}")
 
     run(args)

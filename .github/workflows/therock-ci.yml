@@ -80,8 +80,8 @@ jobs:
         env:
           SUBTREES: ${{ steps.detect.outputs.subtrees }}
           PROJECTS: ${{ inputs.projects }}
-          # TODO(geomin12): Enable TheRock CI for forked PRs
-          IS_FORKED_PR: ${{ github.event.pull_request.head.repo.fork }}
+          # TODO(geomin12): #590 Enable TheRock CI for forked PRs
+          IS_FORKED_PR: ${{ github.event.pull_request.head.repo.fork == true }}
         run: |
           python .github/scripts/therock_configure_ci.py
 
