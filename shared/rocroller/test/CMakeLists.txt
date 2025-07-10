@@ -171,7 +171,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
             PROPERTIES "LABELS" "CATCH"
                        "LABELS" "GPU"
                        "ENVIRONMENT" "${asan_opts}"
-            SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped"
+            SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
         )
         catch_discover_tests(
             rocroller-tests-catch
@@ -183,7 +183,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
             TEST_SPEC "~[gpu]"
             PROPERTIES "LABELS" "CATCH"
                        "ENVIRONMENT" "${asan_opts}"
-            SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped"
+            SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
         )
     endif()
 
