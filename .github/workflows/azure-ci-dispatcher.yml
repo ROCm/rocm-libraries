@@ -79,10 +79,14 @@ jobs:
         pr_number=${{ github.event.pull_request.number }}
         pr_filter_query="branchName=refs/pull/$pr_number/merge&repositoryType=GitHub&repositoryId=ROCm/rocm-libraries&api-version=7.1"
 
-        res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?statusFilter=inProgress&$pr_filter_query" \
+        inprogress_res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?statusFilter=inProgress&$pr_filter_query" \
+          -H "Content-Type: application/json")
+        notstarted_res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?statusFilter=notStarted&$pr_filter_query" \
           -H "Content-Type: application/json")
 
-        runs=$(echo "$res" | jq -r '.value[] | .id')
+        inprogress_runs=$(echo "$inprogress_res" | jq -r '.value[] | .id')
+        notstarted_runs=$(echo "$notstarted_res" | jq -r '.value[] | .id')
+        runs=$(echo -e "$inprogress_runs\n$notstarted_runs" | sort -u)
 
         if [ -z "$runs" ]; then
           echo "No in-progress runs found for ROCm/rocm-libraries PR #$pr_number"
@@ -214,8 +218,6 @@ jobs:
 
         echo "run_ids=${run_ids[*]}" >> $GITHUB_OUTPUT
         echo "project_names=${project_names[*]}" >> $GITHUB_OUTPUT
-        echo "Outputted run IDs: ${run_ids[*]}"
-        echo "Outputted project names: ${project_names[*]}"
 
     - name: Create summary check
       if: steps.dispatch.outputs.run_ids && steps.dispatch.outputs.project_names
@@ -238,13 +240,13 @@ jobs:
           text+="${run_ids[i]}=pending;"
         done
 
-        echo $summary
-        echo $text
-
-        gh api repos/ROCm/rocm-libraries/check-runs \
+        gh_output=$(gh api repos/ROCm/rocm-libraries/check-runs \
           -f 'name=Azure CI Summary' \
           -f 'head_sha=${{ github.event.pull_request.head.sha }}' \
           -f 'status=in_progress' \
           -f 'output[title]=Azure CI Summary' \
           -f "output[summary]=$summary" \
-          -f "output[text]=$text"
+          -f "output[text]=$text")
+
+        echo "Created summary check with ID: $(echo "$gh_output" | jq -r '.id')"
+        echo "Summary check URL: https://github.com/ROCm/rocm-libraries/pull/561/checks?check_run_id=$(echo "$gh_output" | jq -r '.id')"
