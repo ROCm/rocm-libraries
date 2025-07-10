@@ -64,6 +64,8 @@ options:
   7. CMAKE_PREFIX_PATH: "/opt/rocm;/opt/rocm/llvm"
 3. asan (See CMakePresets.json for details)
 4. amd-mrisa (See CMakePresets.json for details)
+5. coverage (See CMakePresets.json for details)
+5. docs (See CMakePresets.json for details)
 
 One can use the presets as follows:
 
@@ -167,8 +169,8 @@ make -j$(nproc)
 - `ROCROLLER_ENABLE_CPPCHECK`: Enable cppcheck (default OFF)
 - `ROCROLLER_MRISAS_DIR`: Path to directory containing MRISA XML files (default `<build dir>/GPUArchitectureGenerator/amd-mrisa`)
 - `ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF`: Use the pregenerates GPU architecture definition YAML file(s) in the repository (default ON)
-- `MXDATAGENERATOR_GIT_TAG`: "mxDataGenerator tag/commit hash to checkout (default see root CMakeLists.txt)
-- `MXDATAGENERATOR_GIT_URL`:Base Git URL to fetch mxDataGenerator from (default https://github.com/ROCm/mxDataGenerator.git)
+- `MXDATAGENERATOR_GIT_TAG`: mxDataGenerator tag/commit hash to checkout (default see root CMakeLists.txt)
+- `MXDATAGENERATOR_GIT_URL`: Base Git URL to fetch mxDataGenerator from (default https://github.com/ROCm/mxDataGenerator.git)
 
 ### Running the tests
 
