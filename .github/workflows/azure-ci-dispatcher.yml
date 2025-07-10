@@ -252,7 +252,7 @@ jobs:
         for i in "${!project_names[@]}"; do
           summary+="| ${project_names[i]} | [${run_ids[i]}](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=${run_ids[i]}) | pending |${newline}"
         done
-        summary+="To request Azure to rerun jobs, click the "Re-run all jobs" button on the [corresponding `Trigger Azure CI` run](https://github.com/ROCm/rocm-libraries/actions/runs/${{ github.run_id }})"
+        summary+="To request Azure to rerun jobs, click the \"Re-run all jobs\" button on the [corresponding \`Trigger Azure CI\` run](https://github.com/ROCm/rocm-libraries/actions/runs/${{ github.run_id }})"
 
         text=""
         for i in "${!project_names[@]}"; do
