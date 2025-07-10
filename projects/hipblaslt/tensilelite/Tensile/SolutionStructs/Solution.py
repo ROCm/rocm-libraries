@@ -1310,6 +1310,20 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "MIWaveTile0(%u) should be multiple of VectorWidthB(%u)" % (state["MIWaveTile"][1], state["VectorWidthB"]))
         return
 
+    if ((state["DepthU"] ==state["MatrixInstK"] )and state["PrefetchGlobalRead"]):
+      state["D_U_iseqMI_K"] = True
+      #ToDo: Formula for numSubTilesA and numSubTilesB
+      # numSubTilesA and numSubTilesB are used to calculate the number of sub-tiles
+      # in the case of D_U_iseqMI_K=True, numSubTilesA and numSubTilesB are set to 2
+      # This is because the number of sub-tiles is determined by the number of
+      # sub-tiles in the A and B dimensions.
+      # since we are currently breaking A into A0 A1 and B into B0 B1 as we have MI[5:6] as [2,2]
+      # and we are using 2x2 sub-tiles for A and B.
+      state["numSubTilesA"] = 2 
+      state["numSubTilesB"] = 2 
+    else:
+      state["D_U_iseqMI_K"] = False
+      
     if len(problemType["IndicesSummation"]) > 1:
       # not supported with multiple summations, bug is maybe something with
       # how stagger iteration is wrapped when unroll loop exits
