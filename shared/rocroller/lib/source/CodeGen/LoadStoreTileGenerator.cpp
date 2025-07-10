@@ -78,6 +78,13 @@ namespace rocRoller
                     auto rhs     = graph->coordinates.getNode(incoming[1]);
                     auto sizeLHS = getUnsignedInt(evaluate(getSize(lhs)));
                     auto sizeRHS = getUnsignedInt(evaluate(getSize(rhs)));
+                    Log::debug(
+                        "KernelGraph::LoadStoreTileGenerator::getNumLDSElements(ldsTag: {}): "
+                        "Flattened LDS with sizeLHS: {}, sizeRHS: {}, size: {}",
+                        ldsTag,
+                        sizeLHS,
+                        sizeRHS,
+                        sizeLHS * sizeRHS);
                     return sizeLHS * sizeRHS;
                 }
             }
@@ -840,7 +847,10 @@ namespace rocRoller
             else
                 AssertFatal(numBytes == 1 || numBytes == 2 || numBytes == 4, ShowValue(numBytes));
             auto m0 = m_context->getM0();
-            AssertFatal(info.ldsWriteStride == m_workgroupSizeTotal * numBytes);
+
+            // When padding, the ldsWriteStride might be larger than m_workgroupSizeTotal * numBytes
+            AssertFatal(info.ldsWriteStride >= m_workgroupSizeTotal * numBytes,
+                        ShowValue(info.ldsWriteStride));
 
             if(setM0)
             {
