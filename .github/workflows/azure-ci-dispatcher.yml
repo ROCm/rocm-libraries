@@ -72,7 +72,7 @@ jobs:
           --config ".github/repos-config.json" \
           --require-auto-push
 
-    - name: Cancel in-progress runs for current PR
+    - name: Cancel in-progress/not-started runs for current PR
       id: cancel-in-progress
       if: steps.detect.outputs.subtrees
       run: |
@@ -89,12 +89,12 @@ jobs:
         runs=$(echo -e "$inprogress_runs\n$notstarted_runs" | sort -u)
 
         if [ -z "$runs" ]; then
-          echo "No in-progress runs found for ROCm/rocm-libraries PR #$pr_number"
+          echo "No in-progress/not-started runs found for ROCm/rocm-libraries PR #$pr_number"
           echo "status=false" >> $GITHUB_OUTPUT
           exit 0
         fi
 
-        echo "Found in-progress runs for ROCm/rocm-libraries PR #$pr_number: $runs"
+        echo "Found in-progress/not-started runs for ROCm/rocm-libraries PR #$pr_number: $runs"
         echo "status=true" >> $GITHUB_OUTPUT
 
         for run_id in $runs; do
@@ -112,20 +112,21 @@ jobs:
           fi
         done
 
-    - name: Rerun previous failed/cancelled runs for current PR HEAD
+    - name: Rerun previous failed/cancelled runs for current PR merge commit
       id: rerun-failed
       if: steps.detect.outputs.subtrees && steps.cancel-in-progress.outputs.status == 'false'
       run: |
         pr_number=${{ github.event.pull_request.number }}
         pr_filter_query="branchName=refs/pull/$pr_number/merge&repositoryType=GitHub&repositoryId=ROCm/rocm-libraries&api-version=7.1"
+        pr_merge_sha=$(curl -sSX GET "https://api.github.com/repos/ROCm/rocm-libraries/git/ref/pull/${pr_number}/merge" | jq -r '.object.sha')
 
         failed_res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?resultFilter=failed&$pr_filter_query" \
           -H "Content-Type: application/json")
         cancelled_res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?resultFilter=canceled&$pr_filter_query" \
           -H "Content-Type: application/json")
 
-        failed_runs=$(echo "$failed_res" | jq -r '.value[] | select(.sourceVersion | contains("${{ github.event.pull_request.head.sha }}")) | .id')
-        cancelled_runs=$(echo "$cancelled_res" | jq -r '.value[] | select(.sourceVersion | contains("${{ github.event.pull_request.head.sha }}")) | .id')
+        failed_runs=$(echo "$failed_res" | jq -r '.value[] | select(.sourceVersion | contains("$pr_merge_sha")) | .id')
+        cancelled_runs=$(echo "$cancelled_res" | jq -r '.value[] | select(.sourceVersion | contains("$pr_merge_sha")) | .id')
         runs=$(echo -e "$failed_runs\n$cancelled_runs" | sort -u)
 
         if [ -z "$runs" ]; then
