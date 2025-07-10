@@ -41,7 +41,7 @@ trigger:
 pr: none
 
 stages:
-- stage: rocrand
+- stage: rocprim
   jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/rocPRIM.yml@pipelines_repo
     parameters:
