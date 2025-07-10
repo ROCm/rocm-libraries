@@ -72,20 +72,17 @@ jobs:
           --config ".github/repos-config.json" \
           --require-auto-push
 
-    - name: Cancel in-progress runs
+    - name: Cancel in-progress runs for current PR
       id: cancel-in-progress
       if: steps.detect.outputs.subtrees
       run: |
         pr_number=${{ github.event.pull_request.number }}
-        res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?statusFilter=inProgress&api-version=7.1" \
+        pr_filter_query="branchName=refs/pull/$pr_number/merge&repositoryType=GitHub&repositoryId=ROCm/rocm-libraries&api-version=7.1"
+
+        res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?statusFilter=inProgress&$pr_filter_query" \
           -H "Content-Type: application/json")
 
-        if [ $? -ne 0 ]; then
-          echo "Failed to fetch Azure runs"
-          exit 1
-        fi
-
-        runs=$(echo "$res" | jq -r '.value[] | select((.sourceBranch | contains("refs/pull/'"$pr_number"'/merge")) and (.repository.id == "ROCm/rocm-libraries")) | .id')
+        runs=$(echo "$res" | jq -r '.value[] | .id')
 
         if [ -z "$runs" ]; then
           echo "No in-progress runs found for ROCm/rocm-libraries PR #$pr_number"
@@ -111,20 +108,21 @@ jobs:
           fi
         done
 
-    - name: Rerun previous failed runs for current PR SHA
+    - name: Rerun previous failed runs for current PR HEAD
       id: rerun-failed
       if: steps.detect.outputs.subtrees && steps.cancel-in-progress.outputs.status == 'false'
       run: |
         pr_number=${{ github.event.pull_request.number }}
-        res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?statusFilter=failed&sourceBranch=refs/pull/$pr_number/merge&repositoryType=GitHub&repositoryId=ROCm/rocm-libraries&api-version=7.1" \
+        pr_filter_query="branchName=refs/pull/$pr_number/merge&repositoryType=GitHub&repositoryId=ROCm/rocm-libraries&api-version=7.1"
+
+        failed_res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?resultFilter=failed&$pr_filter_query" \
+          -H "Content-Type: application/json")
+        cancelled_res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?resultFilter=canceled&$pr_filter_query" \
           -H "Content-Type: application/json")
 
-        if [ $? -ne 0 ]; then
-          echo "Failed to fetch Azure runs"
-          exit 1
-        fi
-
-        runs=$(echo "$res" | jq -r '.value[] | select((.sourceBranch | contains("refs/pull/'"$pr_number"'/merge") and (.sourceVersion | contains("${{ github.event.pull_request.head.sha }}"))) | .id')
+        failed_runs=$(echo "$failed_res" | jq -r '.value[] | select(.sourceVersion | contains("${{ github.event.pull_request.head.sha }}")) | .id')
+        cancelled_runs=$(echo "$cancelled_res" | jq -r '.value[] | select(.sourceVersion | contains("${{ github.event.pull_request.head.sha }}")) | .id')
+        runs=$(echo -e "$failed_runs\n$cancelled_runs" | sort -u)
 
         if [ -z "$runs" ]; then
           echo "No failed runs found for ROCm/rocm-libraries PR #$pr_number"
@@ -149,7 +147,7 @@ jobs:
           fi
         done
 
-    - name: Dispatch Azure CI runs
+    - name: Trigger Azure CI runs
       id: dispatch
       if: steps.detect.outputs.subtrees && steps.rerun-failed.outputs.status == 'false'
       env:
