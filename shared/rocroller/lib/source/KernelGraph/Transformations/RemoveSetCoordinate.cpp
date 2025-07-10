@@ -87,9 +87,29 @@ namespace rocRoller
                 return leaves;
             }
 
-            void removeSetCoordinates(KernelGraph& kg)
-            {
-                using GD = rocRoller::Graph::Direction;
+        static void connect(bool const        isSequenceEdge,
+                            std::vector<int> const& A,
+                            std::vector<int> const& B,
+                            KernelGraph&      kg)
+        {
+            if(A.empty() or B.empty())
+                return;
+
+            auto addEdges = [&]<typename EdgeType>() {
+                for(auto const a : A)
+                    for(auto const b : B)
+                        kg.control.addElement(EdgeType(), {a}, {b});
+            };
+
+            if(isSequenceEdge)
+                addEdges.template operator()<ControlGraph::Sequence>();
+            else
+                addEdges.template operator()<ControlGraph::Body>();
+        }
+
+        static void removeSetCoordinates(KernelGraph& kg)
+        {
+            using GD = rocRoller::Graph::Direction;
 
                 auto const setCoordinates = kg.control.getNodes<CG::SetCoordinate>().to<std::set>();
                 for(auto const sc : setCoordinates | std::views::reverse)
