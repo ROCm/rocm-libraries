@@ -49,7 +49,7 @@ cd rocThrust; mkdir build; cd build
 #   BUILD_TEST            - OFF by default,
 #   BUILD_HIPSTDPAR_TEST  - OFF by default,
 #   BUILD_EXAMPLES        - OFF by default,
-#   BUILD_BENCHMARKS      - OFF by default,
+#   BUILD_BENCHMARK       - OFF by default,
 #   DOWNLOAD_ROCPRIM      - OFF by default, when ON rocPRIM will be downloaded to the build folder,
 #   RNG_SEED_COUNT        - 0 by default, controls non-repeatable random dataset count
 #   PRNG_SEEDS            - 1 by default, reproducible seeds to generate random data
@@ -237,8 +237,8 @@ make -j4
 # Go to rocThrust build directory
 cd rocThrust; cd build
 
-# Configure with benchmarks flag on
-CXX=hipcc cmake -DBUILD_BENCHMARKS=ON ..
+# Configure with benchmark flag on
+CXX=hipcc cmake -DBUILD_BENCHMARK=ON ..
 
 # Build benchmarks
 make -j4

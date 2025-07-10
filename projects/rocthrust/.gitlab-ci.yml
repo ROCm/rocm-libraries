@@ -154,7 +154,7 @@ build:cmake-latest:
   parallel:
     matrix:
       - BUILD_TYPE: Release
-        BUILD_TARGET: [BENCHMARKS, TEST, EXAMPLES]
+        BUILD_TARGET: [BENCHMARK, TEST, EXAMPLES]
         BUILD_VERSION: 17
 
 build:cmake-minimum:
@@ -165,7 +165,7 @@ build:cmake-minimum:
   parallel:
     matrix:
       - BUILD_TYPE: Release
-        BUILD_TARGET: [BENCHMARKS, TEST, EXAMPLES]
+        BUILD_TARGET: [BENCHMARK, TEST, EXAMPLES]
         BUILD_VERSION: 17
 
 build:package:
@@ -227,7 +227,7 @@ build:windows:
       -D GPU_TARGETS=$GPU_TARGET
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLES=OFF
-      -D BUILD_BENCHMARKS=OFF
+      -D BUILD_BENCHMARK=OFF
       -D CMAKE_CXX_FLAGS=-Wno-deprecated-declarations
       -D CMAKE_CXX_COMPILER:FILEPATH="${env:HIP_PATH}/bin/clang++.exe"
       -D CMAKE_INSTALL_PREFIX:PATH="$CI_PROJECT_DIR/build/install"
@@ -532,7 +532,7 @@ benchmark:
       parallel:
         matrix:
           - BUILD_TYPE: Release
-            BUILD_TARGET: BENCHMARKS
+            BUILD_TARGET: BENCHMARK
             BUILD_VERSION: 17
   extends:
     - .cmake-minimum
