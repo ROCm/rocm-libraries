@@ -44,6 +44,7 @@ The hipBLASLt public repository is located at `<https://github.com/ROCm/hipBLASL
 
     * :doc:`Data type support <./reference/data-type-support>`
     * :doc:`hipBLASLt datatypes <./reference/datatypes>`
+    * :doc:`hipBLASLt environment variables <./reference/env-variables>`
     * :doc:`hipBLASLt API <./reference/api-reference>`
     * :doc:`hipBLASLtExt API <./reference/ext-reference>`
     * :doc:`hipBLASLtExt operation API <./reference/ext-ops>`

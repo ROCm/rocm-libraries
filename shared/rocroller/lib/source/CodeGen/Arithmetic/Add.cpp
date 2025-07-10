@@ -27,6 +27,7 @@
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/AddInstruction.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Add.hpp>
+#include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
@@ -83,7 +84,11 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        co_yield swapIfRHSLiteral(lhs, rhs);
+        co_yield m_context->copier()->ensureTypeCommutative(
+            {Register::Type::Vector, Register::Type::Constant},
+            lhs,
+            {Register::Type::Vector, Register::Type::Constant},
+            rhs);
 
         auto const& arch = m_context->targetArchitecture();
         auto const& gpu  = arch.target();
@@ -128,7 +133,8 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        co_yield swapIfRHSLiteral(lhs, rhs);
+        co_yield m_context->copier()->ensureTypeCommutative(
+            {Register::Type::Vector, Register::Type::Literal}, lhs, {Register::Type::Vector}, rhs);
 
         co_yield VectorAddUInt32(m_context, dest, lhs, rhs);
     }
@@ -292,7 +298,8 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        co_yield swapIfRHSLiteral(lhs, rhs);
+        co_yield m_context->copier()->ensureTypeCommutative(
+            {Register::Type::Vector, Register::Type::Constant}, lhs, {Register::Type::Vector}, rhs);
 
         co_yield_(Instruction("v_add_f32", {dest}, {lhs, rhs}, {}, ""));
     }
@@ -307,7 +314,11 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        co_yield swapIfRHSLiteral(lhs, rhs);
+        co_yield m_context->copier()->ensureTypeCommutative(
+            {Register::Type::Vector, Register::Type::Constant},
+            lhs,
+            {Register::Type::Vector, Register::Type::Constant},
+            rhs);
 
         co_yield_(Instruction("v_add_f64", {dest}, {lhs, rhs}, {}, ""));
     }

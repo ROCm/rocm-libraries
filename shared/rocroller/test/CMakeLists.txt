@@ -134,6 +134,7 @@ target_link_libraries(
     gmock
     OpenMP::OpenMP_CXX
     libdivide
+    msgpackc-cxx
 )
 set_property(
     TARGET rocRollerTests
@@ -154,6 +155,7 @@ set(
     catch/TestContext.cpp
     catch/TestKernels.cpp
 
+    catch/AddDeallocateTest.cpp
     catch/AddPrefetchTest.cpp
     catch/AliasDataFlowTagsTest.cpp
     catch/AnnotateInstructionsTest.cpp
@@ -197,6 +199,7 @@ set(
     catch/SettingsTest.cpp
     catch/SubDwordExpressionTest.cpp
     catch/TernaryExpressionTest.cpp
+    catch/TestContext.cpp
     catch/TestContextTest.cpp
     catch/TransposeLoadsTest.cpp
     catch/UnrollLoopsTest.cpp
@@ -217,6 +220,7 @@ target_link_libraries(
     common_test_utilities
     Catch2::Catch2WithMain
     OpenMP::OpenMP_CXX
+    msgpackc-cxx
 )
 set_property(
     TARGET rocRollerTests_catch

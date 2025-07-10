@@ -37,7 +37,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [0, 3, 8, 13, 64, 256]
   N: [0, 3, 8, 13, 64, 256]
-  denseld: [-8, 64, 512]
+  denseld: [256, 512]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
 - name: csc2dense
@@ -46,7 +46,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [0, 531, 1000]
   N: [0, 241, 1000]
-  denseld: [100, 1000, 2000]
+  denseld: [1000, 2000]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
 
 - name: csc2dense
@@ -55,7 +55,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [0, 531, 1000]
   N: [0, 241, 1000]
-  denseld: [100, 1000, 2000]
+  denseld: [1000, 2000]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   graph_test: true
 

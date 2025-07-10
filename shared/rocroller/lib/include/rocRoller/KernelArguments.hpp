@@ -40,7 +40,6 @@ namespace rocRoller
     {
     public:
         explicit KernelArguments(bool log = true, size_t bytes = 0);
-        virtual ~KernelArguments();
 
         void reserve(size_t bytes, size_t count);
 

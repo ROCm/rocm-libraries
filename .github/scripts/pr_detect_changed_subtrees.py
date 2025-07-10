@@ -5,7 +5,6 @@ PR Detect Changed Subtrees Script
 ---------------------------------
 This script analyzes a pull request's changed files and determines which subtrees
 (defined in .github/repos-config.json by category/name) were affected.
-Ignore if the repos-config.json entry has `enable_pr_fanout` set to false.
 
 Steps:
     1. Fetch the changed files in the PR using the GitHub API.
@@ -17,7 +16,6 @@ Arguments:
     --repo              : Full repository name (e.g., org/repo)
     --pr                : Pull request number
     --config            : OPTIONAL, path to the repos-config.json file.
-    --require-fanout    : If set, only include entries with enable_pr_fanout=true.
     --require-auto-pull : If set, only include entries with auto_subtree_pull=true.
     --require-auto-push : If set, only include entries with auto_subtree_push=true.
     --dry-run           : If set, will only log actions without making changes.
@@ -25,12 +23,12 @@ Arguments:
 
 Outputs:
     Writes 'subtrees' key to the GitHub Actions $GITHUB_OUTPUT file, which
-    the workflow reads to pass paths to the checkout and fanout stages.
+    the workflow reads to pass paths to the checkout stages.
     The output is a new-line separated list of subtrees in `category/name` format.
 
 Example Usage:
-    To run in fanout situations in debug mode and perform a dry-run (no changes made):
-        python pr_detect_changed_subtrees.py --repo ROCm/rocm-libraries --pr 123 --require-fanout --debug --dry-run
+    To run in auto-push situations in debug mode and perform a dry-run (no changes made):
+        python pr_detect_changed_subtrees.py --repo ROCm/rocm-libraries --pr 123 --require-auto-push --debug --dry-run
 """
 
 import argparse
@@ -50,7 +48,6 @@ def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--repo", required=True, help="Full repository name (e.g., org/repo)")
     parser.add_argument("--pr", required=True, type=int, help="Pull request number")
     parser.add_argument("--config", required=False, default=".github/repos-config.json", help="Path to the repos-config.json file")
-    parser.add_argument("--require-fanout", action="store_true", help="Only include entries with enable_pr_fanout=true")
     parser.add_argument("--require-auto-pull", action="store_true", help="Only include entries with auto_subtree_pull=true")
     parser.add_argument("--require-auto-push", action="store_true", help="Only include entries with auto_subtree_push=true")
     parser.add_argument("--dry-run", action="store_true", help="Print results without writing to GITHUB_OUTPUT.")
@@ -62,18 +59,14 @@ def get_valid_prefixes(config: List[RepoEntry]) -> Set[str]:
     valid_prefixes = {
         f"{entry.category}/{entry.name}"
         for entry in config
-        if getattr(entry, "enable_pr_fanout", False)  # Default to False if not explicitly set
     }
     logger.debug("Valid subtrees:\n" + "\n".join(sorted(valid_prefixes)))
     return valid_prefixes
 
-def get_valid_prefixes(config: List[RepoEntry], require_fanout: bool = False,
-                       require_auto_pull: bool = False, require_auto_push: bool = False) -> Set[str]:
+def get_valid_prefixes(config: List[RepoEntry], require_auto_pull: bool = False, require_auto_push: bool = False) -> Set[str]:
     """Extract valid subtree prefixes from the configuration based on filters."""
     valid_prefixes = set()
     for entry in config:
-        if require_fanout and not getattr(entry, "enable_pr_fanout", False):
-            continue
         if require_auto_pull and not getattr(entry, "auto_subtree_pull", False):
             continue
         if require_auto_push and not getattr(entry, "auto_subtree_push", False):
@@ -120,7 +113,7 @@ def main(argv=None) -> None:
     client = GitHubCLIClient()
     config = load_repo_config(args.config)
     changed_files = client.get_changed_files(args.repo, int(args.pr))
-    valid_prefixes = get_valid_prefixes(config, args.require_fanout, args.require_auto_pull, args.require_auto_push)
+    valid_prefixes = get_valid_prefixes(config, args.require_auto_pull, args.require_auto_push)
     matched_subtrees = find_matched_subtrees(changed_files, valid_prefixes)
     output_subtrees(matched_subtrees, args.dry_run)
 

@@ -342,7 +342,7 @@ namespace rocRoller
 
             const auto& gpu            = arch.target();
             const auto& barrierLiteral = gpu.isRDNA4GPU() ? "s_barrier_wait" : "s_barrier";
-            if(m_weights.zeroFreeBarriers && inst.getOpCode().rfind(barrierLiteral, 0) == 0
+            if(m_weights.zeroFreeBarriers && inst.getOpCode().starts_with(barrierLiteral)
                && status.waitCount == WaitCount())
                 return 0;
 

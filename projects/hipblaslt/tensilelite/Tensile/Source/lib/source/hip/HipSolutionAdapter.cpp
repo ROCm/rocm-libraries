@@ -265,6 +265,17 @@ namespace TensileLite
             return err;
         }
 
+        // We should update the constructor to set this to avoid
+        // avoid separating construction and initialization
+        void SolutionAdapter::codeObjectDir(std::string codeObjectDir)
+        {
+            if(codeObjectDir.back() != '/');
+                codeObjectDir += '/';
+            m_access.lock();
+            m_codeObjectDirectory = codeObjectDir;
+            m_access.unlock();
+        }
+
         hipError_t SolutionAdapter::initializeLazyLoading(std::string arch,
                                                           std::string codeObjectDir)
         {

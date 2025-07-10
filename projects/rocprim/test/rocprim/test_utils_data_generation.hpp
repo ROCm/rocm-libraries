@@ -575,18 +575,6 @@ std::vector<size_t> get_block_size_multiples(T seed_value, const unsigned int bl
     return std::vector<size_t>(unique_sizes.begin(), unique_sizes.end());
 }
 
-#if ROCPRIM_HAS_INT128_SUPPORT
-template<class T>
-using is_int128 = std::is_same<rocprim::int128_t, typename std::remove_cv<T>::type>;
-template<class T>
-using is_uint128 = std::is_same<rocprim::uint128_t, typename std::remove_cv<T>::type>;
-#else
-template<class T>
-using is_int128 = std::false_type;
-template<class T>
-using is_uint128 = std::false_type;
-#endif // ROCPRIM_HAS_INT128_SUPPORT
-
 } // namespace test_utils
 
 #endif //ROCPRIM_TEST_UTILS_DATA_GENERATION_HPP

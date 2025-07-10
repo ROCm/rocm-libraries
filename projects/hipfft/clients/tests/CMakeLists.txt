@@ -141,19 +141,16 @@ foreach( target ${TEST_TARGETS} )
   endif()
 
   if( BUILD_CLIENTS_TESTS_OPENMP )
+    find_package(OpenMP REQUIRED)
     if( BUILD_WITH_LIB STREQUAL "CUDA" )
       message( STATUS "OpenMP is not supported on CUDA, building tests without it" )
     else()
       target_compile_options( ${target} PRIVATE -DBUILD_CLIENTS_TESTS_OPENMP )
       if(NOT (CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+"))
-        target_compile_options( ${target} PRIVATE -fopenmp )
-        target_link_libraries( ${target} PRIVATE -fopenmp -L${HIP_CLANG_ROOT}/lib -Wl,-rpath=${HIP_CLANG_ROOT}/lib )
+        target_link_libraries( ${target} PRIVATE OpenMP::OpenMP_CXX )
         target_include_directories( ${target} PRIVATE ${HIP_CLANG_ROOT}/include )
       else()
-        if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-          target_compile_options( ${target} PRIVATE -fopenmp=libomp )
-          target_link_options( ${target} PRIVATE -fopenmp=libomp )
-        endif()
+	target_link_libraries( ${target} PRIVATE OpenMP::OpenMP_CXX )
       endif()
     endif()
   endif()
@@ -224,7 +221,7 @@ if (WIN32)
 endif()
 
 option(BUILD_CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)
-set(COVERAGE_TEST_OPTIONS "--smoketest" CACHE STRING "Command line arguments for hipfft-test when generating a code coverage report")
+set(COVERAGE_TEST_OPTIONS "--smoketest" CACHE STRING "Command line arguments for hipfft-test when generating a code coverage report (Note: an additional run of hipfft-test targeting multi_gpu* and callback* tests is always executed and coverage results are aggregated)")
 if (BUILD_CODE_COVERAGE)
   add_custom_target(
     code_cov_tests
@@ -232,6 +229,7 @@ if (BUILD_CODE_COVERAGE)
     COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/hipfft-coverage_%p.profraw" GTEST_LISTENER=NO_PASS_LINE_IN_LOG $<TARGET_FILE:hipfft-test> --precompile=./clients/staging/hipfft-test-precompile.db ${COVERAGE_TEST_OPTIONS}
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/hipfft-coverage_%p.profraw" GTEST_LISTENER=NO_PASS_LINE_IN_LOG $<TARGET_FILE:hipfft-test> --precompile=./clients/staging/hipfft-test-precompile-multi_gpu-plus-callback.db --gtest_filter=multi_gpu*:callback*
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 

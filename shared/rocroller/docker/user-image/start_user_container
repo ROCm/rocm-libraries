@@ -31,6 +31,12 @@ import grp
 import os
 import subprocess
 import argparse
+import pathlib
+import sys
+
+repo_dir = pathlib.Path(__file__).resolve().parent.parent
+sys.path.append(str(repo_dir / "scripts" / "lib"))
+from rrperf import git  # noqa: E402
 
 dockerfiles = {
     "clang": "docker/dockerfile-ubuntu-clang",
@@ -96,7 +102,7 @@ def parseArgs():
     )
     parser.add_argument(
         "--volumes",
-        default=[os.getcwd() + ":/data"],
+        default=[git.top().as_posix() + ":/data"],
         action="append",
         help="What volumes to mount to the container. e.g. /source:/dest",
     )
