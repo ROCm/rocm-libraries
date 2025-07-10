@@ -117,8 +117,8 @@ jobs:
       if: steps.detect.outputs.subtrees && steps.cancel-in-progress.outputs.status == 'false'
       run: |
         pr_number=${{ github.event.pull_request.number }}
+        pr_merge_sha=${{ github.event.pull_request.merge_commit_sha }}
         pr_filter_query="branchName=refs/pull/$pr_number/merge&repositoryType=GitHub&repositoryId=ROCm/rocm-libraries&api-version=7.1"
-        pr_merge_sha=$(curl -sSX GET "https://api.github.com/repos/ROCm/rocm-libraries/git/ref/pull/${pr_number}/merge" | jq -r '.object.sha')
 
         failed_res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?resultFilter=failed&$pr_filter_query" \
           -H "Content-Type: application/json")
@@ -243,10 +243,15 @@ jobs:
           exit 0
         fi
 
+        pr_head_sha=${{ github.event.pull_request.head.sha }}
+        pr_merge_sha=${{ github.event.pull_request.merge_commit_sha }}
+
         newline=$'\n'
 
-        summary="PR #${{ github.event.pull_request.number }}: [${{ github.event.pull_request.title }}](${{ github.event.pull_request.html_url }})${newline}${newline}"
-        summary+="HEAD: [${{ github.event.pull_request.head.sha }}](${{ github.event.pull_request.head.repo.html_url }}/commit/${{ github.event.pull_request.head.sha }})${newline}${newline}"
+        summary="PR ${{ github.event.pull_request.number }}: [${{ github.event.pull_request.title }}](${{ github.event.pull_request.html_url }})${newline}${newline}"
+        summary+="HEAD: [$pr_head_sha](https://github.com/ROCm/rocm-libraries/commit/pr_head_sha)${newline}${newline}"
+        summary+="MERGE: [$pr_merge_sha](https://github.com/ROCm/rocm-libraries/commit/$pr_merge_sha)${newline}${newline}"
+        summary+="### Pipelines triggered for this PR${newline}${newline}"
         summary+="| Project | Run ID | Status |${newline}"
         summary+="|--------------|--------|--------|${newline}"
         for i in "${!project_names[@]}"; do
@@ -254,6 +259,9 @@ jobs:
         done
         summary+="${newline}${newline}"
         summary+="To request Azure to rerun jobs, click the \"Re-run all jobs\" button on the [corresponding \`Trigger Azure CI\` run](https://github.com/ROCm/rocm-libraries/actions/runs/${{ github.run_id }})".
+        summary+="If there are any pending runs for this PR, they will be cancelled, and new runs will be started."
+        summary+="If there are no pending runs, but there are existing failed or cancelled runs for this PR and merge SHA, those existing runs will be rerun."
+        summary+="Otherwise, new runs will be started."
 
         text=""
         for i in "${!project_names[@]}"; do
@@ -262,7 +270,7 @@ jobs:
 
         gh_output=$(gh api repos/ROCm/rocm-libraries/check-runs \
           -f 'name=Azure CI Summary (click me!)' \
-          -f 'head_sha=${{ github.event.pull_request.head.sha }}' \
+          -f 'head_sha=$pr_head_sha' \
           -f 'status=in_progress' \
           -f 'output[title]=Azure CI Summary' \
           -f "output[summary]=$summary" \
@@ -270,4 +278,3 @@ jobs:
 
         echo "Created summary check with ID: $(echo "$gh_output" | jq -r '.id')"
         echo "Summary check URL: https://github.com/ROCm/rocm-libraries/pull/561/checks?check_run_id=$(echo "$gh_output" | jq -r '.id')"
-
