@@ -50,9 +50,12 @@
 
 namespace {
 
-using TestCase = std::tuple<std::vector<std::size_t>, std::vector<int>, miopenReduceTensorOp_t, 
-                                miopenNanPropagation_t,  miopenReduceTensorIndices_t, std::vector<float>>;
-
+using TestCase = std::tuple<std::vector<std::size_t>,
+                            std::vector<int>,
+                            miopenReduceTensorOp_t,
+                            miopenNanPropagation_t,
+                            miopenReduceTensorIndices_t,
+                            std::vector<float>>;
 
 template <class T, bool toVerifyData>
 struct verify_reduce_with_indices
@@ -741,7 +744,7 @@ inline auto GenCases()
 
     return testing::Combine(testing::ValuesIn(get_tensor_lengths<T>()),
                             testing::ValuesIn(get_toreduce_dims()),
-                            testing::Values(MIOPEN_REDUCE_TENSOR_ADD, 
+                            testing::Values(MIOPEN_REDUCE_TENSOR_ADD,
                                             MIOPEN_REDUCE_TENSOR_MUL,
                                             MIOPEN_REDUCE_TENSOR_AMAX,
                                             MIOPEN_REDUCE_TENSOR_AVG,
@@ -766,16 +769,16 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
 {
     void SetUp() override
     {
-        auto&& handle = get_handle();
-        std::string device_name = handle.GetDeviceName();        
+        auto&& handle           = get_handle();
+        std::string device_name = handle.GetDeviceName();
 
-        if (!miopen::StartsWith(device_name, "gfx103") && !miopen::StartsWith(device_name, "gfx110") &&
-            !miopen::StartsWith(device_name, "gfx94"))
+        if(!miopen::StartsWith(device_name, "gfx103") &&
+           !miopen::StartsWith(device_name, "gfx110") && !miopen::StartsWith(device_name, "gfx94"))
         {
             GTEST_SKIP();
         }
 
-        prng::reset_seed();        
+        prng::reset_seed();
 
         handle.EnableProfiling();
 
@@ -802,21 +805,22 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
             }
         }
 
-        miopen::ReduceTensorDescriptor reduceDesc(reduceOp, compTypeVal, nanOpt, indicesOpt, indicesType);
+        miopen::ReduceTensorDescriptor reduceDesc(
+            reduceOp, compTypeVal, nanOpt, indicesOpt, indicesType);
 
         float alpha = scales[0];
         float beta  = scales[1];
 
         // The test is ignored if (alpha, beta) is not (1.0f, 0.0f) and reduceOp is not Add/MUL/AVG
         if(reduceOp != MIOPEN_REDUCE_TENSOR_ADD && reduceOp != MIOPEN_REDUCE_TENSOR_MUL &&
-            reduceOp != MIOPEN_REDUCE_TENSOR_AVG && alpha != 1.0f && beta != 0.0f)
+           reduceOp != MIOPEN_REDUCE_TENSOR_AVG && alpha != 1.0f && beta != 0.0f)
         {
             GTEST_SKIP();
         }
 
         // The test is ignored if indices are requested but the reduceOp is neither MIN nor MAX
         if(indicesOpt != MIOPEN_REDUCE_TENSOR_NO_INDICES && reduceOp != MIOPEN_REDUCE_TENSOR_MIN &&
-            reduceOp != MIOPEN_REDUCE_TENSOR_MAX && reduceOp != MIOPEN_REDUCE_TENSOR_AMAX)
+           reduceOp != MIOPEN_REDUCE_TENSOR_MAX && reduceOp != MIOPEN_REDUCE_TENSOR_AMAX)
         {
             GTEST_SKIP();
         }
@@ -967,39 +971,42 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
         }
         else
         {
-            VerifyReduceNoIndices(reduceDesc, inputTensor, outputTensor, workspaceTensor, alpha, beta);
+            VerifyReduceNoIndices(
+                reduceDesc, inputTensor, outputTensor, workspaceTensor, alpha, beta);
         };
     };
 
 private:
     template <bool toVerifyData>
     void VerifyReduceWithIndices(const miopen::ReduceTensorDescriptor& reduce,
-                               const tensor<T>& input,
-                               const tensor<T>& output,
-                               const tensor<T>& workspace,
-                               const tensor<int>& indices,
-                               float alpha,
-                               float beta)
+                                 const tensor<T>& input,
+                                 const tensor<T>& output,
+                                 const tensor<T>& workspace,
+                                 const tensor<int>& indices,
+                                 float alpha,
+                                 float beta)
     {
-        verify_reduce_with_indices<T, toVerifyData> reduce_with_indices(reduce, input, output, workspace, indices, alpha, beta);
+        verify_reduce_with_indices<T, toVerifyData> reduce_with_indices(
+            reduce, input, output, workspace, indices, alpha, beta);
         CompareResults(reduce_with_indices, toVerifyData);
     }
 
-    void VerifyReduceNoIndices( const miopen::ReduceTensorDescriptor& reduce,
-                                const tensor<T>& input,
-                                const tensor<T>& output,
-                                const tensor<T>& workspace,
-                                float alpha,
-                                float beta)
+    void VerifyReduceNoIndices(const miopen::ReduceTensorDescriptor& reduce,
+                               const tensor<T>& input,
+                               const tensor<T>& output,
+                               const tensor<T>& workspace,
+                               float alpha,
+                               float beta)
     {
-        verify_reduce_no_indices<T> reduce_no_indices(reduce, input, output, workspace, alpha, beta);
+        verify_reduce_no_indices<T> reduce_no_indices(
+            reduce, input, output, workspace, alpha, beta);
         CompareResults(reduce_no_indices, true);
     }
 
     std::string GetOutputValuesForError()
     {
         std::ostringstream oss;
-        oss  << "reduceOp: " << reduceOp << std::endl
+        oss << "reduceOp: " << reduceOp << std::endl
             << "compTypeVal: " << compTypeVal << std::endl
             << "nanOpt: " << nanOpt << std::endl
             << "indicesOpt: " << indicesOpt << std::endl;
@@ -1012,12 +1019,12 @@ private:
         const tensor<float> cpu = std::move(verifier.cpu());
         const tensor<float> gpu = std::move(verifier.gpu());
 
-        if (toVerifyData)
+        if(toVerifyData)
         {
             double threshold = std::numeric_limits<float>::epsilon() * tolerance;
             double error     = miopen::rms_range(cpu, gpu);
 
-            if (error > threshold)
+            if(error > threshold)
             {
                 verifier.fail();
 
@@ -1028,9 +1035,9 @@ private:
         }
         else
         {
-            auto idx = miopen::mismatch_idx(cpu, gpu, miopen::float_equal);
+            auto idx   = miopen::mismatch_idx(cpu, gpu, miopen::float_equal);
             auto range = miopen::range_distance(cpu);
-            if (idx < range)
+            if(idx < range)
             {
                 verifier.fail();
             }
@@ -1040,10 +1047,10 @@ private:
     }
 
 private:
-    miopenReduceTensorOp_t reduceOp    = MIOPEN_REDUCE_TENSOR_ADD;
-    miopenDataType_t compTypeVal       = miopenFloat;
-    miopenNanPropagation_t nanOpt      = MIOPEN_NOT_PROPAGATE_NAN;
-    miopenReduceTensorIndices_t indicesOpt  = MIOPEN_REDUCE_TENSOR_NO_INDICES;
+    miopenReduceTensorOp_t reduceOp        = MIOPEN_REDUCE_TENSOR_ADD;
+    miopenDataType_t compTypeVal           = miopenFloat;
+    miopenNanPropagation_t nanOpt          = MIOPEN_NOT_PROPAGATE_NAN;
+    miopenReduceTensorIndices_t indicesOpt = MIOPEN_REDUCE_TENSOR_NO_INDICES;
 
     miopenIndicesType_t indicesType = MIOPEN_32BIT_INDICES;
 
