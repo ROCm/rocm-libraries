@@ -40,6 +40,18 @@
       "cacheVariables": {
         "ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF": "OFF"
       }
+    },
+    {
+      "name": "coverage",
+      "displayName": "AMD MR ISAs",
+      "description": "Do not use pregenerated arch defs",
+      "inherits": "opt-rocm",
+      "cacheVariables": {
+        "ROCROLLER_BUILD_SHARED_LIBS": "OFF",
+        "ROCROLLER_ENABLE_COVERAGE": "ON"
+
+      }
     }
+
 ]
 }

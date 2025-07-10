@@ -64,7 +64,6 @@ def runCompileCommand(platform, project, jobName, mxDataGeneratorGitURL, mxDataG
                     -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \\
                     -DCMAKE_BUILD_TYPE=Release \\
                     -DROCROLLER_ENABLE_FETCH=ON \\
-                    -DROCROLLER_TESTS_SKIP_SLOW=OFF \\
                     -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm"
                 ccache --print-stats
                 make -j ${target}

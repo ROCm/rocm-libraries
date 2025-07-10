@@ -198,7 +198,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
                    "LABELS" "PYTHON"
     )
 
-    if(ROCROLLER_TESTS_SKIP_SLOW)
+    if(NOT ROCROLLER_ENABLE_SLOW_TESTS)
         set(PYTHON_TEST_SKIP "-m not slow")
     endif()
 
