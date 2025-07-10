@@ -92,6 +92,10 @@ namespace
                 testing_aux_matmul_pref_init(arg);
             else if(!strcmp(arg.function, "aux_matmul_alg_null_matmul"))
                 testing_aux_matmul_alg_null_matmul(arg);
+            else if(!strcmp(arg.function, "aux_mat_copy"))
+                testing_aux_mat_copy(arg);
+            else if(!strcmp(arg.function, "aux_auxiliary_func"))
+                testing_aux_auxiliary_func(arg);
             else
                 FAIL() << "Internal error: Test called with unknown function: " << arg.function;
         }
@@ -132,7 +136,9 @@ namespace
                    || !strcmp(arg.function, "aux_matmul_plan_init")
                    || !strcmp(arg.function, "aux_matmul_alg_null_matmul")
                    || !strcmp(arg.function, "aux_matmul_pref_get_attr_bad_arg")
-                   || !strcmp(arg.function, "aux_matmul_pref_get_attr");
+                   || !strcmp(arg.function, "aux_matmul_pref_get_attr")
+                   || !strcmp(arg.function, "aux_mat_copy")
+                   || !strcmp(arg.function, "aux_auxiliary_func");
         }
 
         // Google Test name suffix based on parameters

@@ -96,24 +96,25 @@ def _configure_git_user(repo_path: Path) -> None:
     _run_git(["config", "user.name", "assistant-librarian[bot]"], cwd=repo_path)
     _run_git(["config", "user.email", "assistant-librarian[bot]@users.noreply.github.com"], cwd=repo_path)
 
-def _apply_patch(repo_path: Path, patch_path: Path) -> None:
-    """Apply a patch file to the working tree."""
-    _run_git(["apply", str(patch_path)], cwd=repo_path)
-    logger.info(f"Applied patch to working tree at {repo_path}")
+def _apply_patch(repo_path: Path, patch_path: Path, rel_file_path: Path, monorepo_path: Path, prefix: str) -> None:
+    """Try to apply a patch; if it fails, fallback to full file replacement."""
+    try:
+        _run_git(["am", str(patch_path)], cwd=repo_path)
+        logger.info(f"Applied patch {patch_path.name} successfully")
+    except RuntimeError as e:
+        logger.warning(f"Patch {patch_path.name} failed to apply; falling back to full file copy")
 
-def _stage_changes(repo_path: Path) -> None:
-    """Stage all changes in the repository."""
-    _run_git(["add", "."], cwd=repo_path)
-    logger.debug(f"Staged all changes in {repo_path}")
+        # Construct source and destination
+        monorepo_file = monorepo_path / prefix / rel_file_path
+        subrepo_file = repo_path / rel_file_path
+        subrepo_file.parent.mkdir(parents=True, exist_ok=True)
 
-def _commit_changes(repo_path: Path, message: str, author_name: str, author_email: str) -> None:
-    """Commit staged changes with the specified author and message."""
-    _run_git([
-        "commit",
-        "--author", f"{author_name} <{author_email}>",
-        "-m", message
-    ], cwd=repo_path)
-    logger.debug(f"Committed changes with author {author_name} <{author_email}>")
+        if not monorepo_file.exists():
+            raise RuntimeError(f"Fallback failed: {monorepo_file} does not exist")
+
+        shutil.copyfile(monorepo_file, subrepo_file)
+        _run_git(["add", str(rel_file_path)], cwd=repo_path)
+        logger.info(f"Copied {monorepo_file} -> {subrepo_file}")
 
 def _set_authenticated_remote(repo_path: Path, repo_url: str) -> None:
     """Set the push URL to use the GitHub App token from GH_TOKEN env."""
@@ -128,18 +129,17 @@ def _push_changes(repo_path: Path, branch: str) -> None:
     _run_git(["push", "origin", branch], cwd=repo_path)
     logger.debug(f"Pushed changes from {repo_path} to origin")
 
-def generate_file_level_patches(prefix: str, merge_sha: str, output_dir: Path) -> Tuple[List[Path], List[str], List[str], List[Tuple[str, str]]]:
-    """
-    Generate one patch per modified file, and collect adds, deletes, and renames.
-    """
+def generate_file_level_patches(prefix: str, merge_sha: str, output_dir: Path) -> tuple[list[str], list[str], list[tuple[str, str]], list[str], list[Path]]:
+    """Generate one patch per modified file, and collect adds, deletes, and renames."""
     diff_output = _run_git([
         "diff", "--name-status", "-M", f"{merge_sha}^!", "--", prefix
     ])
 
-    patch_files = []
     added_files = []
     deleted_files = []
     renamed_files = []
+    modified_files = []
+    patch_files = []
 
     for line in diff_output.splitlines():
         parts = line.split('\t')
@@ -149,11 +149,15 @@ def generate_file_level_patches(prefix: str, merge_sha: str, output_dir: Path) -
         elif status == 'M':
             file_path = parts[1]
             patch_path = output_dir / (file_path.replace("/", "_") + ".patch")
-            diff_text = _run_git([
-                "diff", f"{merge_sha}^!", "--", file_path
+            _run_git([
+                "format-patch",
+                "-1", merge_sha,
+                f"--relative={prefix}",
+                "--output", str(patch_path),
+                "--", file_path
             ])
-            patch_path.write_text(diff_text, encoding="utf-8")
             patch_files.append(patch_path)
+            modified_files.append(file_path)
         elif status == 'D':
             deleted_files.append(parts[1])
         elif status.startswith('R'):
@@ -162,11 +166,10 @@ def generate_file_level_patches(prefix: str, merge_sha: str, output_dir: Path) -
     logger.debug(f"Generated {len(patch_files)} modified file patches, "
                  f"{len(added_files)} added, {len(deleted_files)} deleted, "
                  f"{len(renamed_files)} renamed under {prefix}")
-    return patch_files, added_files, deleted_files, renamed_files
+    return added_files, deleted_files, renamed_files, modified_files, patch_files
 
 def resolve_patch_author(client: GitHubCLIClient, repo: str, pr: int) -> tuple[str, str]:
-    """Determine the appropriate author for the patch
-    Returns: (author_name, author_email)"""
+    """Determine the appropriate author for the patch"""
     pr_data = client.get_pr_by_number(repo, pr)
     body = pr_data.get("body", "") or ""
     match = re.search(r"Originally authored by @([A-Za-z0-9_-]+)", body)
@@ -180,13 +183,13 @@ def resolve_patch_author(client: GitHubCLIClient, repo: str, pr: int) -> tuple[s
     return name or username, email
 
 def apply_patches_and_squash(entry: RepoEntry, monorepo_url: str, monorepo_pr: int,
-                             added_files: List[str], modified_patch_paths: List[Path], deleted_files: List[str],
-                             renamed_files: List[Tuple[str, str]],
-                             author_name: str, author_email: str,
-                             merge_sha: str, dry_run: bool = False) -> None:
+                             added_files: list[str], deleted_files: list[str], renamed_files: list[tuple[str, str]],
+                             modified_files: list[str], modified_patch_paths: list[Path],
+                             author_name: str, author_email: str, merge_sha: str, dry_run: bool = False) -> None:
     """
-    Clone the subrepo, apply multiple file-level patches each as a commit,
-    delete files with git rm, then squash all new commits into one before pushing.
+    Clone the subrepo, apply file-level patches each as a commit,
+    delete files with git rm, copy added files, rename files,
+    then squash all new commits into one before pushing.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         prefix = f"{entry.category}/{entry.name}"
@@ -199,27 +202,23 @@ def apply_patches_and_squash(entry: RepoEntry, monorepo_url: str, monorepo_pr: i
                 for f in added_files:
                     short_path = Path(f).relative_to(prefix_path)
                     logger.info(f"    {short_path}")
-
-            if modified_patch_paths:
-                logger.info("  Modified files (via patch):")
-                for patch_path in modified_patch_paths:
-                    filename = patch_path.stem.replace("_", "/")
-                    logger.info(f"    {filename}")
-
             if deleted_files:
                 logger.info("  Deleted files:")
                 for f in deleted_files:
                     short_path = Path(f).relative_to(prefix_path)
                     logger.info(f"    {short_path}")
-
             if renamed_files:
                 logger.info("  Renamed files:")
                 for old, new in renamed_files:
                     old_rel = Path(old).relative_to(prefix_path)
                     new_rel = Path(new).relative_to(prefix_path)
                     logger.info(f"    {old_rel} -> {new_rel}")
-
-            if not (added_files or modified_patch_paths or deleted_files or renamed_files):
+            if modified_files:
+                logger.info("  Modified files (via patch):")
+                for f in modified_files:
+                    short_path = Path(f).relative_to(prefix_path)
+                    logger.info(f"    {short_path}")
+            if not (added_files or deleted_files or renamed_files or modified_files or modified_patch_paths):
                 logger.info("  No changes detected.")
             return
 
@@ -250,18 +249,15 @@ def apply_patches_and_squash(entry: RepoEntry, monorepo_url: str, monorepo_pr: i
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(src, dst)
 
-        # Handle modified files (apply patches)
-        for patch_path in modified_patch_paths:
-            logger.debug(f"Applying patch {patch_path.name} to {entry.name}")
-            _apply_patch(subrepo_path, patch_path)
-            _stage_changes(subrepo_path)
-            msg = f"[rocm-libraries] Applying patch {patch_path.name}"
-            _commit_changes(subrepo_path, msg, author_name, author_email)
+        # Handle modified files (apply patches one by one)
+        for patch_path, full_file_path in zip(modified_patch_paths, modified_files):
+            rel_path = full_file_path[len(prefix)+1:] if full_file_path.startswith(prefix + "/") else full_file_path
+            logger.debug(f"Applying patch {patch_path.name} to {entry.name} at {rel_path}")
+            _apply_patch(subrepo_path, patch_path, Path(rel_path), Path.cwd(), prefix)
 
         # Final squash
-        _stage_changes(subrepo_path)
         commit_msg = f"[rocm-libraries] {monorepo_url}#{monorepo_pr} (commit {merge_sha[:7]})\n\n" + \
-                    _run_git(["log", "-1", "--pretty=%B", merge_sha])
+                     _run_git(["log", "-1", "--pretty=%B", merge_sha])
         _run_git(["reset", "--soft", base_commit], cwd=subrepo_path)
         _run_git(["commit", "-m", commit_msg, "--author", f"{author_name} <{author_email}>"], cwd=subrepo_path)
 
@@ -280,18 +276,21 @@ def main(argv: Optional[List[str]] = None) -> None:
     relevant_subtrees = get_subtree_info(config, subtrees)
     merge_sha = client.get_squash_merge_commit(args.repo, args.pr)
     logger.debug(f"Merge commit for PR #{args.pr} in {args.repo}: {merge_sha}")
+    _run_git(["checkout", merge_sha])
+    logger.info(f"Checked out merge commit {merge_sha} for patch operations")
     for entry in relevant_subtrees:
         prefix = f"{entry.category}/{entry.name}"
         logger.debug(f"Processing subtree {prefix}")
         with tempfile.TemporaryDirectory() as tmpdir:
             patch_dir = Path(tmpdir)
-            modified_patches, added, deleted, renamed = generate_file_level_patches(prefix, merge_sha, patch_dir)
-            if not (added or modified_patches or deleted or renamed):
+            # Generate patches and lists of adds/deletes/renames
+            added_files, deleted_files, renamed_files, modified_files, modified_patch_paths,  = generate_file_level_patches(prefix, merge_sha, patch_dir)
+            if not (added_files or deleted_files or renamed_files or modified_files or modified_patch_paths):
                 logger.info(f"No changes to apply for {prefix}")
                 continue
             author_name, author_email = resolve_patch_author(client, args.repo, args.pr)
             apply_patches_and_squash(entry, args.repo, args.pr,
-                                     added, modified_patches, deleted, renamed,
+                                     added_files, deleted_files, renamed_files, modified_files, modified_patch_paths,
                                      author_name, author_email, merge_sha,
                                      args.dry_run)
 
