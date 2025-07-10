@@ -31,6 +31,14 @@
 #include <rocRoller/KernelGraph/Transforms/AddLDSPadding.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddLDSPadding_detail.hpp>
 
+namespace rocRoller
+{
+    namespace KernelGraph
+    {
+        int getNumLDSElements(KernelGraphPtr const& graph, int tileTag, int ldsTag);
+    }
+}
+
 namespace AddPrefetchTest
 {
     using namespace rocRoller;
@@ -70,6 +78,78 @@ namespace AddPrefetchTest
         if(expected.contains(key))
         {
             CHECK(padding == expected[key]);
+        }
+    }
+
+    TEST_CASE("getNumLDSElements", "[kernel-graph][graph-transforms]")
+    {
+        using namespace rocRoller::KernelGraph;
+        using namespace rocRoller::Expression;
+
+        SECTION("Simple flatten")
+        {
+            auto graph = std::make_shared<rocRoller::KernelGraph::KernelGraph>();
+
+            uint sizeX = 5u;
+            uint sizeY = 7u;
+
+            auto indexX = graph->coordinates.addElement(MacroTileIndex(0, literal(sizeX), nullptr));
+            auto indexY = graph->coordinates.addElement(MacroTileIndex(1, literal(sizeY), nullptr));
+
+            auto ldsTag = graph->coordinates.addElement(LDS());
+
+            auto flatten = graph->coordinates.addElement(Flatten(), {indexX, indexY}, {ldsTag});
+
+            int ldsElements = getNumLDSElements(graph, -1, ldsTag);
+            CHECK(ldsElements == sizeX * sizeY);
+        }
+    }
+
+    TEST_CASE("getNumLDSElements", "[kernel-graph][graph-transforms]")
+    {
+        using namespace rocRoller::KernelGraph;
+        using namespace rocRoller::Expression;
+
+        SECTION("Simple flatten")
+        {
+            auto graph = std::make_shared<rocRoller::KernelGraph::KernelGraph>();
+
+            uint sizeX = 5u;
+            uint sizeY = 7u;
+
+            auto indexX = graph->coordinates.addElement(MacroTileIndex(0, literal(sizeX), nullptr));
+            auto indexY = graph->coordinates.addElement(MacroTileIndex(1, literal(sizeY), nullptr));
+
+            auto ldsTag = graph->coordinates.addElement(LDS());
+
+            auto flatten = graph->coordinates.addElement(Flatten(), {indexX, indexY}, {ldsTag});
+
+            int ldsElements = getNumLDSElements(graph, -1, ldsTag);
+            CHECK(ldsElements == sizeX * sizeY);
+        }
+
+        // TODO Move getNumLDSElements to Utils?
+
+        SECTION("Joined LDS")
+        {
+            auto graph = std::make_shared<rocRoller::KernelGraph::KernelGraph>();
+
+            uint sizeX   = 5u;
+            uint sizeY   = 7u;
+            uint strideX = GENERATE(7u, 10u);
+            uint strideY = 1u;
+
+            auto indexX = graph->coordinates.addElement(
+                MacroTileIndex(0, literal(sizeX), literal(strideX)));
+            auto indexY = graph->coordinates.addElement(
+                MacroTileIndex(1, literal(sizeY), literal(strideY)));
+
+            auto ldsTag = graph->coordinates.addElement(LDS());
+
+            auto join = graph->coordinates.addElement(Join(), {indexX, indexY}, {ldsTag});
+
+            int ldsElements = getNumLDSElements(graph, -1, ldsTag);
+            CHECK(ldsElements == strideX * sizeX);
         }
     }
 }
