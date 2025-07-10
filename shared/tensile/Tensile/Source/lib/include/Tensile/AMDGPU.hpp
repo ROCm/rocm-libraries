@@ -74,7 +74,7 @@ namespace Tensile
             gfx1101 = 1101,
             gfx1102 = 1102,
             gfx1103 = 1103,
-            gfx1103 = 1150
+            gfx1150 = 1150
         };
 
         static std::string toString(Processor p)
