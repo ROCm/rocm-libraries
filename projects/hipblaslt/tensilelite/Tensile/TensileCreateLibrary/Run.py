@@ -572,13 +572,30 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             if key != "fallback":
                 value.merge(masterLibraries["fallback"])
         masterLibraries.pop("fallback")
+    solIndex = []
     for _, masterLibrary in masterLibraries.items():
         for _, sol in masterLibrary.solutions.items():
             solutions.append(sol.originalSolution)
+            solIndex.append(sol.index)
         for name, lib in masterLibrary.lazyLibraries.items():
             for _, sol in lib.solutions.items():
                 sol.originalSolution._state["codeObjectFile"] = name
                 solutions.append(sol.originalSolution)
+                solIndex.append(sol.index)
+
+    # Get the solution index and it's codeObjectFile name
+    codeObjectFilesIndex = {}
+    for solution, index in zip(solutions, solIndex):
+        if "codeObjectFile" in solution._state and solution._state["codeObjectFile"] is not None:
+            if solution._state["codeObjectFile"] in codeObjectFilesIndex:
+                codeObjectFilesIndex[solution._state["codeObjectFile"]] = min(index, codeObjectFilesIndex[solution._state["codeObjectFile"]])
+            else:
+                codeObjectFilesIndex[solution._state["codeObjectFile"]] = index
+
+    # Reorder to int: name format
+    codeObjectFilesIndex = {v: k for k, v in codeObjectFilesIndex.items()}
+    # Reorder to maintain ascending order by index
+    codeObjectFilesIndex = dict(sorted(codeObjectFilesIndex.items()))
 
     # remove duplicates while preserving order
     numSoln = len(solutions)
@@ -587,7 +604,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     print1(f"Number of solutions parsed: {numSoln}")
     print1(f"Number of unique solutions: {len(solutions)}")
 
-    return solutions, masterLibraries
+    return solutions, masterLibraries, codeObjectFilesIndex
 
 
 ################################################################################
@@ -682,7 +699,7 @@ def run():
         print2("#   %s" % logicFile)
 
     start_glds = timer()
-    solutions, masterLibraries = generateLogicDataAndSolutions(
+    solutions, masterLibraries, libraryMapping = generateLogicDataAndSolutions(
         logicFiles, arguments, asmToolchain.assembler, isaInfoMap
     )
     stop_glds = timer()
@@ -730,6 +747,9 @@ def run():
         filename = os.path.join(newLibraryDir, name)
         lib.applyNaming(splitGSU)
         LibraryIO.write(filename, state(lib), arguments["LibraryFormat"])
+
+    filename = os.path.join(newLibraryDir, "TensileLiteLibrary_lazy_Mapping")
+    LibraryIO.write(filename, libraryMapping, "msgpack")
 
     start_msl = timer()
     for archName, newMasterLibrary in masterLibraries.items():
