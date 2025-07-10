@@ -690,14 +690,6 @@ namespace TensileLite
                 args.append("beta_2", inputs.beta, problem.betaType());
         }
 
-        if(sizeMapping.persistentKernel != 0 || sizeMapping.streamK != 0)
-        {
-            uint32_t magicShift;
-            args.template append<uint32_t>("magicNumberProblemNumGroupTiles0",
-                                           magicNumber(2, problemNumGroupTiles.x, &magicShift));
-            args.template append<uint32_t>("magicShiftProblemNumGroupTiles0", magicShift);
-        }
-
         if(sizeMapping.streamK != 0)
         {
             // SK doesn't care gsu
@@ -721,16 +713,6 @@ namespace TensileLite
             args.template append<uint32_t>("itersPerTile", itersPerTile);
             args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
             args.template append<uint32_t>("magicShiftItersPerTile", magicShiftItersPerTile);
-
-            uint32_t numGroupTiles0x1 = problemNumGroupTiles.x * problemNumGroupTiles.y;
-            uint32_t magicNumProblemNumGroupTiles0By1;
-            uint32_t magicShiftProblemNumGroupTiles0By1;
-            magicNumProblemNumGroupTiles0By1
-                = magicNumber(2, numGroupTiles0x1, &magicShiftProblemNumGroupTiles0By1);
-            args.template append<uint32_t>("magicNumProblemNumGroupTiles0By1",
-                                           magicNumProblemNumGroupTiles0By1);
-            args.template append<uint32_t>("magicShiftProblemNumGroupTiles0By1",
-                                           magicShiftProblemNumGroupTiles0By1);
 
             args.template append<uint32_t>("totalIters", totalIters);
             if(sizeMapping.streamK == 1) // Basic SK
