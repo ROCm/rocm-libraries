@@ -9,36 +9,13 @@ parameters:
 
 jobs:
 - job: report_summary_check
-  displayName: Report CI status to GitHub PR Summary Check
+  displayName: 'Report check status: ${{ parameters.checkConclusion }}'
   variables:
   - group: assistant-librarian
   pool:
     vmImage: ubuntu-latest
   steps:
   - checkout: none
-
-  # - task: Bash@3
-  #   displayName: Run is successful
-  #   condition: succeeded()
-  #   inputs:
-  #     targetType: 'inline'
-  #     script: |
-  #       echo "##vso[task.setvariable variable=CHECK_CONCLUSION]success"
-  # - task: Bash@3
-  #   displayName: Run is failed
-  #   condition: failed()
-  #   inputs:
-  #     targetType: 'inline'
-  #     script: |
-  #       echo "##vso[task.setvariable variable=CHECK_CONCLUSION]failure"
-  # - task: Bash@3
-  #   displayName: Run is cancelled
-  #   condition: canceled()
-  #   inputs:
-  #     targetType: 'inline'
-  #     script: |
-  #       echo "##vso[task.setvariable variable=CHECK_CONCLUSION]cancelled"
-
   - task: Bash@3
     displayName: Install GitHub CLI
     condition: always()
@@ -53,7 +30,7 @@ jobs:
           && sudo mkdir -p -m 755 /etc/apt/sources.list.d \
           && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
           && sudo apt update \
-          && sudo apt install gh -y
+          && sudo apt install gh jq -y
   - task: Bash@3
     displayName: Report CI status to GitHub PR Summary Check
     condition: always()
@@ -93,37 +70,16 @@ jobs:
         CHECK_SUMMARY=$(echo "$CHECK" | jq -r '.output.summary')
         CHECK_TEXT=$(echo "$CHECK" | jq -r '.output.text')
 
-        if [ -z "$CHECK_ID" ]; then
+        if [[ -z "$CHECK_ID" ]]; then
           echo "No Azure CI Summary check found for commit $PR_HEAD_SHA"
           exit 0
         fi
-
-        # also update the summary table with the build status
-        # the summary table is in the format
-        # | Project | Run ID | Status |
-        # |--------------|--------|--------|
-        # where the Run ID is the Azure DevOps build ID
-        # "| ${project_names[i]} | [${run_ids[i]}](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=${run_ids[i]}) | Pending |${newline}"
-        # replace the status of the current build in the summary table
-
         if [[ "$CHECK_SUMMARY" == *"$(Build.BuildId)"* ]]; then
           CHECK_SUMMARY=$(echo "$CHECK_SUMMARY" | sed "s/buildId=$(Build.BuildId)[^|]*|[^|]*|/buildId=$(Build.BuildId)) | ${{ parameters.checkConclusion }} |/")
         fi
-
-        echo "updated check summary"
-        echo $CHECK_SUMMARY
-
-        # the check test is in the format
-        # <build-id-1>=<status-1>;<build-id-2>=<status-2>;...
-        # where <status> is one of "pending", "success", "failure", "error"
-        # replace the status of the current build with variables['Agent.JobStatus']
-
         if [[ "$CHECK_TEXT" == *"$(Build.BuildId)="* ]]; then
           CHECK_TEXT=$(echo "$CHECK_TEXT" | sed "s/$(Build.BuildId)=[^;]*;/$(Build.BuildId)=${{ parameters.checkConclusion }};/")
         fi
-
-        echo "updated check text"
-        echo $CHECK_TEXT
 
         CHECK_STATUS=$(echo "$CHECK_TEXT" | grep -q "pending" && echo "in_progress" || echo "completed")
 

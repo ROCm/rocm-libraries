@@ -45,19 +45,19 @@ stages:
     parameters:
       sparseCheckoutDir: projects/rocrand
       triggerDownstreamJobs: false # todo: revert
-- stage: report_summary_check_successful
+- stage: report_successful
   condition: succeeded()
   jobs:
   - template: templates/report-summary-check.yml
     parameters:
       checkConclusion: success
-- stage: report_summary_check_failed
+- stage: report_failed
   condition: failed()
   jobs:
   - template: templates/report-summary-check.yml
     parameters:
       checkConclusion: failure
-- stage: report_summary_check_cancelled
+- stage: report_cancelled
   condition: canceled() # note: only 1 L in canceled()
   jobs:
   - template: templates/report-summary-check.yml
