@@ -97,7 +97,7 @@ struct default_delete<T[], typename thrust::detail::enable_if<std::is_trivially_
 template <class Deleter>
 struct unique_ptr_deleter_sfinae
 {
-  static_assert(thrust::detail::not_<thrust::detail::is_reference<Deleter>>, "incorrect specialization");
+  static_assert(thrust::detail::not_<thrust::detail::is_reference<Deleter>>::value, "incorrect specialization");
   using lval_ref_type        = const Deleter&;
   using good_rval_ref_type   = Deleter&&;
   using bad_rval_ref_type    = void;
@@ -206,6 +206,18 @@ public:
     unique_ptr(unique_ptr<U, E>&& u) noexcept
         : m_ptr(u.release()), m_deleter(std::forward<E>(u.get_deleter())) {}
 
+
+    //==========================================================================
+    // Assignment
+    //==========================================================================
+    
+    //==========================================================================
+    // Destructor
+    //==========================================================================
+    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 ~unique_ptr()
+    {
+        reset();
+    }
 
 };
 
