@@ -739,7 +739,7 @@ inline auto GenCases()
 {
     std::vector<std::vector<float>> alphabetas = {{1.0f, 0.0f}, {0.5f, 0.5f}};
 
-/*    return testing::Combine(testing::ValuesIn(get_tensor_lengths<T>()),
+    return testing::Combine(testing::ValuesIn(get_tensor_lengths<T>()),
                             testing::ValuesIn(get_toreduce_dims()),
                             testing::Values(MIOPEN_REDUCE_TENSOR_ADD, 
                                             MIOPEN_REDUCE_TENSOR_MUL,
@@ -749,13 +749,6 @@ inline auto GenCases()
                                             MIOPEN_REDUCE_TENSOR_NORM2),
                             testing::Values(0, 1),
                             testing::Values(0, 1),
-                            testing::ValuesIn(alphabetas));*/
-
-    return testing::Combine(testing::ValuesIn(get_tensor_lengths<T>()),
-                            testing::ValuesIn(get_toreduce_dims()),
-                            testing::Values(MIOPEN_REDUCE_TENSOR_NORM2),
-                            testing::Values(1),
-                            testing::Values(0),
                             testing::ValuesIn(alphabetas));
 }
 
@@ -773,9 +766,17 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
 {
     void SetUp() override
     {
+        auto&& handle = get_handle();
+        std::string device_name = handle.GetDeviceName();        
+
+        if (!miopen::StartsWith(device_name, "gfx103") && !miopen::StartsWith(device_name, "gfx110") &&
+            !miopen::StartsWith(device_name, "gfx94"))
+        {
+            GTEST_SKIP();
+        }
+
         prng::reset_seed();        
 
-        auto&& handle = get_handle();
         handle.EnableProfiling();
 
         std::tie(inLengths, toReduceDims, reduceOp, nanOpt, indicesOpt, scales) = GetParam();
@@ -1059,10 +1060,10 @@ using GPU_Reduce_FP32 = ReduceCommon<float>;
 using GPU_Reduce_FP16 = ReduceCommon<half_float::half>;
 using GPU_Reduce_FP64 = ReduceCommon<double>;
 
-//TEST_P(GPU_Reduce_FP32, TestFloat) { this->Run(); }
-//TEST_P(GPU_Reduce_FP16, TestFloat16) { this->Run(); }
+TEST_P(GPU_Reduce_FP32, TestFloat) { this->Run(); }
+TEST_P(GPU_Reduce_FP16, TestFloat16) { this->Run(); }
 TEST_P(GPU_Reduce_FP64, TestDouble) { this->Run(); }
 
-//INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP32, GetCases<float>());
-//INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP16, GetCases<half_float::half>());
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP32, GetCases<float>());
+INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP16, GetCases<half_float::half>());
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP64, GetCases<double>());
