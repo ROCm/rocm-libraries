@@ -53,7 +53,8 @@ def runCI =
         commonGroovy.runCompileCommand(platform, project, jobName, mxDataGeneratorGitURL, mxDataGeneratorGitTag, false, false, '', true, true)
     }
 
-    buildProject(prj, formatCheck, nodes.dockerArray, compileCommand, null, null, staticAnalysis)
+    // change first null to compileCommand once pytest-cmake is available
+    buildProject(prj, formatCheck, nodes.dockerArray, null, null, null, staticAnalysis)
 }
 
 def rocRollerGetBaseParameters() {
