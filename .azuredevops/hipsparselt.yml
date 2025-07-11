@@ -36,7 +36,9 @@ trigger:
 
 pr: none
 
-jobs:
+stages:
+- stage: hipsparselt
+  jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/hipSPARSELt.yml@pipelines_repo
     parameters:
       sparseCheckoutDir: projects/hipsparselt
