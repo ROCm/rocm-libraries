@@ -291,7 +291,8 @@ public:
         return m_deleter;
     }
 
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 const deleter_type& get_deleter() const noexcept
+    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 const deleter_type&
+    get_deleter() const noexcept
     {
         return m_deleter;
     }
@@ -312,15 +313,15 @@ public:
     THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer release() noexcept
     {
         pointer temp = m_ptr;
-        m_ptr = pointer();
+        m_ptr        = pointer();
         return temp;
     }
 
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void reset(pointer p = pointer()) noexcept 
+    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void reset(pointer p = pointer()) noexcept
     {
         pointer temp = m_ptr;
-        m_ptr = p;
-        if (temp)
+        m_ptr        = p;
+        if(temp)
             m_deleter(temp);
     }
 
@@ -330,7 +331,6 @@ public:
         swap(m_ptr, u.m_ptr);
         swap(m_deleter, u.m_deleter);
     }
-
 };
 
 template <class T, class D>
@@ -338,6 +338,12 @@ class unique_ptr<T[], D>
 {
 };
 
-
+template <class T,
+          class D,
+          typename thrust::detail::enable_if<std::is_swappable<D>::value, void>::type>
+inline THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr<T, D>& x, unique_ptr<T, D>& y) noexcept
+{
+    x.swap(y);
+}
 
 THRUST_NAMESPACE_END
