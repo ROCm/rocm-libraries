@@ -54,6 +54,13 @@ endfunction()
 # Get rocRAND tests source files
 file(GLOB rocRAND_TEST_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 
+if(ROCRAND_ENABLE_COVERAGE)
+  add_custom_target(prepare_coverage_report_dir ALL
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/coverage-report/profraw"
+    COMMENT "Creating coverage-report directory for code coverage"
+  )
+endif()
+
 # Build rocRAND tests
 function(add_test_target test_src is_internal)
   get_filename_component(test_name ${test_src} NAME_WE)
@@ -169,7 +176,7 @@ if (ROCRAND_ENABLE_COVERAGE)
 
   add_custom_target(
     coverage
-    DEPENDS test
+    DEPENDS prepare_coverage_report_dir test
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocrand-coverage-*.profraw -o ./coverage-report/rocrand.profdata
     COMMAND ${LLVM_COV} report -object ./library/src/librocrand.so -instr-profile=./coverage-report/rocrand.profdata
     COMMAND ${LLVM_COV} show -object ./library/src/librocrand.so -instr-profile=./coverage-report/rocrand.profdata -format=html -output-dir=coverage-report
