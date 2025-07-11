@@ -186,8 +186,10 @@ namespace AssertTest
 
                 auto executableKernel = m_context->instructions()->getExecutableKernel();
 
-                setenv("HSA_TOOLS_LIB", "/opt/rocm/lib/librocm-debug-agent.so.2", /*replace*/ 1);
-                setenv("HSA_ENABLE_DEBUG", "1", /*replace*/ 1);
+                const auto settings = Settings::getInstance();
+                const auto rocmDebugAgentPath{settings->ROCMPath.getValue()
+                                              + "/lib/librocm-debug-agent.so.2"};
+                setenv("HSA_TOOLS_LIB", rocmDebugAgentPath.c_str(), /*replace*/ 1);
                 const auto runTest = [&]() {
                     executableKernel->executeKernel(kargs, kinv);
                     // Need to wait for signal, otherwise child process may terminate before signal is sent
@@ -202,7 +204,6 @@ namespace AssertTest
                     runTest();
                 }
                 setenv("HSA_TOOLS_LIB", "", /*replace*/ 1);
-                setenv("HSA_ENABLE_DEBUG", "0", /*replace*/ 1);
             }
         }
     }
@@ -300,8 +301,10 @@ namespace AssertTest
 
                 auto executableKernel = m_context->instructions()->getExecutableKernel();
 
-                setenv("HSA_TOOLS_LIB", "/opt/rocm/lib/librocm-debug-agent.so.2", /*replace*/ 1);
-                setenv("HSA_ENABLE_DEBUG", "1", /*replace*/ 1);
+                const auto settings = Settings::getInstance();
+                const auto rocmDebugAgentPath{settings->ROCMPath.getValue()
+                                              + "/lib/librocm-debug-agent.so.2"};
+                setenv("HSA_TOOLS_LIB", rocmDebugAgentPath.c_str(), /*replace*/ 1);
                 const auto runTest = [&]() {
                     executableKernel->executeKernel(kargs, kinv);
                     // Need to wait for signal, otherwise child process may terminate before signal is sent
@@ -316,7 +319,6 @@ namespace AssertTest
                     runTest();
                 }
                 setenv("HSA_TOOLS_LIB", "", /*replace*/ 1);
-                setenv("HSA_ENABLE_DEBUG", "0", /*replace*/ 1);
             }
         }
     }
