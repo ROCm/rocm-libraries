@@ -41,12 +41,21 @@ trigger:
 pr: none
 
 stages:
-- stage: rocprim
+# - stage: rocprim
+#   jobs:
+#   - template: ${{ variables.CI_COMPONENT_PATH }}/rocPRIM.yml@pipelines_repo
+#     parameters:
+#       sparseCheckoutDir: projects/rocprim
+#       triggerDownstreamJobs: false # todo: revert
+- stage: temp_test
   jobs:
-  - template: ${{ variables.CI_COMPONENT_PATH }}/rocPRIM.yml@pipelines_repo
-    parameters:
-      sparseCheckoutDir: projects/rocprim
-      triggerDownstreamJobs: false # todo: revert
+  - job: temp_test
+    displayName: 'Temporary test stage'
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - script: |
+      exit 1
 - stage: report_successful
   condition: succeeded()
   jobs:
