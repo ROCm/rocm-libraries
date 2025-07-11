@@ -678,7 +678,9 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         body += add_work(std::bind(store_lds, this, _1, _2, _3, _4, _5, Component::BOTH, cumheight),
                          width,
                          height,
-                         ThreadGuardMode::GUARD_BY_IF);
+                         ThreadGuardMode::GUARD_BY_IF,
+                         false,
+                         max_factor_pp);
         return f;
     }
 
@@ -884,7 +886,9 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                     += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5, Component::BOTH),
                                 width,
                                 height,
-                                ThreadGuardMode::GUARD_BY_IF);
+                                ThreadGuardMode::GUARD_BY_IF,
+                                false,
+                                max_factor_pp);
                 body += If{Not{lds_is_real}, lds2reg_full};
 
                 auto apply_twiddle
@@ -924,7 +928,9 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                         std::bind(store_lds, this, _1, _2, _3, _4, _5, component, cumheight),
                         half_width,
                         half_height,
-                        ThreadGuardMode::GUARD_BY_IF);
+                        ThreadGuardMode::GUARD_BY_IF,
+                        false,
+                        max_factor_pp);
 
                     half_width  = factors[npass + 1];
                     half_height = static_cast<float>(length) / half_width / threads_per_transform;
@@ -933,7 +939,9 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                         += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5, component),
                                     half_width,
                                     half_height,
-                                    ThreadGuardMode::GUARD_BY_IF);
+                                    ThreadGuardMode::GUARD_BY_IF,
+                                    false,
+                                    max_factor_pp);
                 }
 
                 // internal full lds store (both linear/nonlinear variants)
@@ -945,7 +953,9 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                     std::bind(store_lds, this, _1, _2, _3, _4, _5, Component::BOTH, cumheight),
                     width,
                     height,
-                    ThreadGuardMode::GUARD_BY_IF);
+                    ThreadGuardMode::GUARD_BY_IF,
+                    false,
+                    max_factor_pp);
 
                 body += If{Not{lds_is_real}, reg2lds_full};
                 body += Else{reg2lds_half};
