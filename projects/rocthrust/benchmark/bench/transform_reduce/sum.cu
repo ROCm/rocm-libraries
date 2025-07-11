@@ -32,7 +32,7 @@
 // rocThrust
 #include <thrust/device_vector.h>
 #include <thrust/execution_policy.h>
-#include <thrust/reduce.h>
+#include <thrust/transform_reduce.h>
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
