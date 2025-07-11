@@ -1,8 +1,7 @@
 - MinimumRequiredVersion: 4.13.0
-- gfx
 - gfx950
-- - Device 0049
-  - Device 0050
+- gfx950
+- [Device 0055]
 - AssignedDerivedParameters: true
   Batched: true
   ComplexConjugateA: false
