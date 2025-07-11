@@ -601,8 +601,6 @@ namespace rocRoller
         auto kargs = getKernelArguments(args);
         auto inv   = getKernelInvocation(args);
 
-        KernelGraph::memoryTrace(*m_kernelGraph, inv, kargs);
-
         loadKernel();
 
         if(timer)
