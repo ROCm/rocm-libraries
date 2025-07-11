@@ -301,7 +301,6 @@ def runPerformanceCommand (platform, project)
                         set -ex
                         cd ${project.paths.project_build_prefix}/
                         
-
                         ${sshBlock}
 
                         #Run Performance Test
