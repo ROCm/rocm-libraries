@@ -48,6 +48,22 @@ jobs:
         repositories: |
           rocm-libraries
 
+    - name: Wait until refs/pull/${{ github.event.pull_request.number }}/merge exists
+      run: |
+        merge_ref="refs/pull/${{ github.event.pull_request.number }}/merge"
+        check_merge_ref() {
+          git ls-remote "https://github.com/ROCm/rocm-libraries" "$merge_ref" | grep -q "$merge_ref"
+        }
+        while true; do
+          if check_merge_ref; then
+            echo "$merge_ref found."
+            break
+          else
+            echo "$merge_ref not found. Retrying in 60 seconds..."
+            sleep 60
+          fi
+        done
+
     - name: Checkout code
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       with:
@@ -240,13 +256,11 @@ jobs:
         if [[ -n "${{ steps.dispatch.outputs.run_ids }}" && -n "${{ steps.dispatch.outputs.project_names }}" ]]; then             # If new runs were started
           run_ids=(${{ steps.dispatch.outputs.run_ids }})
           project_names=(${{ steps.dispatch.outputs.project_names }})
-          append_title=""
         elif [[ -n "${{ steps.rerun-failed.outputs.run_ids }}" && -n "${{ steps.rerun-failed.outputs.project_names }}" ]]; then   # If reruns were requested
           run_ids=(${{ steps.rerun-failed.outputs.run_ids }})
           project_names=(${{ steps.rerun-failed.outputs.project_names }})
           success_run_ids=(${{ steps.rerun-failed.outputs.success_run_ids }})
           success_project_names=(${{ steps.rerun-failed.outputs.success_project_names }})
-          append_title=" (rerun)"
         else
           echo "No run IDs or project names found, skipping summary check creation."
           exit 0
@@ -298,7 +312,7 @@ jobs:
           -f "name=Azure CI Summary" \
           -f "head_sha=$pr_head_sha" \
           -f "status=in_progress" \
-          -f "output[title]=Azure CI Summary$append_title" \
+          -f "output[title]=Azure CI Summary" \
           -f "output[summary]=$summary" \
           -f "output[text]=$text")
 
