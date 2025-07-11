@@ -280,6 +280,25 @@ public:
     //==========================================================================
     // Observers
     //==========================================================================
+    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer get() const noexcept
+    {
+        return m_ptr;
+    }
+
+    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 deleter_type& get_deleter() noexcept
+    {
+        return m_deleter;
+    }
+
+    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 const deleter_type& get_deleter() const noexcept
+    {
+        return m_deleter;
+    }
+
+    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit operator bool() const noexcept
+    {
+        return m_ptr != nullptr;
+    }
 
     // dont need memcpy or thrust::copy because device_ptr can be dereferenced in host?
 };
