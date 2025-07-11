@@ -300,11 +300,13 @@ def runPerformanceCommand (platform, project)
             def command = """#!/usr/bin/env bash
                         set -ex
                         cd ${project.paths.project_build_prefix}/
+                        
 
                         ${sshBlock}
 
                         #Run Performance Test
                         export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:${project.paths.project_build_prefix}/build/lib/
+                        export ROCROLLER_BUILD_DIR=`pwd`/build
 
                         ${masterCompareCommand}
 
@@ -368,6 +370,7 @@ def runPerformanceCommand (platform, project)
 
                         #Run Performance Test
                         export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:${project.paths.project_build_prefix}/build/lib/
+                        export ROCROLLER_BUILD_DIR=`pwd`/build
                         ./scripts/rrperf run \\
                             --suite ${rrperfSuite} \\
                             --rundir "./performance_${platform.gpu}"
