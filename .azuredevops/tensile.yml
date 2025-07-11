@@ -37,8 +37,28 @@ trigger:
 
 pr: none
 
-jobs:
+stages:
+- stage: tensile
+  jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/Tensile.yml@pipelines_repo
     parameters:
       sparseCheckoutDir: shared/tensile
       triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
+- stage: report_successful
+  condition: succeeded()
+  jobs:
+  - template: templates/report-summary-check.yml
+    parameters:
+      checkConclusion: success
+- stage: report_failed
+  condition: failed()
+  jobs:
+  - template: templates/report-summary-check.yml
+    parameters:
+      checkConclusion: failure
+- stage: report_cancelled
+  condition: canceled() # note: only 1 L in canceled()
+  jobs:
+  - template: templates/report-summary-check.yml
+    parameters:
+      checkConclusion: cancelled

@@ -32,8 +32,28 @@ trigger:
 
 pr: none
 
-jobs:
+stages:
+- stage: hipblas-common
+  jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/hipBLAS-common.yml@pipelines_repo
     parameters:
       sparseCheckoutDir: projects/hipblas-common
       triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
+- stage: report_successful
+  condition: succeeded()
+  jobs:
+  - template: templates/report-summary-check.yml
+    parameters:
+      checkConclusion: success
+- stage: report_failed
+  condition: failed()
+  jobs:
+  - template: templates/report-summary-check.yml
+    parameters:
+      checkConclusion: failure
+- stage: report_cancelled
+  condition: canceled() # note: only 1 L in canceled()
+  jobs:
+  - template: templates/report-summary-check.yml
+    parameters:
+      checkConclusion: cancelled
