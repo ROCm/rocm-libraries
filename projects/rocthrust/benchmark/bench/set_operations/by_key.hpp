@@ -104,6 +104,7 @@ void run_benchmark(benchmark::State& state,
   OpT op{};
   bench_utils::caching_allocator_t alloc{};
   thrust::detail::device_t policy{};
+  // not a warm-up run, we need to run once to determine the size of the output
   auto result_ends = op(
     policy(alloc),
     in_keys.cbegin(),
