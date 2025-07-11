@@ -50,7 +50,7 @@ def runCI =
         commonGroovy = load "${project.paths.project_src_prefix}/.jenkins/common.groovy"
         String mxDataGeneratorGitURL = params?.ROCROLLER_MXDATAGENERATOR_GIT_URL ?: baseParams?.ROCROLLER_MXDATAGENERATOR_GIT_URL
         String mxDataGeneratorGitTag = params?.ROCROLLER_MXDATAGENERATOR_GIT_TAG ?: baseParams?.ROCROLLER_MXDATAGENERATOR_GIT_TAG
-        runCompileCommand(platform, project, jobName, mxDataGeneratorGitURL, mxDataGeneratorGitTag, false, false, '', true, true)
+        commonGroovy.runCompileCommand(platform, project, jobName, mxDataGeneratorGitURL, mxDataGeneratorGitTag, false, false, '', true, true)
     }
 
     buildProject(prj, formatCheck, nodes.dockerArray, compileCommand, null, null, staticAnalysis)
