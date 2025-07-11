@@ -23,10 +23,11 @@
 ################################################################################
 
 import os
+import re
 from argparse import ArgumentParser
 from typing import Any, Dict, List, Optional
 
-from Tensile.Common import coVersionMap
+from Tensile.Common import coVersionMap, printExit
 from Tensile.Common.Architectures import architectureMap
 from Tensile.Toolchain.Validators import ToolchainDefaults
 
@@ -85,9 +86,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         type=str,
         action="store",
         default="all",
-        help="Supported archs: " + " ".join(architectureMap.keys()) + "You may also "
-        "specify an arch variant to build, enclosed within square brackets, all "
-        "non-matching variants will be filtered out. Example: 'gfx950[id=75a0]'",
+        help="Supported archs: " + " ".join(architectureMap.keys()),
     )
     argParser.add_argument(
         "--no-compress",
@@ -191,6 +190,20 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     )
 
     args = argParser.parse_args()
+
+    # NOTE: The feature that allows predicate based tensilelite library builds
+    # via the `--architecture=gfx950[id=XXXX]` is not fully supported until the
+    # tensilelite runtime lookup and selection for these predicates is complete.
+    # As a staged implementation, the TensileCreateLibrary code to enable this
+    # feature is complete, but will remain disabled until the work is complete.
+    predicatePattern = re.compile(r"\[(.*?)\]")
+    if predicatePattern.search(args.Architecture):
+        printExit(
+            "Predicate based tensilelite library builds are supported; however, since the "
+            "runtime lookup and selection of these libraries is incomplete, the requested "
+            "build is currently disabled. Please re-run using only the architecture name "
+            "without a predicate (`--architecture=gfx950`)."
+        )
 
     arguments = {}
     arguments["RuntimeLanguage"] = args.RuntimeLanguage
