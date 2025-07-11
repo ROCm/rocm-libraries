@@ -48,4 +48,3 @@ stages:
       sparseCheckoutDir: projects/rocprim
       triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
 - template: templates/report-summary-check-wrapper.yml
-

@@ -46,4 +46,3 @@ stages:
       sparseCheckoutDir: projects/rocrand
       triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
 - template: templates/report-summary-check-wrapper.yml
-
