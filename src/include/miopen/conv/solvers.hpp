@@ -2948,7 +2948,7 @@ struct MIOPEN_INTERNALS_EXPORT GemmFwd1x1_0_1 final : GemmFwdBase
 
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&) const override;
-
+   
     friend struct GemmFwdRest;
 };
 
@@ -2966,6 +2966,10 @@ struct MIOPEN_INTERNALS_EXPORT GemmFwdRest final : GemmFwdBase
 
     ConvSolution GetSolution(const ExecutionContext&,
                              const miopen::conv::ProblemDescription&) const override;
+    //float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
+   // {
+     //   return 0.001f;
+    // }
 };
 
 struct GemmBwdBase : ConvSolver
