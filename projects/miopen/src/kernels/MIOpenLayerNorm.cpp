@@ -83,31 +83,6 @@ struct loader
 
             return values;
         }
-        else if(!use_default && !contiguous && STRIDE > 1 && STRIDE <= LOCAL_SIZE &&
-                j + load_factor < INNER_SIZE)
-        {
-            __shared__ T tmp[STRIDE * load_factor];
-            const size_t idx = o * INNER_SIZE * STRIDE + j * STRIDE + s * load_factor;
-            const auto value = *reinterpret_cast<const load_t*>(&src[idx]);
-            vec_t values     = {{}};
-            for(int k = 0; k < ADJUSTED_LOCAL_SIZE; ++k)
-            {
-                if(k == lid)
-                {
-                    *reinterpret_cast<load_t*>(&tmp[s * load_factor]) = value;
-                }
-                __syncthreads();
-                if(k == lid)
-                {
-                    for(int l = 0; l < load_factor; ++l)
-                    {
-                        values.data[l] = tmp[STRIDE * l + s];
-                    }
-                }
-                __syncthreads();
-            }
-            return values;
-        }
         else
         {
             vec_t values = {{}};
