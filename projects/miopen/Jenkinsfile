@@ -1,3 +1,5 @@
+// ADD COMMENT TO TRIGGER A RUN
+
 def rocmnode(name) {
     return '(rocmtest || miopen) && (' + name + ')'
 }
