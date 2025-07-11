@@ -128,19 +128,10 @@ jobs:
           and (.sourceVersion | contains(\"$pr_merge_sha\")))
           | {id: .id, name: .definition.name}")
 
-        failed_run_ids=()
-        failed_project_names=()
-        success_run_ids=()
-        success_project_names=()
-
-        while IFS= read -r line; do
-          failed_run_ids+=($(echo "$line" | jq -r '.id'))
-          failed_project_names+=($(echo "$line" | jq -r '.name'))
-        done <<< "$failed_runs_info"
-        while IFS= read -r line; do
-          success_run_ids+=($(echo "$line" | jq -r '.id'))
-          success_project_names+=($(echo "$line" | jq -r '.name'))
-        done <<< "$success_runs_info"
+        failed_run_ids=$(echo "$failed_runs_info" | jq -r '.id')
+        failed_project_names=$(echo "$failed_runs_info" | jq -r '.name')
+        success_run_ids=$(echo "$success_runs_info" | jq -r '.id')
+        success_project_names=$(echo "$success_runs_info" | jq -r '.name')
 
         if [ -z "$failed_run_ids" ]; then
           echo "No failed/cancelled runs found for ROCm/rocm-libraries PR #$pr_number at merge commit $pr_merge_sha"
