@@ -45,6 +45,7 @@
 // STL
 #include <cstddef>
 #include <string>
+#include <utility>
 #include <vector>
 
 template <class InT, class OutT>
@@ -78,21 +79,28 @@ struct fib_t
   }
 };
 
+template <typename... Args>
+float64_t bench_transform(Args&&... args)
+{
+  bench_utils::caching_allocator_t alloc{}; // transform shouldn't allocate, but let's be consistent
+  thrust::detail::device_t policy{};
+  thrust::transform(policy(alloc), ::std::forward<Args>(args)...); // warmup (queries and caches occupancy)
+
+  bench_utils::gpu_timer d_timer;
+  d_timer.start(0);
+  thrust::transform(policy(alloc), ::std::forward<Args>(args)...);
+  d_timer.stop(0);
+
+  return d_timer.get_duration();
+}
+
 struct basic
 {
-  template <typename T, typename Policy>
-  float64_t run(thrust::device_vector<T>& input, thrust::device_vector<T>& output, Policy policy)
+  template <typename T>
+  float64_t run(thrust::device_vector<T>& input, thrust::device_vector<T>& output)
   {
     fib_t<T, uint32_t> op{};
-    thrust::transform(policy, input.cbegin(), input.cend(), output.begin(), op);
-
-    bench_utils::gpu_timer d_timer;
-
-    d_timer.start(0);
-    thrust::transform(policy, input.cbegin(), input.cend(), output.begin(), op);
-    d_timer.stop(0);
-
-    return d_timer.get_duration();
+    return bench_transform(input.cbegin(), input.cend(), output.begin(), op);
   }
 };
 
@@ -114,12 +122,9 @@ void run_benchmark(benchmark::State& state, const std::size_t elements, const st
     T{42} /*magic number used in Thrust*/);
   thrust::device_vector<T> output(elements);
 
-  bench_utils::caching_allocator_t alloc{};
-  thrust::detail::device_t policy{};
-
   for (auto _ : state)
   {
-    float64_t duration = benchmark.template run<T>(input, output, policy(alloc));
+    float64_t duration = benchmark.template run<T>(input, output);
     state.SetIterationTime(duration);
     gpu_times.push_back(duration);
   }
@@ -178,15 +183,11 @@ struct mul
   template <typename T>
   static float64_t run(thrust::device_vector<T>, thrust::device_vector<T> b, thrust::device_vector<T> c)
   {
-    bench_utils::gpu_timer d_timer;
     const T scalar = startScalar;
-    d_timer.start(0);
-    thrust::transform(
-      c.begin(), c.end(), b.begin(), ::thrust::detail::proclaim_copyable_arguments([=] __device__ __host__(const T& ci) {
+    return bench_transform(
+      c.begin(), c.end(), b.begin(), ::thrust::detail::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& ci) {
         return ci * scalar;
       }));
-    d_timer.stop(0);
-    return d_timer.get_duration();
   }
 };
 struct add
@@ -197,9 +198,7 @@ struct add
   template <typename T>
   static float64_t run(thrust::device_vector<T> a, thrust::device_vector<T> b, thrust::device_vector<T> c)
   {
-    bench_utils::gpu_timer d_timer;
-    d_timer.start(0);
-    thrust::transform(
+    return bench_transform(
       a.begin(),
       a.end(),
       b.begin(),
@@ -207,8 +206,6 @@ struct add
       ::thrust::detail::proclaim_copyable_arguments([] THRUST_DEVICE(const T& ai, const T& bi) -> T {
         return ai + bi;
       }));
-    d_timer.stop(0);
-    return d_timer.get_duration();
   }
 };
 
@@ -220,10 +217,8 @@ struct triad
   template <typename T>
   static float64_t run(thrust::device_vector<T> a, thrust::device_vector<T> b, thrust::device_vector<T> c)
   {
-    bench_utils::gpu_timer d_timer;
     const T scalar = startScalar;
-    d_timer.start(0);
-    thrust::transform(
+    return bench_transform(
       b.begin(),
       b.end(),
       c.begin(),
@@ -231,8 +226,6 @@ struct triad
       ::thrust::detail::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& bi, const T& ci) {
         return bi + scalar * ci;
       }));
-    d_timer.stop(0);
-    return d_timer.get_duration();
   }
 };
 
@@ -244,10 +237,8 @@ struct nstream
   template <typename T>
   static float64_t run(thrust::device_vector<T> a, thrust::device_vector<T> b, thrust::device_vector<T> c)
   {
-    bench_utils::gpu_timer d_timer;
     const T scalar = startScalar;
-    d_timer.start(0);
-    thrust::transform(
+    return bench_transform(
       thrust::make_zip_iterator(a.begin(), b.begin(), c.begin()),
       thrust::make_zip_iterator(a.end(), b.end(), c.end()),
       a.begin(),
@@ -255,8 +246,6 @@ struct nstream
         ::thrust::detail::proclaim_copyable_arguments([=] THRUST_DEVICE(const T& ai, const T& bi, const T& ci) {
           return ai + bi + scalar * ci;
         })));
-    d_timer.stop(0);
-    return d_timer.get_duration();
   }
 };
 
@@ -271,15 +260,11 @@ struct nstream_stable
     const T* a_start = thrust::raw_pointer_cast(a.data());
     const T* b_start = thrust::raw_pointer_cast(b.data());
     const T* c_start = thrust::raw_pointer_cast(c.data());
-    bench_utils::gpu_timer d_timer;
-    const T scalar = startScalar;
-    d_timer.start(0);
-    thrust::transform(a.begin(), a.end(), a.begin(), [=] THRUST_DEVICE(const T& ai) {
+    const T scalar   = startScalar;
+    return bench_transform(a.begin(), a.end(), a.begin(), [=] THRUST_DEVICE(const T& ai) {
       const auto i = &ai - a_start;
       return ai + b_start[i] + scalar * c_start[i];
     });
-    d_timer.stop(0);
-    return d_timer.get_duration();
   }
 };
 
