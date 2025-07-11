@@ -53,15 +53,26 @@ jobs:
         check_merge_ref() {
           git ls-remote "https://github.com/ROCm/rocm-libraries" "$merge_ref" | grep -q "$merge_ref"
         }
-        while true; do
+
+        max_attempts=10
+        attempt=0
+
+        while [ $attempt -lt $max_attempts ]; do
           if check_merge_ref; then
             echo "$merge_ref found."
             break
           else
-            echo "$merge_ref not found. Retrying in 60 seconds..."
-            sleep 60
+            retry_delay=60
+            echo "$merge_ref not found. Retrying in $retry_delay seconds..."
+            sleep $retry_delay
           fi
+          attempt=$((attempt + 1))
         done
+
+        if [ $attempt -ge $max_attempts ]; then
+          echo "$merge_ref not found. Maximum attempts reached."
+          exit 1
+        fi
 
     - name: Checkout code
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
