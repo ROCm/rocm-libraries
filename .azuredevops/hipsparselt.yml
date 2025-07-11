@@ -41,3 +41,4 @@ jobs:
     parameters:
       sparseCheckoutDir: projects/hipsparselt
       triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
+- template: templates/report-summary-check-wrapper.yml
