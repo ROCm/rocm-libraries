@@ -44,21 +44,4 @@ stages:
     parameters:
       sparseCheckoutDir: shared/tensile
       triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
-- stage: report_successful
-  condition: succeeded()
-  jobs:
-  - template: templates/report-summary-check.yml
-    parameters:
-      checkConclusion: success
-- stage: report_failed
-  condition: failed()
-  jobs:
-  - template: templates/report-summary-check.yml
-    parameters:
-      checkConclusion: failure
-- stage: report_cancelled
-  condition: canceled() # note: only 1 L in canceled()
-  jobs:
-  - template: templates/report-summary-check.yml
-    parameters:
-      checkConclusion: cancelled
+- template: templates/report-summary-check-wrapper.yml
