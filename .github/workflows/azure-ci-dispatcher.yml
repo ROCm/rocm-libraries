@@ -266,11 +266,9 @@ jobs:
         summary+="|--------------|--------|--------|${newline}"
 
         if [[ -n "${success_run_ids[*]}" ]]; then
-          summary+="| **Successful runs** | | |${newline}"
           for i in "${!success_project_names[@]}"; do
             summary+="| ${success_project_names[i]} | [${success_run_ids[i]}](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=${success_run_ids[i]}) | success |${newline}"
           done
-          summary+="${newline}"
         fi
 
         for i in "${!project_names[@]}"; do
