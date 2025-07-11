@@ -152,10 +152,6 @@ if(DISABLE_WERROR)
 else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
 endif()
-if(ROCRAND_ENABLE_COVERAGE)
-    target_compile_options( rocrand PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping )
-    target_link_options( rocrand INTERFACE -fprofile-instr-generate )
-endif()
 
 if (CMAKE_CXX_STANDARD EQUAL 14)
   message(WARNING "C++14 will be deprecated in the next major release")
@@ -210,6 +206,11 @@ add_subdirectory(library)
 
 if(BUILD_TEST OR BUILD_BENCHMARK)
   rocm_package_setup_component(clients)
+endif()
+
+if(ROCRAND_ENABLE_COVERAGE)
+    target_compile_options( rocrand PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping )
+    target_link_options( rocrand INTERFACE -fprofile-instr-generate )
 endif()
 
 # Tests
