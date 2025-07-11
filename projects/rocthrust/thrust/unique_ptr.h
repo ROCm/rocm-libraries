@@ -309,6 +309,27 @@ public:
     //==========================================================================
     // Modifiers
     //==========================================================================
+    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer release() noexcept
+    {
+        pointer temp = m_ptr;
+        m_ptr = pointer();
+        return temp;
+    }
+
+    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void reset(pointer p = pointer()) noexcept 
+    {
+        pointer temp = m_ptr;
+        m_ptr = p;
+        if (temp)
+            m_deleter(temp);
+    }
+
+    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr& u) noexcept
+    {
+        using std::swap;
+        swap(m_ptr, u.m_ptr);
+        swap(m_deleter, u.m_deleter);
+    }
 
 };
 
