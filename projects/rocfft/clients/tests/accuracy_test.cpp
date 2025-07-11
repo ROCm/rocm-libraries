@@ -230,7 +230,7 @@ __host__ __device__ static void store_callback_round_trip_inverse(
     Tdata* output, size_t offset, Tdata element, void* cbdata, void* sharedMem)
 {
     auto testdata = static_cast<callback_test_data*>(cbdata);
-    // add scalar to each element
+    // divide each element by scalar
     if(output == testdata->base)
     {
         output[offset] = element / testdata->scalar;

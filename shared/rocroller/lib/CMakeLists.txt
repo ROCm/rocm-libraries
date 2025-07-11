@@ -67,6 +67,7 @@ set(rocroller_src
     source/Expression.cpp
     source/Expression_evaluate.cpp
     source/Expression_generate.cpp
+    source/Expression_referencedKernelArguments.cpp
     source/Expression_resultType.cpp
     source/Expression_serialization.cpp
     source/Expression_toString.cpp
@@ -142,6 +143,7 @@ set(rocroller_src
     source/Costs/WaitCntNopCost.cpp
 
     source/ExpressionTransformations/CombineShifts.cpp
+    source/ExpressionTransformations/ConvertPropagation.cpp
     source/ExpressionTransformations/DataFlowTagPropagation.cpp
     source/ExpressionTransformations/FastArithmetic.cpp
     source/ExpressionTransformations/FastDivision.cpp
@@ -153,10 +155,12 @@ set(rocroller_src
     source/ExpressionTransformations/LowerBitfieldValues.cpp
     source/ExpressionTransformations/LowerExponential.cpp
     source/ExpressionTransformations/LowerPRNG.cpp
+    source/ExpressionTransformations/LowerUnsignedArithmeticShiftR.cpp
     source/ExpressionTransformations/PositionalArgumentPropagation.cpp
     source/ExpressionTransformations/RestoreCommandArguments.cpp
     source/ExpressionTransformations/Simplify.cpp
 
+    source/KernelGraph/ControlFlowArgumentTracer.cpp
     source/KernelGraph/ControlFlowRWTracer.cpp
     source/KernelGraph/ControlGraph/ControlGraph.cpp
     source/KernelGraph/ControlGraph/Operation.cpp
@@ -193,12 +197,14 @@ set(rocroller_src
     source/KernelGraph/Transformations/FuseLoops.cpp
     source/KernelGraph/Transformations/IdentifyParallelDimensions.cpp
     source/KernelGraph/Transformations/InlineIncrements.cpp
+    source/KernelGraph/Transformations/InlineInits.cpp
     source/KernelGraph/Transformations/KernelGraph_loop.cpp
     source/KernelGraph/Transformations/LoadPacked.cpp
     source/KernelGraph/Transformations/LoopOverTileNumbers.cpp
     source/KernelGraph/Transformations/LowerLinear.cpp
     source/KernelGraph/Transformations/LowerTensorContraction.cpp
     source/KernelGraph/Transformations/LowerTile.cpp
+    source/KernelGraph/Transformations/NopExtraScopes.cpp
     source/KernelGraph/Transformations/OrderEpilogueBlocks.cpp
     source/KernelGraph/Transformations/OrderMemory.cpp
     source/KernelGraph/Transformations/OrderMultiplyNodes.cpp
@@ -216,6 +222,7 @@ set(rocroller_src
     source/Observers/DGEMM16x16x4Write.cpp
     source/Observers/DGEMM4x4x4Write.cpp
     source/Observers/DLWrite.cpp
+    source/Observers/FileWritingObserver.cpp
     source/Observers/MEMObserver.cpp
     source/Observers/MFMAObserver.cpp
     source/Observers/OPSEL94x.cpp
@@ -231,8 +238,8 @@ set(rocroller_src
     source/Observers/VCMPXWrite94x.cpp
     source/Observers/WMMAObserver.cpp
     source/Observers/WMMAReadSrcD.cpp
-    source/Observers/WMMAWriteSrcD.cpp
     source/Observers/WMMAWrite.cpp
+    source/Observers/WMMAWriteSrcD.cpp
     source/Observers/WaitcntObserver.cpp
     source/Observers/XDLReadSrcC908.cpp
     source/Observers/XDLReadSrcC90a.cpp

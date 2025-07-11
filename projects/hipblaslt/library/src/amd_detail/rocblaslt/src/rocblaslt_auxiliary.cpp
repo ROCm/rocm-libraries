@@ -483,6 +483,8 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         amaxD,
                                         nullptr,
                                         maxWorkSpaceBytes,
+                                        matmul_descr->act0,
+                                        matmul_descr->act1,
                                         nullptr,
                                         handle->Synchronizer,
                                         swizzleA,
@@ -1035,11 +1037,8 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 break;
-            case ROCBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT:
-                matmulDesc->scaleAType = RocblasltContractionProblem::ScalingFormat::Vector;
             case ROCBLASLT_MATMUL_DESC_A_SCALE_POINTER:
-                if(matmulAttr == ROCBLASLT_MATMUL_DESC_A_SCALE_POINTER
-                   && matmulDesc->scaleAType == RocblasltContractionProblem::ScalingFormat::None)
+                if(matmulDesc->scaleAType == RocblasltContractionProblem::ScalingFormat::None)
                 {
                     matmulDesc->scaleAType = RocblasltContractionProblem::ScalingFormat::Scalar;
                 }
@@ -1087,11 +1086,8 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 break;
-            case ROCBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT:
-                matmulDesc->scaleBType = RocblasltContractionProblem::ScalingFormat::Vector;
             case ROCBLASLT_MATMUL_DESC_B_SCALE_POINTER:
-                if(matmulAttr == ROCBLASLT_MATMUL_DESC_B_SCALE_POINTER
-                   && matmulDesc->scaleBType == RocblasltContractionProblem::ScalingFormat::None)
+                if(matmulDesc->scaleBType == RocblasltContractionProblem::ScalingFormat::None)
                 {
                     matmulDesc->scaleBType = RocblasltContractionProblem::ScalingFormat::Scalar;
                 }
@@ -1253,6 +1249,24 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 break;
+            case ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT:
+                if(sizeof(float) <= sizeInBytes)
+                    memcpy(&matmulDesc->act0, buf, sizeof(float));
+                else
+                {
+                    log_error(__func__, "invalid act arg0 buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
+            case ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT:
+                if(sizeof(float) <= sizeInBytes)
+                    memcpy(&matmulDesc->act1, buf, sizeof(float));
+                else
+                {
+                    log_error(__func__, "invalid act arg1 buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
             default:
                 log_error(__func__, "invalid attribute", matmulAttr);
                 return rocblaslt_status_invalid_value;
@@ -1351,7 +1365,6 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 memcpy(buf, &matmulDesc->bias, sizeof(void*));
                 break;
             case ROCBLASLT_MATMUL_DESC_A_SCALE_POINTER:
-            case ROCBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT:
                 if(sizeWritten)
                     *sizeWritten = sizeof(void*);
                 if(sizeInBytes < sizeof(void*))
@@ -1397,7 +1410,6 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                 }
                 break;
             case ROCBLASLT_MATMUL_DESC_B_SCALE_POINTER:
-            case ROCBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT:
                 if(sizeWritten)
                     *sizeWritten = sizeof(void*);
                 if(sizeInBytes < sizeof(void*))

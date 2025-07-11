@@ -71,8 +71,9 @@ extern "C" {
 *  \par Mixed precisions:
 *  <table>
 *  <caption id="axpby_mixed">Mixed Precisions</caption>
-*  <tr><th>X / Y                   <th>compute_type
-*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f32_r
+*  <tr><th>X / Y                     <th>compute_type
+*  <tr><td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f32_r
 *  </table>
 *
 *  \note

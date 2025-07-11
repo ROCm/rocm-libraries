@@ -30,6 +30,7 @@
 #include <rocRoller/CommandSolution_fwd.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/KernelGraph/Constraints.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/ControlFlowArgumentTracer_fwd.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
 #include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
@@ -54,9 +55,11 @@ namespace rocRoller
          */
         class KernelGraph
         {
-            std::vector<GraphConstraint> m_constraints{
-                &NoDanglingMappings, &SingleControlRoot, &NoRedundantSetCoordinates};
-            std::vector<std::string> m_transforms;
+            std::vector<GraphConstraint> m_constraints{&NoDanglingMappings,
+                                                       &SingleControlRoot,
+                                                       &NoRedundantSetCoordinates,
+                                                       &WalkableControlGraph};
+            std::vector<std::string>     m_transforms;
 
         public:
             ControlGraph::ControlGraph       control;
@@ -126,7 +129,17 @@ namespace rocRoller
          *
          * @ingroup KernelGraph
          */
-        Generator<Instruction> generate(KernelGraph, AssemblyKernelPtr);
+        Generator<Instruction> generate(KernelGraph graph, AssemblyKernelPtr kernel);
+
+        /**
+         * Testing: Supply a specific ControlFlowArgumentTracer.
+         *
+         * @ingroup KernelGraph
+         * @ingroup Testing
+         */
+        Generator<Instruction> generate(KernelGraph                 graph,
+                                        AssemblyKernelPtr           kernel,
+                                        ControlFlowArgumentTracer&& argTracer);
 
         std::string toYAML(KernelGraph const& g);
         KernelGraph fromYAML(std::string const& str);

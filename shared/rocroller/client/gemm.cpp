@@ -383,7 +383,7 @@ namespace rocRoller::Client::GEMMClient
             deviceScaleB = make_shared_device(hostScaleB);
         }
 
-        std::cout << "Generating lauch parameters and runtime arguments..." << std::endl;
+        std::cout << "Generating launch parameters and runtime arguments..." << std::endl;
 
         commandKernel->loadKernel();
 
@@ -497,7 +497,7 @@ namespace rocRoller::Client::GEMMClient
                          * 1.e-9
                   << std::endl;
 
-        result.kernelAssemble = TimerPool::nanoseconds("CommandKernel::assembleKernel");
+        result.kernelAssemble = TimerPool::nanoseconds("Assembler::assembleMachineCode");
         result.kernelGenerate = TimerPool::nanoseconds("CommandKernel::generateKernel");
 
         if(runParams.check)

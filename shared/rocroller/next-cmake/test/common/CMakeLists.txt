@@ -31,12 +31,17 @@ add_library(rocroller::common-test-utilities ALIAS common-test-utilities)
 
 target_link_libraries(common-test-utilities
     PUBLIC
-        roc::rocroller
+        roc::rocroller-interface
         roc::mxDataGenerator
         hip::host
         OpenMP::OpenMP_CXX
         ${CBLAS_LIBRARIES}
 )
+
+if(ROCROLLER_ENABLE_TIMERS)
+    target_compile_definitions(common-test-utilities PUBLIC ROCROLLER_ENABLE_TIMERS)
+    target_compile_options(common-test-utilities PUBLIC -pg -fno-omit-frame-pointer)
+endif()
 
 target_include_directories(common-test-utilities
     PUBLIC

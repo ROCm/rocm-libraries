@@ -227,13 +227,11 @@ namespace ExpressionTest
 
             // expr4
             v_bfe_i32 v4, v0, 3, 7
-            v_mov_b32 v5, 255
-            v_and_b32 v4, v5, v4
+            v_and_b32 v4, 255, v4
 
             // expr5
             v_bfe_i32 v5, v0, 4, 7
-            v_mov_b32 v6, 255
-            v_and_b32 v5, v6, v5
+            v_and_b32 v5, 255, v5
 
             // expr6
             v_bfe_i32 v6, v0, 5, 17
@@ -824,16 +822,14 @@ namespace ExpressionTest
 
             // X is v[36:37]:2xH and Y is v[38:41]:H (and Z is same as Y)
             // Then Y <- X + Y will be: Add(v[36:37]:2xH, v[38:41]:H)
-            v_mov_b32 v42, 65535
-            v_and_b32 v44, v42, v36
-            v_lshrrev_b32 v45, 16, v36
-            v_add_f16 v38, v44, v38
-            v_add_f16 v39, v45, v39
-            v_mov_b32 v43, 65535
-            v_and_b32 v44, v43, v37
-            v_lshrrev_b32 v45, 16, v37
-            v_add_f16 v40, v44, v40
-            v_add_f16 v41, v45, v41
+            v_and_b32 v42, 65535, v36
+            v_lshrrev_b32 v43, 16, v36
+            v_add_f16 v38, v42, v38
+            v_add_f16 v39, v43, v39
+            v_and_b32 v42, 65535, v37
+            v_lshrrev_b32 v43, 16, v37
+            v_add_f16 v40, v42, v40
+            v_add_f16 v41, v43, v41
         )";
 
         CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
@@ -1252,10 +1248,9 @@ namespace ExpressionTest
             CHECK(rSgprBool32 == resultType(op(sgprBool32, sgprBool32)));
         }
 
-        SECTION("Arithmetic ternary")
+        SECTION("MultiplyAdd")
         {
-            auto op = GENERATE_COPY(
-                Expression::multiplyAdd, Expression::addShiftL, Expression::shiftLAdd);
+            auto op = Expression::multiplyAdd;
 
             CAPTURE(op(vgprFloat, vgprFloat, vgprFloat));
 
@@ -1275,6 +1270,92 @@ namespace ExpressionTest
             CHECK(rSgprHalf == resultType(op(sgprHalf, sgprHalf, sgprHalf)));
             CHECK(rSgprHalfx2 == resultType(op(sgprHalfx2, sgprHalfx2, sgprHalfx2)));
             CHECK(rSgprBool32 == resultType(op(sgprBool32, sgprBool32, sgprBool32)));
+        }
+
+        SECTION("AddShiftL")
+        {
+            auto op = Expression::addShiftL;
+
+            CAPTURE(op(vgprFloat, vgprFloat, vgprFloat));
+
+            CHECK(rVgprFloat == resultType(op(vgprFloat, vgprFloat, vgprFloat)));
+            CHECK(rVgprDouble == resultType(op(vgprDouble, vgprDouble, vgprDouble)));
+            CHECK(rVgprInt32 == resultType(op(vgprInt32, vgprInt32, vgprInt32)));
+            CHECK(rVgprInt64 == resultType(op(vgprInt64, vgprInt64, vgprInt64)));
+            CHECK(rVgprUInt32 == resultType(op(vgprUInt32, vgprUInt32, vgprUInt32)));
+            CHECK(rVgprHalf == resultType(op(vgprHalf, vgprHalf, vgprHalf)));
+            CHECK(rVgprHalfx2 == resultType(op(vgprHalfx2, vgprHalfx2, vgprHalfx2)));
+            CHECK(rVgprBool32 == resultType(op(vgprBool32, vgprBool32, vgprBool32)));
+            CHECK(rSgprFloat == resultType(op(sgprFloat, sgprFloat, sgprFloat)));
+            CHECK(rSgprDouble == resultType(op(sgprDouble, sgprDouble, sgprDouble)));
+            CHECK(rSgprInt32 == resultType(op(sgprInt32, sgprInt32, sgprInt32)));
+            CHECK(rSgprInt64 == resultType(op(sgprInt64, sgprInt64, sgprInt64)));
+            CHECK(rSgprUInt32 == resultType(op(sgprUInt32, sgprUInt32, sgprUInt32)));
+            CHECK(rSgprHalf == resultType(op(sgprHalf, sgprHalf, sgprHalf)));
+            CHECK(rSgprHalfx2 == resultType(op(sgprHalfx2, sgprHalfx2, sgprHalfx2)));
+            CHECK(rSgprBool32 == resultType(op(sgprBool32, sgprBool32, sgprBool32)));
+
+            // Shift not considered in promotion
+            CHECK(rVgprInt32 == resultType(op(vgprInt32, vgprInt32, vgprUInt32)));
+            CHECK(rVgprInt32 == resultType(op(vgprInt32, vgprInt32, vgprInt32)));
+            CHECK(rVgprInt32 == resultType(op(vgprInt32, vgprInt32, vgprUInt64)));
+            CHECK(rVgprInt32 == resultType(op(vgprInt32, vgprInt32, vgprInt64)));
+            CHECK(rVgprUInt32 == resultType(op(vgprUInt32, vgprUInt32, vgprUInt32)));
+            CHECK(rVgprUInt32 == resultType(op(vgprUInt32, vgprUInt32, vgprInt32)));
+            CHECK(rVgprUInt32 == resultType(op(vgprUInt32, vgprUInt32, vgprUInt64)));
+            CHECK(rVgprUInt32 == resultType(op(vgprUInt32, vgprUInt32, vgprInt64)));
+
+            CHECK(rVgprUInt64 == resultType(op(vgprUInt64, vgprUInt64, vgprUInt32)));
+            CHECK(rVgprUInt64 == resultType(op(vgprUInt64, vgprUInt64, vgprInt32)));
+            CHECK(rVgprUInt64 == resultType(op(vgprUInt64, vgprUInt64, vgprUInt64)));
+            CHECK(rVgprUInt64 == resultType(op(vgprUInt64, vgprUInt64, vgprInt64)));
+            CHECK(rVgprUInt64 == resultType(op(vgprUInt64, vgprUInt64, vgprUInt32)));
+            CHECK(rVgprUInt64 == resultType(op(vgprUInt64, vgprUInt64, vgprInt32)));
+            CHECK(rVgprUInt64 == resultType(op(vgprUInt64, vgprUInt64, vgprUInt64)));
+            CHECK(rVgprUInt64 == resultType(op(vgprUInt64, vgprUInt64, vgprInt64)));
+        }
+
+        SECTION("ShiftLAdd")
+        {
+            auto op = Expression::shiftLAdd;
+
+            CAPTURE(op(vgprFloat, vgprFloat, vgprFloat));
+
+            CHECK(rVgprFloat == resultType(op(vgprFloat, vgprFloat, vgprFloat)));
+            CHECK(rVgprDouble == resultType(op(vgprDouble, vgprDouble, vgprDouble)));
+            CHECK(rVgprInt32 == resultType(op(vgprInt32, vgprInt32, vgprInt32)));
+            CHECK(rVgprInt64 == resultType(op(vgprInt64, vgprInt64, vgprInt64)));
+            CHECK(rVgprUInt32 == resultType(op(vgprUInt32, vgprUInt32, vgprUInt32)));
+            CHECK(rVgprHalf == resultType(op(vgprHalf, vgprHalf, vgprHalf)));
+            CHECK(rVgprHalfx2 == resultType(op(vgprHalfx2, vgprHalfx2, vgprHalfx2)));
+            CHECK(rVgprBool32 == resultType(op(vgprBool32, vgprBool32, vgprBool32)));
+            CHECK(rSgprFloat == resultType(op(sgprFloat, sgprFloat, sgprFloat)));
+            CHECK(rSgprDouble == resultType(op(sgprDouble, sgprDouble, sgprDouble)));
+            CHECK(rSgprInt32 == resultType(op(sgprInt32, sgprInt32, sgprInt32)));
+            CHECK(rSgprInt64 == resultType(op(sgprInt64, sgprInt64, sgprInt64)));
+            CHECK(rSgprUInt32 == resultType(op(sgprUInt32, sgprUInt32, sgprUInt32)));
+            CHECK(rSgprHalf == resultType(op(sgprHalf, sgprHalf, sgprHalf)));
+            CHECK(rSgprHalfx2 == resultType(op(sgprHalfx2, sgprHalfx2, sgprHalfx2)));
+            CHECK(rSgprBool32 == resultType(op(sgprBool32, sgprBool32, sgprBool32)));
+
+            // Shift not considered in promotion
+            CHECK(rVgprInt32 == resultType(op(vgprInt32, vgprUInt32, vgprInt32)));
+            CHECK(rVgprInt32 == resultType(op(vgprInt32, vgprInt32, vgprInt32)));
+            CHECK(rVgprInt32 == resultType(op(vgprInt32, vgprUInt64, vgprInt32)));
+            CHECK(rVgprInt32 == resultType(op(vgprInt32, vgprInt64, vgprInt32)));
+            CHECK(rVgprUInt32 == resultType(op(vgprUInt32, vgprUInt32, vgprUInt32)));
+            CHECK(rVgprUInt32 == resultType(op(vgprUInt32, vgprInt32, vgprUInt32)));
+            CHECK(rVgprUInt32 == resultType(op(vgprUInt32, vgprUInt64, vgprUInt32)));
+            CHECK(rVgprUInt32 == resultType(op(vgprUInt32, vgprInt64, vgprUInt32)));
+
+            CHECK(rVgprUInt64 == resultType(op(vgprUInt64, vgprUInt32, vgprUInt64)));
+            CHECK(rVgprUInt64 == resultType(op(vgprUInt64, vgprInt32, vgprUInt64)));
+            CHECK(rVgprUInt64 == resultType(op(vgprUInt64, vgprUInt64, vgprUInt64)));
+            CHECK(rVgprUInt64 == resultType(op(vgprUInt64, vgprInt64, vgprUInt64)));
+            CHECK(rVgprUInt64 == resultType(op(vgprUInt64, vgprUInt32, vgprUInt64)));
+            CHECK(rVgprUInt64 == resultType(op(vgprUInt64, vgprInt32, vgprUInt64)));
+            CHECK(rVgprUInt64 == resultType(op(vgprUInt64, vgprUInt64, vgprUInt64)));
+            CHECK(rVgprUInt64 == resultType(op(vgprUInt64, vgprInt64, vgprUInt64)));
         }
 
         SECTION("Conditional")
@@ -2185,7 +2266,7 @@ namespace ExpressionTest
         context.get()->schedule(Expression::generate(destReg, expr1 ^ expr2, context.get()));
 
         auto result = R"(
-            v_add_i32 v1, -5, v0
+            v_add_i32 v1, v0, -5
             v_and_b32 v1, -5, v0
             v_or_b32 v1, -5, v0
             v_xor_b32 v1, -5, v0
@@ -2338,4 +2419,71 @@ namespace ExpressionTest
         CHECK(Expression::complexity(intExpr / intExpr)
               > Expression::complexity(intExpr + intExpr));
     }
+
+    TEST_CASE("Expression kernel arguments", "[expression][utility]")
+    {
+        namespace XP  = Expression;
+        using strings = std::unordered_set<std::string>;
+
+        auto karg0 = std::make_shared<AssemblyKernelArgument>("KernelArg0", DataType::Int32);
+        auto karg1 = std::make_shared<AssemblyKernelArgument>("KernelArg1", DataType::Int32);
+        auto karg2 = std::make_shared<AssemblyKernelArgument>("KernelArg2", DataType::Int32);
+
+        auto kargExp0 = std::make_shared<XP::Expression>(karg0);
+        auto kargExp1 = std::make_shared<XP::Expression>(karg1);
+        auto kargExp2 = std::make_shared<XP::Expression>(karg2);
+
+        CHECK(referencedKernelArguments(kargExp0) == strings({"KernelArg0"}));
+
+        CHECK(referencedKernelArguments((kargExp0 + kargExp0) + XP::literal(5))
+              == strings({"KernelArg0"}));
+
+        CHECK(referencedKernelArguments((kargExp0 + kargExp1) + XP::literal(5))
+              == strings({"KernelArg0", "KernelArg1"}));
+
+        CHECK(referencedKernelArguments(
+                  Expression::conditional(kargExp0, kargExp1, (kargExp2 + XP::literal(5))))
+              == strings({"KernelArg0", "KernelArg1", "KernelArg2"}));
+
+        SECTION("a")
+        {
+            auto scaledMM = std::make_shared<XP::Expression>(Expression::ScaledMatrixMultiply{
+                kargExp0, XP::literal(3), XP::literal(2), XP::literal(3), XP::literal(9)});
+
+            CHECK(referencedKernelArguments(scaledMM) == strings({"KernelArg0"}));
+        }
+
+        SECTION("b")
+        {
+            auto scaledMM = std::make_shared<XP::Expression>(Expression::ScaledMatrixMultiply{
+                XP::literal(1), kargExp1, XP::literal(3), XP::literal(2), XP::literal(3)});
+
+            CHECK(referencedKernelArguments(scaledMM) == strings({"KernelArg1"}));
+        }
+
+        SECTION("c")
+        {
+            auto scaledMM = std::make_shared<XP::Expression>(Expression::ScaledMatrixMultiply{
+                XP::literal(3), XP::literal(1), kargExp2, XP::literal(2), XP::literal(3)});
+
+            CHECK(referencedKernelArguments(scaledMM) == strings({"KernelArg2"}));
+        }
+
+        SECTION("sa")
+        {
+            auto scaledMM = std::make_shared<XP::Expression>(Expression::ScaledMatrixMultiply{
+                XP::literal(2), XP::literal(3), XP::literal(1), kargExp0, XP::literal(3)});
+
+            CHECK(referencedKernelArguments(scaledMM) == strings({"KernelArg0"}));
+        }
+
+        SECTION("sb")
+        {
+            auto scaledMM = std::make_shared<XP::Expression>(Expression::ScaledMatrixMultiply{
+                XP::literal(3), XP::literal(2), XP::literal(3), XP::literal(1), kargExp1});
+
+            CHECK(referencedKernelArguments(scaledMM) == strings({"KernelArg1"}));
+        }
+    }
+
 }

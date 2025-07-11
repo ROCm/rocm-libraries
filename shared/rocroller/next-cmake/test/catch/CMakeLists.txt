@@ -42,6 +42,7 @@ target_link_libraries(rocroller-tests-catch
         rocroller::common-test-utilities
         Catch2::Catch2WithMain
         ${BLAS_LIBRARIES}
+        ${msgpack_libs}
 )
 
 set(_CMAKE_CURRENT_SOURCE_DIR "${ROCROLLER_TEST_DIR}/catch")
@@ -49,15 +50,18 @@ target_sources(rocroller-tests-catch
     PRIVATE
         "${_CMAKE_CURRENT_SOURCE_DIR}/CustomAssertions.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/TestKernels.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/AddDeallocateTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/AddPrefetchTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/AliasDataFlowTagsTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/AnnotateInstructionsTest.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/ArgumentTracerTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/BinaryExpressionTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/BranchGeneratorTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/CommandArgumentValueTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/CommandTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/ConnectWorkgroupsTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/CustomAssertionTest.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/CustomAssertions.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/CustomMatcherTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/DataTypesTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/ExpressionContainsSubExpressionTest.cpp"
@@ -91,7 +95,9 @@ target_sources(rocroller-tests-catch
         "${_CMAKE_CURRENT_SOURCE_DIR}/SettingsTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/SubDwordExpressionTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/TernaryExpressionTest.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/TestContext.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/TestContextTest.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/TestKernels.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/TransposeLoadsTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/UnrollLoopsTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/UtilsTest.cpp"

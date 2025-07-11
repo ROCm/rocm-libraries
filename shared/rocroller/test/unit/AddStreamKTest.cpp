@@ -36,6 +36,7 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -122,7 +123,7 @@ namespace AddStreamKTest
     protected:
         void SetUp() override
         {
-            m_kernelOptions.assertWaitCntState = false;
+            m_kernelOptions->assertWaitCntState = false;
 
             GPUContextFixtureParam<bool>::SetUp();
         }

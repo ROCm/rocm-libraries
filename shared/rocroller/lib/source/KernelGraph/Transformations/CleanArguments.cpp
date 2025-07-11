@@ -202,7 +202,8 @@ namespace rocRoller
                     if(size && !Expression::evaluationTimes(size)[ET::Translate])
                     {
                         auto resultType = resultVariableType(size);
-                        if(resultType == DataType::Int32 || resultType == DataType::Int64)
+                        if(resultType == DataType::Int32 || resultType == DataType::Int64
+                           || resultType == DataType::UInt32 || resultType == DataType::UInt64)
                             enableDivideBy(size, m_context);
                     }
                 };
@@ -241,7 +242,8 @@ namespace rocRoller
             template <CDimension T>
             Dimension visitDimension(int tag, T const& dim)
             {
-                auto d   = dim;
+                auto d = dim;
+
                 d.size   = cleanExpr(dim.size);
                 d.stride = cleanExpr(dim.stride);
                 d.offset = cleanExpr(dim.offset);

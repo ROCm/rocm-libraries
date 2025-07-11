@@ -112,6 +112,11 @@ namespace rocRollerTest
             CommandPtr  getCommand();
             KernelGraph getKernelGraph();
 
+            rocRoller::Operations::OperationTag aTag, bTag;
+            rocRoller::Operations::OperationTag resultTag;
+
+            CommandParametersPtr getCommandParameters() const;
+
         private:
             void createCommand();
 
@@ -302,6 +307,14 @@ namespace rocRollerTest
             std::vector<size_t> m_literalStrides;
             CommandPtr          m_command;
         };
+    }
+
+    template <typename Transform, typename... Args>
+    rocRoller::KernelGraph::KernelGraph transform(rocRoller::KernelGraph::KernelGraph& graph,
+                                                  Args... args)
+    {
+        auto xform = std::make_shared<Transform>(std::forward<Args>(args)...);
+        return graph.transform(xform);
     }
 }
 #include "CommonGraphs_impl.hpp"

@@ -59,7 +59,7 @@ namespace rocRollerTest
     protected:
         void SetUp() override
         {
-            m_kernelOptions.assertWaitCntState = false;
+            m_kernelOptions->assertWaitCntState = false;
 
             std::tie(procedure, m_randomSeed) = GetParam();
             CurrentGPUContextFixture::SetUp();

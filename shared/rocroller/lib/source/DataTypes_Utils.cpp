@@ -465,6 +465,11 @@ namespace rocRoller
         return type == DataType::FP4;
     }
 
+    bool isUnpackedF8F6F4(DataType type)
+    {
+        return isUnpackedF8(type) || isUnpackedF6(type) || isUnpackedF4(type);
+    }
+
     uint packingFactorForDataType(DataType type)
     {
         auto packing = DataTypeInfo::Get(type).packing;

@@ -298,12 +298,13 @@ namespace rocRoller::KernelGraph
      * generating `op`.
      */
     DataType getOffsetDataType(int op, KernelGraph const& graph, bool direct2LDS)
-
     {
         DataType rv = DataType::UInt64;
+        auto     s  = graph.control.get<StoreTiled>(op);
+        auto     l  = graph.control.get<LoadTiled>(op);
         auto     ll = graph.control.get<LoadLDSTile>(op);
         auto     sl = graph.control.get<StoreLDSTile>(op);
-        if(ll || sl || direct2LDS)
+        if(s || l || ll || sl || direct2LDS)
         {
             rv = DataType::UInt32;
         }
@@ -359,8 +360,10 @@ namespace rocRoller::KernelGraph
 
             int base = (info.base == -1) ? -1 : offsetOfCoord.at(info.base);
 
+            // For future: choose type based on buffer or non-buffer
             auto offsetDataType = getOffsetDataType(op, graph, isDirect2LDS);
             auto strideDataType = DataType::UInt64;
+
             if(info.isUnroll)
             {
                 offsetDataType = DataType::Int64;
@@ -390,16 +393,17 @@ namespace rocRoller::KernelGraph
             if(info.needsUpdate)
             {
                 auto offsetExpr = std::make_shared<Expression::Expression>(
-                    Expression::DataFlowTag{offset, Register::Type::Vector, DataType::UInt64});
+                    Expression::DataFlowTag{offset, Register::Type::Vector, offsetDataType});
                 auto strideExpr = std::make_shared<Expression::Expression>(
                     Expression::DataFlowTag{stride, Register::Type::Scalar, DataType::UInt64});
 
                 if(step == nullptr)
-                    update = graph.control.addElement(
-                        Assign{Register::Type::Vector, offsetExpr + strideExpr});
+                    update = graph.control.addElement(Assign{
+                        Register::Type::Vector, convert(offsetDataType, offsetExpr + strideExpr)});
                 else
                     update = graph.control.addElement(
-                        Assign{Register::Type::Vector, offsetExpr + step * strideExpr});
+                        Assign{Register::Type::Vector,
+                               convert(offsetDataType, offsetExpr + step * strideExpr)});
                 graph.mapper.connect(update, offset, NaryArgument::DEST);
             }
         }
@@ -636,8 +640,21 @@ namespace rocRoller::KernelGraph
                                 kgraph, spec.location, kgraph.control.addElement(Scope()), false);
                         }
                         auto scope = scopes[spec.location];
-                        kgraph.control.addElement(Body(), {scope}, {chain.top});
-                        kgraph.control.addElement(Sequence(), {chain.bottom}, {spec.location});
+                        if(m_serializeComputeIndex)
+                        {
+                            auto isScope = kgraph.control.get<Scope>(scope).has_value();
+                            kgraph.control.addElement(isScope ? ControlEdge(Body())
+                                                              : ControlEdge(Sequence()),
+                                                      {scope},
+                                                      {chain.top});
+                            kgraph.control.addElement(Sequence(), {chain.bottom}, {spec.location});
+                            scopes[spec.location] = chain.bottom;
+                        }
+                        else
+                        {
+                            kgraph.control.addElement(Body(), {scope}, {chain.top});
+                            kgraph.control.addElement(Sequence(), {chain.bottom}, {spec.location});
+                        }
                     }
                     else
                     {
@@ -682,6 +699,8 @@ namespace rocRoller::KernelGraph
 
     private:
         std::map<ComputeIndexChainSpecification, std::vector<int>> m_chains;
+
+        bool m_serializeComputeIndex = true;
     };
 
     KernelGraph AddComputeIndex::apply(KernelGraph const& original)

@@ -536,7 +536,7 @@ typedef enum rocsparse_datatype_
     rocsparse_datatype_u8_r   = 161, /**<  8-bit unsigned integer, real */
     rocsparse_datatype_i32_r  = 162, /**< 32-bit signed integer, real */
     rocsparse_datatype_u32_r  = 163, /**< 32-bit unsigned integer, real */
-    rocsparse_datatype_bf16_r = 168 /**< 16-bit bfloat, real */
+    rocsparse_datatype_bf16_r = 168 /**< 16-bit brain floating point, real */
 } rocsparse_datatype;
 
 /*! \ingroup types_module
@@ -954,10 +954,14 @@ typedef enum rocsparse_spgeam_stage_
 {
     rocsparse_spgeam_stage_analysis = 1, /**< Computes number of non-zero entries. */
     rocsparse_spgeam_stage_compute  = 2, /**< Performs the actual SpGEAM computation. */
+    rocsparse_spgeam_stage_symbolic_analysis
+    = 3, /**< Performs only the symbolic analysis SpGEAM computation to fill the column indices array. */
     rocsparse_spgeam_stage_symbolic_compute
-    = 3, /**< Performs only the symbolic SpGEAM computation to fill the column indices array. */
+    = 4, /**< Performs only the symbolic SpGEAM computation to fill the column indices array. */
+    rocsparse_spgeam_stage_numeric_analysis
+    = 5, /**< Performs only the numeric analysis SpGEAM computation to fill the values array. */
     rocsparse_spgeam_stage_numeric_compute
-    = 4 /**< Performs only the numeric SpGEAM computation to fill the values array. */
+    = 6 /**< Performs only the numeric SpGEAM computation to fill the values array. */
 } rocsparse_spgeam_stage;
 
 /*! \ingroup types_module
@@ -972,7 +976,9 @@ typedef enum rocsparse_spgeam_input_
     rocsparse_spgeam_input_scalar_datatype, /**< Select scalar data type for input on SpGEAM descriptor. */
     rocsparse_spgeam_input_compute_datatype, /**< Select compute data type for input on SpGEAM descriptor. */
     rocsparse_spgeam_input_operation_A, /**< Select A matrix transpose operation for input on SpGEAM descriptor. */
-    rocsparse_spgeam_input_operation_B /**< Select B matrix transpose operation for input on SpGEAM descriptor. */
+    rocsparse_spgeam_input_operation_B, /**< Select B matrix transpose operation for input on SpGEAM descriptor. */
+    rocsparse_spgeam_input_scalar_alpha, /**< Select scalar multiplier alpha for input on SpGEAM descriptor. */
+    rocsparse_spgeam_input_scalar_beta /**< Select scalar multiplier beta for input on SpGEAM descriptor. */
 } rocsparse_spgeam_input;
 
 /*! \ingroup types_module

@@ -10,6 +10,7 @@ target_link_libraries(rocroller-tests
         libdivide::libdivide
         ${llvm_libs}
         ${llvm_yaml_libs}
+        ${msgpack_libs}
 )
 
 if(ROCROLLER_ENABLE_LLD)
@@ -33,7 +34,6 @@ target_sources(rocroller-tests
         "${_CMAKE_CURRENT_SOURCE_DIR}/BufferDescriptorTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/CommandTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/CommonSubexpressionElimTest.cpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/ComponentTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/ControlGraphTest.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/ConversionInstructions/Convert_F16_F32.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/ConversionTest.cpp"

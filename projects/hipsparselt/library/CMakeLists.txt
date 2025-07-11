@@ -174,14 +174,6 @@ endif()
 include( GenerateExportHeader )
 generate_export_header( hipsparselt EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/hipsparselt/hipsparselt-export.h)
 
-if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
-  rocm_wrap_header_file(
-    hipsparselt-version.h hipsparselt-export.h
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS include hipsparselt/include
-  )
-endif( )
-
 # Following Boost conventions of prefixing 'lib' on static built libraries, across all platforms
 if( NOT BUILD_SHARED_LIBS )
   set_target_properties( hipsparselt PROPERTIES PREFIX "lib" )
@@ -239,11 +231,3 @@ else( )
 	NAMESPACE roc::
     )
 endif( )
-
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
-  rocm_install(
-    DIRECTORY
-       "${PROJECT_BINARY_DIR}/hipsparselt"
-        DESTINATION "." )
-  message( STATUS "Backward Compatible Sym Link Created for include directories" )
-endif()

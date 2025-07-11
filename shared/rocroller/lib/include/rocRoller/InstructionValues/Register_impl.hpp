@@ -51,13 +51,13 @@ namespace rocRoller
 
         inline std::string RegisterId::toString() const
         {
-            if(IsSpecial(regType))
+            if(IsRegister(regType))
             {
-                return concatenate(regType, regIndex);
+                return concatenate(TypePrefix(regType), regIndex);
             }
             else
             {
-                return concatenate(TypePrefix(regType), regIndex);
+                return concatenate(regType, regIndex);
             }
         }
 
@@ -82,9 +82,26 @@ namespace rocRoller
             case Type::Accumulator:
                 return "a";
 
-            default:
-                throw std::runtime_error("No prefix available for literal values");
+            case Type::Literal:
+            case Type::LocalData:
+            case Type::Label:
+            case Type::NullLiteral:
+            case Type::SCC:
+            case Type::M0:
+            case Type::VCC:
+            case Type::VCC_LO:
+            case Type::VCC_HI:
+            case Type::EXEC:
+            case Type::EXEC_LO:
+            case Type::EXEC_HI:
+            case Type::TTMP7:
+            case Type::TTMP9:
+            case Type::Constant:
+            case Type::Count:
+                Throw<FatalError>("No prefix available for ", toString(t), " values");
             }
+
+            return "";
         }
 
         constexpr inline bool IsRegister(Type t)
@@ -257,6 +274,8 @@ namespace rocRoller
                 return "TTMP7";
             case Type::TTMP9:
                 return "TTMP9";
+            case Type::Constant:
+                return "Constant";
             }
             Throw<FatalError>("Invalid register type!");
         }
@@ -307,6 +326,7 @@ namespace rocRoller
             , m_varType(variableType)
         {
             AssertFatal(ctx != nullptr);
+            AssertFatal(regType != Register::Type::Constant);
             AssertFatal(count > 0, "Invalid register count ", ShowValue(count));
 
             auto const info = DataTypeInfo::Get(variableType);
@@ -328,6 +348,7 @@ namespace rocRoller
             , m_allocationCoord(coord.begin(), coord.end())
         {
             AssertFatal(ctx != nullptr);
+            AssertFatal(regType != Register::Type::Constant);
             m_allocation = Allocation::SameAs(*this, m_name, {});
         }
 
@@ -341,6 +362,7 @@ namespace rocRoller
             , m_allocationCoord(coord)
         {
             AssertFatal(ctx != nullptr);
+            AssertFatal(regType != Register::Type::Constant);
             m_allocation = Allocation::SameAs(*this, m_name, {});
         }
 
@@ -350,6 +372,7 @@ namespace rocRoller
             , m_regType(regType)
             , m_varType(variableType)
         {
+            AssertFatal(regType != Register::Type::Constant);
             // auto range = std::ranges::iota_view{0, count};
             // m_allocationCoord = std::vector(range.begin(), range.end());
             m_allocationCoord = std::vector<int>(count);
@@ -366,6 +389,7 @@ namespace rocRoller
             , m_varType(variableType)
             , m_allocationCoord(coord.begin(), coord.end())
         {
+            AssertFatal(regType != Register::Type::Constant);
             AssertFatal(m_context.lock() != nullptr);
         }
 
@@ -379,6 +403,7 @@ namespace rocRoller
             , m_varType(variableType)
             , m_allocationCoord(coord)
         {
+            AssertFatal(regType != Register::Type::Constant);
             AssertFatal(m_context.lock() != nullptr);
         }
 
@@ -743,6 +768,9 @@ namespace rocRoller
             case Type::LocalData:
                 os << "LDS:" << m_ldsAllocation->toString();
                 return;
+            case Type::Constant:
+                os << getConstant();
+                return;
             case Type::Count:
                 break;
             }
@@ -791,6 +819,16 @@ namespace rocRoller
             {
                 return "";
             }
+            return rocRoller::toString(m_literalValue);
+        }
+
+        inline std::string Value::getConstant() const
+        {
+            if(m_regType != Type::Constant)
+            {
+                return "";
+            }
+            // Constant is a subset of literal
             return rocRoller::toString(m_literalValue);
         }
 
@@ -1057,19 +1095,6 @@ namespace rocRoller
             }
 
             AssertFatal(m_options.contiguousChunkWidth > 0, ShowValue(m_options));
-        }
-
-        inline Allocation::~Allocation()
-        {
-            if(m_allocationState == AllocationState::Allocated)
-            {
-                auto context = m_context.lock();
-                if(context && context->kernelOptions().logLevel > LogLevel::Terse)
-                {
-                    auto inst = Instruction::Comment(descriptiveComment("Freeing"));
-                    context->schedule(inst);
-                }
-            }
         }
 
         inline AllocationPtr

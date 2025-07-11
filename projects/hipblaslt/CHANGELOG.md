@@ -7,17 +7,38 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 ### Added
 
 * Stream-K GEMM support has been enabled for the `FP32`, `FP16`, `BF16`, `FP8`, and `BF8` data types on the MI300A APU. To activate this feature, set the `TENSILE_SOLUTION_SELECTION_METHOD` environment variable to `2`, for example, `export TENSILE_SOLUTION_SELECTION_METHOD=2`.
+* Fused Swish/SiLU GEMM in hipBLASLt (enabled by ``HIPBLASLT_EPILOGUE_SWISH_EXT`` and ``HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT``)
+* Added support for ``HIPBLASLT_EPILOGUE_GELU_AUX_BIAS`` for gfx942
+* Added `HIPBLASLT_TUNING_USER_MAX_WORKSPACE` to constrain max workspace size for user offline tuning
+* Added ``HIPBLASLT_ORDER_COL16_4R16`` and ``HIPBLASLT_ORDER_COL16_4R8`` to ``hipblasLtOrder_t`` to support FP16/BF16 swizzle GEMM and FP8/BF8 swizzle GEMM respectively.
 
 ### Changed
 
-* ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT`` and ``HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT`` are deprecated, use ``ROCBLASLT_MATMUL_DESC_A_SCALE_MODE`` and ``ROCBLASLT_MATMUL_DESC_B_SCALE_MODE`` attributes to set scalar (``HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F``) or vector (``HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F``).
+* ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT`` and ``HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT`` are removed. Use the ``HIPBLASLT_MATMUL_DESC_A_SCALE_MODE`` and ``HIPBLASLT_MATMUL_DESC_B_SCALE_MODE`` attributes to set scalar (``HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F``) or vector (``HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F``).
 * The non-V2 APIs (``GemmPreference``, ``GemmProblemType``, ``GemmEpilogue``, ``GemmTuning``, ``GemmInputs``) in the Cpp header are now the same as the V2 APIs (``GemmPreferenceV2``, ``GemmProblemTypeV2``, ``GemmEpilogueV2``, ``GemmTuningV2``, ``GemmInputsV2``). The original non-V2 APIs are removed.
+* `hipblasltExtAMaxWithScale` API is removed.
 
-### Deprecations
+### Optimized
 
-* ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT`` and ``HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT`` are deprecated.
-* `hipblasltExtAMaxWithScale` API is deprecated.
+* Improved performance for 8-bit (FP8/BF8/I8) NN/NT cases by adding ``s_delay_alu`` to reduce stalls from dependent ALU operations on gfx12+.
+* Improved performance for 8-bit and 16-bit (FP16/BF16) TN cases by enabling software dependency check (Expert Scheduling Mode) under certain restrictions to reduce redundant hardware dependency checks on gfx12+.
+* Improved performance for 8-bit, 16-bit, and 32-bit batched GEMM with a better heuristic search algorithm for gfx942.
+
+### Upcoming changes
+
 * V2 APIs (``GemmPreferenceV2``, ``GemmProblemTypeV2``, ``GemmEpilogueV2``, ``GemmTuningV2``, ``GemmInputsV2``) are deprecated.
+
+## hipBLASLt 0.12.1 for ROCm 6.4.2
+
+### Added
+
+* Support for gfx1151
+
+## hipBLASLt 0.12.1 for ROCm 6.4.1
+
+### Resolved issues
+
+* Fixed an accuracy issue that occurred for some solutions using an `FP32` or `TF32` data type with a TT transpose.
 
 ## hipBLASLt 0.12.0 for ROCm 6.4.0
 

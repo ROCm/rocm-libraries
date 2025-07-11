@@ -505,8 +505,8 @@ namespace GEMMDriverTest
             params->prefetchInFlight              = gemm.prefetchInFlight;
             params->prefetchLDSFactor             = gemm.prefetchLDSFactor;
             params->prefetchMixMemOps             = gemm.prefetchMixMemOps;
-            params->transposeMemoryAccess[LayoutType::MATRIX_A] = gemm.transA == "T";
-            params->transposeMemoryAccess[LayoutType::MATRIX_B] = gemm.transB == "T";
+            params->transposeMemoryAccess.set(LayoutType::MATRIX_A, gemm.transA == "T");
+            params->transposeMemoryAccess.set(LayoutType::MATRIX_B, gemm.transB == "T");
 
             if(gemm.workgroupMapping.first != -1)
             {
@@ -1153,7 +1153,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
     {
-        if(!m_context->targetArchitecture().target().isCDNA2GPU())
+        if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
@@ -1206,7 +1206,8 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamKSmall)
     {
-        if(!m_context->targetArchitecture().target().isCDNA2GPU())
+        // TODO: Update this when the bug is fixed.
+        if(m_context->targetArchitecture().GetCapability(GPUCapability::MaxLdsSize) == 1 << 16)
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }

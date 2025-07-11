@@ -51,7 +51,7 @@ inline double hash_prob(const int seed, const std::string& token)
     // allows one to run the same tests for a given
     // random seed; ie the test suite is repeatable.
     std::hash<std::string>           hasher;
-    std::ranlux24_base               gen(random_seed + hasher(token));
+    std::ranlux24_base               gen(seed + hasher(token));
     std::uniform_real_distribution<> dis(0.0, 1.0);
 
     const double roll = dis(gen);
@@ -432,7 +432,7 @@ inline auto param_generator_real(const double                             base_p
                                  const bool planar,
                                  const bool run_callbacks = false)
 {
-    return param_generator_base(test_prob,
+    return param_generator_base(base_prob,
                                 trans_type_range_real,
                                 v_lengths,
                                 precision_range,

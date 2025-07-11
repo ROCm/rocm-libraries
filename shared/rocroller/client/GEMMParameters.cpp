@@ -148,7 +148,7 @@ namespace rocRoller
                 s << "MxNxK:     " << x.m << "x" << x.n << "x" << x.k << std::endl;
                 s << "Type:      A:" << x.typeA << " B:" << x.typeB << " C:" << x.typeC
                   << " D:" << x.typeD << " ACC:" << x.typeAcc << std::endl;
-                s << "Tranpose:  " << toString(x.transA) << toString(x.transB) << std::endl;
+                s << "Transpose: " << toString(x.transA) << toString(x.transB) << std::endl;
                 return s;
             }
 
@@ -204,7 +204,7 @@ namespace rocRoller
                 s << std::endl;
                 s << "Type:      A:" << x.typeA << " B:" << x.typeB << " C:" << x.typeC
                   << " D:" << x.typeD << " ACC:" << x.typeAcc << std::endl;
-                s << "Tranpose:  " << toString(x.transA) << toString(x.transB) << std::endl;
+                s << "Transpose: " << toString(x.transA) << toString(x.transB) << std::endl;
                 s << "Version:   " << x.version << std::endl;
                 return s;
             }

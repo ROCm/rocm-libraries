@@ -38,13 +38,43 @@ namespace rocRoller
          * lifetimes.  Deallocate operations are added when registers
          * are no longer needed.
          */
-        class AddDeallocate : public GraphTransform
+        class AddDeallocateDataFlow : public GraphTransform
         {
         public:
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override
             {
-                return "AddDeallocate";
+                return "AddDeallocateDataFlow";
+            }
+
+        private:
+        };
+
+        class AddDeallocateArguments : public GraphTransform
+        {
+        public:
+            AddDeallocateArguments(ContextPtr context)
+                : m_context(context)
+            {
+            }
+
+            KernelGraph apply(KernelGraph const& original) override;
+            std::string name() const override
+            {
+                return "AddDeallocateArguments";
+            }
+
+        private:
+            ContextPtr m_context;
+        };
+
+        class MergeAdjacentDeallocates : public GraphTransform
+        {
+        public:
+            KernelGraph apply(KernelGraph const& original) override;
+            std::string name() const override
+            {
+                return "MergeAdjacentDeallocates";
             }
         };
     }

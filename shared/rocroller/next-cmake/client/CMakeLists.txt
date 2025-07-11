@@ -41,7 +41,7 @@ if(NOT CLI11_FOUND)
     endif()
 endif()
 
-add_executable(rocroller_gemm 
+add_executable(rocroller_gemm
     "${_CMAKE_CURRENT_SOURCE_DIR}/gemm.cpp"
     "${_CMAKE_CURRENT_SOURCE_DIR}/GEMMParameters.cpp"
     "${_CMAKE_CURRENT_SOURCE_DIR}/GraphInspector.cpp"
@@ -52,6 +52,7 @@ target_link_libraries(rocroller_gemm
         roc::rocroller
         rocroller::common-test-utilities
         CLI11::CLI11
+        ${msgpack_libs}
         ${BLAS_LIBRARIES}
 )
 if(ROCROLLER_BUILD_SHARED_LIBS)
@@ -61,7 +62,7 @@ endif()
 add_executable(rocroller_codegen_stress "${_CMAKE_CURRENT_SOURCE_DIR}/codegen_stress_test.cpp")
 target_link_libraries(rocroller_codegen_stress
     PUBLIC
-        roc::rocroller
+        roc::rocroller-interface
         rocroller::common-test-utilities
         CLI11::CLI11
         ${BLAS_LIBRARIES}

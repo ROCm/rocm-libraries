@@ -47,7 +47,6 @@ namespace rocsparse
     template <rocsparse_int BLOCK_SIZE,
               rocsparse_int SEGMENTS_PER_BLOCK,
               rocsparse_int SEGMENT_SIZE,
-              rocsparse_int WF_SIZE,
               typename T>
     ROCSPARSE_DEVICE_ILF void nnz_compress_device(rocsparse_int        m,
                                                   rocsparse_index_base idx_base_A,
@@ -83,7 +82,7 @@ namespace rocsparse
             count = rocsparse::wfreduce_sum<SEGMENT_SIZE>(count);
 
             // broadcast count from last thread in segment to all threads in segment
-            count = __shfl(count, SEGMENT_SIZE - 1, SEGMENT_SIZE);
+            count = rocsparse::shfl(count, SEGMENT_SIZE - 1, SEGMENT_SIZE);
 
             nnz_per_row[row_index] = count;
         }

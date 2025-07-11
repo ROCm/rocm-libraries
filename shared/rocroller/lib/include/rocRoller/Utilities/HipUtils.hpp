@@ -30,7 +30,7 @@
 #include <rocRoller/Utilities/Logging.hpp>
 
 // Helper macro to check for HIP API errors
-#define HIP_CHECK(cmd)                                                                \
+#define HIP_CHECK(cmd, message...)                                                    \
     do                                                                                \
     {                                                                                 \
         hipError_t e = cmd;                                                           \
@@ -38,7 +38,7 @@
         {                                                                             \
             std::ostringstream msg;                                                   \
             msg << "HIP failure at line " << __LINE__ << ": " << hipGetErrorString(e) \
-                << std::endl;                                                         \
+                << concatenate("", ##message) << std::endl;                           \
             Log::error(msg.str());                                                    \
             AssertFatal(false, msg.str());                                            \
         }                                                                             \

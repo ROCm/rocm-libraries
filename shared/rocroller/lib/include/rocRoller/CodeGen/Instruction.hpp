@@ -183,6 +183,10 @@ namespace rocRoller
 
         void                    addControlOp(int id);
         std::vector<int> const& controlOps() const;
+        std::optional<int>      innerControlOp() const;
+
+        std::string const& referencedArg() const;
+        void               setReferencedArg(std::string arg);
 
         void addAllocation(std::shared_ptr<Register::Allocation> alloc);
         void addWaitCount(WaitCount const& wait);
@@ -272,6 +276,8 @@ namespace rocRoller
         WaitCount m_waitCount;
 
         std::string m_opcode;
+
+        std::string m_referencedArg;
 
         Scheduling::Dependency m_dependency = Scheduling::Dependency::None;
 
