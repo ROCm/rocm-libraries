@@ -300,7 +300,6 @@ def runPerformanceCommand (platform, project)
             def command = """#!/usr/bin/env bash
                         set -ex
                         cd ${project.paths.project_build_prefix}/
-
                         ${sshBlock}
 
                         #Run Performance Test
