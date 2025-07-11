@@ -14,7 +14,7 @@
 /projects/hipblas-common/ @bnemanich @daineAMD @TorreZuk
 /projects/hipblas-common/**/CMakeLists.txt @ROCm/rocm-math-lib-build-infra
 /projects/hipblas/ @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
-/projects/hipblaslt/ @jichangjichang @KKyang @vin-huang @imcarsonliao @hcman2 @Serge45 @Jinp800125 @TonyYHsieh @solaslin @aazz44ss
+/projects/hipblaslt/ @jichangjichang @KKyang @vin-huang @imcarsonliao @hcman2 @Serge45 @Jinp800125 @TonyYHsieh @solaslin @aazz44ss @ellosel @AlexBrownAMD @bnemanich @msujon-AMD @babakpst
 /projects/hipcub/ @stanleytsang-amd @umfranzw @RobsonRLemos
 /projects/hipfft/ @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
 /projects/hiprand/ @stanleytsang-amd @umfranzw @RobsonRLemos

@@ -1029,6 +1029,14 @@ class KernelWriterAssembly(KernelWriter):
       module.addComment2("Bits 127:96 of SRD.\n" + srdUpperValue.desc())
       module.add(ValueSet("Srd127_96", srdUpperValue.getValue(), format=1))
 
+    if ((kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel')):
+      module.addComment0("MT offset for 64b address (=MT0*MT1*bpeC)")
+      reductionOffset = int(kernel["MacroTile0"]*kernel["MacroTile1"]*self.states.bpeCinternal)
+      reductionOffsetLow32 = reductionOffset & 0xFFFFFFFF
+      reductionOffsetHigh32 = (reductionOffset >> 32) & 0xFFFFFFFF
+      module.add(ValueSet("MTOffset", reductionOffsetLow32, format=1))
+      module.add(ValueSet("MTOffsetH32", reductionOffsetHigh32, format=1))
+
     ########################################
     # Global Offsets
     ########################################
