@@ -54,8 +54,8 @@ stages:
     pool:
       vmImage: ubuntu-latest
     steps:
-    - script: |
-      exit 1
+    - checkout: none
+    - script: exit 1
 - stage: report_successful
   condition: succeeded()
   jobs:
