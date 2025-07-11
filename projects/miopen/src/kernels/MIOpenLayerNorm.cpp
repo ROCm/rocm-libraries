@@ -31,6 +31,30 @@
 
 #include "float_types.h"
 
+template <int N>
+struct log2_floor
+{
+    constexpr static int value = log2_floor<(N >> 1)>::value + 1;
+};
+template <>
+struct log2_floor<1>
+{
+    constexpr static int value = 0;
+};
+template <int N>
+constexpr static int log2_floor_v = log2_floor<N>::value;
+
+template <int N>
+struct log2_ceil
+{
+    constexpr static int value = log2_floor_v<N> + ((1 << log2_floor_v<N>) == N ? 0 : 1);
+};
+template <int N>
+constexpr static int log2_ceil_v = log2_ceil<N>::value;
+
+constexpr static int ADJUSTED_LOCAL_SIZE =
+    STRIDE <= LOCAL_SIZE ? LOCAL_SIZE / (1 << log2_ceil_v<STRIDE>) : LOCAL_SIZE;
+
 using load_t = int4;
 
 template <typename T, size_t n>
@@ -47,19 +71,41 @@ struct loader
     __device__ static auto
     load(uint64_t i, const T* __restrict__ src, const FLOAT default_value = CVT_FP32_2FLOAT(0.0f))
     {
-        const unsigned int gid = blockIdx.x;
-        const uint64_t o       = gid / STRIDE;
-        const uint64_t s       = gid % STRIDE;
-        int lid = threadIdx.x;        // Cannot be unsigned or it will not work for some reason
-        asm volatile("" : "+v"(lid)); // Due to compiler bug of unknown cause
-        // const unsigned int lid = threadIdx.x;
-        const auto j = i + lid * load_factor;
+        const uint64_t o       = blockIdx.x;
+        const unsigned int s   = STRIDE <= LOCAL_SIZE ? threadIdx.y : blockIdx.y;
+        const unsigned int lid = threadIdx.x;
+        const auto j           = i + lid * load_factor;
         if(!use_default && (STRIDE == 1 || contiguous) && j + load_factor < INNER_SIZE)
         {
             const size_t idx  = o * INNER_SIZE * STRIDE + j * STRIDE + s;
             const auto value  = *reinterpret_cast<const load_t*>(&src[contiguous ? j : idx]);
             const auto values = *reinterpret_cast<const vec_t*>(&value);
 
+            return values;
+        }
+        else if(!use_default && !contiguous && STRIDE > 1 && STRIDE <= LOCAL_SIZE &&
+                j + load_factor < INNER_SIZE)
+        {
+            __shared__ T tmp[STRIDE * load_factor];
+            const size_t idx = o * INNER_SIZE * STRIDE + j * STRIDE + s * load_factor;
+            const auto value = *reinterpret_cast<const load_t*>(&src[idx]);
+            vec_t values     = {{}};
+            for(int k = 0; k < ADJUSTED_LOCAL_SIZE; ++k)
+            {
+                if(k == lid)
+                {
+                    *reinterpret_cast<load_t*>(&tmp[s * load_factor]) = value;
+                }
+                __syncthreads();
+                if(k == lid)
+                {
+                    for(int l = 0; l < load_factor; ++l)
+                    {
+                        values.data[l] = tmp[STRIDE * l + s];
+                    }
+                }
+                __syncthreads();
+            }
             return values;
         }
         else
@@ -86,9 +132,8 @@ struct storer
 {
     __device__ static auto store(uint64_t i, TO* __restrict__ dst, loader<TI>::vec_t& data)
     {
-        const unsigned int gid = blockIdx.x;
-        const uint64_t o       = gid / STRIDE;
-        const uint64_t s       = gid % STRIDE;
+        const uint64_t o       = blockIdx.x;
+        const unsigned int s   = STRIDE <= LOCAL_SIZE ? threadIdx.y : blockIdx.y;
         const unsigned int lid = threadIdx.x;
         const auto j           = i + lid * loader<TI>::load_factor;
         if(STRIDE == 1 && j + loader<TI>::load_factor < INNER_SIZE)
@@ -137,7 +182,7 @@ __device__ void layernormfwd(const TI* __restrict__ x,
      * x dim = {N, C, L}, normalized shape = {L}, layout = NHWC
      * outer_size = N, inner_size = L, stride = C
      *
-     * => gws = {outer_size * stride * LOCAL_SIZE}, lws = {LOCAL_SIZE}
+     * => gws = {outer_size * ADJUSTED_LOCAL_SIZE, stride}, lws = {ADJUSTED_LOCAL_SIZE, stride}
      */
 
     /*
@@ -150,8 +195,8 @@ __device__ void layernormfwd(const TI* __restrict__ x,
     // reduce sum for mean and var
     uint64_t i = 0;
     auto tmpx  = loader<TI>::load(i, x);
-    i += LOCAL_SIZE * loader<TI>::load_factor;
-    for(; i < INNER_SIZE; i += LOCAL_SIZE * loader<TI>::load_factor)
+    i += ADJUSTED_LOCAL_SIZE * loader<TI>::load_factor;
+    for(; i < INNER_SIZE; i += ADJUSTED_LOCAL_SIZE * loader<TI>::load_factor)
     {
         auto tmp = loader<TI>::load(i, x);
         __builtin_amdgcn_sched_barrier(0);
@@ -179,32 +224,44 @@ __device__ void layernormfwd(const TI* __restrict__ x,
         // pvar += px * px;
     }
 
-    __shared__ FLOAT_ACCUM ltmp1[LOCAL_SIZE];
-    __shared__ FLOAT_ACCUM ltmp2[LOCAL_SIZE];
+    __shared__ FLOAT_ACCUM ltmp1[ADJUSTED_LOCAL_SIZE];
+    __shared__ FLOAT_ACCUM ltmp2[ADJUSTED_LOCAL_SIZE];
     const int lid = threadIdx.x;
-    ltmp1[lid]    = pmean;
-    ltmp2[lid]    = pvar;
-    __syncthreads();
-    for(uint32_t j = LOCAL_SIZE >> 1; j > 0; j >>= 1)
+    const int s   = STRIDE <= LOCAL_SIZE ? threadIdx.y : blockIdx.y;
+    FLOAT_ACCUM prstd;
+    for(uint64_t j = 0; j < STRIDE; ++j)
     {
-        if(lid < j)
+        if(j == s)
         {
-            ltmp1[lid] += ltmp1[lid + j];
-            ltmp2[lid] += ltmp2[lid + j];
+            ltmp1[lid] = pmean;
+            ltmp2[lid] = pvar;
         }
         __syncthreads();
-    }
-    pmean             = ltmp1[0] / INNER_SIZE;
-    pvar              = ltmp2[0] / INNER_SIZE - pmean * pmean;
-    FLOAT_ACCUM prstd = rsqrt(pvar + FLOAT_ACCUM(eps));
+        for(uint32_t k = ADJUSTED_LOCAL_SIZE >> 1; k > 0; k >>= 1)
+        {
+            if(j == s && lid < k)
+            {
+                ltmp1[lid] += ltmp1[lid + k];
+                ltmp2[lid] += ltmp2[lid + k];
+            }
+            __syncthreads();
+        }
+        if(j == s)
+        {
+            pmean = ltmp1[0] / INNER_SIZE;
+            pvar  = ltmp2[0] / INNER_SIZE - pmean * pmean;
+            prstd = rsqrt(pvar + FLOAT_ACCUM(eps));
 
-    if(lid == 0)
-    {
-        const uint64_t gid = blockIdx.x;
-        if(mean)
-            mean[gid] = CVT_ACCUM2FLOAT(pmean);
-        if(rstd)
-            rstd[gid] = CVT_ACCUM2FLOAT(prstd);
+            if(lid == 0)
+            {
+                const uint64_t gid = blockIdx.x * STRIDE + s;
+                if(mean)
+                    mean[gid] = CVT_ACCUM2FLOAT(pmean);
+                if(rstd)
+                    rstd[gid] = CVT_ACCUM2FLOAT(prstd);
+            }
+        }
+        __syncthreads();
     }
 
     // forward calculation
@@ -215,8 +272,8 @@ __device__ void layernormfwd(const TI* __restrict__ x,
     auto tmpbias =
         loader<TI, true, MODE == MIOPEN_ELEMENTWISE_AFFINE>::load(i, bias, CVT_FP32_2FLOAT(0.0f));
     typename loader<TI>::vec_t tmpy = {{}};
-    i += LOCAL_SIZE * loader<TI>::load_factor;
-    for(; i < INNER_SIZE; i += LOCAL_SIZE * loader<TI>::load_factor)
+    i += ADJUSTED_LOCAL_SIZE * loader<TI>::load_factor;
+    for(; i < INNER_SIZE; i += ADJUSTED_LOCAL_SIZE * loader<TI>::load_factor)
     {
         auto tmp1 = loader<TI>::load(i, x);
         auto tmp2 = loader<TI, true, MODE == MIOPEN_ELEMENTWISE_AFFINE>::load(i, weight, 1);
@@ -237,7 +294,7 @@ __device__ void layernormfwd(const TI* __restrict__ x,
         tmpweight = tmp2;
         tmpbias   = tmp3;
         tmpy      = tmp4;
-        storer<TI, TO>::store(i - LOCAL_SIZE * loader<TI>::load_factor, y, tmpy);
+        storer<TI, TO>::store(i - ADJUSTED_LOCAL_SIZE * loader<TI>::load_factor, y, tmpy);
     }
     tmpy = {{}};
 #pragma unroll
@@ -249,7 +306,7 @@ __device__ void layernormfwd(const TI* __restrict__ x,
 
         tmpy.data[k] = CVT_ACCUM2FLOAT((px - pmean) * prstd * pweight + pbias);
     }
-    storer<TI, TO>::store(i - LOCAL_SIZE * loader<TI>::load_factor, y, tmpy);
+    storer<TI, TO>::store(i - ADJUSTED_LOCAL_SIZE * loader<TI>::load_factor, y, tmpy);
 }
 
 template <typename TI, typename TO>
@@ -271,8 +328,8 @@ __device__ void layernormbwd(const TI* __restrict__ dy,
         auto tmpweight = loader<TI, true, MODE == MIOPEN_ELEMENTWISE_AFFINE>::load(
             i, weight, CVT_FP32_2FLOAT(1.0f));
         auto tmpx = loader<TI>::load(i, x);
-        i += LOCAL_SIZE * loader<TI>::load_factor;
-        for(; i < INNER_SIZE; i += LOCAL_SIZE * loader<TI>::load_factor)
+        i += ADJUSTED_LOCAL_SIZE * loader<TI>::load_factor;
+        for(; i < INNER_SIZE; i += ADJUSTED_LOCAL_SIZE * loader<TI>::load_factor)
         {
             auto tmp1 = loader<TI>::load(i, dy);
             auto tmp2 = loader<TI, true, MODE == MIOPEN_ELEMENTWISE_AFFINE>::load(
@@ -306,25 +363,36 @@ __device__ void layernormbwd(const TI* __restrict__ dy,
         }
     }
 
-    __shared__ FLOAT_ACCUM ltmp1[LOCAL_SIZE];
-    __shared__ FLOAT_ACCUM ltmp2[LOCAL_SIZE];
+    __shared__ FLOAT_ACCUM ltmp1[ADJUSTED_LOCAL_SIZE];
+    __shared__ FLOAT_ACCUM ltmp2[ADJUSTED_LOCAL_SIZE];
     const uint64_t lid = threadIdx.x;
-    ltmp1[lid]         = sum_dy_weight;
-    ltmp2[lid]         = sum_dy_weight_x;
-    __syncthreads();
-    for(uint32_t i = LOCAL_SIZE >> 1; i > 0; i >>= 1)
+    const uint64_t s   = STRIDE <= LOCAL_SIZE ? threadIdx.y : blockIdx.y;
+    for(int i = 0; i < STRIDE; ++i)
     {
-        if(lid < i)
+        if(i == s)
         {
-            ltmp1[lid] += ltmp1[lid + i];
-            ltmp2[lid] += ltmp2[lid + i];
+            ltmp1[lid] = sum_dy_weight;
+            ltmp2[lid] = sum_dy_weight_x;
+        }
+        __syncthreads();
+        for(uint32_t j = ADJUSTED_LOCAL_SIZE >> 1; j > 0; j >>= 1)
+        {
+            if(i == s && lid < j)
+            {
+                ltmp1[lid] += ltmp1[lid + j];
+                ltmp2[lid] += ltmp2[lid + j];
+            }
+            __syncthreads();
+        }
+        if(i == s)
+        {
+            sum_dy_weight   = ltmp1[0];
+            sum_dy_weight_x = ltmp2[0];
         }
         __syncthreads();
     }
 
-    const uint64_t gid = blockIdx.x;
-    sum_dy_weight      = ltmp1[0];
-    sum_dy_weight_x    = ltmp2[0];
+    const uint64_t gid = blockIdx.x * STRIDE + s;
     FLOAT_ACCUM scale  = 1.0f / INNER_SIZE;
     FLOAT_ACCUM prstd  = CVT_FLOAT2ACCUM(rstd[gid]);
     FLOAT_ACCUM pmean  = CVT_FLOAT2ACCUM(mean[gid]);
@@ -338,8 +406,8 @@ __device__ void layernormbwd(const TI* __restrict__ dy,
         loader<TI, true, MODE == MIOPEN_ELEMENTWISE_AFFINE>::load(i, weight, CVT_FP32_2FLOAT(1.0f));
     auto tmpx                        = loader<TI>::load(i, x);
     typename loader<TI>::vec_t tmpdx = {{}};
-    i += LOCAL_SIZE * loader<TI>::load_factor;
-    for(; i < INNER_SIZE; i += LOCAL_SIZE * loader<TI>::load_factor)
+    i += ADJUSTED_LOCAL_SIZE * loader<TI>::load_factor;
+    for(; i < INNER_SIZE; i += ADJUSTED_LOCAL_SIZE * loader<TI>::load_factor)
     {
         auto tmp1 = loader<TI>::load(i, dy);
         auto tmp2 = loader<TI, true, MODE == MIOPEN_ELEMENTWISE_AFFINE>::load(
@@ -361,7 +429,7 @@ __device__ void layernormbwd(const TI* __restrict__ dy,
         tmpweight = tmp2;
         tmpx      = tmp3;
         tmpdx     = tmp4;
-        storer<TI, TO>::store(i - LOCAL_SIZE * loader<TI>::load_factor, dx, tmpdx);
+        storer<TI, TO>::store(i - ADJUSTED_LOCAL_SIZE * loader<TI>::load_factor, dx, tmpdx);
     }
     tmpdx = {{}};
 #pragma unroll
@@ -373,7 +441,7 @@ __device__ void layernormbwd(const TI* __restrict__ dy,
 
         tmpdx.data[k] = CVT_ACCUM2FLOAT(prstd * pdy * pweight - a * px - b);
     }
-    storer<TI, TO>::store(i - LOCAL_SIZE * loader<TI>::load_factor, dx, tmpdx);
+    storer<TI, TO>::store(i - ADJUSTED_LOCAL_SIZE * loader<TI>::load_factor, dx, tmpdx);
 }
 
 template <typename TI, typename TO>

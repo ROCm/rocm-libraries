@@ -54,10 +54,11 @@ ConvSolution LayernormForward::GetSolution(const ExecutionContext& context,
         auto input_dtype  = miopen::GetDataType(problem.GetXDesc().GetType());
         auto output_dtype = miopen::GetDataType(problem.GetYDesc().GetType());
 
-        size_t xlocalsize = config.local_size;
-        size_t xgridsize  = problem.outer_size * problem.stride * xlocalsize;
-        size_t ylocalsize = 1;
-        size_t ygridsize  = 1;
+        size_t xlocalsize = problem.stride <= config.local_size ? config.local_size / (1 << mloLg2(problem.stride))
+                                                        : config.local_size;
+        size_t xgridsize  = problem.outer_size * xlocalsize;
+        size_t ylocalsize = problem.stride <= config.local_size ? problem.stride : 1;
+        size_t ygridsize  = problem.stride;
         size_t zlocalsize = 1;
         size_t zgridsize  = 1;
 
