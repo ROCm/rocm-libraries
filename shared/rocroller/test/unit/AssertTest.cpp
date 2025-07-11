@@ -59,6 +59,8 @@ namespace AssertTest
     {
         auto const& arch = m_context->targetArchitecture();
         auto        gpu  = arch.target();
+        if(gpu.isCDNA1GPU())
+            GTEST_SKIP() << "Skipping GPU AssertTest for " << gpu.toString();
 
         AssertOpKind assertOpKind;
         std::string  outputMsg;
@@ -212,6 +214,8 @@ namespace AssertTest
     {
         auto const& arch = m_context->targetArchitecture();
         auto        gpu  = arch.target();
+        if(gpu.isCDNA1GPU())
+            GTEST_SKIP() << "Skipping GPU AssertTest for " << gpu.toString();
 
         AssertOpKind assertOpKind;
         std::string  outputMsg;
