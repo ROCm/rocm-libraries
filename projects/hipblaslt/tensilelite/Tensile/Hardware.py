@@ -24,7 +24,6 @@
 
 from . import Properties
 from Tensile.Common.Architectures import isaToGfx
-from typing import Optional
 import copy
 
 class HardwarePredicate(Properties.Predicate):
@@ -36,20 +35,13 @@ class HardwarePredicate(Properties.Predicate):
         return cls("AMDGPU", value=cls("Processor", value=gfxArch))
 
     @classmethod
-    def FromHardware(cls, isa, cuCount=None, pciDeviceIDs: Optional[list] = None):
+    def FromHardware(cls, isa, cuCount=None):
         gfxArch = isaToGfx(tuple(isa))
-        if cuCount == None and pciDeviceIDs == None:
+        if cuCount == None:
             return cls("AMDGPU", value=cls("Processor", value=gfxArch))
-        elif cuCount != None and pciDeviceIDs == None:
-            return cls("AMDGPU", value=cls.And([cls("Processor", value=gfxArch),
-                                                cls("CUCount", value=cuCount)]))
-        elif pciDeviceIDs != None and cuCount == None:
-            return cls("AMDGPU", value=cls.And([cls("Processor", value=gfxArch),
-                                                cls("PCIDeviceIDs", value=pciDeviceIDs)]))
         else:
             return cls("AMDGPU", value=cls.And([cls("Processor", value=gfxArch),
-                                                cls("CUCount", value=cuCount),
-                                                cls("PCIDeviceIDs", value=pciDeviceIDs)]))
+                                                cls("CUCount", value=cuCount)]))
 
     def __lt__(self, other):
         # Use superclass logic for TruePreds

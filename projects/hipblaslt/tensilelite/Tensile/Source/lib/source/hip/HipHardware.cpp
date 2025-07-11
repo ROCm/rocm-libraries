@@ -35,8 +35,7 @@ namespace TensileLite
         HipAMDGPU::HipAMDGPU(hipDeviceProp_t const& prop)
             : AMDGPU(AMDGPU::toProcessor(prop.gcnArchName),
                      prop.multiProcessorCount,
-                     std::string(prop.name),
-                     std::string(prop.pciDeviceID))
+                     std::string(prop.name))
             , properties(prop)
         {
             if(analytical::Hardware::isHardwareSupported(prop))

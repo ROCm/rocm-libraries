@@ -765,10 +765,7 @@ class Solution:
         if 'CUCount' not in d:
             d['CUCount'] = None
 
-        if 'PCIDeviceIDs' not in d:
-            d['PCIDeviceIDs'] = None
-
-        rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(d['ISA'], d['CUCount'], d['PCIDeviceIDs'])
+        rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(d['ISA'], d['CUCount'])
         rv.originalSolution = OriginalSolution(
                                   d,
                                   splitGSU,
