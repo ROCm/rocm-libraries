@@ -6,6 +6,7 @@
 #include <thrust/device_new.h>
 #include <thrust/device_ptr.h>
 #include <thrust/for_each.h>
+#include <thrust/device_reference.h>
 
 #include <type_traits>
 #include <utility>
@@ -164,15 +165,15 @@ private:
         std::is_constructible<deleter_type, ArgType>::value>::type;
 
   template <class U, class E>
-  using EnableIfMoveConvertible = typename thrust::detail::enable_if<
-    thrust::detail::and_<thrust::detail::is_convertible<typename U::pointer, pointer>,
-                         thrust::detail::not_<std::is_array<E>>>::value>::type;
+  using EnableIfMoveConvertible =
+    typename thrust::detail::enable_if<thrust::detail::and_<thrust::detail::is_convertible<typename U::pointer, pointer>,
+                                                            thrust::detail::not_<std::is_array<E>>>::value>::type;
 
   template <class E>
   using EnableIfDeleterConvertible = typename thrust::detail::enable_if<
     thrust::detail::or_<thrust::detail::and_<thrust::detail::is_reference<D>, thrust::detail::is_same<D, E>>,
-                         thrust::detail::and_<thrust::detail::not_<thrust::detail::is_reference<D>>,
-                                              thrust::detail::is_convertible<E, D>>>::value>::type;
+                        thrust::detail::and_<thrust::detail::not_<thrust::detail::is_reference<D>>,
+                                             thrust::detail::is_convertible<E, D>>>::value>::type;
 
     template <class E>
     using EnableIfDeleterAssignable =
@@ -300,7 +301,15 @@ public:
         return m_ptr != nullptr;
     }
 
-    // dont need memcpy or thrust::copy because device_ptr can be dereferenced in host?
+    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 auto operator*() const noexcept
+    {
+      return *m_ptr;
+    }
+
+    //==========================================================================
+    // Modifiers
+    //==========================================================================
+
 };
 
 template <class T, class D>
