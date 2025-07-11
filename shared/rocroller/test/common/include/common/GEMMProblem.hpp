@@ -96,8 +96,10 @@ struct GEMMProblem
     bool loadLDSScaleA = false;
     bool loadLDSScaleB = false;
 
-    std::pair<int, int> workgroupMapping  = {-1, -1};
-    bool                workgroupRemapXCC = false;
+    //std::pair<int, int> workgroupMapping  = {-1, -1};
+    int  workgroupMappingDim  = -1;
+    int  workgroupMappingSize = -1;
+    bool workgroupRemapXCC    = false;
 
     rocRoller::Operations::ScaleMode scaleAMode = rocRoller::Operations::ScaleMode::None;
     rocRoller::Operations::ScaleMode scaleBMode = rocRoller::Operations::ScaleMode::None;

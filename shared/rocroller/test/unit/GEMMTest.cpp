@@ -471,7 +471,16 @@ namespace GEMMDriverTest
             }
 
             Operations::OperationTag tagWGM;
-            if(gemm.workgroupMapping.first != -1)
+            //if(gemm.workgroupMapping.first != -1)
+            //{
+            //    tagWGM      = command->allocateTag();
+            //    auto wgmArg = command->allocateArgument(DataType::Int32,
+            //                                            tagWGM,
+            //                                            ArgumentType::Value,
+            //                                            DataDirection::ReadOnly,
+            //                                            rocRoller::WGM);
+            //}
+            if(gemm.workgroupMappingDim != -1)
             {
                 tagWGM      = command->allocateTag();
                 auto wgmArg = command->allocateArgument(DataType::Int32,
@@ -508,9 +517,13 @@ namespace GEMMDriverTest
             params->transposeMemoryAccess.set(LayoutType::MATRIX_A, gemm.transA == "T");
             params->transposeMemoryAccess.set(LayoutType::MATRIX_B, gemm.transB == "T");
 
-            if(gemm.workgroupMapping.first != -1)
+            //if(gemm.workgroupMapping.first != -1)
+            //{
+            //    params->workgroupMapping = {gemm.workgroupMapping.first, nullptr};
+            //}
+            if(gemm.workgroupMappingDim != -1)
             {
-                params->workgroupMapping = {gemm.workgroupMapping.first, nullptr};
+                params->workgroupMapping = {gemm.workgroupMappingDim, nullptr};
             }
 
             if(gemm.workgroupRemapXCC)
@@ -688,9 +701,13 @@ namespace GEMMDriverTest
             auto deviceScratch = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
             commandArgs.setArgument(tagScratch, ArgumentType::Value, deviceScratch.get());
 
-            if(gemm.workgroupMapping.first != -1)
+            //if(gemm.workgroupMapping.first != -1)
+            //{
+            //    commandArgs.setArgument(tagWGM, ArgumentType::Value, gemm.workgroupMapping.second);
+            //}
+            if(gemm.workgroupMappingDim != -1)
             {
-                commandArgs.setArgument(tagWGM, ArgumentType::Value, gemm.workgroupMapping.second);
+                commandArgs.setArgument(tagWGM, ArgumentType::Value, gemm.workgroupMappingSize);
             }
 
             // Host result
@@ -1019,7 +1036,9 @@ namespace GEMMDriverTest
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
-        gemm.workgroupMapping = {0, 6};
+        //gemm.workgroupMapping = {0, 6};
+        gemm.workgroupMappingDim  = 0;
+        gemm.workgroupMappingSize = 6;
         basicGEMM<float>(gemm);
     }
 
@@ -1028,8 +1047,10 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         REQUIRE_ARCH_CAP(GPUCapability::HasXCC);
         GEMMProblem gemm;
-        gemm.workgroupMapping  = {0, 6};
-        gemm.workgroupRemapXCC = true;
+        //gemm.workgroupMapping  = {0, 6};
+        gemm.workgroupMappingDim  = 0;
+        gemm.workgroupMappingSize = 6;
+        gemm.workgroupRemapXCC    = true;
         basicGEMM<float>(gemm);
     }
 

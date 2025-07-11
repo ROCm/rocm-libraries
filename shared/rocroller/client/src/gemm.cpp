@@ -903,55 +903,55 @@ static bool ParseMI(const std::string&                                 arg,
     return PARSE_SUCCESS;
 }
 
-static bool ParseWorkgroupMapping(const std::string&                                 arg,
-                                  rocRoller::Client::GEMMClient::SolutionParameters& solution)
-{
-    if(arg.empty())
-        return PARSE_FAILURE;
-
-    bool fail = false;
-    try
-    {
-        std::istringstream iss(arg);
-        std::string        token;
-
-        iss.exceptions(std::ifstream::eofbit | std::ifstream::failbit | std::ifstream::badbit);
-        std::getline(iss, token, ',');
-        auto dim = std::stoi(token);
-        iss.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-        std::getline(iss, token, ',');
-        auto size                 = std::stoi(token);
-        solution.workgroupMapping = {dim, size};
-
-        fail |= (dim != -1 && dim != 0 && dim != 1);
-        fail |= (size != -1 && size < 1);
-    }
-    catch(const std::invalid_argument&)
-    {
-        fail = true;
-    }
-    catch(const std::ios_base::failure&)
-    {
-        fail = true;
-    }
-
-    if(fail)
-    {
-        std::cerr << "Invalid format for workgroupMapping." << std::endl;
-        std::cerr << std::endl;
-        std::cerr << "The workgroupMapping argument should be formatted like:" << std::endl;
-        std::cerr << std::endl;
-        std::cerr << "    --workgroupMapping=d,s" << std::endl;
-        std::cerr << std::endl;
-        std::cerr << "where d is 0 or 1, and s is a positive integer." << std::endl;
-        std::cerr << std::endl;
-        std::cerr << "For example: --workgroupMapping=0,6" << std::endl;
-
-        return PARSE_FAILURE;
-    }
-
-    return PARSE_SUCCESS;
-}
+//static bool ParseWorkgroupMapping(const std::string&                                 arg,
+//                                  rocRoller::Client::GEMMClient::SolutionParameters& solution)
+//{
+//    if(arg.empty())
+//        return PARSE_FAILURE;
+//
+//    bool fail = false;
+//    try
+//    {
+//        std::istringstream iss(arg);
+//        std::string        token;
+//
+//        iss.exceptions(std::ifstream::eofbit | std::ifstream::failbit | std::ifstream::badbit);
+//        std::getline(iss, token, ',');
+//        auto dim = std::stoi(token);
+//        iss.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+//        std::getline(iss, token, ',');
+//        auto size                 = std::stoi(token);
+//        solution.workgroupMapping = {dim, size};
+//
+//        fail |= (dim != -1 && dim != 0 && dim != 1);
+//        fail |= (size != -1 && size < 1);
+//    }
+//    catch(const std::invalid_argument&)
+//    {
+//        fail = true;
+//    }
+//    catch(const std::ios_base::failure&)
+//    {
+//        fail = true;
+//    }
+//
+//    if(fail)
+//    {
+//        std::cerr << "Invalid format for workgroupMapping." << std::endl;
+//        std::cerr << std::endl;
+//        std::cerr << "The workgroupMapping argument should be formatted like:" << std::endl;
+//        std::cerr << std::endl;
+//        std::cerr << "    --workgroupMapping=d,s" << std::endl;
+//        std::cerr << std::endl;
+//        std::cerr << "where d is 0 or 1, and s is a positive integer." << std::endl;
+//        std::cerr << std::endl;
+//        std::cerr << "For example: --workgroupMapping=0,6" << std::endl;
+//
+//        return PARSE_FAILURE;
+//    }
+//
+//    return PARSE_SUCCESS;
+//}
 
 /*
  * Parse the command line and dispatch.
@@ -977,9 +977,11 @@ int main(int argc, const char* argv[])
         .waveK = -1,
         .waveB = -1,
 
-        .workgroupSizeX         = 128,
-        .workgroupSizeY         = 2,
-        .workgroupMapping       = {-1, -1},
+        .workgroupSizeX = 128,
+        .workgroupSizeY = 2,
+        //.workgroupMapping       = {-1, -1},
+        .workgroupMappingDim    = -1,
+        .workgroupMappingSize   = -1,
         .workgroupRemapXCC      = false,
         .workgroupRemapXCCValue = -1,
 
@@ -1169,10 +1171,21 @@ int main(int argc, const char* argv[])
         "--workgroup_size_x", solution.workgroupSizeX, "Workgroup size in the x dimension.");
     app.add_option(
         "--workgroup_size_y", solution.workgroupSizeY, "Workgroup size in the y dimension.");
-    app.add_option(
-        "--workgroupMapping",
-        [&solution](auto& args) -> bool { return ParseWorkgroupMapping(args[0], solution); },
-        "Workgroup mapping dimension and size.");
+
+    //app.add_option(
+    //    "--workgroupMappingDim",
+    //    [&solution](auto& args) -> bool { return ParseWorkgroupMapping(args[0], solution); },
+    //    "Workgroup mapping dimension.");
+
+    app.add_option("--workgroupMappingDim",
+                   solution.workgroupMappingDim,
+                   "Workgroup mapping dimension (-1, 0, 1). Default: -1")
+        ->check(CLI::IsMember({-1, 0, 1}));
+    app.add_option("--workgroupMappingSize",
+                   solution.workgroupMappingSize,
+                   "Workgroup mapping size. Default: -1")
+        ->check(CLI::Range(-1, -1) | CLI::PositiveNumber);
+
     app.add_flag(
         "--workgroupRemapXCC", solution.workgroupRemapXCC, "Use an XCC-aware workgroup remapping.");
     app.add_option("--workgroupRemapXCCValue",
@@ -1368,9 +1381,17 @@ int main(int argc, const char* argv[])
             yamlPath = std::filesystem::path{io.loadCOPath};
         yamlPath.replace_extension(".yaml");
 
+        std::optional<int> workgroupMappingSize;
+        if(app.count("--workgroupMappingSize") > 0)
+            workgroupMappingSize = solution.workgroupMappingSize;
+
         solution = Serialization::readYAMLFile<rocRoller::Client::GEMMClient::SolutionParameters>(
             yamlPath);
 
+        if(workgroupMappingSize.has_value())
+            solution.workgroupMappingSize = workgroupMappingSize.value();
+
+        std::cout << "This is solution : " << solution << "\n";
         overwriteTypesFromSolution(types, solution);
     }
 
@@ -1407,7 +1428,7 @@ int main(int argc, const char* argv[])
     solution.types = types;
 
     // TODO: Reevaluate the relationship between problem and solution params.
-    problem.workgroupMapping = solution.workgroupMapping;
+    problem.workgroupMapping = {solution.workgroupMappingDim, solution.workgroupMappingSize};
 
     run.check = !noCheckResult;
 

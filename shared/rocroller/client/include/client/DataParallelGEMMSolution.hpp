@@ -216,7 +216,17 @@ namespace rocRoller
                         = command->addOperation(Operations::Tensor(2, typeD, {(size_t)1})); // D
                     command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
 
-                    if(solutionParams.workgroupMapping.first != -1)
+                    //if(solutionParams.workgroupMapping.first != -1)
+                    //{
+                    //    m_tagWGM = command->allocateTag();
+                    //    command->allocateArgument(DataType::Int32,
+                    //                              m_tagWGM,
+                    //                              ArgumentType::Value,
+                    //                              DataDirection::ReadOnly,
+                    //                              rocRoller::WGM);
+                    //}
+
+                    if(solutionParams.workgroupMappingDim != -1)
                     {
                         m_tagWGM = command->allocateTag();
                         command->allocateArgument(DataType::Int32,
@@ -454,9 +464,23 @@ namespace rocRoller
 
                     params->setManualWorkgroupSize({workgroup_size_x, workgroup_size_y, 1});
 
-                    if(solutionParams.workgroupMapping.first != -1)
+                    //if(solutionParams.workgroupMapping.first != -1)
+                    //{
+                    //    auto dim = solutionParams.workgroupMapping.first;
+
+                    //    AssertFatal(
+                    //        dim == 0 || dim == 1,
+                    //        "Only 0 (M) or 1 (N) are supported dimensions for workgroup mapping.",
+                    //        ShowValue(dim));
+
+                    //    // CommandSolution::generateKernelGraph creates the size Expression
+                    //    // and initializes the workgroupMapping.second
+                    //    params->workgroupMapping = {dim, nullptr};
+                    //}
+
+                    if(solutionParams.workgroupMappingDim != -1)
                     {
-                        auto dim = solutionParams.workgroupMapping.first;
+                        auto dim = solutionParams.workgroupMappingDim;
 
                         AssertFatal(
                             dim == 0 || dim == 1,
