@@ -4265,6 +4265,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           numVgprValuPackA *= 2
       else:
         numVgprValuPackA = self.states.a.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackA * (int(4/tensorParametersA["bpeDS"]) - 1)
+    if kernel["enableLDSTrA"]:
+       numVgprValuPackA = 2*kernel["InnerUnroll"]*kernel["MIWaveTileA"]
     vgprIdx += numVgprValuPackA
     self.states.a.startVgprG2L = None
     if not kernel["DirectToLdsA"] or self.do["KeepDirectToLdsAlloc"]:
@@ -4300,6 +4302,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           numVgprValuPackB *= 2
       else:
         numVgprValuPackB = self.states.b.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackB * (int(4/tensorParametersB["bpeDS"]) - 1)
+    if kernel["enableLDSTrB"]:
+       numVgprValuPackB = 2*kernel["InnerUnroll"]*kernel["MIWaveTileB"]        
     vgprIdx += numVgprValuPackB
     self.states.b.startVgprG2L = None
     if not kernel["DirectToLdsB"] or self.do["KeepDirectToLdsAlloc"]:

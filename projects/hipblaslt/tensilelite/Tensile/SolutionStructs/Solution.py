@@ -1298,6 +1298,10 @@ class Solution(collections.abc.Mapping):
     if state["enableLDSTrB"]:
       state["VectorWidthB"] = 1
 
+    if (state["enableLDSTrA"] or state["enableLDSTrB"]) and (state["1LDSBuffer"] == 0) and (state["ProblemType"]["DataType"] != state["ProblemType"]["DestDataType"]):
+      reject(state, printRejectionReason, "LDSTrInst cannot support multiple LDS buffer when input datatype is not the same as destination datatype")
+      return      
+      
     # if state["EnableMatrixInstruction"] and not state["SourceSwap"] and (state["VectorWidthA"] > 1 or state["VectorWidthB"] > 1):
     #   reject(state, printRejectionReason, "not implement VectorWidth without SourceSwap")
 

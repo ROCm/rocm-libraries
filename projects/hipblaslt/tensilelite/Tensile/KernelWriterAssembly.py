@@ -4558,6 +4558,8 @@ class KernelWriterAssembly(KernelWriter):
             numVgprValuPackA *= 2
         else:
           numVgprValuPackA = self.states.a.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackA * (int(4/tensorParametersA["bpeDS"]) - 1)
+        if kernel["enableLDSTrA"]:
+           numVgprValuPackA = 2*kernel["InnerUnroll"]*kernel["MIWaveTileA"]  
       vgprBaseA = self.vgprPool.checkOutAligned(numValuA + numVgprValuPackA, 2)
       imodA.add(RegSet("v", "vgprValuA_X0_I0_BASE", vgprBaseA))
       imodA.add(self.moduleVgprMacroValuA)
@@ -4579,6 +4581,8 @@ class KernelWriterAssembly(KernelWriter):
             numVgprValuPackB *= 2
         else:
           numVgprValuPackB = self.states.b.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackB * (int(4/tensorParametersB["bpeDS"]) - 1)
+        if kernel["enableLDSTrB"]:
+          numVgprValuPackB = 2*kernel["InnerUnroll"]*kernel["MIWaveTileB"]  
       vgprBaseB = self.vgprPool.checkOutAligned(numValuB + numVgprValuPackB, 2)
       imodB.add(RegSet("v", "vgprValuB_X0_I0_BASE", vgprBaseB))
       imodB.add(self.moduleVgprMacroValuB)
