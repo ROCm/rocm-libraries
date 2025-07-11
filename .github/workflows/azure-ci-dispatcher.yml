@@ -22,11 +22,10 @@ on:
       - reopened
       - ready_for_review
     branches:
-      # - develop
-      # - staging
-      # - main
-      # - release-staging/rocm-rel-7.*
-      - users/danielsu/az-dispatch-nonpolling
+      - develop
+      - staging
+      - main
+      - release-staging/rocm-rel-7.*
 
 concurrency:
   group: azure-ci-dispatcher-${{ github.event.pull_request.number || github.ref }}
