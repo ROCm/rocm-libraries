@@ -85,11 +85,11 @@ def build_rocroller(
     subprocess.run(
         [
             "cmake",
-            "--build", 
+            "--build",
             str(build_dir),
-            "--parallel", 
+            "--parallel",
             str(threads),
-            "--target", 
+            "--target",
             "all_clients",
         ],
         cwd=str(project_dir),

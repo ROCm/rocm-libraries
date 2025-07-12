@@ -59,6 +59,16 @@
       "cacheVariables": {
         "ROCROLLER_ENABLE_DOCS": "ON"
       }
+    },
+    {
+      "name": "codeql",
+      "displayName": "Codeql",
+      "description": "Configure for codeql build",
+      "inherits": "opt-rocm",
+      "cacheVariables": {
+        "ROCROLLER_ENABLE_TEST_DISCOVERY": "OFF"
+      }
     }
+
 ]
 }

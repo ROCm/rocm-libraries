@@ -187,6 +187,10 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
         )
     endif()
 
+    if(NOT ROCROLLER_ENABLE_SLOW_TESTS)
+        set(PYTHON_TEST_SKIP "-m not slow")
+    endif()
+
     add_test(
         NAME PythonLint
         COMMAND flake8
@@ -197,11 +201,6 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
         PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${PROJECT_BINARY_DIR}"
                    "LABELS" "PYTHON"
     )
-
-    if(NOT ROCROLLER_ENABLE_SLOW_TESTS)
-        set(PYTHON_TEST_SKIP "-m not slow")
-    endif()
-
     add_test(
         NAME PythonTest
         COMMAND
