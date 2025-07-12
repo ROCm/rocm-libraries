@@ -245,13 +245,9 @@ namespace rocRoller
             // TODO: might be nicer to have UInt32 for strides; need
             // to allow user to specify stride types instead of
             // forcing size_t.
-            ComputeIndex();
-            ComputeIndex(bool     forward,
-                         DataType valueType,
-                         DataType offsetType = DataType::UInt64,
-                         DataType strideType = DataType::UInt64);
 
             bool     forward    = false;
+            bool isDirect2LDS = false;
             DataType valueType  = DataType::Count;
             DataType offsetType = DataType::Count;
             DataType strideType = DataType::Count;

@@ -52,6 +52,7 @@ namespace rocRoller
 
     inline Register::ValuePtr RegisterTagManager::getRegister(int tag) const
     {
+        AssertFatal(tag > 0, ShowValue(tag));
         auto merge = getIndex(tag);
         if(merge)
         {
@@ -96,6 +97,7 @@ namespace rocRoller
 
     inline Register::ValuePtr RegisterTagManager::getRegister(int tag, Register::ValuePtr tmpl)
     {
+        AssertFatal(tag > 0, ShowValue(tag));
         AssertFatal(!hasExpression(tag), "Tag already associated with an expression");
         AssertFatal(!isBorrowed(tag), ShowValue(tag), " has already been borrowed.");
 
@@ -106,13 +108,16 @@ namespace rocRoller
             {
                 AssertFatal(reg->variableType() == tmpl->variableType(),
                             ShowValue(tmpl->variableType()),
-                            ShowValue(reg->variableType()));
+                            ShowValue(reg->variableType()),
+                            ShowValue(tag));
                 AssertFatal(reg->valueCount() == tmpl->valueCount(),
                             ShowValue(tmpl->valueCount()),
-                            ShowValue(reg->valueCount()));
+                            ShowValue(reg->valueCount()),
+                            ShowValue(tag));
                 AssertFatal(reg->regType() == tmpl->regType(),
                             ShowValue(tmpl->regType()),
-                            ShowValue(reg->regType()));
+                            ShowValue(reg->regType()),
+                            ShowValue(tag));
             }
             return reg;
         }
@@ -171,6 +176,7 @@ namespace rocRoller
 
     inline void RegisterTagManager::addRegister(int tag, Register::ValuePtr value)
     {
+        AssertFatal(tag > 0, ShowValue(tag));
         AssertFatal(!hasExpression(tag), "Tag already associated with an expression");
         AssertFatal(!hasAlias(tag),
                     "Aliasing tags must not be deferred.",
