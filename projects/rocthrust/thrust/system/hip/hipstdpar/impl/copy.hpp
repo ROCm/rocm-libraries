@@ -55,6 +55,8 @@ namespace std
 template <typename I, typename O, enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
 inline O copy(execution::parallel_unsequenced_policy, I fi, I li, O fo)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::copy(::thrust::device, fi, li, fo);
 }
 
@@ -75,6 +77,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline O copy_if(execution::parallel_unsequenced_policy, I fi, I li, O fo, P p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::copy_if(::thrust::device, fi, li, fo, ::std::move(p));
 }
 
@@ -102,6 +106,8 @@ inline O copy_if(execution::parallel_unsequenced_policy, I fi, I li, O fo, P p)
 template <typename I, typename N, typename O, enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
 inline O copy_n(execution::parallel_unsequenced_policy, I fi, N n, O fo)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::copy_n(::thrust::device, fi, n, fo);
 }
 
@@ -119,6 +125,8 @@ inline O copy_n(execution::parallel_unsequenced_policy, I fi, N n, O fo)
 template <typename I, typename O, enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
 inline O move(execution::parallel_unsequenced_policy, I fi, I li, O fo)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::copy(::thrust::device, make_move_iterator(fi), make_move_iterator(li), fo);
 }
 

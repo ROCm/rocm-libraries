@@ -57,6 +57,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<F>()>* = nullptr>
 inline void for_each(execution::parallel_unsequenced_policy, I f, I l, F fn)
 {
+  ::hipstd::__maybe_bind_globals();
+
   ::thrust::for_each(::thrust::device, f, l, ::std::move(fn));
 }
 
@@ -85,6 +87,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<F>()>* = nullptr>
 inline I for_each_n(execution::parallel_unsequenced_policy, I f, N n, F fn)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::for_each_n(::thrust::device, f, n, ::std::move(fn));
 }
 

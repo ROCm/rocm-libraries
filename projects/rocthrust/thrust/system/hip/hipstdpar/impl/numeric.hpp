@@ -61,6 +61,8 @@ namespace std
 template <typename I, typename O, enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
 inline O adjacent_difference(execution::parallel_unsequenced_policy, I fi, I li, O fo)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::adjacent_difference(::thrust::device, fi, li, fo);
 }
 
@@ -79,6 +81,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<Op>()>* = nullptr>
 inline O adjacent_difference(execution::parallel_unsequenced_policy, I fi, I li, O fo, Op op)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::adjacent_difference(::thrust::device, fi, li, fo, ::std::move(op));
 }
 
@@ -106,6 +110,8 @@ inline O adjacent_difference(execution::parallel_unsequenced_policy, I fi, I li,
 template <typename I, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline typename iterator_traits<I>::value_type reduce(execution::parallel_unsequenced_policy, I f, I l)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::reduce(::thrust::device, f, l);
 }
 
@@ -120,6 +126,8 @@ inline typename iterator_traits<I>::value_type reduce(execution::parallel_unsequ
 template <typename I, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline T reduce(execution::parallel_unsequenced_policy, I f, I l, T x)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::reduce(::thrust::device, f, l, ::std::move(x));
 }
 
@@ -137,6 +145,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<Op>()>* = nullptr>
 inline T reduce(execution::parallel_unsequenced_policy, I f, I l, T x, Op op)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::reduce(::thrust::device, f, l, ::std::move(x), ::std::move(op));
 }
 
@@ -163,6 +173,8 @@ inline T reduce(execution::parallel_unsequenced_policy, I f, I l, T x, Op op)
 template <typename I, typename O, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
 inline O exclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, T x)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::exclusive_scan(::thrust::device, fi, li, fo, ::std::move(x));
 }
 
@@ -182,6 +194,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<Op>()>* = nullptr>
 inline O exclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, T x, Op op)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::exclusive_scan(::thrust::device, fi, li, fo, ::std::move(x), ::std::move(op));
 }
 
@@ -210,6 +224,8 @@ inline O exclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
 template <typename I, typename O, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
 inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::inclusive_scan(::thrust::device, fi, li, fo);
 }
 
@@ -228,6 +244,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<Op>()>* = nullptr>
 inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, Op op)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::inclusive_scan(::thrust::device, fi, li, fo, ::std::move(op));
 }
 
@@ -263,6 +281,8 @@ inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
     return fo;
   }
 
+  ::hipstd::__maybe_bind_globals();
+
   auto lo = ::thrust::inclusive_scan(::thrust::device, fi, li, fo, op);
 
   return ::thrust::transform(::thrust::device, fo, lo, fo, [op = ::std::move(op), x = ::std::move(x)](auto&& y) {
@@ -295,6 +315,8 @@ inline O inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo
 template <typename I0, typename I1, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
 inline T transform_reduce(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, T x)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::inner_product(::thrust::device, f0, l0, f1, ::std::move(x));
 }
 
@@ -316,6 +338,8 @@ template <
   enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>() && ::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
 inline T transform_reduce(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, T x, Op0 op0, Op1 op1)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::inner_product(::thrust::device, f0, l0, f1, ::std::move(x), ::std::move(op0), ::std::move(op1));
 }
 
@@ -348,6 +372,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
 inline T transform_reduce(execution::parallel_unsequenced_policy, I f, I l, T x, Op0 op0, Op1 op1)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::transform_reduce(::thrust::device, f, l, ::std::move(op1), ::std::move(x), ::std::move(op0));
 }
 
@@ -382,6 +408,8 @@ template <
   enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
 inline O transform_exclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, T x, Op0 op0, Op1 op1)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::transform_exclusive_scan(
     ::thrust::device, fi, li, fo, ::std::move(op1), ::std::move(x), ::std::move(op0));
 }
@@ -419,6 +447,8 @@ template <
   enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<Op0, Op1>()>* = nullptr>
 inline O transform_inclusive_scan(execution::parallel_unsequenced_policy, I fi, I li, O fo, Op0 op0, Op1 op1)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::transform_inclusive_scan(::thrust::device, fi, li, fo, ::std::move(op1), ::std::move(op0));
 }
 
@@ -456,6 +486,8 @@ inline O transform_inclusive_scan(execution::parallel_unsequenced_policy, I fi, 
   {
     return fo;
   }
+
+  ::hipstd::__maybe_bind_globals();
 
   auto lo = ::thrust::transform_inclusive_scan(::thrust::device, fi, li, fo, ::std::move(op1), op0);
 

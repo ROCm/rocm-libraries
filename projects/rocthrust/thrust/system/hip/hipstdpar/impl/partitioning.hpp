@@ -57,6 +57,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline bool is_partitioned(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::is_partitioned(::thrust::device, f, l, ::std::move(p));
 }
 
@@ -84,6 +86,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline I partition(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::partition(::thrust::device, f, l, ::std::move(p));
 }
 
@@ -114,6 +118,8 @@ template <
   enable_if_t<::hipstd::is_offloadable_iterator<I, O0, O1>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline pair<O0, O1> partition_copy(execution::parallel_unsequenced_policy, I f, I l, O0 fo0, O1 fo1, P p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   auto [r0, r1] = ::thrust::partition_copy(::thrust::device, f, l, fo0, fo1, ::std::move(p));
 
   return {::std::move(r0), ::std::move(r1)};
@@ -148,6 +154,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline I stable_partition(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::stable_partition(::thrust::device, f, l, ::std::move(p));
 }
 

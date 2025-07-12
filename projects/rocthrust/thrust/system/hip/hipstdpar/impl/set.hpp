@@ -56,6 +56,8 @@ namespace std
 template <typename I0, typename I1, enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
 inline bool includes(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1)
 {
+  ::hipstd::__maybe_bind_globals();
+
   ::thrust::discard_iterator<> cnt{0};
 
   return ::thrust::set_difference(::thrust::device, f1, l1, f0, l0, cnt) == cnt;
@@ -76,6 +78,8 @@ template <typename I0,
           enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline bool includes(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1, R r)
 {
+  ::hipstd::__maybe_bind_globals();
+
   ::thrust::discard_iterator<> cnt{0};
 
   return ::thrust::set_difference(::thrust::device, f1, l1, f0, l0, cnt, ::std::move(r)) == cnt;
@@ -105,6 +109,8 @@ inline bool includes(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1
 template <typename I0, typename I1, typename O, enable_if_t<::hipstd::is_offloadable_iterator<I0, I1, O>>* = nullptr>
 inline O set_union(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, I1 fi1, I1 li1, O fo)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::set_union(::thrust::device, fi0, li0, fi1, li1, fo);
 }
 
@@ -126,6 +132,8 @@ template <
   enable_if_t<::hipstd::is_offloadable_iterator<I0, I1, O>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline O set_union(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, I1 fi1, I1 li1, O fo, R r)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::set_union(::thrust::device, fi0, li0, fi1, li1, fo, ::std::move(r));
 }
 
@@ -156,6 +164,8 @@ inline O set_union(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, I1 fi
 template <typename I0, typename I1, typename O, enable_if_t<::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
 inline O set_intersection(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, I1 fi1, I1 li1, O fo)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::set_intersection(::thrust::device, fi0, li0, fi1, li1, fo);
 }
 
@@ -177,6 +187,8 @@ template <
   enable_if_t<::hipstd::is_offloadable_iterator<I0, I1, O>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline O set_intersection(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, I1 fi1, I1 li1, O fo, R r)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::set_intersection(::thrust::device, fi0, li0, fi1, li1, fo, ::std::move(r));
 }
 
@@ -207,6 +219,8 @@ inline O set_intersection(execution::parallel_unsequenced_policy, I0 fi0, I0 li0
 template <typename I0, typename I1, typename O, enable_if_t<::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
 inline O set_difference(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, I1 fi1, I1 li1, O fo)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::set_difference(::thrust::device, fi0, li0, fi1, li1, fo);
 }
 
@@ -228,6 +242,8 @@ template <
   enable_if_t<::hipstd::is_offloadable_iterator<I0, I1, O>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline O set_difference(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, I1 fi1, I1 li1, O fo, R r)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::set_difference(::thrust::device, fi0, li0, fi1, li1, fo, ::std::move(r));
 }
 
@@ -258,6 +274,8 @@ inline O set_difference(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, 
 template <typename I0, typename I1, typename O, enable_if_t<::hipstd::is_offloadable_iterator<I0, I1, O>()>* = nullptr>
 inline O set_symmetric_difference(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, I1 fi1, I1 li1, O fo)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::set_symmetric_difference(::thrust::device, fi0, li0, fi1, li1, fo);
 }
 
@@ -279,6 +297,8 @@ template <
   enable_if_t<::hipstd::is_offloadable_iterator<I0, I1, O>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline O set_symmetric_difference(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, I1 fi1, I1 li1, O fo, R r)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::set_symmetric_difference(::thrust::device, fi0, li0, fi1, li1, fo, ::std::move(r));
 }
 

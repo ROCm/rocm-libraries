@@ -59,6 +59,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<F>()>* = nullptr>
 inline O transform(execution::parallel_unsequenced_policy, I fi, I li, O fo, F fn)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::transform(::thrust::device, fi, li, fo, ::std::move(fn));
 }
 
@@ -89,6 +91,8 @@ template <
   enable_if_t<::hipstd::is_offloadable_iterator<I0, I1, O>() && ::hipstd::is_offloadable_callable<F>()>* = nullptr>
 inline O transform(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, I1 fi1, O fo, F fn)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::transform(::thrust::device, fi0, li0, fi1, fo, ::std::move(fn));
 }
 
@@ -119,6 +123,8 @@ inline O transform(execution::parallel_unsequenced_policy, I0 fi0, I0 li0, I1 fi
 template <typename I, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline void replace(execution::parallel_unsequenced_policy, I f, I l, const T& x, const T& y)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::replace(::thrust::device, f, l, x, y);
 }
 
@@ -138,6 +144,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline void replace_if(execution::parallel_unsequenced_policy, I f, I l, P p, const T& x)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::replace_if(::thrust::device, f, l, ::std::move(p), x);
 }
 
@@ -164,6 +172,8 @@ inline void replace_if(execution::parallel_unsequenced_policy, I f, I l, P p, co
 template <typename I, typename O, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I, O>()>* = nullptr>
 inline void replace_copy(execution::parallel_unsequenced_policy, I fi, I li, O fo, const T& x, const T& y)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::replace_copy(::thrust::device, fi, li, fo, x, y);
 }
 
@@ -185,6 +195,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I, O>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline void replace_copy_if(execution::parallel_unsequenced_policy, I fi, I li, O fo, P p, const T& x)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::replace_copy_if(::thrust::device, fi, li, fo, ::std::move(p), x);
 }
 

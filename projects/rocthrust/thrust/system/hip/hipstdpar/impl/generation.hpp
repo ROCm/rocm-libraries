@@ -56,6 +56,8 @@ namespace std
 template <typename I, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline void fill(execution::parallel_unsequenced_policy, I f, I l, const T& x)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::fill(::thrust::device, f, l, x);
 }
 
@@ -72,6 +74,8 @@ inline void fill(execution::parallel_unsequenced_policy, I f, I l, const T& x)
 template <typename I, typename N, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline void fill_n(execution::parallel_unsequenced_policy, I f, N n, const T& x)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::fill_n(::thrust::device, f, n, x);
 }
 
@@ -90,6 +94,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<G>()>* = nullptr>
 inline void generate(execution::parallel_unsequenced_policy, I f, I l, G g)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::generate(::thrust::device, f, l, ::std::move(g));
 }
 
@@ -118,6 +124,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<G>()>* = nullptr>
 inline void generate_n(execution::parallel_unsequenced_policy, I f, N n, G g)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::generate_n(::thrust::device, f, n, ::std::move(g));
 }
 

@@ -358,6 +358,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline bool all_of(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::all_of(::thrust::device, f, l, ::std::move(p));
 }
 
@@ -385,6 +387,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline bool any_of(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::any_of(::thrust::device, f, l, ::std::move(p));
 }
 
@@ -412,6 +416,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline bool none_of(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::none_of(::thrust::device, f, l, ::std::move(p));
 }
 
@@ -437,6 +443,8 @@ inline bool none_of(execution::parallel_unsequenced_policy, I f, I l, P p)
 template <typename I, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline I find(execution::parallel_unsequenced_policy, I f, I l, const T& x)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::find(::thrust::device, f, l, x);
 }
 
@@ -455,6 +463,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline I find_if(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::find_if(::thrust::device, f, l, ::std::move(p));
 }
 
@@ -482,6 +492,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline I find_if_not(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::find_if_not(::thrust::device, f, l, ::std::move(p));
 }
 
@@ -511,6 +523,8 @@ template <class ForwardIt1,
 inline ForwardIt1 find_end(
   execution::parallel_unsequenced_policy, ForwardIt1 first, ForwardIt1 last, ForwardIt2 s_first, ForwardIt2 s_last)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::find_end(first, last, s_first, s_last, thrust::equal_to<>{});
 }
 
@@ -537,6 +551,8 @@ inline ForwardIt1 find_end(
   ForwardIt2 s_last,
   BinaryPred p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::find_end(first, last, s_first, s_last, p);
 }
 
@@ -565,6 +581,8 @@ template <class ForwardIt1,
 inline ForwardIt1 find_first_of(
   execution::parallel_unsequenced_policy, ForwardIt1 first, ForwardIt1 last, ForwardIt2 s_first, ForwardIt2 s_last)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::find_first_of(first, last, s_first, s_last, thrust::equal_to<>{});
 }
 
@@ -591,6 +609,8 @@ inline ForwardIt1 find_first_of(
   ForwardIt2 s_last,
   BinaryPred p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::find_first_of(first, last, s_first, s_last, p);
 }
 
@@ -615,6 +635,8 @@ inline ForwardIt1 find_first_of(
 template <typename I, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline I adjacent_find(execution::parallel_unsequenced_policy, I f, I l)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::adjacent_find(f, l, thrust::equal_to<>{});
 }
 
@@ -631,6 +653,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline I adjacent_find(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::adjacent_find(f, l, p);
 }
 
@@ -656,6 +680,8 @@ inline I adjacent_find(execution::parallel_unsequenced_policy, I f, I l, P p)
 template <typename I, typename T, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline typename iterator_traits<I>::difference_type count(execution::parallel_unsequenced_policy, I f, I l, const T& x)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::count(::thrust::device, f, l, x);
 }
 
@@ -674,6 +700,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline typename iterator_traits<I>::difference_type count_if(execution::parallel_unsequenced_policy, I f, I l, P p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::count_if(::thrust::device, f, l, ::std::move(p));
 }
 
@@ -700,6 +728,8 @@ inline typename iterator_traits<I>::difference_type count_if(execution::parallel
 template <typename I0, typename I1, enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
 inline pair<I0, I1> mismatch(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1)
 {
+  ::hipstd::__maybe_bind_globals();
+
   auto [m0, m1] = ::thrust::mismatch(::thrust::device, f0, l0, f1);
 
   return {::std::move(m0), ::std::move(m1)};
@@ -720,6 +750,8 @@ template <typename I0,
           enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline pair<I0, I1> mismatch(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, P p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   auto [m0, m1] = ::thrust::mismatch(::thrust::device, f0, l0, f1, ::std::move(p));
 
   return {::std::move(m0), ::std::move(m1)};
@@ -747,6 +779,8 @@ inline pair<I0, I1> mismatch(execution::parallel_unsequenced_policy, I0 f0, I0 l
 template <typename I0, typename I1, enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
 inline pair<I0, I1> mismatch(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1)
 {
+  ::hipstd::__maybe_bind_globals();
+
   const auto n = ::std::min(l0 - f0, l1 - f1);
 
   auto [m0, m1] = ::thrust::mismatch(::thrust::device, f0, f0 + n, f1);
@@ -769,6 +803,8 @@ template <typename I0,
           enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>() && ::hipstd::is_offloadable_callable<P>()>* = nullptr>
 inline pair<I0, I1> mismatch(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I1 l1, P p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   const auto n = ::std::min(l0 - f0, l1 - f1);
 
   auto [m0, m1] = ::thrust::mismatch(::thrust::device, f0, f0 + n, f1, ::std::move(p));
@@ -800,6 +836,8 @@ inline pair<I0, I1> mismatch(execution::parallel_unsequenced_policy, I0 f0, I0 l
 template <typename I0, typename I1, enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>()>* = nullptr>
 inline bool equal(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::equal(::thrust::device, f0, l0, f1);
 }
 
@@ -818,6 +856,8 @@ template <typename I0,
           enable_if_t<::hipstd::is_offloadable_iterator<I0, I1>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline bool equal(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, R r)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::equal(::thrust::device, f0, l0, f1, ::std::move(r));
 }
 
@@ -847,6 +887,8 @@ inline bool equal(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I
     return false;
   }
 
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::equal(::thrust::device, f0, l0, f1);
 }
 
@@ -869,6 +911,8 @@ inline bool equal(execution::parallel_unsequenced_policy, I0 f0, I0 l0, I1 f1, I
   {
     return false;
   }
+
+  ::hipstd::__maybe_bind_globals();
 
   return ::thrust::equal(::thrust::device, f0, l0, f1, ::std::move(r));
 }
@@ -900,6 +944,8 @@ template <class ForwardIt1,
 inline ForwardIt1
 search(execution::parallel_unsequenced_policy, ForwardIt1 first, ForwardIt1 last, ForwardIt2 s_first, ForwardIt2 s_last)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::search(first, last, s_first, s_last, thrust::equal_to<>{});
 }
 
@@ -926,6 +972,8 @@ inline ForwardIt1 search(
   ForwardIt2 s_last,
   BinaryPred p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::search(first, last, s_first, s_last, p);
 }
 
@@ -955,6 +1003,8 @@ inline ForwardIt search_n(
   size_t count,
   typename std::iterator_traits<ForwardIt>::value_type const& value)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::search_n(first, last, count, value, thrust::equal_to<>{});
 }
 
@@ -981,6 +1031,8 @@ inline ForwardIt search_n(
   typename std::iterator_traits<ForwardIt>::value_type const& value,
   BinaryPred p)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::search_n(first, last, count, value, p);
 }
 

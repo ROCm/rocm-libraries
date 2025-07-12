@@ -96,6 +96,8 @@ inline constexpr
                              "warning"))) void
   unsupported_iterator_category() noexcept
 {}
+
+void __maybe_bind_globals(); // Forward declaration, defined in global_interposition.hpp
 } // namespace hipstd
 #else // __HIPSTDPAR__
 #  error "__HIPSTDPAR__ should be defined. Please use the '--hipstdpar' compile option."

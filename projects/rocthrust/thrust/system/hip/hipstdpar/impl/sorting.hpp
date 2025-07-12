@@ -179,6 +179,8 @@ namespace std
 template <typename I, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline void sort(execution::parallel_unsequenced_policy, I f, I l)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::sort(::thrust::device, f, l);
 }
 
@@ -195,6 +197,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline void sort(execution::parallel_unsequenced_policy, I f, I l, R r)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::sort(::thrust::device, f, l, ::std::move(r));
 }
 
@@ -220,6 +224,8 @@ inline void sort(execution::parallel_unsequenced_policy, I f, I l, R r)
 template <typename I, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline void stable_sort(execution::parallel_unsequenced_policy, I f, I l)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::stable_sort(::thrust::device, f, l);
 }
 
@@ -236,6 +242,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline void stable_sort(execution::parallel_unsequenced_policy, I f, I l, R r)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::stable_sort(::thrust::device, f, l, ::std::move(r));
 }
 
@@ -284,6 +292,8 @@ template <
 inline void
 partial_sort(execution::parallel_unsequenced_policy, KeysIt first, KeysIt middle, KeysIt last, CompareOp compare_op)
 {
+  ::hipstd::__maybe_bind_globals();
+
   ::thrust::__partial_sort(::thrust::device, first, middle, last, compare_op);
 }
 
@@ -346,6 +356,8 @@ inline void partial_sort_copy(
   RandomIt d_last,
   CompareOp compare_op)
 {
+  ::hipstd::__maybe_bind_globals();
+
   ::thrust::__partial_sort_copy(::thrust::device, first, last, d_first, d_last, compare_op);
 }
 
@@ -379,6 +391,8 @@ inline void partial_sort_copy(
 template <typename I, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline bool is_sorted(execution::parallel_unsequenced_policy, I f, I l)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::is_sorted(::thrust::device, f, l);
 }
 
@@ -395,6 +409,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline bool is_sorted(execution::parallel_unsequenced_policy, I f, I l, R r)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::is_sorted(::thrust::device, f, l, ::std::move(r));
 }
 
@@ -420,6 +436,8 @@ inline bool is_sorted(execution::parallel_unsequenced_policy, I f, I l, R r)
 template <typename I, enable_if_t<::hipstd::is_offloadable_iterator<I>()>* = nullptr>
 inline I is_sorted_until(execution::parallel_unsequenced_policy, I f, I l)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::is_sorted_until(::thrust::device, f, l);
 }
 
@@ -436,6 +454,8 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<R>()>* = nullptr>
 inline I is_sorted_until(execution::parallel_unsequenced_policy, I f, I l, R r)
 {
+  ::hipstd::__maybe_bind_globals();
+
   return ::thrust::is_sorted_until(::thrust::device, f, l, ::std::move(r));
 }
 
@@ -484,6 +504,8 @@ template <
 inline void
 nth_element(execution::parallel_unsequenced_policy, KeysIt first, KeysIt nth, KeysIt last, CompareOp compare_op)
 {
+  ::hipstd::__maybe_bind_globals();
+
   ::thrust::__nth_element(::thrust::device, first, nth, last, compare_op);
 }
 
