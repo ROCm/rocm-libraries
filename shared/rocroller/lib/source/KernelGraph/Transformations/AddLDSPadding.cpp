@@ -126,8 +126,8 @@ namespace rocRoller
         using namespace AddLDSPaddingDetail;
 
         /**
-	 * @brief Get the upstream Flatten edge coming in to an LDS node.
-	 */
+         * @brief Get the upstream Flatten edge coming in to an LDS node.
+         */
         std::optional<int> getFlattenEdgeTag(KernelGraph const& graph, int tag)
         {
             for(auto elem : graph.coordinates.getNeighbours<GD::Upstream>(tag))
@@ -140,8 +140,8 @@ namespace rocRoller
         }
 
         /**
-	 * @brief Get the downstream Tile edge coming out of an LDS node.
-	 */
+         * @brief Get the downstream Tile edge coming out of an LDS node.
+         */
         std::optional<int> getTileEdgeTag(KernelGraph const& graph, int tag)
         {
             for(auto elem : graph.coordinates.getNeighbours<GD::Downstream>(tag))
@@ -154,23 +154,23 @@ namespace rocRoller
         }
 
         /**
-	 * @brief Propagate the size and stride of the slow dimension
-	 * to upstream/downstream node.
-	 *
-	 * For example, after padding the slow dimension's stride, the
-	 * joined dimension size needs to be updated.
-	 *
-	 *     Slow Dimension     Fast Dimension
-	 *        size=256           size=128
-	 *    stride=128+padding     stride=1
-	 *	     \              /
-	 *	      --------------
-	 *	              |
-	 *	            Join
-	 *	              |
-	 *	          Dimension
-	 *               size=256*128   <--- should be updated to 256*(128+padding)
-	 */
+         * @brief Propagate the size and stride of the slow dimension
+         * to upstream/downstream node.
+         *
+         * For example, after padding the slow dimension's stride, the
+         * joined dimension size needs to be updated.
+         *
+         *     Slow Dimension     Fast Dimension
+         *        size=256           size=128
+         *    stride=128+padding     stride=1
+         *           \              /
+         *            --------------
+         *                    |
+         *                  Join
+         *                    |
+         *                Dimension
+         *               size=256*128   <--- should be updated to 256*(128+padding)
+         */
         void propagateSize(KernelGraph& graph, int slowTag, Graph::Direction propagateDirection)
         {
             auto truePredicate = [](auto x) { return true; };
@@ -201,13 +201,13 @@ namespace rocRoller
         }
 
         /**
-	 * @brief Update the strides of the slow and fast dimensions.
-	 *
-	 * The slow dimension's stride is set to the size of the fast
-	 * dimension plus padding.
-	 *
-	 * The fast dimension's stride is set to 1.
-	 */
+         * @brief Update the strides of the slow and fast dimensions.
+         *
+         * The slow dimension's stride is set to the size of the fast
+         * dimension plus padding.
+         *
+         * The fast dimension's stride is set to 1.
+         */
         void updateStrides(KernelGraph&              graph,
                            std::array<int, 2> const& tags,
                            uint                      numPaddingElements)
@@ -239,97 +239,96 @@ namespace rocRoller
         }
 
         /**
-	 * @brief Match the transform coming out of an LDS node to the
-	 * same pattern as the transform coming into the LDS node.
-	 *
-	 * This is used when Direct2LDS loads are padded.
-	 *
-	 * For example, consider the following transforms in and out
-	 * of LDS:
-	 *
-	 *                               TileNumber     TileIndex   <---- sister tags
-	 *                                 size=64       size=4
-	 *                                       \       /
-	 *                                        Flatten
-	 *                                           |
-	 *     MacroTileIndex                  MacroTileIndex
-	 *        size=256                       size=128
-	 *               \		        /
-	 *		  ----------------------
-	 * 			     |
-	 * 			  Flatten
-	 * 			     |
-	 * 			    LDS
-	 * 			     |
-	 *    	                   Tile
-	 * 			     |
-	 * 		  ----------------------
-	 *               /		        \
-	 *     MacroTileIndex                  MacroTileIndex
-	 *  	  size=256                       size=128
-	 *           |
-	 *         Tile     <---- edge
-	 *        /    \
-	 *  TileNumber  TileIndex    <---- tags
-	 *   size=32       size=8
-	 *
-	 * Note that above the LDS node, the small tile is 64x4; but
-	 * below the LDS the small tile is 32x8.  These are compatible
-	 * when there is no padding, and all edges are either Flatten or
-	 * Tile edges.
-	 *
-	 * If we pad one of the early dimensions, the compatibility
-	 * may be broken.  We can fix it by matching the downstream
-	 * transform to the upstream "sister" transform:
-	 *
-	 *                               TileNumber     TileIndex    <---- sister tags
-	 *                                 size=64       size=4
-	 *			      stride=64+padding   |
-	 *                                       \       /
-	 *                                         Join
-	 *                                           |
-	 *     MacroTileIndex                  MacroTileIndex
-	 *        size=128                   size=256+4*padding
-	 *               \		        /
-	 *		  ----------------------
-	 * 			     |
-	 * 			  Flatten
-	 * 			     |
-	 * 			    LDS
-	 * 			     |
-	 *    	                   Tile
-	 * 			     |
-	 * 		  ----------------------
-	 *               /		        \
-	 *     MacroTileIndex                  MacroTileIndex
-	 *   size=256+4*padding                   size=128
-	 *           |
-	 *         Split   <---- new edge (overwrites edge)
-	 *           |
-	 *         -------------
-	 *        /             \
-	 *  TileNumber           TileIndex    <---- new tags (overwrites tags)
-	 *   size=64              size=4
-	 *  stride=64+padding    stride=1
-	 *       \              /
-	 *        --------------
-	 * 	      |
-	 *	   Flatten
-	 * 	      |
-	 * 	    Linear
-	 *         size=256
-	 * 	      |
-	 *          Tile
-	 *         /    \
-	 *  TileNumber  TileIndex
-	 *   size=32      size=8
-	 *	 
-	 */
+         * @brief Match the transform coming out of an LDS node to the
+         * same pattern as the transform coming into the LDS node.
+         *
+         * This is used when Direct2LDS loads are padded.
+         *
+         * For example, consider the following transforms in and out
+         * of LDS:
+         *
+         *                               TileNumber     TileIndex   <---- sister tags
+         *                                 size=64       size=4
+         *                                       \       /
+         *                                        Flatten
+         *                                           |
+         *     MacroTileIndex                  MacroTileIndex
+         *        size=256                       size=128
+         *               \                      /
+         *                ----------------------
+         *                           |
+         *                        Flatten
+         *                           |
+         *                          LDS
+         *                           |
+         *                         Tile
+         *                           |
+         *                ----------------------
+         *               /                      \
+         *     MacroTileIndex                  MacroTileIndex
+         *        size=256                       size=128
+         *           |
+         *         Tile     <---- edge
+         *        /    \
+         *  TileNumber  TileIndex    <---- tags
+         *   size=32       size=8
+         *
+         * Note that above the LDS node, the small tile is 64x4; but
+         * below the LDS the small tile is 32x8.  These are compatible
+         * when there is no padding, and all edges are either Flatten or
+         * Tile edges.
+         *
+         * If we pad one of the early dimensions, the compatibility
+         * may be broken.  We can fix it by matching the downstream
+         * transform to the upstream "sister" transform:
+         *
+         *                               TileNumber     TileIndex    <---- sister tags
+         *                                 size=64       size=4
+         *                            stride=64+padding   |
+         *                                       \       /
+         *                                         Join
+         *                                           |
+         *     MacroTileIndex                  MacroTileIndex
+         *        size=128                   size=256+4*padding
+         *               \                      /
+         *                ----------------------
+         *                           |
+         *                        Flatten
+         *                           |
+         *                          LDS
+         *                           |
+         *                         Tile
+         *                           |
+         *                ----------------------
+         *               /                      \
+         *     MacroTileIndex                  MacroTileIndex
+         *   size=256+4*padding                   size=128
+         *           |
+         *         Split   <---- new edge (overwrites edge)
+         *           |
+         *         -------------
+         *        /             \
+         *  TileNumber           TileIndex    <---- new tags (overwrites tags)
+         *   size=64              size=4
+         *  stride=64+padding    stride=1
+         *       \              /
+         *        --------------
+         *            |
+         *         Flatten
+         *            |
+         *          Linear
+         *         size=256
+         *            |
+         *          Tile
+         *         /    \
+         *  TileNumber  TileIndex
+         *   size=32      size=8
+         *
+         */
         bool matchTransforms(KernelGraph&              graph,
                              int&                      edge,
                              std::array<int, 2>&       tags,
-                             std::array<int, 2> const& sisterTags,
-                             auto                      numPaddingElements)
+                             std::array<int, 2> const& sisterTags)
         {
             auto getCoordinateSize
                 = [&](int tag) { return getSize(graph.coordinates.getNode(tag)); };
@@ -366,6 +365,15 @@ namespace rocRoller
             return true;
         }
 
+        /**
+         * @brief Get the layout type and data type of the LDS node.
+         *
+         * This will traverse upstream from the LDS node until it finds
+         * a MacroTile node, and returns the layout type and data type
+         * of that MacroTile.
+         *
+         * If no MacroTile is found, an empty optional is returned.
+         */
         std::optional<std::pair<LayoutType, DataType>>
             getLayoutTypeAndDataType(KernelGraph const& graph, int ldsTag)
         {
@@ -428,12 +436,12 @@ namespace rocRoller
         };
 
         /**
-	 * @brief Get the number of padding elements for a given LDS
-	 * node.
-	 *
-	 * If the padding is set to -1, this will compute a default
-	 * padding value.
-	 */
+         * @brief Get the number of padding elements for a given LDS
+         * node.
+         *
+         * If the padding is set to -1, this will compute a default
+         * padding value.
+         */
         uint AddLDSPaddingVisitor::getLDSPaddingElements(KernelGraph const&    graph,
                                                          LDSPaddingInfo const& info) const
         {
@@ -452,8 +460,7 @@ namespace rocRoller
          */
         void AddLDSPaddingVisitor::stage(KernelGraph const& graph, int ldsTag)
         {
-            // TODO FIX THIS
-            bool isDirect2LDS = false;
+            bool isDirect2LDS = graph.coordinates.get<LDS>(ldsTag)->isDirect2LDS;
 
             auto flattenEdgeTag = getFlattenEdgeTag(graph, ldsTag);
             auto tileEdgeTag    = getTileEdgeTag(graph, ldsTag);
@@ -519,11 +526,8 @@ namespace rocRoller
                 if(paddingElements == 0)
                     continue;
 
-                bool needsPropagateSize = matchTransforms(graph,
-                                                          info.downstreamEdge,
-                                                          info.downstreamTags,
-                                                          info.upstreamTags,
-                                                          paddingElements);
+                bool needsPropagateSize = matchTransforms(
+                    graph, info.downstreamEdge, info.downstreamTags, info.upstreamTags);
 
                 // Change upstream edge to Join
                 graph.coordinates.setElement(info.upstreamEdge, Join());
