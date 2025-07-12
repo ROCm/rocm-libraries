@@ -396,7 +396,7 @@ class CodeGenRun(CodeGen):
 
     def command(self) -> List[str]:
         retval = [
-            "client/rocroller_codegen_stress",
+            "client/rocroller-codegen-stress",
             "--inst_count=" + str(self.instCount),
             "--instructions=" + str(self.instructions),
             "--yaml=" + str(self.output),

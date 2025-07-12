@@ -66,3 +66,6 @@ endif()
 if(ROCROLLER_ENABLE_ASAN)
     rocroller_target_configure_sanitizers(rocroller-codegen-stress PRIVATE)
 endif()
+
+add_custom_target(all_clients)
+add_dependencies(all_clients rocroller-gemm rocroller-codegen-stress)

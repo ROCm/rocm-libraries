@@ -78,18 +78,21 @@ def build_rocroller(
             "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
             "-DROCROLLER_ENABLE_CPPCHECK=OFF",
         ],
-        cwd=str(build_dir),
+        cwd=str(project_dir),
         check=True,
     )
 
     subprocess.run(
         [
-            "make",
-            "-j",
+            "cmake",
+            "--build", 
+            str(build_dir),
+            "--parallel", 
             str(threads),
+            "--target", 
             "all_clients",
         ],
-        cwd=str(build_dir),
+        cwd=str(project_dir),
         check=True,
     )
 
