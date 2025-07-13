@@ -69,3 +69,11 @@ endif()
 
 add_custom_target(all_clients)
 add_dependencies(all_clients rocroller-gemm rocroller-codegen-stress)
+
+if(ROCROLLER_ENABLE_COVERAGE OR BUILD_CODE_COVERAGE)
+    target_compile_options(rocroller-gemm PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(rocroller-gemm PRIVATE -fprofile-instr-generate)
+
+    target_compile_options(rocroller-codegen-stress PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(rocroller-codegen-stress PRIVATE -fprofile-instr-generate)
+endif()
