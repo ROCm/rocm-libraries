@@ -103,6 +103,7 @@ set(CMAKE_INSTALL_LIBDIR "lib" CACHE INTERNAL "Installation directory for librar
 
 
 # Build options
+option(HIPBLASLT_ENABLE_ROCM_LIBRARIES "Use dependencies availble in rocm-libraries" ON)
 option(BUILD_SHARED_LIBS "Build hipBLASLt as a shared library" ON)
 option(BUILD_CLIENTS_TESTS "Build tests (requires googletest)" OFF)
 option(BUILD_CLIENTS_BENCHMARKS "Build benchmarks" OFF)
@@ -273,7 +274,13 @@ endif()
 if( LEGACY_HIPBLAS_DIRECT )
   find_package( hipblas REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 else()
-  find_package( hipblas-common REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
+  if(NOT ROCM_LIBRARIES_ENABLE_SUPERBUILD)
+    if(HIPBLASLT_ENABLE_ROCM_LIBRARIES)
+      add_subdirectory("${PROJECT_SOURCE_DIR}/../hipblas-common" "${CMAKE_CURRENT_BINARY_DIR}/hipblas-common")
+    else()
+      find_package(hipblas-common REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
+    endif()
+  endif()
 endif()
 
 if(HIPBLASLT_ENABLE_MARKER)

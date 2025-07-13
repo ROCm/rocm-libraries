@@ -1163,8 +1163,8 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         params->prefetch = false;
     }
 
-    params->transposeMemoryAccess[LayoutType::MATRIX_A] = gemm->kernelType.transA == HIPBLAS_OP_T;
-    params->transposeMemoryAccess[LayoutType::MATRIX_B] = gemm->kernelType.transB == HIPBLAS_OP_T;
+    params->transposeMemoryAccess.set(LayoutType::MATRIX_A, gemm->kernelType.transA == HIPBLAS_OP_T);
+    params->transposeMemoryAccess.set(LayoutType::MATRIX_B, gemm->kernelType.transB == HIPBLAS_OP_T);
 
     uint workgroupSizeX = gemm->workgroupSizeX * gemm->workgroupSizeY;
     uint workgroupSizeY = 1;

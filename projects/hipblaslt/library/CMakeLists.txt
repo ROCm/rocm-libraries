@@ -162,7 +162,7 @@ if(HIPBLASLT_ENABLE_MARKER)
 endif()
 
 if( NOT BUILD_CUDA AND NOT LEGACY_HIPBLAS_DIRECT )
-  target_link_libraries(hipblaslt INTERFACE roc::hipblas-common)
+  target_link_libraries(hipblaslt PUBLIC roc::hipblas-common)
 endif()
 
 if(NOT WIN32)
@@ -173,30 +173,38 @@ if(NOT WIN32)
     endif()
 endif()
 
-# RocRoller integration
-include(FetchContent)
-if(HIPBLASLT_USE_ROCROLLER)
-  _save_var(BUILD_TESTING)
-  _save_var(BUILD_CLIENTS)
-  _save_var(CMAKE_SHARED_LINKER_FLAGS)
-  _save_var(CMAKE_VISIBILITY_INLINES_HIDDEN)
-  set(BUILD_CLIENTS OFF)
-  set(BUILD_TESTING OFF)
-  set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
-  set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-  FetchContent_Declare(
-    rocRoller
-    GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
-    GIT_TAG 75cb812426f075e60b6612650a8deda22f4cb1bb
-  )
-  FetchContent_MakeAvailable(rocRoller)
-  target_link_libraries(hipblaslt PRIVATE rocroller_interface)
-  add_definitions(-DHIPBLASLT_USE_ROCROLLER)
 
-  _restore_var(BUILD_TESTING)
-  _restore_var(BUILD_CLIENTS)
-  _restore_var(CMAKE_SHARED_LINKER_FLAGS)
-  _restore_var(CMAKE_VISIBILITY_INLINES_HIDDEN)
+if(HIPBLASLT_USE_ROCROLLER)
+  if(NOT ROCM_LIBRARIES_ENABLE_SUPERBUILD)
+    if(HIPBLASLT_ENABLE_ROCM_LIBRARIES)
+      set(ROCROLLER_ENABLE_FETCH ON)
+      set(ROCROLLER_ENABLE_CLIENT OFF)
+      set(ROCROLLER_BUILD_TESTING OFF)
+      add_subdirectory("${PROJECT_SOURCE_DIR}/../../shared/rocroller" "${CMAKE_CURRENT_BINARY_DIR}/rocroller")
+      target_link_libraries(hipblaslt PRIVATE roc::rocroller-interface)
+    else()
+      _save_var(BUILD_TESTING)
+      _save_var(BUILD_CLIENTS)
+      _save_var(CMAKE_SHARED_LINKER_FLAGS)
+      _save_var(CMAKE_VISIBILITY_INLINES_HIDDEN)
+      set(BUILD_CLIENTS OFF)
+      set(BUILD_TESTING OFF)
+      set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
+      set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+      FetchContent_Declare(
+        rocRoller
+        GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
+        GIT_TAG 7267293b1e9065755567be2af387ca887785b77c
+      )
+      FetchContent_MakeAvailable(rocRoller)
+      _restore_var(BUILD_TESTING)
+      _restore_var(BUILD_CLIENTS)
+      _restore_var(CMAKE_SHARED_LINKER_FLAGS)
+      _restore_var(CMAKE_VISIBILITY_INLINES_HIDDEN)
+      target_link_libraries(hipblaslt PRIVATE roc::rocroller_interface)
+    endif()
+  endif()
+  target_compile_definitions(hipblaslt PUBLIC HIPBLASLT_USE_ROCROLLER)
 endif()
 
 # Target properties
