@@ -192,7 +192,10 @@ inline void __maybe_bind_globals()
 }
 } // Namespace hipstd.
 #else // __HIPSTDPAR_HAS_TRUE_GLOBALS__
+namespace hipstd
+{
 inline void __maybe_bind_globals() {}
+} // Namespace hipstd.
 #endif // __HIPSTDPAR_HAS_TRUE_GLOBALS__
 
 #else // __HIPSTDPAR__
