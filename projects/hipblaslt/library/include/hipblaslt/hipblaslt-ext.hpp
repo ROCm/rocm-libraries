@@ -182,6 +182,8 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void
             setScalingBType(hipblasLtMatmulMatrixScale_t
                                 scalingBType); //!< Only works if DataTypeA = DataTypeB = FP8.
+        HIPBLASLT_EXPORT void setAct0(float act0); //!< Set first extra argument for activation function.
+        HIPBLASLT_EXPORT void setAct1(float act1); //!< Set second extra argument for activation function.
 
         HIPBLASLT_EXPORT hipblasLtEpilogue_t
                                      getMode() const; //!< The mode of epilogue. Default is gemm.
@@ -197,6 +199,8 @@ namespace hipblaslt_ext
             const; //!< 0 is scalar, 1 is vector. Only works if DataTypeA = DataTypeB = FP8.
         HIPBLASLT_EXPORT hipblasLtMatmulMatrixScale_t getScalingBType()
             const; //!< 0 is scalar, 1 is vector. Only works if DataTypeA = DataTypeB = FP8.
+        HIPBLASLT_EXPORT float getAct0(); //!< first extra argument for activation function.
+        HIPBLASLT_EXPORT float getAct1(); //!< second extra argument for activation function.
     private:
         friend Gemm;
         friend GroupedGemm;

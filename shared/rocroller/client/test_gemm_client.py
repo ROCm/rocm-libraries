@@ -42,7 +42,7 @@ build = pathlib.Path(__file__).parent.parent / "build"
 if os.getenv("ROCROLLER_BUILD_DIR") is not None:
     build = pathlib.Path(os.getenv("ROCROLLER_BUILD_DIR"))
 
-gemm = (build / "bin" / "client" / "rocRoller_gemm").resolve()
+gemm = (build / "client" / "rocroller-gemm").resolve()
 
 
 # Python 3.11 has contextlib.chdir but 3.10 doesn't
@@ -385,6 +385,7 @@ streamK: false
 streamKTwoTile: false
 ...
 """
+
 
 def type_configurations():
     """Return list of type combinations to test."""

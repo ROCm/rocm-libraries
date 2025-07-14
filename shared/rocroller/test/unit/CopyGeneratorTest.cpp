@@ -70,6 +70,105 @@ namespace CopyGeneratorTest
         }
     };
 
+    static void testEnsureTypeCommutative(rocRoller::ContextPtr& context)
+    {
+        auto literal       = Register::Value::Literal(65536);
+        auto small_literal = Register::Value::Literal(10);
+
+        using Bitset = EnumBitset<Register::Type>;
+        using namespace std::placeholders;
+        auto ensureTypeCommutative = std::bind(&rocRoller::CopyGenerator::ensureTypeCommutative,
+                                               context->copier().get(),
+                                               _1,
+                                               _2,
+                                               _3,
+                                               _4);
+
+        // Throw if LHS is also a literal
+        EXPECT_THROW(
+            {
+                context->schedule(
+                    ensureTypeCommutative(Bitset{Register::Type::Vector, Register::Type::Literal},
+                                          literal,
+                                          Bitset{Register::Type::Vector},
+                                          literal));
+            },
+            FatalError);
+
+        // No swap as RHS can be Literal
+        context->schedule(
+            ensureTypeCommutative(Bitset{Register::Type::Vector, Register::Type::Literal},
+                                  literal,
+                                  Bitset{Register::Type::Literal},
+                                  literal));
+
+        // No swap as RHS can be Constant
+        context->schedule(
+            ensureTypeCommutative(Bitset{Register::Type::Vector, Register::Type::Literal},
+                                  literal,
+                                  Bitset{Register::Type::Constant},
+                                  small_literal));
+
+        // RHS (Literal) swapped with LHS
+        {
+            auto vgpr = std::make_shared<Register::Value>(
+                context, Register::Type::Vector, DataType::Int32, 1);
+            vgpr->allocateNow();
+
+            auto literal_copy = literal;
+            context->schedule(
+                ensureTypeCommutative(Bitset{Register::Type::Vector, Register::Type::Literal},
+                                      vgpr,
+                                      Bitset{Register::Type::Vector},
+                                      literal_copy));
+
+            EXPECT_EQ(vgpr, literal);
+        }
+
+        // RHS (Constant) swapped with LHS
+        {
+            auto vgpr = std::make_shared<Register::Value>(
+                context, Register::Type::Vector, DataType::Int32, 1);
+            vgpr->allocateNow();
+
+            auto literal_copy = small_literal;
+            context->schedule(
+                ensureTypeCommutative(Bitset{Register::Type::Vector, Register::Type::Constant},
+                                      vgpr,
+                                      Bitset{Register::Type::Vector},
+                                      literal_copy));
+
+            EXPECT_EQ(vgpr, small_literal);
+        }
+
+        // Move RHS to a new VGPR
+        {
+            auto vgpr = std::make_shared<Register::Value>(
+                context, Register::Type::Vector, DataType::Int32, 1);
+            vgpr->allocateNow();
+            context->schedule(ensureTypeCommutative(
+                Bitset{Register::Type::Vector}, vgpr, Bitset{Register::Type::Vector}, literal));
+        }
+    }
+
+    TEST_F(CopyGenerator90aTest, ensureTypeCommutative)
+    {
+        testEnsureTypeCommutative(m_context);
+        EXPECT_EQ(NormalizedSource("v_mov_b32 v1, 65536"), NormalizedSource(output()));
+    }
+
+    TEST_F(CopyGenerator94xTest, ensureTypeCommutative)
+    {
+        testEnsureTypeCommutative(m_context);
+        EXPECT_EQ(NormalizedSource("v_mov_b32 v1, 65536"), NormalizedSource(output()));
+    }
+
+    TEST_F(CopyGenerator1200Test, ensureTypeCommutative)
+    {
+        testEnsureTypeCommutative(m_context);
+        EXPECT_EQ(NormalizedSource("v_mov_b32 v1, 65536"), NormalizedSource(output()));
+    }
+
     // Test if correct instructions are generated
     TEST_F(CopyGenerator90aTest, Instruction)
     {

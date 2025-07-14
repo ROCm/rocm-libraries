@@ -172,11 +172,11 @@ namespace rocRoller
 
         inline bool WaitcntObserver::isDirect2LDS(Instruction const& inst)
         {
-            if(inst.getOpCode().rfind("buffer_load_", 0) == 0)
+            if(GPUInstructionInfo::isVMEMRead(inst.getOpCode()))
             {
                 for(auto const& mod : inst.getModifiers())
                 {
-                    if(mod.rfind("lds", 0) == 0)
+                    if(mod == "lds")
                     {
                         return true;
                     }
@@ -187,9 +187,10 @@ namespace rocRoller
 
         inline void WaitcntObserver::observeWaitDirect2LDS(Instruction const& inst)
         {
-            if(isDirect2LDS(inst) && !m_needsWaitDirect2LDS)
+            if(isDirect2LDS(inst))
                 m_needsWaitDirect2LDS = true;
-            if((inst.getOpCode().rfind("s_barrier", 0) == 0) && m_needsWaitDirect2LDS)
+
+            if(GPUInstructionInfo::isSBarrier(inst.getOpCode()))
                 m_needsWaitDirect2LDS = false;
         }
     };

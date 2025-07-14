@@ -105,49 +105,6 @@ constexpr const char* rocblaslt_compute_type_string(rocblaslt_compute_type type)
     }
 }
 
-constexpr const char* rocblaslt_transpose_letter(hipblasOperation_t op)
-{
-    switch(op)
-    {
-    case HIPBLAS_OP_N:
-        return "N";
-    case HIPBLAS_OP_T:
-        return "T";
-    case HIPBLAS_OP_C:
-        return "C";
-    default:
-        return "invalidTranspose";
-    }
-}
-// Convert rocblaslt_status to string
-constexpr const char* rocblaslt_status_to_string(rocblaslt_status status)
-{
-#define CASE(x) \
-    case x:     \
-        return #x
-    switch(status)
-    {
-        CASE(rocblaslt_status_success);
-        CASE(rocblaslt_status_invalid_handle);
-        CASE(rocblaslt_status_not_implemented);
-        CASE(rocblaslt_status_invalid_pointer);
-        CASE(rocblaslt_status_invalid_size);
-        CASE(rocblaslt_status_memory_error);
-        CASE(rocblaslt_status_internal_error);
-        CASE(rocblaslt_status_invalid_value);
-        CASE(rocblaslt_status_arch_mismatch);
-        CASE(rocblaslt_status_zero_pivot);
-        CASE(rocblaslt_status_not_initialized);
-        CASE(rocblaslt_status_type_mismatch);
-        CASE(rocblaslt_status_requires_sorted_storage);
-        CASE(rocblaslt_status_continue);
-    }
-#undef CASE
-    // We don't use default: so that the compiler warns us if any valid enums are
-    // missing from our switch. If the value is not a valid rocblaslt_status, we
-    // return this string.
-    return "<undefined rocblaslt_status value>";
-}
 template <typename>
 static constexpr char rocblaslt_precision_string[] = "invalid";
 template <>
@@ -451,6 +408,7 @@ inline bool is_bias_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_BGRADA:
     case ROCBLASLT_EPILOGUE_BGRADB:
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
+    case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
         return true;
     default:
         return false;
@@ -471,6 +429,8 @@ inline bool is_act_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
     case ROCBLASLT_EPILOGUE_SWISH_EXT:
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
+    case ROCBLASLT_EPILOGUE_CLAMP_EXT:
+    case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
         return true;
     case ROCBLASLT_EPILOGUE_DEFAULT:
     case ROCBLASLT_EPILOGUE_BIAS:

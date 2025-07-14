@@ -36,6 +36,7 @@
 #define ROCRAND_SQRT2_DOUBLE (1.4142135623730951)
 
 #include <hip/hip_runtime.h>
+#include <utility>
 
 #define ROCRAND_KERNEL __global__ static
 
@@ -85,32 +86,6 @@
     #define ROCRAND_DEPRECATED(msg) __attribute__((deprecated(msg)))
 #else
     #define ROCRAND_DEPRECATED(msg)
-#endif
-
-// This is an accessor macro for HIP vector types (eg. int2, float4, etc.).
-// Prior to HIP 7.0, individual elements could be accessed through the
-// data member:
-//
-// int2 vec;
-// vec.data[0] = 1;
-//
-// Beginning with HIP 7.0, the data member is hidden, and individual
-// elements must be accessed like this:
-//
-// int2 vec;
-// vec[0] = 1;
-//
-// You can use the macro like this:
-//
-// int2 vec;
-// ROCRAND_HIPVEC_ACCESS(vec)[0];
-//
-#if defined(__HIP_PLATFORM_AMD__)
-    #if HIP_VERSION_MAJOR < 7
-        #define ROCRAND_HIPVEC_ACCESS(x) x.data
-    #else
-        #define ROCRAND_HIPVEC_ACCESS(x) x
-    #endif
 #endif
 
 namespace rocrand_device {
@@ -186,6 +161,43 @@ __forceinline__ __device__ __host__ void
 {
     lo = val;
     hi = 0;
+}
+
+template<typename T, typename = void>
+struct has_data : std::false_type
+{};
+
+template<typename T>
+struct has_data<T, decltype(std::declval<T>().data, void())> : std::true_type
+{};
+
+template<typename T>
+static constexpr bool has_data_v = has_data<T>::value;
+
+/// This is an accessor utility for HIP vector types (eg. int2, float4, etc.).
+/// Prior to HIP 7.0, individual elements could be accessed through the
+/// data member:
+///   int2 vec;
+///   vec.data[0] = 1;
+///
+/// Beginning with HIP 7.0, the data member is hidden, and individual
+/// elements can instead be accessed through the underlaying native vector.
+template<typename V, typename Index>
+__forceinline__ __device__ __host__
+auto get_element_at(V vector, Index i)
+{
+#if defined(__HIP_PLATFORM_AMD__)
+    if constexpr(has_data_v<V>)
+    {
+        return vector.data[i];
+    }
+    else
+    {
+        return get_native_vector(vector)[i];
+    }
+#else
+    return (&vector.x)[i];
+#endif
 }
 
 } // end namespace detail
