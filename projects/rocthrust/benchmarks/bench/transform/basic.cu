@@ -257,7 +257,7 @@ void add_benchmarks(const std::string& name, std::vector<benchmark::internal::Be
     BENCHMARK_BABELSTREAM_TYPE(int16_t),
     BENCHMARK_BABELSTREAM_TYPE(float),
     BENCHMARK_BABELSTREAM_TYPE(double),
-    BENCHMARK_BABELSTREAM_TYPE(int128_t),
+    BENCHMARK_BABELSTREAM_TYPE(rocprim::int128_t),
   };
 
   benchmarks.insert(benchmarks.end(), bs.begin(), bs.end());
