@@ -32,7 +32,7 @@ set(TENSILE_CODE_OBJECT_VERSION
     "V4"
     CACHE STRING "Path to directory containing logic files")
 set(TENSILE_LOGIC_DIR
-    "${tensile_SOURCE_DIR}/../../rocBLAS/library/src/blas3/Tensile/Logic/asm_full"
+    "${tensile_SOURCE_DIR}/../../../projects/rocblas/library/src/blas3/Tensile/Logic/asm_full"
     CACHE STRING "Path to directory containing logic files")
 
 set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--merge-files")

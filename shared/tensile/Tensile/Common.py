@@ -256,7 +256,6 @@ globalParameters["SupportedISA"] = [(8,0,3),
 globalParameters["KeepBuildTmp"] = True                           # Do not remove build artifacts during the build process or build_tmp after build completes
 globalParameters["GenerateManifestAndExit"] = False               # Output manifest file with list of expected library objects and exit
 globalParameters["VerifyManifest"] = False                        # Verify manifest file against generated library files and exit.
-globalParameters["ClientBuildPath"] = "0_Build"                   # subdirectory for host code build directory
 globalParameters["BenchmarkProblemsPath"] = "1_BenchmarkProblems" # subdirectory for benchmarking phases
 globalParameters["BenchmarkDataPath"] = "2_BenchmarkData"         # subdirectory for storing final benchmarking data
 globalParameters["LibraryLogicPath"] = "3_LibraryLogic"           # subdirectory for library logic produced by analysis
@@ -2509,7 +2508,6 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None ):
     "OutputPath",
     "EmbedLibraryKey",
     "Version",
-    "BuildClient",
     "ClientConfig",
     "WriteMasterSolutionIndex",
     "HipConfig",
