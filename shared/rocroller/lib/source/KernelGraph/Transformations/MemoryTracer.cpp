@@ -169,6 +169,69 @@ namespace rocRoller::KernelGraph
                 event.workItem);
         }
 
+        struct Summary
+        {
+            static constexpr bool echoBanks = true;
+
+            struct Banks
+            {
+                uint   bankIndex;
+                size_t workitemsAccessed;
+                bool   imbalanced;
+            };
+            struct Access
+            {
+                int                           tag;
+                uint                          instruction;
+                int                           ldsTag;
+                std::vector<Banks>            accessedBanks;
+                std::vector<std::vector<int>> banksToWorkitems;
+            };
+
+            std::vector<Access>     accesses;
+            std::unordered_set<int> imbalancedTags;
+
+            std::string toString() const
+            {
+                std::stringstream ss;
+                for(auto const& [tag, instruction, ldsTag, accessedBanks, banksToWorkitems] :
+                    this->accesses)
+                {
+                    ss << fmt::format("Operation tag {} instruction {} accesses LDS {}:\n",
+                                      tag,
+                                      instruction,
+                                      ldsTag);
+                    for(auto const& [bankIndex, workitemsAccessed, imbalanced] : accessedBanks)
+                    {
+                        ss << fmt::format("  Bank {}: {} workitems {}\n",
+                                          bankIndex,
+                                          workitemsAccessed,
+                                          imbalanced ? "(imbalanced)" : "");
+                    }
+                    if constexpr(echoBanks)
+                    {
+                        for(size_t bankIndex = 0; bankIndex < banksToWorkitems.size(); ++bankIndex)
+                        {
+                            ss << fmt::format("  Bank {:2d}: ", bankIndex);
+                            for(auto workitem : banksToWorkitems[bankIndex])
+                            {
+                                ss << fmt::format("{:2d} ", workitem);
+                            }
+                            ss << '\n';
+                        }
+                    }
+                    return ss.str();
+                }
+                ss << fmt::format("  Imbalanced tags: {}\n", this->imbalancedTags);
+                return ss.str();
+            }
+        };
+
+        std::ostream& operator<<(std::ostream& stream, Summary const& summary)
+        {
+            return stream << summary.toString();
+        }
+
         /**
          * LDS bank model
          */
@@ -181,59 +244,6 @@ namespace rocRoller::KernelGraph
                 Direction direction;
                 uint      workitem;
                 uint      bankIndex;
-            };
-
-            struct Summary
-            {
-                struct Banks
-                {
-                    uint   bankIndex;
-                    size_t workitemsAccessed;
-                    bool   imbalanced;
-                };
-                struct Access
-                {
-                    int                           tag;
-                    uint                          instruction;
-                    int                           ldsTag;
-                    std::vector<Banks>            accessedBanks;
-                    std::vector<std::vector<int>> banksToWorkitems;
-                };
-
-                std::vector<Access>     accesses;
-                std::unordered_set<int> imbalancedTags;
-
-                std::string toString()
-                {
-                    std::stringstream ss;
-                    for(auto const& [tag, instruction, ldsTag, accessedBanks, banksToWorkitems] :
-                        this->accesses)
-                    {
-                        ss << fmt::format("Operation tag {} instruction {} accesses LDS {}:\n",
-                                          tag,
-                                          instruction,
-                                          ldsTag);
-                        for(auto const& [bankIndex, workitemsAccessed, imbalanced] : accessedBanks)
-                        {
-                            ss << fmt::format("  Bank {}: {} workitems {}\n",
-                                              bankIndex,
-                                              workitemsAccessed,
-                                              imbalanced ? "(imbalanced)" : "");
-                        }
-                        for(size_t bankIndex = 0; bankIndex < banksToWorkitems.size(); ++bankIndex)
-                        {
-                            ss << fmt::format("  Bank {:2d}: ", bankIndex);
-                            for(auto workitem : banksToWorkitems[bankIndex])
-                            {
-                                ss << fmt::format("{:2d} ", workitem);
-                            }
-                            ss << '\n';
-                        }
-                        return ss.str();
-                    }
-                    ss << fmt::format("  Imbalanced tags: {}\n", this->imbalancedTags);
-                    return ss.str();
-                }
             };
 
             /**
@@ -257,11 +267,6 @@ namespace rocRoller::KernelGraph
 
             void simulate(MemoryEventSimulated event)
             {
-                if(event.operationTag == 4722)
-                {
-                    Log::info("LDSBankModel::simulate({})", toString(event));
-                }
-
                 for(int i = 0; i < event.bytesRequested; i += m_entryWidthInBytes)
                 {
                     auto ldsAddressInBytes = event.byteOffset + i;
@@ -280,13 +285,8 @@ namespace rocRoller::KernelGraph
                 }
             }
 
-            std::string summary()
+            Summary summary() const
             {
-                std::stringstream ss;
-                ss << "LDS Bank Model: " << m_entryWidthInBytes * m_numEntriesPerBank * m_numBanks
-                   << " bytes, " << m_entryWidthInBytes << "byte bank width, " << m_numBanks
-                   << " banks" << std::endl;
-
                 Summary summary;
 
                 // For each operation tag and instruction...
@@ -333,26 +333,29 @@ namespace rocRoller::KernelGraph
 
                     // For each bank, find the workitems that accessed it
                     std::vector<std::vector<int>> banksToWorkitems;
-                    const auto                    maxWorkitems = 256;
-                    for(int bankIndex = 0; bankIndex < m_numBanks; ++bankIndex)
+                    if constexpr(Summary::echoBanks)
                     {
-                        if(bankWorkitems.contains(bankIndex))
+                        const auto maxWorkitems = 256;
+                        for(int bankIndex = 0; bankIndex < m_numBanks; ++bankIndex)
                         {
-                            banksToWorkitems.emplace_back([&]() {
-                                std::vector<int> workitems;
-                                for(int workitem = 0; workitem < maxWorkitems; ++workitem)
-                                {
-                                    if(bankWorkitems[bankIndex].contains(workitem))
+                            if(bankWorkitems.contains(bankIndex))
+                            {
+                                banksToWorkitems.emplace_back([&]() {
+                                    std::vector<int> workitems;
+                                    for(int workitem = 0; workitem < maxWorkitems; ++workitem)
                                     {
-                                        workitems.emplace_back(workitem);
+                                        if(bankWorkitems[bankIndex].contains(workitem))
+                                        {
+                                            workitems.emplace_back(workitem);
+                                        }
                                     }
-                                }
-                                return workitems;
-                            }());
-                        }
-                        else
-                        {
-                            banksToWorkitems.emplace_back();
+                                    return workitems;
+                                }());
+                            }
+                            else
+                            {
+                                banksToWorkitems.emplace_back();
+                            }
                         }
                     }
 
@@ -360,7 +363,17 @@ namespace rocRoller::KernelGraph
                         tag, instruction, ldsTag, workitemsInfo, banksToWorkitems);
                 }
 
-                return summary.toString();
+                return summary;
+            }
+
+            std::string toString() const
+            {
+                std::stringstream ss;
+                ss << "LDS Bank Model: "
+                   << this->m_entryWidthInBytes * this->m_numEntriesPerBank * this->m_numBanks
+                   << " bytes, " << this->m_entryWidthInBytes << "byte bank width, "
+                   << this->m_numBanks << " banks" << std::endl;
+                return ss.str();
             }
 
         private:
@@ -370,6 +383,11 @@ namespace rocRoller::KernelGraph
 
             std::map<std::pair<int, uint>, std::vector<LDSBankAccess>> m_bankAccesses;
         };
+
+        std::ostream& operator<<(std::ostream& stream, LDSBankModel const& ldsBankModel)
+        {
+            return stream << ldsBankModel.toString();
+        }
 
         /**
          * @brief Memory tracer for the kernel graph.
