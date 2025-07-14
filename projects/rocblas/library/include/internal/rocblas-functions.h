@@ -19316,7 +19316,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrtri_strided_batched(rocblas_handle     
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
     memory found in the handle to increase overall performance (where k is m
     when rocblas_side_left and is n when rocblas_side_right). For more
-    information on pre-allocated memory in the handle please see the Device
+    information on pre-allocated memory in the handle, see the Device
     Memory Allocation in rocBLAS section of :ref:api-reference-guide.
 
     Although not widespread, some gemm kernels used by trsm may use atomic operations.
@@ -19513,7 +19513,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_64(rocblas_handle                han
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
     memory found in the handle to increase overall performance (where k is m
     when rocblas_side_left and is n when rocblas_side_right). For more
-    information on pre-allocated memory in the handle please see the Device
+    information on pre-allocated memory in the handle, see the Device
     Memory Allocation in rocBLAS section of :ref:api-reference-guide.
 
     @param[in]
@@ -19705,7 +19705,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_batched_64(rocblas_handle           
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
     memory found in the handle to increase overall performance (where k is m when
     HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT). For more information on
-    pre-allocated memory in the handle please see the Device Memory Allocation
+    pre-allocated memory in the handle, see the Device Memory Allocation
     in rocBLAS section of the rocBLAS API Reference.
 
     @param[in]
