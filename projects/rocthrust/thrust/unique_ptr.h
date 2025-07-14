@@ -286,6 +286,11 @@ public:
         return m_ptr;
     }
 
+    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 T* get_raw() const noexcept
+    {
+        return thrust::raw_pointer_cast(m_ptr);
+    }
+
     THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 deleter_type& get_deleter() noexcept
     {
         return m_deleter;
