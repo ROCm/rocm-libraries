@@ -299,6 +299,8 @@ if(BUILD_TEST)
     add_rocthrust_test("type_traits")
     add_rocthrust_test("uninitialized_copy")
     add_rocthrust_test("uninitialized_fill")
+    add_rocthrust_test("unique_ptr_general")
+    add_rocthrust_test("unique_ptr_allocate_deallocate")
     add_rocthrust_test("unique")
     # temporarily disable unique_by_key due to Azure CI build failure
     #add_rocthrust_test("unique_by_key")
