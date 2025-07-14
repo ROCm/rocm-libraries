@@ -58,7 +58,7 @@ add_library(rocroller-no-rtti
         "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionTransformations/FastDivision.cpp"
 )
 if(ROCROLLER_ENABLE_LLD)
-    target_compile_definitions(rocroller-no-rtti PRIVATE ROCROLLER_ENABLE_LLD)
+    target_compile_definitions(rocroller-no-rtti PRIVATE ROCROLLER_USE_LLD)
     target_link_libraries(rocroller-no-rtti PRIVATE lldELF)
 endif()
 target_compile_options(rocroller-no-rtti PRIVATE -fno-rtti)

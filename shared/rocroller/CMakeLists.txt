@@ -151,12 +151,6 @@ if(ROCROLLER_ENABLE_LLVM)
     find_package(LLVM REQUIRED)
 endif()
 
-if(ROCROLLER_ENABLE_LLD)
-    find_package(LLD REQUIRED)
-    target_include_directories(rocroller PRIVATE "${LLD_INCLUDES}")
-    target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_LLD)
-endif()
-
 if(ROCROLLER_BUILD_SHARED_LIBS)
     add_library(rocroller SHARED)
 else()
@@ -167,6 +161,12 @@ add_library(roc::rocroller ALIAS rocroller)
 
 add_library(rocroller-interface INTERFACE)
 add_library(roc::rocroller-interface ALIAS rocroller-interface)
+
+if(ROCROLLER_ENABLE_LLD)
+    find_package(LLD REQUIRED)
+    target_include_directories(rocroller PRIVATE "${LLD_INCLUDES}")
+    target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_LLD)
+endif()
 
 if(ROCROLLER_ENABLE_ASAN AND NOT WIN32)
     rocroller_target_configure_sanitizers(rocroller PRIVATE)
