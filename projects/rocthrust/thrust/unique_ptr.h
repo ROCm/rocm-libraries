@@ -362,4 +362,14 @@ inline THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr<T, D>& x, unique_ptr<T,
     x.swap(y);
 }
 
+template <class T,
+          class... Args,
+          class = typename thrust::detail::enable_if<
+              thrust::detail::not_<std::is_array<T>>::value>::type>
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique(Args&&... args)
+{
+  thrust::device_ptr<T> p = thrust::device_malloc<T>(1);
+  return unique_ptr<T>(thrust::device_new<T>(p, T(std::forward<Args>(args)...), 1));
+}
+
 THRUST_NAMESPACE_END
