@@ -55,8 +55,8 @@ namespace rocRoller
         }
 
         static void buildControlStack(int                           tag,
-                                std::unordered_map<int, int>& controlStack,
-                                CG::ControlGraph const&       graph)
+                                      std::unordered_map<int, int>& controlStack,
+                                      CG::ControlGraph const&       graph)
         {
             using GD = rocRoller::Graph::Direction;
 
@@ -97,11 +97,11 @@ namespace rocRoller
         }
 
         static void collectSetCoordinates(KernelGraph const&       graph,
-                                        std::unordered_set<int>& visited,
-                                        int                      tag,
-                                        std::vector<int>&        result)
+                                          std::unordered_set<int>& visited,
+                                          int                      tag,
+                                          std::vector<int>&        result)
         {
-            auto traverse = [&]<typename ...EdgeTypes>()
+            auto traverse = [&]<typename... EdgeTypes>()
             {
                 auto traverse = [&]<typename EdgeType>() {
                     for(auto child : graph.control.getOutputNodeIndices<EdgeType>(tag))
@@ -116,7 +116,11 @@ namespace rocRoller
                 (traverse.template operator()<EdgeTypes>(), ...);
             };
 
-            traverse.template operator()<CG::Sequence, CG::ForLoopIncrement, CG::Else, CG::Body, CG::Initialize>();
+            traverse.template operator()<CG::Sequence,
+                                         CG::ForLoopIncrement,
+                                         CG::Else,
+                                         CG::Body,
+                                         CG::Initialize>();
 
             if(graph.control.get<CG::SetCoordinate>(tag).has_value())
                 result.push_back(tag);
@@ -237,10 +241,10 @@ namespace rocRoller
             return leaves;
         }
 
-        static void connect(bool const        isSequenceEdge,
+        static void connect(bool const              isSequenceEdge,
                             std::vector<int> const& A,
                             std::vector<int> const& B,
-                            KernelGraph&      kg)
+                            KernelGraph&            kg)
         {
             if(A.empty() or B.empty())
                 return;
@@ -257,6 +261,27 @@ namespace rocRoller
                 addEdges.template operator()<ControlGraph::Body>();
         }
 
+        static bool const verifyInputEdgesAreOfTheSameType(KernelGraph const& kg, int const node)
+        {
+            using GD = rocRoller::Graph::Direction;
+
+            auto const allSequence
+                = std::ranges::all_of(kg.control.getNeighbours<GD::Upstream>(node), [&](int x) {
+                      return std::holds_alternative<CG::Sequence>(kg.control.getEdge(x));
+                  });
+
+            if(not allSequence)
+            {
+                auto const allBody
+                    = std::ranges::all_of(kg.control.getNeighbours<GD::Upstream>(node), [&](int x) {
+                          return std::holds_alternative<CG::Body>(kg.control.getEdge(x));
+                      });
+                AssertFatal(allBody, "A SetCoordinate's input edges are of different types");
+            }
+
+            return allSequence;
+        }
+
         static void removeSetCoordinates(KernelGraph& kg)
         {
             using GD = rocRoller::Graph::Direction;
@@ -268,11 +293,7 @@ namespace rocRoller
                                       .to<std::vector>();
                 AssertFatal(not inputNodes.empty());
 
-                auto const edge = kg.control.getNeighbours<GD::Upstream>(sc).take(1).only();
-                AssertFatal(edge.has_value(),
-                            "A SetCoordinate should have at least one incoming edge");
-                bool const isSequenceEdge
-                    = std::holds_alternative<CG::Sequence>(kg.control.getEdge(*edge));
+                bool const isSequenceEdge = verifyInputEdgesAreOfTheSameType(kg, sc);
 
                 auto bodyNodes = kg.control.getOutputNodeIndices<CG::Body>(sc).to<std::vector>();
                 auto sequenceNodes
