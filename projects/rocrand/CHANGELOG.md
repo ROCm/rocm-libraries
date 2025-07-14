@@ -3,6 +3,8 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
+## rocRAND 4.0.0 for ROCm 7.0
+
 ### Added
 
 * gfx950 support
@@ -25,8 +27,8 @@ Documentation for rocRAND is available at
 
 ### Changed
 
-* Changed the return type for `rocrand_generate_poisson` for the `SOBOL64` and `SCRAMBLED_SOBOL64` engines
-* Changed the unnecessarily large 64-bit data type for constants used for skipping in `MRG32K3A` to the 32-bit data type .
+* Changed the return type for `rocrand_generate_poisson` for the `SOBOL64` and `SCRAMBLED_SOBOL64` engines.
+* Changed the unnecessarily large 64-bit data type for constants used for skipping in `MRG32K3A` to the 32-bit data type.
 * Updated several `gfx942` auto tuning parameters.
 * Modified error handling and expanded the error information for the case of double-deallocation of the (scrambled) sobol32 and sobol64 constants and direction vectors.
 
@@ -43,13 +45,13 @@ Documentation for rocRAND is available at
   * `rocrand_h_scrambled_sobol32_direction_vectors`, use `rocrand_get_direction_vectors32` instead.
   * `rocrand_h_scrambled_sobol64_direction_vectors`, use `rocrand_get_direction_vectors64` instead.
 
-### Upcoming changes
-
-* Deprecated the rocRAND Fortran API in favor of hipfort.
-
 ### Resolved issues
 
 * Fixed an issue where `mt19937.hpp` would cause kernel errors during auto tuning.
+
+### Upcoming changes
+
+* Deprecated the rocRAND Fortran API in favor of hipfort.
 
 ## rocRAND 3.3.0 for ROCm 6.4
 
