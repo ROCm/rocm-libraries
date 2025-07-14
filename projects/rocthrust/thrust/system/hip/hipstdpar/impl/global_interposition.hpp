@@ -143,8 +143,7 @@ public:
         if (hipGetSymbolAddress(reinterpret_cast<void**>(&ps_),
                                 __hipstdpar_symbol_indirection_table) !=
             hipSuccess) {
-            throw ::std::runtime_error(
-                "Failed to retrieve symbol indirection table.");
+            return; // Compiler did not set this up for us.
         }
 
         for (auto i = 0u; i != ps_->n_; ++i) ud_.push_back(i);
@@ -163,7 +162,7 @@ public:
     }
     ~__Global_binder()
     {
-        if (!__HIPSTDPAR_INTERPOSE_ALLOC__) return;
+        if (!__HIPSTDPAR_INTERPOSE_ALLOC__ || !ps_) return;
 
         dl_iterate_phdr([](dl_phdr_info* i, size_t, void* p) {
             const auto self{static_cast<__Global_binder*>(p)};
