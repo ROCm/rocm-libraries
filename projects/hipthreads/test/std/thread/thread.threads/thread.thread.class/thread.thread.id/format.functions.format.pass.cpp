@@ -24,6 +24,9 @@
 // template<class... Args>
 //   wstring format(wformat_string<Args...> fmt, Args&&... args);
 
+// TODO: This currently only tests formatting thread IDs in host code. We should add tests for device code if/when
+// libhipcxx adds support for strings and std::format
+
 #include <format>
 #include <cassert>
 

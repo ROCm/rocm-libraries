@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 //
 // UNSUPPORTED: no-threads
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_USE_GPU_THREADS
 
 // <thread>
 
@@ -18,6 +19,7 @@
 #include <cassert>
 
 #include "test_macros.h"
+#include "force_include_hip.h"
 
 int main(int, char**)
 {

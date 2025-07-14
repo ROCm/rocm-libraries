@@ -76,7 +76,7 @@ void list_devices()
 __host__ __device__
 int fake_main(int, char**);
 
-int cuda_thread_count = 1;
+unsigned int cuda_thread_count = 1;
 
 __global__
 void fake_main_kernel(int * ret)

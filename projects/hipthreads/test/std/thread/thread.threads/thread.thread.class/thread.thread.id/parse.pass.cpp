@@ -23,6 +23,9 @@
 // Note this tests the basics of this function. It's tested in more detail in
 // the format functions test.
 
+// TODO: This currently only tests formatting thread IDs in host code. We should add tests for device code if/when
+// libhipcxx adds support for strings and std::format
+
 #include <cassert>
 #include <concepts>
 #include <format>

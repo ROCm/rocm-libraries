@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 //
 // UNSUPPORTED: no-threads
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_USE_GPU_THREADS
 
 // <thread>
 
@@ -25,6 +26,7 @@
 
 #include "test_macros.h"
 #include "test_comparisons.h"
+#include "force_include_hip.h"
 
 int main(int, char**) {
   AssertComparisonsAreNoexcept<gpu::thread::id>();
@@ -36,7 +38,9 @@ int main(int, char**) {
 
   gpu::thread::id id1;
   gpu::thread::id id2;
+#ifdef __HIP_DEVICE_COMPILE__
   gpu::thread::id id3 = gpu::this_thread::get_id();
+#endif
 
   // `id1` and `id2` should compare equal
   assert(testComparisons(id1, id2, /*isEqual*/ true, /*isLess*/ false));
@@ -44,25 +48,27 @@ int main(int, char**) {
   assert(testOrder(id1, id2, std::strong_ordering::equal));
 #endif
 
+#ifdef __HIP_DEVICE_COMPILE__
   // Test `t1` and `t3` which are not equal
   bool isLess = id1 < id3;
   assert(testComparisons(id1, id3, /*isEqual*/ false, isLess));
 #if TEST_STD_VER > 17
   assert(testOrder(id1, id3, isLess ? std::strong_ordering::less : std::strong_ordering::greater));
 #endif
+#endif
 
   // Regression tests for https://github.com/llvm/llvm-project/issues/56187
   // libc++ previously declared the comparison operators as hidden friends
   // which was non-conforming.
-  assert(std::operator==(id1, id2));
+  assert(gpu::operator==(id1, id2));
 #if TEST_STD_VER <= 17
-  assert(!std::operator!=(id1, id2));
-  assert(!std::operator<(id1, id2));
-  assert(std::operator<=(id1, id2));
-  assert(!std::operator>(id1, id2));
-  assert(std::operator>=(id1, id2));
+  assert(!gpu::operator!=(id1, id2));
+  assert(!gpu::operator<(id1, id2));
+  assert(gpu::operator<=(id1, id2));
+  assert(!gpu::operator>(id1, id2));
+  assert(gpu::operator>=(id1, id2));
 #else
-  assert(std::operator<=>(id1, id2) == std::strong_ordering::equal);
+  assert(gpu::operator<=>(id1, id2) == std::strong_ordering::equal);
 #endif
 
   return 0;
