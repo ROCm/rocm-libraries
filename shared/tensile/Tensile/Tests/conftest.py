@@ -43,7 +43,6 @@ def pytest_addoption(parser):
     parser.addoption("--tensile-options")
     parser.addoption("--global-parameters")
     parser.addoption("--prebuilt-client")
-    parser.addoption("--no-common-build", action="store_true")
     parser.addoption("--builddir", "--client-dir")
     parser.addoption("--timing-file", default=None)
     parser.addoption("--asm-cache")
@@ -106,10 +105,8 @@ def tensile_args(pytestconfig, builddir, worker_lock_path):
         rv += extraOptions.split(",")
     if pytestconfig.getoption("--global-parameters"):
         rv += ["--global-parameters", pytestconfig.getoption("--global-parameters")]
-    if not pytestconfig.getoption("--no-common-build"):
-        rv += ["--client-build-path", builddir]
-        if pytestconfig.getoption("--prebuilt-client"):
-            rv += ["--prebuilt-client", pytestconfig.getoption("--prebuilt-client")]
+    if pytestconfig.getoption("--prebuilt-client"):
+        rv += ["--prebuilt-client", pytestconfig.getoption("--prebuilt-client")]
     if pytestconfig.getoption("--asm-cache"):
         rv += ["--asm-cache", pytestconfig.getoption("--asm-cache")]
 

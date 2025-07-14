@@ -132,6 +132,8 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
                                                          void*                  amaxD,
                                                          void*                  workspace,
                                                          size_t                 workspaceSize,
+                                                         float                  act0,
+                                                         float                  act1,
                                                          hipStream_t            stream,
                                                          void*                  Synchronizer,
                                                          bool                   swizzleA,
@@ -196,6 +198,8 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , amaxD(amaxD)
     , workspace(workspace)
     , workspaceSize(workspaceSize)
+    , act0(act0)
+    , act1(act1)
     , stream(stream)
     , Synchronizer(Synchronizer)
     , swizzleA(swizzleA)
@@ -321,6 +325,9 @@ namespace
         case ROCBLASLT_EPILOGUE_SWISH_EXT:
         case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
             return TensileLite::ActivationType::Silu;
+        case ROCBLASLT_EPILOGUE_CLAMP_EXT:
+        case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
+            return TensileLite::ActivationType::Clamp;
         case ROCBLASLT_EPILOGUE_BIAS:
         case ROCBLASLT_EPILOGUE_DEFAULT:
         case ROCBLASLT_EPILOGUE_BGRADA:
@@ -358,6 +365,7 @@ namespace
         case ROCBLASLT_EPILOGUE_BGRADA:
         case ROCBLASLT_EPILOGUE_BGRADB:
         case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
+        case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
             return true;
             break;
         default:
@@ -664,6 +672,8 @@ namespace
         case TensileLite::ActivationType::Silu:
         case TensileLite::ActivationType::Swish:
             return "swish";
+        case TensileLite::ActivationType::Clamp:
+            return "clamp";
         case TensileLite::ActivationType::None:
         default:
             return "none";
@@ -787,6 +797,11 @@ namespace
         {
             rocblaslt::Debug::Instance().logMarkerStart(s.c_str());
             rocblaslt::Debug::Instance().logMarkerStop();
+        }
+        if(rocblaslt::Debug::Instance().benchPrintCommand())
+        {
+            std::cout << s << std::endl;
+            rocblaslt::Debug::Instance().setBenchPrint(false);
         }
     }
 
@@ -1101,6 +1116,11 @@ namespace
         {
             rocblaslt::Debug::Instance().logMarkerStart(s.c_str());
             rocblaslt::Debug::Instance().logMarkerStop();
+        }
+        if(rocblaslt::Debug::Instance().benchPrintCommand())
+        {
+            std::cout << s << std::endl;
+            rocblaslt::Debug::Instance().setBenchPrint(false);
         }
     }
 
@@ -1699,8 +1719,8 @@ namespace
         // push 2 activation arguments
         std::visit(
             [&inputs, &prob](auto val) {
-                inputs.activationArgs.push_back(val);
-                inputs.activationArgs.push_back(val);
+                inputs.activationArgs.push_back((decltype(val))prob.act0);
+                inputs.activationArgs.push_back((decltype(val))prob.act1);
                 if(prob.k)
                     inputs.alpha = *(decltype(val)*)(prob.alpha);
                 else
@@ -1712,7 +1732,7 @@ namespace
         // convert alpha and beta to float if compute type is half
         if(prob.compute_type == rocblaslt_compute_f16)
         {
-            inputs.activationArgs = {0.0f, 0.0f};
+            inputs.activationArgs = {prob.act0, prob.act1};
             inputs.alpha          = static_cast<float>(std::get<hipblasLtHalf>(inputs.alpha));
             inputs.beta           = static_cast<float>(std::get<hipblasLtHalf>(inputs.beta));
         }
@@ -2054,7 +2074,13 @@ namespace
                 {
                     using MSL
                         = TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>;
-                    m_library        = std::dynamic_pointer_cast<MSL>(lib);
+                    m_library = std::dynamic_pointer_cast<MSL>(lib);
+                    if(!m_library->initLibraryMapping(tensileLibPath))
+                    {
+                        std::cerr << "\nrocblaslt error: Could not initialize Tensile library "
+                                     "mapping"
+                                  << std::endl;
+                    }
                     m_tensileLibPath = tensileLibPath.string();
                 }
                 return 0;
@@ -2068,19 +2094,6 @@ namespace
                 // rocblaslt_abort();
             }
         }
-
-#if ROCBLASLT_TENSILE_LAZY_LOAD
-        // A workaround for getSolutionsFromIndex and isSolutionSupported with lazy_lib_load.
-        // preload() shouldn't be called more than once.
-        void preload()
-        {
-            auto lib = TensileLite::LoadLibraryFilePreload<TensileLite::ContractionProblemGemm>(
-                m_tensileLibPath,
-                std::vector<TensileLite::LazyLoadingInit>{m_deviceSet.begin(), m_deviceSet.end()});
-            using MSL = TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>;
-            m_library = std::dynamic_pointer_cast<MSL>(lib);
-        }
-#endif
     };
 
     // Return the library and adapter for the current HIP device
@@ -2089,12 +2102,7 @@ namespace
             library
         = nullptr,
         std::shared_ptr<hipDeviceProp_t>* deviceProp = nullptr,
-        int                               device     = -1
-#if ROCBLASLT_TENSILE_LAZY_LOAD
-        ,
-        bool isPreload = false
-#endif
-    )
+        int                               device     = -1)
     try
     {
         // TensileHost is initialized on the first call
@@ -2127,16 +2135,6 @@ namespace
             }
         }
 
-#if ROCBLASLT_TENSILE_LAZY_LOAD
-        // A workaround for getSolutionsFromIndex and isSolutionSupported when lazy_lib_load is on.
-        // preload() shouldn't be called more than once.
-        if(isPreload)
-            static int once = [&] {
-                host.preload();
-                *library = host.get_library();
-                return 0;
-            }();
-#endif
         // If an adapter is found, it is assumed that the library is initialized
         if(library)
             *library = host.get_library();
@@ -2389,7 +2387,8 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         data->inputs       = GetTensileInputs(prob);
 
         if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
-           || rocblaslt::Debug::Instance().printLogAsMarker())
+           || rocblaslt::Debug::Instance().printLogAsMarker()
+           || rocblaslt::Debug::Instance().benchPrintCommand())
         {
             logBenchFromTensileDataGemm(data->problem,
                                         data->inputs,
@@ -2915,7 +2914,8 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             std::shared_ptr<TensileDataGemm> data
                 = std::static_pointer_cast<TensileDataGemm>(gemmData);
             if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
-               || rocblaslt::Debug::Instance().printLogAsMarker())
+               || rocblaslt::Debug::Instance().printLogAsMarker()
+               || rocblaslt::Debug::Instance().benchPrintCommand())
             {
                 logBenchFromTensileDataGemm(data->problem,
                                             data->inputs,
@@ -2949,7 +2949,8 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
                 return rocblaslt_status_not_initialized;
             }
             if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
-               || rocblaslt::Debug::Instance().printLogAsMarker())
+               || rocblaslt::Debug::Instance().printLogAsMarker()
+               || rocblaslt::Debug::Instance().benchPrintCommand())
             {
                 logBenchFromTensileDataGemm(data->problem,
                                             data->inputs,
@@ -3484,12 +3485,7 @@ rocblaslt_status
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
     std::shared_ptr<TensileLite::Hardware> hardware;
 
-#if ROCBLASLT_TENSILE_LAZY_LOAD
-    // isPreload = true is to load placeholder libraries except code objects
-    auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device, true);
-#else
     auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
-#endif
 
     if(!library)
     {
@@ -3498,9 +3494,8 @@ rocblaslt_status
 
     hardware = TensileLite::hip::GetDevice(*deviceProp);
 
-    int  lastSolutionIndex = library->solutions.rbegin()->first;
-    bool isOutOfBound      = true;
-    int  i                 = 0;
+    bool isOutOfBound = false;
+    int  i            = 0;
     for(auto index : solutionIndex)
     {
 #ifdef HIPBLASLT_USE_ROCROLLER
@@ -3512,10 +3507,12 @@ rocblaslt_status
         }
 
 #endif
-        isOutOfBound  = isOutOfBound && (index > lastSolutionIndex);
         auto solution = library->getSolutionByIndex(*hardware, index);
         if(!solution)
+        {
+            isOutOfBound = true;
             continue;
+        }
         rocblaslt_matmul_heuristic_result result;
         memset(&result, 0, sizeof(rocblaslt_matmul_heuristic_result));
         memset(result.algo.data, 0, sizeof(result.algo.data));
@@ -3546,12 +3543,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
     std::shared_ptr<hipDeviceProp_t>       deviceProp;
     std::shared_ptr<TensileLite::Hardware> hardware;
 
-#if ROCBLASLT_TENSILE_LAZY_LOAD
-    // isPreload = true is a workaround for lazy_lib_load
-    auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device, true);
-#else
     auto adapter = get_library_and_adapter(&library, &deviceProp, handle->device);
-#endif
 
     if(!library)
     {

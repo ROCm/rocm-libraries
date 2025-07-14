@@ -10,21 +10,7 @@ Device memory allocation in rocBLAS
 ********************************************************************
 
 For temporary device memory, rocBLAS uses a per-handle memory allocation with out-of-band management.
-The temporary device memory is stored in the handle. This allows for the recycling of temporary device memory
-across multiple computational kernels that use the same handle. Each handle has a single stream, and
-kernels execute in order in the stream, with each kernel completing before the next kernel in the
-stream starts. There are four schemes for temporary device memory:
-
-*  **rocBLAS_managed**: This is the default scheme. If there is not enough memory in the handle, computational functions allocate the required
-   memory. Any memory that is allocated persists in the handle, so it is available for later computational functions that use the handle.
-*  **user_managed, preallocate**: An environment variable is set before the rocBLAS handle is created.
-   After that there are no more allocations or deallocations.
-*  **user_managed, manual**:  The user calls helper functions to get or set the memory size throughout the program,
-   thereby controlling when allocation and deallocation occur.
-*  **user_owned**:  The user allocates workspace and calls a helper function to allow rocBLAS to access the workspace.
-
-The default scheme has the disadvantage that allocation is synchronizing, so if there is not enough memory in the handle,
-a synchronizing deallocation and allocation occur.
+For more information, see the device memory allocation section of the :ref:programmers-guide.
 
 The following computational functions use temporary device memory.
 
