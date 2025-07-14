@@ -244,7 +244,7 @@ if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
   set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" )
 
   rocm_create_package(
-    NAME rocprim
+    NAME rocprim-dev
     DESCRIPTION "rocPRIM is a header-only library that provides HIP parallel primitives." 
     MAINTAINER "rocPRIM Maintainer <rocprim-maintainer@amd.com>"
     HEADER_ONLY

@@ -207,7 +207,7 @@ set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PR
 
 if(HIP_COMPILER STREQUAL "clang")
   rocm_create_package(
-    NAME hipcub
+    NAME hipcub-dev
     DESCRIPTION "hipCUB (rocPRIM backend)"
     MAINTAINER "hipcub-maintainer@amd.com"
     HEADER_ONLY

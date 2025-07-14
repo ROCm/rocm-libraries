@@ -238,7 +238,7 @@ set(CPACK_RPM_PACKAGE_LICENSE "ASL 2.0")
 set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" )
 
 rocm_create_package(
-  NAME rocthrust
+  NAME rocthrust-dev
   DESCRIPTION "rocThrust is a ROCm port of the Thrust library, written in HIP"
   MAINTAINER "rocthrust-maintainer@amd.com"
   HEADER_ONLY

@@ -80,7 +80,7 @@ set(VERSION_STRING "1.3.0")
 rocm_setup_version(VERSION ${PROJECT_VERSION})
 
 rocm_create_package(
-    NAME hipblas-common
+    NAME hipblas-common-dev
     DESCRIPTION "Common files for hipBLAS libraries"
     MAINTAINER "hipBLAS Maintainer <hipblas-maintainer@amd.com>"
     LDCONFIG
