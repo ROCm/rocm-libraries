@@ -185,7 +185,7 @@ namespace rocRoller::KernelGraph
 
             struct Summary
             {
-                struct Workitem
+                struct Banks
                 {
                     uint   bankIndex;
                     size_t workitemsAccessed;
@@ -193,37 +193,46 @@ namespace rocRoller::KernelGraph
                 };
                 struct Access
                 {
-                    int                   tag;
-                    uint                  instruction;
-                    int                   ldsTag;
-                    std::vector<Workitem> workitems;
+                    int                           tag;
+                    uint                          instruction;
+                    int                           ldsTag;
+                    std::vector<Banks>            accessedBanks;
+                    std::vector<std::vector<int>> banksToWorkitems;
                 };
 
-                std::vector<Access> accesses;
+                std::vector<Access>     accesses;
+                std::unordered_set<int> imbalancedTags;
 
                 std::string toString()
                 {
                     std::stringstream ss;
-                    for(auto const& [tag, instruction, ldsTag, workitems] : this->accesses)
+                    for(auto const& [tag, instruction, ldsTag, accessedBanks, banksToWorkitems] :
+                        this->accesses)
                     {
                         ss << fmt::format("Operation tag {} instruction {} accesses LDS {}:\n",
                                           tag,
                                           instruction,
                                           ldsTag);
-                        for(auto const& [bankIndex, workitemsAccessed, imbalanced] : workitems)
+                        for(auto const& [bankIndex, workitemsAccessed, imbalanced] : accessedBanks)
                         {
                             ss << fmt::format("  Bank {}: {} workitems {}\n",
                                               bankIndex,
                                               workitemsAccessed,
                                               imbalanced ? "(imbalanced)" : "");
                         }
+                        for(size_t bankIndex = 0; bankIndex < banksToWorkitems.size(); ++bankIndex)
+                        {
+                            ss << fmt::format("  Bank {:2d}: ", bankIndex);
+                            for(auto workitem : banksToWorkitems[bankIndex])
+                            {
+                                ss << fmt::format("{:2d} ", workitem);
+                            }
+                            ss << '\n';
+                        }
+                        return ss.str();
                     }
+                    ss << fmt::format("  Imbalanced tags: {}\n", this->imbalancedTags);
                     return ss.str();
-                }
-
-                std::ostream& operator<<(std::ostream& stream)
-                {
-                    return stream << toString();
                 }
             };
 
@@ -310,48 +319,46 @@ namespace rocRoller::KernelGraph
                         anyImbalance |= workitems.size() > minWorkitemsPerBank;
 
                     if(anyImbalance)
-                        m_imbalancedTags.insert(tag);
+                        summary.imbalancedTags.insert(tag);
 
                     const auto workitemsInfo = [&]() {
-                        decltype(Summary::Access::workitems) workitemsInfo;
+                        decltype(Summary::Access::accessedBanks) workitemsInfo;
                         for(auto const& [bankIndex, workitems] : bankWorkitems)
                         {
                             auto imbalanced = workitems.size() > minWorkitemsPerBank;
-                            ss << fmt::format("  Bank {}: {} workitems {}\n",
-                                              bankIndex,
-                                              workitems.size(),
-                                              imbalanced ? "(imbalanced)" : "");
                             workitemsInfo.emplace_back(bankIndex, workitems.size(), imbalanced);
                         }
                         return workitemsInfo;
                     }();
 
-                    summary.accesses.emplace_back(tag, instruction, ldsTag, workitemsInfo);
-
-                    bool echoBanks = false;
-                    if(echoBanks)
+                    // For each bank, find the workitems that accessed it
+                    std::vector<std::vector<int>> banksToWorkitems;
+                    const auto                    maxWorkitems = 256;
+                    for(int bankIndex = 0; bankIndex < m_numBanks; ++bankIndex)
                     {
-                        auto maxWokitems = 256;
-
-                        // For each bank, print the workitems that accessed it
-                        for(int bankIndex = 0; bankIndex < m_numBanks; ++bankIndex)
+                        if(bankWorkitems.contains(bankIndex))
                         {
-                            if(bankWorkitems.contains(bankIndex))
-                            {
-                                ss << fmt::format("  Bank {:2d}: ", bankIndex);
-                                for(int workitem = 0; workitem < maxWokitems; ++workitem)
+                            banksToWorkitems.emplace_back([&]() {
+                                std::vector<int> workitems;
+                                for(int workitem = 0; workitem < maxWorkitems; ++workitem)
                                 {
-                                    ss << (bankWorkitems[bankIndex].contains(workitem)
-                                               ? fmt::format("{:2d} ", workitem)
-                                               : "   ");
+                                    if(bankWorkitems[bankIndex].contains(workitem))
+                                    {
+                                        workitems.emplace_back(workitem);
+                                    }
                                 }
-                                ss << "\n";
-                            }
+                                return workitems;
+                            }());
+                        }
+                        else
+                        {
+                            banksToWorkitems.emplace_back();
                         }
                     }
-                }
 
-                ss << fmt::format("  Imbalanced tags: {}\n", m_imbalancedTags);
+                    summary.accesses.emplace_back(
+                        tag, instruction, ldsTag, workitemsInfo, banksToWorkitems);
+                }
 
                 return summary.toString();
             }
@@ -362,7 +369,6 @@ namespace rocRoller::KernelGraph
             uint m_numEntriesPerBank;
 
             std::map<std::pair<int, uint>, std::vector<LDSBankAccess>> m_bankAccesses;
-            std::unordered_set<int>                                    m_imbalancedTags;
         };
 
         /**
