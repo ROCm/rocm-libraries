@@ -14,18 +14,22 @@ if(NOT GTest_FOUND)
     endif()
 endif()
 
-find_package(mxDataGenerator)
-if(NOT mxDataGenerator_FOUND)
-    if(ROCROLLER_ENABLE_FETCH)
-        FetchContent_Declare(
-            mxDataGenerator
-            GIT_REPOSITORY ${MXDATAGENERATOR_GIT_URL}
-            GIT_TAG ${MXDATAGENERATOR_GIT_TAG}
-        )
-        FetchContent_MakeAvailable(mxDataGenerator)
-    else()
-        message(FATAL_ERROR "Failed to find mxDataGenerator")
+if(NOT ROCROLLER_ENABLE_ROCM_LIBRARIES)
+    find_package(mxDataGenerator)
+    if(NOT mxDataGenerator_FOUND)
+        if(ROCROLLER_ENABLE_FETCH)
+            FetchContent_Declare(
+                mxDataGenerator
+                GIT_REPOSITORY ${MXDATAGENERATOR_GIT_URL}
+                GIT_TAG ${MXDATAGENERATOR_GIT_TAG}
+            )
+            FetchContent_MakeAvailable(mxDataGenerator)
+        else()
+            message(FATAL_ERROR "Failed to find mxDataGenerator")
+        endif()
     endif()
+else()
+  add_subdirectory("${PROJECT_SOURCE_DIR}/../mxdatagenerator" "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
 endif()
 
 add_executable(rocroller-tests)

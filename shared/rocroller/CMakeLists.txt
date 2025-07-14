@@ -24,6 +24,7 @@ list(
 )
 include(ROCMInstallTargets)
 
+option(ROCROLLER_ENABLE_ROCM_LIBRARIES "Use dependencies availble in rocm-libraries" ON)
 option(ROCROLLER_ENABLE_CLIENT "Build the rocRoller client." ON)
 option(ROCROLLER_ENABLE_YAML_CPP "Enable yaml-cpp backend." ON)
 cmake_dependent_option(ROCROLLER_ENABLE_LLVM "Enable llvm yaml backend." ON "NOT ROCROLLER_ENABLE_YAML_CPP" OFF)
