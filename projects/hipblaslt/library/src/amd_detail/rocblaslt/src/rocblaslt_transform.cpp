@@ -77,7 +77,7 @@ namespace
             {
                 for(auto& adp : adapters)
                 {
-                    (void)adp->initializeLazyLoading("", coFolder);
+                    adp->codeObjectDir(coFolder);
                 }
             }
             catch(const std::runtime_error& e)

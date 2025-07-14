@@ -40,6 +40,45 @@ rocRoller is a software library for generating AMDGPU kernels.
 
 ### Quick start instructions
 
+The rocRoller CMake support should configure out of the box assuming
+project dependencies are installed in a location discoverable
+by CMake by default. In the event that this is not the case, the
+`CMAKE_PREFIX_PATH` can be used to help CMake find required packages.
+Often, ROCm is installed in `/opt/rocm` so setting the prefix path
+accordingly will ensure ROCm dependencies are locatable. To aide in 
+setting common configurations a `CMakePresets.json` file is provided
+in the project root directory. Two presets are provided with the following
+options:
+
+1. opt-rocm (used to emulate current dev workflow)
+  1. CMAKE_CXX_COMPILER: "/opt/rocm/bin/amdclang++"
+  2. ROCROLLER_ENABLE_FETCH: "ON"
+  3. CMAKE_PREFIX_PATH": "/opt/rocm;/opt/rocm/llvm"
+2. precheckin (same config used for ci pipelines)
+  1. ROCROLLER_ENABLE_CPPCHECK: "ON"
+  2. ROCROLLER_ENABLE_YAML_CPP: "OFF"
+  3. CMAKE_CXX_COMPILER: "/opt/rocm/bin/amdclang++"
+  4. CMAKE_BUILD_TYPE: "Release"
+  5. ROCROLLER_ENABLE_FETCH: "ON"
+  6. ROCROLLER_TESTS_SKIP_SLOW: "OFF"
+  7. CMAKE_PREFIX_PATH: "/opt/rocm;/opt/rocm/llvm"
+3. asan (See CMakePresets.json for details)
+4. amd-mrisa (See CMakePresets.json for details)
+5. coverage (See CMakePresets.json for details)
+5. docs (See CMakePresets.json for details)
+
+One can use the presets as follows:
+
+```
+cmake --preset opt-rocm -B build -S . <any additional cmake options>
+cmake --preset precheckin -B build -S . <any additional cmake options>
+```
+
+As previously mentioned, if dependencies are installed in the environment
+nothing is required. However, if third party dependencies are not installed,
+one can use `ROCROLLER_ENABLE_FETCH` to enable FetchContent for pulling and
+building dependencies (off by default).
+
 To build rocRoller using Docker:
 ```
 git clone --recurse-submodules git@github.com:ROCm/rocRoller.git rocRoller
@@ -49,7 +88,7 @@ docker exec -ti -u ${USER} ${USER}_dev_clang bash
 cd /data
 mkdir -p build
 cd build
-cmake -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
+cmake --preset opt-rocm -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
 make -j
 ```
 
@@ -64,14 +103,13 @@ git clone --recurse-submodules git@github.com:ROCm/rocRoller.git rocRoller
 cd rocRoller
 mkdir -p build
 cd build
-cmake -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
+cmake --preset opt-rocm -DROCROLLER_ENABLE_TIMERS=ON -DCMAKE_BUILD_TYPE=Release ..
 make -j
 ```
 
 To run the unit tests:
 ```
-cd rocRoller/build
-make test
+ctest --test-dir build/test <additional ctest options>
 ```
 
 ### Detailed commandline instructions
@@ -114,28 +152,25 @@ make -j$(nproc)
 
 #### CMake Options
 
-- Ninja is an alternative to `make` and is generally faster at
-  building the rocRoller library.  Include `-G Ninja` in your `cmake`
-  command and then use `ninja` to build.
-- `-DSKIP_CPPCHECK=ON` Skips running every source file through
-  `cppcheck` (skip is on by default).  This speeds up builds.
-- `-DCMAKE_BUILD_TYPE=Debug` will build a debug version with debugging
-  information for gdb.  Specify `Release` instead for release builds.
-- `-DBUILD_SHARED_LIBS=OFF` will build the project as a static
-  library, `ON` (default) will build it as a shared library.
-- `-DYAML_BACKEND=YAML_CPP` (default) or `-DYAML_BACKEND=LLVM`
-  determines the backend used for YAML serialization.
-- `-DINTERNAL_MRISAS=<CUSTOM_MRISA_XML_FILES>` where `<CUSTOM_MRISA_XML_FILES>`
-  is a semi-colon delimitted list of paths to MRISA XML files. Allows the user
-  to specify additional MRISA XML files to use during compilation.
-- To see what options your build directory was configured with, run `cmake -LAH`
-- It is highly recommended _not_ to reconfigure a build directory with cmake.
-  Doing so can lead to caching problems with the configuration.  When in doubt,
-  remove your build directory and start fresh.
-- `-DROCROLLER_USE_PREGENERATED_ARCH_DEF=OFF` will not use the
-  [GPUArchitecture yaml file(s)](GPUArchitectureGenerator/pregenerated) checked
-  into the repo, and will instead generate them from scratch using the MRISA XML
-  files and [GPUArchitecture_def](GPUArchitectureGenerator/include/GPUArchitectureGenerator/GPUArchitectureGenerator_defs.hpp) file.
+- `ROCROLLER_ENABLE_CLIENT`: Build the rocRoller client (default ON)
+- `ROCROLLER_ENABLE_YAML_CPP`: Enable yaml-cpp backend (default ON)
+- `ROCROLLER_ENABLE_LLVM`: Enable llvm yaml backend (default OFF)
+- `ROCROLLER_BUILD_TESTING`: Build rocRoller testing (default ON)
+- `ROCROLLER_ENABLE_CATCH`: Build rocRoller catch unit tests (default ON)
+- `ROCROLLER_ENABLE_ARCH_GEN_TEST`: Build rocRoller architecture generator test (default ON)
+- `ROCROLLER_ENABLE_TEST_DISCOVERY`: Use gtest and catch2 test discovery functions (default ON)
+- `ROCROLLER_ENABLE_COVERAGE`: Build code coverage (default OFF)
+- `ROCROLLER_TESTS_SKIP_SLOW`: Disable slow running tests (default OFF)
+- `ROCROLLER_EMBED_ARCH_DEF`: Embed msgpack architecture data in library (default ON)
+- `ROCROLLER_BUILD_SHARED_LIBS`: Build rocRoller as a shared library (default ON)
+- `ROCROLLER_ENABLE_FETCH`: Enable fetch content for dependencies if find_package fails (default OFF)
+- `ROCROLLER_ENABLE_LLD`: Build rocroller functionality requiring LLD (default OFF)
+- `ROCROLLER_ENABLE_TIMERS`: Enable rocRoller timer code (default OFF)
+- `ROCROLLER_ENABLE_CPPCHECK`: Enable cppcheck (default OFF)
+- `ROCROLLER_MRISAS_DIR`: Path to directory containing MRISA XML files (default `<build dir>/GPUArchitectureGenerator/amd-mrisa`)
+- `ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF`: Use the pregenerates GPU architecture definition YAML file(s) in the repository (default ON)
+- `MXDATAGENERATOR_GIT_TAG`: mxDataGenerator tag/commit hash to checkout (default see root CMakeLists.txt)
+- `MXDATAGENERATOR_GIT_URL`: Base Git URL to fetch mxDataGenerator from (default https://github.com/ROCm/mxDataGenerator.git)
 
 ### Running the tests
 
@@ -149,7 +184,7 @@ This will run our unit tests using `ctest` (one process per test).
 
 Alternatively, from the build directory simply run:
 ```
-./rocRollerTests
+./rocroller-tests
 ```
 
 This command will run all of the tests all together. The tests will
@@ -159,7 +194,7 @@ segmentation fault in any of the tests it will stop.
 Individual tests can be run at the command line from the build
 directory. For example:
 ```
-./rocRollerTests --gtest_filter="*MemoryInstructionsExecuter.GPU_ExecuteFlatTest1Byte*"
+./rocroller-tests --gtest_filter="*MemoryInstructionsExecuter.GPU_ExecuteFlatTest1Byte*"
 ```
 
 Tests that require a GPU are prefixed with `GPU_`.  If you are running
@@ -169,12 +204,12 @@ ctest -LE GPU
 ```
 or
 ```
-./bin/rocRollerTests --gtest_filter="-*GPU_*"
+./bin/rocroller-tests --gtest_filter="-*GPU_*"
 ```
 
 A full list of gtests available can be listed using the command:
 ```
-./bin/rocRollerTests --gtest_list_tests
+./bin/rocroller-tests --gtest_list_tests
 ```
 
 To prevent exceptions from being eaten by GoogleTest:
@@ -198,13 +233,11 @@ Updated yaml files can be copied from `./build/share/rocRoller/split_yamls/` aft
 building with `-DROCROLLER_USE_PREGENERATED_ARCH_DEF=OFF`.
 
 ```bash
-mkdir ./build
-cd ./build
-cmake -DROCROLLER_USE_PREGENERATED_ARCH_DEF=OFF ../
-make -j GPUArchitecture_def
-cp ./share/rocRoller/split_yamls/*.yaml ../GPUArchitectureGenerator/pregenerated/
-cd ../GPUArchitectureGenerator/pregenerated/
-../../scripts/format_yaml.py -I *.yaml
+cmake --preset amd-mrisa -B build -S .
+cmake --build build --target GPUArchitecture_def
+cp build/GPUArchitectureGenerator/split_yamls/*.yaml GPUArchitectureGenerator/pregenerated/
+cd GPUArchitectureGenerator/pregenerated/
+../scripts/format_yaml.py -I *.yaml
 ```
 
 ## GEMM client
@@ -216,7 +249,7 @@ library by default.
 To run the GEMM client from your build directory:
 
 ```
-./bin/client/rocRoller_gemm --help
+./bin/client/rocroller-gemm --help
 ```
 
 ## File Structure
@@ -290,7 +323,7 @@ This will generate an HTML website from the markdown readme files and Doxygen co
 
 Each new feature is required to have a test.
 - Test sources are placed in the `test` folder.
-- CPP Files for Unit Tests should be included in the `rocRollerTests` executable in [CMakeLists.txt](https://github.com/ROCm/rocRoller/blob/master/test/CMakeLists.txt).
+- CPP Files for Unit Tests should be included in the `rocroller-tests` executable in [CMakeLists.txt](https://github.com/ROCm/rocRoller/blob/master/test/CMakeLists.txt).
 
 Some tests require multiple threads for properly testing a desired or undesired behaviour (e.g. thread-safety) or to benefit from faster execution. Therefore, it is recommended to set `OMP_NUM_THREADS` appropriately. A value between `[NUM_PHYSICAL_CORES/2, NUM_PHYSICAL_CORES)` is recommended. Setting `OMP_NUM_THREADS` to the number of available cores or higher can cause test to run slower due to oversubscription (e.g. increased contention).
 
@@ -370,7 +403,7 @@ CMake configure with `-DROCROLLER_ENABLE_TIMERS=ON` and compile.
 
 Then run with the steps outlined in [scripts/flamegraph.py](scripts/flamegraph.py):
 ```
-  perf record -F 99 -g ./bin/rocRollerTests --gtest_filter="KernelGraph*03"
+  perf record -F 99 -g ./bin/rocroller-tests --gtest_filter="KernelGraph*03"
   perf script > out.perf
   ~/FlameGraph/stackcollapse-perf.pl out.perf > out.folded
   ~/FlameGraph/flamegraph.pl out.folded > kernel.svg

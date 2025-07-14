@@ -61,6 +61,9 @@ struct KernelType
     size_t scaleBBlockRowSize = 1u;
     size_t scaleBBlockColSize = 32u;
 
+    rocRoller::DataType scaleTypeA = rocRoller::DataType::E8M0;
+    rocRoller::DataType scaleTypeB = rocRoller::DataType::E8M0;
+
     auto operator<=>(const KernelType& other) const = default;
 };
 

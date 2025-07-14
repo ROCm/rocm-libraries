@@ -82,7 +82,7 @@ namespace rocsparse
             count = rocsparse::wfreduce_sum<SEGMENT_SIZE>(count);
 
             // broadcast count from last thread in segment to all threads in segment
-            count = __shfl(count, SEGMENT_SIZE - 1, SEGMENT_SIZE);
+            count = rocsparse::shfl(count, SEGMENT_SIZE - 1, SEGMENT_SIZE);
 
             nnz_per_row[row_index] = count;
         }

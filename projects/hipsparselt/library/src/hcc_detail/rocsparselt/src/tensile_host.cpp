@@ -442,6 +442,7 @@ namespace
 
         // Set the GSU workspace
         inputs.ws = prob.workspace;
+        inputs.Synchronizer = prob.workspace;
 
         // set bias vector
         inputs.bias = reinterpret_cast<const void*>(prob.bias_vector);
@@ -869,8 +870,8 @@ rocsparselt_status runContractionProblem(const RocsparseltContractionProblem<Ti,
 
             if(!search_iterations)
             {
-                if(configs[*config_id].max_workspace_bytes > prob.workspaceSize
-                   || (configs[*config_id].max_workspace_bytes > 0 && prob.workspace == nullptr))
+                if(configs[*config_id].max_workspace_bytes + configs[*config_id].synchronizer_bytes > prob.workspaceSize
+                   || (configs[*config_id].max_workspace_bytes + configs[*config_id].synchronizer_bytes > 0 && prob.workspace == nullptr))
                 {
                     hipsparselt_cerr << "config " << *config_id << " need extra workspace "
                                      << configs[*config_id].max_workspace_bytes << " bytes."
@@ -886,7 +887,7 @@ rocsparselt_status runContractionProblem(const RocsparseltContractionProblem<Ti,
                                      << " does not exists - skip" << std::endl;
                     return rocsparselt_status_not_implemented;
                 }
-
+                tensile_inputs.ws = (uint8_t*) tensile_inputs.Synchronizer + configs[*config_id].synchronizer_bytes;
                 RETURN_IF_HIP_ERROR(
                     adapter.launchKernels(solution->solve(tensile_prob, tensile_inputs, *hardware),
                                           prob.streams[0],
@@ -902,8 +903,8 @@ rocsparselt_status runContractionProblem(const RocsparseltContractionProblem<Ti,
                 RETURN_IF_HIP_ERROR(hipEventCreate(&stopEvent));
                 for(int id = 0; id < config_max_id; id++)
                 {
-                    if(configs[id].max_workspace_bytes > prob.workspaceSize
-                       || (configs[id].max_workspace_bytes > 0 && prob.workspace == nullptr))
+                    if(configs[id].max_workspace_bytes + configs[id].synchronizer_bytes > prob.workspaceSize
+                       || (configs[id].max_workspace_bytes + configs[id].synchronizer_bytes> 0 && prob.workspace == nullptr))
                     {
                         hipsparselt_cerr << "config " << id << " need extra workspace "
                                          << configs[id].max_workspace_bytes << " bytes - skip."
@@ -919,7 +920,7 @@ rocsparselt_status runContractionProblem(const RocsparseltContractionProblem<Ti,
                                          << std::endl;
                         continue;
                     }
-
+                    tensile_inputs.ws = (uint8_t*) tensile_inputs.Synchronizer + configs[id].synchronizer_bytes;
                     //warm up
                     RETURN_IF_HIP_ERROR(adapter.launchKernels(
                         solution->solve(tensile_prob, tensile_inputs, *hardware),
@@ -1045,6 +1046,7 @@ rocsparselt_status getBestSolutions(const RocsparseltContractionProblem<Ti, To, 
         configs[i].max_workspace_bytes = solution->requiredWorkspaceSize(tensile_prob, *hardware);
         configs[i].use_bias            = tensile_prob.useBias();
         configs[i].use_scale_alpha_vec = tensile_prob.useScaleAlphaVec();
+        configs[i].synchronizer_bytes  = std::ceil(solution->requiredSynchronizerSize(tensile_prob, *hardware) / 16) * 16; // align 16 
     }
     return rocsparselt_status_success;
 }

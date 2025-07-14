@@ -156,7 +156,7 @@ namespace rocRoller::KernelGraph::ControlGraph
 
         auto it = startingNodes.begin();
         if(it == startingNodes.end())
-            return std::move(rv);
+            return rv;
 
         rv = populateOrderCache(*it);
 
@@ -166,7 +166,7 @@ namespace rocRoller::KernelGraph::ControlGraph
             rv.insert(nodes.begin(), nodes.end());
         }
 
-        return std::move(rv);
+        return rv;
     }
 
     std::set<int> ControlGraph::populateOrderCache(int startingNode) const
@@ -225,7 +225,7 @@ namespace rocRoller::KernelGraph::ControlGraph
 
         m_descendentCache[startingNode] = allNodes;
 
-        return std::move(allNodes);
+        return allNodes;
     }
 
     template <CForwardRangeOf<int> ARange, CForwardRangeOf<int> BRange>
