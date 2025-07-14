@@ -19315,9 +19315,7 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrtri_strided_batched(rocblas_handle     
     When trsm is launched with a k evenly divisible by the internal block size of 128,
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
     memory found in the handle to increase overall performance (where k is m
-    when rocblas_side_left and is n when rocblas_side_right). For more
-    information on pre-allocated memory in the handle, see the Device
-    Memory Allocation in rocBLAS section of :ref:api-reference-guide.
+    when rocblas_side_left and is n when rocblas_side_right).
 
     Although not widespread, some gemm kernels used by trsm may use atomic operations.
     See Atomic Operations in the API Reference Guide for more information.
