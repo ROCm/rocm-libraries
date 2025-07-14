@@ -9,6 +9,9 @@
 // UNSUPPORTED: no-threads
 // UNSUPPORTED: c++03
 
+// gpulib doesn't yet have support hashing thread IDs
+// XFAIL: *
+
 // <thread>
 
 // Test that <thread> provides all of the arithmetic, enum, and pointer
@@ -20,6 +23,7 @@
 #include "poisoned_hash_helper.h"
 
 #include "test_macros.h"
+#include "force_include_hip.h"
 
 int main(int, char**) {
   test_library_hash_specializations_available();

@@ -22,6 +22,9 @@
 // string vformat(string_view fmt, format_args args);
 // wstring vformat(wstring_view fmt, wformat_args args);
 
+// TODO: This currently only tests formatting thread IDs in host code. We should add tests for device code if/when
+// libhipcxx adds support for strings and std::format
+
 #include <format>
 #include <cassert>
 

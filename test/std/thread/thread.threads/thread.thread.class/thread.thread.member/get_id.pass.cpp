@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 //
 // UNSUPPORTED: no-threads
+// ADDITIONAL_COMPILE_FLAGS: -DTEST_USE_GPU_THREADS
 
 // <thread>
 
@@ -21,28 +22,17 @@
 
 #include "make_test_thread.h"
 #include "test_macros.h"
+#include "force_include_hip.h"
 
 class G
 {
-    int alive_;
+    int alive_ = 1;
 public:
-    static __device__ int n_alive;
-    static __device__ bool op_run;
-
-    __device__ G() : alive_(1) {++n_alive;}
-    __device__ G(const G& g) : alive_(g.alive_) {++n_alive;}
-    __device__ ~G() {alive_ = 0; --n_alive;}
-
     __device__ void operator()()
     {
         assert(alive_ == 1);
-        assert(n_alive >= 1);
-        op_run = true;
     }
 };
-
-__device__ int G::n_alive = 0;
-__device__ bool G::op_run = false;
 
 int main(int, char**)
 {

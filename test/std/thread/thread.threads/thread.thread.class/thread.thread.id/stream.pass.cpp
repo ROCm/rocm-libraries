@@ -23,6 +23,9 @@
 // basic_ostream<charT, traits>&
 // operator<<(basic_ostream<charT, traits>& out, thread::id id);
 
+// TODO: This currently only tests formatting thread IDs in host code. We should add tests for device code if/when
+// libhipcxx adds support for strings and std::format
+
 #include <cassert>
 #include <format>
 #include <locale>
