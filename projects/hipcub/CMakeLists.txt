@@ -71,10 +71,6 @@ else()
   set(ROCM_ROOT "/opt/rocm" CACHE PATH "Root directory of the ROCm installation")
 endif()
 
-
-# Set the header wrapper OFF by default.
-option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
-
 # Add hipCUB's CMake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -174,18 +170,6 @@ endif()
 if(BUILD_BENCHMARK AND NOT ONLY_INSTALL)
   rocm_package_setup_client_component(benchmarks)
   add_subdirectory(benchmark)
-endif()
-
-# Create header wrapper for backward compatibility
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_wrap_header_dir(
-            ${PROJECT_SOURCE_DIR}/hipcub/include/hipcub/
-	    PATTERNS "*.h"
-	    PATTERN "*.hpp"
-	    GUARDS SYMLINK WRAPPER
-	    WRAPPER_LOCATIONS cub/${CMAKE_INSTALL_INCLUDEDIR}/hipcub/
-            OUTPUT_LOCATIONS cub/wrapper/include/hipcub/
-	  )
 endif()
 
 # Package
