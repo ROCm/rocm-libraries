@@ -32,6 +32,7 @@
 
 #include <cassert>
 #include <cstdio>
+#include <cstring>
 
 #define CUDA_SAFE_CALL(...)                                                           \
   do                                                                                  \
