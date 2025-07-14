@@ -63,21 +63,23 @@ TYPED_TEST_SUITE(DoubleBufferTest, Params);
 
 TYPED_TEST(DoubleBufferTest, TestDoubleBuffer)
 {
+    using T = TypeParam;
+
     // Test default construction
-    rocprim::double_buffer<int> db_default;
-    EXPECT_EQ(db_default.current(), nullptr);
-    EXPECT_EQ(db_default.alternate(), nullptr);
+    rocprim::double_buffer<T> db_default;
+    test_utils::assert_eq(db_default.current(), static_cast<T*>(nullptr));
+    test_utils::assert_eq(db_default.alternate(), static_cast<T*>(nullptr));
 
     // Test current buffer
-    EXPECT_EQ(this->db.current(), &this->value1);
+    test_utils::assert_eq(this->db.current(), &this->value1);
 
     // Test alternate buffer
-    EXPECT_EQ(this->db.alternate(), &this->value2);
+    test_utils::assert_eq(this->db.alternate(), &this->value2);
 
     // Test swap buffers
     this->db.swap();
-    EXPECT_EQ(this->db.current(), &this->value2);
-    EXPECT_EQ(this->db.alternate(), &this->value1);
+    test_utils::assert_eq(this->db.current(), &this->value2);
+    test_utils::assert_eq(this->db.alternate(), &this->value1);
 }
 
 template<typename T>
@@ -97,18 +99,18 @@ TYPED_TEST(FutureValueTest, TestFutureValue)
 
     // Test const future value
     const auto cfv = this->fv;
-    EXPECT_EQ(static_cast<T>(cfv), this->value);
+    test_utils::assert_eq(static_cast<T>(cfv), this->value);
 
     // Test value access
     this->value = get_random_full_range<T>();
-    EXPECT_EQ(static_cast<TypeParam>(this->fv), this->value);
+    test_utils::assert_eq(static_cast<TypeParam>(this->fv), this->value);
 
     // Test plain input value
     T val = get_random_full_range<T>();
-    EXPECT_EQ(rocprim::detail::get_input_value(val), val);
+    test_utils::assert_eq(rocprim::detail::get_input_value(val), val);
 
     // Test future input value
-    EXPECT_EQ(rocprim::detail::get_input_value(this->fv), this->value);
+    test_utils::assert_eq(rocprim::detail::get_input_value(this->fv), this->value);
 }
 
 template<class K, class V>
@@ -148,8 +150,8 @@ TYPED_TEST(KeyValuePairTest, TestKeyValuePair)
     kv_type kv2{k, v};
 
     // Test value access
-    EXPECT_EQ(kv1.key, k);
-    EXPECT_EQ(kv1.value, v);
+    test_utils::assert_eq(kv1.key, k);
+    test_utils::assert_eq(kv1.value, v);
 
     K k_diff;
     V v_diff;
@@ -206,8 +208,8 @@ TYPED_TEST(UninitializedArrayTest, EmplaceConstructsCorrectValue)
     {
         V  val = get_random_full_range<V>();
         V& ref = this->ua.emplace(i, val); // Emplace construction
-        EXPECT_EQ(ref, val); // Same value by reference
-        EXPECT_EQ(this->ua.get_unsafe_array()[i], val); // Same value in array
+        test_utils::assert_eq(ref, val); // Same value by reference
+        test_utils::assert_eq(this->ua.get_unsafe_array()[i], val); // Same value in array
     }
 
     // Test memory consistency
@@ -215,8 +217,8 @@ TYPED_TEST(UninitializedArrayTest, EmplaceConstructsCorrectValue)
     this->ua.emplace(0, v0);
 
     auto& arr = this->ua.get_unsafe_array();
-    EXPECT_EQ(&arr[0], &this->ua.get_unsafe_array()[0]); // Same address
-    EXPECT_EQ(arr[0], v0); // Same content
+    test_utils::assert_eq(&arr[0], &this->ua.get_unsafe_array()[0]); // Same address
+    test_utils::assert_eq(arr[0], v0); // Same content
 
     for(unsigned int i = 0; i < TestFixture::Count; ++i)
     {
@@ -228,6 +230,6 @@ TYPED_TEST(UninitializedArrayTest, EmplaceConstructsCorrectValue)
     auto&                         arr_moved = moved.get_unsafe_array();
     for(unsigned int i = 0; i < TestFixture::Count; ++i)
     {
-        EXPECT_EQ(arr_moved[i], V(i + 1));
+        test_utils::assert_eq(arr_moved[i], V(i + 1));
     }
 }
