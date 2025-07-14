@@ -43,62 +43,65 @@ namespace TensileLite
             Hardware::INSTRUCTION_MAP
             = {{Hardware::Architecture::gfx942,
                 {
-                    //Schema : (MI_M,MI_N,MI_K,Datatype_Size)
-                    {MatrixInstruction(16, 16, 1, 32), 32}, // v_mfma_f32_16x16x1_4b_f32
-                    {MatrixInstruction(16, 16, 4, 32), 32}, // v_mfma_f32_16x16x4_f32
-                    {MatrixInstruction(16, 16, 4, 64), 32}, // v_mfma_f64_16x16x4_f64
-                    {MatrixInstruction(4, 4, 4, 16), 8}, // v_mfma_f32_4x4x4_16b_f16
-                    {MatrixInstruction(32, 32, 2, 32), 64}, // v_mfma_f32_32x32x2_f32
-                    {MatrixInstruction(16, 16, 4, 16), 32}, // v_mfma_f32_16x16x4_4b_f16
-                    {MatrixInstruction(32, 32, 4, 8), 64}, // v_mfma_i32_32x32x4_2b_i8/f8/b8
-                    {MatrixInstruction(32, 32, 16, 8), 32}, // v_mfma_i32_32x32x16_i8
-                    {MatrixInstruction(4, 4, 4, 64), 16}, // v_mfma_f64_4x4x4_4b_f64
-                    {MatrixInstruction(32, 32, 1, 32), 64}, // v_mfma_f32_32x32x1_2b_f32
-                    {MatrixInstruction(32, 32, 8, 16), 32}, // v_mfma_f32_32x32x8_f16
-                    {MatrixInstruction(16, 16, 16, 16), 16}, // v_mfma_f32_16x16x16_f16/bf16
-                    {MatrixInstruction(32, 32, 4, 16), 64}, // v_mfma_f32_32x32x4_2b_f16
-                    {MatrixInstruction(4, 4, 1, 32), 8}, // v_mfma_f32_4x4x1_16b_f32
-                    {MatrixInstruction(16, 16, 32, 8), 16}, // v_mfma_i32_16x16x32_i8
-                    {MatrixInstruction(4, 4, 4, 8), 8}, // v_mfma_i32_4x4x4_16b_i8
-                    {MatrixInstruction(32, 32, 4, 32), 32}, // v_mfma_f32_32x32x4_xf32
-                    {MatrixInstruction(16, 16, 4, 8), 32}, // v_mfma_i32_16x16x4_4b_i8
-                    {MatrixInstruction(16, 16, 8, 32), 16}, // v_mfma_f32_16x16x8_xf32
-                    {MatrixInstruction(16, 16, 32, 32), 16}, // v_mfma_f32_16x16x8_xf32
-                }},
-               {Hardware::Architecture::gfx950, //TODO: NEed to make sure these are the right MFMAs
-                {
-                    {MatrixInstruction(16, 16, 32, 8), 16}, // v_mfma_i32_16x16x32_i8
-                    {MatrixInstruction(16, 16, 1, 32), 32}, // v_mfma_f32_16x16x1_4b_f32
-                    {MatrixInstruction(16, 16, 4, 32), 32}, // v_mfma_f32_16x16x4_f32
-                    {MatrixInstruction(16, 16, 4, 64), 32}, // v_mfma_f64_16x16x4_f64
-                    {MatrixInstruction(4, 4, 4, 16), 8}, // v_mfma_f32_4x4x4_16b_f16
-                    {MatrixInstruction(32, 32, 2, 32), 64}, // v_mfma_f32_32x32x2_f32
-                    {MatrixInstruction(16, 16, 4, 16), 32}, // v_mfma_f32_16x16x4_4b_f16
-                    {MatrixInstruction(32, 32, 4, 8), 64}, // v_mfma_i32_32x32x4_2b_i8/f8/b8
-                    {MatrixInstruction(32, 32, 16, 8), 32}, // v_mfma_i32_32x32x16_i8
-                    {MatrixInstruction(4, 4, 4, 64), 16}, // v_mfma_f64_4x4x4_4b_f64
-                    {MatrixInstruction(32, 32, 1, 32), 64}, // v_mfma_f32_32x32x1_2b_f32
-                    {MatrixInstruction(32, 32, 8, 16), 32}, // v_mfma_f32_32x32x8_f16
-                    {MatrixInstruction(16, 16, 16, 16), 16}, // v_mfma_f32_16x16x16_f16/bf16
-                    {MatrixInstruction(32, 32, 4, 16), 64}, // v_mfma_f32_32x32x4_2b_f16
-                    {MatrixInstruction(4, 4, 1, 32), 8}, // v_mfma_f32_4x4x1_16b_f32
-                    {MatrixInstruction(16, 16, 32, 8), 16}, // v_mfma_i32_16x16x32_i8
-                    {MatrixInstruction(4, 4, 4, 8), 8}, // v_mfma_i32_4x4x4_16b_i8
-                    {MatrixInstruction(32, 32, 4, 32), 32}, // v_mfma_f32_32x32x4_xf32
-                    {MatrixInstruction(16, 16, 4, 8), 32}, // v_mfma_i32_16x16x4_4b_i8
-                    {MatrixInstruction(16, 16, 8, 32), 16}, // v_mfma_f32_16x16x8_xf32
-                    //----------
-                    {MatrixInstruction(32, 32, 64, 8), 64}, // v_mfma_i32_32x32x16_i8
-                    {MatrixInstruction(16, 16, 32, 16), 16}, // v_mfma_i32_16x16x32_f16/bf16
-                    //----------
-                    //TODO these need to be checked.
-                    {MatrixInstruction(16, 16, 128, 8), 32}, // V_MFMA_F32_16X16X128_F8
-                    {MatrixInstruction(16, 16, 128, 6), 16}, // V_MFMA_F32_16X16X128_F6
-                    {MatrixInstruction(16, 16, 128, 4), 16}, // V_MFMA_F32_16X16X128_F4
-                    {MatrixInstruction(32, 32, 64, 8), 64},  // V_MFMA_F32_32X32X64_F8
-                    {MatrixInstruction(32, 32, 64, 6), 32},  // V_MFMA_F32_32X32X64_F6
-                    {MatrixInstruction(32, 32, 64, 4), 32},  // V_MFMA_F32_32X32X64_F4
+                    // Schema: {MatrixInstruction(MI_M, MI_N, MI_K, Datatype_Size), Cycles}
+                    {MatrixInstruction(16, 16,  4, 64),	32}, // V_MFMA_F64_16X16X4_F64
+                    {MatrixInstruction( 4,  4,  4, 64),	16}, // V_MFMA_F64_4X4X4_4B_F64
 
+                    {MatrixInstruction(32, 32,  2, 32), 64}, // V_MFMA_F32_32X32X2_F32
+                    {MatrixInstruction(16, 16,  4, 32), 32}, // V_MFMA_F32_16X16X4_F32
+                    {MatrixInstruction(32, 32,  1, 32), 64}, // V_MFMA_F32_32X32X1_2B_F32
+                    {MatrixInstruction(16, 16,  1, 32), 32}, // V_MFMA_F32_16X16X1_4B_F32
+                    {MatrixInstruction( 4,  4,  1, 32),  8}, // V_MFMA_F32_4X4X1_16B_F32
+
+                    {MatrixInstruction(32, 32,  4, 32), 32}, // V_MFMA_F32_32X32X4_XF32
+                    {MatrixInstruction(16, 16,  8, 32), 16}, // V_MFMA_F32_16X16X8_XF32
+
+                    {MatrixInstruction(32, 32,  8, 16), 32}, // V_MFMA_F32_32X32X8_<F16/BF16>
+                    {MatrixInstruction(16, 16, 16, 16), 16}, // V_MFMA_F32_16X16X16_<F16/BF16>
+                    {MatrixInstruction(32, 32,  4, 16), 64}, // V_MFMA_F32_32X32X4_2B_<F16/BF16>
+                    {MatrixInstruction(16, 16,  4, 16), 32}, // V_MFMA_F32_16X16X4_4B_<F16/BF16>
+                    {MatrixInstruction( 4,  4,  4, 16),  8}, // V_MFMA_F32_4X4X4_16B_<F16/BF16>
+
+                    {MatrixInstruction(32, 32, 16,  8), 32}, // V_MFMA_F32_32x32x16_<F8/BF8/I8>_<F8/BF8/I8>
+                    {MatrixInstruction(16, 16, 32,  8), 16}, // V_MFMA_F32_16x16x32_<F8/BF8/I8>_<F8/BF8/I8>
+                    {MatrixInstruction(32, 32,  4,  8), 64}, // V_MFMA_I32_32X32X4_2B_I8
+                    {MatrixInstruction(16, 16,  4,  8), 32}, // V_MFMA_I32_16X16X4_4B_I8
+                    {MatrixInstruction( 4,  4,  4,  8),  8}, // V_MFMA_I32_4X4X4_16B_I8
+                }},
+               {Hardware::Architecture::gfx950,
+                {
+                    {MatrixInstruction(16, 16,   4, 64), 32}, // V_MFMA_F64_16X16X4_F64
+                    {MatrixInstruction( 4,  4,   4, 64), 16}, // V_MFMA_F64_4X4X4_4B_F64
+
+                    {MatrixInstruction(32, 32,   2, 32), 64}, // V_MFMA_F32_32X32X2_F32
+                    {MatrixInstruction(16, 16,   4, 32), 32}, // V_MFMA_F32_16X16X4_F32
+                    {MatrixInstruction(32, 32,   1, 32), 64}, // V_MFMA_F32_32X32X1_2B_F32
+                    {MatrixInstruction(16, 16,   1, 32), 32}, // V_MFMA_F32_16X16X1_4B_F32
+                    {MatrixInstruction( 4,  4,   1, 32),  8}, // V_MFMA_F32_4X4X1_16B_F32
+
+                    {MatrixInstruction(32, 32,  16, 16), 32}, // V_MFMA_F32_32X32X16_<F16/BF16>
+                    {MatrixInstruction(32, 32,   8, 16), 32}, // V_MFMA_F32_32X32X8_<F16/BF16>
+                    {MatrixInstruction(16, 16,  32, 16), 16}, // V_MFMA_F32_16X16X32_<F16/BF16>
+                    {MatrixInstruction(16, 16,  16, 16), 16}, // V_MFMA_F32_16X16X16_<F16/BF16>
+                    {MatrixInstruction(32, 32,   4, 16), 64}, // V_MFMA_F32_32X32X4_2B_<F16/BF16>
+                    {MatrixInstruction(16, 16,   4, 16), 32}, // V_MFMA_F32_16X16X4_4B_<F16/BF16>
+                    {MatrixInstruction( 4,  4,   4, 16),  8}, // V_MFMA_F32_4X4X4_16B_<F16/BF16>
+
+                    {MatrixInstruction(32, 32,  64,  8), 64}, // V_MFMA_F32_32X32X64_F8
+                    {MatrixInstruction(32, 32,  32,  8), 32}, // V_MFMA_F32_32x32x32_I8
+                    {MatrixInstruction(32, 32,  16,  8), 32}, // V_MFMA_F32_32x32x16_<F8/BF8/I8>_<F8/BF8/I8>
+                    {MatrixInstruction(16, 16, 128,  8), 32}, // V_MFMA_F32_16X16X128_F8
+                    {MatrixInstruction(16, 16,  64,  8), 16}, // V_MFMA_F32_16x16x64_I8
+                    {MatrixInstruction(16, 16,  32,  8), 16}, // V_MFMA_F32_16x16x32_<F8/BF8/I8>_<F8/BF8/I8>
+                    {MatrixInstruction(32, 32,   4,  8), 64}, // V_MFMA_I32_32X32X4_2B_I8
+                    {MatrixInstruction(16, 16,   4,  8), 32}, // V_MFMA_I32_16X16X4_4B_I8
+                    {MatrixInstruction( 4,  4,   4,  8),  8}, // V_MFMA_I32_4X4X4_16B_I8
+
+                    {MatrixInstruction(32, 32,  64,  6), 32}, // V_MFMA_F32_32X32X64_F6
+                    {MatrixInstruction(16, 16, 128,  6), 16}, // V_MFMA_F32_16X16X128_F6
+
+                    {MatrixInstruction(32, 32,  64,  4), 32}, // V_MFMA_F32_32X32X64_F4
+                    {MatrixInstruction(16, 16, 128,  4), 16}, // V_MFMA_F32_16X16X128_F4
                 }}};
 
     } // namespace analytical
