@@ -183,6 +183,50 @@ namespace rocRoller::KernelGraph
                 uint      bankIndex;
             };
 
+            struct Summary
+            {
+                struct Workitem
+                {
+                    uint   bankIndex;
+                    size_t workitemsAccessed;
+                    bool   imbalanced;
+                };
+                struct Access
+                {
+                    int                   tag;
+                    uint                  instruction;
+                    int                   ldsTag;
+                    std::vector<Workitem> workitems;
+                };
+
+                std::vector<Access> accesses;
+
+                std::string toString()
+                {
+                    std::stringstream ss;
+                    for(auto const& [tag, instruction, ldsTag, workitems] : this->accesses)
+                    {
+                        ss << fmt::format("Operation tag {} instruction {} accesses LDS {}:\n",
+                                          tag,
+                                          instruction,
+                                          ldsTag);
+                        for(auto const& [bankIndex, workitemsAccessed, imbalanced] : workitems)
+                        {
+                            ss << fmt::format("  Bank {}: {} workitems {}\n",
+                                              bankIndex,
+                                              workitemsAccessed,
+                                              imbalanced ? "(imbalanced)" : "");
+                        }
+                    }
+                    return ss.str();
+                }
+
+                std::ostream& operator<<(std::ostream& stream)
+                {
+                    return stream << toString();
+                }
+            };
+
             /**
              * @brief Construct a new LDSBankModel object.
              *
@@ -234,6 +278,8 @@ namespace rocRoller::KernelGraph
                    << " bytes, " << m_entryWidthInBytes << "byte bank width, " << m_numBanks
                    << " banks" << std::endl;
 
+                Summary summary;
+
                 // For each operation tag and instruction...
                 for(auto const& [key, accesses] : m_bankAccesses)
                 {
@@ -266,18 +312,21 @@ namespace rocRoller::KernelGraph
                     if(anyImbalance)
                         m_imbalancedTags.insert(tag);
 
-                    ss << fmt::format("Operation tag {} instruction {} accesses LDS {}:\n",
-                                      tag,
-                                      instruction,
-                                      ldsTag);
-                    for(auto const& [bankIndex, workitems] : bankWorkitems)
-                    {
-                        auto imbalanced = workitems.size() > minWorkitemsPerBank;
-                        ss << fmt::format("  Bank {}: {} workitems {}\n",
-                                          bankIndex,
-                                          workitems.size(),
-                                          imbalanced ? "(imbalanced)" : "");
-                    }
+                    const auto workitemsInfo = [&]() {
+                        decltype(Summary::Access::workitems) workitemsInfo;
+                        for(auto const& [bankIndex, workitems] : bankWorkitems)
+                        {
+                            auto imbalanced = workitems.size() > minWorkitemsPerBank;
+                            ss << fmt::format("  Bank {}: {} workitems {}\n",
+                                              bankIndex,
+                                              workitems.size(),
+                                              imbalanced ? "(imbalanced)" : "");
+                            workitemsInfo.emplace_back(bankIndex, workitems.size(), imbalanced);
+                        }
+                        return workitemsInfo;
+                    }();
+
+                    summary.accesses.emplace_back(tag, instruction, ldsTag, workitemsInfo);
 
                     bool echoBanks = false;
                     if(echoBanks)
@@ -304,7 +353,7 @@ namespace rocRoller::KernelGraph
 
                 ss << fmt::format("  Imbalanced tags: {}\n", m_imbalancedTags);
 
-                return ss.str();
+                return summary.toString();
             }
 
         private:
