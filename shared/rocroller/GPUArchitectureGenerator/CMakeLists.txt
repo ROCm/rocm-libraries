@@ -65,10 +65,11 @@ if(ROCROLLER_ENABLE_TIMERS)
 endif()
 
 if(NOT ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF)
+    set(amd_gpu_mr_isa_zip AMD_GPU_MR_ISA_XML-2025_03_06.zip)
     add_custom_command(
         OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/amd-mrisa.stamp"
-        COMMAND wget https://gpuopen.com/download/machine-readable-isa/AMD_GPU_MR_ISA_XML-2024_08_22.zip
-        COMMAND unzip AMD_GPU_MR_ISA_XML-2024_08_22.zip -d ${ROCROLLER_MRISAS_DIR}
+        COMMAND wget https://gpuopen.com/download/machine-readable-isa/${amd_gpu_mr_isa_zip}
+        COMMAND unzip ${amd_gpu_mr_isa_zip} -d ${ROCROLLER_MRISAS_DIR}
         COMMAND touch "${CMAKE_CURRENT_BINARY_DIR}/amd-mrisa.stamp"
     )
     add_custom_target(amd-mrisa
