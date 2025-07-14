@@ -63,7 +63,7 @@ else()
     set(SUPPORTED_ARCHITECTURES ${BASE_ARCHITECTURES})
 endif()
 
-function(tensile_validate_gpu_targets targets)
+function(tensilelite_validate_gpu_targets targets)
     set(supported_list ${SUPPORTED_ARCHITECTURES})
     set(target_list ${targets})
 
@@ -81,11 +81,11 @@ function(tensile_validate_gpu_targets targets)
     endforeach()
 endfunction()
 
-function(tensile_get_base_architectures output_var)
+function(tensilelite_get_base_architectures output_var)
     set(${output_var} ${BASE_ARCHITECTURES} PARENT_SCOPE)
 endfunction()
 
-function(tensile_get_supported_architectures output_var)
+function(tensilelite_get_supported_architectures output_var)
     set(${output_var} ${SUPPORTED_ARCHITECTURES} PARENT_SCOPE)
 endfunction()
 

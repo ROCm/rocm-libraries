@@ -109,9 +109,9 @@ set(ROCBLASLT_LIB_DIR "${HIPBLASLT_LIB_DIR}/src/amd_detail/rocblaslt")
 set(GPU_TARGETS "" CACHE STRING "AMD GFX targets to cross-compile")
 
 if(NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all")
-    tensile_get_base_architectures(GPU_TARGETS)
+    tensilelite_get_base_architectures(GPU_TARGETS)
 else()
-    tensile_validate_gpu_targets("${GPU_TARGETS}")
+    tensilelite_validate_gpu_targets("${GPU_TARGETS}")
 endif()
 message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 
