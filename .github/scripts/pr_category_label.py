@@ -92,7 +92,6 @@ def main(argv=None) -> None:
     client = GitHubCLIClient()
     changed_files = [file for file in client.get_changed_files(args.repo, int(args.pr))]
 
-
     if not changed_files:
         logger.warning("REST API failed or returned no changed files. Falling back to Git CLI...")
         try:

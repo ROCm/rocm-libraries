@@ -396,6 +396,7 @@ namespace rocRoller
                                         int                      tag,
                                         std::vector<int>&        result)
         {
+            // cppcheck-suppress internalAstError
             auto traverse = [&]<typename EdgeType>() {
                 for(auto child : graph.control.getOutputNodeIndices<EdgeType>(tag))
                 {

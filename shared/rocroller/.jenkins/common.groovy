@@ -33,12 +33,13 @@ def withSSH(platform, pipeline) {
     }
 }
 
-def runCompileCommand(platform, project, jobName, mxDataGeneratorGitURL, mxDataGeneratorGitTag, boolean codeCoverage=false, boolean enableTimers=false, String target='', boolean useYamlCpp=true)
+def runCompileCommand(platform, project, jobName, mxDataGeneratorGitURL, mxDataGeneratorGitTag, boolean codeCoverage=false, boolean enableTimers=false, String target='', boolean useYamlCpp=true, boolean staticAnalysis=false)
 {
     project.paths.construct_build_prefix()
-    String codeCovFlag = codeCoverage ? '-DCODE_COVERAGE=ON -DSKIP_CPPCHECK=ON -DBUILD_SHARED_LIBS=OFF' : '-DSKIP_CPPCHECK=OFF'
+    String codeCovFlag = codeCoverage ? '-DROCROLLER_ENABLE_COVERAGE=ON -DROCROLLER_BUILD_SHARED_LIBS=OFF -DROCROLLER_ENABLE_LLD=ON' : ''
     String timerFlag = enableTimers ? '-DROCROLLER_ENABLE_TIMERS=ON' : ''
-    String yamlBackendFlag = useYamlCpp ? '-DYAML_BACKEND=YAML_CPP' : '-DYAML_BACKEND=LLVM'
+    String yamlBackendFlag = useYamlCpp ? '' : '-DROCROLLER_ENABLE_YAML_CPP=OFF'
+    String useCppCheck = staticAnalysis ? '-DROCROLLER_ENABLE_CPPCHECK=ON' : ''
 
     mxDataGeneratorGitURL = mxDataGeneratorGitURL?.trim();
     mxDataGeneratorGitTag = mxDataGeneratorGitTag?.trim();
@@ -58,11 +59,12 @@ def runCompileCommand(platform, project, jobName, mxDataGeneratorGitURL, mxDataG
                 # Check that all tests are included.
                 ../scripts/check_included_tests.py
                 cmake ../ \\
-                    ${codeCovFlag} ${timerFlag} ${yamlBackendFlag}\\
+                    ${codeCovFlag} ${timerFlag} ${yamlBackendFlag} ${useCppCheck}\\
                     ${mxDataGeneratorGitURLFlag} ${mxDataGeneratorGitTagFlag}\\
+                    -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \\
                     -DCMAKE_BUILD_TYPE=Release \\
-                    -DROCROLLER_TESTS_SKIP_SLOW=OFF \\
-                    -DBUILD_VERBOSE=ON
+                    -DROCROLLER_ENABLE_FETCH=ON \\
+                    -DCMAKE_PREFIX_PATH="/opt/rocm;/opt/rocm/llvm"
                 ccache --print-stats
                 make -j ${target}
                 ccache --print-stats
@@ -176,13 +178,9 @@ def runBuildDocsCommand(platform, project)
         def command = """#!/usr/bin/env bash
                     set -ex
                     cd ${project.paths.project_build_prefix}
-
                     ${sshBlock}
-
-                    mkdir -p build
-                    cd build
-                    cmake ../
-                    make -j docs
+                    cmake --preset docs -B build -S .
+                    cmake --build build --target docs
                     """
         platform.runCommand(this, command)
     }
@@ -304,7 +302,7 @@ def runPerformanceCommand (platform, project)
                         ${sshBlock}
 
                         #Run Performance Test
-                        export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:${project.paths.project_build_prefix}/build/lib/
+                        export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:${project.paths.project_build_prefix}/build/
 
                         ${masterCompareCommand}
 
@@ -367,7 +365,7 @@ def runPerformanceCommand (platform, project)
                         unzip archive.zip
 
                         #Run Performance Test
-                        export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:${project.paths.project_build_prefix}/build/lib/
+                        export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:${project.paths.project_build_prefix}/build/
                         ./scripts/rrperf run \\
                             --suite ${rrperfSuite} \\
                             --rundir "./performance_${platform.gpu}"

@@ -68,24 +68,31 @@ def build_rocroller(
     subprocess.run(
         [
             "cmake",
+            f"-B {build_dir}",
+            f"-S {project_dir}",
             "-DCMAKE_BUILD_TYPE=Release",
             "-DROCROLLER_ENABLE_TIMERS=ON",
+            "-DROCROLLER_ENABLE_FETCH=ON",
+            "-DCMAKE_PREFIX_PATH='/opt/rocm;/opt/rocm/llvm'",
+            "-DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++",
             "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
-            "-DSKIP_CPPCHECK=On",
-            "../",
+            "-DROCROLLER_ENABLE_CPPCHECK=OFF",
         ],
-        cwd=str(build_dir),
+        cwd=str(project_dir),
         check=True,
     )
 
     subprocess.run(
         [
-            "make",
-            "-j",
+            "cmake",
+            "--build",
+            str(build_dir),
+            "--parallel",
             str(threads),
+            "--target",
             "all_clients",
         ],
-        cwd=str(build_dir),
+        cwd=str(project_dir),
         check=True,
     )
 
