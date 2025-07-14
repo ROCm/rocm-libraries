@@ -33,7 +33,7 @@ trigger:
 pr: none
 
 stages:
-- stage: hipblas-common
+- stage: hipblas_common
   jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/hipBLAS-common.yml@pipelines_repo
     parameters:
