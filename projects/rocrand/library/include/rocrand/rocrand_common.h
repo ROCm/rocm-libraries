@@ -36,6 +36,7 @@
 #define ROCRAND_SQRT2_DOUBLE (1.4142135623730951)
 
 #include <hip/hip_runtime.h>
+#include <utility>
 
 #define ROCRAND_KERNEL __global__ static
 
