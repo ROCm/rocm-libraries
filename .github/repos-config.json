@@ -3,7 +3,7 @@
     {
       "name": "tensile",
       "url": "ROCm/Tensile",
-      "branch": "release-staging/rocm-rel-7.0",
+      "branch": "release/rocm-rel-7.0",
       "category": "shared",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
@@ -12,9 +12,9 @@
     {
       "name": "composablekernel",
       "url": "ROCm/composable_kernel",
-      "branch": "release-staging/rocm-rel-7.0",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false,
       "enable_pr_fanout": false
     },
@@ -23,14 +23,14 @@
       "url": "ROCm/hipBLAS",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false,
       "enable_pr_fanout": false
     },
     {
       "name": "hipblas-common",
       "url": "ROCm/hipBLAS-common",
-      "branch": "release-staging/rocm-rel-7.0",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
@@ -39,7 +39,7 @@
     {
       "name": "hipblaslt",
       "url": "ROCm/hipBLASLt",
-      "branch": "release-staging/rocm-rel-7.0",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
@@ -48,43 +48,43 @@
     {
       "name": "hipfft",
       "url": "ROCm/hipFFT",
-      "branch": "release-staging/rocm-rel-7.0",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false,
       "enable_pr_fanout": false
     },
     {
       "name": "hipsolver",
       "url": "ROCm/hipSOLVER",
-      "branch": "release-staging/rocm-rel-7.0",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false,
       "enable_pr_fanout": false
     },
     {
       "name": "hipsparse",
       "url": "ROCm/hipSPARSE",
-      "branch": "release-staging/rocm-rel-7.0",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false,
       "enable_pr_fanout": false
     },
     {
       "name": "hipsparselt",
       "url": "ROCm/hipSPARSELt",
-      "branch": "release-staging/rocm-rel-7.0",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false,
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
       "enable_pr_fanout": false
     },
     {
       "name": "rocblas",
       "url": "ROCm/rocBLAS",
-      "branch": "release-staging/rocm-rel-7.0",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
@@ -93,34 +93,25 @@
     {
       "name": "rocfft",
       "url": "ROCm/rocFFT",
-      "branch": "release-staging/rocm-rel-7.0",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false,
-      "enable_pr_fanout": false
-    },
-    {
-      "name": "rocroller",
-      "url": "ROCm/rocRoller",
-      "branch": "main",
-      "category": "shared",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false,
       "enable_pr_fanout": false
     },
     {
       "name": "rocsolver",
       "url": "ROCm/rocSOLVER",
-      "branch": "release-staging/rocm-rel-7.0",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false,
       "enable_pr_fanout": false
     },
     {
       "name": "rocsparse",
       "url": "ROCm/rocSPARSE",
-      "branch": "release-staging/rocm-rel-7.0",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
@@ -128,7 +119,7 @@
     },{
       "name": "hipcub",
       "url": "ROCm/hipCUB",
-      "branch": "release-staging/rocm-rel-7.0",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
@@ -137,7 +128,7 @@
     {
       "name": "rocprim",
       "url": "ROCm/rocPRIM",
-      "branch": "release-staging/rocm-rel-7.0",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
@@ -146,7 +137,7 @@
     {
       "name": "rocrand",
       "url": "ROCm/rocRAND",
-      "branch": "release-staging/rocm-rel-7.0",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
@@ -155,7 +146,7 @@
     {
       "name": "rocthrust",
       "url": "ROCm/rocThrust",
-      "branch": "release-staging/rocm-rel-7.0",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
@@ -164,7 +155,7 @@
     {
       "name": "hiprand",
       "url": "ROCm/hipRAND",
-      "branch": "release-staging/rocm-rel-7.0",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
