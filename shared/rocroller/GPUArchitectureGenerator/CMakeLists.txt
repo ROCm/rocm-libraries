@@ -1,222 +1,144 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
 
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+add_library(isa-spec-manager OBJECT)
+target_sources(isa-spec-manager
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/isa_spec_manager/isa_xml_reader.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/isa_spec_manager/tinyxml2.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/isa_spec_manager/amdisa_utility.cpp"
+)
+add_library(rocroller::isa-spec-manager ALIAS isa-spec-manager)
+target_include_directories(isa-spec-manager
+    PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/isa_spec_manager"
+)
+add_executable(GPUArchitectureGenerator
+    "${CMAKE_CURRENT_SOURCE_DIR}/source/GPUArchitectureGenerator.cpp"
+    "${PROJECT_SOURCE_DIR}/lib/source/GPUArchitecture.cpp"
+    "${PROJECT_SOURCE_DIR}/lib/source/GPUArchitectureLibrary.cpp"
+    "${PROJECT_SOURCE_DIR}/lib/source/Assemblers/Assembler.cpp"
+    "${PROJECT_SOURCE_DIR}/lib/source/Costs/Cost.cpp"
+    "${PROJECT_SOURCE_DIR}/lib/source/DataTypes_F6_Utils.cpp"
+    "${PROJECT_SOURCE_DIR}/lib/source/DataTypes_F8_Utils.cpp"
+    "${PROJECT_SOURCE_DIR}/lib/source/DataTypes_BF16_Utils.cpp"
+    "${PROJECT_SOURCE_DIR}/lib/source/Error.cpp"
+    "${PROJECT_SOURCE_DIR}/lib/source/Logging.cpp"
+    "${PROJECT_SOURCE_DIR}/lib/source/Scheduler.cpp"
+    "${PROJECT_SOURCE_DIR}/lib/source/Utilities/Settings.cpp"
+    "${PROJECT_SOURCE_DIR}/lib/source/Timer.cpp"
+)
 
-# ArchitectureGenerator
-
-set(ROCROLLER_ASSEMBLER_PATH "" CACHE STRING "Path to assembler (defaults to ROCM_PATH/bin/amdclang++)")
-
-if ("${ROCROLLER_ASSEMBLER_PATH}" STREQUAL "")
-    if("${ROCM_PATH}" STREQUAL "")
-        set(ROCROLLER_ASSEMBLER_PATH "/opt/rocm/bin/amdclang++")
-    else()
-        set(ROCROLLER_ASSEMBLER_PATH "${ROCM_PATH}/bin/amdclang++")
-    endif()
+if(ROCROLLER_ENABLE_LLVM)
+    target_compile_definitions(GPUArchitectureGenerator PRIVATE ROCROLLER_USE_LLVM)
+    target_link_libraries(GPUArchitectureGenerator PRIVATE ${llvm_yaml_libs})
+    target_include_directories(GPUArchitectureGenerator PUBLIC "${LLVM_INCLUDE_DIRS}")
+else()
+    target_compile_definitions(GPUArchitectureGenerator PRIVATE ROCROLLER_USE_YAML_CPP)
+    target_link_libraries(GPUArchitectureGenerator PRIVATE yaml-cpp::yaml-cpp)
 endif()
 
-# Not visible to library users, so not necessary to use system packages
-rocroller_add_dependency(
-    isa_spec_manager HASH 1c6fcc8072c7a94ceedb734cf06fd8a08487c4b3
+target_include_directories(GPUArchitectureGenerator
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        "${PROJECT_SOURCE_DIR}/lib/include" # necessary?
 )
-if(NOT ROCROLLER_USE_PREGENERATED_ARCH_DEF)
-    rocroller_add_dependency(mrisa_xml VERSION 2024_08_22)
+target_compile_features(GPUArchitectureGenerator PRIVATE cxx_std_20)
+target_link_libraries(GPUArchitectureGenerator
+    PRIVATE
+        ${msgpack_libs}
+        ${llvm_libs}
+        spdlog::spdlog_header_only
+        hip::host
+        fmt::fmt-header-only
+        rocroller::isa-spec-manager
+)
+target_compile_definitions(GPUArchitectureGenerator
+    PRIVATE
+       ROCROLLER_USE_HIP
+       __HIP_PLATFORM_AMD__
+)
+
+if(ROCROLLER_ENABLE_TIMERS)
+    target_compile_definitions(GPUArchitectureGenerator PRIVATE ROCROLLER_ENABLE_TIMERS)
+    target_compile_options(GPUArchitectureGenerator PRIVATE -pg -fno-omit-frame-pointer)
 endif()
 
-add_executable(
-    GPUArchitectureGenerator
-    ${CMAKE_CURRENT_SOURCE_DIR}/source/GPUArchitectureGenerator.cpp
-    ${PROJECT_SOURCE_DIR}/lib/source/GPUArchitecture.cpp
-    ${PROJECT_SOURCE_DIR}/lib/source/GPUArchitectureLibrary.cpp
-    ${PROJECT_SOURCE_DIR}/lib/source/Assemblers/Assembler.cpp
-    ${PROJECT_SOURCE_DIR}/lib/source/Costs/Cost.cpp
-    ${PROJECT_SOURCE_DIR}/lib/source/DataTypes_F6_Utils.cpp
-    ${PROJECT_SOURCE_DIR}/lib/source/DataTypes_F8_Utils.cpp
-    ${PROJECT_SOURCE_DIR}/lib/source/DataTypes_BF16_Utils.cpp
-    ${PROJECT_SOURCE_DIR}/lib/source/Error.cpp
-    ${PROJECT_SOURCE_DIR}/lib/source/Logging.cpp
-    ${PROJECT_SOURCE_DIR}/lib/source/Scheduler.cpp
-    ${PROJECT_SOURCE_DIR}/lib/source/Utilities/Settings.cpp
-    ${PROJECT_SOURCE_DIR}/lib/source/Timer.cpp
-)
-
-if(NOT ROCROLLER_USE_PREGENERATED_ARCH_DEF AND DEFINED INTERNAL_MRISAS AND INTERNAL_MRISAS)
-    foreach(MRISA_FILE IN LISTS INTERNAL_MRISAS)
-        if(EXISTS ${MRISA_FILE})
-            get_filename_component(mrisa_file_name "${MRISA_FILE}" NAME)
-            add_custom_target(
-                copy_${mrisa_file_name}
-                COMMAND ${CMAKE_COMMAND} -E copy "${MRISA_FILE}"
-                        "${mrisa_xml_SOURCE_DIR}"
-                BYPRODUCTS "${mrisa_xml_SOURCE_DIR}/${mrisa_file_name}"
-                DEPENDS ${MRISA_FILE}
-            )
-            list(APPEND INTERNAL_MRISA_FILES
-                 "${mrisa_xml_SOURCE_DIR}/${mrisa_file_name}"
-            )
-            list(APPEND INTERNAL_MRISA_TARGETS copy_${mrisa_file_name})
-        else()
-            message(WARNING "MRISA file ${MRISA_FILE} could not be found.")
-        endif()
-    endforeach(MRISA_FILE IN LISTS INTERNAL_MRISAS)
-endif()
-
-target_compile_options(
-    GPUArchitectureGenerator PUBLIC ${COROUTINES_COMPILE_OPTION}
-                                    ${EXTRA_COMPILE_OPTIONS}
-)
-target_link_options(GPUArchitectureGenerator PUBLIC ${EXTRA_LINK_OPTIONS})
-
-target_link_libraries(
-  GPUArchitectureGenerator PUBLIC
-  ${llvm_libs}
-  msgpackc-cxx
-  isa_spec_manager
-  spdlog::spdlog_header_only
-)
-target_include_directories(
-    GPUArchitectureGenerator PRIVATE include ${PROJECT_SOURCE_DIR}/lib/include
-)
-
-target_include_directories(
-    GPUArchitectureGenerator SYSTEM PRIVATE ${LLVM_INCLUDE_DIRS}
-)
-
-target_compile_definitions(
-    GPUArchitectureGenerator PRIVATE ROCROLLER_NO_EMBED_ARCH_DEF
-)
-
-if(YAML_BACKEND STREQUAL "YAML_CPP")
-    target_link_libraries(GPUArchitectureGenerator PUBLIC yaml-cpp)
-endif()
-
-if(ROCROLLER_USE_HIP)
-    target_link_libraries(GPUArchitectureGenerator PUBLIC hip::host)
-    target_compile_definitions(
-        GPUArchitectureGenerator PUBLIC ROCROLLER_USE_HIP __HIP_PLATFORM_AMD__
-    )
-endif()
-
-set(ARCH_FILE_DIR ${PROJECT_BINARY_DIR}/share/rocRoller)
-
-file(MAKE_DIRECTORY ${ARCH_FILE_DIR})
-
-set(GPUArchitectureGeneratorBin $<TARGET_FILE:GPUArchitectureGenerator>)
-
-if(BUILD_ADDRESS_SANITIZER OR "${CMAKE_CXX_FLAGS}" MATCHES "-fsanitize=address")
-    # Must populate LD_PRELOAD with ASAN runtime if ASAN is being used.
-    # Find the ASAN RT with compiler and update env for Tensile call.
-    execute_process(
-        COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.asan-x86_64.so
-        OUTPUT_VARIABLE ASAN_LIB_PATH
-        COMMAND_ECHO STDOUT)
-    string(STRIP ${ASAN_LIB_PATH} ASAN_LIB_PATH)
-    set(GPUArchitectureGeneratorBin LD_PRELOAD=${ASAN_LIB_PATH} ASAN_OPTIONS=detect_leaks=0 ${GPUArchitectureGeneratorBin})
-endif()
-
-if(NOT ROCROLLER_USE_PREGENERATED_ARCH_DEF)
-
-    file(MAKE_DIRECTORY ${ARCH_FILE_DIR}/split_yamls)
-
+if(NOT ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF)
     add_custom_command(
-        OUTPUT ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/amd-mrisa.stamp"
+        COMMAND wget https://gpuopen.com/download/machine-readable-isa/AMD_GPU_MR_ISA_XML-2024_08_22.zip
+        COMMAND unzip AMD_GPU_MR_ISA_XML-2024_08_22.zip -d ${ROCROLLER_MRISAS_DIR}
+        COMMAND touch "${CMAKE_CURRENT_BINARY_DIR}/amd-mrisa.stamp"
+    )
+    add_custom_target(amd-mrisa
+        DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/amd-mrisa.stamp"
+    )
+    add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.yaml"
         COMMAND
-            ${GPUArchitectureGeneratorBin}
-            ${ARCH_FILE_DIR}/split_yamls/GPUArchitecture_def.yaml
-            ${ROCROLLER_ASSEMBLER_PATH}
+            $<TARGET_FILE:GPUArchitectureGenerator>
+            "${CMAKE_CURRENT_BINARY_DIR}/split_yamls/GPUArchitecture_def.yaml"
+            ${CMAKE_CXX_COMPILER}
             -Y
             --split
             --xml_dir
-            ${mrisa_xml_SOURCE_DIR}
+            ${ROCROLLER_MRISAS_DIR}
         COMMAND
-            ${GPUArchitectureGeneratorBin}
-            ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
-            ${ROCROLLER_ASSEMBLER_PATH}
+            $<TARGET_FILE:GPUArchitectureGenerator>
+            "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.yaml"
+            ${CMAKE_CXX_COMPILER}
             -Y
-            --xml_dir ${mrisa_xml_SOURCE_DIR}
-        DEPENDS GPUArchitectureGenerator ${INTERNAL_MRISA_TARGETS}
+            --xml_dir ${ROCROLLER_MRISAS_DIR}
+        DEPENDS GPUArchitectureGenerator amd-mrisa
     )
-
 else()
-
-    file(GLOB YAML_FILES "${PROJECT_SOURCE_DIR}/GPUArchitectureGenerator/pregenerated/*.yaml")
+    file(GLOB YAML_FILES "${CMAKE_CURRENT_SOURCE_DIR}/pregenerated/*.yaml")
     set(YAML_ARGS "")
     foreach(YAML_FILE ${YAML_FILES})
         list(APPEND YAML_ARGS --yaml "${YAML_FILE}")
     endforeach()
 
     add_custom_command(
-        OUTPUT ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.yaml"
         COMMAND
-            ${GPUArchitectureGeneratorBin}
-            ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
-            ${ROCROLLER_ASSEMBLER_PATH}
+            $<TARGET_FILE:GPUArchitectureGenerator>
+            "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.yaml"
+            ${CMAKE_CXX_COMPILER}
             -Y ${YAML_ARGS}
         DEPENDS GPUArchitectureGenerator "${YAML_FILES}"
     )
-
 endif()
 
 add_custom_command(
-    OUTPUT ${ARCH_FILE_DIR}/GPUArchitecture_def.msgpack
+    DEPENDS GPUArchitectureGenerator "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.yaml"
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.msgpack"
     COMMAND
-        ${GPUArchitectureGeneratorBin}
-        ${ARCH_FILE_DIR}/GPUArchitecture_def.msgpack
-        ${ROCROLLER_ASSEMBLER_PATH}
-        --yaml ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
-    DEPENDS GPUArchitectureGenerator ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
+        $<TARGET_FILE:GPUArchitectureGenerator>
+        "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.msgpack"
+        ${CMAKE_CXX_COMPILER}
+        --yaml "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.yaml"
 )
 
-if(INTERNAL_MRISA_FILES)
-    set(delete_internal_command COMMAND ${CMAKE_COMMAND} -E remove
-                                ${INTERNAL_MRISA_FILES}
-    )
-endif()
-
 if(ROCROLLER_EMBED_ARCH_DEF)
-    # Not exposed to users of the library, so not necessary to use system package
-    rocroller_add_dependency(cmrc VERSION 2.0.1)
-
     cmrc_add_resource_library(
         GPUArchitecture_def_library
-        ALIAS rocRoller::GPUArchitecture_def
+        ALIAS rocroller::GPUArchitecture_def
+        TYPE OBJECT
         NAMESPACE rocRoller
-        WHENCE ${ARCH_FILE_DIR}
+        WHENCE "${CMAKE_CURRENT_BINARY_DIR}"
         PREFIX resources
-        ${ARCH_FILE_DIR}/GPUArchitecture_def.msgpack
+        "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.msgpack"
     )
-
     set_target_properties(
-        GPUArchitecture_def_library PROPERTIES POSITION_INDEPENDENT_CODE True
+        GPUArchitecture_def_library PROPERTIES POSITION_INDEPENDENT_CODE ON
     )
-
-    set(resource_library GPUArchitecture_def_library)
 endif()
 
 add_custom_target(
     GPUArchitecture_def ALL
-    ${delete_internal_command}
-    DEPENDS ${ARCH_FILE_DIR}/GPUArchitecture_def.yaml
-            ${ARCH_FILE_DIR}/GPUArchitecture_def.msgpack ${resource_library}
+    DEPENDS
+        GPUArchitecture_def_library
+        "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.yaml"
+        "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitecture_def.msgpack"
 )

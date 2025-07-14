@@ -271,9 +271,9 @@ int main(int argc, char* argv[])
         "      HP - hermitian planar\n"
         "\n"
         "Usage"};
-    // Override CLI11 help to print after later CLI11 options that are defined, and allow gtest's help
+    // Override CLI11 help to print it along gtest's help
     app.set_help_flag("");
-    CLI::Option* opt_help = app.add_flag("-h, --help", "Produces this help message");
+    const auto opt_help = app.add_flag("-h, --help", "Produces this help message");
     app.add_option("-v, --verbose", verbose, "Print out detailed information for the tests")
         ->default_val(0);
     app.add_option("--test_prob", test_prob, "Probability of running individual tests")
@@ -330,8 +330,8 @@ int main(int argc, char* argv[])
             test_prob = 0.02;
         });
     // Token string to fully specify fft params for the manual test.
-    std::string  test_token;
-    CLI::Option* opt_token
+    std::string test_token;
+    auto*       opt_token
         = app.add_option("--token", test_token, "Test token name for manual test")->default_val("");
     // Group together options that conflict with --token
     auto* non_token = app.add_option_group("Token Conflict", "Options excluded by --token");
@@ -393,10 +393,32 @@ int main(int argc, char* argv[])
                           "1) PRNG sequence (host)\n"
                           "2) linearly-spaced sequence (device)\n"
                           "3) linearly-spaced sequence (host)");
-    CLI::Option* opt_version = app.add_flag(
-        "--version", "Print queryable version information from the hipfft library's backend");
+    const auto* opt_version = app.add_flag(
+        "--version",
+        "Print queryable version information from the hipfft library's backend (and return)");
+    app.add_option("--R", ramgb, "RAM limit in GiB for tests")
+        ->default_val(host_memory::singleton().get_total_gbytes());
+    app.add_option("--V", vramgb, "VRAM limit in GiB for tests")->default_val(0);
+    app.add_option("--half_epsilon", half_epsilon)->default_val(9.77e-4);
+    app.add_option("--single_epsilon", single_epsilon)->default_val(3.75e-5);
+    app.add_option("--double_epsilon", double_epsilon)->default_val(1e-15);
+    app.add_option("--skip_runtime_fails",
+                   skip_runtime_fails,
+                   "Skip the test if there is a runtime failure")
+        ->default_val(true);
+    app.add_option("-w, --wise", use_fftw_wisdom, "Use FFTW wisdom");
+    // Filename for fftw and fftwf wisdom.
+    std::string fftw_wisdom_filename;
+    app.add_option("-W, --wisdomfile", fftw_wisdom_filename, "FFTW3 wisdom filename")
+        ->default_val("wisdom3.txt");
+    // Filename for precompiled kernels to be written to
+    std::string precompile_file;
+    app.add_option("--precompile",
+                   precompile_file,
+                   "Precompile kernels to a file for all test cases before running tests")
+        ->default_val("");
     // Try parsing initial args that will be used to configure tests
-    // Allow extras to pass on gtest and hipFFT arguments without error
+    // Allow extras to pass on gtest arguments without error
     app.allow_extras();
     try
     {
@@ -449,69 +471,51 @@ int main(int argc, char* argv[])
     // (makes the token reported by gtest less ambiguous)
     manual_params.validate();
 
+    // extract remaining arguments for subsequent gtest initialization
+    std::vector<std::string> remaining_args = app.remaining();
+    std::string              gtest_help_opt = "--help";
     // NB: If we initialize gtest first, then it removes all of its own command-line
     // arguments and sets argc and argv correctly;
-    ::testing::InitGoogleTest(&argc, argv); // gtest args are removed
-    // Filename for fftw and fftwf wisdom.
-    std::string fftw_wisdom_filename;
-
-    // Filename for precompiled kernels to be written to
-    std::string precompile_file;
-
-    app.add_option("--R", ramgb, "RAM limit in GiB for tests")
-        ->default_val(host_memory::singleton().get_total_gbytes());
-    app.add_option("--V", vramgb, "VRAM limit in GiB for tests")->default_val(0);
-    app.add_option("--half_epsilon", half_epsilon)->default_val(9.77e-4);
-    app.add_option("--single_epsilon", single_epsilon)->default_val(3.75e-5);
-    app.add_option("--double_epsilon", double_epsilon)->default_val(1e-15);
-    app.add_option("--skip_runtime_fails",
-                   skip_runtime_fails,
-                   "Skip the test if there is a runtime failure")
-        ->default_val(true);
-    app.add_option("-w, --wise", use_fftw_wisdom, "Use FFTW wisdom");
-    app.add_option("-W, --wisdomfile", fftw_wisdom_filename, "FFTW3 wisdom filename")
-        ->default_val("wisdom3.txt");
-    app.add_option("--precompile",
-                   precompile_file,
-                   "Precompile kernels to a file for all test cases before running tests")
-        ->default_val("");
-
-    // Parse rest of args and catch any errors here
-    try
+    std::vector<char*> gtest_argv;
+    gtest_argv.insert(gtest_argv.begin(), argv[0]);
+    for(std::string& s : remaining_args)
     {
-        app.parse(argc, argv);
+        gtest_argv.push_back(&s[0]);
     }
-    catch(const CLI::ParseError& e)
+    if(*opt_help)
     {
-        return app.exit(e);
+        // make sure gtest prints its help as well
+        gtest_argv.push_back(&gtest_help_opt[0]);
     }
+    gtest_argv.push_back(NULL);
+    decltype(argc) gtest_argc = gtest_argv.size() - 1;
+    ::testing::InitGoogleTest(&gtest_argc, gtest_argv.data()); // gtest-relevant args are removed
 
     if(*opt_help)
     {
         std::cout << app.help() << "\n";
         return EXIT_SUCCESS;
     }
+    // no help was used, gtest_argc is expected to be 1 at this point. If not, some of the
+    // used options were not recognized at all
+    if(gtest_argc > 1)
+    {
+        std::cout << "Unrecognised option(s) found:\n  ";
+        for(auto i = 1; i < gtest_argc; i++)
+            std::cout << gtest_argv[i] << " ";
+        std::cout << "\nRun with --help for more information.\n";
+        return EXIT_FAILURE;
+    }
+
     if(*opt_version || verbose > 0)
     {
         int hipfft_version;
         hipfftGetVersion(&hipfft_version);
         std::cout << "hipFFT version: " << hipfft_version << std::endl;
-
         if(*opt_version)
         {
             return EXIT_SUCCESS;
         }
-    }
-
-    // Ensure there are no leftover options used by neither gtest nor CLI11
-    std::vector<std::string> remaining_args = app.remaining();
-    if(!remaining_args.empty())
-    {
-        std::cout << "Unrecognised option(s) found:\n  ";
-        for(auto i : app.remaining())
-            std::cout << i << " ";
-        std::cout << "\nRun with --help for more information.\n";
-        return EXIT_FAILURE;
     }
 
     std::cout << "Using random_seed = " << random_seed << std::endl;
