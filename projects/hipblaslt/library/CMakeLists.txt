@@ -194,7 +194,7 @@ if(HIPBLASLT_USE_ROCROLLER)
       FetchContent_Declare(
         rocRoller
         GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
-        GIT_TAG 7267293b1e9065755567be2af387ca887785b77c
+        GIT_TAG a9cbf901489a27a530a699d1d6a6b765a9c02426
       )
       FetchContent_MakeAvailable(rocRoller)
       _restore_var(BUILD_TESTING)
