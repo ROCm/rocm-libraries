@@ -26,6 +26,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.md")
 
 include(FetchROCmCMake)
+include(hipSPARSELtSupportedArchitectures)
 include(CMakeDependentOption)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
@@ -66,9 +67,20 @@ option(HIPSPARSELT_ENABLE_MARKER "Enable rocTracer marker support." OFF)
 option(HIPSPARSELT_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
 option(HIPSPARSELT_ENABLE_VERBOSE "Output additional build information." OFF)
 
-set(HIPSPARSELT_TENSILELITE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../hipblaslt/tensilelite" CACHE PATH "Path to tensilelite directory.")
+set(HIPSPARSELT_HIPBLASLT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../hipblaslt/next-cmake" CACHE PATH "Path to hipblaslt directory.")
 set(HIPSPARSELT_COVERAGE_GTEST_FILTER "*quick*:*pre_checkin*:*ILP64*-*known_bug*" 
     CACHE STRING "GTest filter for coverage tests.")
+
+if(NOT HIPSPARSELT_ENABLE_CUDA)
+    set(GPU_TARGETS "" CACHE STRING "AMD GFX targets to cross-compile")
+
+    if(NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all")
+        hipsparselt_get_base_architectures(GPU_TARGETS)
+    else()
+        hipsparselt_validate_gpu_targets("${GPU_TARGETS}")
+    endif()
+    message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
+endif()
 
 if(HIPSPARSELT_ENABLE_FORTRAN AND HIPSPARSELT_ENABLE_ASAN)
     message(FATAL_ERROR "Cannot enable fortran clients and address sanitizers.")
@@ -91,11 +103,12 @@ endif()
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 find_package(hip REQUIRED)
 
-if(HIPSPARSELT_ENABLE_HIP)
-    # TODO: This should be located through an out of
-    # source add_subdirectory in a superbuild context
-    find_package(hipsparse REQUIRED)
-endif()
+# if(HIPSPARSELT_ENABLE_HIP)
+#     if(NOT ROCM_SUPERBUILD)
+#         # TODO: This dependency shouldn't be required, why is it?
+#         # find_package(hipsparse REQUIRED)
+#     endif()
+# endif()
 
 if(HIPSPARSELT_ENABLE_ROCM_SMI)
     find_package(rocm_smi REQUIRED)
@@ -119,53 +132,37 @@ if(HIPSPARSELT_ENABLE_CUDA)
     message(STATUS "Found cuSPARSELt: ${CUSPARSELT_LIBRARY}")
 endif()
 
-# GPU Architecture Setup
-# ============================================================================
-if(NOT HIPSPARSELT_ENABLE_CUDA)
-    # Set default GPU targets for ROCm
-    if(HIPSPARSELT_ENABLE_ASAN)
-        rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-            TARGETS "gfx942:xnack+;gfx950:xnack+;"
-        )
-    else()
-        rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-            TARGETS "gfx942;gfx950;"
-        )
-    endif()
-
-    if(AMDGPU_TARGETS)
-        set(TMPAMDGPU_TARGETS "${AMDGPU_TARGETS}")
-        if(TMPAMDGPU_TARGETS STREQUAL "all")
-            set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target" FORCE)
-        else()
-            set(AMDGPU_TARGETS "${TMPAMDGPU_TARGETS}" CACHE STRING "AMD GPU targets to compile for" FORCE)
-        endif()
-    else()
-        set(AMDGPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "List of specific machine types for library to target")
-    endif()
-
-    if(HIPSPARSELT_ENABLE_VERBOSE)
-        message(STATUS "AMDGPU_TARGETS: ${AMDGPU_TARGETS}")
-    endif()
-endif()
-
 # Add Subdirectories
 # ============================================================================
-if(HIPSPARSELT_ENABLE_TENSILELITE)
-    set(TENSILELITE_PATH "${HIPSPARSELT_TENSILELITE_PATH}")
-    if(NOT EXISTS "${TENSILELITE_PATH}")
-        message(FATAL_ERROR "TensileLite not found at ${TENSILELITE_PATH}. Please ensure hipblaslt/tensilelite is available.")
+if(HIPSPARSELT_ENABLE_HIP)
+    set(HIPBLASLT_PATH "${HIPSPARSELT_HIPBLASLT_PATH}")
+    if(NOT EXISTS "${HIPBLASLT_PATH}")
+        message(FATAL_ERROR "hipBLASLt not found at ${HIPBLASLT_PATH}. Please ensure hipblaslt is available.")
     endif()
-    
-    # Exposes targets for tensile-host and library
-    add_subdirectory("${TENSILELITE_PATH}" Tensilelite EXCLUDE_FROM_ALL)
+
+    block(SCOPE_FOR VARIABLES)
+        set(HIPBLASLT_ENABLE_HOST OFF CACHE BOOL "" FORCE)
+        set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
+        set(HIPBLASLT_ENABLE_DEVICE ON CACHE BOOL "" FORCE)
+        set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
+        set(HIPBLASLT_LIBLOGIC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full" CACHE STRING "" FORCE)
+
+        if(WIN32)
+            set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}hipsparselt/bin" CACHE PATH "path to tensile library" FORCE)
+        else()
+            set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipsparselt" CACHE PATH "path to tensile library" FORCE)
+        endif()
+        
+        # Exposes targets for tensile-host and library
+        add_subdirectory("${HIPBLASLT_PATH}" hipblaslt-BUILD)
+    endblock()
 endif()
 
 add_subdirectory(library)
 
-if(HIPSPARSELT_ENABLE_CLIENT)
-    add_subdirectory(clients)
-endif()
+# if(HIPSPARSELT_ENABLE_CLIENT)
+#     add_subdirectory(clients)
+# endif()
 
 # ============================================================================
 # Package Configuration

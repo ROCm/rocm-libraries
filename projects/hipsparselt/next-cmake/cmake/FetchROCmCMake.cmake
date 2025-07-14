@@ -28,4 +28,4 @@ include(ROCMClients)
 include(ROCMCreatePackage)
 include(ROCMInstallTargets)
 include(ROCMPackageConfigHelpers)
-
+include(ROCMCheckTargetIds)

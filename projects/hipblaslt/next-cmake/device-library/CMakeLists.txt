@@ -26,9 +26,11 @@ project(device-library VERSION 0.0.1 LANGUAGES CXX ASM)
 
 set(TENSILELITE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite)
 
-list(JOIN GPU_TARGETS "$<SEMICOLON>" TENSILE_GPU_TARGETS_SEMI_ESCAPED)
+# Underscores are used to delimit architectures when tensile libraries are built via CMake
+# to avoid complications related to how semicolons are interpreted as list separators
+list(JOIN GPU_TARGETS "_" TENSILE_GPU_TARGETS_UNDERSCORE_DELIMITED)
 
-set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--architecture=${TENSILE_GPU_TARGETS_SEMI_ESCAPED}")
+set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--architecture=${TENSILE_GPU_TARGETS_UNDERSCORE_DELIMITED}")
 set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--cxx-compiler=${CMAKE_CXX_COMPILER}")
 if(HIPBLASLT_ENABLE_ASAN)
     set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--address-sanitizer")
