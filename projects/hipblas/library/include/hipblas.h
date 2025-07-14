@@ -20886,7 +20886,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmmStridedBatched_64(hipblasHandle_t    
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
     memory found in the handle to increase overall performance (where k is m when
     HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT). For more information on
-    pre-allocated memory in the handle please see the Device Memory Allocation
+    pre-allocated memory in the handle, see the Device Memory Allocation
     in rocBLAS section of the rocBLAS API Reference.
 
     - Supported precisions in rocBLAS : s,d,c,z
@@ -21078,7 +21078,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsm_64(hipblasHandle_t         handle,
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
     memory found in the handle to increase overall performance (where k is m when
     HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT). For more information on
-    pre-allocated memory in the handle please see the Device Memory Allocation
+    pre-allocated memory in the handle, see the Device Memory Allocation
     in rocBLAS section of the rocBLAS API Reference.
 
     - Supported precisions in rocBLAS : s,d,c,z
@@ -21268,7 +21268,7 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsmBatched_64(hipblasHandle_t           
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
     memory found in the handle to increase overall performance (where k is m when
     HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT). For more information on
-    pre-allocated memory in the handle please see the Device Memory Allocation
+    pre-allocated memory in the handle, see the Device Memory Allocation
     in rocBLAS section of the rocBLAS API Reference.
 
     - Supported precisions in rocBLAS : s,d,c,z
