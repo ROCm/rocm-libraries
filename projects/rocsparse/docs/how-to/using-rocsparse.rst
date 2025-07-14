@@ -689,6 +689,81 @@ where
     \text{ell_col_ind}[9] & = \{0, 1, 0, 1, 2, 3, 3, -1, 4\}
   \end{array}
 
+Blocked ELL storage format
+--------------------------
+
+The Blocked Ellpack (ELL) storage format represents an :math:`(mb \cdot \text{block_dim}) \times (nb \cdot \text{block_dim})` matrix by:
+
+=========== ================================================================================
+mb          Number of block rows (integer).
+nb          Number of block columns (integer).
+ell_width   Maximum number of non-zero block elements per row (integer).
+ell_val     Array of ``mb * ell_width * block_dim * block_dim`` elements containing the data (floating point).
+ell_col_ind Array of ``mb * ell_width`` elements containing the column indices (integer).
+block_dim   Dimension of each block (integer).
+=========== ================================================================================
+
+The Blocked ELL is similar to the ELL format except that column entries now indicate the location of two dimensional blocks of size
+``block_dim * block_dim`` instead of single matrix entries. The block values can be stored in either row or column ordering.
+Rows with less than ``ell_width`` non-zero blocks are padded with zero blocks (``ell_val``) and :math:`-1` (``ell_col_ind``).
+Consider the following :math:`6 \times 6` matrix and the corresponding Blocked ELL structures,
+with :math:`mb = 3, nb = 3, block_dim = 2` and :math:`\text{ell_width} = 2` using zero-based indexing and row ordering for the blocks:
+
+.. math::
+
+  A = \begin{pmatrix}
+        1.0 & 2.0 & 0.0 & 0.0 & 3.0 & 1.0 \\
+        2.0 & 4.0 & 0.0 & 0.0 & 4.0 & 3.0 \\
+        0.0 & 0.0 & 6.0 & 4.0 & 7.0 & 8.0 \\
+        0.0 & 0.0 & 4.0 & 5.0 & 3.0 & 2.0 \\
+        1.0 & 2.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+        2.0 & 1.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+      \end{pmatrix}
+
+with the blocks :math:`A_{ij}`
+
+.. math::
+
+  A_{00} = \begin{pmatrix}
+             1.0 & 2.0 \\
+             2.0 & 4.0 \\
+           \end{pmatrix},
+  A_{02} = \begin{pmatrix}
+             3.0 & 1.0 \\
+             4.0 & 3.0 \\
+           \end{pmatrix},
+  A_{11} = \begin{pmatrix}
+             6.0 & 4.0 \\
+             4.0 & 5.0 \\
+           \end{pmatrix},
+  A_{12} = \begin{pmatrix}
+             7.0 & 8.0 \\
+             3.0 & 2.0 \\
+           \end{pmatrix},
+  A_{21} = \begin{pmatrix}
+             1.0 & 2.0 \\
+             2.0 & 1.0 \\
+           \end{pmatrix}
+
+such that
+
+.. math::
+
+  A = \begin{pmatrix}
+        A_{00} & 0      & A_{02} \\
+        0      & A_{11} & A_{12} \\
+        A_{21} & 0      & 0      \\
+      \end{pmatrix}
+
+where
+
+.. math::
+
+  \begin{array}{ll}
+    \text{ell_val}[20] & = \{1.0, 2.0, 2.0, 4.0, 6.0, 4.0, 4.0, 5.0, 1.0, 2.0, 2.0, 1.0, 3.0, 1.0, 4.0, 3.0, 7.0, 8.0, 3.0, 2.0, 0.0, 0.0, 0.0, 0.0\} \\
+    \text{ell_col_ind}[6] & = \{0, 1, 0, 2, 2, -1\}
+  \end{array}
+
 .. _HYB storage format:
 
 HYB storage format

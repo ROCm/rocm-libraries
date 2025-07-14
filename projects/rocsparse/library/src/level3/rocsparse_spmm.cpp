@@ -537,7 +537,7 @@ namespace rocsparse
                 //
             case rocsparse_spmm_stage_buffer_size:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::bellmm_template_buffer_size<T, I>(
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::bellmm_template_buffer_size(
                     handle,
                     trans_A,
                     trans_B,
@@ -553,12 +553,12 @@ namespace rocsparse
                     (const T*)alpha,
                     mat_A->descr,
                     (const I*)mat_A->const_col_data,
-                    (const T*)mat_A->const_val_data,
-                    (const T*)mat_B->const_values,
+                    (const A*)mat_A->const_val_data,
+                    (const B*)mat_B->const_values,
                     mat_B->ld,
                     mat_B->order,
                     (const T*)beta,
-                    (T*)mat_C->values,
+                    (C*)mat_C->values,
                     mat_C->ld,
                     mat_C->order,
                     buffer_size)));
@@ -570,7 +570,7 @@ namespace rocsparse
                 //
             case rocsparse_spmm_stage_preprocess:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::bellmm_template_preprocess<T, I>(
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::bellmm_template_preprocess(
                     handle,
                     trans_A,
                     trans_B,
@@ -586,12 +586,12 @@ namespace rocsparse
                     (const T*)alpha,
                     mat_A->descr,
                     (const I*)mat_A->const_col_data,
-                    (const T*)mat_A->const_val_data,
-                    (const T*)mat_B->const_values,
+                    (const A*)mat_A->const_val_data,
+                    (const B*)mat_B->const_values,
                     mat_B->ld,
                     mat_B->order,
                     (const T*)beta,
-                    (T*)mat_C->values,
+                    (C*)mat_C->values,
                     mat_C->ld,
                     mat_C->order,
                     temp_buffer)));
@@ -603,7 +603,7 @@ namespace rocsparse
                 //
             case rocsparse_spmm_stage_compute:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::bellmm_template<T, I>(
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::bellmm_template(
                     handle,
                     trans_A,
                     trans_B,
@@ -621,14 +621,14 @@ namespace rocsparse
                     (const T*)alpha,
                     mat_A->descr,
                     (const I*)mat_A->const_col_data,
-                    (const T*)mat_A->const_val_data,
-                    (const T*)mat_B->const_values,
+                    (const A*)mat_A->const_val_data,
+                    (const B*)mat_B->const_values,
                     mat_B->ld,
                     (I)mat_B->batch_count,
                     mat_B->batch_stride,
                     mat_B->order,
                     (const T*)beta,
-                    (T*)mat_C->values,
+                    (C*)mat_C->values,
                     mat_C->ld,
                     (I)mat_C->batch_count,
                     mat_C->batch_stride,
