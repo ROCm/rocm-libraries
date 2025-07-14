@@ -68,7 +68,7 @@ if(ROCROLLER_ENABLE_ASAN)
     )
 endif()
 
-if(ROCROLLER_ENABLE_ARCH_GEN_TEST)
+if(ROCROLLER_ENABLE_GEMM_CLIENT_TESTS)
     if(NOT ROCROLLER_ENABLE_LLD)
         # There are a few tests that require ReadELF functionality
         # which is disabled by default and on a deprecation path.
@@ -92,14 +92,15 @@ if(ROCROLLER_ENABLE_ARCH_GEN_TEST)
         PROPERTIES
             SKIP_REGULAR_EXPRESSION ${rocroller_skip_regex}
     )
-    add_executable(arch-gen-tests)
-    if(ROCROLLER_ENABLE_ASAN)
-        rocroller_target_configure_sanitizers(arch-gen-tests PRIVATE)
-        set_target_properties(arch-gen-tests
-            PROPERTIES 
-                CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
-        )
-    endif()
+endif()
+
+add_executable(arch-gen-tests)
+if(ROCROLLER_ENABLE_ASAN)
+    rocroller_target_configure_sanitizers(arch-gen-tests PRIVATE)
+    set_target_properties(arch-gen-tests
+        PROPERTIES
+            CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
+    )
 endif()
 
 find_package(BLAS REQUIRED)
@@ -142,15 +143,13 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
             SKIP_REGULAR_EXPRESSION "test/unit/ErrorTest.cpp:"
             ENVIRONMENT "${asan_opts}"
     )
-    if(ROCROLLER_ENABLE_ARCH_GEN_TEST)
-        gtest_discover_tests(
-            arch-gen-tests
-            XML_OUTPUT_DIR ${TEST_REPORT_DIR}
-            DISCOVERY_MODE PRE_TEST
-            PROPERTIES
-                ENVIRONMENT "${asan_opts}"
-        )
-    endif()
+    gtest_discover_tests(
+        arch-gen-tests
+        XML_OUTPUT_DIR ${TEST_REPORT_DIR}
+        DISCOVERY_MODE PRE_TEST
+        PROPERTIES
+            ENVIRONMENT "${asan_opts}"
+    )
 
     if(ROCROLLER_ENABLE_CATCH)
         if(ROCROLLER_ENABLE_FETCH)

@@ -30,7 +30,7 @@ cmake_dependent_option(ROCROLLER_ENABLE_LLVM "Enable llvm yaml backend." ON "NOT
 option(ROCROLLER_BUILD_TESTING "Build rocRoller testing." ON)
 option(ROCROLLER_ENABLE_DOCS "Build rocRoller documentation." OFF)
 option(ROCROLLER_ENABLE_CATCH "Build rocRoller catch unit tests" ON)
-option(ROCROLLER_ENABLE_ARCH_GEN_TEST "Build rocRoller architecture generator test" ON)
+option(ROCROLLER_ENABLE_GEMM_CLIENT_TESTS "Use pytest test discovery to add gemm client tests (requires pytest-cmake)" ON)
 option(ROCROLLER_ENABLE_TEST_DISCOVERY "Use gtest and catch2 test discovery functions." ON)
 option(ROCROLLER_ENABLE_COVERAGE "Build code coverage." OFF)
 cmake_dependent_option(ROCROLLER_ENABLE_SLOW_TESTS "Disable slow running tests." ON "NOT ROCROLLER_ENABLE_COVERAGE" OFF)
