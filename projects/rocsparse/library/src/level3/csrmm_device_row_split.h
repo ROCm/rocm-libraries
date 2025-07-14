@@ -328,11 +328,12 @@ namespace rocsparse
                                    - idx_base)
                                 : 0;
 
-                const T v = (k < row_end) ? rocsparse::conj_val(
-                                rocsparse::nontemporal_load(
-                                    csr_val + k + columns_values_batch_stride_A * batch),
-                                conj_A)
-                                          : static_cast<T>(0);
+                const T v = (k < row_end)
+                                ? rocsparse::conj_val(
+                                      rocsparse::nontemporal_load(
+                                          csr_val + k + columns_values_batch_stride_A * batch),
+                                      conj_A)
+                                : static_cast<A>(0);
 
                 for(uint32_t i = 0; i < SUBWFSIZE; ++i)
                 {
@@ -671,11 +672,12 @@ namespace rocsparse
                                - idx_base)
                             : 0;
 
-            const T v = (k < row_end) ? rocsparse::conj_val(
-                            rocsparse::nontemporal_load(csr_val + k
-                                                        + columns_values_batch_stride_A * batch),
-                            conj_A)
-                                      : static_cast<T>(0);
+            const T v = (k < row_end)
+                            ? rocsparse::conj_val(
+                                  rocsparse::nontemporal_load(
+                                      csr_val + k + columns_values_batch_stride_A * batch),
+                                  conj_A)
+                            : static_cast<A>(0);
 
             for(uint32_t i = 0; i < SUBWFSIZE; ++i)
             {
@@ -869,7 +871,7 @@ namespace rocsparse
         __shared__ T shared_B[BLOCKSIZE / WF_SIZE][WF_SIZE];
         shared_B[wid][lid]
             = (cid < N) ? rocsparse::conj_val(dense_B[row + colB + batch_stride_B * batch], conj_B)
-                        : static_cast<T>(0);
+                        : static_cast<B>(0);
 
         __threadfence_block();
         const I row_start = csr_row_ptr[row + offsets_batch_stride_A * batch] - idx_base;
@@ -950,7 +952,7 @@ namespace rocsparse
         shared_B[wid][lid]
             = (cid < N)
                   ? rocsparse::conj_val(dense_B[ldb * row + cid + batch_stride_B * batch], conj_B)
-                  : static_cast<T>(0);
+                  : static_cast<B>(0);
 
         __threadfence_block();
         const I row_start = csr_row_ptr[row + offsets_batch_stride_A * batch] - idx_base;
