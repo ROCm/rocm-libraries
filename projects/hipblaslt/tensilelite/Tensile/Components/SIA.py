@@ -33,7 +33,7 @@ from ..Component import SIA
 
 from copy import deepcopy
 from typing import Tuple
-
+import math
 PRECISION = 100
 class SIA3(SIA):
     kernel = {"ScheduleIterAlg": 3}
@@ -258,6 +258,12 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
     # final index definition
     writer.states.numMfmaForNextLoopLR = min(writer.states.numMfmaForNextLoopLR,numMfmaPerIter-1)
     writer.states.syncPlrMfmaIndex = numMfmaPerIter*(kernel["LoopIters"]-writer.states.numItersPLR+1) - writer.states.numMfmaForNextLoopLR - 1 if writer.states.numItersPLR else 0
+    if kernel["D_U_iseqMI_K"]:
+        mfmaiter0 =  math.ceil(kernel["MIWaveTile"][0]/2) * math.ceil(kernel["MIWaveTile"][1]/2)
+        mfmaiter1 = math.floor(kernel["MIWaveTile"][0]/2) * math.ceil(kernel["MIWaveTile"][1]/2)
+        mfmaiter2 = math.ceil(kernel["MIWaveTile"][0]/2) * math.floor(kernel["MIWaveTile"][1]/2)
+        writer.states.syncPlrMfmaIndex = mfmaiter0 + mfmaiter1 + mfmaiter2
+
     numMfmaBetweenLWandBarrier = 2 if kernel["MatrixInstM"] == 32 else 3
     writer.states.lwEndMfmaIndex = max(writer.states.syncPlrMfmaIndex - numMfmaBetweenLWandBarrier,0) if writer.states.numItersPLR else numMfmaPerIter*kernel["LoopIters"] - 1
     if kernel["DirectToLds"] and kernel["PrefetchGlobalRead"] == 2:

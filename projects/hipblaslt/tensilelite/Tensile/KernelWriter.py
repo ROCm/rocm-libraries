@@ -1286,6 +1286,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 skipLocalWriteWaitcnt += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
               if not localReadItemsThisLoop:
                 self.states.perIterLocalWriteCanSkip[iteration] += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
+            if kernel["D_U_iseqMI_K"] and (writeItems and i == numMfmaPerIter - 1):
+              writeItem = writeItems.pop(0)
+              iterCode.add(writeItem)
         if mfmaIndex == self.states.lwEndMfmaIndex:
           while writeItems:
             localWriteCodeCounts.pop(0)
@@ -2099,7 +2102,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         mfmaiter0 =  math.ceil(kernel["MIWaveTile"][0]/2) * math.ceil(kernel["MIWaveTile"][1]/2)
         mfmaiter1 = math.floor(kernel["MIWaveTile"][0]/2) * math.ceil(kernel["MIWaveTile"][1]/2)
         mfmaiter2 = math.ceil(kernel["MIWaveTile"][0]/2) * math.floor(kernel["MIWaveTile"][1]/2)
-        self.states.lwStartMfmaIndex = math.floor((kernel["MIWaveTile"][1] + kernel["MIWaveTile"][0]/2)) -1
+        self.states.lwStartMfmaIndex = math.floor((kernel["MIWaveTile"][1] + kernel["MIWaveTile"][0])/2) -1
         self.states.syncPlrMfmaIndex = mfmaiter0 + mfmaiter1 + mfmaiter2
 
       # which loop iteration to reset the LRO,
@@ -2522,7 +2525,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         mfmaiter0 =  math.ceil(kernel["MIWaveTile"][0]/2) * math.ceil(kernel["MIWaveTile"][1]/2)
         mfmaiter1 = math.floor(kernel["MIWaveTile"][0]/2) * math.ceil(kernel["MIWaveTile"][1]/2)
         mfmaiter2 = math.ceil(kernel["MIWaveTile"][0]/2) * math.floor(kernel["MIWaveTile"][1]/2)
-        self.states.lwStartMfmaIndex = math.floor((kernel["MIWaveTile"][1] + kernel["MIWaveTile"][0]/2)) -1
+        self.states.lwStartMfmaIndex = math.floor((kernel["MIWaveTile"][1] + kernel["MIWaveTile"][0])/2) -1
         self.states.syncPlrMfmaIndex = mfmaiter0 + mfmaiter1 + mfmaiter2
         #self.states.lwEndMfmaIndex = min(self.states.syncPlrMfmaIndex-1 ,self.states.lwStartMfmaIndex + kernel["MIWaveTile"][1] + kernel["MIWaveTile"][0])
         
