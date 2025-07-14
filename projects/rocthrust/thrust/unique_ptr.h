@@ -412,18 +412,107 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(const unique_ptr<
 
 template <class T1, class D1, class T2, class D2>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(const unique_ptr<T1, D1>& x,
-                                                                 const unique_ptr<T2, D2>& y)
+                                                                        const unique_ptr<T2, D2>& y)
 {
     return !(y < x);
 }
 
 template <class T1, class D1, class T2, class D2>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(const unique_ptr<T1, D1>& x,
-                                                                 const unique_ptr<T2, D2>& y)
+                                                                        const unique_ptr<T2, D2>& y)
 {
     return !(x < y);
 }
 
+template <class T, class D>
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator==(const unique_ptr<T, D>& x,
+                                                                        std::nullptr_t) noexcept
+{
+    return !x;
+}
+
+#if THRUST_STD_VER <= 17
+template <class T, class D>
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
+operator==(std::nullptr_t, const unique_ptr<T, D>& y) noexcept
+{
+    return !y;
+}
+
+template <class T, class D>
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator!=(const unique_ptr<T, D>& x,
+                                                                        std::nullptr_t) noexcept
+{
+    return static_cast<bool>(x);
+}
+
+template <class T, class D>
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
+operator!=(std::nullptr_t, const unique_ptr<T, D>& y) noexcept
+{
+    return static_cast<bool>(y);
+}
+#endif
+
+template <class T, class D>
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(const unique_ptr<T, D>& x,
+                                                                       std::nullptr_t)
+{
+    return std::less<typename unique_ptr<T, D>::pointer>()(x.get(), nullptr); // x.get() < nullptr;
+}
+
+template <class T, class D>
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(std::nullptr_t,
+                                                                       const unique_ptr<T, D>& y)
+{
+    return std::less<typename unique_ptr<T, D>::pointer>()(nullptr, y.get()); // nullptr < y.get();
+}
+
+template <class T, class D>
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(const unique_ptr<T, D>& x,
+                                                                       std::nullptr_t)
+{
+    return nullptr < x;
+}
+
+template <class T, class D>
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(std::nullptr_t,
+                                                                       const unique_ptr<T, D>& y)
+{
+    return y < nullptr;
+}
+
+template <class T, class D>
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(const unique_ptr<T, D>& x,
+                                                                        std::nullptr_t)
+{
+    return !(nullptr < x);
+}
+
+template <class T, class D>
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(std::nullptr_t,
+                                                                        const unique_ptr<T, D>& y)
+{
+    return !(y < nullptr);
+}
+
+template <class T, class D>
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(const unique_ptr<T, D>& x,
+                                                                        std::nullptr_t)
+{
+    return !(x < nullptr);
+}
+
+template <class T, class D>
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(std::nullptr_t,
+                                                                        const unique_ptr<T, D>& y)
+{
+    return !(y < nullptr);
+}
+
+//==============================================================================
+// Make unique
+//==============================================================================
 template <class T,
           class... Args,
           class = typename thrust::detail::enable_if<
