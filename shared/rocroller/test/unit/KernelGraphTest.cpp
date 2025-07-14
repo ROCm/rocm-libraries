@@ -3082,4 +3082,129 @@ namespace KernelGraphTest
         auto tag       = std::get<Expression::DataFlowTag>(*lhs).tag;
         EXPECT_EQ(tag, vgprB);
     }
+
+    TEST_F(KernelGraphTest, RemoveSetCoordinate)
+    {
+        auto kgraph = rocRoller::KernelGraph::KernelGraph();
+
+        int kernel = kgraph.control.addElement(Kernel());
+
+        int nop1 = kgraph.control.addElement(NOP());
+        int nop2 = kgraph.control.addElement(NOP());
+        int nop3 = kgraph.control.addElement(NOP());
+        int nop4 = kgraph.control.addElement(NOP());
+        int nop5 = kgraph.control.addElement(NOP());
+        int nop6 = kgraph.control.addElement(NOP());
+
+        auto one = Expression::literal(1u);
+        int  sc1 = kgraph.control.addElement(SetCoordinate(one));
+        int  sc2 = kgraph.control.addElement(SetCoordinate(one));
+        int  sc3 = kgraph.control.addElement(SetCoordinate(one));
+        int  sc4 = kgraph.control.addElement(SetCoordinate(one));
+        int  sc5 = kgraph.control.addElement(SetCoordinate(one));
+        int  sc6 = kgraph.control.addElement(SetCoordinate(one));
+
+        int dim = kgraph.coordinates.addElement(Adhoc());
+        kgraph.mapper.connect<Adhoc>(sc1, dim);
+        kgraph.mapper.connect<Adhoc>(sc2, dim);
+        kgraph.mapper.connect<Adhoc>(sc3, dim);
+        kgraph.mapper.connect<Adhoc>(sc4, dim);
+        kgraph.mapper.connect<Adhoc>(sc5, dim);
+        kgraph.mapper.connect<Adhoc>(sc6, dim);
+
+        //  Original:
+        //
+        //          Kernel
+        //            |
+        //            |[body]
+        //            v
+        //           nop1
+        //            |
+        //            |[seq]
+        //            v
+        //           nop2 --------------
+        //            |                |
+        //            |[body]          |[seq]
+        //            v                v
+        //           sc1              sc2  -------------
+        //            |                |               |
+        //            |[seq]           |[body]         |[body]
+        //            v                v               v
+        //           sc3              nop3            sc4 ------------------
+        //            |------------                    |                   |
+        //            |           |                    |[seq]              |[seq]
+        //            |[seq]      |[seq]               v                   v
+        //            v           v                   nop4                nop5
+        //           sc5         sc6
+        //                        |
+        //                        |[body]
+        //                        v
+        //                       nop6
+        //
+
+        kgraph.control.addElement(Body(), {kernel}, {nop1});
+        kgraph.control.addElement(Sequence(), {nop1}, {nop2});
+        kgraph.control.addElement(Body(), {nop2}, {sc1});
+        kgraph.control.addElement(Sequence(), {sc1}, {sc3});
+        kgraph.control.addElement(Sequence(), {sc3}, {sc5});
+        kgraph.control.addElement(Sequence(), {sc3}, {sc6});
+        kgraph.control.addElement(Body(), {sc6}, {nop6});
+
+        kgraph.control.addElement(Sequence(), {nop2}, {sc2});
+        kgraph.control.addElement(Body(), {sc2}, {nop3});
+        kgraph.control.addElement(Body(), {sc2}, {sc4});
+        kgraph.control.addElement(Sequence(), {sc4}, {nop4});
+        kgraph.control.addElement(Sequence(), {sc4}, {nop5});
+
+        auto removeSetCoordinate = std::make_shared<RemoveSetCoordinate>(m_context);
+        auto kg2                 = kgraph.transform(removeSetCoordinate);
+
+        //  After:
+        //
+        //          Kernel
+        //            |
+        //            |[body]
+        //            v
+        //           nop1
+        //            |
+        //            |[seq]
+        //            v
+        //           nop2 -------------------------------------
+        //            |                |           |          |
+        //            |[body]          |[seq]      |[seq]     |[seq]
+        //            v                v           v          v
+        //           nop6              nop3        nop4       nop5
+        //
+
+        std::string expected = R".(
+               digraph {
+               "1"[label="Kernel(1)"];
+               "2"[label="NOP(2)"];
+               "3"[label="NOP(3)"];
+               "4"[label="NOP(4)"];
+               "5"[label="NOP(5)"];
+               "6"[label="NOP(6)"];
+               "7"[label="NOP(7)"];
+               "14"[label="Body(14)",shape=box];
+               "15"[label="Sequence(15)",shape=box];
+               "28"[label="Sequence(28)",shape=box];
+               "29"[label="Sequence(29)",shape=box];
+               "30"[label="Sequence(30)",shape=box];
+               "33"[label="Body(33)",shape=box];
+               "1" -> "14"
+               "2" -> "15"
+               "3" -> "28"
+               "3" -> "29"
+               "3" -> "30"
+               "3" -> "33"
+               "14" -> "2"
+               "15" -> "3"
+               "28" -> "4"
+               "29" -> "5"
+               "30" -> "6"
+               "33" -> "7"
+        }).";
+
+        EXPECT_EQ(NormalizedSource(expected), NormalizedSource(kg2.control.toDOT()));
+    }
 }
