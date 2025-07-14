@@ -539,9 +539,9 @@ int LayerNormDriver<T>::RunBackwardGPU()
                 inner_size *= dims[i];
             }
         }
-        size_t size = (3 * outer_size * inner_size + // dy, input, dx
+        size_t size = (5 * outer_size * inner_size + // dy (x2), input (x2), dx
                        3 * inner_size +              // weight, dw, db
-                       2 * outer_size                // mean, rstd
+                       4 * outer_size                // mean (x2), rstd (x2)
                        ) *
                       miopen::get_data_size(data_type);
         std::cout << "Data size: " << size << std::endl;
