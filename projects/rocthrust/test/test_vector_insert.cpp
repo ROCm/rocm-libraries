@@ -22,7 +22,7 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <utility>
 #endif
 
@@ -146,11 +146,7 @@ TYPED_TEST(VectorInsertPrimitiveTests, TestVectorRangeInsert)
       size_t end   = size > 0 ? (size_t) h_src[size + 1] % size : 0;
       if (end < begin)
       {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        using ::cuda::std::swap;
-#else
-        using ::std::swap;
-#endif
+        using _THRUST_STD::swap;
         swap(begin, end);
       }
 

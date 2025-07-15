@@ -25,39 +25,25 @@
 
 #include <unittest/unittest.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/iterator>
-#  include <cuda/std/type_traits>
-#else
-#  include <iterator>
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(iterator)
+#include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_DIAG_PUSH
 THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
-// ensure that we properly support thrust::counting_iterator from cuda::std
+// ensure that we properly support thrust::counting_iterator from _THRUST_STD
 void test_iterator_traits()
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using It = cuda::std::iterator_traits<thrust::counting_iterator<int>>;
-#else
-  using It = ::std::iterator_traits<thrust::counting_iterator<int>>;
-#endif
-  using category = thrust::detail::iterator_category_with_system_and_traversal<std::random_access_iterator_tag,
+  using It       = _THRUST_STD::iterator_traits<thrust::counting_iterator<int>>;
+  using category = thrust::detail::iterator_category_with_system_and_traversal<::std::random_access_iterator_tag,
                                                                                thrust::any_system_tag,
                                                                                thrust::random_access_traversal_tag>;
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using cuda::std::is_same;
-#else
-  using ::std::is_same;
-#endif
-  static_assert(is_same<It::difference_type, ptrdiff_t>::value, "");
-  static_assert(is_same<It::value_type, int>::value, "");
-  static_assert(is_same<It::pointer, void>::value, "");
-  static_assert(is_same<It::reference, signed int>::value, "");
-  static_assert(is_same<It::iterator_category, category>::value, "");
+  static_assert(_THRUST_STD::is_same<It::difference_type, ptrdiff_t>::value, "");
+  static_assert(_THRUST_STD::is_same<It::value_type, int>::value, "");
+  static_assert(_THRUST_STD::is_same<It::pointer, void>::value, "");
+  static_assert(_THRUST_STD::is_same<It::reference, signed int>::value, "");
+  static_assert(_THRUST_STD::is_same<It::iterator_category, category>::value, "");
 
   static_assert(::thrust::detail::is_cpp17_random_access_iterator<thrust::counting_iterator<int>>::value, "");
 }
@@ -87,13 +73,8 @@ void TestCountingIteratorCopyConstructor()
   ASSERT_EQUAL(*iter0, *d_iter);
 }
 DECLARE_UNITTEST(TestCountingIteratorCopyConstructor);
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-static_assert(cuda::std::is_trivially_copy_constructible<thrust::counting_iterator<int>>::value, "");
-static_assert(cuda::std::is_trivially_copyable<thrust::counting_iterator<int>>::value, "");
-#else
-static_assert(::std::is_trivially_copy_constructible<thrust::counting_iterator<int>>::value, "");
-static_assert(::std::is_trivially_copyable<thrust::counting_iterator<int>>::value, "");
-#endif
+static_assert(_THRUST_STD::is_trivially_copy_constructible<thrust::counting_iterator<int>>::value, "");
+static_assert(_THRUST_STD::is_trivially_copyable<thrust::counting_iterator<int>>::value, "");
 
 void TestCountingIteratorIncrement()
 {

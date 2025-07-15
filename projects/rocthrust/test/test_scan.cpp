@@ -29,11 +29,7 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/array>
-#else
-#  include <array>
-#endif
+#include _THRUST_STD_INCLUDE(array)
 
 TESTS_DEFINE(ScanTests, FullTestsParams);
 
@@ -574,7 +570,7 @@ TEST(ScanTests, TestScanWithLargeTypes)
 
   _TestScanWithLargeTypes<int, 1>();
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_HIP && !defined(__QNX__)
+#if !defined(__QNX__)
   _TestScanWithLargeTypes<int, 8>();
   _TestScanWithLargeTypes<int, 64>();
 #else
@@ -852,6 +848,8 @@ struct Int
 
 TEST(ScanTests, TestInclusiveScanWithUserDefinedType)
 {
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
   thrust::device_vector<Int> vec(5, Int{1});
 
   thrust::inclusive_scan(thrust::device, vec.cbegin(), vec.cend(), vec.begin());
@@ -861,20 +859,12 @@ TEST(ScanTests, TestInclusiveScanWithUserDefinedType)
 
 // Represents a permutation as a tuple of integers, see also: https://en.wikipedia.org/wiki/Permutation
 // We need a distinct type (instead of an alias) for operator<< to be found via ADL
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct permutation_t : ::cuda::std::array<int, 5>
-#else
-struct permutation_t : ::std::array<int, 5>
-#endif
+struct permutation_t : _THRUST_STD::array<int, 5>
 {
   permutation_t() = default;
 
   constexpr THRUST_HOST_DEVICE permutation_t(int a, int b, int c, int d, int e)
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      : ::cuda::std::array<int, 5>{a, b, c, d, e}
-#else
-      : ::std::array<int, 5>{a, b, c, d, e}
-#endif
+      : _THRUST_STD::array<int, 5>{a, b, c, d, e}
   {}
 
   friend std::ostream& operator<<(std::ostream& os, const permutation_t& p)

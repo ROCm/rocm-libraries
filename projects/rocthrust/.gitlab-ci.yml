@@ -445,9 +445,8 @@ build:cuda-and-omp:
   script:
     - git clone -b $CCCL_GIT_BRANCH https://github.com/NVIDIA/cccl.git $CCCL_DIR
     # Replace CCCL Thrust headers with rocThrust headers
-    - rm -R $CCCL_DIR/thrust/thrust
+    - rm -r $CCCL_DIR/thrust/thrust
     - cp -r $CI_PROJECT_DIR/thrust $CCCL_DIR/thrust
-    - cp $CI_PROJECT_DIR/testing/type_traits.cu $CCCL_DIR/thrust/testing
     - sed -i '/include(cmake\/ThrustAddSubdir.cmake)/i \  include(../cmake/CCCLAddSubdirHelper.cmake)' $CCCL_DIR/thrust/CMakeLists.txt
     # Build tests and examples from CCCL Thrust
     - cmake

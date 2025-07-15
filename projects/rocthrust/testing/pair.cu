@@ -21,7 +21,7 @@
 
 #include <unittest/unittest.h>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <utility>
 #endif
 
@@ -307,11 +307,7 @@ void TestPairSwap()
   thrust::pair<int, int> a(x, y);
   thrust::pair<int, int> b(z, w);
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::swap;
-#else
-  using ::std::swap;
-#endif
+  using _THRUST_STD::swap;
   swap(a, b);
 
   ASSERT_EQUAL(z, a.first);

@@ -26,7 +26,7 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #  include <utility>
 #endif
@@ -207,11 +207,7 @@ DECLARE_UNARY_LOGICAL_FUNCTIONAL_UNITTEST(logical_not, LogicalNot);
 
 // TODO(bgruber): replace by cuda::std::as_const in C++14
 template <class _Tp>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-typename ::cuda::std::add_const<_Tp>::type& as_const(_Tp& __t) noexcept
-#else
-typename ::std::add_const<_Tp>::type& as_const(_Tp& __t) noexcept
-#endif
+typename _THRUST_STD::add_const<_Tp>::type& as_const(_Tp& __t) noexcept
 {
   return __t;
 }
@@ -220,12 +216,6 @@ typename ::std::add_const<_Tp>::type& as_const(_Tp& __t) noexcept
 TEST(AllTypesTests, TestIdentityFunctional) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::is_same;
-#else
-  using ::std::is_same;
-#endif
 
   int i    = 42;
   double d = 3.14;
@@ -239,29 +229,21 @@ TEST(AllTypesTests, TestIdentityFunctional) THRUST_DISABLE_BROKEN_GCC_VECTORIZER
   ASSERT_EQ(i, 1337);
 
   // value categories and const
-  static_assert(is_same<decltype(thrust::identity<int>{}(42)), int&&>::value, "");
-  static_assert(is_same<decltype(thrust::identity<int>{}(i)), int&>::value, "");
-  static_assert(is_same<decltype(thrust::identity<int>{}(as_const(i))), const int&>::value, "");
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  static_assert(is_same<decltype(thrust::identity<int>{}(::cuda::std::move(i))), int&&>::value, "");
-#else
-  static_assert(is_same<decltype(thrust::identity<int>{}(::std::move(i))), int&&>::value, "");
-#endif
-  static_assert(is_same<decltype(thrust::identity<int>{}(static_cast<const int&&>(i))), const int&>::value, "");
+  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(42)), int&&>::value, "");
+  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(i)), int&>::value, "");
+  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(as_const(i))), const int&>::value, "");
+  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(_THRUST_STD::move(i))), int&&>::value, "");
+  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(static_cast<const int&&>(i))), const int&>::value, "");
 
   // value categories when casting to different type
-  static_assert(is_same<decltype(thrust::identity<int>{}(3.14)), int&&>::value, "");
+  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(3.14)), int&&>::value, "");
   // unfortunately, old versions of MSVC pick the `const int&` overload instead of `int&&`
 #if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && THRUST_MSVC_VERSION >= 1929
-  static_assert(is_same<decltype(thrust::identity<int>{}(d)), int&&>::value, "");
-  static_assert(is_same<decltype(thrust::identity<int>{}(as_const(d))), int&&>::value, "");
+  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(d)), int&&>::value, "");
+  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(as_const(d))), int&&>::value, "");
 #endif
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  static_assert(is_same<decltype(thrust::identity<int>{}(::cuda::std::move(d))), int&&>::value, "");
-#else
-  static_assert(is_same<decltype(thrust::identity<int>{}(::std::move(d))), int&&>::value, "");
-#endif
-  static_assert(is_same<decltype(thrust::identity<int>{}(static_cast<const double&&>(d))), int&&>::value, "");
+  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(_THRUST_STD::move(d))), int&&>::value, "");
+  static_assert(_THRUST_STD::is_same<decltype(thrust::identity<int>{}(static_cast<const double&&>(d))), int&&>::value, "");
 }
 
 TYPED_TEST(VectorTests, TestIdentityFunctionalVector) THRUST_DISABLE_BROKEN_GCC_VECTORIZER

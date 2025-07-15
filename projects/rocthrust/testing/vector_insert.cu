@@ -20,7 +20,7 @@
 
 #include <unittest/unittest.h>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <utility>
 #endif
 
@@ -134,11 +134,7 @@ struct TestVectorRangeInsert
     size_t end   = n > 0 ? (size_t) h_src[n + 1] % n : 0;
     if (end < begin)
     {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      using ::cuda::std::swap;
-#else
-      using ::std::swap;
-#endif
+      using _THRUST_STD::swap;
       swap(begin, end);
     }
 

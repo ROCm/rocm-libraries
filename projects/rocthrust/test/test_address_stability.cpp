@@ -20,7 +20,7 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <functional>
 #endif
 
@@ -41,23 +41,17 @@ TEST(AddressStabilityTests, TestAddressStabilityLibcuxx)
   using ::thrust::detail::proclaim_copyable_arguments;
   using ::thrust::detail::proclaims_copyable_arguments;
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::plus;
-#else
-  using ::std::plus;
-#endif
-
   // libcu++ function objects with known types
-  static_assert(proclaims_copyable_arguments<plus<int>>::value, "");
-  static_assert(!proclaims_copyable_arguments<plus<>>::value, "");
+  static_assert(proclaims_copyable_arguments<_THRUST_STD::plus<int>>::value, "");
+  static_assert(!proclaims_copyable_arguments<_THRUST_STD::plus<>>::value, "");
 
   // libcu++ function objects with unknown types
-  static_assert(!proclaims_copyable_arguments<plus<addable>>::value, "");
-  static_assert(!proclaims_copyable_arguments<plus<>>::value, "");
+  static_assert(!proclaims_copyable_arguments<_THRUST_STD::plus<addable>>::value, "");
+  static_assert(!proclaims_copyable_arguments<_THRUST_STD::plus<>>::value, "");
 
   // libcu++ function objects with unknown types and opt-in
-  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(plus<addable>{}))>::value, "");
-  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(plus<>{}))>::value, "");
+  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(_THRUST_STD::plus<addable>{}))>::value, "");
+  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(_THRUST_STD::plus<>{}))>::value, "");
 }
 
 TEST(AddressStabilityTests, TestAddressStabilityThrust)

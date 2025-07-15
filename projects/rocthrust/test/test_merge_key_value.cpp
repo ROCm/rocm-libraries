@@ -24,7 +24,7 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
 
@@ -68,27 +68,17 @@ TESTS_DEFINE(MergeKeyValueTests, FullTestsParams);
 template <typename T, typename CompareOp, typename... Args>
 auto call_merge(Args&&... args) -> decltype(thrust::merge(std::forward<Args>(args)...))
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  THRUST_IF_CONSTEXPR (::cuda::std::is_void<CompareOp>::value)
-#else
-  THRUST_IF_CONSTEXPR (::std::is_void<CompareOp>::value)
-#endif
+  THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<CompareOp>::value)
   {
     return thrust::merge(std::forward<Args>(args)...);
   }
   else
   {
     // TODO(bgruber): remove next line in C++17 and pass CompareOp{} directly to stable_sort
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    using C = ::cuda::std::conditional_t<::cuda::std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
-#else
-    using C = ::std::conditional_t<::std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
-#endif
+    using C = _THRUST_STD::conditional_t<_THRUST_STD::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
     return thrust::merge(std::forward<Args>(args)..., C{});
   }
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  _CCCL_UNREACHABLE();
-#endif
+  __builtin_unreachable();
 }
 
 TYPED_TEST(MergeKeyValueTestsClass, TestMergeKeyValue)
@@ -123,11 +113,7 @@ TYPED_TEST(MergeKeyValueTestsClass, TestMergeKeyValue)
         h_b[i] = T(h_keys_b[i], h_values_b[i]);
       }
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      THRUST_IF_CONSTEXPR (::cuda::std::is_void<compare_function>::value)
-#else
-      THRUST_IF_CONSTEXPR (::std::is_void<compare_function>::value)
-#endif
+      THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<compare_function>::value)
       {
         thrust::stable_sort(h_a.begin(), h_a.end());
         thrust::stable_sort(h_b.begin(), h_b.end());
@@ -135,12 +121,7 @@ TYPED_TEST(MergeKeyValueTestsClass, TestMergeKeyValue)
       else
       {
         // TODO(bgruber): remove next line in C++17 and pass compare_function{} directly to stable_sort
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        using C =
-          ::cuda::std::conditional_t<::cuda::std::is_void<compare_function>::value, thrust::less<T>, compare_function>;
-#else
-        using C = ::std::conditional_t<::std::is_void<compare_function>::value, thrust::less<T>, compare_function>;
-#endif
+        using C = _THRUST_STD::conditional_t<_THRUST_STD::is_void<compare_function>::value, thrust::less<T>, compare_function>;
         thrust::stable_sort(h_a.begin(), h_a.end(), C{});
         thrust::stable_sort(h_b.begin(), h_b.end(), C{});
       }
