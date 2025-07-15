@@ -3,7 +3,7 @@
 
 find_package(BLAS REQUIRED)
 
-find_package(CLI11)
+find_package(CLI11 QUIET)
 if(NOT CLI11_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
         FetchContent_Declare(

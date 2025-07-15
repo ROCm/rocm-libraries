@@ -71,7 +71,7 @@ else()
     unset(CMAKE_CXX_CPPCHECK CACHE)
 endif()
 
-find_package(fmt 11.1.3)
+find_package(fmt 11.1.3 QUIET)
 if(NOT fmt_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
         set(FMT_SYSTEM_HEADERS ON)
@@ -86,7 +86,7 @@ if(NOT fmt_FOUND)
     endif()
 endif()
 
-find_package(spdlog)
+find_package(spdlog QUIET)
 if(NOT spdlog_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
         FetchContent_Declare(
@@ -100,7 +100,7 @@ if(NOT spdlog_FOUND)
     endif()
 endif()
 
-find_package(libdivide)
+find_package(libdivide QUIET)
 if(NOT libdivide_FOUND)
 if(ROCROLLER_ENABLE_FETCH)
     FetchContent_Declare(
@@ -124,7 +124,7 @@ else()
     set(msgpack_libs msgpackc)
 endif()
 
-find_package(Boost 1.74.0)
+find_package(Boost 1.74.0 QUIET)
 if(NOT Boost_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
         FetchContent_Declare(
@@ -256,7 +256,11 @@ target_link_libraries(rocroller
         ${llvm_libs}
 )
 
-target_include_directories(rocroller PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include>)
+target_include_directories(rocroller 
+    PUBLIC 
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include>
+)
+
 
 target_compile_features(rocroller PUBLIC cxx_std_20)
 
@@ -287,7 +291,7 @@ rocm_install(
     TARGETS rocroller rocroller-interface
     EXPORT rocroller-targets
     INCLUDE
-        "${ROCROLLER_LIB_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/lib/include"
 )
 
 if(ROCROLLER_BUILD_TESTING OR BUILD_TESTING)

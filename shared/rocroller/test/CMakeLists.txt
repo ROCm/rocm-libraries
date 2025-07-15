@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-find_package(GTest)
+find_package(GTest QUIET)
 if(NOT GTest_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
         FetchContent_Declare(
@@ -14,7 +14,7 @@ if(NOT GTest_FOUND)
     endif()
 endif()
 
-find_package(mxDataGenerator)
+find_package(mxDataGenerator QUIET)
 if(NOT mxDataGenerator_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
         FetchContent_Declare(
