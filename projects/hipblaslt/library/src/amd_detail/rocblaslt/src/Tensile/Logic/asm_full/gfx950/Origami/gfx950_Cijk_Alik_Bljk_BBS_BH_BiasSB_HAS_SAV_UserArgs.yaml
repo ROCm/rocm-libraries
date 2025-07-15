@@ -24330,7 +24330,7 @@
     AssertSummationElementMultiple: 1
     AssignedDerivedParameters: true
     AssignedProblemIndependentDerivedParameters: true
-    BaseName: Custom_Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
+    BaseName: Custom_Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
     BufferLoad: true
     BufferStore: true
     CUCount: null
@@ -24338,7 +24338,7 @@
     ClusterLocalRead: 1
     CodeObjectVersion: '4'
     ConvertAfterDS: false
-    CustomKernelName: Custom_Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
+    CustomKernelName: Custom_Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
     DebugStreamK: 0
     DepthU: 64
     DirectToLds: true
@@ -24373,7 +24373,7 @@
       SupportUserGSU: false, UseUniversalArgs: true}
     Kernel: true
     KernelLanguage: Assembly
-    KernelNameMin: Custom_Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
+    KernelNameMin: Custom_Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
     LDSTrInst: false
     LSCA: 64
     LSCB: 64
@@ -24554,7 +24554,7 @@
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 80
-    SolutionNameMin: Custom_Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
+    SolutionNameMin: Custom_Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950
     SourceSwap: false
     StaggerU: 0
     StaggerUMapping: 0
