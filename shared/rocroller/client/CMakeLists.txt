@@ -1,98 +1,79 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
 
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+find_package(BLAS REQUIRED)
 
+find_package(CLI11)
+if(NOT CLI11_FOUND)
+    if(ROCROLLER_ENABLE_FETCH)
+        FetchContent_Declare(
+            CLI11
+            GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
+            GIT_TAG main
+        )
+        FetchContent_MakeAvailable(CLI11)
+    else()
+        message(FATAL_ERROR "Failed to find CLI11")
+    endif()
+endif()
 
-message("Building client program")
-
-# Header only, not visible to library users, system package not required
-rocroller_add_dependency(CLI11 VERSION 2.1.2)
-
-add_executable(
-    rocroller_gemm gemm.cpp GEMMParameters.cpp GraphInspector.cpp visualize.cpp
+add_executable(rocroller-gemm
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gemm.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/GEMMParameters.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/GraphInspector.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/visualize.cpp"
 )
+target_sources(rocroller-gemm
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/client/BenchmarkSolution.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/client/DataParallelGEMMSolution.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/client/GEMMParameters.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/client/GEMMSolution.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/client/GraphInspector.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/client/GraphInspector_impl.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/client/StreamKGEMMSolution.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/client/visualize.hpp"
+)
+target_link_libraries(rocroller-gemm
+    PRIVATE
+        roc::rocroller-interface
+        rocroller::common-test-utilities
+        CLI11::CLI11
+        ${BLAS_LIBRARIES}
+)
+target_include_directories(rocroller-gemm PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
-target_compile_options(rocroller_gemm PUBLIC ${EXTRA_COMPILE_OPTIONS})
-target_link_options(rocroller_gemm PUBLIC ${EXTRA_LINK_OPTIONS})
-target_link_libraries(
-    rocroller_gemm
+if(ROCROLLER_BUILD_SHARED_LIBS) # why?
+    target_link_libraries(rocroller-gemm PUBLIC ${llvm_yaml_libs})
+endif()
+
+if(ROCROLLER_ENABLE_ASAN)
+    rocroller_target_configure_sanitizers(rocroller-gemm PRIVATE)
+endif()
+
+add_executable(rocroller-codegen-stress "${CMAKE_CURRENT_SOURCE_DIR}/src/codegen_stress_test.cpp")
+target_link_libraries(rocroller-codegen-stress
     PUBLIC
-    rocroller_interface
-    common_test_utilities
-    CLI11::CLI11
-    msgpackc-cxx
+        roc::rocroller-interface
+        rocroller::common-test-utilities
+        CLI11::CLI11
+        ${BLAS_LIBRARIES}
 )
-if(BUILD_SHARED_LIBS)
-    target_link_libraries(
-        rocroller_gemm PUBLIC ${llvm_yaml_libs}
-    )
+if(ROCROLLER_BUILD_SHARED_LIBS) # why are we using this logic
+    target_link_libraries(rocroller-codegen-stress PUBLIC ${llvm_yaml_libs})
 endif()
 
-set_target_properties(
-    rocroller_gemm PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin/client"
-        OUTPUT_NAME "rocRoller_gemm"
-)
-add_custom_command(
-    OUTPUT "${PROJECT_BINARY_DIR}/bin/client/gemm"
-    COMMAND
-        sudo ln -s $<TARGET_FILE:rocroller_gemm>
-            ${PROJECT_BINARY_DIR}/bin/client/gemm
-    MAIN_DEPENDENCY rocroller_gemm
-)
-
-add_executable(rocroller_codegen_stress codegen_stress_test.cpp)
-
-target_compile_options(rocroller_codegen_stress PUBLIC ${EXTRA_COMPILE_OPTIONS})
-target_link_options(rocroller_codegen_stress PUBLIC ${EXTRA_LINK_OPTIONS})
-target_link_libraries(
-    rocroller_codegen_stress PUBLIC rocroller_interface CLI11::CLI11
-)
-if(BUILD_SHARED_LIBS)
-    target_link_libraries(
-        rocroller_codegen_stress PUBLIC ${llvm_yaml_libs}
-    )
+if(ROCROLLER_ENABLE_ASAN)
+    rocroller_target_configure_sanitizers(rocroller-codegen-stress PRIVATE)
 endif()
-
-set_target_properties(
-    rocroller_codegen_stress PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/bin/client"
-        OUTPUT_NAME "rocRoller_codegen_stress"
-)
-add_custom_command(
-    OUTPUT "${PROJECT_BINARY_DIR}/bin/client/codegen_stress"
-    COMMAND
-        sudo ln -s $<TARGET_FILE:rocroller_codegen_stress>
-            ${PROJECT_BINARY_DIR}/bin/client/codegen_stress
-    MAIN_DEPENDENCY rocroller_codegen_stress
-)
 
 add_custom_target(all_clients)
-add_dependencies(all_clients rocroller_gemm rocroller_codegen_stress)
+add_dependencies(all_clients rocroller-gemm rocroller-codegen-stress)
 
-rocm_install(
-  TARGETS rocroller_gemm rocroller_codegen_stress
-  COMPONENT benchmarks
-)
+if(ROCROLLER_ENABLE_COVERAGE OR BUILD_CODE_COVERAGE)
+    target_compile_options(rocroller-gemm PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(rocroller-gemm PRIVATE -fprofile-instr-generate)
+
+    target_compile_options(rocroller-codegen-stress PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(rocroller-codegen-stress PRIVATE -fprofile-instr-generate)
+endif()

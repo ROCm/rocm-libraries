@@ -23,7 +23,7 @@
 
 set(_CMAKE_CURRENT_SOURCE_DIR "${TEMP_TENSILE_HOST_SOURCE_DIR}/include/Tensile/analytical")
 
-target_sources(hipblaslt
+target_sources(tensilelite-host
     PRIVATE
         "${_CMAKE_CURRENT_SOURCE_DIR}/AnalyticalGemm.hpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/Hardware.hpp"

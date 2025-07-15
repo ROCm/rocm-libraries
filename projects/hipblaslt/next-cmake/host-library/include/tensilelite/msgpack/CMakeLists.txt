@@ -23,7 +23,7 @@
 
 set(_CMAKE_CURRENT_SOURCE_DIR "${TEMP_TENSILE_HOST_SOURCE_DIR}/include/Tensile")
 
-target_sources(hipblaslt
+target_sources(tensilelite-host
     PRIVATE
         "${_CMAKE_CURRENT_SOURCE_DIR}/msgpack/Loading.hpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/msgpack/MessagePack.hpp"

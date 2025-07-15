@@ -40,6 +40,7 @@ set(ROCSPARSE_BENCHMARK_SOURCES
 )
 
 set(ROCSPARSE_CLIENTS_COMMON
+  ../common/rocsparse.cpp
   ../common/utility.cpp
   ../common/rocsparse_reproducibility.cpp
   ../common/rocsparse_reproducibility_test.cpp

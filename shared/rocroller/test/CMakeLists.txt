@@ -1,336 +1,206 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
 
-option(ROCROLLER_TESTS_SKIP_SLOW "Skip slow tests (currently only Python tests)" ON)
-
-if(CODE_COVERAGE)
-    set(ROCROLLER_TESTS_SKIP_SLOW OFF)
+find_package(GTest)
+if(NOT GTest_FOUND)
+    if(ROCROLLER_ENABLE_FETCH)
+        FetchContent_Declare(
+            googletest
+            URL https://github.com/google/googletest/archive/refs/tags/release-1.12.1.zip
+        )
+        FetchContent_MakeAvailable(googletest)
+    else()
+        message(FATAL_ERROR "Failed to find googletest")
+    endif()
 endif()
 
-include(CTest)
+find_package(mxDataGenerator)
+if(NOT mxDataGenerator_FOUND)
+    if(ROCROLLER_ENABLE_FETCH)
+        FetchContent_Declare(
+            mxDataGenerator
+            GIT_REPOSITORY ${MXDATAGENERATOR_GIT_URL}
+            GIT_TAG ${MXDATAGENERATOR_GIT_TAG}
+        )
+        FetchContent_MakeAvailable(mxDataGenerator)
+    else()
+        message(FATAL_ERROR "Failed to find mxDataGenerator")
+    endif()
+endif()
 
-# Header only/static, not visible to library users, so not necessary to use system packages
-rocroller_add_dependency(googletest VERSION 1.12.1)
-rocroller_add_dependency(Catch2 VERSION 3.7.0)
+add_executable(rocroller-tests)
+
+if(ROCROLLER_ENABLE_CATCH AND (ROCROLLER_BUILD_TESTING OR BUILD_TESTING))
+    add_executable(rocroller-tests-catch)
+    # When detecting tests gtest and catch test discovery modules run
+    # something like:
+    # execute_process(COMMAND ${_TEST_EXECUTOR} "${_TEST_EXECUTABLE}" --gtest_list_tests ${filter})
+    # where TEST_EXECUTABLE is rocroller-tests-catch and TEST_EXECUTOR
+    # is a command to prepend primarily for the purposes of running in
+    # a cross compiled environment. As such, we can set the CROSSCOMPILING_EMULATOR
+    # property on the test targets to use the cmake -E -env command providing
+    # the LD_PRELOAD and ASAN_OPTIONS variables necessary to run sanitizer builds.
+    # Note that the entries in the string are semicolon separated which is necessary
+    # to ensure that the command supplied to execute_process is interpreted as a list
+    # of strings rather than one white space delimited string.
+    if(ROCROLLER_ENABLE_ASAN)
+    rocroller_target_configure_sanitizers(rocroller-test-catch PRIVATE)
+        set_target_properties(rocroller-tests-catch
+            PROPERTIES 
+                CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
+        )
+    endif()
+endif()
 
 # Component stand-alone test
-add_executable(ComponentTest standalone/ComponentTest.cpp)
-target_compile_options(ComponentTest PUBLIC ${EXTRA_COMPILE_OPTIONS})
-target_link_options(ComponentTest PUBLIC ${EXTRA_LINK_OPTIONS} -pthread)
-target_link_libraries(ComponentTest rocroller_interface msgpackc-cxx)
-target_include_directories(
-    ComponentTest PRIVATE ${PROJECT_SOURCE_DIR}/lib/include
-)
+add_executable(component-test)
 
-set(
-    rocRollerTests_SOURCES
-    unit/ContextFixture.cpp
-    unit/GPUContextFixture.cpp
-    unit/GenericContextFixture.cpp
-
-    unit/AddStreamKTest.cpp
-    unit/AllocatingObserverTest.cpp
-    unit/ArgumentLoaderTest.cpp
-    unit/ArgumentValueTest.cpp
-    unit/ArithmeticTest.cpp
-    unit/AssemblerTest.cpp
-    unit/AssertTest.cpp
-    unit/BufferDescriptorTest.cpp
-    unit/CommandTest.cpp
-    unit/CommonSubexpressionElimTest.cpp
-    unit/ComponentTest.cpp
-    unit/ControlGraphTest.cpp
-    unit/ConversionInstructions/Convert_F16_F32.cpp
-    unit/ConversionTest.cpp
-    unit/CoordinateGraphTest.cpp
-    unit/CopyGeneratorTest.cpp
-    unit/CostTest.cpp
-    unit/DataTypesTest.cpp
-    unit/DependencyTest.cpp
-    unit/EnumToStringTest.cpp
-    unit/ErrorTest.cpp
-    unit/F6Test.cpp
-    unit/F8Test.cpp
-    unit/FP4Test.cpp
-    unit/FastDivisionTest.cpp
-    unit/FastMultiplicationTest.cpp
-    unit/FileWritingObserverTest.cpp
-    unit/GEMMFusion.cpp
-    unit/GEMMTest.cpp
-    unit/GPUArchitectureTest.cpp
-    unit/GPUInstructionInfoTest.cpp
-    unit/GeneratorTest.cpp
-    unit/HalfPrecisionTest.cpp
-    unit/KernelGraphTest.cpp
-    unit/KernelGraphTest/ConstantPropagation.cpp
-    unit/KernelGraphTest/KernelGraphUtils.cpp
-    unit/KernelGraphTest/Simplify.cpp
-    unit/KernelGraphTest/UpdateParameters.cpp
-    unit/KernelIndexTest.cpp
-    unit/KernelOptionsTest.cpp
-    unit/KernelTest.cpp
-    unit/LDSTest.cpp
-    unit/LDSTileCopyTest.cpp
-    unit/LabelTest.cpp
-    unit/LockTest.cpp
-    unit/LowerExponentialTest.cpp
-    unit/MFMAHazardObserverTest.cpp
-    unit/MFMAUnitObserverTest.cpp
-    unit/MatrixMultiplyTest.cpp
-    unit/MemoryInstructionsTest.cpp
-    unit/MetaObserverTest.cpp
-    unit/MixedArithmeticTest.cpp
-    unit/OperationTagTest.cpp
-    unit/PermLanesTest.cpp
-    unit/RandomTest.cpp
-    unit/RegisterAllocatorTest.cpp
-    unit/RegisterLivenessObserverTest.cpp
-    unit/SchedulerTest.cpp
-    unit/ScopeTest.cpp
-    unit/ScopeManagerTest.cpp
-    unit/SourceMatcherTest.cpp
-    unit/StreamTest.cpp
-    unit/SupportedInstructionObserverTest.cpp
-    unit/TileTransposeAdd.cpp
-    unit/TimerTest.cpp
-    unit/UtilsTest.cpp
-    unit/VariantTest.cpp
-    unit/VectorAddBenchmark.cpp
-    unit/WaitCountObserverTest.cpp
-    unit/WaitCountTest.cpp
-)
-
-add_executable(rocRollerTests ${rocRollerTests_SOURCES})
-
-find_package(OpenMP)
-target_compile_options(rocRollerTests PUBLIC ${EXTRA_COMPILE_OPTIONS})
-target_link_options(rocRollerTests PUBLIC ${EXTRA_LINK_OPTIONS})
-target_link_libraries(
-    rocRollerTests
-    common_test_utilities
-    gtest_main
-    gmock
-    OpenMP::OpenMP_CXX
-    libdivide
-    msgpackc-cxx
-)
-set_property(
-    TARGET rocRollerTests
-    APPEND
-    PROPERTY INSTALL_RPATH "$ORIGIN/../lib/llvm/lib"
-)
-
-if(YAML_BACKEND STREQUAL "YAML_CPP")
-    target_compile_definitions(
-        rocRollerTests PUBLIC ROCROLLER_TESTS_USE_YAML_CPP
+if(ROCROLLER_ENABLE_ASAN)
+    rocroller_target_configure_sanitizers(component-test PRIVATE)
+    set_target_properties(component-test
+        PROPERTIES 
+            CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
+    )
+    rocroller_target_configure_sanitizers(rocroller-tests PRIVATE)
+    set_target_properties(rocroller-tests
+        PROPERTIES 
+            CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
     )
 endif()
 
-set(
-    rocRollerTests_catch_SOURCES
-
-    catch/CustomAssertions.cpp
-    catch/TestContext.cpp
-    catch/TestKernels.cpp
-
-    catch/AddDeallocateTest.cpp
-    catch/AddPrefetchTest.cpp
-    catch/AliasDataFlowTagsTest.cpp
-    catch/AnnotateInstructionsTest.cpp
-    catch/ArgumentTracerTest.cpp
-    catch/BinaryExpressionTest.cpp
-    catch/BranchGeneratorTest.cpp
-    catch/CommandArgumentValueTest.cpp
-    catch/CommandTest.cpp
-    catch/ConnectWorkgroupsTest.cpp
-    catch/CustomAssertionTest.cpp
-    catch/CustomMatcherTest.cpp
-    catch/DataTypesTest.cpp
-    catch/ExpressionContainsSubExpressionTest.cpp
-    catch/ExpressionIdenticalTest.cpp
-    catch/ExpressionSerializationTest.cpp
-    catch/ExpressionTest.cpp
-    catch/ExpressionToStringTest.cpp
-    catch/ExpressionTransformationTest.cpp
-    catch/FastArithmeticTest.cpp
-    catch/FastDivisionTransformationTest.cpp
-    catch/GlobalLoadStoreTest.cpp
-    catch/HazardObserverTest.cpp
-    catch/HypergraphTest.cpp
-    catch/IdentifyParallelDimensionsTest.cpp
-    catch/InstructionTest.cpp
-    catch/KernelArgumentsTest.cpp
-    catch/KernelGraphColouringTest.cpp
-    catch/KernelGraphConstraintsTest.cpp
-    catch/KernelGraphRemoveDuplicatesTest.cpp
-    catch/KernelGraphSimplifyTest.cpp
-    catch/LDSAllocationTest.cpp
-    catch/LargerLDSTest.cpp
-    catch/LoadPackedTest.cpp
-    catch/MEMObserverTest.cpp
-    catch/MultipleLDSAllocationTest.cpp
-    catch/RandomNumberExpressionTest.cpp
-    catch/RandomNumberGenerationTest.cpp
-    catch/RegisterTagManagerTest.cpp
-    catch/RegisterTest.cpp
-    catch/ScalarExpressionTest.cpp
-    catch/SettingsTest.cpp
-    catch/SubDwordExpressionTest.cpp
-    catch/TernaryExpressionTest.cpp
-    catch/TestContext.cpp
-    catch/TestContextTest.cpp
-    catch/TransposeLoadsTest.cpp
-    catch/UnrollLoopsTest.cpp
-    catch/UtilsTest.cpp
-    catch/WMMAHazardObserverTest.cpp
-    catch/WMMAObserverUnitTest.cpp
-    catch/WidenAddrExprTo64bitTest.cpp
-    catch/mxDataGeneratorTest.cpp
-    catch/ScaleUtilsTest.cpp
-)
-
-add_executable(rocRollerTests_catch ${rocRollerTests_catch_SOURCES})
-target_compile_options(rocRollerTests_catch PUBLIC ${EXTRA_COMPILE_OPTIONS})
-
-target_link_options(rocRollerTests_catch PUBLIC ${EXTRA_LINK_OPTIONS})
-target_link_libraries(
-    rocRollerTests_catch
-    common_test_utilities
-    Catch2::Catch2WithMain
-    OpenMP::OpenMP_CXX
-    msgpackc-cxx
-)
-set_property(
-    TARGET rocRollerTests_catch
-    APPEND
-    PROPERTY INSTALL_RPATH "$ORIGIN/../lib/llvm/lib"
-)
-
-if(YAML_BACKEND STREQUAL "YAML_CPP")
-    target_compile_definitions(
-        rocRollerTests_catch PUBLIC ROCROLLER_TESTS_USE_YAML_CPP
+if(ROCROLLER_ENABLE_ARCH_GEN_TEST)
+    if(NOT ROCROLLER_ENABLE_LLD)
+        # There are a few tests that require ReadELF functionality
+        # which is disabled by default and on a deprecation path.
+        # The tests that fail are missing the amdhsa.version key
+        # and as such hit a fatal error that emits the following
+        #     Key   key = amdhsa.version
+        #      not found: {}
+        # If observed, the test will be marked as skipped rather
+        # than failing.
+        if(ROCROLLER_ENABLE_LLVM)
+            set(rocroller_skip_regex "FatalError\\(hsa_version.size\\(\\) == 2\\)")
+        else()
+            set(rocroller_skip_regex "key = amdhsa.version")
+        endif()
+    endif()
+    find_package(Pytest REQUIRED) # requires pip install -r requirements.txt
+    pytest_discover_tests(
+        GEMMClientTests
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/client"
+        ENVIRONMENT "ROCROLLER_BUILD_DIR=${PROJECT_BINARY_DIR}" "LD_PRELOAD=${ASAN_LIB_PATH}" "ASAN_OPTIONS=detect_leaks=0"
+        PROPERTIES
+            SKIP_REGULAR_EXPRESSION ${rocroller_skip_regex}
     )
+    add_executable(arch-gen-tests)
+    if(ROCROLLER_ENABLE_ASAN)
+        rocroller_target_configure_sanitizers(arch-gen-tests PRIVATE)
+        set_target_properties(arch-gen-tests
+            PROPERTIES 
+                CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
+        )
+    endif()
 endif()
 
-# Add gemm client tests.  Use pytest-cmake integration for parallelism.
-find_package(Pytest)
-pytest_discover_tests(
-  GEMMClientTests
-  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/client
-  ENVIRONMENT "ROCROLLER_BUILD_DIR=${PROJECT_BINARY_DIR}"
-)
+find_package(BLAS REQUIRED)
+find_package(cblas)
+find_package(OpenMP REQUIRED)
 
-# ArchGen unit tests
-add_executable(ArchGenTests unit/GPUArchitectureGeneratorTest.cpp)
+if(ROCROLLER_ENABLE_YAML_CPP)
+    target_compile_definitions(rocroller-tests PRIVATE ROCROLLER_TESTS_USE_YAML_CPP)
+else()
+    target_compile_definitions(rocroller-tests PRIVATE ROCROLLER_USE_LLVM)
+endif()
 
-target_compile_options(
-    ArchGenTests PUBLIC ${COROUTINES_COMPILE_OPTION} ${EXTRA_COMPILE_OPTIONS}
-)
-target_link_options(ArchGenTests PUBLIC ${EXTRA_LINK_OPTIONS})
-target_include_directories(
-    ArchGenTests PRIVATE ${PROJECT_SOURCE_DIR}/GPUArchitectureGenerator/include
-)
+if(ROCROLLER_ENABLE_CATCH)
+    add_subdirectory(catch)
+endif()
+add_subdirectory(common)
+add_subdirectory(standalone)
+add_subdirectory(unit)
 
-target_link_libraries(
-    ArchGenTests
-    PUBLIC common_test_utilities
-           rocroller_interface
-           gtest_main
-           gmock
-           isa_spec_manager
-)
-
-if(NOT CODE_ANALYSIS)
+if(ROCROLLER_ENABLE_TEST_DISCOVERY)
     set(TEST_REPORT_DIR "${PROJECT_BINARY_DIR}/test_report")
 
     include(GoogleTest)
     gtest_discover_tests(
-        rocRollerTests
+        rocroller-tests
         XML_OUTPUT_DIR ${TEST_REPORT_DIR}
         TEST_FILTER "-*GPU_*"
         DISCOVERY_MODE PRE_TEST
+        PROPERTIES
+            SKIP_REGULAR_EXPRESSION "test/unit/ErrorTest.cpp:"
+            ENVIRONMENT "${asan_opts}"
     )
     gtest_discover_tests(
-        rocRollerTests
+        rocroller-tests
         XML_OUTPUT_DIR ${TEST_REPORT_DIR}
         TEST_FILTER "*GPU_*"
         PROPERTIES "LABELS" "GPU"
         DISCOVERY_MODE PRE_TEST
+        PROPERTIES
+            SKIP_REGULAR_EXPRESSION "test/unit/ErrorTest.cpp:"
+            ENVIRONMENT "${asan_opts}"
     )
-    gtest_discover_tests(
-        ArchGenTests
-        XML_OUTPUT_DIR ${TEST_REPORT_DIR}
-        DISCOVERY_MODE PRE_TEST
-    )
+    if(ROCROLLER_ENABLE_ARCH_GEN_TEST)
+        gtest_discover_tests(
+            arch-gen-tests
+            XML_OUTPUT_DIR ${TEST_REPORT_DIR}
+            DISCOVERY_MODE PRE_TEST
+            PROPERTIES
+                ENVIRONMENT "${asan_opts}"
+        )
+    endif()
 
-    # path to catch scripts added to CMAKE_MODULE_PATH when Catch2 is added
-    include(Catch)
-    catch_discover_tests(
-        rocRollerTests_catch
-        REPORTER JUnit
-        OUTPUT_DIR ${TEST_REPORT_DIR}
-        OUTPUT_SUFFIX ".xml"
-        DISCOVERY_MODE PRE_TEST
-        EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
-        TEST_SPEC "[gpu]"
-        PROPERTIES "LABELS"
-                   "CATCH"
-                   "LABELS"
-                   "GPU"
-        SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped"
-    )
+    if(ROCROLLER_ENABLE_CATCH)
+        if(ROCROLLER_ENABLE_FETCH)
+            list(APPEND CMAKE_MODULE_PATH "${Catch2_SOURCE_DIR}/extras")
+        else()
+            list(APPEND CMAKE_MODULE_PATH "${Catch2_DIR}")
+        endif()
 
-    catch_discover_tests(
-        rocRollerTests_catch
-        REPORTER JUnit
-        OUTPUT_DIR ${TEST_REPORT_DIR}
-        OUTPUT_SUFFIX ".xml"
-        DISCOVERY_MODE PRE_TEST
-        EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
-        TEST_SPEC "~[gpu]"
-        PROPERTIES "LABELS" "CATCH"
-        SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped"
-    )
+        include(Catch)
+        catch_discover_tests(
+            rocroller-tests-catch
+            REPORTER JUnit
+            OUTPUT_DIR ${TEST_REPORT_DIR}
+            OUTPUT_SUFFIX ".xml"
+            DISCOVERY_MODE PRE_TEST
+            EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
+            TEST_SPEC "[gpu]"
+            PROPERTIES "LABELS" "CATCH"
+                       "LABELS" "GPU"
+                       "ENVIRONMENT" "${asan_opts}"
+            SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
+        )
+        catch_discover_tests(
+            rocroller-tests-catch
+            REPORTER JUnit
+            OUTPUT_DIR ${TEST_REPORT_DIR}
+            OUTPUT_SUFFIX ".xml"
+            DISCOVERY_MODE PRE_TEST
+            EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
+            TEST_SPEC "~[gpu]"
+            PROPERTIES "LABELS" "CATCH"
+                       "ENVIRONMENT" "${asan_opts}"
+            SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
+        )
+    endif()
 
-    # Add script linting
+    if(NOT ROCROLLER_ENABLE_SLOW_TESTS)
+        set(PYTHON_TEST_SKIP "-m not slow")
+    endif()
+
     add_test(
         NAME PythonLint
         COMMAND flake8
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}/scripts
+        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}/scripts"
     )
     set_tests_properties(
         PythonLint
         PROPERTIES ENVIRONMENT "ROCROLLER_BUILD_DIR=${PROJECT_BINARY_DIR}"
                    "LABELS" "PYTHON"
     )
-
-    if(ROCROLLER_TESTS_SKIP_SLOW)
-        set(PYTHON_TEST_SKIP "-m not slow")
-    endif()
-
-    # Add rrperf unit tests
     add_test(
         NAME PythonTest
         COMMAND
@@ -347,7 +217,22 @@ if(NOT CODE_ANALYSIS)
     )
 endif()
 
-rocm_install(
-    TARGETS rocRollerTests rocRollerTests_catch
-    COMPONENT tests
-)
+if(ROCROLLER_ENABLE_COVERAGE OR BUILD_CODE_COVERAGE)
+    target_compile_options(rocroller PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(rocroller PRIVATE -fprofile-instr-generate)
+
+    target_compile_options(rocroller-no-rtti PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+
+    target_compile_options(common-test-utilities PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+
+    if(ROCROLLER_ENABLE_ARCH_GEN_TEST)
+        target_compile_options(arch-gen-tests PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+        target_link_options(arch-gen-tests PRIVATE -fprofile-instr-generate)
+    endif()
+
+    target_compile_options(rocroller-tests PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(rocroller-tests PRIVATE -fprofile-instr-generate)
+
+    target_compile_options(rocroller-tests-catch PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+    target_link_options(rocroller-tests-catch PRIVATE -fprofile-instr-generate)
+endif()
