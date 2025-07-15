@@ -27,6 +27,7 @@
 #include "../iterator/zip_iterator.hpp"
 #include "../types/tuple.hpp"
 
+#include "config_types.hpp"
 #include "detail/device_transform.hpp"
 #include "device_transform_config.hpp"
 
@@ -43,31 +44,13 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
-constexpr const char* arch_name(target_arch a)
-{
-    switch(a)
-    {
-        case target_arch::gfx803: return "gfx803";
-        case target_arch::gfx900: return "gfx900";
-        case target_arch::gfx906: return "gfx906";
-        case target_arch::gfx908: return "gfx908";
-        case target_arch::gfx90a: return "gfx90a";
-        case target_arch::gfx942: return "gfx942";
-        case target_arch::gfx1030: return "gfx1030";
-        case target_arch::gfx1100: return "gfx1100";
-        case target_arch::gfx1102: return "gfx1102";
-        case target_arch::gfx1200: return "gfx1200";
-        case target_arch::gfx1201: return "gfx1201";
-        default: return "unknown";
-    }
-}
 
 // Trampoline that is fully specialized at compile-time for a single GPU architecture.
 // By instantiating this template once per supported `target_arch`,the correct tuned config
 // will be derived from the template
 template<target_arch Arch,
-         bool        IsPointer,
          class Config,
+         bool IsPointer,
          class ResultType,
          class InputIt,
          class OutputIt,
@@ -79,21 +62,18 @@ void transform_trampoline(InputIt in, size_t n, OutputIt out, UnaryOp op)
     // Pull the per-arch tuned parameters into constexpr scope
     constexpr auto p = Config::template architecture_config<Arch>::params;
 
-    // if(threadIdx.x == 0 && blockIdx.x == 0)
-    // {
-    //     printf("[transform][%s] block=%u  items/thread=%u\n",
-    //            arch_name(Arch),
-    //            p.kernel_config.block_size,
-    //            p.kernel_config.items_per_thread);
-    // }
-
     // Delegate to the real implementation, with the correct constants
-    detail::transform_kernel_impl<
-        IsPointer,
-        Config::template architecture_config<Arch>::params.kernel_config.block_size,
-        Config::template architecture_config<Arch>::params.kernel_config.items_per_thread,
-        Config::template architecture_config<Arch>::params.load_type,
-        ResultType>(in, n, out, op);
+#ifndef ROCPRIM_EXPERIMENTAL_SPIRV
+    if constexpr(Arch == device_target_arch())
+#endif
+    {
+        detail::transform_kernel_impl<
+            IsPointer,
+            Config::template architecture_config<Arch>::params.kernel_config.block_size,
+            Config::template architecture_config<Arch>::params.kernel_config.items_per_thread,
+            Config::template architecture_config<Arch>::params.load_type,
+            ResultType>(in, n, out, op);
+    }
 }
 
 // Host-side helper running at run-time, picking the trampoline whose template
@@ -121,42 +101,23 @@ inline hipError_t launch_transform_for_arch(target_arch arch,
     {
         constexpr target_arch A = decltype(arch_tag)::value;
         if(A != arch || launched)
+        {
             return;
+        }
 
-        constexpr auto     cfg              = Config::template architecture_config<A>::params;
-        constexpr unsigned block_size       = cfg.kernel_config.block_size;
-        constexpr unsigned items_per_thread = cfg.kernel_config.items_per_thread;
-        constexpr size_t   items_per_block  = block_size * items_per_thread;
-
-        const dim3 block(block_size);
-        const dim3 grid((n + items_per_block - 1) / items_per_block);
-
-        // std::cout << "[transform] pick " << detail::arch_name(A) << "  block=" << block.x
-        //           << "  items=" << items_per_thread << "  grid=" << grid.x << '\n';
-
-        transform_trampoline<A, IsPointer, Config, ResultType>
+        transform_trampoline<A, Config, IsPointer, ResultType>
             <<<grid, block, 0, s>>>(in, n, out, op);
 
         launched = true;
     };
 
     // Enumerate every architecture for which we have a tuned config
-    try_launch(std::integral_constant<target_arch, target_arch::gfx803>{});
-    try_launch(std::integral_constant<target_arch, target_arch::gfx900>{});
-    try_launch(std::integral_constant<target_arch, target_arch::gfx906>{});
-    try_launch(std::integral_constant<target_arch, target_arch::gfx908>{});
-    try_launch(std::integral_constant<target_arch, target_arch::gfx90a>{});
-    try_launch(std::integral_constant<target_arch, target_arch::gfx942>{});
-    try_launch(std::integral_constant<target_arch, target_arch::gfx1030>{});
-    try_launch(std::integral_constant<target_arch, target_arch::gfx1100>{});
-    try_launch(std::integral_constant<target_arch, target_arch::gfx1102>{});
-    try_launch(std::integral_constant<target_arch, target_arch::gfx1200>{});
-    try_launch(std::integral_constant<target_arch, target_arch::gfx1201>{});
+    detail::for_each_arch(try_launch);
 
     // Fallback for unknown architectures
     if(!launched)
     {
-        transform_trampoline<target_arch::unknown, IsPointer, Config, ResultType>
+        transform_trampoline<target_arch::unknown, Config, IsPointer, ResultType>
             <<<grid, block, 0, s>>>(in, n, out, op);
     }
     return hipSuccess;
@@ -191,7 +152,7 @@ inline hipError_t transform_impl(InputIterator     input,
         return result;
     }
     const detail::transform_config_params params
-        = detail::dispatch_target_arch<config>(target_arch);
+        = detail::dispatch_target_arch<config, false>(target_arch);
 
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;

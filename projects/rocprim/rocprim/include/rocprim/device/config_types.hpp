@@ -153,11 +153,7 @@ struct fallback_block_size
 
 template<class Config, class Default>
 using default_or_custom_config =
-    typename std::conditional<
-        std::is_same<Config, default_config>::value,
-        Default,
-        Config
-    >::type;
+    typename std::conditional<std::is_same<Config, default_config>::value, Default, Config>::type;
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 enum class target_arch : unsigned int
@@ -204,32 +200,34 @@ constexpr bool prefix_equals(const char* lhs, const char* rhs, std::size_t n)
     return i == n && *lhs == '\0';
 }
 
+constexpr const char* target_names[] = {"gfx803",
+                                        "gfx900",
+                                        "gfx906",
+                                        "gfx908",
+                                        "gfx90a",
+                                        "gfx942",
+                                        "gfx1030",
+                                        "gfx1100",
+                                        "gfx1102",
+                                        "gfx1200",
+                                        "gfx1201"};
+
+constexpr target_arch target_architectures[] = {
+    target_arch::gfx803,
+    target_arch::gfx900,
+    target_arch::gfx906,
+    target_arch::gfx908,
+    target_arch::gfx90a,
+    target_arch::gfx942,
+    target_arch::gfx1030,
+    target_arch::gfx1100,
+    target_arch::gfx1102,
+    target_arch::gfx1200,
+    target_arch::gfx1201,
+};
+
 constexpr target_arch get_target_arch_from_name(const char* const arch_name, const std::size_t n)
 {
-    constexpr const char* target_names[]         = {"gfx803",
-                                                    "gfx900",
-                                                    "gfx906",
-                                                    "gfx908",
-                                                    "gfx90a",
-                                                    "gfx942",
-                                                    "gfx1030",
-                                                    "gfx1100",
-                                                    "gfx1102",
-                                                    "gfx1200",
-                                                    "gfx1201"};
-    constexpr target_arch target_architectures[] = {
-        target_arch::gfx803,
-        target_arch::gfx900,
-        target_arch::gfx906,
-        target_arch::gfx908,
-        target_arch::gfx90a,
-        target_arch::gfx942,
-        target_arch::gfx1030,
-        target_arch::gfx1100,
-        target_arch::gfx1102,
-        target_arch::gfx1200,
-        target_arch::gfx1201,
-    };
     static_assert(sizeof(target_names) / sizeof(target_names[0])
                       == sizeof(target_architectures) / sizeof(target_architectures[0]),
                   "target_names and target_architectures should have the same number of elements");
@@ -243,6 +241,19 @@ constexpr target_arch get_target_arch_from_name(const char* const arch_name, con
         }
     }
     return target_arch::unknown;
+}
+
+template<class F, std::size_t... Is>
+constexpr void for_each_arch_impl(F&& f, std::index_sequence<Is...>)
+{
+    (f(std::integral_constant<target_arch, target_architectures[Is]>{}), ...);
+}
+
+template<class F>
+constexpr void for_each_arch(F&& f)
+{
+    for_each_arch_impl(std::forward<F>(f),
+                       std::make_index_sequence<std::size(target_architectures)>{});
 }
 
 /**
@@ -264,41 +275,42 @@ constexpr target_arch device_target_arch()
 #endif
 }
 
-template<class Config>
+template<class Config, bool IgnoreConfig = ROCPRIM_EXPERIMENTAL_SPIRV>
 auto dispatch_target_arch([[maybe_unused]] const target_arch target_arch)
 {
-#if !defined(ROCPRIM_EXPERIMENTAL_SPIRV)
-    switch(target_arch)
+    if constexpr(!IgnoreConfig)
     {
+        switch(target_arch)
+        {
 
-        case target_arch::unknown:
-            return Config::template architecture_config<target_arch::unknown>::params;
-        case target_arch::gfx803:
-            return Config::template architecture_config<target_arch::gfx803>::params;
-        case target_arch::gfx900:
-            return Config::template architecture_config<target_arch::gfx900>::params;
-        case target_arch::gfx906:
-            return Config::template architecture_config<target_arch::gfx906>::params;
-        case target_arch::gfx908:
-            return Config::template architecture_config<target_arch::gfx908>::params;
-        case target_arch::gfx90a:
-            return Config::template architecture_config<target_arch::gfx90a>::params;
-        case target_arch::gfx942:
-            return Config::template architecture_config<target_arch::gfx942>::params;
-        case target_arch::gfx1030:
-            return Config::template architecture_config<target_arch::gfx1030>::params;
-        case target_arch::gfx1100:
-            return Config::template architecture_config<target_arch::gfx1100>::params;
-        case target_arch::gfx1102:
-            return Config::template architecture_config<target_arch::gfx1102>::params;
-        case target_arch::gfx1200:
-            return Config::template architecture_config<target_arch::gfx1200>::params;
-        case target_arch::gfx1201:
-            return Config::template architecture_config<target_arch::gfx1201>::params;
-        case target_arch::invalid:
-            assert(false && "Invalid target architecture selected at runtime.");
+            case target_arch::unknown:
+                return Config::template architecture_config<target_arch::unknown>::params;
+            case target_arch::gfx803:
+                return Config::template architecture_config<target_arch::gfx803>::params;
+            case target_arch::gfx900:
+                return Config::template architecture_config<target_arch::gfx900>::params;
+            case target_arch::gfx906:
+                return Config::template architecture_config<target_arch::gfx906>::params;
+            case target_arch::gfx908:
+                return Config::template architecture_config<target_arch::gfx908>::params;
+            case target_arch::gfx90a:
+                return Config::template architecture_config<target_arch::gfx90a>::params;
+            case target_arch::gfx942:
+                return Config::template architecture_config<target_arch::gfx942>::params;
+            case target_arch::gfx1030:
+                return Config::template architecture_config<target_arch::gfx1030>::params;
+            case target_arch::gfx1100:
+                return Config::template architecture_config<target_arch::gfx1100>::params;
+            case target_arch::gfx1102:
+                return Config::template architecture_config<target_arch::gfx1102>::params;
+            case target_arch::gfx1200:
+                return Config::template architecture_config<target_arch::gfx1200>::params;
+            case target_arch::gfx1201:
+                return Config::template architecture_config<target_arch::gfx1201>::params;
+            case target_arch::invalid:
+                assert(false && "Invalid target architecture selected at runtime.");
+        }
     }
-#endif
     return Config::template architecture_config<target_arch::unknown>::params;
 }
 
@@ -401,7 +413,7 @@ inline hipError_t get_device_from_stream(const hipStream_t stream, int& device_i
     const bool is_legacy_stream = false;
 #endif
 
-    if (stream == default_stream || stream == hipStreamPerThread || is_legacy_stream)
+    if(stream == default_stream || stream == hipStreamPerThread || is_legacy_stream)
     {
         const hipError_t result = hipGetDevice(&device_id);
         if(result != hipSuccess)
@@ -466,7 +478,8 @@ inline hipError_t host_warp_size(const int device_id, unsigned int& warp_size)
 /// \return hipError_t any error that might occur.
 ///
 /// It is constant for a device.
-ROCPRIM_HOST inline hipError_t host_warp_size(const hipStream_t stream, unsigned int& warp_size)
+ROCPRIM_HOST
+inline hipError_t host_warp_size(const hipStream_t stream, unsigned int& warp_size)
 {
     int        hip_device;
     hipError_t success = detail::get_device_from_stream(stream, hip_device);

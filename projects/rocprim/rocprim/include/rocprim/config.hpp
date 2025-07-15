@@ -146,6 +146,10 @@
     #define ROCPRIM_MAX_ATOMIC_SIZE 16
 #endif
 
+#if !defined(ROCPRIM_EXPERIMENTAL_SPIRV) || !ROCPRIM_EXPERIMENTAL_SPIRV
+    #define ROCPRIM_EXPERIMENTAL_SPIRV 0
+#endif
+
 // DPP is supported only after Volcanic Islands (GFX8+)
 // Only defined when support is present, in contrast to ROCPRIM_DETAIL_USE_DPP, which should be
 // always defined
@@ -196,7 +200,7 @@
 /// Quad size (group of 4 threads)
 #define ROCPRIM_QUAD_SIZE 4u
 
-#if(defined(_MSC_VER) && !defined(__clang__)) || (defined(__GNUC__) && !defined(__clang__))
+#if (defined(_MSC_VER) && !defined(__clang__)) || (defined(__GNUC__) && !defined(__clang__))
     #define ROCPRIM_UNROLL
     #define ROCPRIM_NO_UNROLL
 #else
