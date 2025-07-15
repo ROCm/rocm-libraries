@@ -40,7 +40,7 @@
 #  ifndef THRUST_NO_RTTI
 #    if defined(THRUST_DISABLE_RTTI) // Escape hatch for users to manually disable RTTI
 #      define THRUST_NO_RTTI
-#    elif defined(__ICC)
+#    elif defined(__INTEL_COMPILER)
 #      if __RTTI == 0 && __INTEL_RTTI__ == 0 && __GXX_RTTI == 0 && _CPPRTTI == 0
 #        define THRUST_NO_RTTI
 #      endif
