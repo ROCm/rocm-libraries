@@ -456,34 +456,38 @@ rocblas_status gemm_ex_typecasting(rocblas_handle     handle,
         // Pass alpha and beta as simple array (stride of 1)
         // since Tensile does not have gemm_batched, we will have to iterate
         // over batches either way
-        if(check_numerics && !std::is_same_v<Ti, signed char>)
+        constexpr bool check_numerics_supported = !std::is_same_v<Ti, int8_t>;
+        if constexpr(check_numerics_supported)
         {
-            bool           is_input = true;
-            rocblas_status gemm_ex_check_numerics_status
-                = rocblas_gemm_check_numerics("rocblas_gemm_batched_ex",
-                                              handle,
-                                              trans_a,
-                                              trans_b,
-                                              m,
-                                              n,
-                                              k,
-                                              (const Ti* const*)a,
-                                              offsetAin,
-                                              lda,
-                                              stride_a,
-                                              (const Ti* const*)b,
-                                              offsetBin,
-                                              ldb,
-                                              stride_b,
-                                              (const To* const*)c,
-                                              offsetCin,
-                                              ldc,
-                                              stride_c,
-                                              batch_count,
-                                              check_numerics,
-                                              is_input);
-            if(gemm_ex_check_numerics_status != rocblas_status_success)
-                return gemm_ex_check_numerics_status;
+            if(check_numerics)
+            {
+                bool           is_input = true;
+                rocblas_status gemm_ex_check_numerics_status
+                    = rocblas_gemm_check_numerics("rocblas_gemm_batched_ex",
+                                                  handle,
+                                                  trans_a,
+                                                  trans_b,
+                                                  m,
+                                                  n,
+                                                  k,
+                                                  (const Ti* const*)a,
+                                                  offsetAin,
+                                                  lda,
+                                                  stride_a,
+                                                  (const Ti* const*)b,
+                                                  offsetBin,
+                                                  ldb,
+                                                  stride_b,
+                                                  (const To* const*)c,
+                                                  offsetCin,
+                                                  ldc,
+                                                  stride_c,
+                                                  batch_count,
+                                                  check_numerics,
+                                                  is_input);
+                if(gemm_ex_check_numerics_status != rocblas_status_success)
+                    return gemm_ex_check_numerics_status;
+            }
         }
 
         status = rocblas_internal_gemm_ex<BATCHED>(handle,
@@ -517,34 +521,37 @@ rocblas_status gemm_ex_typecasting(rocblas_handle     handle,
         if(status != rocblas_status_success)
             return status;
 
-        if(check_numerics && !std::is_same_v<Ti, signed char>)
+        if constexpr(check_numerics_supported)
         {
-            bool           is_input = false;
-            rocblas_status gemm_ex_check_numerics_status
-                = rocblas_gemm_check_numerics("rocblas_gemm_batched_ex",
-                                              handle,
-                                              trans_a,
-                                              trans_b,
-                                              m,
-                                              n,
-                                              k,
-                                              (const Ti* const*)a,
-                                              offsetAin,
-                                              lda,
-                                              stride_a,
-                                              (const Ti* const*)b,
-                                              offsetBin,
-                                              ldb,
-                                              stride_b,
-                                              (To* const*)d,
-                                              offsetDin,
-                                              ldd,
-                                              stride_d,
-                                              batch_count,
-                                              check_numerics,
-                                              is_input);
-            if(gemm_ex_check_numerics_status != rocblas_status_success)
-                return gemm_ex_check_numerics_status;
+            if(check_numerics)
+            {
+                bool           is_input = false;
+                rocblas_status gemm_ex_check_numerics_status
+                    = rocblas_gemm_check_numerics("rocblas_gemm_batched_ex",
+                                                  handle,
+                                                  trans_a,
+                                                  trans_b,
+                                                  m,
+                                                  n,
+                                                  k,
+                                                  (const Ti* const*)a,
+                                                  offsetAin,
+                                                  lda,
+                                                  stride_a,
+                                                  (const Ti* const*)b,
+                                                  offsetBin,
+                                                  ldb,
+                                                  stride_b,
+                                                  (To* const*)d,
+                                                  offsetDin,
+                                                  ldd,
+                                                  stride_d,
+                                                  batch_count,
+                                                  check_numerics,
+                                                  is_input);
+                if(gemm_ex_check_numerics_status != rocblas_status_success)
+                    return gemm_ex_check_numerics_status;
+            }
         }
     }
     else

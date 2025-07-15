@@ -1241,8 +1241,7 @@ class GSUOn(GSU):
             if kernel["ProblemType"]["SupportUserArgs"]:
                 module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=2, comment="ArgType == 2 ?"))
                 module.add(SCBranchSCC0(labelName=extReadEpilogueLabeltmp.getLabelName()))
-            reductionOffset = kernel["MacroTile0"]*kernel["MacroTile1"]*writer.states.bpeCinternal
-            module.add(SMulI32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgprAccumTiles), src1=hex(reductionOffset), comment="accumNumTiles*(MT0*MT1*bpeC)"))
+            module.add(SMulI32(dst=sgpr(tmpSgpr0), src0=sgpr(tmpSgprAccumTiles), src1="MTOffset", comment="accumNumTiles*(MT0*MT1*bpeC)"))
             module.add(SAddU32(dst=sgpr("AddressTD"), src0=sgpr("AddressTD"), src1=sgpr(tmpSgpr0)))
             module.add(SAddCU32(dst=sgpr("AddressTD+1"), src0=sgpr("AddressTD+1"), src1=0))
             module.add(SAddU32(dst=sgpr("Synchronizer"), src0=sgpr("Synchronizer"), src1=hex(1638400)))
@@ -1871,12 +1870,10 @@ class GSUOn(GSU):
         tmpS01 = writer.sgprPool.checkOut(1, preventOverflow=False) #
         tmpS02 = writer.sgprPool.checkOut(1, preventOverflow=False) #
         tmpS03 = writer.sgprPool.checkOut(1, preventOverflow=False) #
-        tmpS04 = writer.sgprPool.checkOutAligned(2,2, preventOverflow=False) #
         tmpS05 = writer.sgprPool.checkOutAligned(2,2, preventOverflow=False) #
         tmpS06 = writer.sgprPool.checkOutAligned(4,4, preventOverflow=False) #overflow?
         tmpS06Res = ContinuousRegister(idx=tmpS06, size=4)
 
-        reductionOffset = kernel["MacroTile0"]*kernel["MacroTile1"]*writer.states.bpeCinternal
         #####################################synchronizer offset cal and set synchronizer#####################################
         #####################################WaveId+WgId*WaveNum+WgNum*WaveNum*Batch#####################################
         #####################################WgId+WaveId*WgNum+WgNum*WaveNum*Batch#####################################
@@ -1908,9 +1905,7 @@ class GSUOn(GSU):
             module.add(SSubU32(dst=sgpr(tmpS02), src0=sgpr(tmpS02), src1=hex(1), comment=""))
             module.add(SAtomicDec(dst=sgpr(tmpS02), base=sgpr("SrdSync", 2), smem=SMEMModifiers(glc=True)))
             #####################################cal synchronizer sum offset#####################################
-            module.addComment("synchronizer sum offset cal")
-            module.add(SMovB64(dst=sgpr(tmpS04,2), src=hex(reductionOffset), comment="MT0*MT1*bpeC"))
-            module.addSpaceLine()
+            module.addComment0("synchronizer sum offset is equal to MTOffset (=MT0*MT1*bpeC)")
 
         #####################################cal synchronizer sum start#####################################
         # no need to do because we have workspace start sgpr
@@ -1932,12 +1927,11 @@ class GSUOn(GSU):
         if batchIdx == 0:
             module.add(VMovB32(dst=vgpr(bufferOOB), src="BufferOOB"))
             module.addComment("add offset to base workspace address")
-            module.add(SMulHIU32(dst=sgpr(tmpS06+1), src0=hex(reductionOffset), src1=sgpr("GSUStartWGIdx"), comment="(MT0*MT1*bpeC)*WGIdx"))
-            module.add(SMulI32(dst=sgpr(tmpS06), src0=hex(reductionOffset), src1=sgpr("GSUStartWGIdx"), comment="(MT0*MT1*bpeC)*WGIdx"))
+            module.add(SMulHIU32(dst=sgpr(tmpS06+1), src0="MTOffset", src1=sgpr("GSUStartWGIdx"), comment="(MT0*MT1*bpeC)*WGIdx"))
+            module.add(SMulI32(dst=sgpr(tmpS06), src0="MTOffset", src1=sgpr("GSUStartWGIdx"), comment="(MT0*MT1*bpeC)*WGIdx"))
             module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr("AddressD+0"), src1=sgpr(tmpS06), comment="add lo to SRD"))
             module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr("AddressD+1"), src1=sgpr(tmpS06+1), comment="add hi to SRD"))
-            module.add(SMovB32(sgpr(tmpS06+2), sgpr("SrdD+2"), ""))
-            module.add(SMovB32(sgpr(tmpS06+3), sgpr("SrdD+3"), ""))
+            module.add(SMovB64(sgpr(tmpS06+2, 2), sgpr("SrdD+2", 2), ""))
 
         addr1 = sgpr(tmpS06, 4)
         addr0 = vgpr(vgproffset)
@@ -1973,8 +1967,8 @@ class GSUOn(GSU):
                 for times in range(elementIdx, elementIdx+1):
                     if batchIdx != 0 or elementIdx != 0:
                         module.add(SAddU32(dst=sgpr(soffset), src0=sgpr(soffset), src1=increment, comment="Increase sgpr offset for load"))
-                        module.add(SMulHIU32(dst=sgpr(tmpS06+1), src0=hex(reductionOffset), src1=sgpr("GSUStartWGIdx"), comment="(MT0*MT1*bpeC)*WGIdx"))
-                        module.add(SMulI32(dst=sgpr(tmpS06), src0=hex(reductionOffset), src1=sgpr("GSUStartWGIdx"), comment="(MT0*MT1*bpeC)*WGIdx"))
+                        module.add(SMulHIU32(dst=sgpr(tmpS06+1), src0="MTOffset", src1=sgpr("GSUStartWGIdx"), comment="(MT0*MT1*bpeC)*WGIdx"))
+                        module.add(SMulI32(dst=sgpr(tmpS06), src0="MTOffset", src1=sgpr("GSUStartWGIdx"), comment="(MT0*MT1*bpeC)*WGIdx"))
                         module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr("AddressD+0"), src1=sgpr(tmpS06), comment="add lo to SRD"))
                         module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr("AddressD+1"), src1=sgpr(tmpS06+1), comment="add hi to SRD"))
 
@@ -1998,8 +1992,8 @@ class GSUOn(GSU):
                 for i in range(0,GSUP1):
                     module.add(SSubI32(dst=sgpr("GSUSync"), src0=sgpr("GSUSync"), src1=1, comment="%u" % i))
 
-                    module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1=sgpr(tmpS04+0), comment="" ))
-                    module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1=sgpr(tmpS04+1), comment="" ))
+                    module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1="MTOffset", comment="" ))
+                    module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment="" ))
 
                     module.add(SCmpEQI32(src0=sgpr("GSUSync"), src1=0, comment=""))#GSUSync+GSUP1==GSU
                     module.add(SCBranchSCC1(labelName=SynchronizerAddEndlabel[i].getLabelName(), comment="SyncAddbranchhere"))
@@ -2045,8 +2039,8 @@ class GSUOn(GSU):
                     module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0-(GSUP1-1), comment=""))#GSUSync+GSUP1==GSU
                     module.add(SCBranchSCC1(labelName=SynchronizerAddSkiplabel.getLabelName(), comment="SyncAddbranch"))
 
-                    module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1=sgpr(tmpS04+0), comment=""))
-                    module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1=sgpr(tmpS04+1), comment=""))
+                    module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1="MTOffset", comment=""))
+                    module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment=""))
 
                     module.add(VCmpGEI32(dst=sgpr(tmpS05,2), src0=0, src1=sgpr("GSUSync"), comment=""))
                     module.add(VCndMaskB32(dst=vgpr(GSUMvgpr), src1=vgpr(bufferOOB), src0=addr0, src2=sgpr(tmpS05,2), comment="protect if OOB"))
@@ -2116,15 +2110,15 @@ class GSUOn(GSU):
                 SynchronizerAddEndlabel[idx] = Label(writer.labels.getNameInc(SynchronizerAddEndlabelString), SynchronizerAddEndComment)
 
             # set buffer load address for WG0
-            module.add(SMulHIU32(dst=sgpr(tmpWSD+1), src0=hex(reductionOffset), src1=sgpr("GSUStartWGIdx"), comment="(MT0*MT1*bpeC)*WGIdx"))
-            module.add(SMulI32(dst=sgpr(tmpWSD), src0=hex(reductionOffset), src1=sgpr("GSUStartWGIdx"), comment="(MT0*MT1*bpeC)*WGIdx"))
+            module.add(SMulHIU32(dst=sgpr(tmpWSD+1), src0="MTOffset", src1=sgpr("GSUStartWGIdx"), comment="(MT0*MT1*bpeC)*WGIdx"))
+            module.add(SMulI32(dst=sgpr(tmpWSD), src0="MTOffset", src1=sgpr("GSUStartWGIdx"), comment="(MT0*MT1*bpeC)*WGIdx"))
             module.add(SAddU32(dst=sgpr(tmpWSD), src0=sgpr("AddressD+0"), src1=sgpr(tmpWSD), comment="add lo to SRD"))
-            module.add(SAddCU32(dst=sgpr(tmpWSD+1), src0=sgpr("AddressD+1"), src1=sgpr(tmpWSD+1), comment="add hi to SRD"))
+            module.add(SAddCU32(dst=sgpr(tmpWSD+1), src0=sgpr("AddressD+1"), src1=sgpr(tmpWSD+1), comment="add hi to SRD WSD"))
             module.add(SMovB64(sgpr(tmpWSD+2, 2), sgpr("SrdD+2", 2), ""))
 
             # set buffer load address for WG1
-            module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpWSD+0), src1=sgpr(tmpS04+0), comment="" ))
-            module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpWSD+1), src1=sgpr(tmpS04+1), comment="" ))
+            module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpWSD+0), src1="MTOffset", comment="" ))
+            module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpWSD+1), src1="MTOffsetH32", comment="" ))
             module.add(SMovB64(sgpr(tmpS06+2, 2), sgpr("SrdD+2", 2), ""))
 
             if batchIdx == 0:
@@ -2163,8 +2157,8 @@ class GSUOn(GSU):
             module.add(SSubI32(dst=sgpr("GSUSync"), src0=sgpr("GSUSync"), src1=2))
             module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0, comment="GSUSync <= 0?"))
             module.add(SCBranchSCC1(labelName=SynchronizerAddEndlabel[1].getLabelName(), comment=""))
-            module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1=sgpr(tmpS04+0), comment="" ))
-            module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1=sgpr(tmpS04+1), comment="" ))
+            module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1="MTOffset", comment="" ))
+            module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment="" ))
 
             # other WGs: read all elements together
             for uidx in range(2, unrolledWGs+1):
@@ -2185,8 +2179,8 @@ class GSUOn(GSU):
                 module.add(SSubI32(dst=sgpr("GSUSync"), src0=sgpr("GSUSync"), src1=1))
                 module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0, comment="GSUSync <= 0?"))
                 module.add(SCBranchSCC1(labelName=SynchronizerAddEndlabel[uidx].getLabelName(), comment=""))
-                module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1=sgpr(tmpS04+0), comment="" ))
-                module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1=sgpr(tmpS04+1), comment="" ))
+                module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1="MTOffset", comment="" ))
+                module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment="" ))
 
             module.addComment("buffer load end\n")
 
@@ -2233,8 +2227,8 @@ class GSUOn(GSU):
             module.add(SSubI32(dst=sgpr("GSUSync"), src0=sgpr("GSUSync"), src1=1))
             module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0-unrolledWGs, comment=""))
             module.add(SCBranchSCC1(labelName=accumulationEndlabel.getLabelName(), comment="Accumulation finished"))
-            module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1=sgpr(tmpS04+0), comment="" ))
-            module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1=sgpr(tmpS04+1), comment="" ))
+            module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1="MTOffset", comment="" ))
+            module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment="" ))
             module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0, comment="disable buffer load if GSUSync <= 0"))
             module.add(SCSelectB32(sgpr(tmpS06+2), 0, sgpr(tmpS06+2), ""))
             module.add(accumulationStartlabel)
@@ -2275,8 +2269,8 @@ class GSUOn(GSU):
                 module.add(SSubI32(dst=sgpr("GSUSync"), src0=sgpr("GSUSync"), src1=1))
                 module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0-unrolledWGs, comment=""))
                 module.add(SCBranchSCC1(labelName=accumulationEndlabel.getLabelName(), comment="Accumulation finished"))
-                module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1=sgpr(tmpS04+0), comment="" ))
-                module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1=sgpr(tmpS04+1), comment="" ))
+                module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr(tmpS06+0), src1="MTOffset", comment="" ))
+                module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment="" ))
                 module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0, comment="disable buffer load if GSUSync <= 0"))
                 module.add(SCSelectB32(sgpr(tmpS06+2), 0, sgpr(tmpS06+2), ""))
 
@@ -2337,7 +2331,6 @@ class GSUOn(GSU):
 
         writer.sgprPool.checkIn(tmpS06)
         writer.sgprPool.checkIn(tmpS05)
-        writer.sgprPool.checkIn(tmpS04)
         writer.sgprPool.checkIn(tmpS03)
         writer.sgprPool.checkIn(tmpS02)
         writer.sgprPool.checkIn(tmpS01)

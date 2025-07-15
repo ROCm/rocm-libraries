@@ -37,6 +37,7 @@ include(GenerateExportHeader)
 include(CMakeDependentOption)
 include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
+include(TensileliteSupportedArchitectures)
 
 rocm_setup_version(VERSION ${PROJECT_VERSION})
 set(hipblaslt_SOVERSION 1.0)
@@ -105,6 +106,14 @@ set(TEMP_TENSILE_HOST_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/Ten
 set(HIPBLASLT_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../library")
 set(HIPBLASLT_CLIENTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../clients")
 set(ROCBLASLT_LIB_DIR "${HIPBLASLT_LIB_DIR}/src/amd_detail/rocblaslt")
+set(GPU_TARGETS "" CACHE STRING "AMD GFX targets to cross-compile")
+
+if(NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all")
+    tensilelite_get_base_architectures(GPU_TARGETS)
+else()
+    tensilelite_validate_gpu_targets("${GPU_TARGETS}")
+endif()
+message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 
 find_package(hip REQUIRED)
 if(HIPBLASLT_ENABLE_HOST)
