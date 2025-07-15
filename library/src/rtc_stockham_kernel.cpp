@@ -129,6 +129,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                       PrintScheme(node.scheme));
         specs->threads_per_transform = kernel->threads_per_transform[0];
         specs->half_lds              = kernel->half_lds;
+        specs->ebtype                = node.ebtype;
 
         specs2d.emplace(factors2d,
                         factors1d,
@@ -186,7 +187,6 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                                         node.largeTwdBase,
                                         node.ltwdSteps,
                                         node.largeTwdBatchIsTransformCount,
-                                        node.ebtype,
                                         node.dir2regMode,
                                         node.intrinsicMode,
                                         node.sbrcTranstype,
@@ -213,7 +213,6 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                             node.largeTwdBase,
                             node.ltwdSteps,
                             node.largeTwdBatchIsTransformCount,
-                            node.ebtype,
                             node.dir2regMode,
                             node.intrinsicMode,
                             node.sbrcTranstype,

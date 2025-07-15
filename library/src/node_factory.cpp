@@ -1031,7 +1031,8 @@ bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData
     size_t checkDist     = product(nodeData.length.begin(), nodeData.length.end());
     bool   distCondition = (nodeData.iDist == checkDist && nodeData.oDist == checkDist);
 
-    bool strideCondition = (nodeData.inStride[0] == 1 && nodeData.outStride[0] == 1);
+    bool strideCondition = ((nodeData.inStride.size() && nodeData.inStride[0]) == 1
+                            && (nodeData.outStride.size() && nodeData.outStride[0]) == 1);
 
     bool arrayTypeCondition = (nodeData.inArrayType != rocfft_array_type_complex_planar
                                && nodeData.outArrayType != rocfft_array_type_complex_planar);

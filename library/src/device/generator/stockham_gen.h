@@ -22,6 +22,7 @@
 
 #pragma once
 #include "../../../../shared/arithmetic.h"
+#include "../kernels/device_enum.h"
 #include "rocfft/rocfft.h"
 #include <ostream>
 #include <string>
@@ -59,6 +60,8 @@ struct StockhamGeneratorSpecs
     // statically defined for the kernel
     unsigned int static_dim = 0;
     std::string  scheme;
+
+    EmbeddedType ebtype = EmbeddedType::NONE;
 
     // this value indicating if the wgs, tpt are excatly what we want
     // (i.e. were already derived somewhere)

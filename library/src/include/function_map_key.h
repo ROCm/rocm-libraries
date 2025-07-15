@@ -284,6 +284,7 @@ struct FromString<KernelConfig>
     }
 };
 
+// Base function map key
 struct FMKeyBase
 {
     FMKeyBase(std::array<size_t, 3> lengths,
@@ -324,6 +325,8 @@ struct FMKeyBase
 //    (And that is what exactly "fuction_pool::insert_default_entry()" and
 //                               "function_pool::get_actual_key()"" is doing
 //
+
+// Function map key for regular kernels, derived from FMKeyBase.
 struct FMKey : public FMKeyBase
 {
     SBRC_TRANSPOSE_TYPE sbrcTrans     = NONE;
@@ -460,6 +463,7 @@ struct FromString<FMKey>
     }
 };
 
+// Hash function for FMKey.
 struct SimpleHash
 {
     size_t operator()(const FMKey& p) const noexcept
@@ -476,6 +480,14 @@ struct SimpleHash
     }
 };
 
+// Function map key for partial-pass kernels.
+// Derived from FMKeyBase, but adds two kernel configurations.
+// Partial pass kernels are linked, as opposed to regular
+// kernels that can act completely independent, and require
+// a separate key type.
+// When querying the function pool with this key, we can
+// return the two partial pass kernels that can handle the
+// specified FFT, e.g., a 3D FFT with two partial pass kernels.
 struct PPFMKey : public FMKeyBase
 {
     KernelConfig kernel_config_1 = KernelConfig::EmptyConfig();
@@ -538,6 +550,7 @@ struct PPFMKey : public FMKeyBase
     }
 };
 
+// Hash function for PPFMKey.
 struct SimpleHashPP
 {
     size_t operator()(const PPFMKey& p) const noexcept
