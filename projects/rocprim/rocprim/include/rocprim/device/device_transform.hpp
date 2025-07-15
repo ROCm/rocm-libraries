@@ -43,6 +43,24 @@ BEGIN_ROCPRIM_NAMESPACE
 
 namespace detail
 {
+constexpr const char* arch_name(target_arch a)
+{
+    switch(a)
+    {
+        case target_arch::gfx803: return "gfx803";
+        case target_arch::gfx900: return "gfx900";
+        case target_arch::gfx906: return "gfx906";
+        case target_arch::gfx908: return "gfx908";
+        case target_arch::gfx90a: return "gfx90a";
+        case target_arch::gfx942: return "gfx942";
+        case target_arch::gfx1030: return "gfx1030";
+        case target_arch::gfx1100: return "gfx1100";
+        case target_arch::gfx1102: return "gfx1102";
+        case target_arch::gfx1200: return "gfx1200";
+        case target_arch::gfx1201: return "gfx1201";
+        default: return "unknown";
+    }
+}
 
 // Trampoline that is fully specialized at compile-time for a single GPU architecture.
 // By instantiating this template once per supported `target_arch`,the correct tuned config
@@ -60,6 +78,14 @@ void transform_trampoline(InputIt in, size_t n, OutputIt out, UnaryOp op)
 {
     // Pull the per-arch tuned parameters into constexpr scope
     constexpr auto p = Config::template architecture_config<Arch>::params;
+
+    // if(threadIdx.x == 0 && blockIdx.x == 0)
+    // {
+    //     printf("[transform][%s] block=%u  items/thread=%u\n",
+    //            arch_name(Arch),
+    //            p.kernel_config.block_size,
+    //            p.kernel_config.items_per_thread);
+    // }
 
     // Delegate to the real implementation, with the correct constants
     detail::transform_kernel_impl<
@@ -94,12 +120,24 @@ inline hipError_t launch_transform_for_arch(target_arch arch,
     auto try_launch = [&](auto arch_tag)
     {
         constexpr target_arch A = decltype(arch_tag)::value;
-        if(A == arch && !launched)
-        {
-            transform_trampoline<A, IsPointer, Config, ResultType>
-                <<<grid, block, 0, s>>>(in, n, out, op);
-            launched = true;
-        }
+        if(A != arch || launched)
+            return;
+
+        constexpr auto     cfg              = Config::template architecture_config<A>::params;
+        constexpr unsigned block_size       = cfg.kernel_config.block_size;
+        constexpr unsigned items_per_thread = cfg.kernel_config.items_per_thread;
+        constexpr size_t   items_per_block  = block_size * items_per_thread;
+
+        const dim3 block(block_size);
+        const dim3 grid((n + items_per_block - 1) / items_per_block);
+
+        // std::cout << "[transform] pick " << detail::arch_name(A) << "  block=" << block.x
+        //           << "  items=" << items_per_thread << "  grid=" << grid.x << '\n';
+
+        transform_trampoline<A, IsPointer, Config, ResultType>
+            <<<grid, block, 0, s>>>(in, n, out, op);
+
+        launched = true;
     };
 
     // Enumerate every architecture for which we have a tuned config
@@ -193,8 +231,8 @@ inline hipError_t transform_impl(InputIterator     input,
                                                                   output + offset,
                                                                   current_size,
                                                                   transform_op,
-                                                                  dim3(current_blocks),
-                                                                  dim3(block_size),
+                                                                  current_blocks,
+                                                                  block_size,
                                                                   stream);
 
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("transform_kernel", current_size, start);
