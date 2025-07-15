@@ -1,3 +1,6 @@
+# rocRoller
+> [!CAUTION]
+> The rocRoller repository is retired, please use the [ROCm/rocm-libraries](https://github.com/ROCm/rocm-libraries) repository
 
 # AMD's rocRoller Assembly Kernel Generator
 

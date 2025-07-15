@@ -173,18 +173,6 @@ if(BUILD_CODE_COVERAGE)
   add_link_options(--coverage)
 endif()
 
-include(CMakeDependentOption)
-cmake_dependent_option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY
-  "Build with file/folder reorg backward compatibility enabled" OFF "NOT WIN32" OFF)
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
-  rocm_wrap_header_dir(
-    ${CMAKE_SOURCE_DIR}/library/include
-    PATTERNS "*.h"
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS ${CMAKE_INSTALL_INCLUDEDIR}
-  )
-endif()
-
 if(WIN32)
   add_compile_definitions(
     WIN32_LEAN_AND_MEAN

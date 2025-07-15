@@ -28,6 +28,7 @@ set(_CMAKE_CURRENT_SOURCE_DIR "${ROCROLLER_LIB_DIR}/source/ExpressionTransformat
 target_sources(rocroller
     PRIVATE
         "${_CMAKE_CURRENT_SOURCE_DIR}/CombineShifts.cpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR}/ConvertPropagation.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/DataFlowTagPropagation.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/FastArithmetic.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/FastMultiplication.cpp"

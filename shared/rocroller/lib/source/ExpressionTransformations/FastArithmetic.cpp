@@ -44,6 +44,7 @@ namespace rocRoller
             }
             ExpressionPtr orig = x;
 
+            x = convertPropagation(x);
             x = fastDivision(x, m_context);
             x = simplify(x);
             x = lowerExponential(x);

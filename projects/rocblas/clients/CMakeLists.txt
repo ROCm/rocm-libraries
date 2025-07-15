@@ -22,6 +22,24 @@
 
 cmake_minimum_required( VERSION 3.16.8 )
 
+function( apply_omp_settings lib_target_ )
+  if (TARGET OpenMP::OpenMP_CXX)
+    set_target_properties( ${lib_target_} PROPERTIES
+      BUILD_RPATH "${HIP_CLANG_ROOT}/lib"
+    )
+    set_target_properties( ${lib_target_} PROPERTIES
+      INSTALL_RPATH "$ORIGIN/../llvm/lib"
+    )
+  elseif(TARGET OpenMP::omp)
+    set_target_properties( ${lib_target_} PROPERTIES
+      BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}"
+    )
+    set_target_properties( ${lib_target_} PROPERTIES
+      INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}"
+    )
+  endif()
+endfunction()
+
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
 if( NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE )
@@ -69,20 +87,27 @@ endif()
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-# if it fails to find OpenMP compile and link flags in strange configurations it can just use non-parallel reference computation
-# if there is no omp.h to find the client compilation will fail and this should be obvious, used to be REQUIRED
-find_package(OpenMP)
+# Look for openmp config in ROCm install to populate openmp_LIB_DIR and openmp_LIB_INSTALL_DIR
+find_package(OpenMP CONFIG PATHS "${HIP_CLANG_ROOT}/lib/cmake")
 
-if (TARGET OpenMP::OpenMP_CXX)
-  set( COMMON_LINK_LIBS "OpenMP::OpenMP_CXX")
-  get_filename_component(LIBOMP_PATH "${OpenMP_omp_LIBRARY}" PATH)
-  if (NOT WIN32)
-    list( APPEND COMMON_LINK_LIBS "-Wl,-rpath=${LIBOMP_PATH}")
+if (TARGET OpenMP::omp)
+  set( COMMON_LINK_LIBS "OpenMP::omp")
+  message(STATUS "Found openmp-config.cmake at ${OpenMP_DIR}")
+else()
+  # if it fails to find OpenMP compile and link flags in strange configurations it can just use non-parallel reference computation
+  # if there is no omp.h to find the client compilation will fail and this should be obvious, used to be REQUIRED
+  find_package(OpenMP)
+  if (TARGET OpenMP::OpenMP_CXX)
+    set( COMMON_LINK_LIBS "OpenMP::OpenMP_CXX")
+    if(HIP_PLATFORM STREQUAL amd)
+      list( APPEND COMMON_LINK_LIBS "-L\"${HIP_CLANG_ROOT}/lib\"")
+      if (NOT WIN32)
+        list( APPEND COMMON_LINK_LIBS "-lomp")
+      else()
+        list( APPEND COMMON_LINK_LIBS "libomp")
+      endif()
+    endif()
   endif()
-endif()
-
-if (WIN32)
-  list( APPEND COMMON_LINK_LIBS "libomp")
 endif()
 
 if (TARGET Threads::Threads)

@@ -314,7 +314,7 @@ class GEMMResult(GEMM, RRPerfResult):
             + "/"
             + str(self.prefetchLDSFactor),
             "SCH": self.scheduler[0],
-            "SK": TF(self.streamK) + "/" + self.numWGs,
+            "SK": TF(self.streamK) + "/" + str(self.numWGs),
             "2TSK": TF(self.streamKTwoTile),
             "iters": "/".join(
                 [str(getattr(self, "num" + x)) for x in ["WarmUp", "Outer", "Inner"]]

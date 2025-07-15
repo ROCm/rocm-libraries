@@ -555,8 +555,9 @@ namespace rocRoller
 
             // TODO: Improve setting of arch-specific buffer options
             BufferInstructionOptions bufOpts{.glc = true};
-            auto                     flagRegister = graph.coordinates.addElement(VGPR());
-            auto loadFlagTag = graph.control.addElement(LoadSGPR(DataType::UInt32, bufOpts));
+
+            auto flagRegister = graph.coordinates.addElement(VGPR());
+            auto loadFlagTag  = graph.control.addElement(LoadSGPR(DataType::UInt32, bufOpts));
 
             auto numScratch     = argInfo.numWGs;
             auto boundsCheckTag = graph.control.addElement(

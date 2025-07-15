@@ -155,6 +155,7 @@ set(
     catch/TestContext.cpp
     catch/TestKernels.cpp
 
+    catch/AddDeallocateTest.cpp
     catch/AddPrefetchTest.cpp
     catch/AliasDataFlowTagsTest.cpp
     catch/AnnotateInstructionsTest.cpp
@@ -198,6 +199,7 @@ set(
     catch/SettingsTest.cpp
     catch/SubDwordExpressionTest.cpp
     catch/TernaryExpressionTest.cpp
+    catch/TestContext.cpp
     catch/TestContextTest.cpp
     catch/TransposeLoadsTest.cpp
     catch/UnrollLoopsTest.cpp

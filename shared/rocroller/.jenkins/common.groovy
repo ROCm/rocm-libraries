@@ -33,12 +33,17 @@ def withSSH(platform, pipeline) {
     }
 }
 
-def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, boolean enableTimers=false, String target='', boolean useYamlCpp=true)
+def runCompileCommand(platform, project, jobName, mxDataGeneratorGitURL, mxDataGeneratorGitTag, boolean codeCoverage=false, boolean enableTimers=false, String target='', boolean useYamlCpp=true)
 {
     project.paths.construct_build_prefix()
     String codeCovFlag = codeCoverage ? '-DCODE_COVERAGE=ON -DSKIP_CPPCHECK=ON -DBUILD_SHARED_LIBS=OFF' : '-DSKIP_CPPCHECK=OFF'
     String timerFlag = enableTimers ? '-DROCROLLER_ENABLE_TIMERS=ON' : ''
     String yamlBackendFlag = useYamlCpp ? '-DYAML_BACKEND=YAML_CPP' : '-DYAML_BACKEND=LLVM'
+
+    mxDataGeneratorGitURL = mxDataGeneratorGitURL?.trim();
+    mxDataGeneratorGitTag = mxDataGeneratorGitTag?.trim();
+    String mxDataGeneratorGitURLFlag = mxDataGeneratorGitURL ? '-DMXDATAGENERATOR_GIT_URL=' + mxDataGeneratorGitURL : ''
+    String mxDataGeneratorGitTagFlag = mxDataGeneratorGitTag ? '-DMXDATAGENERATOR_GIT_TAG=' + mxDataGeneratorGitTag : ''
 
     withSSH(platform) {
         sshBlock ->
@@ -54,6 +59,7 @@ def runCompileCommand(platform, project, jobName, boolean codeCoverage=false, bo
                 ../scripts/check_included_tests.py
                 cmake ../ \\
                     ${codeCovFlag} ${timerFlag} ${yamlBackendFlag}\\
+                    ${mxDataGeneratorGitURLFlag} ${mxDataGeneratorGitTagFlag}\\
                     -DCMAKE_BUILD_TYPE=Release \\
                     -DROCROLLER_TESTS_SKIP_SLOW=OFF \\
                     -DBUILD_VERBOSE=ON
