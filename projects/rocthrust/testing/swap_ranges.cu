@@ -148,7 +148,6 @@ struct type_with_swap
   bool m_swapped;
 };
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
 namespace detail
 {
 THRUST_EXEC_CHECK_DISABLE
@@ -160,15 +159,10 @@ THRUST_HOST_DEVICE inline void swap(Assignable1& a, Assignable2& b)
   b                = temp;
 } // end swap()
 } // namespace detail
-#endif
 
 inline THRUST_HOST_DEVICE void swap(type_with_swap& a, type_with_swap& b)
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::swap;
-#else
   using ::detail::swap;
-#endif
   swap(a.m_x, b.m_x);
   a.m_swapped = true;
   b.m_swapped = true;

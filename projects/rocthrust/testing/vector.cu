@@ -637,8 +637,6 @@ void TestVectorResizing()
 
   ASSERT_EQUAL(v.size(), 0lu);
 
-// TODO remove this WAR
-#if defined(__CUDACC__) && CUDART_VERSION == 3000
   // depending on sizeof(T), we will receive one
   // of two possible exceptions
   try
@@ -649,10 +647,9 @@ void TestVectorResizing()
   {}
   catch (std::bad_alloc e)
   {
-    // reset the CUDA error
-    cudaGetLastError();
+    // reset the HIP error
+    (void) hipGetLastError();
   } // end catch
-#endif // defined(__CUDACC__) && CUDART_VERSION==3000
 
   ASSERT_EQUAL(v.size(), 0lu);
 }
@@ -673,8 +670,6 @@ void TestVectorReserving()
 
   ASSERT_EQUAL(v.capacity(), old_capacity);
 
-// TODO remove this WAR
-#if defined(__CUDACC__) && CUDART_VERSION == 3000
   try
   {
     v.reserve(std::numeric_limits<size_t>::max());
@@ -683,7 +678,6 @@ void TestVectorReserving()
   {}
   catch (std::bad_alloc e)
   {}
-#endif // defined(__CUDACC__) && CUDART_VERSION==3000
 
   ASSERT_EQUAL(v.capacity(), old_capacity);
 }

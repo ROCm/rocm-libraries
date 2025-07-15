@@ -18,13 +18,11 @@
 #include <thrust/device_malloc_allocator.h>
 #include <thrust/sequence.h>
 
+#include <utility>
+
 #include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
-
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <utility>
-#endif
 
 TESTS_DEFINE(VectorInsertTests, FullTestsParams);
 TESTS_DEFINE(VectorInsertPrimitiveTests, NumericalTestsParams);
@@ -146,11 +144,7 @@ TYPED_TEST(VectorInsertPrimitiveTests, TestVectorRangeInsert)
       size_t end   = size > 0 ? (size_t) h_src[size + 1] % size : 0;
       if (end < begin)
       {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        using ::cuda::std::swap;
-#else
         using ::std::swap;
-#endif
         swap(begin, end);
       }
 

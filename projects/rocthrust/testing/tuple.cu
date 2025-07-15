@@ -19,11 +19,9 @@
 #include <thrust/swap.h>
 #include <thrust/tuple.h>
 
-#include <unittest/unittest.h>
+#include <utility>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <utility>
-#endif
+#include <unittest/unittest.h>
 
 using namespace unittest;
 
@@ -492,11 +490,7 @@ void TestTupleSwap()
   thrust::tuple<int, int, int> t1(a, b, c);
   thrust::tuple<int, int, int> t2(x, y, z);
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::swap;
-#else
   using ::std::swap;
-#endif
   swap(t1, t2);
 
   ASSERT_EQUAL(x, thrust::get<0>(t1));

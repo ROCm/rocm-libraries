@@ -25,13 +25,9 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/scan.h>
 
-#include <unittest/unittest.h>
+#include <array>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/array>
-#else
-#  include <array>
-#endif
+#include <unittest/unittest.h>
 
 template <typename T>
 struct max_functor
@@ -704,20 +700,12 @@ DECLARE_UNITTEST(TestInclusiveScanWithUserDefinedType);
 
 // Represents a permutation as a tuple of integers, see also: https://en.wikipedia.org/wiki/Permutation
 // We need a distinct type (instead of an alias) for operator<< to be found via ADL
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct permutation_t : ::cuda::std::array<int, 5>
-#else
 struct permutation_t : ::std::array<int, 5>
-#endif
 {
   permutation_t() = default;
 
   constexpr THRUST_HOST_DEVICE permutation_t(int a, int b, int c, int d, int e)
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      : ::cuda::std::array<int, 5>{a, b, c, d, e}
-#else
       : ::std::array<int, 5>{a, b, c, d, e}
-#endif
   {}
 
   friend std::ostream& operator<<(std::ostream& os, const permutation_t& p)

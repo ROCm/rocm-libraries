@@ -19,13 +19,11 @@
 #include <thrust/swap.h>
 #include <thrust/tuple.h>
 
+#include <utility>
+
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
-
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <utility>
-#endif
 
 TESTS_DEFINE(PairTests, NumericalTestsParams);
 
@@ -319,11 +317,7 @@ TEST(PairTests, TestPairSwap)
   thrust::pair<int, int> a(x, y);
   thrust::pair<int, int> b(z, w);
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::swap;
-#else
   using ::std::swap;
-#endif
   swap(a, b);
 
   ASSERT_EQ(z, a.first);

@@ -18,12 +18,10 @@
 #include <thrust/device_reference.h>
 #include <thrust/device_vector.h>
 
+#include <utility>
+
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
-
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <utility>
-#endif
 
 TESTS_DEFINE(DeviceReferenceTests, NumericalTestsParams);
 TESTS_DEFINE(DeviceReferenceIntegerTests, IntegerTestsParams);
@@ -265,11 +263,7 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceSwap)
   ref2 = 13;
 
   // test ADL two-step swap
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::swap;
-#else
   using ::std::swap;
-#endif
   swap(ref1, ref2);
   ASSERT_EQ(13, ref1);
   ASSERT_EQ(7, ref2);

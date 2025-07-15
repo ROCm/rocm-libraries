@@ -19,11 +19,9 @@
 #include <thrust/swap.h>
 #include <thrust/tuple.h>
 
-#include <unittest/unittest.h>
+#include <utility>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <utility>
-#endif
+#include <unittest/unittest.h>
 
 template <typename T>
 struct TestPairManipulation
@@ -307,11 +305,7 @@ void TestPairSwap()
   thrust::pair<int, int> a(x, y);
   thrust::pair<int, int> b(z, w);
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::swap;
-#else
   using ::std::swap;
-#endif
   swap(a, b);
 
   ASSERT_EQUAL(z, a.first);

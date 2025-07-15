@@ -43,8 +43,12 @@
 namespace internal
 {
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+using ::cuda::std::enable_if_t;
+
 using ::cuda::std::_And;
 #else
+using ::std::enable_if_t;
+
 template <typename...>
 using expand_to_true = ::std::true_type;
 template <typename... Pred>
@@ -334,13 +338,8 @@ struct lazy_disable_if : lazy_enable_if<!condition, T>
 template <typename T1, typename T2, typename T = void>
 using enable_if_convertible = enable_if<is_convertible<T1, T2>::value, T>;
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 template <typename T1, typename T2, typename T = void>
-using enable_if_convertible_t = ::cuda::std::enable_if_t<is_convertible<T1, T2>::value, T>;
-#else
-template <typename T1, typename T2, typename T = void>
-using enable_if_convertible_t = ::std::enable_if_t<is_convertible<T1, T2>::value, T>;
-#endif
+using enable_if_convertible_t = ::internal::enable_if_t<is_convertible<T1, T2>::value, T>;
 
 template <typename T1, typename T2, typename T = void>
 struct disable_if_convertible : disable_if<is_convertible<T1, T2>::value, T>
