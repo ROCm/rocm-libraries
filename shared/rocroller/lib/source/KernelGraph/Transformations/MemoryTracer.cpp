@@ -395,23 +395,19 @@ namespace rocRoller::KernelGraph
          * This class walks the control graph and builds a list of
          * MemoryEventExpression objects.  These objects represent
          * instructions that the code-generator will emit.
-	 *
-	 * Note that the base LDS allocation address is assumed to be
-	 * zero.  If you are comparing the bank indexes reported here
-	 * vs those computed by, eg, inspecting register values, you
-	 * may see a discrepancy.  However, the number of bank
-	 * conflicts should be the same.
+         *
+         * Note that the base LDS allocation address is assumed to be
+         * zero.  If you are comparing the bank indexes reported here
+         * vs those computed by, eg, inspecting register values, you
+         * may see a discrepancy.  However, the number of bank
+         * conflicts should be the same.
+         * 
+         * Note that not all visit operations are correctly implemented.
+         *
+         * Can we get this to work: struct MemoryTracer : TopoControlGraphVisitor<MemoryTracer>
          */
-        //struct MemoryTracer : TopoControlGraphVisitor<MemoryTracer>
         struct MemoryTracer
         {
-            // MemoryTracer(KernelGraph const&      graph,
-            //              KernelInvocation const& invocation,
-            //              KernelArguments const&  arguments)
-            //     : TopoControlGraphVisitor<MemoryTracer>::TopoControlGraphVisitor(graph)
-            //     , m_graph(graph)
-            //     , m_invocation(invocation)
-            //     , m_arguments(arguments)
             MemoryTracer(KernelGraph const&      graph,
                          KernelInvocation const& invocation,
                          KernelArguments const&  arguments)
@@ -615,56 +611,6 @@ namespace rocRoller::KernelGraph
                                         0, // XXX
                                         numBytes});
                 }
-#if 0		
-                else if(tile.memoryType == MemoryType::VGPR)
-                {
-                    auto [elemXTag, elemX] = m_graph.getDimension<ElementNumber>(tag, 0);
-                    auto [elemYTag, elemY] = m_graph.getDimension<ElementNumber>(tag, 1);
-
-                    auto m = getUnsignedInt(evaluate(elemX.size));
-                    auto n = getUnsignedInt(evaluate(elemY.size));
-
-                    Log::info("LDS VGPR LOAD: tag {}, m {}, n {}", tag, m, n);
-
-                    // auto packing = DataTypeInfo::Get(load.varType).packing;
-                    // n /= packing;
-
-                    auto elementBits
-                        = DataTypeInfo::Get(load.varType.getDereferencedType()).elementBits;
-                    // auto numBytes = (elementBits * m * n) / 8u;
-
-                    auto numBytes = elementBits / 8u;
-
-                    for(auto i = 0; i < m; ++i)
-                    {
-                        coords.setCoordinate(elemXTag, Expression::literal(i));
-                        for(auto j = 0; j < n; ++j)
-                        {
-                            coords.setCoordinate(elemYTag, Expression::literal(j));
-
-                            // XXX do this once, just above
-                            auto index = coords.reverse({ldsTag})[0];
-
-                            m_events.push_back({tag,
-                                                ldsTag,
-                                                tileTag,
-                                                Direction::LDSLoad,
-                                                index * Expression::literal(numBytes),
-                                                0, // XXX
-                                                numBytes});
-
-                            Log::debug("LDSLoad: tag {}, index {}, numBytes {}",
-                                       tag,
-                                       toString(index),
-                                       numBytes);
-                        }
-                    }
-                }
-                else
-                {
-                    // XXX
-                }
-#endif
             }
 
             void operator()(int tag, LoadTileDirect2LDS const& op, Transformer coords) {}
@@ -691,10 +637,6 @@ namespace rocRoller::KernelGraph
                 auto elemX = m_graph.mapper.get<ElementNumber>(tag, 0);
                 auto elemY = m_graph.mapper.get<ElementNumber>(tag, 1);
 
-                // XXX Can we we create dummy variables for these?  Then
-                // only create the expression once and evaluate it
-                // multiple times?
-
                 for(auto i = 0; i < m; ++i)
                 {
                     coords.setCoordinate(elemX, Expression::literal(i));
@@ -715,25 +657,7 @@ namespace rocRoller::KernelGraph
                 }
             }
 
-            void operator()(int tag, LoadVGPR const& load, Transformer coords)
-            {
-                auto [userTag, user] = m_graph.getDimension<User>(tag);
-                auto [vgprTag, vgpr] = m_graph.getDimension<VGPR>(tag);
-
-                // Only one?
-                auto numBytes
-                    = DataTypeInfo::Get(load.varType.getDereferencedType()).elementBits / 8u;
-                ExpressionPtr index
-                    = load.scalar ? Expression::literal(0u) : coords.reverse({userTag})[0];
-
-                m_events.push_back({tag,
-                                    userTag,
-                                    vgprTag,
-                                    Direction::GlobalLoad,
-                                    index * Expression::literal(numBytes),
-                                    0, // XXX
-                                    numBytes});
-            }
+            void operator()(int tag, LoadVGPR const& load, Transformer coords) {}
 
             void operator()(int tag, LoadSGPR const& load, Transformer coords) {}
 
