@@ -187,7 +187,7 @@ if(HIPBLASLT_USE_ROCROLLER)
   FetchContent_Declare(
     rocRoller
     GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
-    GIT_TAG 75cb812426f075e60b6612650a8deda22f4cb1bb
+    GIT_TAG a9cbf901489a27a530a699d1d6a6b765a9c02426
   )
   FetchContent_MakeAvailable(rocRoller)
   target_link_libraries(hipblaslt PRIVATE rocroller_interface)
