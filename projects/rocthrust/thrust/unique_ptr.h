@@ -22,17 +22,14 @@ struct default_delete<T, typename thrust::detail::enable_if<thrust::detail::not_
 {
   using pointer = thrust::device_ptr<T>;
 
-  THRUST_HOST
-  constexpr default_delete() noexcept = default;
+  THRUST_HOST constexpr default_delete() noexcept = default;
 
   template <class U>
-  THRUST_HOST
-  default_delete(const default_delete<U>&,
-              typename thrust::detail::enable_if<
-                  thrust::detail::is_convertible<thrust::device_ptr<U>,
-                                                  pointer>::value>::type* = nullptr) noexcept
-  {
-  }
+  THRUST_HOST default_delete(
+    const default_delete<U>&,
+    typename thrust::detail::enable_if<thrust::detail::is_convertible<thrust::device_ptr<U>, pointer>::value>::type* =
+      nullptr) noexcept
+  {}
 
   THRUST_HOST
   void operator()(pointer ptr) const noexcept
@@ -56,13 +53,12 @@ struct default_delete<
   constexpr default_delete(size_t n = 0) noexcept : m_size(n) {};
 
   template <class U>
-  THRUST_HOST default_delete(
-      const default_delete<U[]>& other,
-      typename thrust::detail::enable_if<
-          thrust::detail::is_convertible<U (*)[], T (*)[]>::value>::type* = nullptr) noexcept
+  THRUST_HOST
+  default_delete(const default_delete<U[]>& other,
+              typename thrust::detail::enable_if<thrust::detail::is_convertible<U (*)[], T (*)[]>::value>::type* =
+                nullptr) noexcept
       : m_size(other.size())
-  {
-  }
+  {}
 
   THRUST_HOST
   void operator()(pointer ptr) const noexcept
@@ -74,10 +70,9 @@ struct default_delete<
     thrust::device_free(ptr);
   }
 
-  THRUST_HOST
-  size_t size() const
+  THRUST_HOST size_t size() const
   {
-      return m_size;
+    return m_size;
   }
 
 private:
@@ -117,34 +112,34 @@ struct unique_ptr_deleter_sfinae
 template <class Deleter>
 struct unique_ptr_deleter_sfinae<const Deleter&>
 {
-    using lval_ref_type        = const Deleter&;
-    using good_rval_ref_type   = void;
-    using bad_rval_ref_type    = const Deleter&&;
-    using enable_rval_overload = thrust::detail::false_type;
+  using lval_ref_type        = const Deleter&;
+  using good_rval_ref_type   = void;
+  using bad_rval_ref_type    = const Deleter&&;
+  using enable_rval_overload = thrust::detail::false_type;
 };
 
 template <class Deleter>
 struct unique_ptr_deleter_sfinae<Deleter&>
 {
-    using lval_ref_type        = Deleter&;
-    using good_rval_ref_type   = void;
-    using bad_rval_ref_type    = Deleter&&;
-    using enable_rval_overload = thrust::detail::false_type;
+  using lval_ref_type        = Deleter&;
+  using good_rval_ref_type   = void;
+  using bad_rval_ref_type    = Deleter&&;
+  using enable_rval_overload = thrust::detail::false_type;
 };
 
 template <class T, class D = default_delete<T>>
 class unique_ptr
 {
 public:
-    using pointer      = typename D::pointer;
-    using element_type = T;
-    using deleter_type = D;
+  using pointer      = typename D::pointer;
+  using element_type = T;
+  using deleter_type = D;
 
 private:
-    pointer                            m_ptr;
-    [[no_unique_address]] deleter_type m_deleter;
+  pointer                            m_ptr;
+  [[no_unique_address]] deleter_type m_deleter;
 
-    using DeleterSFINAE = unique_ptr_deleter_sfinae<D>;
+  using DeleterSFINAE = unique_ptr_deleter_sfinae<D>;
 
   template <bool Dummy>
   using LValRefType = typename thrust::detail::dependent_type<DeleterSFINAE, Dummy>::type::lval_ref_type;
@@ -161,9 +156,9 @@ private:
     thrust::detail::and_<std::is_default_constructible<Deleter>,
                          thrust::detail::not_<thrust::detail::is_pointer<Deleter>>>::value>::type;
 
-    template <class ArgType>
-    using EnableIfDeleterConstructible = typename thrust::detail::enable_if<
-        std::is_constructible<deleter_type, ArgType>::value>::type;
+  template <class ArgType>
+  using EnableIfDeleterConstructible =
+    typename thrust::detail::enable_if<std::is_constructible<deleter_type, ArgType>::value>::type;
 
   template <class U, class E>
   using EnableIfMoveConvertible =
@@ -176,42 +171,37 @@ private:
                         thrust::detail::and_<thrust::detail::not_<thrust::detail::is_reference<D>>,
                                              thrust::detail::is_convertible<E, D>>>::value>::type;
 
-    template <class E>
-    using EnableIfDeleterAssignable =
-        typename thrust::detail::enable_if<thrust::detail::is_assignable<D&, E&&>::value>::type;
+  template <class E>
+  using EnableIfDeleterAssignable =
+    typename thrust::detail::enable_if<thrust::detail::is_assignable<D&, E&&>::value>::type;
 
 public:
-    //==========================================================================
-    // Constructors
-    //==========================================================================
+  //==========================================================================
+  // Constructors
+  //==========================================================================
 
-    template <bool Dummy = true, class = EnableIfDeleterDefaultConstructible<Dummy>>
-    THRUST_HOST constexpr unique_ptr() noexcept
-        : m_ptr()
-        , m_deleter()
-    {
-    }
+  template <bool Dummy = true, class = EnableIfDeleterDefaultConstructible<Dummy>>
+  THRUST_HOST constexpr unique_ptr() noexcept
+      : m_ptr()
+      , m_deleter()
+  {}
 
-    template <bool Dummy = true, class = EnableIfDeleterDefaultConstructible<Dummy>>
-    THRUST_HOST constexpr unique_ptr(std::nullptr_t) noexcept
-        : unique_ptr()
-    {
-    }
+  template <bool Dummy = true, class = EnableIfDeleterDefaultConstructible<Dummy>>
+  THRUST_HOST constexpr unique_ptr(std::nullptr_t) noexcept
+      : unique_ptr()
+  {}
 
-    template <bool Dummy = true, class = EnableIfDeleterDefaultConstructible<Dummy>>
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(pointer p) noexcept
-        : m_ptr(p)
-        , m_deleter()
-    {
-    }
+  template <bool Dummy = true, class = EnableIfDeleterDefaultConstructible<Dummy>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(pointer p) noexcept
+      : m_ptr(p)
+      , m_deleter()
+  {}
 
-    template <bool Dummy = true, class = EnableIfDeleterConstructible<LValRefType<Dummy>>>
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(pointer            p,
-                                                                LValRefType<Dummy> d) noexcept
-        : m_ptr(p)
-        , m_deleter(d)
-    {
-    }
+  template <bool Dummy = true, class = EnableIfDeleterConstructible<LValRefType<Dummy>>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(pointer p, LValRefType<Dummy> d) noexcept
+      : m_ptr(p)
+      , m_deleter(d)
+  {}
 
     template <bool Dummy = true, class = EnableIfDeleterConstructible<GoodRValRefType<Dummy>>>
     THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(pointer                p,
@@ -223,25 +213,19 @@ public:
                   "rvalue deleter bound to reference");
     }
 
-    template <bool Dummy = true, class = EnableIfDeleterConstructible<BadRValRefType<Dummy>>>
-    unique_ptr(pointer p, BadRValRefType<Dummy> d) = delete;
+  template <bool Dummy = true, class = EnableIfDeleterConstructible<BadRValRefType<Dummy>>>
+  unique_ptr(pointer p, BadRValRefType<Dummy> d) = delete;
 
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr&& u) noexcept
-        : m_ptr(u.release())
-        , m_deleter(std::forward<deleter_type>(u.get_deleter()))
-    {
-    }
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr&& u) noexcept
+      : m_ptr(u.release())
+      , m_deleter(std::forward<deleter_type>(u.get_deleter()))
+  {}
 
-    template <class U,
-              class E,
-              class = EnableIfMoveConvertible<unique_ptr<U, E>, U>,
-              class = EnableIfDeleterConvertible<E>>
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr<U, E>&& u) noexcept
-        : m_ptr(u.release())
-        , m_deleter(std::forward<E>(u.get_deleter()))
-    {
-    }
-
+  template <class U, class E, class = EnableIfMoveConvertible<unique_ptr<U, E>, U>, class = EnableIfDeleterConvertible<E>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr<U, E>&& u) noexcept
+      : m_ptr(u.release())
+      , m_deleter(std::forward<E>(u.get_deleter()))
+  {}
 
   //==========================================================================
   // Assignment
@@ -253,17 +237,13 @@ public:
     return *this;
   }
 
-    template <class U,
-              class E,
-              class = EnableIfMoveConvertible<unique_ptr<U, E>, U>,
-              class = EnableIfDeleterAssignable<E>>
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr&
-    operator=(unique_ptr<U, E>&& u) noexcept
-    {
-        reset(u.release());
-        m_deleter = std::forward<E>(u.get_deleter());
-        return *this;
-    }
+  template <class U, class E, class = EnableIfMoveConvertible<unique_ptr<U, E>, U>, class = EnableIfDeleterAssignable<E>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(unique_ptr<U, E>&& u) noexcept
+  {
+    reset(u.release());
+    m_deleter = std::forward<E>(u.get_deleter());
+    return *this;
+  }
 
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(std::nullptr_t) noexcept
   {
@@ -279,96 +259,94 @@ public:
         reset();
     }
 
-    //==========================================================================
-    // Observers
-    //==========================================================================
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer get() const noexcept
-    {
-        return m_ptr;
-    }
+  //==========================================================================
+  // Observers
+  //==========================================================================
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer get() const noexcept
+  {
+    return m_ptr;
+  }
 
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 T* get_raw() const noexcept
-    {
-        return thrust::raw_pointer_cast(m_ptr);
-    }
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 T* get_raw() const noexcept
+  {
+    return thrust::raw_pointer_cast(m_ptr);
+  }
 
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 deleter_type& get_deleter() noexcept
-    {
-        return m_deleter;
-    }
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 deleter_type& get_deleter() noexcept
+  {
+    return m_deleter;
+  }
 
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 const deleter_type&
-    get_deleter() const noexcept
-    {
-        return m_deleter;
-    }
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 const deleter_type& get_deleter() const noexcept
+  {
+    return m_deleter;
+  }
 
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit operator bool() const noexcept
-    {
-        return m_ptr != nullptr;
-    }
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit operator bool() const noexcept
+  {
+    return m_ptr != nullptr;
+  }
 
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 auto operator*() const noexcept
-    {
-      return *m_ptr;
-    }
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 auto operator*() const noexcept
+  {
+    return *m_ptr;
+  }
 
-    // Calling `->` on a `unique_ptr` from host code (e.g., `my_unique_ptr->member`)
-    // will attempt to dereference a device pointer on the host, leading to a
-    // segmentation fault.
-    //
-    // To access the object's members, you must first explicitly copy the data
-    // from the device to a host-side object (e.g., `host_copy = *my_unique_ptr;`).
-    // THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer operator->() const noexcept
-    // {
-    //     return m_ptr;
-    // }
+  // Calling `->` on a `unique_ptr` from host code (e.g., `my_unique_ptr->member`)
+  // will attempt to dereference a device pointer on the host, leading to a
+  // segmentation fault.
+  //
+  // To access the object's members, you must first explicitly copy the data
+  // from the device to a host-side object (e.g., `host_copy = *my_unique_ptr;`).
+  // THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer operator->() const noexcept
+  // {
+  //     return m_ptr;
+  // }
 
-    //==========================================================================
-    // Modifiers
-    //==========================================================================
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer release() noexcept
-    {
-        pointer temp = m_ptr;
-        m_ptr        = pointer();
-        return temp;
-    }
+  //==========================================================================
+  // Modifiers
+  //==========================================================================
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer release() noexcept
+  {
+    pointer temp = m_ptr;
+    m_ptr        = pointer();
+    return temp;
+  }
 
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void reset(pointer p = pointer()) noexcept
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void reset(pointer p = pointer()) noexcept
+  {
+    pointer temp = m_ptr;
+    m_ptr        = p;
+    if (temp)
     {
-        pointer temp = m_ptr;
-        m_ptr        = p;
-        if(temp)
-            m_deleter(temp);
+      m_deleter(temp);
     }
+  }
 
-    THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr& u) noexcept
-    {
-        using std::swap;
-        swap(m_ptr, u.m_ptr);
-        swap(m_deleter, u.m_deleter);
-    }
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr& u) noexcept
+  {
+    using std::swap;
+    swap(m_ptr, u.m_ptr);
+    swap(m_deleter, u.m_deleter);
+  }
 };
 
 template <class T, class D>
 class unique_ptr<T[], D>
-{
-};
+{};
 
-template <class T,
-          class D,
-          typename thrust::detail::enable_if<std::is_swappable<D>::value, void>::type>
+template <class T, class D, typename thrust::detail::enable_if<std::is_swappable<D>::value, void>::type>
 inline THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr<T, D>& x, unique_ptr<T, D>& y) noexcept
 {
-    x.swap(y);
+  x.swap(y);
 }
 
 //==============================================================================
 // Comparison Operators
 //==============================================================================
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator==(const unique_ptr<T1, D1>& x,
-                                                                        const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
+operator==(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   // The initial `std::common_type` approach was considered to support comparisons
   // between related types (e.g., a base and derived class pointer). However,
@@ -385,16 +363,16 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator==(const unique_ptr
 
 #if THRUST_STD_VER <= 17
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator!=(const unique_ptr<T1, D1>& x,
-                                                                        const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
+operator!=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
-    return !(x == y);
+  return !(x == y);
 }
 #endif
 
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(const unique_ptr<T1, D1>& x,
-                                                                       const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
+operator<(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
   // Similar to `operator==`, the `const void*` cast provides a robust,
   // standard-compliant way to establish a strict total ordering for any two
@@ -404,31 +382,31 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(const unique_ptr<
 }
 
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(const unique_ptr<T1, D1>& x,
-                                                                       const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
+operator>(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
-    return y < x;
+  return y < x;
 }
 
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(const unique_ptr<T1, D1>& x,
-                                                                        const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
+operator<=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
-    return !(y < x);
+  return !(y < x);
 }
 
 template <class T1, class D1, class T2, class D2>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(const unique_ptr<T1, D1>& x,
-                                                                        const unique_ptr<T2, D2>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
+operator>=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
 {
-    return !(x < y);
+  return !(x < y);
 }
 
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator==(const unique_ptr<T, D>& x,
-                                                                        std::nullptr_t) noexcept
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
+operator==(const unique_ptr<T, D>& x, std::nullptr_t) noexcept
 {
-    return !x;
+  return !x;
 }
 
 #if THRUST_STD_VER <= 17
@@ -436,78 +414,70 @@ template <class T, class D>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
 operator==(std::nullptr_t, const unique_ptr<T, D>& y) noexcept
 {
-    return !y;
+  return !y;
 }
 
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator!=(const unique_ptr<T, D>& x,
-                                                                        std::nullptr_t) noexcept
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
+operator!=(const unique_ptr<T, D>& x, std::nullptr_t) noexcept
 {
-    return static_cast<bool>(x);
+  return static_cast<bool>(x);
 }
 
 template <class T, class D>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
 operator!=(std::nullptr_t, const unique_ptr<T, D>& y) noexcept
 {
-    return static_cast<bool>(y);
+  return static_cast<bool>(y);
 }
 #endif
 
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(const unique_ptr<T, D>& x,
-                                                                       std::nullptr_t)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(const unique_ptr<T, D>& x, std::nullptr_t)
 {
-    return std::less<typename unique_ptr<T, D>::pointer>()(x.get(), nullptr); // x.get() < nullptr;
+  return std::less<typename unique_ptr<T, D>::pointer>()(x.get(), nullptr); // x.get() < nullptr;
 }
 
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(std::nullptr_t,
-                                                                       const unique_ptr<T, D>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<(std::nullptr_t, const unique_ptr<T, D>& y)
 {
-    return std::less<typename unique_ptr<T, D>::pointer>()(nullptr, y.get()); // nullptr < y.get();
+  return std::less<typename unique_ptr<T, D>::pointer>()(nullptr, y.get()); // nullptr < y.get();
 }
 
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(const unique_ptr<T, D>& x,
-                                                                       std::nullptr_t)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(const unique_ptr<T, D>& x, std::nullptr_t)
 {
-    return nullptr < x;
+  return nullptr < x;
 }
 
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(std::nullptr_t,
-                                                                       const unique_ptr<T, D>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>(std::nullptr_t, const unique_ptr<T, D>& y)
 {
-    return y < nullptr;
+  return y < nullptr;
 }
 
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(const unique_ptr<T, D>& x,
-                                                                        std::nullptr_t)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(const unique_ptr<T, D>& x, std::nullptr_t)
 {
-    return !(nullptr < x);
+  return !(nullptr < x);
 }
 
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(std::nullptr_t,
-                                                                        const unique_ptr<T, D>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator<=(std::nullptr_t, const unique_ptr<T, D>& y)
 {
-    return !(y < nullptr);
+  return !(y < nullptr);
 }
 
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(const unique_ptr<T, D>& x,
-                                                                        std::nullptr_t)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(const unique_ptr<T, D>& x, std::nullptr_t)
 {
-    return !(x < nullptr);
+  return !(x < nullptr);
 }
 
 template <class T, class D>
-THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(std::nullptr_t,
-                                                                        const unique_ptr<T, D>& y)
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(std::nullptr_t, const unique_ptr<T, D>& y)
 {
-    return !(y < nullptr);
+  return !(y < nullptr);
 }
 
 //==============================================================================
