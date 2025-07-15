@@ -3,17 +3,12 @@
 
 cmake_minimum_required(VERSION 3.25.2)
 project(
-  hipSPARSELt
+  hipsparselt
   VERSION 0.2.4
   LANGUAGES CXX)
 
-# Set policies for modern CMake behavior
 if(POLICY CMP0135)
   cmake_policy(SET CMP0135 NEW)  # FetchContent timestamp handling
-endif()
-
-if(POLICY CMP0066)
-  cmake_policy(SET CMP0066 NEW)  # Honor per-config flags in try_compile
 endif()
 
 if(POLICY CMP0077)
@@ -44,11 +39,9 @@ endif()
 
 # Build Options and Validation
 # ============================================================================
-
 option(HIPSPARSELT_ENABLE_CLIENT "Build hipSPARSELt clients." ON)
 option(HIPSPARSELT_ENABLE_CUDA "Build hipSPARSELt with CUDA backend." OFF)
 option(HIPSPARSELT_ENABLE_HIP "Build hipSPARSELt with HIP backend." ON)
-option(HIPSPARSELT_ENABLE_TENSILELITE "Build hipSPARSELt with TensileLite backend." ON)
 
 option(HIPSPARSELT_BUILD_SHARED_LIBS "Build the hipSPARSELt shared library." ON)
 option(HIPSPARSELT_BUILD_TESTING "Build test client." ON)
@@ -154,20 +147,19 @@ if(HIPSPARSELT_ENABLE_HIP)
         endif()
         
         # Exposes targets for tensile-host and library
+        # TODO: update the build output directory for hipblaslt/tensilelite
         add_subdirectory("${HIPBLASLT_PATH}" hipblaslt-BUILD)
     endblock()
 endif()
 
 add_subdirectory(library)
 
-# if(HIPSPARSELT_ENABLE_CLIENT)
-#     add_subdirectory(clients)
-# endif()
+if(HIPSPARSELT_ENABLE_CLIENT)
+    add_subdirectory(clients)
+endif()
 
-# ============================================================================
 # Package Configuration
 # ============================================================================
-
 # # Set package name based on backend
 # if(HIPSPARSELT_ENABLE_CUDA)
 #     set(PACKAGE_NAME "hipsparselt-cuda")
@@ -189,10 +181,8 @@ add_subdirectory(library)
 #     LDCONFIG_DIR ${CMAKE_INSTALL_FULL_LIBDIR}
 # )
 
-# ============================================================================
 # Coverage Setup
 # ============================================================================
-
 if(HIPSPARSELT_BUILD_COVERAGE)
     target_compile_options(hipsparselt PRIVATE 
         -fprofile-arcs 

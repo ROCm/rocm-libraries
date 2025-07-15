@@ -17,9 +17,9 @@ target_sources(hipsparselt PRIVATE
 )
 
 target_sources(hipsparselt PRIVATE
-    "${_CMAKE_CURRENT_SOURCE_DIR}/src/spmm/rocsparselt_compress.cpp"
-    "${_CMAKE_CURRENT_SOURCE_DIR}/src/spmm/rocsparselt_prune.cpp"
-    "${_CMAKE_CURRENT_SOURCE_DIR}/src/spmm/rocsparselt_spmm.cpp"
+    # "${_CMAKE_CURRENT_SOURCE_DIR}/src/spmm/rocsparselt_compress.cpp"
+    # "${_CMAKE_CURRENT_SOURCE_DIR}/src/spmm/rocsparselt_prune.cpp"
+    # "${_CMAKE_CURRENT_SOURCE_DIR}/src/spmm/rocsparselt_spmm.cpp"
 )
 
 target_include_directories(hipsparselt PRIVATE
@@ -41,6 +41,9 @@ if(NOT ROCSPARSELT_ENABLE_TENSILELITE)
     #     "${_CMAKE_CURRENT_SOURCE_DIR}/src/spmm/hip/rocsparselt_spmm.cpp"
     # )
 else()
+    target_sources(hipsparselt PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/src/tensile_host.cpp")
+    target_include_directories(hipsparselt PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/src/Tensile")
+    
     set(tensile_source_files "${_CMAKE_CURRENT_SOURCE_DIR}/src/tensile_host.cpp")
     list(APPEND hipsparselt_source_backend ${tensile_source_files})
 

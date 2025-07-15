@@ -3,6 +3,4 @@
 
 set(_CMAKE_CURRENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../library/src/nvcc_detail")
 
-target_sources(hipsparselt PRIVATE
-    "${_CMAKE_CURRENT_SOURCE_DIR}/hipsparselt.cpp"
-)
+target_sources(hipsparselt PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/hipsparselt.cpp")

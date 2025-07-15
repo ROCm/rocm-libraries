@@ -73,6 +73,7 @@ set_target_properties(hipsparselt PROPERTIES
 target_include_directories(hipsparselt
                         PUBLIC
                             $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}/include>
+                            $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}/src/include>
                             $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
                             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
@@ -86,18 +87,15 @@ if(HIPSPARSELT_ENABLE_CUDA)
 endif()
     
 if(HIPSPARSELT_ENABLE_HIP)
+    target_compile_definitions(hipsparselt PRIVATE BUILD_WITH_TENSILE)
     target_include_directories(hipsparselt 
         PUBLIC
             $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}> # Needed?
             $<BUILD_INTERFACE:${HIPSPARSE_INCLUDE_DIRS}> # Needed?
     )
     target_link_libraries(hipsparselt PRIVATE hip::device)
-endif()
-
-if(HIPSPARSELT_ENABLE_TENSILELITE)
-    target_compile_definitions(hipsparselt PRIVATE BUILD_WITH_TENSILE=1)
 else()
-    target_compile_definitions(hipsparselt PRIVATE BUILD_WITH_TENSILE=0)
+    target_compile_definitions(hipsparselt PRIVATE BUILD_WITH_TENSILE)
 endif()
 
 add_subdirectory(include)
