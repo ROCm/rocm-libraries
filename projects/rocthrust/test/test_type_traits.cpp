@@ -195,9 +195,14 @@ TEST(TypeTraitsTests, TestTriviallyRelocatable)
   static_assert(thrust::is_trivially_relocatable<int2>::value, "");
   static_assert(thrust::is_trivially_relocatable<int3>::value, "");
   static_assert(thrust::is_trivially_relocatable<int4>::value, "");
-#ifndef _LIBCUDACXX_HAS_NO_INT128
+#if !(THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC                                          \
+      || (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC && !defined(__CUDACC_RTC_INT128__)) \
+      || (defined(__NVCC__) && __CUDACC_VER_MAJOR__ * 100 + __CUDACC_VER_MINOR__ < 1105)         \
+      || !defined(__SIZEOF_INT128__))
   static_assert(thrust::is_trivially_relocatable<__int128>::value, "");
-#endif // _LIBCUDACXX_HAS_NO_INT128
+#endif // (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC || (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC &&
+       // !defined(__CUDACC_RTC_INT128__)) || (defined(__NVCC__) && __CUDACC_VER_MAJOR__ * 100 + __CUDACC_VER_MINOR__ <
+       // 1105) || !defined(__SIZEOF_INT128__))
 #if defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
   static_assert(thrust::is_trivially_relocatable<thrust::complex<float>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::complex<float>>::value, "");
