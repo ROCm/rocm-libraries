@@ -1,6 +1,8 @@
 # ########################################################################
 # Copyright (C) 2025 Advanced Micro Devices, Inc.
 #
+# MIT License
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -21,10 +23,37 @@
 #
 # ########################################################################
 
-set(_CMAKE_CURRENT_SOURCE_DIR "${TEMP_TENSILE_HOST_SOURCE_DIR}/source")
-
-target_sources(tensilelite-host
+set(TENSILELITE_CLIENT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite/Tensile/Source/client")
+set(_CMAKE_CURRENT_SOURCE_DIR ${TENSILELITE_CLIENT_DIR})
+find_package(Boost COMPONENTS program_options filesystem REQUIRED)
+add_executable(tensilelite-client "${_CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
+target_link_libraries(tensilelite-client
     PRIVATE
-        "${_CMAKE_CURRENT_SOURCE_DIR}/hip/HipSolutionAdapter.cpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/hip/HipHardware.cpp"
+        hip::device
+        hip::host
+        tensilelite::tensilelite-host
+        rocisa::rocisa-cpp
+        Boost::program_options
+        Boost::filesystem
+        OpenMP::OpenMP_CXX
 )
+if(rocm_smi_FOUND)
+    target_link_libraries(tensilelite-client PRIVATE rocm_smi64)
+endif()
+target_include_directories(tensilelite-client PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/include")
+target_compile_definitions(tensilelite-client PRIVATE TENSILE_DEFAULT_SERIALIZATION)
+
+set_target_properties(tensilelite-client
+    PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+
+if(HIPBLASLT_ENABLE_ASAN)
+    hipblaslt_target_configure_sanitizers(tensilelite-client PRIVATE)
+endif()
+
+add_subdirectory(include)
+add_subdirectory(src)
+
