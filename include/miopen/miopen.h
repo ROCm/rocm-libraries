@@ -520,12 +520,13 @@ typedef enum
     miopenActivationABS      = 5, /*!< Absolute value \f$abs(x)\f$ */
     miopenActivationPOWER = 6, /*!< Scaled and shifted power \f$(\alpha + \beta * x)^{gamma}\f$ */
     miopenActivationCLIPPEDRELU =
-        7, /*!< Clipped Rectified Linear Unit \f$ min(\alpha, max(0,x)) \f$ */
+        7, /*!< Clipped Rectified Linear Unit \f$ max(0, min(\alpha, x)) \f$ */
     miopenActivationLEAKYRELU =
         8, /*!< Leaky Rectified Linear Unit \f$ \alpha * x | x <= 0; x | x > 0 \f$ */
     miopenActivationELU =
         9, /*!< Exponential Rectified Linear Unit \f$ \alpha * (e^{x} - 1) | x <= 0; x | x > 0 \f$
             */
+    miopenActivationCLAMP = 10, /*!< Clamp \f$ max(\alpha, min(\beta, x)) \f$ */
 } miopenActivationMode_t;
 
 /*! @ingroup softmax
@@ -664,6 +665,8 @@ typedef enum
               miss, uses the existing Find machinery with skipping non-dynamic kernels, thus saving
               compilation time. Faster start-up times than Hybrid Find, but GPU performance might be
               a bit worse. >*/
+    miopenConvolutionFindModeTrustVerify     = 6,
+    miopenConvolutionFindModeTrustVerifyFull = 7,
     miopenConvolutionFindModeDefault =
         miopenConvolutionFindModeDynamicHybrid /*!< Default FindMode >*/
 } miopenConvolutionFindMode_t;
@@ -3205,6 +3208,7 @@ miopenBatchNormalizationBackward_V2(miopenHandle_t handle,
  * , shifting, saved variance and
  * mean (input)
  * @param bnScale                   Batch norm scaling, gamma, tensor (input)
+ * @param bnBias                    Batch norm bias (input)
  * @param resultBnScaleDiff         Tensor for dscale (output)
  * @param resultBnBiasDiff          Tensor for dbias (output)
  * @param epsilon                   Value to stabilize inverse variance calculation (input)
@@ -3231,6 +3235,7 @@ miopenBatchNormBackwardActivation(miopenHandle_t handle,
                                   const miopenTensorDescriptor_t savedMeanDesc,
                                   const miopenTensorDescriptor_t savedVarianceDesc,
                                   const void* bnScale,
+                                  const void* bnBias,
                                   void* resultBnScaleDiff,
                                   void* resultBnBiasDiff,
                                   double epsilon,
@@ -3878,8 +3883,11 @@ MIOPEN_EXPORT miopenStatus_t miopenSetOpArgsBiasForward(miopenOperatorArgs_t arg
                                                         const void* alpha,
                                                         const void* beta,
                                                         const void* bias);
-/*! @brief Executes the fusion plan
+
+/*! @brief Executes the fusion plan. Only compatible with NHWC/NDHWC tensor layouts.
  *
+ *  @deprecated This function is deprecated and may be removed in a future release.
+ *             Use miopenExecuteFusionPlan_v2 instead.
  *
  * @param handle           MIOpen handle (input)
  * @param fusePlanDesc     fused plan descriptor (input)
@@ -3898,6 +3906,31 @@ miopenExecuteFusionPlan(const miopenHandle_t handle,
                         const miopenTensorDescriptor_t outputDesc,
                         void* output,
                         miopenOperatorArgs_t args);
+
+/*! @brief Executes the fusion plan with a workspace buffer for layout transformations.
+ *
+ *
+ * @param handle           MIOpen handle (input)
+ * @param fusePlanDesc     fused plan descriptor (input)
+ * @param inputDesc        Descriptor of the input tensor (input)
+ * @param input            Source data tensor  (input)
+ * @param outputDesc       Decriptor of the output tensor (input)
+ * @param output           Destination data tensor  (output)
+ * @param args             An argument object of the fused kernel (input)
+ * @param workspace        A pointer to an intermediate workspace (input)
+ * @param workspaceSize Size of the memory in bytes pointed to by workSpace above (input)
+ * @return           miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t
+miopenExecuteFusionPlan_v2(const miopenHandle_t handle,
+                           const miopenFusionPlanDescriptor_t fusePlanDesc,
+                           const miopenTensorDescriptor_t inputDesc,
+                           const void* input,
+                           const miopenTensorDescriptor_t outputDesc,
+                           void* output,
+                           miopenOperatorArgs_t args,
+                           void* workspace,
+                           size_t workspaceSize);
 
 /*! @brief Prepares and executes the Convlution+Bias+Activation Fusion.
  *
