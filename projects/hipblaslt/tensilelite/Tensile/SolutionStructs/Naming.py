@@ -120,7 +120,7 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
                                                            "StaggerUMapping",
                                                            "GlobalSplitUCoalesced",
                                                            "GlobalSplitUWorkGroupMappingRoundRobin"])
-  components = [f'{str(state["ProblemType"])}']
+  components = [f'{str(ProblemType(state["ProblemType"],printIndexAssignmentInfo=False))}']
 
   if "MacroTile0" in state \
       and "MacroTile1" in state \

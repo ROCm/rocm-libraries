@@ -466,12 +466,12 @@ if(BUILD_CODE_COVERAGE)
 
     COMMAND ${LLVM_COV_EXECUTABLE}
             report
-            -object ./library/libhipblaslt-d.so.0.15
+            -object ./library/libhipblaslt-d.so.${hipblaslt_SOVERSION}
             -instr-profile=./coverage_test.profdata
             --ignore-filename-regex=.*/build/debug/.*
     COMMAND ${LLVM_COV_EXECUTABLE}
             show
-            -object ./library/libhipblaslt-d.so.0.15
+            -object ./library/libhipblaslt-d.so.${hipblaslt_SOVERSION}
             -instr-profile=./coverage_test.profdata
             -format=html -output-dir=coverage-report
             --ignore-filename-regex=.*/build/debug/.*

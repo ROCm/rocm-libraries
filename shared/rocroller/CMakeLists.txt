@@ -1,206 +1,56 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
 
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+cmake_minimum_required(VERSION 3.24.4)
+project(rocroller VERSION 1.0.0 LANGUAGES CXX)
 
-cmake_minimum_required(VERSION 3.21...3.22)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-set(ROCROLLER_VERSION "1.0.0")
-set(ROCROLLER_SOVERSION 1)
+include(CMakeRC)
+include(FetchContent)
+include(CMakeDependentOption)
+include(rocroller_target_configure_sanitizers)
 
-# Consider removing this in the future
-# This should appear before the project command, because it does not use FORCE
-if(WIN32)
-    set(CMAKE_INSTALL_PREFIX
-        "${PROJECT_BINARY_DIR}/package"
-        CACHE PATH "Install path prefix, prepended onto install directories"
-    )
-else()
-    set(CMAKE_INSTALL_PREFIX
-        "/opt/rocm"
-        CACHE PATH "Install path prefix, prepended onto install directories"
-    )
-endif()
-
-# This has to be initialized before the project() command appears
-# Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
-if(NOT DEFINED CMAKE_CONFIGURATION_TYPES AND NOT DEFINED CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE
-        Release
-        CACHE
-            STRING
-            "Choose the type of build, options are: None Debug Release RelWithDebInfo MinSizeRel."
-    )
-endif()
-
-project(
-    rocRoller
-    VERSION ${ROCROLLER_VERSION}
-    LANGUAGES CXX
-)
-if(CMAKE_C_COMPILER)
-    # If the compiler is specified but the C language isn't enabled,
-    # LLVM pitches a fit, so for easy compatibility just enable the C language
-    enable_language(C)
-endif()
-
-set(CMAKE_CXX_STANDARD 20)
-
-# Append our library helper cmake path and the cmake path for hip (for convenience)
-# Users may override HIP path by specifying their own in CMAKE_MODULE_PATH
-list(
-    APPEND
-    CMAKE_MODULE_PATH
-    ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-    ${ROCM_PATH}/lib/cmake/hip
-    /opt/rocm/lib/cmake/hip
-    ${HIP_DIR}/cmake
-)
-
-# NOTE:  workaround until hip cmake modules fixes symlink logic in their config files; remove when fixed
-list(
-    APPEND
-    CMAKE_PREFIX_PATH
-    ${ROCM_PATH}/lib/cmake/hip
-    /opt/rocm
-    /opt/rocm/llvm
-    /opt/rocm/hip
-)
-
-include(cmake/Dependencies.cmake)
-rocroller_add_dependency(
+FetchContent_Declare(
     ROCmCMakeBuildTools
-    VERSION 0.11.0
-    FIND_PACKAGE_ARGS NO_DEFAULT_PATH # PATHS "${ROCM_PATH}"
+    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake.git
+    GIT_TAG rocm-6.3.0
+    SOURCE_SUBDIR "DISABLE ADDING TO BUILD"
 )
-
-include(ROCMSetupVersion)
-include(ROCMCreatePackage)
+FetchContent_MakeAvailable(ROCmCMakeBuildTools)
+list(
+    APPEND CMAKE_MODULE_PATH
+    ${rocmcmakebuildtools_SOURCE_DIR}/share/rocmcmakebuildtools/cmake
+)
 include(ROCMInstallTargets)
-include(ROCMClients)
 
-rocm_setup_version(VERSION ${ROCROLLER_VERSION})
-
+option(ROCROLLER_ENABLE_CLIENT "Build the rocRoller client." ON)
+option(ROCROLLER_ENABLE_YAML_CPP "Enable yaml-cpp backend." ON)
+cmake_dependent_option(ROCROLLER_ENABLE_LLVM "Enable llvm yaml backend." ON "NOT ROCROLLER_ENABLE_YAML_CPP" OFF)
+option(ROCROLLER_BUILD_TESTING "Build rocRoller testing." ON)
+option(ROCROLLER_ENABLE_DOCS "Build rocRoller documentation." OFF)
+option(ROCROLLER_ENABLE_CATCH "Build rocRoller catch unit tests" ON)
+option(ROCROLLER_ENABLE_ARCH_GEN_TEST "Build rocRoller architecture generator test" ON)
+option(ROCROLLER_ENABLE_TEST_DISCOVERY "Use gtest and catch2 test discovery functions." ON)
+option(ROCROLLER_ENABLE_COVERAGE "Build code coverage." OFF)
+cmake_dependent_option(ROCROLLER_ENABLE_SLOW_TESTS "Disable slow running tests." ON "NOT ROCROLLER_ENABLE_COVERAGE" OFF)
+option(ROCROLLER_EMBED_ARCH_DEF "Embed msgpack architecture data in library." ON)
+option(ROCROLLER_BUILD_SHARED_LIBS "Build rocRoller as a shared library." ON)
+option(ROCROLLER_ENABLE_FETCH "Enable fetch content for dependencies if find_package fails." OFF)
+option(ROCROLLER_ENABLE_LLD "Build rocroller functionality requiring LLD" OFF)
 option(ROCROLLER_ENABLE_TIMERS "Enable rocRoller timer code." OFF)
-option(ROCROLLER_USE_HIP "Use HIP within the rocRoller." ON)
-option(ROCROLLER_USE_LLD "Use LLD within the rocRoller." ON)
-option(ROCROLLER_EMBED_ARCH_DEF
-       "Embed the generated GPU architecture msgpack in the library" ON
-)
-option(ROCROLLER_USE_PREGENERATED_ARCH_DEF
-       "Use the pregenerates GPU architecture definition YAML file(s) in the repository." ON
-)
-option(SKIP_CPPCHECK "Skip CPPCHECK." ON)
-
-option(CODE_ANALYSIS "When building, don't query for tests etc." OFF)
-option(CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)
-
-option(BUILD_SHARED_LIBS "Build using shared libraries" ON)
-option(BUILD_CLIENTS "Build performance testing clients" ON)
-option(BUILD_TESTING "Build rocRoller test clients" ON)
-option(BUILD_DOCS "Build rocRoller documentation" ON)
-option(BUILD_VERBOSE "Output additional build information" OFF)
-option(BUILD_ADDRESS_SANITIZER "Build rocRoller with address sanitizer enabled (clang only)" OFF)
-
-option(MXDATAGENERATOR_GIT_TAG "mxDataGenerator tag/commit hash to checkout" "3ac153eec4c1a1e0da7546abc9c0c4f54e180f43")
+option(ROCROLLER_ENABLE_CPPCHECK "Enable cppcheck." OFF)
+option(ROCROLLER_ENABLE_ASAN "Enable addresss sanitizers." OFF)
+option(ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF "Use the pregenerates GPU architecture definition YAML file(s) in the repository." ON)
+set(ROCROLLER_MRISAS_DIR "${CMAKE_CURRENT_BINARY_DIR}/GPUArchitectureGenerator/amd-mrisa" CACHE STRING "Path to directory containing MRISA XML files.")
+set(MXDATAGENERATOR_GIT_TAG "3ac153eec4c1a1e0da7546abc9c0c4f54e180f43" CACHE STRING "mxDataGenerator tag/commit hash to checkout")
 set(MXDATAGENERATOR_GIT_URL "https://github.com/ROCm/mxDataGenerator.git" CACHE STRING "Base Git URL to fetch mxDataGenerator from.")
 
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
-
-set(YAML_BACKEND
-    "YAML_CPP"
-    CACHE STRING "YAML backend used for serialization"
-)
-set_property(CACHE YAML_BACKEND PROPERTY STRINGS YAML_CPP LLVM)
-
-# For paths given when reporting errors
-add_compile_options(-fmacro-prefix-map=${PROJECT_SOURCE_DIR}=.)
-
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    if(BUILD_ADDRESS_SANITIZER)
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -shared-libasan")
-        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
-    endif()
-    set(COROUTINES_COMPILE_OPTION)
-    set(EXTRA_COMPILE_OPTIONS)
-    set(EXTRA_LINK_OPTIONS -fuse-ld=lld -frtti)
-else()
-    if(BUILD_ADDRESS_SANITIZER)
-        message(FATAL_ERROR "BUILD_ADDRESS_SANITIZER with a non-clang compiler is not supported")
-    endif()
-    set(COROUTINES_COMPILE_OPTION -fcoroutines)
-    set(EXTRA_COMPILE_OPTIONS)
-    set(EXTRA_LINK_OPTIONS -frtti)
+if(ROCROLLER_ENABLE_TEST_DISCOVERY)
+    enable_testing()
 endif()
 
-if(ROCROLLER_ENABLE_TIMERS)
-    add_definitions(-DROCROLLER_ENABLE_TIMERS)
-    add_compile_options(-pg -fno-omit-frame-pointer)
-endif()
-
-if(CODE_COVERAGE)
-    list(PREPEND EXTRA_COMPILE_OPTIONS -fprofile-instr-generate
-         -fcoverage-mapping
-    )
-    list(PREPEND EXTRA_LINK_OPTIONS -fprofile-instr-generate -fcoverage-mapping)
-endif()
-
-if(ROCROLLER_USE_HIP)
-    list(APPEND CMAKE_PREFIX_PATH /opt/rocm /opt/rocm/hip)
-    find_package(hip)
-
-    find_package(LLVM REQUIRED HINTS /opt/rocm/llvm/)
-
-    if(YAML_BACKEND STREQUAL "LLVM")
-        llvm_map_components_to_libnames(llvm_yaml_libs objectyaml)
-    endif()
-
-    llvm_map_components_to_libnames(llvm_libs mc support)
-endif()
-
-# does not show up in headers, no system package required
-rocroller_add_dependency(msgpack VERSION 3.3.0)
-rocroller_add_dependency(fmt VERSION 11.1.3)
-rocroller_add_dependency(spdlog VERSION 1.15.1)
-
-if(YAML_BACKEND STREQUAL "YAML_CPP")
-    # shows up in headers, system package required
-    rocroller_add_dependency(
-        yaml-cpp
-        VERSION 0.7.0
-        COMPONENTS devel runtime
-    )
-    add_definitions(-DROCROLLER_USE_YAML_CPP)
-elseif(YAML_BACKEND STREQUAL "LLVM")
-    add_definitions(-DROCROLLER_USE_LLVM)
-endif()
-
-if(SKIP_CPPCHECK)
-    unset(CMAKE_CXX_CPPCHECK CACHE)
-else()
+if(ROCROLLER_ENABLE_CPPCHECK)
     find_program(CMAKE_CXX_CPPCHECK NAMES cppcheck)
     if(CMAKE_CXX_CPPCHECK)
         list(
@@ -217,129 +67,250 @@ else()
             "--suppressions-list=${PROJECT_SOURCE_DIR}/CppCheckSuppressions.txt"
         )
     endif()
+else()
+    unset(CMAKE_CXX_CPPCHECK CACHE)
 endif()
 
-# Git hash
-execute_process(
-    COMMAND git describe --always --dirty
-    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
-    OUTPUT_VARIABLE ROCROLLER_GIT_HASH
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-
-set(ROCROLLER_GIT_VERSION_CPP_FILE
-    ${PROJECT_BINARY_DIR}/source/rocRoller/Utilities/Version.cpp
-)
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/lib/source/Utilities/Version.cpp.in
-    ${ROCROLLER_GIT_VERSION_CPP_FILE}
-)
-
-add_subdirectory(GPUArchitectureGenerator)
-add_subdirectory(lib)
-
-if(BUILD_CLIENTS OR BUILD_TESTING)
-    add_subdirectory(test/common)
-
-    if(NOT CLIENTS_OS)
-        rocm_set_os_id(CLIENTS_OS)
-        string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)
-        rocm_read_os_release(CLIENTS_OS_VERSION VERSION_ID)
-    endif()
-    message(STATUS "OS: ${CLIENTS_OS} ${CLIENTS_OS_VERSION}")
-    set(OPENMP_DEB "libomp-dev")
-    set(OPENMP_RPM "libgomp")
-
-    if(PROJECT_IS_TOP_LEVEL)
-        rocm_package_setup_component(clients)
-    endif()
-endif()
-
-if(BUILD_TESTING)
-    enable_testing()
-    if(PROJECT_IS_TOP_LEVEL)
-        rocm_package_setup_client_component(
-            tests
-            DEPENDS DEB
-                    "${OPENMP_DEB}"
-                    "libopenblas-dev"
-                    RPM
-                    "${OPENMP_RPM}"
-                    "libopenblas-devel"
+find_package(fmt 11.1.3)
+if(NOT fmt_FOUND)
+    if(ROCROLLER_ENABLE_FETCH)
+        set(FMT_SYSTEM_HEADERS ON)
+        FetchContent_Declare(
+            fmt
+            GIT_REPOSITORY https://github.com/fmtlib/fmt.git
+            GIT_TAG 11.1.3
         )
+        FetchContent_MakeAvailable(fmt)
+    else()
+        message(FATAL_ERROR "Failed to find fmt")
     endif()
+endif()
+
+find_package(spdlog)
+if(NOT spdlog_FOUND)
+    if(ROCROLLER_ENABLE_FETCH)
+        FetchContent_Declare(
+            spdlog
+            GIT_REPOSITORY https://github.com/gabime/spdlog.git
+            GIT_TAG v1.x
+        )
+        FetchContent_MakeAvailable(spdlog)
+    else()
+        message(FATAL_ERROR "Failed to find spdlog")
+    endif()
+endif()
+
+find_package(libdivide)
+if(NOT libdivide_FOUND)
+if(ROCROLLER_ENABLE_FETCH)
+    FetchContent_Declare(
+        libdivide
+        GIT_REPOSITORY https://github.com/ridiculousfish/libdivide.git
+        GIT_TAG master
+    )
+    FetchContent_MakeAvailable(libdivide)
+    else()
+        message(FATAL_ERROR "Failed to find libdivide")
+    endif()
+endif()
+
+find_package(msgpack-cxx CONFIG)
+if(msgpack-cxx_FOUND)
+    message(STATUS "Found msgpack-cxx (>=6.x)")
+    set(msgpack_libs msgpack-cxx)
+else()
+    find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
+    message(STATUS "Found msgpack (<=5.x)")
+    set(msgpack_libs msgpackc)
+endif()
+
+find_package(Boost 1.74.0)
+if(NOT Boost_FOUND)
+    if(ROCROLLER_ENABLE_FETCH)
+        FetchContent_Declare(
+            boost
+            URL https://github.com/boostorg/boost/releases/download/boost-1.87.0/boost-1.87.0-cmake.tar.gz
+        )
+        set(boost_temp_testing ${BUILD_TESTING})
+        set(BUILD_TESTING OFF)
+        set(BUILD_SHARED_LIBS OFF)
+        set(boost_temp_shared ${BUILD_SHARED_LIBS})
+        set(Boost_USE_STATIC_LIBS ON)
+        set(BOOST_INCLUDE_LIBRARIES multi_index)
+        FetchContent_MakeAvailable(boost)
+        set(BUILD_TESTING ${boost_temp_testing})
+        set(BUILD_SHARED_LIBS ${boost_temp_shared})
+    else()
+        message(FATAL_ERROR "Failed to find boost")
+    endif()
+endif()
+
+find_package(hip REQUIRED)
+find_package(amd_comgr REQUIRED)
+if(ROCROLLER_ENABLE_LLVM)
+    find_package(LLVM REQUIRED)
+endif()
+
+if(ROCROLLER_BUILD_SHARED_LIBS)
+    add_library(rocroller SHARED)
+else()
+    add_library(rocroller STATIC)
+    set_target_properties(rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+add_library(roc::rocroller ALIAS rocroller)
+
+add_library(rocroller-interface INTERFACE)
+add_library(roc::rocroller-interface ALIAS rocroller-interface)
+
+if(ROCROLLER_ENABLE_LLD)
+    find_package(LLD REQUIRED)
+    target_include_directories(rocroller PRIVATE "${LLD_INCLUDES}")
+    target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_LLD)
+endif()
+
+if(ROCROLLER_ENABLE_ASAN AND NOT WIN32)
+    rocroller_target_configure_sanitizers(rocroller PRIVATE)
+    set(ASAN_LIB_PATH "unset")
+    execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.asan-x86_64.so
+        OUTPUT_VARIABLE ASAN_LIB_PATH
+    )
+    # If ASAN_LIB_PATH is libclang_rt.asan-x86_64.so
+    # rather than /path/to/libclang_rt.asan-x86_64.so then
+    # we failed to locate it and HAS_PARENT_PATH is false.
+    string(STRIP ${ASAN_LIB_PATH} ASAN_LIB_PATH)
+    cmake_path(HAS_PARENT_PATH ASAN_LIB_PATH result)
+    if(NOT result)
+        message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so ")
+    endif()
+    set(asan_opts "LD_PRELOAD=${ASAN_LIB_PATH};ASAN_OPTIONS=detect_leaks=0")
+endif()
+
+if(ROCROLLER_BUILD_SHARED_LIBS)
+    target_link_libraries(rocroller-interface INTERFACE roc::rocroller)
+else()
+    target_link_libraries(rocroller-interface INTERFACE $<LINK_LIBRARY:WHOLE_ARCHIVE,roc::rocroller>)
+endif()
+
+if(ROCROLLER_ENABLE_TIMERS)
+    target_compile_definitions(rocroller PUBLIC ROCROLLER_ENABLE_TIMERS)
+    target_compile_options(rocroller PRIVATE -pg -fno-omit-frame-pointer)
+endif()
+
+if(ROCROLLER_ENABLE_YAML_CPP)
+    find_package(yaml-cpp 0.8.0)
+    if(NOT yaml-cpp_FOUND)
+        if(ROCROLLER_ENABLE_FETCH)
+            set(YAML_CPP_BUILD_TOOLS OFF)
+            set(YAML_BUILD_SHARED_LIBS OFF)
+            option(YAML_CPP_INSTALL "" ON)
+            FetchContent_Declare(
+                yaml_cpp
+                GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+                GIT_TAG 0.8.0
+            )
+            FetchContent_MakeAvailable(yaml_cpp)
+        else()
+            message(FATAL_ERROR "Failed to find yaml-cpp")
+        endif()
+    endif()
+    target_link_libraries(rocroller PUBLIC yaml-cpp::yaml-cpp)
+    target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_YAML_CPP)
+endif()
+
+target_compile_definitions(rocroller
+    PUBLIC
+        ROCROLLER_USE_HIP
+        __HIP_PLATFORM_AMD__
+)
+
+if(ROCROLLER_ENABLE_LLVM)
+    llvm_map_components_to_libnames(llvm_yaml_libs objectyaml)
+    llvm_map_components_to_libnames(llvm_libs mc support)
+endif()
+
+target_link_libraries(rocroller
+    PUBLIC
+       Boost::headers
+       hip::host
+    PRIVATE
+        ${msgpack_libs}
+        amd_comgr
+)
+
+if(ROCROLLER_ENABLE_LLVM)
+    # ROCROLLER_USE_LLVM enables the llvm yaml API
+    target_compile_definitions(rocroller PUBLIC ROCROLLER_USE_LLVM)
+    target_include_directories(rocroller PUBLIC "${LLVM_INCLUDE_DIRS}")
+endif()
+
+target_link_libraries(rocroller
+    PUBLIC
+        fmt::fmt-header-only
+    PRIVATE
+        $<BUILD_INTERFACE:spdlog::spdlog_header_only>
+        $<BUILD_INTERFACE:libdivide::libdivide>
+        ${llvm_yaml_libs}
+        ${llvm_libs}
+)
+
+target_include_directories(rocroller PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include>)
+
+target_compile_features(rocroller PUBLIC cxx_std_20)
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/lib/source/Utilities/Version.cpp.in"
+    "${PROJECT_BINARY_DIR}/rocRoller/src/Version.cpp"
+)
+target_sources(rocroller PRIVATE "${PROJECT_BINARY_DIR}/rocRoller/src/Version.cpp")
+
+add_subdirectory(lib/source)
+add_subdirectory(lib/include)
+add_subdirectory(GPUArchitectureGenerator)
+
+if(ROCROLLER_EMBED_ARCH_DEF)
+    target_link_libraries(rocroller PUBLIC $<BUILD_INTERFACE:rocroller::GPUArchitecture_def>)
+    target_compile_definitions(rocroller PRIVATE ROCROLLER_EMBED_ARCH_DEF)
+endif()
+
+if(ROCROLLER_BUILD_TESTING)
     add_subdirectory(test)
 endif()
 
-if(BUILD_DOCS)
-    # Add docs directory
-    add_subdirectory(docs)
-endif()
-
-if(BUILD_CLIENTS)
-    if(PROJECT_IS_TOP_LEVEL)
-        rocm_package_setup_client_component(
-            benchmarks DEPENDS DEB "${OPENMP_DEB}" RPM "${OPENMP_RPM}"
-        )
-    endif()
-    # Add client directory
+if(ROCROLLER_ENABLE_CLIENT)
     add_subdirectory(client)
 endif()
 
-if(PROJECT_IS_TOP_LEVEL)
-    include(GNUInstallDirs)
+rocm_install(
+    TARGETS rocroller rocroller-interface
+    EXPORT rocroller-targets
+    INCLUDE
+        "${ROCROLLER_LIB_DIR}/include"
+)
 
-    if(WIN32)
-        set(CPACK_SOURCE_GENERATOR "ZIP")
-        set(CPACK_GENERATOR "ZIP")
-    else()
-        set(CPACK_GENERATOR "DEB")
-    endif()
-
-    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
-    set(CPACK_RPM_PACKAGE_LICENSE "MIT")
-
-    if(WIN32)
-        set(CMAKE_INSTALL_PREFIX
-            "C:/hipSDK"
-            CACHE PATH "Install path" FORCE
-        )
-        set(INSTALL_PREFIX "C:/hipSDK")
-        set(CPACK_SET_DESTDIR FALSE)
-        set(CPACK_PACKAGE_INSTALL_DIRECTORY "C:/hipSDK")
-        set(CPACK_PACKAGING_INSTALL_PREFIX "")
-        set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
-    else()
-        if(NOT CPACK_PACKAGING_INSTALL_PREFIX)
-            set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
-        endif()
-        set(CPACK_SET_DESTDIR
-            OFF
-            CACHE
-                BOOL
-                "Boolean toggle to make CPack use DESTDIR mechanism when packaging"
+if(ROCROLLER_BUILD_TESTING OR BUILD_TESTING)
+    rocm_install(
+        TARGETS rocroller-tests
+        COMPONENT tests
+    )
+    if(ROCROLLER_ENABLE_CATCH)
+        rocm_install(
+            TARGETS rocroller-tests-catch
+            COMPONENT tests
         )
     endif()
+endif()
 
-    set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
-        "\${CPACK_PACKAGING_INSTALL_PREFIX}"
-    )
+rocm_export_targets(
+    TARGETS roc::rocroller roc::rocroller-interface
+    NAMESPACE roc::
+    EXPORT rocroller-targets
+    DEPENDS PACKAGE yaml-cpp
+    DEPENDS PACKAGE Boost
+    DEPENDS PACKAGE fmt
+    DEPENDS PACKAGE hip
+)
 
-    set(package_name rocroller)
-
-    rocm_package_add_deb_dependencies(STATIC_DEPENDS "rocm-llvm-dev >= 18.0.0")
-    rocm_package_add_rpm_dependencies(STATIC_DEPENDS "rocm-llvm-devel >= 18.0.0")
-
-    set(ROCROLLER_CONFIG_DIR
-        "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
-        CACHE PATH "Path placed into ldconfig file"
-    )
-
-    rocm_create_package(
-        NAME ${package_name}
-        DESCRIPTION "A library for generating AMDGPU kernels"
-        MAINTAINER "rocRoller Maintainer <rocroller-maintainer@amd.com>"
-        LDCONFIG
-        LDCONFIG_DIR ${ROCROLLER_CONFIG_DIR}
-    )
+if(ROCROLLER_ENABLE_DOCS)
+    add_subdirectory(docs)
 endif()

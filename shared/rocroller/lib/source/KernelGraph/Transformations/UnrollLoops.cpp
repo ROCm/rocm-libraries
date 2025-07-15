@@ -237,6 +237,7 @@ namespace rocRoller
                                       std::vector<int>&        controlStack,
                                       bool const               bodyParent)
         {
+            // cppcheck-suppress syntaxError
             auto const traverseEdge = [&]<typename EdgeType>() {
                 for(auto parent : graph.control.getInputNodeIndices<EdgeType>(tag))
                 {
