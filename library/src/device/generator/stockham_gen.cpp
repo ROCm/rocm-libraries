@@ -238,6 +238,7 @@ void output_json(const std::vector<GeneratedLauncher>& launchers,
     output << "]";
 }
 
+// Render stockham partial-pass kernel generated launchers in JSON format.
 void stockham_partial_pass_variants(const std::string&               kernel_name,
                                     const StockhamGeneratorSpecs&    specs1,
                                     const StockhamGeneratorSpecs&    specs2,
@@ -577,7 +578,6 @@ void validate_pp_off_dim_length(const StockhamPartialPassParams& pp_params_1,
     if(length_off_dim != pp_params_1.parent_length[pp_params_1.off_dim])
         throw std::runtime_error("Invalid partial-pass kernel off-dimension length");
 }
-
 // Validate grid parameters for partial pass kernels.
 void validate_pp_grid_params(const StockhamPartialPassParams& params_1,
                              const StockhamPartialPassParams& params_2,
@@ -786,6 +786,14 @@ int main()
 
             if(!threads_per_transform.empty())
                 specs2d.threads_per_transform = threads_per_transform.back();
+
+            // 2D_SINGLE kernels use the specified workgroup size
+            // directly
+            if(scheme == "CS_KERNEL_2D_SINGLE")
+            {
+                specs.wgs_is_derived   = true;
+                specs2d.wgs_is_derived = true;
+            }
 
             // aim for occupancy-2 by default
             specs.lds_byte_limit   = lds_size_bytes / 2;

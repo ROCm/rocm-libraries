@@ -83,6 +83,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         specs->threads_per_transform = kernel->threads_per_transform[0];
         specs->half_lds              = kernel->half_lds;
         specs->direct_to_from_reg    = kernel->direct_to_from_reg;
+        specs->ebtype                = node.ebtype;
 
         if(node.isPartialPassEnabled())
         {
