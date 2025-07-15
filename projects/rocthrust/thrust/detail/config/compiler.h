@@ -49,6 +49,10 @@
 #define THRUST_HOST_COMPILER_CLANG 3
 //! deprecated [Since 2.7]
 #define THRUST_HOST_COMPILER_INTEL 4
+//! deprecated [Since 2.7]
+#define THRUST_HOST_COMPILER_NVHPC 5
+//! deprecated [Since 2.7]
+#define THRUST_HOST_COMPILER_NVRTC 6
 
 // enumerate device compilers we know about
 //! deprecated [Since 2.7]
