@@ -11,6 +11,8 @@ Documentation for rocThrust available at
 * Drop `c++14` support for rocthrust.
 * Renamed `cpp14_required.h` to `cpp_version_check.h`
 * Switched to using `clang++` to compile for google benchmark on Windows system
+* Added gfx950 support.
+* Merged changes from upstream CCCL/thrust 2.6.0
 
 ### Removed
 
@@ -24,13 +26,6 @@ Documentation for rocThrust available at
 ### Resolved issues
 
 * Fixed an issue with internal calls to unqualified `distance()` which would be ambigious due to also visibile implementation through ADL.
-
-## rocThrust 3.4.0 for ROCm 6.5
-
-### Added
-
-* Added gfx950 support.
-* Merged changes from upstream CCCL/thrust 2.6.0
 
 ### Known Issues
 * The order of the values being compared by thrust::exclusive_scan_by_key and thrust::inclusive_scan_by_key can change between runs when integers are being compared. This can cause incorrect output when a non-commutative operator such as division is being used.

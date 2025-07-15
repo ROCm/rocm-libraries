@@ -1,6 +1,8 @@
 # ########################################################################
 # Copyright (C) 2025 Advanced Micro Devices, Inc.
 #
+# MIT License
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
@@ -21,24 +23,27 @@
 #
 # ########################################################################
 
-set(_CMAKE_CURRENT_SOURCE_DIR "${TEMP_TENSILE_HOST_SOURCE_DIR}/include/Tensile")
+set(_CMAKE_CURRENT_SOURCE_DIR "${TENSILELITE_CLIENT_DIR}/source")
 
-target_sources(tensilelite-host
+target_sources(tensilelite-client
     PRIVATE
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Serialization/Base.hpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Serialization/Containers.hpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Serialization/ContractionPredicates.hpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Serialization/ContractionSolution.hpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Serialization/ExactLogicLibrary.hpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Serialization/FreeSizeLibrary.hpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Serialization/GranularitySelectionLibrary.hpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Serialization/HasTraits.hpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Serialization/MLFeatures.hpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Serialization/MLPClassificationLibrary.hpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Serialization/MapLibrary.hpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Serialization/MatchingLibrary.hpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Serialization/PlaceholderLibrary.hpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Serialization/Predicates.hpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Serialization/Properties.hpp"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/Serialization/SolutionLibrary.hpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/BenchmarkTimer.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/ClientProblemFactory.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/DataInitialization.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/PerformanceReporter.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitorListener.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/TimingEvents.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/HardwareMonitor.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/ReferenceValidator.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/ResultFileReporter.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/ResultReporter.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/MetaRunListener.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/Reference.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/ProgressListener.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/TypedId.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/Rotating.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/CSVStackFile.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/SolutionIterator.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/LibraryUpdateReporter.cpp"
 )
+
