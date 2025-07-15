@@ -247,6 +247,10 @@ template struct rocsparse_matrix_factory_random<_Float16, int32_t, int32_t>;
 template struct rocsparse_matrix_factory_random<_Float16, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_random<_Float16, int64_t, int64_t>;
 
+template struct rocsparse_matrix_factory_random<rocsparse_bfloat16, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_random<rocsparse_bfloat16, int64_t, int32_t>;
+template struct rocsparse_matrix_factory_random<rocsparse_bfloat16, int64_t, int64_t>;
+
 template struct rocsparse_matrix_factory_random<float, int32_t, int32_t>;
 template struct rocsparse_matrix_factory_random<float, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_random<float, int64_t, int64_t>;

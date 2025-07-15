@@ -195,6 +195,11 @@ void testing_spsv_coo(const Arguments& arg)
     CHECK_ROCSPARSE_ERROR(rocsparse_spsv(
         handle, trans_A, dalpha, A, x, y2, ttype, alg, preprocess, nullptr, dbuffer));
 
+    //
+    // Set the buffer to some values.
+    //
+    CHECK_HIP_ERROR(hipMemset(dbuffer, 143, buffer_size));
+
     if(arg.unit_check)
     {
         // Solve on host

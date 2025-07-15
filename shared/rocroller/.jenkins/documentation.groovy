@@ -92,11 +92,22 @@ ci: {
     ]
     auxiliary.registerAdditionalParameters(additionalParameters)
 
-    def propertyList = ["enterprise":[pipelineTriggers([cron('0 1 * * 0')])]]
+    def propertyList = [
+        "enterprise":[pipelineTriggers([cron('0 1 * * 0')])],
+        "rocm-libraries":[pipelineTriggers([cron('0 1 * * 0')])]
+    ]
     propertyList = auxiliary.appendPropertyList(propertyList)
 
-    def jobNameList = ["enterprise":(["rocroller-ubuntu20-clang":['rocroller-compile', 'rocroller-gfx90a'],
-                                  "rocroller-ubuntu20-gcc":['rocroller-compile', 'rocroller-gfx90a']])]
+    def jobNameList = [
+        "enterprise":([
+            "rocroller-ubuntu20-clang":['rocroller-compile', 'rocroller-gfx90a'],
+            "rocroller-ubuntu20-gcc":['rocroller-compile', 'rocroller-gfx90a']
+        ]),
+        "rocm-libraries":([
+            "rocroller-ubuntu20-clang":['rocroller-compile', 'rocroller-gfx90a'],
+            "rocroller-ubuntu20-gcc":['rocroller-compile', 'rocroller-gfx90a']
+        ])
+    ]
     jobNameList = auxiliary.appendJobNameList(jobNameList)
 
     propertyList.each

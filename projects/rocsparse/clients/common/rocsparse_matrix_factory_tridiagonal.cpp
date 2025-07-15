@@ -210,6 +210,10 @@ template struct rocsparse_matrix_factory_tridiagonal<_Float16, int32_t, int32_t>
 template struct rocsparse_matrix_factory_tridiagonal<_Float16, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_tridiagonal<_Float16, int64_t, int64_t>;
 
+template struct rocsparse_matrix_factory_tridiagonal<rocsparse_bfloat16, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_tridiagonal<rocsparse_bfloat16, int64_t, int32_t>;
+template struct rocsparse_matrix_factory_tridiagonal<rocsparse_bfloat16, int64_t, int64_t>;
+
 template struct rocsparse_matrix_factory_tridiagonal<float, int32_t, int32_t>;
 template struct rocsparse_matrix_factory_tridiagonal<float, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_tridiagonal<float, int64_t, int64_t>;

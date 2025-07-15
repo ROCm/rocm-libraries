@@ -221,7 +221,7 @@ namespace rocRoller
                     return command;
                 }
 
-                virtual CommandParametersPtr
+                CommandParametersPtr
                     makeCommandParameters(CommandPtr                command,
                                           SolutionParameters const& solutionParams) override
                 {
@@ -434,10 +434,10 @@ namespace rocRoller
 
                     if(solutionParams.matchMemoryAccess)
                     {
-                        params->transposeMemoryAccess[LayoutType::MATRIX_A]
-                            = solutionParams.transA == TransposeType::T;
-                        params->transposeMemoryAccess[LayoutType::MATRIX_B]
-                            = solutionParams.transB == TransposeType::T;
+                        params->transposeMemoryAccess.set(
+                            LayoutType::MATRIX_A, solutionParams.transA == TransposeType::T);
+                        params->transposeMemoryAccess.set(
+                            LayoutType::MATRIX_B, solutionParams.transB == TransposeType::T);
                     }
 
                     uint workgroup_size_x
@@ -483,10 +483,9 @@ namespace rocRoller
                     return params;
                 }
 
-                virtual CommandArguments
-                    commandArguments(CommandPtr               command,
-                                     ProblemParameters const& problemParams,
-                                     RunParameters const&     runParams) const override
+                CommandArguments commandArguments(CommandPtr               command,
+                                                  ProblemParameters const& problemParams,
+                                                  RunParameters const&     runParams) const override
                 {
                     CommandArguments commandArgs = command->createArguments();
 
@@ -535,9 +534,9 @@ namespace rocRoller
                     return commandArgs;
                 }
 
-                virtual void setPredicates(CommandPtr                command,
-                                           CommandKernelPtr          commandKernel,
-                                           SolutionParameters const& solutionParams) override
+                void setPredicates(CommandPtr                command,
+                                   CommandKernelPtr          commandKernel,
+                                   SolutionParameters const& solutionParams) override
                 {
                     using namespace rocRoller::Expression;
                     auto params = commandKernel->getCommandParameters();

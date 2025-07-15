@@ -98,7 +98,7 @@ namespace rocRoller
                          const float       min,
                          const float       max,
                          const uint32_t    seed,
-                         const int         blockScaling = 1,
+                         const index_t     blockScaling = 1,
                          const DataPattern pattern      = Bounded)
     {
         auto sizes   = desc.sizes();
@@ -109,8 +109,8 @@ namespace rocRoller
         using DGenDT = typename rrDT2DGenDT<rrDT>::type;
         DGen::DataGenerator<DGenDT> dgen;
         dgen.setSeed(seed);
-        std::vector<int> dgen_sizes(sizes.begin(), sizes.end());
-        std::vector<int> dgen_strides(strides.begin(), strides.end());
+        std::vector<index_t> dgen_sizes(sizes.begin(), sizes.end());
+        std::vector<index_t> dgen_strides(strides.begin(), strides.end());
         return dgen.generate(dgen_sizes, dgen_strides, opts);
     }
 
@@ -197,29 +197,23 @@ namespace rocRoller
         using STA          = typename SegmentedTypeOf<TA>::type;
         using STB          = typename SegmentedTypeOf<TB>::type;
 
-#pragma omp parallel sections
         {
-#pragma omp section
-            {
-                auto dgenA = getDataGenerator<STA>(descA, min, max, seed + 1, blockScalingA);
-                hostA      = getRandomVector<STA>(dgenA, hasScaleA);
-                if(hasScaleA)
-                    hostScaleA = dgenA.getScaleBytes();
-            }
+            auto dgenA = getDataGenerator<STA>(descA, min, max, seed + 1, blockScalingA);
+            hostA      = getRandomVector<STA>(dgenA, hasScaleA);
+            if(hasScaleA)
+                hostScaleA = dgenA.getScaleBytes();
+        }
 
-#pragma omp section
-            {
-                auto dgenB = getDataGenerator<STB>(descB, min, max, seed + 2, blockScalingB);
-                hostB      = getRandomVector<STB>(dgenB, hasScaleB);
-                if(hasScaleB)
-                    hostScaleB = dgenB.getScaleBytes();
-            }
+        {
+            auto dgenB = getDataGenerator<STB>(descB, min, max, seed + 2, blockScalingB);
+            hostB      = getRandomVector<STB>(dgenB, hasScaleB);
+            if(hasScaleB)
+                hostScaleB = dgenB.getScaleBytes();
+        }
 
-#pragma omp section
-            {
-                auto dgenC = getDataGenerator<TC>(descC, min, max, seed);
-                hostC      = getRandomVector<TC>(dgenC, false);
-            }
+        {
+            auto dgenC = getDataGenerator<TC>(descC, min, max, seed);
+            hostC      = getRandomVector<TC>(dgenC, false);
         }
     }
 
