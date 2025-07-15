@@ -58,7 +58,7 @@ namespace rocRoller
         {
             auto [dst, index] = *merge;
 
-	    AssertFatal(hasRegister(dst), ShowValue(dst));
+            AssertFatal(hasRegister(dst), ShowValue(dst));
 
             auto target = getRegister(dst);
             return target->element({index});
@@ -69,7 +69,7 @@ namespace rocRoller
         {
             auto [dst, index] = *segment;
 
-	    AssertFatal(hasRegister(dst), ShowValue(dst));
+            AssertFatal(hasRegister(dst), ShowValue(dst));
 
             auto target = getRegister(dst);
             return target->segment({index});
@@ -164,10 +164,11 @@ namespace rocRoller
             aliasMsg = fmt::format(" alias {} -> {}", tag, dst);
         }
 
+        if(auto ctx = m_context.lock())
         {
             auto inst
                 = Instruction::Comment(fmt::format("tag {}: {}{}", tag, r->toString(), aliasMsg));
-            m_context.lock()->schedule(inst);
+            ctx->schedule(inst);
         }
 
         m_registers.emplace(tag, r);
@@ -183,6 +184,7 @@ namespace rocRoller
                     ShowValue(tag),
                     ShowValue(getAlias(tag).value_or(-1)));
         AssertFatal(!hasRegister(tag), "Tag ", tag, " already in RegisterTagManager.");
+        AssertFatal(value != nullptr, ShowValue(tag));
 
         if(auto existingTag = findRegister(value))
         {
@@ -197,6 +199,13 @@ namespace rocRoller
                         getRegister(*existingTag)->toString());
         }
 
+        // if(auto ctx = m_context.lock())
+        // {
+        //     auto inst
+        //         = Instruction::Comment(fmt::format("tag {}: {}", tag, value->toString()));
+        //     ctx->schedule(inst);
+        // }
+
         m_registers.emplace(tag, value);
     }
 
@@ -208,6 +217,13 @@ namespace rocRoller
         AssertFatal(!hasRegister(tag), "Tag ", tag, " already associated with a register");
 
         AssertFatal(!m_aliases.contains(tag), "Cannot alias an expression tag.");
+
+        // if(auto ctx = m_context.lock())
+        // {
+        //     auto inst
+        //         = Instruction::Comment(fmt::format("tag {}: {}", tag, toString(value)));
+        //     ctx->schedule(inst);
+        // }
 
         m_expressions.emplace(tag, std::make_pair(value, attrs));
     }
@@ -291,12 +307,12 @@ namespace rocRoller
 
     inline bool RegisterTagManager::hasRegister(int tag) const
     {
-        auto merge = getIndex(tag);
-        if(merge)
-        {
-            auto [dst, index] = *merge;
-            return hasRegister(dst);
-        }
+        // auto merge = getIndex(tag);
+        // if(merge)
+        // {
+        //     auto [dst, index] = *merge;
+        //     return hasRegister(dst);
+        // }
 
         auto segment = getSegment(tag);
         if(segment)

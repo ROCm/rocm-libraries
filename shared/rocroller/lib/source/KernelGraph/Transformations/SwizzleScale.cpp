@@ -24,9 +24,11 @@
  *
  *******************************************************************************/
 
-#include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/SwizzleScale.hpp>
+
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 
 namespace rocRoller
 {
@@ -641,14 +643,24 @@ namespace rocRoller
                 graph.coordinates.addElement(Index(0), {exchangeTileTag}, {tileTag});
                 graph.mapper.connect<MacroTile>(exchange, exchangeTileTag);
 
-                //auto destMacTileTag = graph.coordinates.addElement(MacroTile());
-		auto destMacTileTag = exchangeTileTag;
+                auto destMacTileTag = context->kernelOptions()->skipPermlane
+                                          ? exchangeTileTag
+                                          : graph.coordinates.addElement(MacroTile());
+
                 graph.mapper.connect(exchange, destMacTileTag, NaryArgument::DEST);
+
+                auto createNode = [&context](int idx) -> rocRoller::KernelGraph::CoordinateGraph::Edge {
+                    if(context->kernelOptions()->skipPermlane)
+                        return Segment(idx);
+
+                    return Index(idx);
+                };
 
                 // add index edge to point to exchange output tile.
                 int index = 0;
+
                 graph.coordinates.addElement(
-                    Segment(index++), {scaleLoads.at(load.first)}, {destMacTileTag});
+                    createNode(index++), {scaleLoads.at(load.first)}, {destMacTileTag});
 
                 // merge the loads
                 for(auto const merge : load.second)
@@ -677,8 +689,9 @@ namespace rocRoller
                             Index(merge.second), {exchangeTileTag}, {tileTag});
                         graph.mapper.connect<MacroTile>(replaceOp, exchangeTileTag);
 
-                        //destMacTileTag = graph.coordinates.addElement(MacroTile());
-			destMacTileTag = exchangeTileTag;
+                        destMacTileTag = context->kernelOptions()->skipPermlane
+                                          ? exchangeTileTag
+                                          : graph.coordinates.addElement(MacroTile());
                         graph.mapper.connect(replaceOp, destMacTileTag, NaryArgument::DEST);
 
                         // reset the index
@@ -692,7 +705,7 @@ namespace rocRoller
                     purgeNodeAndChildren(graph, mergeTopOp);
 
                     graph.coordinates.addElement(
-                        Segment(index++), {scaleLoads.at(merge.first)}, {destMacTileTag});
+                        createNode(index++), {scaleLoads.at(merge.first)}, {destMacTileTag});
                 }
 
                 // update the SetCoordinate value and its Unroll coordinate connection

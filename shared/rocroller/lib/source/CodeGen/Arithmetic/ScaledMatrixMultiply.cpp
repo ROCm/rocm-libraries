@@ -128,15 +128,15 @@ namespace rocRoller
             auto typeB = matB->variableType().dataType;
 
             std::string mi;
-	    std::string aType, bType;
+            std::string aType, bType;
 
-	    AssertFatal(arch.HasCapability(GPUCapability::HasMFMA_scale_f8f6f4),
+            AssertFatal(arch.HasCapability(GPUCapability::HasMFMA_scale_f8f6f4),
                         "Scaled Matrix Multiplication is not supported for",
                         arch.target().toString());
 
-	    auto M = miSizes.m;
-	    auto N = miSizes.n;
-	    auto K = miSizes.k;
+            auto M = miSizes.m;
+            auto N = miSizes.n;
+            auto K = miSizes.k;
 
             AssertFatal((M == 16 && N == 16 && K == 128) || (M == 32 && N == 32 && K == 64),
                         "Invalid wavetile {}x{}x{} for scaled MFMA instruction for {}.",
@@ -147,14 +147,14 @@ namespace rocRoller
 
             if(maybeScaleBlockSize)
             {
-		auto scaleBlockSize = maybeScaleBlockSize.value();
+                auto scaleBlockSize = maybeScaleBlockSize.value();
                 AssertFatal(scaleBlockSize == 32,
                             fmt::format("Scale block size expected: 32, got: {}, on: {}",
                                         scaleBlockSize,
                                         arch.target().toString()));
             }
 
-	    mi = concatenate("v_mfma_scale_f32_", M, "x", N, "x", K, "_f8f6f4");
+            mi = concatenate("v_mfma_scale_f32_", M, "x", N, "x", K, "_f8f6f4");
 
             aType = "cbsz:" + Arithmetic::getModifier(typeA);
             bType = "blgp:" + Arithmetic::getModifier(typeB);
@@ -170,11 +170,20 @@ namespace rocRoller
 
             auto [opselLo, opselHi] = Arithmetic::getOpselModifiers2xByte(aScaleByte, bScaleByte);
 
-            co_yield_(Instruction(mi,
-                                  {dest},
-                                  {matA, matB, matC, scaleA, scaleB},
-                                  {opselLo, opselHi, aType, bType},
-                                  ""));
+            Instruction inst(mi,
+                             {dest},
+                             {matA, matB, matC, scaleA, scaleB},
+                             {opselLo, opselHi, aType, bType},
+                             "");
+
+            auto status = m_context->peek(inst);
+
+            if(status.waitCount != WaitCount())
+            {
+                co_yield Instruction::Wait(status.waitCount);
+            }
+
+            co_yield inst;
         }
     }
 }

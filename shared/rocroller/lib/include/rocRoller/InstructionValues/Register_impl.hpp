@@ -972,7 +972,7 @@ namespace rocRoller
             return element<std::initializer_list<T>>(indices);
         }
 
-        inline ValuePtr Value::bitfield(uint8_t bitOffset, uint8_t bitWidth) const
+        inline ValuePtr Value::bitfield(int bitOffset, int bitWidth) const
         {
             AssertFatal(allocationState() != AllocationState::NoAllocation,
                         ShowValue(allocationState()));
@@ -1042,13 +1042,12 @@ namespace rocRoller
             return this->m_bitOffset.has_value();
         }
 
-        inline uint8_t Value::getBitOffset() const
+        inline int Value::getBitOffset() const
         {
-            AssertFatal(this->m_bitOffset.has_value());
-            return this->m_bitOffset.value();
+            return this->m_bitOffset.value_or(0);
         }
 
-        inline uint8_t Value::getBitWidth() const
+        inline int Value::getBitWidth() const
         {
             AssertFatal(this->m_bitWidth.has_value());
             return this->m_bitWidth.value();

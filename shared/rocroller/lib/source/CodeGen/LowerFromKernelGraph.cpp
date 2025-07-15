@@ -1175,13 +1175,13 @@ namespace rocRoller
                 // Exchange tile fixed size: 64 x 4
                 const uint numVgpr = 64 * 4 / wfs;
 
-                AssertFatal(m_context->registerTagManager()->hasRegister(macTileTag));
+                // AssertFatal(m_context->registerTagManager()->hasRegister(macTileTag));
 
                 auto vgpr = m_context->registerTagManager()->getRegister(macTileTag);
 
                 auto packedVariableType = DataTypeInfo::Get(exchange.varType).packedVariableType();
 
-                /*if(packedVariableType)
+                if(packedVariableType && !m_context->kernelOptions()->skipPermlane)
                 {
                     auto allocOptions = Register::AllocationOptions::FullyContiguous();
                     auto temp         = Register::Value::Placeholder(
@@ -1193,50 +1193,56 @@ namespace rocRoller
                             Expression::BitFieldExtract{
                                 {}, exchange.varType.dataType, index * 8, 8});
                     vgpr = temp;
-                }*/
+                }
 
                 auto oMacTileTag = m_graph->mapper.get(tag, NaryArgument::DEST);
-                AssertFatal(m_context->registerTagManager()->hasRegister(oMacTileTag));
-                //AssertFatal(!m_context->registerTagManager()->hasRegister(oMacTileTag));
-                //m_context->registerTagManager()->addRegister(oMacTileTag, vgpr);
-                //AssertFatal(vgpr->registerCount() == numVgpr);
 
-		/*
-                if(Expression::identical(vgprIndex.size, Expression::literal(4u)))
+                if(m_context->kernelOptions()->skipPermlane)
                 {
-                    for(uint32_t i = 0; i < numVgpr; i += 2)
-                    {
-                        co_yield_(Instruction::InoutInstruction(
-                            "v_permlane16_swap_b32",
-                            {vgpr->element({i}), vgpr->element({i + 1})},
-                            {},
-                            ""));
-                    }
-                    for(uint32_t i = 0; i < numVgpr / 2; i++)
-                    {
-                        co_yield_(Instruction::InoutInstruction(
-                            "v_permlane32_swap_b32",
-                            {vgpr->element({i}), vgpr->element({i + 2})},
-                            {},
-                            ""));
-                    }
-                }
-                else if(Expression::identical(vgprIndex.size, Expression::literal(2u)))
-                {
-                    for(uint32_t i = 0; i < numVgpr; i += 2)
-                    {
-                        co_yield_(Instruction::InoutInstruction(
-                            "v_permlane32_swap_b32",
-                            {vgpr->element({i}), vgpr->element({i + 1})},
-                            {},
-                            ""));
-                    }
+                    AssertFatal(m_context->registerTagManager()->hasRegister(oMacTileTag), ShowValue(oMacTileTag));
                 }
                 else
-                    Throw<FatalError>("Exchange for the given vgprIndex size not supported.");
-		*/
+                {
+                    AssertFatal(!m_context->registerTagManager()->hasRegister(oMacTileTag), ShowValue(oMacTileTag));
+                    AssertFatal(vgpr->registerCount() == numVgpr);
 
-		co_return;
+                    m_context->registerTagManager()->addRegister(oMacTileTag, vgpr);
+
+                    if(Expression::identical(vgprIndex.size, Expression::literal(4u)))
+                    {
+                        for(uint32_t i = 0; i < numVgpr; i += 2)
+                        {
+                            co_yield_(Instruction::InoutInstruction(
+                                "v_permlane16_swap_b32",
+                                {vgpr->element({i}), vgpr->element({i + 1})},
+                                {},
+                                ""));
+                        }
+                        for(uint32_t i = 0; i < numVgpr / 2; i++)
+                        {
+                            co_yield_(Instruction::InoutInstruction(
+                                "v_permlane32_swap_b32",
+                                {vgpr->element({i}), vgpr->element({i + 2})},
+                                {},
+                                ""));
+                        }
+                    }
+                    else if(Expression::identical(vgprIndex.size, Expression::literal(2u)))
+                    {
+                        for(uint32_t i = 0; i < numVgpr; i += 2)
+                        {
+                            co_yield_(Instruction::InoutInstruction(
+                                "v_permlane32_swap_b32",
+                                {vgpr->element({i}), vgpr->element({i + 1})},
+                                {},
+                                ""));
+                        }
+                    }
+                    else
+                    {
+                        Throw<FatalError>("Exchange for the given vgprIndex size not supported.");
+                    }
+                }
             }
 
             Generator<Instruction> operator()(int tag, SeedPRNG const& seedPRNG, Transformer coords)

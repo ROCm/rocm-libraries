@@ -269,8 +269,10 @@ namespace rocRoller
         };
 
         template <typename T, typename IO, typename Context>
-        requires(std::same_as<KernelGraph::CoordinateGraph::Index, T> || std::same_as<KernelGraph::CoordinateGraph::Segment, T>)
-        struct MappingTraits<T, IO, Context>
+        requires(
+            CIsAnyOf<T,
+                     KernelGraph::CoordinateGraph::Index,
+                     KernelGraph::CoordinateGraph::Segment>) struct MappingTraits<T, IO, Context>
         {
             using iot = IOTraits<IO>;
 
