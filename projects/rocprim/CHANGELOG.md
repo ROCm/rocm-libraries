@@ -7,6 +7,7 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Added
 
 * Added `get_sreg_lanemask_lt`, `get_sreg_lanemask_le`, `get_sreg_lanemask_gt` and `get_sreg_lanemask_ge`.
+* Added missing benchmarks so that every autotuned type is now covered.
 
 ### Upcoming changes
 

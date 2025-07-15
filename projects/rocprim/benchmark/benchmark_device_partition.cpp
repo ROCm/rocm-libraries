@@ -90,69 +90,65 @@
     CREATE_PARTITION_THREE_WAY_BENCHMARK(type, partition_three_way_probability::p050_p075) \
     CREATE_PARTITION_THREE_WAY_BENCHMARK(type, partition_three_way_probability::p075_p100)
 
+#define BENCHMARK_TYPES_TUNING(T)          \
+    BENCHMARK_FLAG_TYPE(T, int8_t)         \
+    BENCHMARK_PREDICATE_TYPE(T)            \
+    BENCHMARK_TWO_WAY_FLAG_TYPE(T, int8_t) \
+    BENCHMARK_TWO_WAY_PREDICATE_TYPE(T)    \
+    BENCHMARK_THREE_WAY_TYPE(T)
+
 int main(int argc, char* argv[])
 {
     benchmark_utils::executor executor(argc, argv, 128 * benchmark_utils::MiB, 10, 5);
 
 #ifndef BENCHMARK_CONFIG_TUNING
+    // Tuned types
+    BENCHMARK_TYPES_TUNING(rocprim::int128_t)
+    BENCHMARK_TYPES_TUNING(int64_t)
+    BENCHMARK_TYPES_TUNING(int)
+    BENCHMARK_TYPES_TUNING(short)
+    BENCHMARK_TYPES_TUNING(int8_t)
+    BENCHMARK_TYPES_TUNING(double)
+    BENCHMARK_TYPES_TUNING(float)
+    BENCHMARK_TYPES_TUNING(rocprim::half)
+
+    #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
+    // Not tuned types
+    BENCHMARK_FLAG_TYPE(uint8_t, uint8_t)
+    BENCHMARK_FLAG_TYPE(rocprim::uint128_t, uint8_t)
+
+    BENCHMARK_PREDICATE_TYPE(uint8_t)
+    BENCHMARK_PREDICATE_TYPE(rocprim::uint128_t)
+
+    BENCHMARK_TWO_WAY_FLAG_TYPE(uint8_t, uint8_t)
+    BENCHMARK_TWO_WAY_FLAG_TYPE(rocprim::uint128_t, uint8_t)
+
+    BENCHMARK_TWO_WAY_PREDICATE_TYPE(uint8_t)
+    BENCHMARK_TWO_WAY_PREDICATE_TYPE(rocprim::uint128_t)
+
+    BENCHMARK_THREE_WAY_TYPE(uint8_t)
+    BENCHMARK_THREE_WAY_TYPE(rocprim::uint128_t)
+
+    // Not tuned custom types
     using custom_double2    = common::custom_type<double, double>;
     using custom_int_double = common::custom_type<int, double>;
     using huge_float2       = common::custom_huge_type<1024, float, float>;
 
-    BENCHMARK_FLAG_TYPE(int, unsigned char)
-    BENCHMARK_FLAG_TYPE(float, unsigned char)
-    BENCHMARK_FLAG_TYPE(double, unsigned char)
-    BENCHMARK_FLAG_TYPE(uint8_t, uint8_t)
-    BENCHMARK_FLAG_TYPE(int8_t, int8_t)
-    BENCHMARK_FLAG_TYPE(rocprim::half, int8_t)
     BENCHMARK_FLAG_TYPE(custom_double2, unsigned char)
-    BENCHMARK_FLAG_TYPE(rocprim::int128_t, int8_t)
-    BENCHMARK_FLAG_TYPE(rocprim::uint128_t, uint8_t)
     BENCHMARK_FLAG_TYPE(huge_float2, uint8_t)
 
-    BENCHMARK_PREDICATE_TYPE(int)
-    BENCHMARK_PREDICATE_TYPE(float)
-    BENCHMARK_PREDICATE_TYPE(double)
-    BENCHMARK_PREDICATE_TYPE(uint8_t)
-    BENCHMARK_PREDICATE_TYPE(int8_t)
-    BENCHMARK_PREDICATE_TYPE(rocprim::half)
     BENCHMARK_PREDICATE_TYPE(custom_int_double)
-    BENCHMARK_PREDICATE_TYPE(rocprim::int128_t)
-    BENCHMARK_PREDICATE_TYPE(rocprim::uint128_t)
     BENCHMARK_PREDICATE_TYPE(huge_float2)
 
-    BENCHMARK_TWO_WAY_FLAG_TYPE(int, unsigned char)
-    BENCHMARK_TWO_WAY_FLAG_TYPE(float, unsigned char)
-    BENCHMARK_TWO_WAY_FLAG_TYPE(double, unsigned char)
-    BENCHMARK_TWO_WAY_FLAG_TYPE(uint8_t, uint8_t)
-    BENCHMARK_TWO_WAY_FLAG_TYPE(int8_t, int8_t)
-    BENCHMARK_TWO_WAY_FLAG_TYPE(rocprim::half, int8_t)
     BENCHMARK_TWO_WAY_FLAG_TYPE(custom_double2, unsigned char)
-    BENCHMARK_TWO_WAY_FLAG_TYPE(rocprim::int128_t, int8_t)
-    BENCHMARK_TWO_WAY_FLAG_TYPE(rocprim::uint128_t, uint8_t)
     BENCHMARK_TWO_WAY_FLAG_TYPE(huge_float2, uint8_t)
 
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(int)
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(float)
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(double)
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(uint8_t)
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(int8_t)
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(rocprim::half)
     BENCHMARK_TWO_WAY_PREDICATE_TYPE(custom_int_double)
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(rocprim::int128_t)
-    BENCHMARK_TWO_WAY_PREDICATE_TYPE(rocprim::uint128_t)
     BENCHMARK_TWO_WAY_PREDICATE_TYPE(huge_float2)
 
-    BENCHMARK_THREE_WAY_TYPE(int)
-    BENCHMARK_THREE_WAY_TYPE(float)
-    BENCHMARK_THREE_WAY_TYPE(double)
-    BENCHMARK_THREE_WAY_TYPE(uint8_t)
-    BENCHMARK_THREE_WAY_TYPE(int8_t)
-    BENCHMARK_THREE_WAY_TYPE(rocprim::half)
     BENCHMARK_THREE_WAY_TYPE(custom_int_double)
-    BENCHMARK_THREE_WAY_TYPE(rocprim::int128_t)
-    BENCHMARK_THREE_WAY_TYPE(rocprim::uint128_t)
     BENCHMARK_THREE_WAY_TYPE(huge_float2)
+    #endif
 #endif
 
     executor.run();
