@@ -154,7 +154,7 @@ template <typename RealType>
 struct normal_distribution_base
 {
 #if ((THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVHPC \
-      || defined(__CUDACC_RTC__))                                                                                 \
+      || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC)                                                      \
      && !defined(_NVHPC_CUDA))                                                                                    \
   || (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP)
   using type = normal_distribution_nvcc<RealType>;

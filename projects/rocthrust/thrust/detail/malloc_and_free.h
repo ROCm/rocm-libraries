@@ -64,7 +64,7 @@ malloc(const thrust::detail::execution_policy_base<DerivedPolicy>& exec, std::si
 
 // XXX WAR nvbug 992955
 #if (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVHPC \
-     || defined(__CUDACC_RTC__))
+     || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC)
 #  if CUDART_VERSION < 5000
 
 // cudafe generates unqualified calls to free(int *volatile)
