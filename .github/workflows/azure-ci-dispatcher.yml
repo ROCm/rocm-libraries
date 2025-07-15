@@ -13,6 +13,7 @@
 # The token should be stored in the repository secrets as `AZ_PAT`.
 
 
+
 name: Trigger Azure CI
 
 on:
