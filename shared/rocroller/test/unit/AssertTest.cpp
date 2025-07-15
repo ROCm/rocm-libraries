@@ -59,7 +59,7 @@ namespace AssertTest
     {
         auto const& arch = m_context->targetArchitecture();
         auto        gpu  = arch.target();
-        if(gpu.isCDNA1GPU() || gpu.isRDNA4GPU())
+        if(gpu.isCDNA1GPU())
             GTEST_SKIP() << "Skipping GPU AssertTest for " << gpu.toString();
 
         AssertOpKind assertOpKind;
@@ -178,27 +178,35 @@ namespace AssertTest
                 EXPECT_THAT(output(), testing::HasSubstr("AssertOpKind == NoOp"));
             }
 
-            // if(isLocalDevice())
-            // {
-            //     KernelArguments kargs;
-            //     KernelInvocation kinv;
-            //     kinv.workitemCount = {1, 1, 1};
-            //     kinv.workgroupSize = {1, 1, 1};
-            //     auto executableKernel = m_context->instructions()->getExecutableKernel();
-            //     const auto runTest = [&]() {
-            //         executableKernel->executeKernel(kargs, kinv);
-            //         // Need to wait for signal, otherwise child process may terminate before signal is sent
-            //         (void)hipDeviceSynchronize();
-            //     };
-            //     if(assertOpKind != AssertOpKind::NoOp)
-            //     {
-            //         EXPECT_EXIT({ runTest(); }, ::testing::KilledBySignal(SIGABRT), outputMsg);
-            //     }
-            //     else
-            //     {
-            //         runTest();
-            //     }
-            // }
+            if(isLocalDevice())
+            {
+                KernelArguments kargs;
+
+                KernelInvocation kinv;
+                kinv.workitemCount = {1, 1, 1};
+                kinv.workgroupSize = {1, 1, 1};
+
+                auto executableKernel = m_context->instructions()->getExecutableKernel();
+
+                const auto settings = Settings::getInstance();
+                const auto rocmDebugAgentPath{settings->ROCMPath.getValue()
+                                              + "/lib/librocm-debug-agent.so.2"};
+                setenv("HSA_TOOLS_LIB", rocmDebugAgentPath.c_str(), /*replace*/ 1);
+                const auto runTest = [&]() {
+                    executableKernel->executeKernel(kargs, kinv);
+                    // Need to wait for signal, otherwise child process may terminate before signal is sent
+                    (void)hipDeviceSynchronize();
+                };
+                if(assertOpKind != AssertOpKind::NoOp)
+                {
+                    EXPECT_EXIT({ runTest(); }, ::testing::KilledBySignal(SIGABRT), outputMsg);
+                }
+                else
+                {
+                    runTest();
+                }
+                setenv("HSA_TOOLS_LIB", "", /*replace*/ 1);
+            }
         }
     }
 
@@ -206,7 +214,7 @@ namespace AssertTest
     {
         auto const& arch = m_context->targetArchitecture();
         auto        gpu  = arch.target();
-        if(gpu.isCDNA1GPU() || gpu.isRDNA4GPU())
+        if(gpu.isCDNA1GPU())
             GTEST_SKIP() << "Skipping GPU AssertTest for " << gpu.toString();
 
         AssertOpKind assertOpKind;
@@ -287,27 +295,35 @@ namespace AssertTest
                 EXPECT_THAT(output(), testing::HasSubstr("AssertOpKind == NoOp"));
             }
 
-            // if(isLocalDevice())
-            // {
-            //     KernelArguments kargs;
-            //     KernelInvocation kinv;
-            //     kinv.workitemCount = {1, 1, 1};
-            //     kinv.workgroupSize = {1, 1, 1};
-            //     auto executableKernel = m_context->instructions()->getExecutableKernel();
-            //     const auto runTest = [&]() {
-            //         executableKernel->executeKernel(kargs, kinv);
-            //         // Need to wait for signal, otherwise child process may terminate before signal is sent
-            //         (void)hipDeviceSynchronize();
-            //     };
-            //     if(assertOpKind != AssertOpKind::NoOp)
-            //     {
-            //         EXPECT_EXIT({ runTest(); }, ::testing::KilledBySignal(SIGABRT), outputMsg);
-            //     }
-            //     else
-            //     {
-            //         runTest();
-            //     }
-            // }
+            if(isLocalDevice())
+            {
+                KernelArguments kargs;
+
+                KernelInvocation kinv;
+                kinv.workitemCount = {1, 1, 1};
+                kinv.workgroupSize = {1, 1, 1};
+
+                auto executableKernel = m_context->instructions()->getExecutableKernel();
+
+                const auto settings = Settings::getInstance();
+                const auto rocmDebugAgentPath{settings->ROCMPath.getValue()
+                                              + "/lib/librocm-debug-agent.so.2"};
+                setenv("HSA_TOOLS_LIB", rocmDebugAgentPath.c_str(), /*replace*/ 1);
+                const auto runTest = [&]() {
+                    executableKernel->executeKernel(kargs, kinv);
+                    // Need to wait for signal, otherwise child process may terminate before signal is sent
+                    (void)hipDeviceSynchronize();
+                };
+                if(assertOpKind != AssertOpKind::NoOp)
+                {
+                    EXPECT_EXIT({ runTest(); }, ::testing::KilledBySignal(SIGABRT), outputMsg);
+                }
+                else
+                {
+                    runTest();
+                }
+                setenv("HSA_TOOLS_LIB", "", /*replace*/ 1);
+            }
         }
     }
 
@@ -316,8 +332,8 @@ namespace AssertTest
         GPU_AssertTest,
         ::testing::Combine(
             supportedISAValues(),
-            ::testing::Values(std::tuple(AssertOpKind::MemoryViolation, "Memory access fault"),
-                              std::tuple(AssertOpKind::STrap, "HSA_STATUS_ERROR_EXCEPTION"),
+            ::testing::Values(std::tuple(AssertOpKind::MemoryViolation, "MEMORY_VIOLATION"),
+                              std::tuple(AssertOpKind::STrap, "ASSERT_TRAP"),
                               std::tuple(AssertOpKind::NoOp, "AssertOpKind == NoOp"),
                               std::tuple(AssertOpKind::Count, "Invalid AssertOpKind"))));
 }
