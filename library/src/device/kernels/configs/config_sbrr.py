@@ -21,7 +21,6 @@
 from kernels.configs import config_lds
 from types import SimpleNamespace as NS
 
-# yapf: disable
 # Note: Default half_lds is True and default direct_to_from_reg is True as well.
 # TODO- Currently, if half_lds is True, then direct_to_from_reg must be True
 #       but if half_lds is False, direct_to_from_reg can be either (still can be True).
