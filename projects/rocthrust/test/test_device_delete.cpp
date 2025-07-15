@@ -15,6 +15,7 @@
  *  limitations under the License.
  */
 
+#include <thrust/detail/nv_target.h>
 #include <thrust/device_delete.h>
 #include <thrust/device_new.h>
 #include <thrust/device_ptr.h>
@@ -25,42 +26,37 @@
 
 struct Foo
 {
-  __host__ __device__ Foo(void)
-      : set_me_upon_destruction(nullptr)
+  THRUST_HOST_DEVICE Foo()
+      : set_me_upon_destruction{nullptr}
   {}
 
-  __host__ __device__ ~Foo(void)
+  THRUST_HOST_DEVICE ~Foo()
   {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    // __device__ overload
-    if (set_me_upon_destruction != 0)
-    {
-      *set_me_upon_destruction = true;
-    }
-#endif
+    NV_IF_TARGET(NV_IS_DEVICE, (if (set_me_upon_destruction != nullptr) { *set_me_upon_destruction = true; }));
   }
 
   bool* set_me_upon_destruction;
 };
 
-// KNOWN_FAILURE
-// GTest may throw a link error if there is not at least 1 test case per executable
+#if !defined(__QNX__)
 TEST(DeviceDelete, TestDeviceDeleteDestructorInvocation)
 {
-  /*
-  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
-
-  thrust::device_vector<bool> destructor_flag(1, false);
-
-  thrust::device_ptr<Foo> foo_ptr = thrust::device_new<Foo>();
-
-  Foo exemplar;
-  exemplar.set_me_upon_destruction = thrust::raw_pointer_cast(&destructor_flag[0]);
-  *foo_ptr                         = exemplar;
-
-  ASSERT_EQ(false, destructor_flag[0]);
-
-  thrust::device_delete(foo_ptr);
-
-  ASSERT_EQ(true, destructor_flag[0]);*/
+  // SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  //
+  // KNOWN_FAILURE;
+  //
+  //  thrust::device_vector<bool> destructor_flag(1, false);
+  //
+  //  thrust::device_ptr<Foo> foo_ptr  = thrust::device_new<Foo>();
+  //
+  //  Foo exemplar;
+  //  exemplar.set_me_upon_destruction = thrust::raw_pointer_cast(&destructor_flag[0]);
+  //  *foo_ptr = exemplar;
+  //
+  //  ASSERT_EQ(false, destructor_flag[0]);
+  //
+  //  thrust::device_delete(foo_ptr);
+  //
+  //  ASSERT_EQ(true, destructor_flag[0]);
 }
+#endif

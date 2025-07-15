@@ -19,11 +19,8 @@
 #include <thrust/transform.h>
 #include <thrust/tuple.h>
 
+#include <unittest/hip/testframework.h>
 #include <unittest/unittest.h>
-
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <unittest/cuda/testframework.h>
-#endif
 
 using namespace unittest;
 

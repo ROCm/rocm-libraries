@@ -20,36 +20,24 @@
 #include <thrust/sort.h>
 #include <thrust/unique.h>
 
-#include <unittest/unittest.h>
+#include <type_traits>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits>
-#endif
+#include <unittest/unittest.h>
 
 template <typename T, typename CompareOp, typename... Args>
 auto call_merge(Args&&... args) -> decltype(thrust::merge(std::forward<Args>(args)...))
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  THRUST_IF_CONSTEXPR (::cuda::std::is_void<CompareOp>::value)
-#else
   THRUST_IF_CONSTEXPR (::std::is_void<CompareOp>::value)
-#endif
   {
     return thrust::merge(std::forward<Args>(args)...);
   }
   else
   {
     // TODO(bgruber): remove next line in C++17 and pass CompareOp{} directly to stable_sort
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    using C = ::cuda::std::conditional_t<::cuda::std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
-#else
     using C = ::std::conditional_t<::std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
-#endif
     return thrust::merge(std::forward<Args>(args)..., C{});
   }
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  _CCCL_UNREACHABLE();
-#endif
+  __builtin_unreachable();
 }
 
 template <typename U, typename CompareOp = void>
@@ -70,11 +58,7 @@ void TestMergeKeyValue(size_t n)
     h_b[i] = T(h_keys_b[i], h_values_b[i]);
   }
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  THRUST_IF_CONSTEXPR (::cuda::std::is_void<CompareOp>::value)
-#else
   THRUST_IF_CONSTEXPR (::std::is_void<CompareOp>::value)
-#endif
   {
     thrust::stable_sort(h_a.begin(), h_a.end());
     thrust::stable_sort(h_b.begin(), h_b.end());
@@ -82,11 +66,7 @@ void TestMergeKeyValue(size_t n)
   else
   {
     // TODO(bgruber): remove next line in C++17 and pass CompareOp{} directly to stable_sort
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    using C = ::cuda::std::conditional_t<::cuda::std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
-#else
     using C = ::std::conditional_t<::std::is_void<CompareOp>::value, thrust::less<T>, CompareOp>;
-#endif
     thrust::stable_sort(h_a.begin(), h_a.end(), C{});
     thrust::stable_sort(h_b.begin(), h_b.end(), C{});
   }

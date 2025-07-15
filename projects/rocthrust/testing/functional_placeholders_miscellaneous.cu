@@ -18,13 +18,6 @@
 #include <thrust/functional.h>
 #include <thrust/transform.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/utility>
-#elif defined(__has_include)
-#  if __has_include(<cuda/std/utility>)
-#    include <cuda/std/utility>
-#  endif // __has_include(<cuda/std/utility>)
-#endif // THRUST_DEVICE_SYSTEM
 #include <utility>
 
 #include <unittest/unittest.h>
@@ -106,7 +99,6 @@ VectorUnitTest<TestFunctionalPlaceholdersTransformIterator,
 VectorUnitTest<TestFunctionalPlaceholdersTransformIterator, ThirtyTwoBitTypes, thrust::host_vector, std::allocator>
   TestFunctionalPlaceholdersTransformIteratorInstanceHost;
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 void TestFunctionalPlaceholdersArgumentValueCategories()
 {
   using namespace thrust::placeholders;
@@ -115,7 +107,7 @@ void TestFunctionalPlaceholdersArgumentValueCategories()
   int b     = 3;
   ASSERT_EQUAL(expr(2, 3), 13); // pass pr-value
   ASSERT_EQUAL(expr(a, b), 13); // pass l-value
-  ASSERT_EQUAL(expr(::cuda::std::move(a), ::cuda::std::move(b)), 13); // pass x-value
+  ASSERT_EQUAL(expr(::std::move(a), ::std::move(b)), 13); // pass x-value
 }
 DECLARE_UNITTEST(TestFunctionalPlaceholdersArgumentValueCategories);
 
@@ -130,10 +122,5 @@ void TestFunctionalPlaceholdersSemiRegular()
   Expr expr3;
   expr3 = expr; // copy-assignable
   ASSERT_EQUAL(expr3(2, 3), 13);
-
-#  if _CCCL_STD_VER >= 2014
-  static_assert(::cuda::std::semiregular<Expr>, "");
-#  endif // _CCCL_STD_VER >= 2014
 }
 DECLARE_UNITTEST(TestFunctionalPlaceholdersSemiRegular);
-#endif

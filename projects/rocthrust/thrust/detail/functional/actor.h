@@ -43,6 +43,7 @@
 #  include <cuda/std/type_traits>
 #  include <cuda/std/utility>
 #else
+#  include <tuple>
 #  include <type_traits>
 #  include <utility>
 #endif
@@ -101,17 +102,6 @@ struct argument
     -> decltype(thrust::get<Pos>(thrust::tuple<Ts&&...>{THRUST_FWD(args)...}))
   {
     return thrust::get<Pos>(thrust::tuple<Ts&&...>{THRUST_FWD(args)...});
-  }
-};
-#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-template <unsigned int Pos>
-struct argument
-{
-  template <typename... Ts>
-  THRUST_HOST_DEVICE auto eval(Ts&&... args) const
-    -> decltype(thrust::get<Pos>(thrust::tuple<Ts...>{THRUST_FWD(args)...}))
-  {
-    return thrust::get<Pos>(thrust::tuple<Ts...>{THRUST_FWD(args)...});
   }
 };
 #else

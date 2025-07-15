@@ -17,14 +17,6 @@
 
 #include <thrust/memory.h>
 
-#include "unittest/exceptions.h"
-#include "unittest/testframework.h"
-
-// #include backends' testframework.h, if they exist and are required for the build
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <unittest/cuda/testframework.h>
-#endif
-
 #include <algorithm>
 #include <cstdlib>
 #include <ctime>
@@ -33,6 +25,12 @@
 #include <limits>
 #include <numeric>
 #include <string>
+
+#include "unittest/exceptions.h"
+#include "unittest/testframework.h"
+
+// #include backends' testframework.h, if they exist and are required for the build
+#include <unittest/hip/testframework.h>
 
 // clang-format off
 const size_t standard_test_sizes[] =
