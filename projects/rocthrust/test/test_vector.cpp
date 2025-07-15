@@ -676,9 +676,6 @@ TYPED_TEST(VectorTests, TestVectorResizing)
 
   ASSERT_EQ(v.size(), 0lu);
 
-// TODO remove this WAR
-#if ((THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC) && CUDART_VERSION == 3000)
-  || (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP)
   // depending on sizeof(T), we will receive one
   // of two possible exceptions
   try
@@ -689,15 +686,9 @@ TYPED_TEST(VectorTests, TestVectorResizing)
   {}
   catch (std::bad_alloc e)
   {
-    // reset the CUDA or HIP error
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    cudaGetLastError();
-#  else
-    hipGetLastError();
-#  endif
+    // reset the HIP error
+    (void) hipGetLastError();
   } // end catch
-#endif // ((THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC) && CUDART_VERSION == 3000) || (THRUST_DEVICE_COMPILER
-       // == THRUST_DEVICE_COMPILER_HIP)
 
   ASSERT_EQ(v.size(), 0lu);
 }
@@ -720,9 +711,6 @@ TYPED_TEST(VectorTests, TestVectorReserving)
 
   ASSERT_EQ(v.capacity(), old_capacity);
 
-// TODO remove this WAR
-#if ((THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC) && CUDART_VERSION == 3000)
-  || (THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP)
   try
   {
     v.reserve(std::numeric_limits<size_t>::max());
@@ -731,8 +719,6 @@ TYPED_TEST(VectorTests, TestVectorReserving)
   {}
   catch (std::bad_alloc e)
   {}
-#endif // ((THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC) && CUDART_VERSION == 3000) || (THRUST_DEVICE_COMPILER
-       // == THRUST_DEVICE_COMPILER_HIP)
 
   ASSERT_EQ(v.capacity(), old_capacity);
 }

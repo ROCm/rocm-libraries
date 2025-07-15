@@ -25,7 +25,7 @@
 
 #include _THRUST_STD_INCLUDE(type_traits)
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <utility>
 #endif
 
@@ -325,11 +325,7 @@ TEST(PairTests, TestPairSwap)
   thrust::pair<int, int> a(x, y);
   thrust::pair<int, int> b(z, w);
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::swap;
-#else
-  using ::std::swap;
-#endif
+  using _THRUST_STD::swap;
   swap(a, b);
 
   ASSERT_EQ(z, a.first);

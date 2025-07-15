@@ -21,7 +21,7 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <utility>
 #endif
 
@@ -265,11 +265,7 @@ TYPED_TEST(DeviceReferenceTests, TestDeviceReferenceSwap)
   ref2 = 13;
 
   // test ADL two-step swap
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::swap;
-#else
-  using ::std::swap;
-#endif
+  using _THRUST_STD::swap;
   swap(ref1, ref2);
   ASSERT_EQ(13, ref1);
   ASSERT_EQ(7, ref2);

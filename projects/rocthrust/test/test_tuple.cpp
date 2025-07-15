@@ -23,7 +23,7 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <utility>
 #endif
 
@@ -507,11 +507,7 @@ TEST(TupleTests, TestTupleSwap)
   thrust::tuple<int, int, int> t1(a, b, c);
   thrust::tuple<int, int, int> t2(x, y, z);
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::swap;
-#else
-  using ::std::swap;
-#endif
+  using _THRUST_STD::swap;
   swap(t1, t2);
 
   ASSERT_EQ(x, thrust::get<0>(t1));

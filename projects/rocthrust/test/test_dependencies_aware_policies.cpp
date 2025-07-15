@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -23,7 +23,8 @@
 #include <thrust/system/omp/detail/par.h>
 #include <thrust/system/tbb/detail/par.h>
 
-#include <unittest/unittest.h>
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
@@ -65,7 +66,7 @@ struct TestDependencyAttachment
   template <typename... Expected, typename T>
   static void assert_correct(T)
   {
-    ASSERT_EQUAL(
+    ASSERT_EQ(
       (_THRUST_STD::is_same<
         T,
         typename PolicyInfo::template apply_base_first<thrust::detail::execute_with_dependencies, Expected...>>::value),
@@ -75,13 +76,12 @@ struct TestDependencyAttachment
   template <typename Allocator, typename... Expected, typename T>
   static void assert_correct_with_allocator(T)
   {
-    ASSERT_EQUAL(
-      (_THRUST_STD::is_same<
-        T,
-        typename PolicyInfo::template apply_base_second<thrust::detail::execute_with_allocator_and_dependencies,
-                                                        Allocator,
-                                                        Expected...>>::value),
-      true);
+    ASSERT_EQ((_THRUST_STD::is_same<
+                T,
+                typename PolicyInfo::template apply_base_second<thrust::detail::execute_with_allocator_and_dependencies,
+                                                                Allocator,
+                                                                Expected...>>::value),
+              true);
   }
 
   void operator()()
@@ -117,12 +117,22 @@ using tbb_par_info    = policy_info<thrust::system::tbb::detail::par_t, thrust::
 
 using hip_par_info = policy_info<thrust::system::hip::detail::par_t, thrust::hip_rocprim::execute_on_stream_base>;
 
-SimpleUnitTest<TestDependencyAttachment,
-               unittest::type_list<
-                 // TODO: uncomment when dependencies are generalized to all backends
-                 // sequential_info,
-                 // cpp_par_info,
-                 // omp_par_info,
-                 // tbb_par_info,
-                 hip_par_info>>
-  TestDependencyAttachmentInstance;
+using PolicyTestsParams = ::testing::Types<
+  // TODO: uncomment when dependencies are generalized to all backends
+  // Params<sequential_info>,
+  // Params<cpp_par_info>,
+  // Params<omp_par_info>,
+  // Params<tbb_par_info>,
+  Params<hip_par_info>>;
+
+TESTS_DEFINE(DependenciesAwarePoliciesTests, PolicyTestsParams);
+
+TYPED_TEST(DependenciesAwarePoliciesTests, TestDependencyAttachmentInstance)
+{
+  using T = typename TestFixture::input_type;
+
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  TestDependencyAttachment<T> test;
+  test();
+}

@@ -26,7 +26,7 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
 
@@ -524,11 +524,6 @@ TYPED_TEST(ComplexTests, TestComplexMemberOperators)
 TYPED_TEST(ComplexTests, TestComplexBasicArithmetic)
 {
   using T = typename TestFixture::input_type;
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::is_same;
-#else
-  using ::std::is_same;
-#endif
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -548,14 +543,14 @@ TYPED_TEST(ComplexTests, TestComplexBasicArithmetic)
     ASSERT_NEAR(thrust::norm(a), std::norm(b), T(0.01));
 
     ASSERT_EQ(thrust::conj(a), std::conj(b));
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::conj(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::conj(a))>::value, "");
 
     ASSERT_NEAR_COMPLEX(thrust::polar(data[0], data[1]), std::polar(data[0], data[1]));
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::polar(data[0], data[1]))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::polar(data[0], data[1]))>::value, "");
 
     // random_samples does not seem to produce infinities so proj(z) == z
     ASSERT_EQ(thrust::proj(a), a);
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::proj(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::proj(a))>::value, "");
   }
 }
 
@@ -645,11 +640,6 @@ TYPED_TEST(ComplexTests, TestComplexUnaryArithmetic)
 TYPED_TEST(ComplexTests, TestComplexExponentialFunctions)
 {
   using T = typename TestFixture::input_type;
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::is_same;
-#else
-  using ::std::is_same;
-#endif
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -665,20 +655,15 @@ TYPED_TEST(ComplexTests, TestComplexExponentialFunctions)
     ASSERT_NEAR_COMPLEX(thrust::exp(a), std::exp(b));
     ASSERT_NEAR_COMPLEX(thrust::log(a), std::log(b));
     ASSERT_NEAR_COMPLEX(thrust::log10(a), std::log10(b));
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::exp(a))>::value, "");
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::log(a))>::value, "");
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::log10(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::exp(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::log(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::log10(a))>::value, "");
   }
 }
 
 TYPED_TEST(ComplexTests, TestComplexPowerFunctions)
 {
   using T = typename TestFixture::input_type;
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::is_same;
-#else
-  using ::std::is_same;
-#endif
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -691,28 +676,24 @@ TYPED_TEST(ComplexTests, TestComplexPowerFunctions)
     const std::complex<T> b_std(b_thrust);
 
     ASSERT_NEAR_COMPLEX(thrust::pow(a_thrust, b_thrust), std::pow(a_std, b_std));
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust, b_thrust))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust, b_thrust))>::value, "");
     ASSERT_NEAR_COMPLEX(thrust::pow(a_thrust, b_thrust.real()), std::pow(a_std, b_std.real()));
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust, b_thrust.real()))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust, b_thrust.real()))>::value, "");
     ASSERT_NEAR_COMPLEX(thrust::pow(a_thrust.real(), b_thrust), std::pow(a_std.real(), b_std));
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust.real(), b_thrust))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust.real(), b_thrust))>::value, "");
 
     ASSERT_NEAR_COMPLEX(thrust::pow(a_thrust, 4), std::pow(a_std, 4));
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust, 4))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust, 4))>::value, "");
 
     ASSERT_NEAR_COMPLEX(thrust::sqrt(a_thrust), std::sqrt(a_std));
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::sqrt(a_thrust))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::sqrt(a_thrust))>::value, "");
   }
 
   // Test power functions with promoted types.
   {
-    using T0 = T;
-    using T1 = other_floating_point_type_t<T0>;
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    using promoted = ::cuda::std::common_type_t<T0, T1>;
-#else
-    using promoted = ::std::common_type_t<T0, T1>;
-#endif
+    using T0       = T;
+    using T1       = other_floating_point_type_t<T0>;
+    using promoted = _THRUST_STD::common_type_t<T0, T1>;
 
     thrust::host_vector<T0> data = random_samples<T0>(4);
 
@@ -722,28 +703,27 @@ TYPED_TEST(ComplexTests, TestComplexPowerFunctions)
     const std::complex<T0> b_std(data[2], data[3]);
 
     ASSERT_NEAR_COMPLEX(thrust::pow(a_thrust, b_thrust), std::pow(a_std, b_std));
-    static_assert(is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust, b_thrust))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust, b_thrust))>::value, "");
     ASSERT_NEAR_COMPLEX(thrust::pow(b_thrust, a_thrust), std::pow(b_std, a_std));
-    static_assert(is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust, a_thrust))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust, a_thrust))>::value, "");
     ASSERT_NEAR_COMPLEX(thrust::pow(a_thrust, b_thrust.real()), std::pow(a_std, b_std.real()));
-    static_assert(is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust, b_thrust.real()))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust, b_thrust.real()))>::value,
+                  "");
     ASSERT_NEAR_COMPLEX(thrust::pow(b_thrust, a_thrust.real()), std::pow(b_std, a_std.real()));
-    static_assert(is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust, a_thrust.real()))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust, a_thrust.real()))>::value,
+                  "");
     ASSERT_NEAR_COMPLEX(thrust::pow(a_thrust.real(), b_thrust), std::pow(a_std.real(), b_std));
-    static_assert(is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust.real(), b_thrust))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust.real(), b_thrust))>::value,
+                  "");
     ASSERT_NEAR_COMPLEX(thrust::pow(b_thrust.real(), a_thrust), std::pow(b_std.real(), a_std));
-    static_assert(is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust.real(), a_thrust))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust.real(), a_thrust))>::value,
+                  "");
   }
 }
 
 TYPED_TEST(ComplexTests, TestComplexTrigonometricFunctions)
 {
   using T = typename TestFixture::input_type;
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::is_same;
-#else
-  using ::std::is_same;
-#endif
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -759,30 +739,30 @@ TYPED_TEST(ComplexTests, TestComplexTrigonometricFunctions)
     ASSERT_NEAR_COMPLEX(thrust::cos(a), std::cos(c));
     ASSERT_NEAR_COMPLEX(thrust::sin(a), std::sin(c));
     ASSERT_NEAR_COMPLEX(thrust::tan(a), std::tan(c));
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::cos(a))>::value, "");
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::sin(a))>::value, "");
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::tan(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::cos(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::sin(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::tan(a))>::value, "");
 
     ASSERT_NEAR_COMPLEX(thrust::cosh(a), std::cosh(c));
     ASSERT_NEAR_COMPLEX(thrust::sinh(a), std::sinh(c));
     ASSERT_NEAR_COMPLEX(thrust::tanh(a), std::tanh(c));
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::cosh(a))>::value, "");
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::sinh(a))>::value, "");
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::tanh(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::cosh(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::sinh(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::tanh(a))>::value, "");
 
     ASSERT_NEAR_COMPLEX(thrust::acos(a), std::acos(c));
     ASSERT_NEAR_COMPLEX(thrust::asin(a), std::asin(c));
     ASSERT_NEAR_COMPLEX(thrust::atan(a), std::atan(c));
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::acos(a))>::value, "");
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::asin(a))>::value, "");
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::atan(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::acos(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::asin(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::atan(a))>::value, "");
 
     ASSERT_NEAR_COMPLEX(thrust::acosh(a), std::acosh(c));
     ASSERT_NEAR_COMPLEX(thrust::asinh(a), std::asinh(c));
     ASSERT_NEAR_COMPLEX(thrust::atanh(a), std::atanh(c));
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::acosh(a))>::value, "");
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::asinh(a))>::value, "");
-    static_assert(is_same<thrust::complex<T>, decltype(thrust::atanh(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::acosh(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::asinh(a))>::value, "");
+    static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::atanh(a))>::value, "");
   }
 }
 

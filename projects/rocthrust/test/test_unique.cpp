@@ -24,6 +24,10 @@
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(array)
+#endif
+
 TESTS_DEFINE(UniqueTests, FullTestsParams);
 
 TESTS_DEFINE(UniqueIntegralTests, IntegerTestsParams);
@@ -353,6 +357,10 @@ TYPED_TEST(UniqueIntegralTests, TestUniqueCount)
   }
 }
 
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+template <typename T, std::size_t N>
+using DeviceArray = _THRUST_STD::array<T, N>;
+#else // !_THRUST_HAS_DEVICE_SYSTEM_STD
 template <typename T, std::size_t N>
 struct DeviceArray
 {
@@ -371,6 +379,7 @@ struct DeviceArray
     return true;
   }
 };
+#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
 
 TYPED_TEST(UniqueTests, TestUniqueMemoryAccess)
 {

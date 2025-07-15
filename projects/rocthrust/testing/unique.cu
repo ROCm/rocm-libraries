@@ -22,10 +22,8 @@
 
 #include <unittest/unittest.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/array>
-#else
-#  include <array>
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(array)
 #endif
 
 template <typename ForwardIterator>
@@ -310,10 +308,10 @@ struct TestUniqueCount
 };
 VariableUnitTest<TestUniqueCount, IntegralTypes> TestUniqueCountInstance;
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <typename T, std::size_t N>
-using DeviceArray = cuda::std::array<T, N>;
-#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+using DeviceArray = _THRUST_STD::array<T, N>;
+#else // !_THRUST_HAS_DEVICE_SYSTEM_STD
 template <typename T, std::size_t N>
 struct DeviceArray
 {
@@ -332,7 +330,7 @@ struct DeviceArray
     return true;
   }
 };
-#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
 
 template <typename T>
 struct TestUniqueMemoryAccess

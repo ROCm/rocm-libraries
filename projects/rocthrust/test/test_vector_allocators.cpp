@@ -24,7 +24,7 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <utility>
 #endif
 
@@ -281,11 +281,7 @@ void TestVectorAllocatorPropagateOnSwap()
 
   Vector v1(10, alloc1);
   Vector v2(17, alloc1);
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::swap;
-#else
-  using ::std::swap;
-#endif
+  using _THRUST_STD::swap;
   swap(v1, v2);
 
   ASSERT_EQ(v1.size(), 17u);

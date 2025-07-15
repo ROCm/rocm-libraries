@@ -24,14 +24,13 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/universal_vector.h>
 
+#include _THRUST_STD_INCLUDE(utility)
+
 #include <unittest/exceptions.h>
 #include <unittest/util.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/utility>
-#else
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
-#  include <utility>
 #endif
 
 #define ASSERT_EQUAL_WITH_FILE_AND_LINE(X, Y, FILE_, LINE_)       unittest::assert_equal((X), (Y), FILE_, LINE_)
@@ -128,11 +127,7 @@ double const DEFAULT_ABSOLUTE_TOL = 1e-4;
 template <typename T>
 struct value_type
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using type = ::cuda::std::remove_const_t<::cuda::std::remove_reference_t<T>>;
-#else
-  using type = ::std::remove_const_t<::std::remove_reference_t<T>>;
-#endif
+  using type = _THRUST_STD::remove_const_t<_THRUST_STD::remove_reference_t<T>>;
 };
 
 template <typename T>
@@ -354,11 +349,7 @@ struct is_complex<std::complex<T>> : public THRUST_NS_QUALIFIER::true_type
 } // namespace
 
 template <typename T1, typename T2>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-inline ::cuda::std::enable_if_t<is_complex<T1>::value && is_complex<T2>::value, bool>
-#else
-inline ::std::enable_if_t<is_complex<T1>::value && is_complex<T2>::value, bool>
-#endif
+inline _THRUST_STD::enable_if_t<is_complex<T1>::value && is_complex<T2>::value, bool>
 almost_equal(const T1& a, const T2& b, double a_tol, double r_tol)
 {
   return almost_equal(a.real(), b.real(), a_tol, r_tol) && almost_equal(a.imag(), b.imag(), a_tol, r_tol);
@@ -426,11 +417,7 @@ inline int promote_char(char c)
 template <typename T>
 T&& promote_char(T&& t)
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  return ::cuda::std::forward<T>(t);
-#else
-  return ::std::forward<T>(t);
-#endif
+  return _THRUST_STD::forward<T>(t);
 }
 
 template <typename ForwardIterator1, typename ForwardIterator2, typename BinaryPredicate>

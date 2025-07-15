@@ -36,7 +36,7 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #  include <utility>
 #endif
@@ -115,11 +115,7 @@ template <typename IteratorT, typename PointerT, typename expected_unwrapped_typ
 struct check_unwrapped_iterator
 {
   using unwrapped_t =
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    ::cuda::std::remove_reference_t<decltype(thrust::try_unwrap_contiguous_iterator(cuda::std::declval<IteratorT>()))>;
-#else
-    ::std::remove_reference_t<decltype(thrust::try_unwrap_contiguous_iterator(::std::declval<IteratorT>()))>;
-#endif
+    _THRUST_STD::remove_reference_t<decltype(thrust::try_unwrap_contiguous_iterator(_THRUST_STD::declval<IteratorT>()))>;
 
   static constexpr bool value =
     std::is_same<expected_unwrapped_type, expect_pointer>::value

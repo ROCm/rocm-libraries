@@ -18,11 +18,8 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/scan.h>
 
+#include <unittest/hip/testframework.h>
 #include <unittest/unittest.h>
-
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <unittest/cuda/testframework.h>
-#endif
 
 using namespace unittest;
 

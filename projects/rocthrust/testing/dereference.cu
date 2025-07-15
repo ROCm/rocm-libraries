@@ -27,11 +27,8 @@ THRUST_DIAG_PUSH
 THRUST_DIAG_SUPPRESS_MSVC(4244 4267) // possible loss of data
 
 template <typename Iterator1, typename Iterator2>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
-#endif
-  void
-  simple_copy_on_device(Iterator1 first1, Iterator1 last1, Iterator2 first2)
+__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void
+simple_copy_on_device(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 {
   while (first1 != last1)
   {
@@ -42,11 +39,7 @@ __global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT
 template <typename Iterator1, typename Iterator2>
 void simple_copy(Iterator1 first1, Iterator1 last1, Iterator2 first2)
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA || THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
   simple_copy_on_device<<<1, 1>>>(first1, last1, first2);
-#else
-  simple_copy_on_device(first1, last1, first2);
-#endif
 }
 
 void TestDeviceDereferenceDeviceVectorIterator()

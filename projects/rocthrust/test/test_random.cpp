@@ -23,7 +23,7 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
 
@@ -770,11 +770,7 @@ void ValidateDistributionCharacteristic()
 
   // test distribution & engine with comparable ranges
   // only do this if they have the same result_type
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  if (::cuda::std::is_same<typename Distribution::result_type, typename Engine::result_type>::value)
-#else
-  if (::std::is_same<typename Distribution::result_type, typename Engine::result_type>::value)
-#endif
+  if (_THRUST_STD::is_same<typename Distribution::result_type, typename Engine::result_type>::value)
   {
     // test Distribution with same range as engine
 
