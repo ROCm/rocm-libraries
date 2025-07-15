@@ -27,9 +27,9 @@
 #endif // no system header
 
 #include <thrust/detail/type_traits.h>
-#if !defined(__CUDACC_RTC__)
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
 #  include <thrust/detail/execute_with_dependencies.h>
-#endif // !defined(__CUDACC_RTC__)
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
 
 #if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
 #  include <type_traits>
@@ -68,7 +68,7 @@ public:
     return alloc;
   }
 
-#if !defined(__CUDACC_RTC__)
+#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
   template <typename... Dependencies>
   THRUST_DEPRECATED THRUST_HOST execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>
   after(Dependencies&&... dependencies) const
@@ -108,7 +108,7 @@ public:
   {
     return {alloc, capture_as_dependency(std::move(dependencies))};
   }
-#endif // !defined(__CUDACC_RTC__)
+#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
 };
 
 THRUST_SUPPRESS_DEPRECATED_POP

@@ -39,11 +39,11 @@
 #  pragma system_header
 #endif // no system header
 
-#if defined(__CUDACC_RTC__)
+#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
 #  include <cuda/std/iterator>
-#else // defined(__CUDACC_RTC__)
+#else // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
 #  include <iterator>
-#endif // defined(__CUDACC_RTC__)
+#endif // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
 
 THRUST_NAMESPACE_BEGIN
 
@@ -53,9 +53,9 @@ THRUST_NAMESPACE_BEGIN
 template <typename T>
 struct iterator_traits
     :
-#if defined(__CUDACC_RTC__)
+#if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
     ::cuda
-#endif // defined(__CUDACC_RTC__)
+#endif // THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
     ::std::iterator_traits<T>
 {};
 
