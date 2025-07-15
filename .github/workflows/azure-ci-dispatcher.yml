@@ -26,6 +26,7 @@ on:
       - staging
       - main
       - release-staging/rocm-rel-7.*
+      - users/danielsu/az-ignore-rocm-ci
 
 concurrency:
   group: azure-ci-dispatcher-${{ github.event.pull_request.number || github.ref }}
