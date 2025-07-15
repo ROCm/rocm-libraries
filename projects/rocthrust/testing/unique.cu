@@ -20,13 +20,9 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/unique.h>
 
-#include <unittest/unittest.h>
+#include <array>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/array>
-#else
-#  include <array>
-#endif
+#include <unittest/unittest.h>
 
 template <typename ForwardIterator>
 ForwardIterator unique(my_system& system, ForwardIterator first, ForwardIterator)
@@ -310,10 +306,6 @@ struct TestUniqueCount
 };
 VariableUnitTest<TestUniqueCount, IntegralTypes> TestUniqueCountInstance;
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-template <typename T, std::size_t N>
-using DeviceArray = cuda::std::array<T, N>;
-#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
 template <typename T, std::size_t N>
 struct DeviceArray
 {
@@ -332,7 +324,6 @@ struct DeviceArray
     return true;
   }
 };
-#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 template <typename T>
 struct TestUniqueMemoryAccess

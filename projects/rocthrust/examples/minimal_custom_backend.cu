@@ -24,10 +24,8 @@
 #include <thrust/functional.h>
 #include <thrust/transform.h>
 
+#include <functional>
 #include <iostream>
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <functional>
-#endif
 
 // This example demonstrates how to build a minimal custom
 // Thrust backend by intercepting for_each's dispatch.
@@ -67,28 +65,16 @@ int main()
   my_system sys;
 
   // To invoke our version of for_each, pass sys as the first parameter
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  thrust::for_each(sys, vec.begin(), vec.end(), ::cuda::std::negate<>{});
-#else
   thrust::for_each(sys, vec.begin(), vec.end(), ::std::negate<>{});
-#endif
 
   // Other algorithms that Thrust implements with thrust::for_each will also
   // cause our version of for_each to be invoked when we pass an instance of my_system as the first parameter.
   // Even though we did not define a special version of transform, Thrust dispatches the version it knows
   // for thrust::device_execution_policy, which my_system inherits.
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  thrust::transform(sys, vec.begin(), vec.end(), vec.begin(), ::cuda::std::identity{});
-#else
   thrust::transform(sys, vec.begin(), vec.end(), vec.begin(), ::internal::identity{});
-#endif
 
   // Invocations without my_system are handled normally.
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  thrust::for_each(vec.begin(), vec.end(), ::cuda::std::negate<>{});
-#else
   thrust::for_each(vec.begin(), vec.end(), ::std::negate<>{});
-#endif
 
   return 0;
 }

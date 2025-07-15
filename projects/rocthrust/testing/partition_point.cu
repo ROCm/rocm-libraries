@@ -34,11 +34,6 @@ template <typename Vector>
 void TestPartitionPointSimple()
 {
   using Iterator = typename Vector::iterator;
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::identity;
-#else
-  using ::internal::identity;
-#endif
 
   Vector v{1, 1, 1, 0};
 
@@ -46,11 +41,11 @@ void TestPartitionPointSimple()
 
   Iterator last = v.begin() + 4;
   Iterator ref  = first + 3;
-  ASSERT_EQUAL_QUIET(ref, thrust::partition_point(first, last, identity{}));
+  ASSERT_EQUAL_QUIET(ref, thrust::partition_point(first, last, ::internal::identity{}));
 
   last = v.begin() + 3;
   ref  = last;
-  ASSERT_EQUAL_QUIET(ref, thrust::partition_point(first, last, identity{}));
+  ASSERT_EQUAL_QUIET(ref, thrust::partition_point(first, last, ::internal::identity{}));
 }
 DECLARE_VECTOR_UNITTEST(TestPartitionPointSimple);
 

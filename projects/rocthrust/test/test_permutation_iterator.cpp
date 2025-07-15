@@ -15,6 +15,7 @@
  *  limitations under the License.
  */
 
+#include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/permutation_iterator.h>
 #include <thrust/reduce.h>
@@ -22,16 +23,10 @@
 #include <thrust/transform_reduce.h>
 #include <thrust/universal_vector.h>
 
+#include <type_traits>
+
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
-
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/type_traits>
-#else
-#  include <thrust/functional.h>
-
-#  include <type_traits>
-#endif
 
 using IntegralVectorTestsParams =
   ::testing::Types<Params<thrust::host_vector<signed char>>,
@@ -90,13 +85,8 @@ TYPED_TEST(PermutationIteratorTests, TestPermutationIteratorSimple)
   Vector ref{10, 2, 3, 4, 5, 20, 7, 8};
   ASSERT_EQ(source, ref);
 }
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-static_assert(cuda::std::is_trivially_copy_constructible<thrust::permutation_iterator<int*, int*>>::value, "");
-static_assert(cuda::std::is_trivially_copyable<thrust::permutation_iterator<int*, int*>>::value, "");
-#else
 static_assert(::std::is_trivially_copy_constructible<thrust::permutation_iterator<int*, int*>>::value, "");
 static_assert(::std::is_trivially_copyable<thrust::permutation_iterator<int*, int*>>::value, "");
-#endif
 
 TYPED_TEST(PermutationIteratorTests, TestPermutationIteratorGather)
 {
@@ -302,11 +292,7 @@ TYPED_TEST(PermutationIteratorTests, TestPermutationIteratorWithCountingIterator
     thrust::transform(thrust::make_permutation_iterator(input, index),
                       thrust::make_permutation_iterator(input, index + 4),
                       output.begin(),
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                      ::cuda::std::identity{});
-#else
                       ::internal::identity{});
-#endif
 
     Vector ref{0, 1, 2, 3};
     ASSERT_EQ(output, ref);

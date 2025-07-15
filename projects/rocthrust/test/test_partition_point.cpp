@@ -38,11 +38,6 @@ TYPED_TEST(PartitionPointVectorTests, TestPartitionPointSimple)
 {
   using Vector   = typename TestFixture::input_type;
   using Iterator = typename Vector::iterator;
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::identity;
-#else
-  using ::internal::identity;
-#endif
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
@@ -52,11 +47,11 @@ TYPED_TEST(PartitionPointVectorTests, TestPartitionPointSimple)
 
   Iterator last = v.begin() + 4;
   Iterator ref  = first + 3;
-  ASSERT_EQ_QUIET(ref, thrust::partition_point(first, last, identity{}));
+  ASSERT_EQ_QUIET(ref, thrust::partition_point(first, last, ::internal::identity{}));
 
   last = v.begin() + 3;
   ref  = last;
-  ASSERT_EQ_QUIET(ref, thrust::partition_point(first, last, identity{}));
+  ASSERT_EQ_QUIET(ref, thrust::partition_point(first, last, ::internal::identity{}));
 }
 
 TYPED_TEST(PartitionPointVectorTests, TestPartitionPoint)

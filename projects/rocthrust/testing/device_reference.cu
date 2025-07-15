@@ -18,11 +18,9 @@
 #include <thrust/device_reference.h>
 #include <thrust/device_vector.h>
 
-#include <unittest/unittest.h>
+#include <utility>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <utility>
-#endif
+#include <unittest/unittest.h>
 
 void TestDeviceReferenceConstructorFromDeviceReference()
 {
@@ -240,11 +238,7 @@ void TestDeviceReferenceSwap()
   ref2 = 13;
 
   // test ADL two-step swap
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::swap;
-#else
   using ::std::swap;
-#endif
   swap(ref1, ref2);
   ASSERT_EQUAL(13, ref1);
   ASSERT_EQUAL(7, ref2);

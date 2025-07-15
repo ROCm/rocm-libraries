@@ -373,32 +373,26 @@ VariableUnitTest<TestTransformScanToDiscardIterator, IntegralTypes> TestTransfor
 template <typename T>
 void TestValueCategoryDeduction()
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::identity;
-#else
-  using ::internal::identity;
-#endif
-
   thrust::device_vector<T> vec;
 
   T a_h[10] = {5, 0, 5, 8, 6, 7, 5, 3, 0, 9};
   vec.assign((T*) a_h, a_h + 10);
 
   thrust::transform_inclusive_scan(
-    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), identity{}, thrust::maximum<>{});
+    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), ::internal::identity{}, thrust::maximum<>{});
 
   ASSERT_EQUAL((thrust::device_vector<T>{5, 5, 5, 8, 8, 8, 8, 8, 8, 9}), vec);
 
   vec.assign((T*) a_h, a_h + 10);
 
   thrust::transform_inclusive_scan(
-    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), identity{}, T{}, thrust::maximum<>{});
+    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), ::internal::identity{}, T{}, thrust::maximum<>{});
 
   ASSERT_EQUAL((thrust::device_vector<T>{5, 5, 5, 8, 8, 8, 8, 8, 8, 9}), vec);
 
   vec.assign((T*) a_h, a_h + 10);
   thrust::transform_exclusive_scan(
-    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), identity{}, T{}, thrust::maximum<>{});
+    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), ::internal::identity{}, T{}, thrust::maximum<>{});
 
   ASSERT_EQUAL((thrust::device_vector<T>{0, 5, 5, 5, 8, 8, 8, 8, 8, 8}), vec);
 }

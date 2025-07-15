@@ -25,9 +25,7 @@
 #  include <thrust/future.h>
 
 #  include <string>
-#  if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#    include <type_traits>
-#  endif
+#  include <type_traits>
 
 #  include <unittest/unittest.h>
 
@@ -177,11 +175,7 @@ private:
   {
     // Sink the prefix tuple into a const local so it can be safely passed to
     // multiple invocations without worrying about potential modifications.
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    using prefix_tuple_type = cuda::std::remove_cvref_t<PrefixArgTuple>;
-#  else
-    using prefix_tuple_type = ::std::remove_cv_t<::std::remove_reference_t<PrefixArgTuple>>;
-#  endif
+    using prefix_tuple_type              = ::std::remove_cv_t<::std::remove_reference_t<PrefixArgTuple>>;
     prefix_tuple_type const prefix_tuple = THRUST_FWD(prefix_tuple_ref);
 
     using postfix_tuple_type               = std::tuple_element_t<PostfixIdx, postfix_args_type>;

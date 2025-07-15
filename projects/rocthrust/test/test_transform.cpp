@@ -15,6 +15,7 @@
  *  limitations under the License.
  */
 
+#include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
@@ -27,10 +28,6 @@
 #include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
-
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <thrust/functional.h>
-#endif
 
 // There is a unfortunate miscompilation of the gcc-11 vectorizer leading to OOB writes
 // Adding this attribute suffices that this miscompilation does not appear anymore
@@ -216,11 +213,7 @@ TYPED_TEST(TransformVectorTests, TestTransformIfUnaryNoStencilSimple) THRUST_DIS
   Vector output{-1, -2, -3};
   Vector result{-1, 2, -3};
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  iter = thrust::transform_if(input.begin(), input.end(), output.begin(), thrust::negate<T>(), ::cuda::std::identity{});
-#else
   iter = thrust::transform_if(input.begin(), input.end(), output.begin(), thrust::negate<T>(), ::internal::identity{});
-#endif
 
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(output, result);
@@ -284,11 +277,7 @@ TYPED_TEST(TransformVectorTests, TestTransformIfUnarySimple) THRUST_DISABLE_BROK
   Vector result{-1, 2, -3};
 
   iter = thrust::transform_if(
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    input.begin(), input.end(), stencil.begin(), output.begin(), thrust::negate<T>(), ::cuda::std::identity{});
-#else
     input.begin(), input.end(), stencil.begin(), output.begin(), thrust::negate<T>(), ::internal::identity{});
-#endif
 
   ASSERT_EQ(std::size_t(iter - output.begin()), input.size());
   ASSERT_EQ(output, result);
@@ -422,11 +411,7 @@ TYPED_TEST(TransformVectorTests, TestTransformIfBinarySimple) THRUST_DISABLE_BRO
   Vector output{1, 2, 3};
   Vector result{5, 2, -3};
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  ::cuda::std::identity identity;
-#else
   ::internal::identity identity;
-#endif
 
   iter = thrust::transform_if(
     input1.begin(),
@@ -982,13 +967,8 @@ TYPED_TEST(TransformInOutTests, TestTransformUnaryCountingIterator) THRUST_DISAB
   thrust::host_vector<U> h_result(n);
   thrust::device_vector<U> d_result(n);
 
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  thrust::transform(h_first, h_first + n, h_result.begin(), ::cuda::std::identity{});
-  thrust::transform(d_first, d_first + n, d_result.begin(), ::cuda::std::identity{});
-#  else
   thrust::transform(h_first, h_first + n, h_result.begin(), ::internal::identity{});
   thrust::transform(d_first, d_first + n, d_result.begin(), ::internal::identity{});
-#  endif
 
   ASSERT_EQ(h_result, d_result);
 }

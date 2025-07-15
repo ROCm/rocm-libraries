@@ -16,14 +16,11 @@
  */
 
 #include <thrust/find.h>
+#include <thrust/functional.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/sequence.h>
 
 #include <unittest/unittest.h>
-
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <thrust/functional.h>
-#endif
 
 template <typename T>
 struct equal_to_value_pred
@@ -147,11 +144,7 @@ void TestFindIfDispatchExplicit()
   thrust::device_vector<int> vec(1);
 
   my_system sys(0);
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  thrust::find_if(sys, vec.begin(), vec.end(), ::cuda::std::identity{});
-#else
   thrust::find_if(sys, vec.begin(), vec.end(), ::internal::identity{});
-#endif
 
   ASSERT_EQUAL(true, sys.is_valid());
 }
@@ -168,11 +161,7 @@ void TestFindIfDispatchImplicit()
 {
   thrust::device_vector<int> vec(1);
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  thrust::find_if(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), ::cuda::std::identity{});
-#else
   thrust::find_if(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), ::internal::identity{});
-#endif
 
   ASSERT_EQUAL(13, vec.front());
 }
@@ -206,11 +195,7 @@ void TestFindIfNotDispatchExplicit()
   thrust::device_vector<int> vec(1);
 
   my_system sys(0);
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  thrust::find_if_not(sys, vec.begin(), vec.end(), ::cuda::std::identity{});
-#else
   thrust::find_if_not(sys, vec.begin(), vec.end(), ::internal::identity{});
-#endif
 
   ASSERT_EQUAL(true, sys.is_valid());
 }
@@ -227,11 +212,7 @@ void TestFindIfNotDispatchImplicit()
 {
   thrust::device_vector<int> vec(1);
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  thrust::find_if_not(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), ::cuda::std::identity{});
-#else
   thrust::find_if_not(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), ::internal::identity{});
-#endif
 
   ASSERT_EQUAL(13, vec.front());
 }

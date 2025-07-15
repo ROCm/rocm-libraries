@@ -29,26 +29,21 @@ TYPED_TEST(LogicalTests, TestAllOf)
 {
   using Vector = typename TestFixture::input_type;
   using T      = typename Vector::value_type;
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::identity;
-#else
-  using ::internal::identity;
-#endif
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   Vector v(3, T{1});
 
-  ASSERT_EQ(thrust::all_of(v.begin(), v.end(), identity{}), true);
+  ASSERT_EQ(thrust::all_of(v.begin(), v.end(), ::internal::identity{}), true);
 
   v[1] = T{0};
 
-  ASSERT_EQ(thrust::all_of(v.begin(), v.end(), identity{}), false);
+  ASSERT_EQ(thrust::all_of(v.begin(), v.end(), ::internal::identity{}), false);
 
-  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 0, identity{}), true);
-  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 1, identity{}), true);
-  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 2, identity{}), false);
-  ASSERT_EQ(thrust::all_of(v.begin() + 1, v.begin() + 2, identity{}), false);
+  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 0, ::internal::identity{}), true);
+  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 1, ::internal::identity{}), true);
+  ASSERT_EQ(thrust::all_of(v.begin() + 0, v.begin() + 2, ::internal::identity{}), false);
+  ASSERT_EQ(thrust::all_of(v.begin() + 1, v.begin() + 2, ::internal::identity{}), false);
 }
 
 template <class InputIterator, class Predicate>
@@ -94,24 +89,19 @@ TYPED_TEST(LogicalTests, TestAnyOf)
 
   using Vector = typename TestFixture::input_type;
   using T      = typename Vector::value_type;
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::identity;
-#else
-  using ::internal::identity;
-#endif
 
   Vector v(3, T{1});
 
-  ASSERT_EQ(thrust::any_of(v.begin(), v.end(), identity{}), true);
+  ASSERT_EQ(thrust::any_of(v.begin(), v.end(), ::internal::identity{}), true);
 
   v[1] = 0;
 
-  ASSERT_EQ(thrust::any_of(v.begin(), v.end(), identity{}), true);
+  ASSERT_EQ(thrust::any_of(v.begin(), v.end(), ::internal::identity{}), true);
 
-  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 0, identity{}), false);
-  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 1, identity{}), true);
-  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 2, identity{}), true);
-  ASSERT_EQ(thrust::any_of(v.begin() + 1, v.begin() + 2, identity{}), false);
+  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 0, ::internal::identity{}), false);
+  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 1, ::internal::identity{}), true);
+  ASSERT_EQ(thrust::any_of(v.begin() + 0, v.begin() + 2, ::internal::identity{}), true);
+  ASSERT_EQ(thrust::any_of(v.begin() + 1, v.begin() + 2, ::internal::identity{}), false);
 }
 
 template <class InputIterator, class Predicate>
@@ -157,24 +147,19 @@ TYPED_TEST(LogicalTests, TestNoneOf)
 
   using Vector = typename TestFixture::input_type;
   using T      = typename Vector::value_type;
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::identity;
-#else
-  using ::internal::identity;
-#endif
 
   Vector v(3, T{1});
 
-  ASSERT_EQ(thrust::none_of(v.begin(), v.end(), identity{}), false);
+  ASSERT_EQ(thrust::none_of(v.begin(), v.end(), ::internal::identity{}), false);
 
   v[1] = 0;
 
-  ASSERT_EQ(thrust::none_of(v.begin(), v.end(), identity{}), false);
+  ASSERT_EQ(thrust::none_of(v.begin(), v.end(), ::internal::identity{}), false);
 
-  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 0, identity{}), true);
-  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 1, identity{}), false);
-  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 2, identity{}), false);
-  ASSERT_EQ(thrust::none_of(v.begin() + 1, v.begin() + 2, identity{}), true);
+  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 0, ::internal::identity{}), true);
+  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 1, ::internal::identity{}), false);
+  ASSERT_EQ(thrust::none_of(v.begin() + 0, v.begin() + 2, ::internal::identity{}), false);
+  ASSERT_EQ(thrust::none_of(v.begin() + 1, v.begin() + 2, ::internal::identity{}), true);
 }
 
 template <class InputIterator, class Predicate>

@@ -16,6 +16,7 @@
  */
 
 #include <thrust/count.h>
+#include <thrust/functional.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/iterator/zip_iterator.h>
@@ -25,10 +26,6 @@
 #include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
-
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <thrust/functional.h>
-#endif
 
 #if defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 110000 && THRUST_GCC_VERSION < 120000
 #  define WAIVE_GCC11_FAILURES
@@ -177,11 +174,7 @@ TYPED_TEST(PartitionVectorTests, TestStablePartitionStencilSimple)
 
   Vector stencil{0, 1, 0, 0, 1};
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  Iterator iter = thrust::stable_partition(data.begin(), data.end(), stencil.begin(), ::cuda::std::identity{});
-#else
   Iterator iter = thrust::stable_partition(data.begin(), data.end(), stencil.begin(), ::internal::identity{});
-#endif
 
   Vector ref{2, 2, 1, 1, 3};
 
@@ -227,11 +220,7 @@ TYPED_TEST(PartitionVectorTests, TestStablePartitionCopyStencilSimple)
   Vector false_results(3);
 
   thrust::pair<typename Vector::iterator, typename Vector::iterator> ends = thrust::stable_partition_copy(
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), ::cuda::std::identity{});
-#else
     data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), ::internal::identity{});
-#endif
 
   Vector true_ref(2, 2);
 

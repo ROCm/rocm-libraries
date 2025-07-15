@@ -19,12 +19,9 @@
 #include <thrust/random.h>
 
 #include <sstream>
+#include <type_traits>
 
 #include <unittest/unittest.h>
-
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits>
-#endif
 
 template <typename Engine>
 struct ValidateEngine
@@ -714,11 +711,7 @@ void ValidateDistributionCharacteristic()
 
   // test distribution & engine with comparable ranges
   // only do this if they have the same result_type
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  if (::cuda::std::is_same<typename Distribution::result_type, typename Engine::result_type>::value)
-#else
   if (::std::is_same<typename Distribution::result_type, typename Engine::result_type>::value)
-#endif
   {
     // test Distribution with same range as engine
 

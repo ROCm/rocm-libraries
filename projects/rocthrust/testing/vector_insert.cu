@@ -18,11 +18,9 @@
 #include <thrust/device_malloc_allocator.h>
 #include <thrust/sequence.h>
 
-#include <unittest/unittest.h>
+#include <utility>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <utility>
-#endif
+#include <unittest/unittest.h>
 
 template <class Vector>
 struct TestVectorRangeInsertSimple
@@ -134,11 +132,7 @@ struct TestVectorRangeInsert
     size_t end   = n > 0 ? (size_t) h_src[n + 1] % n : 0;
     if (end < begin)
     {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      using ::cuda::std::swap;
-#else
       using ::std::swap;
-#endif
       swap(begin, end);
     }
 

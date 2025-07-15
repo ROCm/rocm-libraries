@@ -29,16 +29,13 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <unittest/unittest.h>
-
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits>
-#  include <utility>
-#endif
 
 THRUST_STATIC_ASSERT((thrust::is_contiguous_iterator<std::string::iterator>::value));
 
@@ -107,11 +104,7 @@ template <typename IteratorT, typename PointerT, typename expected_unwrapped_typ
 struct check_unwrapped_iterator
 {
   using unwrapped_t =
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    ::cuda::std::remove_reference_t<decltype(thrust::try_unwrap_contiguous_iterator(cuda::std::declval<IteratorT>()))>;
-#else
     ::std::remove_reference_t<decltype(thrust::try_unwrap_contiguous_iterator(::std::declval<IteratorT>()))>;
-#endif
 
   static constexpr bool value =
     std::is_same<expected_unwrapped_type, expect_pointer>::value

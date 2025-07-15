@@ -26,10 +26,6 @@
 #include <thrust/mr/host_memory_resource.h>
 #include <thrust/mr/universal_memory_resource.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/limits>
-#endif
-
 #include <cstdio>
 #include <iostream>
 #include <limits>
@@ -227,14 +223,6 @@ template <>
 struct numeric_limits<custom_numeric> : numeric_limits<int>
 {};
 } // namespace std
-
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-_LIBCUDACXX_BEGIN_NAMESPACE_STD
-template <>
-struct numeric_limits<custom_numeric> : numeric_limits<int>
-{};
-_LIBCUDACXX_END_NAMESPACE_STD
-#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace detail

@@ -20,11 +20,9 @@
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 
-#include <unittest/unittest.h>
+#include <utility>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <utility>
-#endif
+#include <unittest/unittest.h>
 
 template <typename BaseAlloc, bool PropagateOnSwap>
 class stateful_allocator : public BaseAlloc
@@ -273,11 +271,7 @@ void TestVectorAllocatorPropagateOnSwap()
 
   Vector v1(10, alloc1);
   Vector v2(17, alloc1);
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::swap;
-#else
   using ::std::swap;
-#endif
   swap(v1, v2);
 
   ASSERT_EQUAL(v1.size(), 17u);

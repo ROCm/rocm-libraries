@@ -39,35 +39,30 @@ struct is_even
 TYPED_TEST(IsPartitionedVectorTests, TestIsPartitionedSimple)
 {
   using Vector = typename TestFixture::input_type;
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::identity;
-#else
-  using ::internal::identity;
-#endif
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
   Vector v{1, 1, 1, 0};
 
   // empty partition
-  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin(), v.begin(), identity{}));
+  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin(), v.begin(), ::internal::identity{}));
 
   // one element true partition
-  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin(), v.begin() + 1, identity{}));
+  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin(), v.begin() + 1, ::internal::identity{}));
 
   // just true partition
-  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin(), v.begin() + 2, identity{}));
+  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin(), v.begin() + 2, ::internal::identity{}));
 
   // both true & false partitions
-  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin(), v.end(), identity{}));
+  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin(), v.end(), ::internal::identity{}));
 
   // one element false partition
-  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin() + 3, v.end(), identity{}));
+  ASSERT_EQ_QUIET(true, thrust::is_partitioned(v.begin() + 3, v.end(), ::internal::identity{}));
 
   v = {1, 0, 1, 1};
 
   // not partitioned
-  ASSERT_EQ_QUIET(false, thrust::is_partitioned(v.begin(), v.end(), identity{}));
+  ASSERT_EQ_QUIET(false, thrust::is_partitioned(v.begin(), v.end(), ::internal::identity{}));
 }
 
 TYPED_TEST(IsPartitionedVectorTests, TestIsPartitioned)

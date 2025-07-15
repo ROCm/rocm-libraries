@@ -33,11 +33,7 @@ void TestTabulateDispatchExplicit()
   thrust::device_vector<int> vec(1);
 
   my_system sys(0);
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  thrust::tabulate(sys, vec.begin(), vec.end(), ::cuda::std::identity{});
-#else
   thrust::tabulate(sys, vec.begin(), vec.end(), ::internal::identity{});
-#endif
 
   ASSERT_EQUAL(true, sys.is_valid());
 }
@@ -53,11 +49,7 @@ void TestTabulateDispatchImplicit()
 {
   thrust::device_vector<int> vec(1);
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  thrust::tabulate(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), ::cuda::std::identity{});
-#else
   thrust::tabulate(thrust::retag<my_tag>(vec.begin()), thrust::retag<my_tag>(vec.end()), ::internal::identity{});
-#endif
 
   ASSERT_EQUAL(13, vec.front());
 }
@@ -70,11 +62,7 @@ void TestTabulateSimple()
 
   Vector v(5);
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  thrust::tabulate(v.begin(), v.end(), ::cuda::std::identity{});
-#else
   thrust::tabulate(v.begin(), v.end(), ::internal::identity{});
-#endif
 
   Vector ref{0, 1, 2, 3, 4};
   ASSERT_EQUAL(v, ref);
@@ -116,11 +104,7 @@ void TestTabulateToDiscardIterator(size_t n)
 {
   thrust::tabulate(thrust::discard_iterator<thrust::device_system_tag>(),
                    thrust::discard_iterator<thrust::device_system_tag>(n),
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                   ::cuda::std::identity{});
-#else
                    ::internal::identity{});
-#endif
 
   // nothing to check -- just make sure it compiles
 }

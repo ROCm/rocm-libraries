@@ -51,11 +51,7 @@ int main()
   // compute indices of nonzero elements
   using IndexIterator = thrust::device_vector<int>::iterator;
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  IndexIterator indices_end = thrust::copy_if(first, last, stencil.begin(), indices.begin(), ::cuda::std::identity{});
-#else
   IndexIterator indices_end = thrust::copy_if(first, last, stencil.begin(), indices.begin(), ::internal::identity{});
-#endif
   // indices now contains [1,2,5,7]
 
   // print result

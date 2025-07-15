@@ -30,18 +30,15 @@ THRUST_SUPPRESS_DEPRECATED_PUSH
 #include <thrust/sequence.h>
 #include <thrust/universal_vector.h>
 
+#include <functional>
 #include <memory>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
-
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <functional>
-#  include <type_traits>
-#  include <utility>
-#endif
 
 #if defined(__NVCOMPILER)
 THRUST_SUPPRESS_DEPRECATED_POP
@@ -214,11 +211,7 @@ struct forward
   template <class _Tp>
   constexpr _Tp&& operator()(_Tp&& __t) const noexcept
   {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    return _CUDA_VSTD::forward<_Tp>(__t);
-#else
     return ::std::forward<_Tp>(__t);
-#endif
   }
 };
 
@@ -228,15 +221,8 @@ TEST(TransformIteratorTests, TestTransformIteratorReferenceAndValueType)
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using cuda::std::identity;
-  using ::cuda::std::is_same;
-  using ::cuda::std::negate;
-#else
-  using ::internal::identity;
   using ::std::is_same;
   using ::std::negate;
-#endif
   {
     thrust::host_vector<bool> v;
 
@@ -264,7 +250,7 @@ TEST(TransformIteratorTests, TestTransformIteratorReferenceAndValueType)
     static_assert(is_same<decltype(it_tr_tid)::value_type, bool>::value, "");
     (void) it_tr_tid;
 
-    auto it_tr_cid = thrust::make_transform_iterator(it, identity{});
+    auto it_tr_cid = thrust::make_transform_iterator(it, ::internal::identity{});
     static_assert(is_same<decltype(it_tr_cid)::reference, bool>::value, ""); // special handling by
                                                                              // transform_iterator_reference
     static_assert(is_same<decltype(it_tr_cid)::value_type, bool>::value, "");
@@ -298,7 +284,7 @@ TEST(TransformIteratorTests, TestTransformIteratorReferenceAndValueType)
     static_assert(is_same<decltype(it_tr_tid)::value_type, bool>::value, "");
     (void) it_tr_tid;
 
-    auto it_tr_cid = thrust::make_transform_iterator(it, identity{});
+    auto it_tr_cid = thrust::make_transform_iterator(it, ::internal::identity{});
     static_assert(is_same<decltype(it_tr_cid)::reference, bool>::value, ""); // special handling by
                                                                              // transform_iterator_reference
     static_assert(is_same<decltype(it_tr_cid)::value_type, bool>::value, "");
@@ -337,7 +323,7 @@ TEST(TransformIteratorTests, TestTransformIteratorReferenceAndValueType)
     static_assert(is_same<decltype(it_tr_tid)::value_type, bool>::value, "");
     (void) it_tr_tid;
 
-    auto it_tr_cid = thrust::make_transform_iterator(it, identity{});
+    auto it_tr_cid = thrust::make_transform_iterator(it, ::internal::identity{});
     static_assert(is_same<decltype(it_tr_cid)::reference, bool>::value, ""); // special handling by
                                                                              // transform_iterator_reference
     static_assert(is_same<decltype(it_tr_cid)::value_type, bool>::value, "");
@@ -356,11 +342,7 @@ TEST(TransformIteratorTests, TestTransformIteratorIdentity)
 
   ASSERT_EQ(*thrust::make_transform_iterator(v.begin(), thrust::identity<int>{}), 42);
   ASSERT_EQ(*thrust::make_transform_iterator(v.begin(), thrust::identity<>{}), 42);
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  ASSERT_EQ(*thrust::make_transform_iterator(v.begin(), cuda::std::identity{}), 42);
-#else
   ASSERT_EQ(*thrust::make_transform_iterator(v.begin(), ::internal::identity{}), 42);
-#endif
   using namespace thrust::placeholders;
   ASSERT_EQ(*thrust::make_transform_iterator(v.begin(), _1), 42);
   THRUST_SUPPRESS_DEPRECATED_POP

@@ -20,15 +20,11 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/unique.h>
 
+#include <array>
+
 #include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
-
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/array>
-#else
-#  include <array>
-#endif
 
 TESTS_DEFINE(UniqueTests, FullTestsParams);
 
@@ -359,10 +355,6 @@ TYPED_TEST(UniqueIntegralTests, TestUniqueCount)
   }
 }
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-template <typename T, std::size_t N>
-using DeviceArray = cuda::std::array<T, N>;
-#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
 template <typename T, std::size_t N>
 struct DeviceArray
 {
@@ -381,7 +373,6 @@ struct DeviceArray
     return true;
   }
 };
-#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 
 TYPED_TEST(UniqueTests, TestUniqueMemoryAccess)
 {

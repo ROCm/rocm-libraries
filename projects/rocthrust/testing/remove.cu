@@ -209,11 +209,7 @@ void TestRemoveIfStencilSimple()
   Vector data{1, 2, 1, 3, 2};
   Vector stencil{0, 1, 0, 0, 1};
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  typename Vector::iterator end = thrust::remove_if(data.begin(), data.end(), stencil.begin(), ::cuda::std::identity{});
-#else
   typename Vector::iterator end = thrust::remove_if(data.begin(), data.end(), stencil.begin(), ::internal::identity{});
-#endif
 
   ASSERT_EQUAL(end - data.begin(), 3);
   data.resize(end - data.begin());
@@ -323,11 +319,7 @@ void TestRemoveCopyIfStencilSimple()
   Vector result(5);
 
   typename Vector::iterator end =
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    thrust::remove_copy_if(data.begin(), data.end(), stencil.begin(), result.begin(), ::cuda::std::identity{});
-#else
     thrust::remove_copy_if(data.begin(), data.end(), stencil.begin(), result.begin(), ::internal::identity{});
-#endif
 
   ASSERT_EQUAL(end - result.begin(), 3);
   result.resize(end - result.begin());

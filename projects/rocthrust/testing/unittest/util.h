@@ -22,12 +22,10 @@
 #include <thrust/limits.h>
 
 #include <iostream>
+#include <limits>
 #include <string>
+#include <type_traits>
 #include <typeinfo>
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <limits>
-#  include <type_traits>
-#endif
 
 #include <unittest/system.h>
 
@@ -43,35 +41,18 @@ std::string type_name()
 // Use this with counting_iterator to avoid generating a range larger than we
 // can represent.
 template <typename T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-typename THRUST_NS_QUALIFIER::detail::disable_if<::cuda::std::is_floating_point<T>::value, T>::type
-#else
 typename THRUST_NS_QUALIFIER::detail::disable_if<::std::is_floating_point<T>::value, T>::type
-#endif
 truncate_to_max_representable(std::size_t n)
 {
   return static_cast<T>(
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    THRUST_NS_QUALIFIER::min<std::size_t>(n, static_cast<std::size_t>(::cuda::std::numeric_limits<T>::max())));
-#else
     THRUST_NS_QUALIFIER::min<std::size_t>(n, static_cast<std::size_t>(::std::numeric_limits<T>::max())));
-#endif
 }
 
 // TODO: This probably won't work for `half`.
 template <typename T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-typename ::cuda::std::enable_if_t<::cuda::std::is_floating_point<T>::value, T>
-#else
-typename ::std::enable_if_t<::std::is_floating_point<T>::value, T>
-#endif
-truncate_to_max_representable(std::size_t n)
+typename ::std::enable_if_t<::std::is_floating_point<T>::value, T> truncate_to_max_representable(std::size_t n)
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  return THRUST_NS_QUALIFIER::min<T>(static_cast<T>(n), ::cuda::std::numeric_limits<T>::max());
-#else
   return THRUST_NS_QUALIFIER::min<T>(static_cast<T>(n), ::std::numeric_limits<T>::max());
-#endif
 }
 
 } // namespace unittest

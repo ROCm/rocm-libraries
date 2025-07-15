@@ -20,11 +20,9 @@
 #include <thrust/transform.h>
 #include <thrust/tuple.h>
 
-#include <unittest/unittest.h>
+#include <type_traits>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits>
-#endif
+#include <unittest/unittest.h>
 
 struct make_pair_functor
 {
@@ -40,13 +38,8 @@ struct add_pairs
   template <typename Pair1, typename Pair2>
   THRUST_HOST_DEVICE Pair1 operator()(const Pair1& x, const Pair2& y)
   {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    using T1 = typename ::cuda::std::common_type<typename Pair1::first_type, typename Pair2::first_type>::type;
-    using T2 = typename ::cuda::std::common_type<typename Pair1::second_type, typename Pair2::second_type>::type;
-#else
     using T1 = typename ::std::common_type<typename Pair1::first_type, typename Pair2::first_type>::type;
     using T2 = typename ::std::common_type<typename Pair1::second_type, typename Pair2::second_type>::type;
-#endif
 
     return thrust::make_pair(static_cast<T1>(x.first + y.first), static_cast<T2>(x.second + y.second));
   } // end operator()
