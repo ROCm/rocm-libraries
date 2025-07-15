@@ -1,13 +1,3 @@
-# Documentation ownership
-**/.readthedocs.yaml @ROCm/rocm-documentation
-**/docs/ @ROCm/rocm-documentation
-
-# Build ownership
-**/next-cmake/ @ROCm/rocm-math-lib-build-infra
-
-# CI ownership
-/.azuredevops/ @ROCm/external-ci
-
 # Project-specific ownership
 /projects/miopen/ @BrianHarrisonAMD @BradPepersAMD @adickin-amd @JonathanLichtnerAMD
 /projects/composablekernel/ @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @tenpercent @ThomasNing @coderfeli
@@ -30,3 +20,16 @@
 /shared/mxdatagenerator/ @ROCm/rocroller-developers
 /shared/rocroller/ @ROCm/rocroller-developers
 /shared/tensile/ @babakpst @yoichiyoshida @bragadeesh @AlexBrownAMD @ellosel @bstefanuk
+
+# Build ownership
+**/next-cmake/ @ROCm/rocm-math-lib-build-infra
+
+# CI ownership
+/.azuredevops/ @ROCm/external-ci
+
+# Documentation ownership
+**/*.md @ROCm/rocm-documentation
+**/*.rst @ROCm/rocm-documentation
+**/.readthedocs.yaml @ROCm/rocm-documentation
+**/docs/ @ROCm/rocm-documentation
+**/library/include/ @ROCm/rocm-documentation
