@@ -150,7 +150,6 @@ if(BUILD_BENCHMARKS)
     endif()
     set(GOOGLEBENCHMARK_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/googlebenchmark CACHE PATH "")
     if(NOT (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
-    # hip-clang cannot compile googlebenchmark for some reason
       if(WIN32)
         get_filename_component(CXX_DIRNAME ${CMAKE_CXX_COMPILER} DIRECTORY)
         set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=${CXX_DIRNAME}/clang++.exe")
