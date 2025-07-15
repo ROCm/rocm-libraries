@@ -132,4 +132,14 @@ Tests:
   transB: N
   alpha: 1
   beta: 0
+
+- name: aux_mat_copy
+  category: pre_checkin
+  function:
+    - aux_mat_copy: *hpa_half_precision
+
+- name: aux_auxiliary_func
+  category: pre_checkin
+  function:
+    - aux_auxiliary_func: *hpa_half_precision
 ...

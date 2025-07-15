@@ -97,7 +97,6 @@ jobs:
           token: ${{ steps.generate-token.outputs.token }}
           fetch-depth: 0
 
-
       - name: Generate and apply patches
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
@@ -106,4 +105,5 @@ jobs:
             --repo "${{ github.repository }}" \
             --pr "${{ github.event.inputs.pr }}" \
             --subtrees "${{ steps.detect.outputs.subtrees }}" \
-            --config ".github/repos-config.json"
+            --config ".github/repos-config.json" \
+            --debug

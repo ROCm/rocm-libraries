@@ -131,6 +131,7 @@ if (NOT WIN32)
   list( APPEND COMMON_LINK_LIBS "-lm -lstdc++fs" )
 endif()
 target_link_libraries( rocblas-test PRIVATE ${COMMON_LINK_LIBS} )
+apply_omp_settings( rocblas-test )
 
 target_compile_options(rocblas-test PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_OPTIONS}>)
 

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -61,6 +61,8 @@ INSTANTIATE_MIXED(int32_t, int8_t, int8_t, float, float);
 INSTANTIATE_MIXED(int64_t, int8_t, int8_t, float, float);
 INSTANTIATE_MIXED(int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int64_t, _Float16, _Float16, float, float);
+INSTANTIATE_MIXED(int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_MIXED(int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 
 INSTANTIATE_MIXED(
     int32_t, float, rocsparse_float_complex, rocsparse_float_complex, rocsparse_float_complex);

@@ -33,6 +33,7 @@ target_sources(hipblaslt
         "${_CMAKE_CURRENT_SOURCE_DIR1}/rocblaslt-auxiliary.h"
         "${_CMAKE_CURRENT_SOURCE_DIR2}/utility.hpp"
         "${_CMAKE_CURRENT_SOURCE_DIR2}/rocroller_host.hpp"
+        "${_CMAKE_CURRENT_SOURCE_DIR2}/rocroller_host_internal.hpp"
         "${_CMAKE_CURRENT_SOURCE_DIR2}/rocblaslt_mat_utils.hpp"
         "${_CMAKE_CURRENT_SOURCE_DIR2}/tuple_helper.hpp"
         "${_CMAKE_CURRENT_SOURCE_DIR2}/tensile_host.hpp"
