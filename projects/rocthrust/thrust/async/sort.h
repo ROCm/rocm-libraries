@@ -161,7 +161,7 @@ THRUST_SUPPRESS_DEPRECATED_PUSH
   )
 
   template <typename... Args>
-  #if THRUST_DEVICE_COMPILER != THRUST_DEVICE_COMPILER_NVCC
+  #if !(defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG)
   // clang in CUDA mode can only handle one attribute
   THRUST_NODISCARD THRUST_HOST
   #endif
@@ -304,7 +304,7 @@ struct sort_fn final
   )
 
   template <typename... Args>
-  #if THRUST_DEVICE_COMPILER != THRUST_DEVICE_COMPILER_NVCC
+  #if !(defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG)
   // clang in CUDA mode can only handle one attribute
   THRUST_NODISCARD THRUST_HOST
   #endif
