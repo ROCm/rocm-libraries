@@ -844,6 +844,66 @@ TEST(HipcubDeviceForTests, ForEachCopyNTempStore)
     }
 }
 
+TEST(HipcubDeviceForTests, ForEachInExtents)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using item_t                = int;
+    using data_t                = std::array<item_t, 3>;
+    using extents_type          = hipcub::extents<item_t, 3, 2, 2>;
+    constexpr auto extents_size = hipcub::extents_size<extents_type>::value;
+    constexpr auto memory_size  = extents_size * sizeof(data_t);
+
+    extents_type ext{};
+
+    std::vector<data_t> expected = {
+        {0, 0, 0},
+        {0, 0, 1},
+        {0, 1, 0},
+        {0, 1, 1},
+        {1, 0, 0},
+        {1, 0, 1},
+        {1, 1, 0},
+        {1, 1, 1},
+        {2, 0, 0},
+        {2, 0, 1},
+        {2, 1, 0},
+        {2, 1, 1}
+    };
+
+    item_t* d_input = nullptr;
+    HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, memory_size));
+    HIP_CHECK(hipMemset(d_input, 0, memory_size));
+
+    struct Op
+    {
+        using op_data_t = item_t[3];
+        void* d_data;
+
+        __device__ __host__ __forceinline__
+        void  operator()(int idx, int x, int y, int z)
+        {
+            auto& i = static_cast<op_data_t*>(d_data)[idx];
+            i[0]    = x;
+            i[1]    = y;
+            i[2]    = z;
+        }
+    };
+
+    HIP_CHECK(hipcub::DeviceFor::ForEachInExtents(ext, Op{d_input}));
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
+
+    std::vector<data_t> h_output(extents_size, {0, 0, 0});
+    HIP_CHECK(hipMemcpy(h_output.data(), d_input, memory_size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(h_output, expected));
+    HIP_CHECK(hipFree(d_input));
+}
+
 template<class Params>
 class HipcubDeviceForBulkTests : public HipcubDeviceForTests<Params>
 {};
