@@ -208,20 +208,20 @@ TEST(InnerProductTests, TestInnerProductWithBigIndexes)
 #endif
 }
 
-// TEST(InnerProductTests, TestInnerProductPlaceholders)
-// { // Regression test for NVIDIA/thrust#1178
-//   using namespace thrust::placeholders;
+TEST(InnerProductTests, TestInnerProductPlaceholders)
+{ // Regression test for NVIDIA/thrust#1178
+  using namespace thrust::placeholders;
 
-//   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-//   thrust::device_vector<float> v1(100, 1.f);
-//   thrust::device_vector<float> v2(100, 1.f);
+  thrust::device_vector<float> v1(100, 1.f);
+  thrust::device_vector<float> v2(100, 1.f);
 
-//   auto result = thrust::inner_product(v1.begin(), v1.end(), v2.begin(), 0.0f, thrust::plus<float>{}, _1 * _2 + 1.0f);
+  auto result = thrust::inner_product(v1.begin(), v1.end(), v2.begin(), 0.0f, thrust::plus<float>{}, _1 * _2 + 1.0f);
 
-//   auto error_margin = 1e-4 * (::std::abs(result) + 200.f) * 1e-4;
-//   ASSERT_NEAR(static_cast<double>(result), static_cast<double>(200.f), static_cast<double>(error_margin));
-// }
+  auto error_margin = 1e-4 * (::std::abs(result) + 200.f) * 1e-4;
+  ASSERT_NEAR(static_cast<double>(result), static_cast<double>(200.f), static_cast<double>(error_margin));
+}
 
 template <class T>
 T clip_infinity(T val)
