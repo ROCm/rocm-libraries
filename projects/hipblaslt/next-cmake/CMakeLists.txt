@@ -73,7 +73,7 @@ if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
     set(HIPBLASLT_ENABLE_MSGPACK ON CACHE BOOL "Use msgpack for parsing configuration files.")
     set(HIPBLASLT_ENABLE_OPENMP ON CACHE BOOL "Use OpenMP to improve performance.")
     set(HIPBLASLT_ENABLE_LLVM OFF CACHE BOOL "Use msgpack for parsing configuration files.")
-    set(HIPBLASLT_ENABLE_ROCROLLER OFF CACHE BOOL "Use RocRoller library.")
+    set(HIPBLASLT_ENABLE_ROCROLLER ON CACHE BOOL "Use RocRoller library.")
     set(HIPBLASLT_ENABLE_BLIS ON CACHE BOOL "Enable BLIS support.") # I don't know that we can build with this OFF
     set(HIPBLASLT_ENABLE_LAZY_LOAD ON CACHE BOOL "Enable lazy loading of runtime code oject files to reduce ram usage.")
     cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
@@ -250,9 +250,9 @@ if(TENSILELITE_ENABLE_HOST OR HIPBLASLT_ENABLE_HOST)
 
     if(HIPBLASLT_ENABLE_MSGPACK)
         if(msgpack-cxx_FOUND)
-            target_link_libraries(tensilelite-host PRIVATE msgpack-cxx)
+            target_link_libraries(tensilelite-host PUBLIC msgpack-cxx)
         else()
-            target_link_libraries(tensilelite-host PRIVATE msgpackc)
+            target_link_libraries(tensilelite-host PUBLIC msgpackc)
         endif()
         target_compile_definitions(tensilelite-host PRIVATE TENSILE_MSGPACK)
     endif()
@@ -265,7 +265,7 @@ if(TENSILELITE_ENABLE_HOST OR HIPBLASLT_ENABLE_HOST)
             "${CMAKE_CURRENT_BINARY_DIR}/include"
     )
 
-    target_link_libraries(tensilelite-host 
+    target_link_libraries(tensilelite-host
         PUBLIC
             rocisa::rocisa-cpp
             hip::device
@@ -292,8 +292,8 @@ if(HIPBLASLT_ENABLE_HOST)
         PUBLIC
             roc::${hipblas_target}
             hip::device
+            $<BUILD_INTERFACE:tensilelite::tensilelite-host>
         PRIVATE
-            tensilelite-host
             ${CMAKE_DL_LIBS}
             ${rocTracer}
     )
