@@ -3083,6 +3083,56 @@ namespace KernelGraphTest
         EXPECT_EQ(tag, vgprB);
     }
 
+    TEST_F(KernelGraphTest, Transformer)
+    {
+        auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
+
+        int macK  = 16;
+        int waveK = 8;
+
+        example.setTileSize(128, 256, macK);
+        example.setMFMA(32, 32, waveK, 1);
+        example.setUseLDS(true, false, false);
+
+        auto kgraph0 = example.getKernelGraph();
+        auto params  = example.getCommandParameters();
+
+        auto updateParametersTransform = std::make_shared<UpdateParameters>(params);
+        auto addLDSTransform           = std::make_shared<AddLDS>(params, m_context);
+        auto lowerTileTransform        = std::make_shared<LowerTile>(params, m_context);
+        auto lowerTensorContractionTransform
+            = std::make_shared<LowerTensorContraction>(params, m_context);
+        auto unrollLoopsTransform      = std::make_shared<UnrollLoops>(params, m_context);
+        auto fuseLoopsTransform        = std::make_shared<FuseLoops>();
+        auto removeDuplicatesTransform = std::make_shared<RemoveDuplicates>();
+
+        auto cleanLoopsTransform      = std::make_shared<CleanLoops>();
+        auto addComputeIndexTransform = std::make_shared<AddComputeIndex>();
+
+        kgraph0      = kgraph0.transform(updateParametersTransform);
+        auto kgraph1 = kgraph0.transform(addLDSTransform);
+        kgraph1      = kgraph1.transform(lowerTileTransform);
+        kgraph1      = kgraph1.transform(lowerTensorContractionTransform);
+
+        //
+        // Build transformer one by one
+        //
+        std::unordered_map<int, Transformer> transformers;
+        for(auto op : kgraph1.control.getNodes())
+            transformers.emplace(op, kgraph1.getTransformer(op));
+
+        //
+        // Build all transformers at once
+        //
+        kgraph1.buildAllTransformers();
+
+        //
+        // The resulting transformers should be identical
+        //
+        for(auto op : kgraph1.control.getNodes())
+            EXPECT_EQ(transformers.at(op).getIndexes(), kgraph1.getTransformer(op).getIndexes());
+    }
+
     TEST_F(KernelGraphTest, RemoveSetCoordinate)
     {
         auto kgraph = rocRoller::KernelGraph::KernelGraph();

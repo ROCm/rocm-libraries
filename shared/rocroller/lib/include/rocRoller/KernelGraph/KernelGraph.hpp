@@ -62,13 +62,22 @@ namespace rocRoller
                                                        &WalkableControlGraph};
             std::vector<std::string>     m_transforms;
 
+            std::unordered_map<int, rocRoller::KernelGraph::CoordinateGraph::Transformer>
+                m_transformers;
+
         public:
             ControlGraph::ControlGraph       control;
             CoordinateGraph::CoordinateGraph coordinates;
             ControlToCoordinateMapper        mapper;
 
-            std::unordered_map<int, rocRoller::KernelGraph::CoordinateGraph::Transformer>
-                transformers;
+            void initializeTransformersForCodeGen(rocRoller::Expression::ExpressionTransducer);
+            CoordinateGraph::Transformer getTransformer(int op);
+            void                         buildAllTransformers();
+            void updateTransformer(int op, int coord, Expression::ExpressionPtr expr);
+            std::unordered_map<int, CoordinateGraph::Transformer> const& getAllTransformers() const
+            {
+                return m_transformers;
+            }
 
             std::string toDOT(bool drawMappings = false, std::string title = "") const;
 

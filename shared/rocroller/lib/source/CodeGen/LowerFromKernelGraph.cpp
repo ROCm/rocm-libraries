@@ -87,11 +87,7 @@ namespace rocRoller
                 //
                 // Rebind the transducer and coordinate graph to the ones in m_graph
                 //
-                for(auto& iter : m_graph->transformers)
-                {
-                    iter.second.setCoordinateGraph(&m_graph->coordinates);
-                    iter.second.setTransducer(m_fastArith);
-                }
+                m_graph->initializeTransformersForCodeGen(m_fastArith);
 
                 co_yield Instruction::Comment("CodeGeneratorVisitor::generate() begin");
                 auto candidates = m_graph->control.roots().to<std::set>();
@@ -239,10 +235,8 @@ namespace rocRoller
                 {
                     std::set<std::string> allReferencedArgs;
 
-                    for(auto inst : std::visit(*this,
-                                               std::variant<int>(tag),
-                                               operation)
-                                        .map(AddControlOp(tag)))
+                    for(auto inst :
+                        std::visit(*this, std::variant<int>(tag), operation).map(AddControlOp(tag)))
                     {
                         if(m_argumentTracer && inst.innerControlOp() == tag)
                         {
@@ -324,16 +318,13 @@ namespace rocRoller
                 //
                 // Fill in workgroup indexes and workitem indexes for each transformer
                 //
-                m_graph->transformers.at(tag).fillExecutionCoordinates(m_context);
-                for(auto& [node, xformer] : m_graph->transformers)
+                auto coord = m_graph->getTransformer(tag);
+                coord.fillExecutionCoordinates(m_context);
+                for(auto const& [node, _] : m_graph->getAllTransformers())
                 {
-                    if(node != tag)
-                    {
-                        for(auto const& [coord, expr] : m_graph->transformers.at(tag).getIndexes())
-                            xformer.setCoordinate(coord, expr);
-                    }
-                }                
-
+                    for(auto const& [coord, expr] : coord.getIndexes())
+                        m_graph->updateTransformer(node, coord, expr);
+                }
 
                 auto init = m_graph->control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
                 co_yield generate(init);
@@ -683,8 +674,7 @@ namespace rocRoller
                 }
             }
 
-            Generator<Instruction>
-                operator()(int tag, Deallocate const& deallocate)
+            Generator<Instruction> operator()(int tag, Deallocate const& deallocate)
             {
                 for(auto const& c : m_graph->mapper.getConnections(tag))
                 {
@@ -716,11 +706,11 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, ComputeIndex const& ci)
             {
-                co_yield m_loadStoreTileGenerator.genComputeIndex(tag, ci, m_graph->transformers.at(tag));
+                co_yield m_loadStoreTileGenerator.genComputeIndex(
+                    tag, ci, m_graph->getTransformer(tag));
             }
 
-            Generator<Instruction>
-                operator()(int tag, SetCoordinate const& setCoordinate)
+            Generator<Instruction> operator()(int tag, SetCoordinate const& setCoordinate)
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::SetCoordinate({}): {}",
@@ -741,12 +731,14 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, LoadTiled const& load)
             {
-                co_yield m_loadStoreTileGenerator.genLoadTile(tag, load, m_graph->transformers.at(tag));
+                co_yield m_loadStoreTileGenerator.genLoadTile(
+                    tag, load, m_graph->getTransformer(tag));
             }
 
             Generator<Instruction> operator()(int tag, LoadLDSTile const& load)
             {
-                co_yield m_loadStoreTileGenerator.genLoadLDSTile(tag, load, m_graph->transformers.at(tag));
+                co_yield m_loadStoreTileGenerator.genLoadLDSTile(
+                    tag, load, m_graph->getTransformer(tag));
             }
 
             Generator<Instruction> operator()(int tag, LoadSGPR const& load)
@@ -768,7 +760,7 @@ namespace rocRoller
 
                 co_yield Instruction::Comment("GEN: LoadSGPR; user index");
 
-                auto indexes = m_graph->transformers.at(tag).reverse({userTag});
+                auto indexes = m_graph->getTransformer(tag).reverse({userTag});
                 co_yield generateOffset(
                     offset, indexes[0], dst->variableType().dataType, user.offset);
 
@@ -819,8 +811,7 @@ namespace rocRoller
                 }
             }
 
-            Generator<Instruction>
-                loadVGPRFromScalarValue(User user, Register::ValuePtr vgpr)
+            Generator<Instruction> loadVGPRFromScalarValue(User user, Register::ValuePtr vgpr)
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::LoadVGPR(): scalar value");
@@ -831,8 +822,7 @@ namespace rocRoller
                 co_yield m_context->copier()->copy(vgpr, s_value, "Move value");
             }
 
-            Generator<Instruction>
-                loadVGPRFromScalarPointer(User user, Register::ValuePtr vgpr)
+            Generator<Instruction> loadVGPRFromScalarPointer(User user, Register::ValuePtr vgpr)
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::LoadVGPR(): scalar pointer");
@@ -851,16 +841,15 @@ namespace rocRoller
                     MemoryInstructions::MemoryKind::Global, vgpr, vPtr, nullptr, numBytes);
             }
 
-            Generator<Instruction> loadVGPRFromGlobalArray(int                userTag,
-                                                           User               user,
-                                                           Register::ValuePtr vgpr)
+            Generator<Instruction>
+                loadVGPRFromGlobalArray(int userTag, User user, Register::ValuePtr vgpr)
             {
                 auto offset = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::Int64, 1);
 
                 co_yield Instruction::Comment("GEN: LoadVGPR; user index");
 
-                auto indexes = m_graph->transformers.at(userTag).reverse({userTag});
+                auto indexes = m_graph->getTransformer(userTag).reverse({userTag});
                 co_yield generateOffset(
                     offset, indexes[0], vgpr->variableType().dataType, user.offset);
 
@@ -990,8 +979,7 @@ namespace rocRoller
                 co_yield Instruction::Unlock("Unlock Block");
             }
 
-            Generator<Instruction>
-                operator()(int tag, TensorContraction const& mul)
+            Generator<Instruction> operator()(int tag, TensorContraction const& mul)
             {
                 Throw<FatalError>("TensorContraction present in kernel graph.");
             }
@@ -1003,27 +991,28 @@ namespace rocRoller
 
             Generator<Instruction> operator()(int tag, StoreTiled const& store)
             {
-                co_yield m_loadStoreTileGenerator.genStoreTile(tag, store, m_graph->transformers.at(tag));
+                co_yield m_loadStoreTileGenerator.genStoreTile(
+                    tag, store, m_graph->getTransformer(tag));
             }
 
-            Generator<Instruction>
-                operator()(int tag, StoreLDSTile const& store)
+            Generator<Instruction> operator()(int tag, StoreLDSTile const& store)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::StoreLDSTiled({})",
                                                    tag);
                 co_yield Instruction::Comment("GEN: StoreLDSTile");
 
-                co_yield m_loadStoreTileGenerator.genStoreLDSTile(tag, store, m_graph->transformers.at(tag));
+                co_yield m_loadStoreTileGenerator.genStoreLDSTile(
+                    tag, store, m_graph->getTransformer(tag));
             }
 
-            Generator<Instruction>
-                operator()(int tag, LoadTileDirect2LDS const& load)
+            Generator<Instruction> operator()(int tag, LoadTileDirect2LDS const& load)
             {
                 rocRoller::Log::getLogger()->debug(
                     "KernelGraph::CodeGenerator::LoadTileDirect2LDS({})", tag);
                 co_yield Instruction::Comment("GEN: LoadTileDirect2LDS");
 
-                co_yield m_loadStoreTileGenerator.genLoadTileDirect2LDS(tag, load, m_graph->transformers.at(tag));
+                co_yield m_loadStoreTileGenerator.genLoadTileDirect2LDS(
+                    tag, load, m_graph->getTransformer(tag));
             }
 
             Generator<Instruction> operator()(int tag, StoreVGPR const& store)
@@ -1038,7 +1027,7 @@ namespace rocRoller
                 auto offset = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::Int64, 1);
 
-                auto indexes = m_graph->transformers.at(tag).forward({userTag});
+                auto indexes = m_graph->getTransformer(tag).forward({userTag});
 
                 co_yield Instruction::Comment("GEN: StoreVGPR; user index");
                 co_yield generateOffset(
@@ -1069,7 +1058,7 @@ namespace rocRoller
                 auto offset = Register::Value::Placeholder(
                     m_context, Register::Type::Scalar, DataType::Int64, 1);
 
-                auto indexes = m_graph->transformers.at(tag).forward({userTag});
+                auto indexes = m_graph->getTransformer(tag).forward({userTag});
 
                 co_yield Instruction::Comment("GEN: StoreSGPR; user index");
                 co_yield generateOffset(
@@ -1110,7 +1099,7 @@ namespace rocRoller
 
                 const uint waveTileSize = waveTile.sizes[0] * waveTile.sizes[1];
 
-                auto& coords = m_graph->transformers.at(tag);
+                auto                      coords = m_graph->getTransformer(tag);
                 Expression::ExpressionPtr waveTileExpr, simdBlockExpr, vgprIndexExpr, expectedExpr;
 
                 {
@@ -1258,7 +1247,7 @@ namespace rocRoller
                 {
                     // Generate an expression of TID and add it to the seed
                     auto tidTag  = m_graph->mapper.get(tag, NaryArgument::LHS);
-                    auto indexes = m_graph->transformers.at(tag).forward({tidTag});
+                    auto indexes = m_graph->getTransformer(tag).forward({tidTag});
                     seedExpr     = seedExpr + indexes[0];
                 }
 
