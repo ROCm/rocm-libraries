@@ -108,7 +108,7 @@ jobs:
         res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?$pr_filter_query" \
           -H "Content-Type: application/json")
 
-        runs=$(echo "$res" | jq -r ".value[] | select(.status == \"inProgress\" or .status == \"notStarted\") | .id")
+        runs=$(echo "$res" | jq -r ".value[] | select((.status == \"inProgress\" or .status == \"notStarted\") and .definition.name != \"rocm-ci-caller\") | .id")
 
         if [ -z "$runs" ]; then
           echo "No in-progress/not-started runs found for ROCm/rocm-libraries PR #$pr_number"
@@ -262,6 +262,7 @@ jobs:
     - name: Create summary check
       env:
         GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        PR_TITLE: ${{ toJSON(github.event.pull_request.title) }}
       run: |
         if [[ -n "${{ steps.dispatch.outputs.run_ids }}" && -n "${{ steps.dispatch.outputs.project_names }}" ]]; then             # If new runs were started
           run_ids=(${{ steps.dispatch.outputs.run_ids }})
@@ -282,7 +283,7 @@ jobs:
 
         newline=$'\n'
 
-        summary="PR: [${{ github.event.pull_request.title }} #$pr_number](${{ github.event.pull_request.html_url }})${newline}${newline}"
+        summary="PR: [$PR_TITLE #$pr_number](${{ github.event.pull_request.html_url }})${newline}${newline}"
         summary+="HEAD: [$pr_head_sha](https://github.com/ROCm/rocm-libraries/commit/$pr_head_sha)${newline}${newline}"
         summary+="MERGE: [$pr_merge_sha](https://github.com/ROCm/rocm-libraries/commit/$pr_merge_sha)${newline}${newline}"
         summary+="### Pipelines triggered for this PR${newline}${newline}"

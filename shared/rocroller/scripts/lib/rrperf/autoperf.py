@@ -65,6 +65,19 @@ def build_rocroller(
     build_dir = project_dir / "build_perf"
     build_dir.mkdir(parents=True, exist_ok=True)
 
+    mx_datagen_git_url_env_var = "ROCROLLER_MXDATAGENERATOR_GIT_URL"
+    mx_datagen_git_tag_env_var = "ROCROLLER_MXDATAGENERATOR_GIT_TAG"
+    mx_datagen_git_url = os.environ.get(mx_datagen_git_url_env_var)
+    mx_datagen_git_tag = os.environ.get(mx_datagen_git_tag_env_var)
+
+    if not mx_datagen_git_url:
+        print(f"Warning: {mx_datagen_git_url_env_var} not defined. Using mxDataGeneator Git URL in CMakeLists.txt.")
+    if not mx_datagen_git_tag:
+        print(f"Warning: {mx_datagen_git_tag_env_var} not defined. Using mxDataGeneator Git tag in CMakeLists.txt.")
+
+    mx_datagen_git_url_flag = "-DMXDATAGENERATOR_GIT_URL=" + mx_datagen_git_url if mx_datagen_git_url else ""
+    mx_datagen_git_tag_flag = "-DMXDATAGENERATOR_GIT_TAG=" + mx_datagen_git_tag if mx_datagen_git_tag else ""
+
     subprocess.run(
         [
             "cmake",
@@ -77,6 +90,9 @@ def build_rocroller(
             "-DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++",
             "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
             "-DROCROLLER_ENABLE_CPPCHECK=OFF",
+            mx_datagen_git_url_flag,
+            mx_datagen_git_tag_flag,
+            "../",
         ],
         cwd=str(project_dir),
         check=True,

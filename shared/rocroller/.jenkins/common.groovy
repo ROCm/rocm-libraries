@@ -213,10 +213,12 @@ def runBuildDocsCommand(platform, project)
     }
 }
 
-def runPerformanceCommand (platform, project)
+def runPerformanceCommand (platform, project, mxDataGeneratorGitURL, mxDataGeneratorGitTag)
 {
     String masterURL = env.CHANGE_ID ? env.JOB_URL.replace("PR-${env.CHANGE_ID}", env.CHANGE_TARGET) : env.JOB_URL
 
+    mxDataGeneratorGitURL = mxDataGeneratorGitURL?.trim() ?: "";
+    mxDataGeneratorGitTag = mxDataGeneratorGitTag?.trim() ?: "";
 
     withSSH(platform){
         sshBlock ->
@@ -237,6 +239,8 @@ def runPerformanceCommand (platform, project)
             if (masterCompare)
             {
                 masterCompareCommand = """
+                    export ROCROLLER_MXDATAGENERATOR_GIT_URL=${mxDataGeneratorGitURL}
+                    export ROCROLLER_MXDATAGENERATOR_GIT_TAG=${mxDataGeneratorGitTag}
                     ./scripts/rrperf autoperf \\
                         --suite ${rrperfSuite} \\
                         --clonedir "./performance_build_${platform.gpu}" \\
@@ -256,6 +260,8 @@ def runPerformanceCommand (platform, project)
             else
             {
                 masterCompareCommand = """
+                    export ROCROLLER_MXDATAGENERATOR_GIT_URL=${mxDataGeneratorGitURL}
+                    export ROCROLLER_MXDATAGENERATOR_GIT_TAG=${mxDataGeneratorGitTag}
                     mkdir -p performance_build_${platform.gpu}
                     ./scripts/rrperf autoperf \\
                         --suite ${rrperfSuite} \\
@@ -441,9 +447,12 @@ def runPerformanceCommand (platform, project)
     }
 }
 
-def runCodeQLCompileCommand (platform, project, jobName)
+def runCodeQLCompileCommand (platform, project, jobName, mxDataGeneratorGitURL, mxDataGeneratorGitTag)
 {
     project.paths.construct_build_prefix()
+
+    mxDataGeneratorGitURL = mxDataGeneratorGitURL?.trim() ?: "";
+    mxDataGeneratorGitTag = mxDataGeneratorGitTag?.trim() ?: "";
 
     withSSH(platform) {
         sshBlock ->
@@ -453,6 +462,8 @@ def runCodeQLCompileCommand (platform, project, jobName)
 
                     ${sshBlock}
 
+                    export ROCROLLER_MXDATAGENERATOR_GIT_URL=${mxDataGeneratorGitURL}
+                    export ROCROLLER_MXDATAGENERATOR_GIT_TAG=${mxDataGeneratorGitTag}
                     ./codeql/setup_codeql
                     ./codeql/create_database
                     """

@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-find_package(Catch2)
+find_package(Catch2 QUIET)
 if(NOT Catch2_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
         FetchContent_Declare(
