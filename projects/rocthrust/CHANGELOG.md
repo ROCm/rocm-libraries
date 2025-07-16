@@ -10,7 +10,7 @@ Documentation for rocThrust available at
 * Updated the required version of Google Benchmark from 1.8.0 to 1.9.0.
 * Drop `c++14` support for rocthrust.
 * Renamed `cpp14_required.h` to `cpp_version_check.h`
-* Switched to using `clang++` to compile for google benchmark on Windows system
+* `clang++` is now used to compile google benchmarks on Windows.```
 * Added gfx950 support.
 * Merged changes from upstream CCCL/thrust 2.6.0
 
