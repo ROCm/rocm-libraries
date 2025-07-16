@@ -352,7 +352,7 @@ inline void execute_gpu_fft(Tparams&              params,
     // Execute the transform:
     auto fft_status = params.execute(pibuffer.data(), pobuffer.data());
     if(fft_status != fft_status_success)
-        throw std::runtime_error("rocFFT plan execution failure");
+        throw std::runtime_error("plan execution failure");
     // work around potential problem of following hipMemcpy
     // not properly waiting for rocFFT's kernels to finish
     if(hipDeviceSynchronize() != hipSuccess)
@@ -547,6 +547,7 @@ void check_output_strides(const std::vector<hostbuf>& output, Tparams& params)
 // run rocFFT inverse transform
 template <class Tparams>
 inline void run_round_trip_inverse(Tparams&              params,
+                                   std::vector<gpubuf>&  ibuffer,
                                    std::vector<gpubuf>&  obuffer,
                                    std::vector<void*>&   pibuffer,
                                    std::vector<void*>&   pobuffer,
@@ -611,7 +612,14 @@ inline void run_round_trip_inverse(Tparams&              params,
             }
         }
     }
-
+    if(params.multiGPU > 1)
+    {
+        if(verbose > 0)
+        {
+            std::cout << "scattering data for multi-GPU inverse" << std::endl;
+        }
+        params.multi_gpu_prepare(ibuffer, pibuffer, pobuffer);
+    }
     // execute GPU transform
     execute_gpu_fft(params, pibuffer, pobuffer, obuffer, gpu_output, true);
 }
@@ -851,7 +859,8 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     if(fftw_compare && last_cpu_fft_data.length == params.length
        && last_cpu_fft_data.transform_type == params.transform_type
        && last_cpu_fft_data.run_callbacks == params.run_callbacks
-       && last_cpu_fft_data.scale_factor == params.scale_factor)
+       && last_cpu_fft_data.scale_factor == params.scale_factor
+       && last_cpu_fft_data.precision >= params.precision)
     {
         if(last_cpu_fft_data.nbatch >= params.nbatch)
         {
@@ -1405,7 +1414,7 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
         params_inverse.inverse_from_forward(params);
 
         run_round_trip_inverse<Tparams>(
-            params_inverse, ibuffer, pobuffer, pibuffer, gpu_input_data);
+            params_inverse, *obuffer, ibuffer, pobuffer, pibuffer, gpu_input_data);
     }
 
     if(fftw_compare)

@@ -18,7 +18,11 @@ NVIDIA CUDA applications that use the CUDA cuRAND library to the
 :doc:`HIP <hip:index>` layer. In a
 ROCm environment, hipRAND uses the rocRAND library.
 
-The rocRAND public repository is located at `<https://github.com/ROCm/rocRAND>`_.
+The rocRAND public repository is located at `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand>`_.
+
+.. note::
+
+   The rocRAND repository for ROCm 6.4 and earlier is located at `<https://github.com/ROCm/rocRAND>`_.
 
 .. grid:: 2
   :gutter: 3
@@ -36,7 +40,7 @@ The rocRAND public repository is located at `<https://github.com/ROCm/rocRAND>`_
 
   .. grid-item-card:: Examples
 
-    * `Examples <https://github.com/ROCm/rocRAND/tree/develop/python/rocrand/examples>`_
+    * `Examples <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand/python/rocrand/examples>`_
 
   .. grid-item-card:: API reference
 

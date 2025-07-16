@@ -91,6 +91,22 @@ def main(argv=None) -> None:
     )
     client = GitHubCLIClient()
     changed_files = [file for file in client.get_changed_files(args.repo, int(args.pr))]
+
+    if not changed_files:
+        logger.warning("REST API failed or returned no changed files. Falling back to Git CLI...")
+        try:
+            # Ensure fetch is safe
+            os.system("git fetch origin +refs/pull/*/merge:refs/remotes/origin/pr/*")
+            # Get merge commit ref for this PR
+            base_ref = f"origin/{os.getenv('GITHUB_BASE_REF', 'main')}"
+            head_ref = "HEAD"  # Assumes checkout to PR merge ref
+            result = os.popen(f"git diff --name-only {base_ref}...{head_ref}").read()
+            changed_files = result.strip().splitlines()
+            logger.info(f"Fallback changed files: {changed_files}")
+        except Exception as e:
+            logger.error(f"Git CLI fallback failed: {e}")
+            sys.exit(1)
+
     existing_labels = client.get_existing_labels_on_pr(args.repo, int(args.pr))
     desired_labels = compute_desired_labels(changed_files)
     output_labels(existing_labels, desired_labels, args.dry_run)

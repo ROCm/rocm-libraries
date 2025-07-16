@@ -189,27 +189,6 @@ namespace rocRoller
                 concatenate(indent, argName2, " (", arg2->description(), ")"));
     }
 
-    Generator<Instruction> ArithmeticGenerator::swapIfRHSLiteral(Register::ValuePtr& lhs,
-                                                                 Register::ValuePtr& rhs)
-    {
-        // Check for unsupported constant values and move them into vgprs
-        if(rhs->regType() == Register::Type::Literal)
-        {
-            AssertFatal(lhs->regType() != Register::Type::Literal,
-                        ShowValue(rhs),
-                        ShowValue(lhs),
-                        "Can not process two literal sources (consider simplifying expression)");
-            std::swap(lhs, rhs);
-        }
-
-        if(lhs->regType() == Register::Type::Literal
-           && !m_context->targetArchitecture().isSupportedConstantValue(lhs))
-        {
-            co_yield moveToVGPR(lhs);
-        }
-        co_return;
-    }
-
     Generator<Instruction>
         ArithmeticGenerator::scalarCompareThroughVALU(std::string const  instruction,
                                                       Register::ValuePtr dst,

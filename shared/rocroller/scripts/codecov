@@ -110,7 +110,7 @@ fi
 
 script_path=$(dirname "$(realpath $0)")
 code_cov_path=${build_path}
-profdata_file=${code_cov_path}/rocRollerTests.profdata
+profdata_file=${code_cov_path}/rocroller-tests.profdata
 ignore_patterns="(.*googletest-src.*)|(.*/catch2-src/.*)|(.*/catch2-build/.*)|(.*/yaml-cpp-src/.*)|(.*hip/include.*)|(.*/include/llvm/.*)|(.*/spdlog/.*)|(.*/msgpack-src/.*)|(.*/build/.*)|(.*/extern/.*)|(.*/test/.*[Tt]ests?.cpp)"
 
 if $skip_codecov; then
@@ -127,11 +127,11 @@ else
     source ${script_path}/../docker/setup-node
 
     # The `%m` creates a different prof file for each object file. So one for
-    # rocroller.so and one for rocRollerTests.
+    # rocroller.so and one for rocroller-tests.
     # Also had to switch to using ctest so seg faults can be handled gracefully.
 
     echo Using $(nproc) threads for code coverage tests.
-    OMP_NUM_THREADS=8 LLVM_PROFILE_FILE=${code_cov_path}/rocRollerTests_%m.profraw ctest \
+    OMP_NUM_THREADS=8 LLVM_PROFILE_FILE=${code_cov_path}/rocroller-tests_%m.profraw ctest \
         -j $(nproc) \
         --test-dir ${build_path} \
         --output-on-failure \
@@ -147,9 +147,9 @@ else
     # directory, so we have to filter out the files we don't want.
     /opt/rocm/lib/llvm/bin/llvm-cov report \
         --instr-profile=${profdata_file} \
-        --object ${build_path}/bin/rocRollerTests \
-        --object ${build_path}/bin/rocRollerTests_catch \
-        --object ${build_path}/bin/ArchGenTests \
+        --object ${build_path}/test/rocroller-tests \
+        --object ${build_path}/test/rocroller-tests-catch \
+        --object ${build_path}/test/arch-gen-tests \
         --ignore-filename-regex=${ignore_patterns} >${code_cov_path}/code_cov_${gpu}.report
     cat ${code_cov_path}/code_cov_${gpu}.report
 
@@ -157,9 +157,9 @@ else
         --format=html \
         --Xdemangler=/opt/rocm/llvm/bin/llvm-cxxfilt \
         --instr-profile=${profdata_file} \
-        --object ${build_path}/bin/rocRollerTests \
-        --object ${build_path}/bin/rocRollerTests_catch \
-        --object ${build_path}/bin/ArchGenTests \
+        --object ${build_path}/test/rocroller-tests \
+        --object ${build_path}/test/rocroller-tests-catch \
+        --object ${build_path}/test/arch-gen-tests \
         --ignore-filename-regex=${ignore_patterns} \
         --output-dir=${code_cov_path}/code_cov_${gpu}_html
 
@@ -168,9 +168,9 @@ else
         --use-color=false \
         --Xdemangler=/opt/rocm/llvm/bin/llvm-cxxfilt \
         --instr-profile=${profdata_file} \
-        --object ${build_path}/bin/rocRollerTests \
-        --object ${build_path}/bin/rocRollerTests_catch \
-        --object ${build_path}/bin/ArchGenTests \
+        --object ${build_path}/test/rocroller-tests \
+        --object ${build_path}/test/rocroller-tests-catch \
+        --object ${build_path}/test/arch-gen-tests \
         --ignore-filename-regex=${ignore_patterns} \
         --output-dir=${code_cov_path}/code_cov_${gpu}_text
 

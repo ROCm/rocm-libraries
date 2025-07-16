@@ -232,6 +232,7 @@ namespace rocRoller
                 auto fusedLoopBodyChildren
                     = graph.control.getOutputNodeIndices<Body>(fusedLoopTag).to<std::vector>();
 
+                // cppcheck-suppress internalAstError
                 auto initializeGroups = [&]<typename T>() {
                     std::set<std::pair<int, int>> groups;
                     auto                          nodes

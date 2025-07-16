@@ -85,6 +85,7 @@ TEST_F(GPUInstructionInfoTest, LDS)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -114,6 +115,7 @@ TEST_F(GPUInstructionInfoTest, LDS)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -146,6 +148,7 @@ TEST_F(GPUInstructionInfoTest, Scalar)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, true);
         EXPECT_CATEGORY_EQ(inst, isSMEM, true);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -174,6 +177,7 @@ TEST_F(GPUInstructionInfoTest, Scalar)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, true);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, true);
 
@@ -202,6 +206,36 @@ TEST_F(GPUInstructionInfoTest, Scalar)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, true);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
+        EXPECT_CATEGORY_EQ(inst, isSControl, true);
+        EXPECT_CATEGORY_EQ(inst, isSALU, false);
+
+        EXPECT_CATEGORY_EQ(inst, isVector, false);
+        EXPECT_CATEGORY_EQ(inst, isVALU, false);
+        EXPECT_CATEGORY_EQ(inst, isDGEMM, false);
+        EXPECT_CATEGORY_EQ(inst, isVMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isVMEMRead, false);
+        EXPECT_CATEGORY_EQ(inst, isVMEMWrite, false);
+        EXPECT_CATEGORY_EQ(inst, isFlat, false);
+
+        EXPECT_CATEGORY_EQ(inst, isLDS, false);
+        EXPECT_CATEGORY_EQ(inst, isLDSRead, false);
+        EXPECT_CATEGORY_EQ(inst, isLDSWrite, false);
+
+        EXPECT_CATEGORY_EQ(inst, isACCVGPRRead, false);
+        EXPECT_CATEGORY_EQ(inst, isACCVGPRWrite, false);
+    }
+
+    for(auto inst : {"s_barrier", "s_barrier_wait"})
+    {
+        EXPECT_CATEGORY_EQ(inst, isDLOP, false);
+        EXPECT_CATEGORY_EQ(inst, isMFMA, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMPX, false);
+        EXPECT_CATEGORY_EQ(inst, isVCMP, false);
+
+        EXPECT_CATEGORY_EQ(inst, isScalar, true);
+        EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, true);
         EXPECT_CATEGORY_EQ(inst, isSControl, true);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -234,6 +268,7 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -262,6 +297,7 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -291,6 +327,7 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -320,6 +357,7 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -349,6 +387,7 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -378,6 +417,7 @@ TEST_F(GPUInstructionInfoTest, Vector)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -410,6 +450,7 @@ TEST_F(GPUInstructionInfoTest, AccMFMA)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -439,6 +480,7 @@ TEST_F(GPUInstructionInfoTest, AccMFMA)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -468,6 +510,7 @@ TEST_F(GPUInstructionInfoTest, AccMFMA)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 
@@ -497,6 +540,7 @@ TEST_F(GPUInstructionInfoTest, AccMFMA)
 
         EXPECT_CATEGORY_EQ(inst, isScalar, false);
         EXPECT_CATEGORY_EQ(inst, isSMEM, false);
+        EXPECT_CATEGORY_EQ(inst, isSBarrier, false);
         EXPECT_CATEGORY_EQ(inst, isSControl, false);
         EXPECT_CATEGORY_EQ(inst, isSALU, false);
 

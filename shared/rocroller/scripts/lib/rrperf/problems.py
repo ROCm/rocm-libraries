@@ -248,7 +248,7 @@ class GEMMRun(GEMM):
             "numInner": "num_inner",
         }
 
-        command = "bin/client/rocRoller_gemm"
+        command = "client/rocroller-gemm"
 
         def argName(key):
             if key in specialNames:
@@ -314,7 +314,7 @@ class GEMMResult(GEMM, RRPerfResult):
             + "/"
             + str(self.prefetchLDSFactor),
             "SCH": self.scheduler[0],
-            "SK": TF(self.streamK) + "/" + self.numWGs,
+            "SK": TF(self.streamK) + "/" + str(self.numWGs),
             "2TSK": TF(self.streamKTwoTile),
             "iters": "/".join(
                 [str(getattr(self, "num" + x)) for x in ["WarmUp", "Outer", "Inner"]]
@@ -396,7 +396,7 @@ class CodeGenRun(CodeGen):
 
     def command(self) -> List[str]:
         retval = [
-            "bin/client/rocRoller_codegen_stress",
+            "client/rocroller-codegen-stress",
             "--inst_count=" + str(self.instCount),
             "--instructions=" + str(self.instructions),
             "--yaml=" + str(self.output),
