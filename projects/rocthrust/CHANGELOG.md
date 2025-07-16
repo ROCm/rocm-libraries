@@ -36,7 +36,7 @@ Documentation for rocThrust available at
 
 * `device_malloc_allocator.h` has been removed. This header file was unused and should not impact users.
 * Removed C++14 support, only C++17 is supported.
-* `test_header.hpp` was removed for a more de-coupled headers. HIP_CHECK, the test and inter_run_bwr namespace was moved to `test_utils.hpp`.
+* `test_header.hpp` has been removed. The `HIP_CHECK` function, as well as the `test` and `inter_run_bwr` namespaces, have been moved to `test_utils.hpp`.
 * `test_assertions.hpp` was split up into `test_real_assertions.hpp` and `test_imag_assertions.hpp`.
 
 ### Upcoming changes
