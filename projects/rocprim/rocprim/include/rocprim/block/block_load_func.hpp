@@ -289,14 +289,13 @@ void block_load_direct_striped(unsigned int flat_id,
                                T (&items)[ItemsPerThread],
                                unsigned int valid)
 {
-    InputIterator thread_iter = block_input + flat_id;
     ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
         unsigned int offset = item * BlockSize;
         if (flat_id + offset < valid)
         {
-            items[item] = thread_iter[offset];
+            items[item] = block_input[flat_id + offset];
         }
     }
 }
