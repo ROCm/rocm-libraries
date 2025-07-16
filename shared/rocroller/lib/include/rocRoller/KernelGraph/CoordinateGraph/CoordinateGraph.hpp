@@ -116,6 +116,8 @@ namespace rocRoller
          */
         class CoordinateGraph : public Graph::Hypergraph<Dimension, Edge>
         {
+            bool isRestricted = false;
+
         public:
             using Base = Graph::Hypergraph<Dimension, Edge>;
 
@@ -155,6 +157,13 @@ namespace rocRoller
             requires(std::constructible_from<CoordinateGraph::Element, T>) std::optional<T> get(
                 int tag)
             const;
+
+            virtual bool isModificationAllowed(int index) const override;
+
+            void setRestricted()
+            {
+                isRestricted = true;
+            }
         };
 
         std::string name(CoordinateGraph::Element const& el);

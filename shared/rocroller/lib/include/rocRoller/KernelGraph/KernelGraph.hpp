@@ -78,6 +78,11 @@ namespace rocRoller
             {
                 return m_transformers;
             }
+            void setRestricted()
+            {
+                control.setRestricted();
+                coordinates.setRestricted();
+            }
 
             std::string toDOT(bool drawMappings = false, std::string title = "") const;
 
