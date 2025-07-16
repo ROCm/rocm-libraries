@@ -61,10 +61,10 @@ namespace rocRoller
         bool CoordinateGraph::isModificationAllowed(int index) const
         {
             if(not isRestricted)
-                return false;
+                return true;
 
             if(not Settings::getInstance()->get(Settings::EnforceGraphConstraints))
-                return false;
+                return true;
 
             auto const& el = getElement(index);
 
@@ -73,13 +73,11 @@ namespace rocRoller
                 return std::visit(
                     [](auto&& arg) {
                         using EdgeType = std::decay_t<decltype(arg)>;
-                        if constexpr(std::is_same_v<EdgeType, CoordinateTransformEdge>)
-                            return true;
-                        return false;
+                        return !(std::is_same_v<EdgeType, CoordinateTransformEdge>);
                     },
                     std::get<Edge>(el));
             }
-            return false;
+            return true;
         }
     }
 }

@@ -158,7 +158,7 @@ namespace rocRoller
             AssertFatal(m_elements.find(index) == m_elements.end());
             m_elements.emplace(index, std::forward<T>(element));
 
-            AssertFatal(not isModificationAllowed(index),
+            AssertFatal(isModificationAllowed(index),
                         "Add element is disallowed on an immutable graph");
 
             clearCache(GraphModification::AddElement);
@@ -231,7 +231,7 @@ namespace rocRoller
 
             m_elements.emplace(index, std::forward<T>(element));
 
-            AssertFatal(not isModificationAllowed(index),
+            AssertFatal(isModificationAllowed(index),
                         "Add element is disallowed on an immutable graph");
 
             if(elementType == ElementType::Edge)
@@ -286,7 +286,7 @@ namespace rocRoller
         template <typename Node, typename Edge, bool Hyper>
         void Hypergraph<Node, Edge, Hyper>::deleteElement(int index)
         {
-            AssertFatal(not isModificationAllowed(index),
+            AssertFatal(isModificationAllowed(index),
                         "Delete element is disallowed on an immutable graph");
 
             auto elem = getElement(index);

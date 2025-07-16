@@ -158,8 +158,16 @@ namespace rocRoller
                 int tag)
             const;
 
+            /**
+             *  Check if modifying an element (index) is allowed or not. This
+             *  only comes into effect when the graph is in restricted mode.
+             */
             virtual bool isModificationAllowed(int index) const override;
 
+            /**
+             *  Set the graph to be in restricted mode. Some operations would
+             *  be disallowed when in restricted mode.
+             */
             void setRestricted()
             {
                 isRestricted = true;
