@@ -39,63 +39,6 @@ namespace rocRoller
     {
         namespace CG = rocRoller::KernelGraph::ControlGraph;
 
-        static bool
-            isParentSetCoordinate(CG::ControlGraph const& graph, int const edge, int const node)
-        {
-            return std::holds_alternative<CG::SetCoordinate>(graph.getNode(node))
-                   && (std::holds_alternative<CG::Initialize>(graph.getEdge(edge))
-                       || std::holds_alternative<CG::Body>(graph.getEdge(edge)));
-        }
-
-        static bool isParentForLoopOp(CG::ControlGraph const& graph, int const edge, int const node)
-        {
-            return std::holds_alternative<CG::ForLoopOp>(graph.getNode(node))
-                   && (std::holds_alternative<CG::Body>(graph.getEdge(edge))
-                       || std::holds_alternative<CG::ForLoopIncrement>(graph.getEdge(edge)));
-        }
-
-        static void buildControlStack(int                           tag,
-                                      std::unordered_map<int, int>& controlStack,
-                                      CG::ControlGraph const&       graph)
-        {
-            using GD = rocRoller::Graph::Direction;
-
-            int parent = -1;
-
-            auto const edge = graph.getNeighbours<Graph::Direction::Upstream>(tag).take(1).only();
-            if(edge.has_value())
-            {
-                auto const node
-                    = graph.getNeighbours<Graph::Direction::Upstream>(*edge).take(1).only();
-                AssertFatal(node.has_value(), "Node does not exist!");
-
-                if(isParentSetCoordinate(graph, *edge, *node)
-                   or isParentForLoopOp(graph, *edge, *node))
-                    parent = *node;
-                else
-                {
-                    if(not controlStack.contains(*node))
-                        buildControlStack(*node, controlStack, graph);
-                    parent = controlStack.at(*node);
-                }
-            }
-
-            controlStack[tag] = parent;
-        }
-
-        static std::unordered_map<int, int> buildControlStack(KernelGraph const& kg)
-        {
-            std::unordered_map<int, int> controlStack;
-
-            for(auto const node : kg.control.getNodes())
-            {
-                if(not controlStack.contains(node))
-                    buildControlStack(node, controlStack, kg.control);
-            }
-
-            return controlStack;
-        }
-
         static void collectSetCoordinates(KernelGraph const&       graph,
                                           std::unordered_set<int>& visited,
                                           int                      tag,
@@ -143,55 +86,6 @@ namespace rocRoller
             return result;
         }
 
-        static void buildTransformers(KernelGraph& kg)
-        {
-            auto cs = buildControlStack(kg);
-            for(auto const& [node, parent] : cs)
-            {
-                auto [iter, _] = kg.transformers.emplace(node, &kg.coordinates);
-
-                auto tag = parent;
-                while(tag != -1)
-                {
-                    if(std::holds_alternative<CG::SetCoordinate>(kg.control.getNode(tag)))
-                    {
-                        auto connections = kg.mapper.getConnections(tag);
-                        if(not iter->second.hasCoordinate(connections[0].coordinate))
-                        {
-                            auto setCoordinate
-                                = std::get<CG::SetCoordinate>((kg.control.getNode(tag)));
-
-                            iter->second.setCoordinate(connections[0].coordinate,
-                                                       setCoordinate.value);
-                        }
-                    }
-                    else
-                    {
-                        AssertFatal(
-                            kg.control.isElemType<CG::ForLoopOp>()(tag),
-                            "A node in control stack is not a ForLoopOp nor a SetCoordinate");
-
-                        auto loopIncrTag = kg.mapper.get(tag, NaryArgument::DEST);
-                        auto expr        = std::make_shared<Expression::Expression>(
-                            rocRoller::Expression::DataFlowTag{
-                                loopIncrTag, Register::Type::Scalar, rocRoller::DataType::Int32});
-                        auto loopDims
-                            = kg.coordinates.getOutputNodeIndices<CoordinateGraph::DataFlowEdge>(
-                                loopIncrTag);
-                        for(auto const& dim : loopDims)
-                        {
-                            if(not iter->second.hasCoordinate(dim))
-                            {
-                                iter->second.setCoordinate(dim, expr);
-                            }
-                        }
-                    }
-
-                    tag = cs.at(tag);
-                }
-            }
-        }
-
         static void findLeaves(int                      tag,
                                KernelGraph const&       kg,
                                std::unordered_set<int>& visited,
@@ -216,7 +110,6 @@ namespace rocRoller
 
             if(hasChildren)
             {
-                // This might not be necessary
                 // Consider reusing visited for direct traversal instead of calling DFS
                 for(auto child : kg.control.getOutputNodeIndices<CG::Body>(tag))
                     for(auto node : kg.control.depthFirstVisit(child))
@@ -328,7 +221,7 @@ namespace rocRoller
 
             auto newGraph = k;
 
-            buildTransformers(newGraph);
+            newGraph.buildAllTransformers();
             removeSetCoordinates(newGraph);
 
             // Post-transformation check: should NOT have any SetCoordinates in Control Graph

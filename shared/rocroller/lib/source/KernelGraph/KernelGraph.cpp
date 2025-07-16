@@ -33,6 +33,99 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+
+        static bool isParentSetCoordinate(ControlGraph::ControlGraph const& graph,
+                                          int const                         edge,
+                                          int const                         node)
+        {
+            return std::holds_alternative<ControlGraph::SetCoordinate>(graph.getNode(node))
+                   && (std::holds_alternative<ControlGraph::Initialize>(graph.getEdge(edge))
+                       || std::holds_alternative<ControlGraph::Body>(graph.getEdge(edge)));
+        }
+
+        static bool isParentForLoopOp(ControlGraph::ControlGraph const& graph,
+                                      int const                         edge,
+                                      int const                         node)
+        {
+            return std::holds_alternative<ControlGraph::ForLoopOp>(graph.getNode(node))
+                   && (std::holds_alternative<ControlGraph::Body>(graph.getEdge(edge))
+                       || std::holds_alternative<ControlGraph::ForLoopIncrement>(
+                           graph.getEdge(edge)));
+        }
+
+        static void buildControlStack(int                               tag,
+                                      std::unordered_map<int, int>&     controlStack,
+                                      ControlGraph::ControlGraph const& graph)
+        {
+            using GD = rocRoller::Graph::Direction;
+
+            int parent = -1;
+
+            auto const edge = graph.getNeighbours<Graph::Direction::Upstream>(tag).take(1).only();
+            if(edge.has_value())
+            {
+                auto const node
+                    = graph.getNeighbours<Graph::Direction::Upstream>(*edge).take(1).only();
+                AssertFatal(node.has_value(), "Node does not exist!");
+
+                if(isParentSetCoordinate(graph, *edge, *node)
+                   or isParentForLoopOp(graph, *edge, *node))
+                    parent = *node;
+                else
+                {
+                    if(not controlStack.contains(*node))
+                        buildControlStack(*node, controlStack, graph);
+                    parent = controlStack.at(*node);
+                }
+            }
+
+            controlStack[tag] = parent;
+        }
+
+        static std::unordered_map<int, int> buildControlStack(KernelGraph const& kg)
+        {
+            std::unordered_map<int, int> controlStack;
+
+            for(auto const node : kg.control.getNodes())
+            {
+                if(not controlStack.contains(node))
+                    buildControlStack(node, controlStack, kg.control);
+            }
+
+            return controlStack;
+        }
+
+        static void setTransformerByForLoopOp(CoordinateGraph::Transformer& transformer,
+                                              KernelGraph&                  kg,
+                                              int                           forLoopOp)
+        {
+            auto loopIncrTag = kg.mapper.get(forLoopOp, NaryArgument::DEST);
+            auto expr = std::make_shared<Expression::Expression>(rocRoller::Expression::DataFlowTag{
+                loopIncrTag, Register::Type::Scalar, rocRoller::DataType::Int32});
+            auto loopDims
+                = kg.coordinates.getOutputNodeIndices<CoordinateGraph::DataFlowEdge>(loopIncrTag);
+            for(auto const& dim : loopDims | std::views::filter([&](int dim) {
+                                      return !transformer.hasCoordinate(dim);
+                                  }))
+            {
+                transformer.setCoordinate(dim, expr);
+            }
+        }
+
+        static void setTransformerBySetCoordinate(CoordinateGraph::Transformer& transformer,
+                                                  KernelGraph&                  kg,
+                                                  int                           setCoordinateOp)
+        {
+            auto connections = kg.mapper.getConnections(setCoordinateOp);
+            if(not transformer.hasCoordinate(connections[0].coordinate))
+            {
+                auto setCoordinate
+                    = std::get<ControlGraph::SetCoordinate>((kg.control.getNode(setCoordinateOp)));
+
+                transformer.setCoordinate(connections[0].coordinate, setCoordinate.value);
+            }
+        }
+
         std::string KernelGraph::toDOT(bool drawMappings, std::string title) const
         {
             std::stringstream ss;
@@ -69,6 +162,83 @@ namespace rocRoller
                 retval.combine(check);
             }
             return retval;
+        }
+
+        void KernelGraph::initializeTransformersForCodeGen(
+            Expression::ExpressionTransducer transducer)
+        {
+            for(auto& p : m_transformers)
+            {
+                p.second.setCoordinateGraph(&coordinates);
+                p.second.setTransducer(transducer);
+            }
+        }
+
+        void KernelGraph::updateTransformer(int op, int coord, Expression::ExpressionPtr expr)
+        {
+            AssertFatal(m_transformers.contains(op), "Transformer does not exist");
+            m_transformers.at(op).setCoordinate(coord, expr);
+        }
+
+        void KernelGraph::buildAllTransformers()
+        {
+            m_transformers.clear();
+
+            auto cs = buildControlStack(*this);
+            for(auto const& [node, parent] : cs)
+            {
+                auto [iter, _] = m_transformers.emplace(node, &coordinates);
+
+                auto tag = parent;
+                while(tag != -1)
+                {
+                    if(std::holds_alternative<ControlGraph::SetCoordinate>(control.getNode(tag)))
+                        setTransformerBySetCoordinate(iter->second, *this, tag);
+                    else
+                    {
+                        AssertFatal(
+                            control.isElemType<ControlGraph::ForLoopOp>()(tag),
+                            "A node in control stack is not a ForLoopOp nor a SetCoordinate");
+                        setTransformerByForLoopOp(iter->second, *this, tag);
+                    }
+
+                    tag = cs.at(tag);
+                }
+            }
+        }
+
+        rocRoller::KernelGraph::CoordinateGraph::Transformer KernelGraph::getTransformer(int op)
+        {
+            if(not m_transformers.contains(op))
+            {
+                using GD = rocRoller::Graph::Direction;
+
+                auto [iter, _] = m_transformers.emplace(op, &coordinates);
+
+                auto node = op;
+                while(true)
+                {
+                    auto const edge
+                        = control.getNeighbours<Graph::Direction::Upstream>(node).take(1).only();
+                    if(not edge.has_value())
+                        break;
+
+                    auto const parent
+                        = control.getNeighbours<Graph::Direction::Upstream>(*edge).take(1).only();
+
+                    if(isParentSetCoordinate(control, edge.value(), parent.value()))
+                    {
+                        setTransformerBySetCoordinate(iter->second, *this, parent.value());
+                    }
+                    else if(isParentForLoopOp(control, edge.value(), parent.value()))
+                    {
+                        setTransformerByForLoopOp(iter->second, *this, parent.value());
+                    }
+
+                    node = parent.value();
+                }
+            }
+            return m_transformers.at(op);
         }
 
         ConstraintStatus KernelGraph::checkConstraints() const
