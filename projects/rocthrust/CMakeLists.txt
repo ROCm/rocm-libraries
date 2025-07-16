@@ -76,6 +76,13 @@ elseif(DEFINED ROCRAND_FETCH_METHOD)
   message(WARNING "Ignoring ROCRAND_FETCH_METHOD, since the benchmarks are not being built (rocRAND is not required).")
 endif()
 
+# Setup download branch for ROCm dependencies (rocPRIM and rocRAND).
+# Note that this is only used if the ROCPRIM/ROCRAND_FETCH_METHOD is set to DOWNLOAD. The other fetch methods
+# locate an existing copy of the dependency.
+# Fetch method PACKAGE will use the branch that the pre-existing package was built with.
+# Fetch method MONOREPO will use the branch that is currently checked out in the local monorepo repository.
+set(ROCM_DEP_RELEASE_BRANCH "develop" CACHE STRING "Download branch for ROCm dependencies")
+
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
 
