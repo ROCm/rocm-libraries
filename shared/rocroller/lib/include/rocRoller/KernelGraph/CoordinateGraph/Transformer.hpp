@@ -105,8 +105,18 @@ namespace rocRoller
 
             /**
              * Implicitly set indexes for all Workgroup and Workitem dimensions in the graph.
+             * 
+             * Uses Workgroups and Workitems from the context.
              */
             void fillExecutionCoordinates(ContextPtr context);
+
+            /**
+             * Implicitly set indexes for all Workgroup and Workitem dimensions in the graph.
+             */
+            void fillExecutionCoordinates(
+                ContextPtr                                      context,
+                std::array<Expression::ExpressionPtr, 3> const& kernelWorkgroupIndexes,
+                std::array<Expression::ExpressionPtr, 3> const& kernelWorkitemIndexes);
 
         private:
             Expression::ExpressionPtr transduce(Expression::ExpressionPtr exp) const;

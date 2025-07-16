@@ -62,8 +62,10 @@ namespace rocRoller
                     kernelWorkitemIndexes;
                 for(int i = 0; i < kernel->kernelDimensions(); ++i)
                 {
-                    kernelWorkgroupIndexes[i] = kernel->workgroupIndex().at(i)->expression();
-                    kernelWorkitemIndexes[i]  = kernel->workitemIndex().at(i)->expression();
+                    if(kernel->workgroupIndex().at(i) != nullptr)
+                        kernelWorkgroupIndexes[i] = kernel->workgroupIndex().at(i)->expression();
+                    if(kernel->workitemIndex().at(i) != nullptr)
+                        kernelWorkitemIndexes[i] = kernel->workitemIndex().at(i)->expression();
                 }
                 fillExecutionCoordinates(context, kernelWorkgroupIndexes, kernelWorkitemIndexes);
             }
@@ -91,9 +93,9 @@ namespace rocRoller
                     auto expr = kernelWorkgroupIndexes.at(dimensionWorkgroup.dim);
 
                     // TODO Remove this when Workgroup removed from RegisterTagManager
-		    if(context)
-			context->registerTagManager()->addExpression(
-			    tag, kernelWorkgroupIndexes.at(dimensionWorkgroup.dim), {});
+                    if(context)
+                        context->registerTagManager()->addExpression(
+                            tag, kernelWorkgroupIndexes.at(dimensionWorkgroup.dim), {});
 
                     setCoordinate(tag, expr);
                 }

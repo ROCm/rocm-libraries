@@ -149,10 +149,9 @@ namespace ConnectWorkgroupsTest
             auto transformer = Transformer(&m_graph->coordinates);
             transformer.fillExecutionCoordinates(m_context);
 
-            auto wgRegister = m_context->registerTagManager()->getRegister(m_workgroupU);
+            auto [wgRegister, _] = m_context->registerTagManager()->getExpression(m_workgroupU);
 
-            auto exprs = m_graph->coordinates.forward(
-                {wgRegister->expression()}, {m_workgroupU}, {m_wgx, m_wgy});
+            auto exprs = m_graph->coordinates.forward({wgRegister}, {m_workgroupU}, {m_wgx, m_wgy});
 
             return exprs;
         }
@@ -420,10 +419,10 @@ namespace ConnectWorkgroupsTest
             auto transformer = Transformer(&m_graph->coordinates);
             transformer.fillExecutionCoordinates(m_context);
 
-            auto wgRegister = m_context->registerTagManager()->getRegister(m_newWorkgroupU);
+            auto [wgRegister, _] = m_context->registerTagManager()->getExpression(m_newWorkgroupU);
 
-            auto exprs = m_graph->coordinates.forward(
-                {wgRegister->expression()}, {m_newWorkgroupU}, {m_workgroupU});
+            auto exprs
+                = m_graph->coordinates.forward({wgRegister}, {m_newWorkgroupU}, {m_workgroupU});
 
             return exprs[0];
         }
