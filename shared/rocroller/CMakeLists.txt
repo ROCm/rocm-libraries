@@ -30,7 +30,7 @@ cmake_dependent_option(ROCROLLER_ENABLE_LLVM "Enable llvm yaml backend." ON "NOT
 option(ROCROLLER_BUILD_TESTING "Build rocRoller testing." ON)
 option(ROCROLLER_ENABLE_DOCS "Build rocRoller documentation." OFF)
 option(ROCROLLER_ENABLE_CATCH "Build rocRoller catch unit tests" ON)
-option(ROCROLLER_ENABLE_ARCH_GEN_TEST "Build rocRoller architecture generator test" ON)
+option(ROCROLLER_ENABLE_GEMM_CLIENT_TESTS "Use pytest test discovery to add gemm client tests (requires pytest-cmake)" ON)
 option(ROCROLLER_ENABLE_TEST_DISCOVERY "Use gtest and catch2 test discovery functions." ON)
 option(ROCROLLER_ENABLE_COVERAGE "Build code coverage." OFF)
 cmake_dependent_option(ROCROLLER_ENABLE_SLOW_TESTS "Disable slow running tests." ON "NOT ROCROLLER_ENABLE_COVERAGE" OFF)
@@ -71,7 +71,7 @@ else()
     unset(CMAKE_CXX_CPPCHECK CACHE)
 endif()
 
-find_package(fmt 11.1.3)
+find_package(fmt 11.1.3 QUIET)
 if(NOT fmt_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
         set(FMT_SYSTEM_HEADERS ON)
@@ -86,7 +86,7 @@ if(NOT fmt_FOUND)
     endif()
 endif()
 
-find_package(spdlog)
+find_package(spdlog QUIET)
 if(NOT spdlog_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
         FetchContent_Declare(
@@ -100,7 +100,7 @@ if(NOT spdlog_FOUND)
     endif()
 endif()
 
-find_package(libdivide)
+find_package(libdivide QUIET)
 if(NOT libdivide_FOUND)
 if(ROCROLLER_ENABLE_FETCH)
     FetchContent_Declare(
@@ -124,7 +124,7 @@ else()
     set(msgpack_libs msgpackc)
 endif()
 
-find_package(Boost 1.74.0)
+find_package(Boost 1.74.0 QUIET)
 if(NOT Boost_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
         FetchContent_Declare(
@@ -161,6 +161,8 @@ add_library(roc::rocroller ALIAS rocroller)
 
 add_library(rocroller-interface INTERFACE)
 add_library(roc::rocroller-interface ALIAS rocroller-interface)
+
+target_compile_options(rocroller PUBLIC $<BUILD_INTERFACE:-fmacro-prefix-map=${PROJECT_SOURCE_DIR}=rocm-libraries/shared/rocroller>)
 
 if(ROCROLLER_ENABLE_LLD)
     find_package(LLD REQUIRED)
@@ -254,7 +256,11 @@ target_link_libraries(rocroller
         ${llvm_libs}
 )
 
-target_include_directories(rocroller PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include>)
+target_include_directories(rocroller 
+    PUBLIC 
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include>
+)
+
 
 target_compile_features(rocroller PUBLIC cxx_std_20)
 
@@ -285,7 +291,7 @@ rocm_install(
     TARGETS rocroller rocroller-interface
     EXPORT rocroller-targets
     INCLUDE
-        "${ROCROLLER_LIB_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/lib/include"
 )
 
 if(ROCROLLER_BUILD_TESTING OR BUILD_TESTING)
