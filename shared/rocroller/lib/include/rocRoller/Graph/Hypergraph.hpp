@@ -421,6 +421,15 @@ namespace rocRoller
              */
             std::optional<int> findEdge(int tail, int head) const;
 
+            /**
+             * This function is called to disallow certain operations
+             * (add/delete certain elements) if the graph is immutable.
+             */
+            virtual bool isModificationAllowed(int) const
+            {
+                return false;
+            }
+
             // clang-format off
         private:
             // clang-format on

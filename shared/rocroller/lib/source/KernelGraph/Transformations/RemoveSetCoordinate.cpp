@@ -231,6 +231,8 @@ namespace rocRoller
                         "Control graph still has SetCoordinates: ",
                         ShowValue(setCoordinates));
 
+            newGraph.setRestricted();
+
             return newGraph;
         }
     }

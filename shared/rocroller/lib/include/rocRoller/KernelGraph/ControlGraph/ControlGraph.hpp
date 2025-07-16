@@ -240,6 +240,21 @@ namespace rocRoller
             template <CControlEdge Edge, std::convertible_to<int>... Nodes>
             void chain(int a, int b, Nodes... remaining);
 
+            /**
+             *  Check if modifying an element (index) is allowed or not. This
+             *  only comes into effect when the graph is in restricted mode.
+             */
+            virtual bool isModificationAllowed(int index) const override;
+
+            /**
+             *  Set the graph to be in restricted mode. Some operations would
+             *  be disallowed when in restricted mode.
+             */
+            void setRestricted()
+            {
+                isRestricted = true;
+            }
+
         private:
             virtual void clearCache(Graph::GraphModification modification) override;
             void         checkOrderCache() const;
@@ -278,6 +293,8 @@ namespace rocRoller
             mutable std::unordered_map<int, std::set<int>> m_descendentCache;
 
             mutable CacheStatus m_cacheStatus = CacheStatus::Invalid;
+
+            mutable bool isRestricted = false;
         };
 
         std::string name(ControlGraph::Element const& el);
