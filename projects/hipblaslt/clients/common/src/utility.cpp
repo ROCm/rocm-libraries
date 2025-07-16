@@ -384,7 +384,7 @@ void hipblasltStoreValuesToFile(hipblasOperation_t transA, int row, int col,
 }
 
 /* ==================================================================== */
-/*! \brief write a matrix to file. */
+/*! \brief call hipblasltStoreValuesToFile with appropriate datatype. */
 void hipblasltDispatchValuesToFile(hipblasOperation_t transA, hipDataType T,
                                    int row, int col, int lda, void *hA,
                                    std::string ADataFile) {
