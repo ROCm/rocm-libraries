@@ -97,8 +97,6 @@ SUPPORTED_ISA = [
     IsaVersion(12, 0, 1),
 ]
 
-SUPPORTED_EMULATION_DEVICE_IDS = {"id=0049", "id=0050", "id=0051", "id=0052", "id=0054", "id=0062"}
-
 SUPPORTED_ARCH_DEVICE_IDS = {
     "id=74a0": "gfx942",
     "id=74a1": "gfx942",
@@ -125,12 +123,9 @@ SUPPORTED_ARCH_CU_COUNTS = {
     # filtering support for other architectures.
 }
 
-# Here, emulation IDs are included in the fallback list as a stopgap
-# until proper device IDs are added to the logic files.
 ARCH_DEVICE_ID_FALLBACKS = {
-    "id=75a0": list(SUPPORTED_EMULATION_DEVICE_IDS),
-    "id=75a2": ["id=75a0"] + list(SUPPORTED_EMULATION_DEVICE_IDS),
-    "id=75a3": ["id=75a0"] + list(SUPPORTED_EMULATION_DEVICE_IDS),
+    "id=75a2": ["id=75a0"],
+    "id=75a3": ["id=75a0"],
 }
 
 # Here, `None` refers to an unspecified CU count.
@@ -284,10 +279,10 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
     Extracts architecture predicate information from a given logic file.
 
     The file is expected to have the following format:
-    - Line 1: Minimum required version (e.g., "- {MinimumRequiredVersion: 4.33.0}")
-    - Line 2: Code name of the architecture (e.g., "- aquavanjaram")
-    - Line 3: GFX name of the architecture or a map with variant details (e.g., "- gfx950" or "- {Architecture: gfx950, CUCount: 256}")
-    - Line 4: Device IDs (e.g., "- [Device 1234, Device 5678]")
+    - Line 0: Minimum required version (e.g., "- {MinimumRequiredVersion: 4.33.0}")
+    - Line 1: Code name of the architecture (e.g., "- aquavanjaram")
+    - Line 2: GFX name of the architecture or a map with variant details (e.g., "- gfx950" or "- {Architecture: gfx950, CUCount: 256}")
+    - Line 3: Device IDs (e.g., "- [Device 1234, Device 5678]")
 
     Args:
         file: Path to a logic file.
@@ -332,6 +327,12 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
         gfx, cu = l2(f.readline())
         deviceIds = l3(f.readline())
 
+    try:
+        for id in deviceIds:
+            _verifyPredicate(id, gfx)
+    except ValueError as e:
+        raise LogicFileError(f"Invalid device ID found while parsing {file}: {e}")
+
     return ArchInfo(Name=name, Gfx=gfx, DeviceIds=deviceIds, CUCount=cu)
 
 
@@ -348,29 +349,20 @@ def _verifyPredicate(predicateSpec: str, gfx: str) -> str:
     Raises:
         ValueError: If the predicate specification is invalid or if device ID doesn't match GFX architecture.
     """
+    msgPrefix = f"Invalid predicate: {predicateSpec}"
     key, _, val = predicateSpec.partition("=")
     if key == "id":
         if predicateSpec not in SUPPORTED_ARCH_DEVICE_IDS:
-            raise ValueError(
-                f"Invalid architecture predicate: device ID not supported: {predicateSpec}"
-            )
+            raise ValueError(f"{msgPrefix}: device ID not supported")
         if gfx and SUPPORTED_ARCH_DEVICE_IDS[predicateSpec] != gfx:
-            raise ValueError(
-                f"Invalid architecture predicate: device ID {predicateSpec} is not associated with {gfx}"
-            )
+            raise ValueError(f"{msgPrefix}: device ID is not associated with {gfx}")
     elif key == "cu":
         if predicateSpec not in SUPPORTED_ARCH_CU_COUNTS:
-            raise ValueError(
-                f"Invalid architecture predicate: CU count not supported: {predicateSpec}"
-            )
+            raise ValueError(f"{msgPrefix}: CU count not supported")
         if gfx and SUPPORTED_ARCH_CU_COUNTS[predicateSpec] != gfx:
-            raise ValueError(
-                f"Invalid architecture predicate: CU count {predicateSpec} is not associated with {gfx}"
-            )
+            raise ValueError(f"{msgPrefix}: CU count is not associated with {gfx}")
     else:
-        raise ValueError(
-            f"Invalid predicate: only device ID and CU count-based predicates are currently supported: {predicateSpec}"
-        )
+        raise ValueError(f"{msgPrefix}: only device ID and CU count-based predicates are currently supported")
     return predicateSpec
 
 
