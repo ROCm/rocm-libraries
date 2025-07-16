@@ -30,7 +30,7 @@ endif()
 option(HIPBLASLT_ENABLE_DEVICE "Build hipBLASLt device libraries." ON)
 option(HIPBLASLT_ENABLE_CLIENT "Build hipBLASLt client apps." ON)
 option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON)
-option(TENSILELITE_ENABLE_CLIENT "Build the tensilelite client." OFF)
+option(TENSILELITE_ENABLE_CLIENT "Build the tensilelite client." ON)
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support" OFF)
 
@@ -99,7 +99,7 @@ if(HIPBLASLT_ENABLE_HOST)
     else()
         set(hipblas_target hipblas-common)
     endif()
-    if(NOT TARGET ${hipblas_target})
+    if(NOT ROCM_LIBRARIES_SUPERBUILD)
         find_package(${hipblas_target} REQUIRED)
     endif()
     if(HIPBLASLT_ENABLE_BLIS)
@@ -131,7 +131,8 @@ if(HIPBLASLT_ENABLE_MSGPACK)
     if(msgpack-cxx_FOUND)
         message(STATUS "Found msgpack-cxx (>=6.x)")
     else()
-        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
+        # TODO: set minimum version requied for *-cxx library
+        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack) 
         message(STATUS "Found msgpack (<=5.x)")
     endif()
 endif()
@@ -181,9 +182,10 @@ if(HIPBLASLT_ENABLE_DEVICE)
     endif()
 endif()
 
-if(HIPBLASLT_ENABLE_ROCROLLER AND NOT TARGET roc::rocroller)
+if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBRARIES_SUPERBUILD)
     find_package(rocroller REQUIRED)
     option(YAML_CPP_INSTALL "" ON)
+    # Should we require enabling fetch
     if(NOT rocroller_FOUND)
         set(ROCROLLER_ENABLE_FETCH ON)
         set(ROCROLLER_BUILD_TESTING OFF)
@@ -199,6 +201,7 @@ if(HIPBLASLT_ENABLE_ROCROLLER AND NOT TARGET roc::rocroller)
 endif()
 
 if(TENSILELITE_ENABLE_HOST OR HIPBLASLT_ENABLE_HOST)
+<<<<<<< HEAD
     add_library(tensilelite-host OBJECT)
     add_library(tensilelite::tensilelite-host ALIAS tensilelite-host)
 
@@ -247,6 +250,9 @@ if(TENSILELITE_ENABLE_HOST OR HIPBLASLT_ENABLE_HOST)
             hip::device
     )
 
+=======
+    add_subdirectory(tensilelite)
+>>>>>>> 27e46da01f (Move back to using library dir to ease burden of moving to new build system)
     add_subdirectory(rocisa/rocisa-cpp)
 endif()
 
@@ -255,7 +261,7 @@ if(HIPBLASLT_ENABLE_HOST)
         add_library(hipblaslt SHARED)
     else()
         add_library(hipblaslt STATIC)
-        target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_STATIC_LIB)
+        target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_STATIC_LIB) # check if this is in a public header
     endif()
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_link_libraries(hipblaslt PRIVATE roc::rocroller)
@@ -287,22 +293,22 @@ if(HIPBLASLT_ENABLE_HOST)
     )
 
     if(HIPBLASLT_ENABLE_HIPBLAS_DIRECT)
-        target_compile_definitions(hipblaslt PRIVATE LEGACY_HIPBLAS_DIRECT)
+        target_compile_definitions(hipblaslt PRIVATE LEGACY_HIPBLAS_DIRECT) # public header?
     endif()
 
     if(HIPBLASLT_ENABLE_LAZY_LOAD)
-        target_compile_definitions(hipblaslt PRIVATE ROCBLASLT_TENSILE_LAZY_LOAD)
+        target_compile_definitions(hipblaslt PRIVATE ROCBLASLT_TENSILE_LAZY_LOAD) # public header?
     endif()
 
     if(HIPBLASLT_ENABLE_MARKER)
-        target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_MARKER)
+        target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_MARKER) # public header?
     endif()
 
     target_include_directories(hipblaslt
         PUBLIC
             $<BUILD_INTERFACE:${HIPBLASLT_LIB_DIR}/src/include>
             $<BUILD_INTERFACE:${HIPBLASLT_LIB_DIR}/include>
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/host-library/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/library/include>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         PRIVATE
             "${ROCBLASLT_LIB_DIR}/include"
@@ -312,11 +318,11 @@ if(HIPBLASLT_ENABLE_HOST)
 
     set_target_properties(hipblaslt
         PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/host-library
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/library
     )
 endif()
 
-add_subdirectory(host-library)
+add_subdirectory(library)
 
 if(HIPBLASLT_ENABLE_DEVICE)
     add_subdirectory(device-library)
@@ -324,13 +330,6 @@ endif()
 
 if(HIPBLASLT_ENABLE_CLIENT)
     add_subdirectory(clients)
-endif()
-if(TENSILELITE_ENABLE_CLIENT)
-    add_subdirectory(tensilelite-client)
-endif()
-
-if(TENSILELITE_ENABLE_CLIENT)
-    target_link_libraries(tensilelite-client PRIVATE tensilelite::tensilelite-host) 
 endif()
 
 if(HIPBLASLT_ENABLE_HOST)
@@ -347,8 +346,8 @@ if(HIPBLASLT_ENABLE_HOST)
     # TODO: remove the follow file install once rocblas is updated
     install(
         FILES
-            "${CMAKE_CURRENT_BINARY_DIR}/host-library/include/hipblaslt/hipblaslt-export.h"
-            "${CMAKE_CURRENT_BINARY_DIR}/host-library/include/hipblaslt/hipblaslt-version.h"
+            "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-export.h"
+            "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-version.h"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
         COMPONENT hipBLASLt_Development
     )
