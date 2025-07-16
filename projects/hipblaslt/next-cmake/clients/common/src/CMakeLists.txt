@@ -36,7 +36,7 @@ target_sources(hipblaslt-clients-common
 )
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
-    target_sources(hipblaslt-clients-common PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/mxDataGen.cpp")
+    #target_sources(hipblaslt-clients-common PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/mxDataGen.cpp")
 endif()
 
 if(HIPBLASLT_ENABLE_BLIS)

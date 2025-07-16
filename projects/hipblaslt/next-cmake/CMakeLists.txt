@@ -52,7 +52,7 @@ endif()
 
 set(HIPBLASLT_ENABLE_DEVICE ON CACHE BOOL "Build hipBLASLt device libraries.")
 set(HIPBLASLT_ENABLE_CLIENT ON CACHE BOOL "Build hipBLASLt client apps.")
-cmake_dependent_option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON "HIPBLASLT_ENABLE_CLIENT" OFF)
+set(HIPBLASLT_ENABLE_HOST ON CACHE BOOL "Build hipBLASLt host library.")
 set(TENSILELITE_ENABLE_CLIENT OFF CACHE BOOL "Build the tensilelite client.")
 set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "Build the tensilelite host library.")
 set(HIPBLASLT_ENABLE_COVERAGE OFF CACHE BOOL "Build gcov support")
@@ -207,17 +207,19 @@ if(HIPBLASLT_ENABLE_DEVICE)
 endif()
 
 if(HIPBLASLT_ENABLE_ROCROLLER AND NOT TARGET roc::rocroller)
-    find_package(rocroller REQUIRED)
+    find_package(rocroller QUIET)
     option(YAML_CPP_INSTALL "" ON)
     if(NOT rocroller_FOUND)
+        include(FetchContent)
         set(ROCROLLER_ENABLE_FETCH ON)
-        set(ROCROLLER_BUILD_TESTING OFF)
+        set(ROCROLLER_BUILD_TESTING ON)
         set(ROCROLLER_ENABLE_CLIENT OFF)
+        set(ROCROLLER_ENABLE_GEMM_CLIENT_TESTS OFF)
         FetchContent_Declare(
             rocRoller
             GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
-            GIT_TAG main
-            SOURCE_SUBDIR next-cmake
+            GIT_TAG develop
+            SOURCE_SUBDIR
         )
         FetchContent_MakeAvailable(rocRoller)
     endif()
