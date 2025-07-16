@@ -21,8 +21,8 @@
  *
  * ************************************************************************ */
 
-/*!\file
- * \brief rocsparse.h includes other *.h and exposes a common interface
+/*! \file
+ *  \brief rocsparse.h includes other *.h and exposes a common interface
  */
 
 #ifndef ROCSPARSE_H
@@ -31,6 +31,7 @@
 #include "rocsparse-auxiliary.h"
 #include "rocsparse-debugging.h"
 #include "rocsparse-functions.h"
+#include "rocsparse-roctx.h"
 #include "rocsparse-version.h"
 
 #endif /* ROCSPARSE_H */

@@ -102,6 +102,28 @@ namespace rocRoller
                 return {regType, varType};
             }
 
+            ResultType operator()(AddShiftL const& expr)
+            {
+                auto lhsVal  = call(expr.lhs);
+                auto r1hsVal = call(expr.r1hs);
+
+                auto regType = Register::PromoteType(lhsVal.regType, r1hsVal.regType);
+                auto varType = VariableType::Promote(lhsVal.varType, r1hsVal.varType);
+
+                return {regType, varType};
+            }
+
+            ResultType operator()(ShiftLAdd const& expr)
+            {
+                auto lhsVal  = call(expr.lhs);
+                auto r2hsVal = call(expr.r2hs);
+
+                auto regType = Register::PromoteType(lhsVal.regType, r2hsVal.regType);
+                auto varType = VariableType::Promote(lhsVal.varType, r2hsVal.varType);
+
+                return {regType, varType};
+            }
+
             ResultType operator()(ScaledMatrixMultiply const& expr)
             {
                 auto matAVal = call(expr.matA);

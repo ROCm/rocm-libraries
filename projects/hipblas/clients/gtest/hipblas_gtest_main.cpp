@@ -78,15 +78,6 @@ static void print_version_info()
     // clang-format on
 }
 
-int hipblas_test_datafile()
-{
-    int ret = 0;
-    for(Arguments arg : HipBLAS_TestData())
-        ret |= run_bench_test(arg, 1, 0);
-    test_cleanup::cleanup();
-    return ret;
-}
-
 using namespace testing;
 
 class ConfigurableEventListener : public TestEventListener

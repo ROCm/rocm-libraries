@@ -56,7 +56,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
       GIT_TAG             release-1.11.0
       GIT_SHALLOW         TRUE
       INSTALL_DIR         ${GTEST_ROOT}
-      CMAKE_ARGS          -DBUILD_GTEST=ON -DINSTALL_GTEST=ON -Dgtest_force_shared_crt=ON -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
+      CMAKE_ARGS          -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DBUILD_GTEST=ON -DINSTALL_GTEST=ON -Dgtest_force_shared_crt=ON -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>
       LOG_DOWNLOAD        TRUE
       LOG_CONFIGURE       TRUE
       LOG_BUILD           TRUE
@@ -150,9 +150,9 @@ if(BUILD_BENCHMARKS)
     endif()
     set(GOOGLEBENCHMARK_ROOT ${CMAKE_CURRENT_BINARY_DIR}/deps/googlebenchmark CACHE PATH "")
     if(NOT (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"))
-    # hip-clang cannot compile googlebenchmark for some reason
       if(WIN32)
-        set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=cl")
+        get_filename_component(CXX_DIRNAME ${CMAKE_CXX_COMPILER} DIRECTORY)
+        set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=${CXX_DIRNAME}/clang++.exe")
       else()
         set(COMPILER_OVERRIDE "-DCMAKE_CXX_COMPILER=g++")
       endif()

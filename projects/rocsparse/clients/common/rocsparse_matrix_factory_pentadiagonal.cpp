@@ -245,6 +245,10 @@ template struct rocsparse_matrix_factory_pentadiagonal<_Float16, int32_t, int32_
 template struct rocsparse_matrix_factory_pentadiagonal<_Float16, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_pentadiagonal<_Float16, int64_t, int64_t>;
 
+template struct rocsparse_matrix_factory_pentadiagonal<rocsparse_bfloat16, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_pentadiagonal<rocsparse_bfloat16, int64_t, int32_t>;
+template struct rocsparse_matrix_factory_pentadiagonal<rocsparse_bfloat16, int64_t, int64_t>;
+
 template struct rocsparse_matrix_factory_pentadiagonal<float, int32_t, int32_t>;
 template struct rocsparse_matrix_factory_pentadiagonal<float, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_pentadiagonal<float, int64_t, int64_t>;

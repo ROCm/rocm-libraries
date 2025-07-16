@@ -707,7 +707,11 @@ namespace rocRoller
             if(!expr)
                 return {};
             auto visitor = ConsolidateSubExpressionVisitor(context);
-            return visitor.call(*expr);
+            auto rv      = visitor.call(*expr);
+
+            updateDistances(rv);
+
+            return rv;
         }
 
         int getConsolidationCount(ExpressionTree const& tree)
@@ -742,12 +746,78 @@ namespace rocRoller
             return rebuildExpressionHelper(tree, tree.size() - 1);
         }
 
+        void updateDistances(ExpressionTree& tree)
+        {
+            if(tree.size() < 2)
+                return;
+
+            for(int idx = 0; idx < tree.size(); idx++)
+            {
+                auto& node = tree[idx];
+                AssertFatal(
+                    node.deps.empty() || *node.deps.rbegin() < idx,
+                    "tree is no longer in topological order! This function needs to be updated!");
+                node.distanceFromRoot = 0;
+            }
+
+            for(auto const& nodeA : std::ranges::views::reverse(tree))
+            {
+                int newLevel = nodeA.distanceFromRoot + 1;
+
+                for(int idxB : nodeA.deps)
+                {
+                    if(tree.at(idxB).distanceFromRoot < newLevel)
+                        tree[idxB].distanceFromRoot = newLevel;
+                }
+            }
+        }
+
+        std::string statistics(ExpressionTree tree)
+        {
+            std::string rv = fmt::format("Expression tree with {} nodes.", tree.size());
+            updateDistances(tree);
+
+            std::map<int, int> levelCounts;
+            std::map<int, int> levelDeltas;
+            for(int idx = 0; idx < tree.size(); idx++)
+            {
+                auto d = tree[idx].distanceFromRoot;
+                levelCounts[d]++;
+
+                for(auto idx2 : tree[idx].deps)
+                {
+                    auto d2 = tree.at(idx2).distanceFromRoot;
+                    levelDeltas[d2 - d]++;
+                }
+            }
+
+            rv += "Level Value Counts:\n";
+            for(auto [level, count] : std::ranges::views::reverse(levelCounts))
+                rv += fmt::format("{}: {}\n", level, count);
+
+            rv += "Level Delta Counts:\n";
+            for(auto [level, count] : std::ranges::views::reverse(levelDeltas))
+                rv += fmt::format("{}: {}\n", level, count);
+
+            return rv;
+        }
+
         std::string describe(ExpressionNode const& node)
         {
             std::string desc = "nullptr";
             if(node.reg)
                 desc = node.reg->description();
-            return fmt::format("{} = {}", desc, toString(node.expr));
+            return fmt::format(
+                "{} = {} (level {})", desc, toString(node.expr), node.distanceFromRoot);
+        }
+
+        Register::Type ExpressionNode::regType() const
+        {
+            if(reg != nullptr)
+                return reg->regType();
+            if(expr != nullptr)
+                return resultRegisterType(expr);
+            return Register::Type::Count;
         }
 
         std::string toDOT(ExpressionTree const& tree)

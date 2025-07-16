@@ -49,7 +49,7 @@ def analyze(directory: pathlib.Path):
     data = read_data(directory)
 
     infos = sorted(map(info, data), key=lambda x: x[2])
-    for (dim, value, time) in infos:
+    for dim, value, time in infos:
         print(f"{dim}, {value}, {time}")
 
 
@@ -61,6 +61,7 @@ def info(res: GEMMResult):
 
 def read_data(directory: pathlib.Path) -> List[GEMMResult]:
     import itertools
+
     return itertools.chain(*map(rrperf.problems.load_results, directory.glob("*.yaml")))
 
 

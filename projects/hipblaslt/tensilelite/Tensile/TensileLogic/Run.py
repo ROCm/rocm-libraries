@@ -68,18 +68,21 @@ def _runChecks(
             return keep, total
 
         solutions = []
+        data = readYAML(file)
+        problemType = data[4]
         if check.OnlyCustomKernels and hasCustomKernel(file):
             print1(f">> {file.relative_to(logicPath)}")
-            solutions = readYAML(file)[5]  # Solutions are the 5th index
+            solutions = data[5]  # Solutions are the 5th index
         elif check.All:
             print1(f">> {file.relative_to(logicPath)}")
-            solutions = readYAML(file)[5]  # Solutions are the 5th index
+            solutions = data[5]  # Solutions are the 5th index
 
         for s in solutions:
             s, isCustom = handleCustomKernel(s, isaInfoMap)
             if check.OnlyCustomKernels and not isCustom:
                 continue
 
+            s["ProblemType"] = problemType
             if all(
                 [
                     _validateMatrixInstruction(s, isaInfoMap, file.relative_to(logicPath)),

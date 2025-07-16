@@ -483,6 +483,8 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
                                         amaxD,
                                         nullptr,
                                         maxWorkSpaceBytes,
+                                        matmul_descr->act0,
+                                        matmul_descr->act1,
                                         nullptr,
                                         handle->Synchronizer,
                                         swizzleA,
@@ -1244,6 +1246,24 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                 else
                 {
                     log_error(__func__, "invalid compute_input_typeB buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
+            case ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT:
+                if(sizeof(float) <= sizeInBytes)
+                    memcpy(&matmulDesc->act0, buf, sizeof(float));
+                else
+                {
+                    log_error(__func__, "invalid act arg0 buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                break;
+            case ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT:
+                if(sizeof(float) <= sizeInBytes)
+                    memcpy(&matmulDesc->act1, buf, sizeof(float));
+                else
+                {
+                    log_error(__func__, "invalid act arg1 buf size", sizeInBytes);
                     return rocblaslt_status_invalid_value;
                 }
                 break;
