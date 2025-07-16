@@ -363,3 +363,46 @@ void hipblaslt_print_version()
     hipblaslt_cout << "hipBLASLt version: " << version << std::endl;
     hipblaslt_cout << "hipBLASLt git version: " << git_version << std::endl;
 }
+
+/* ==================================================================== */
+/*! \brief write a matrix to file. */
+template <typename T>
+void hipblasltStoreValuesToFile(hipblasOperation_t transA, int row, int col,
+                                int lda, T *A, std::string ADataFile) {
+  const int A_row = transA == HIPBLAS_OP_N ? row : col;
+  const int A_col = transA == HIPBLAS_OP_N ? col : row;
+
+  std::ofstream FILE(ADataFile);
+
+  for (int i = 0; i < A_row; i++) {
+    for (int j = 0; j < A_col; j++)
+      FILE << std::left << std::setw(12) << static_cast<double>(A[j * lda + i]);
+    FILE << std::endl;
+  }
+
+  FILE.close();
+}
+
+/* ==================================================================== */
+/*! \brief write a matrix to file. */
+void hipblasltDispatchValuesToFile(hipblasOperation_t transA, hipDataType T,
+                                   int row, int col, int lda, void *hA,
+                                   std::string ADataFile) {
+  if (T == HIP_R_32F)
+    hipblasltStoreValuesToFile(transA, row, col, lda, static_cast<float *>(hA),
+                               ADataFile);
+  else if (T == HIP_R_64F)
+    hipblasltStoreValuesToFile(transA, row, col, lda, static_cast<double *>(hA),
+                               ADataFile);
+  else if (T == HIP_R_16F)
+    hipblasltStoreValuesToFile(transA, row, col, lda,
+                               static_cast<hipblasLtHalf *>(hA), ADataFile);
+  else if (T == HIP_R_16BF)
+    hipblasltStoreValuesToFile(transA, row, col, lda,
+                               static_cast<hip_bfloat16 *>(hA), ADataFile);
+  else
+    hipblaslt_cout << "This datatype " << T
+                   << " is Unsupported and could be added to the if-else "
+                      "condition to write to file"
+                   << std::endl;
+}
