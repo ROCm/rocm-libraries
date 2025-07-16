@@ -21,7 +21,7 @@
 #
 # ########################################################################
 
-set(_CMAKE_CURRENT_SOURCE_DIR "${TEMP_TENSILE_HOST_SOURCE_DIR}/source/analytical")
+set(_CMAKE_CURRENT_SOURCE_DIR "${TENSILELITE_HOST_SOURCE_DIR}/source/analytical")
 
 target_sources(tensilelite-host
     PRIVATE

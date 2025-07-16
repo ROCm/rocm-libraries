@@ -25,7 +25,7 @@ cmake_minimum_required(VERSION 3.25.0)
 project(clients LANGUAGES CXX)
 
 set(TEMP_CLIENTS_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../clients")
-set(TEMP_TENSILE_CLIENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite/Tensile/Source/client")
+set(TENSILELITE_CLIENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite/Tensile/Source/client")
 set(TEMP_TENSILELITE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite")
 
 add_executable(hipblaslt-bench)
@@ -35,7 +35,7 @@ target_include_directories(hipblaslt-clients-common
     PUBLIC
         $<BUILD_INTERFACE:${TEMP_CLIENTS_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${TEMP_CLIENTS_SOURCE_DIR}/common>
-        $<BUILD_INTERFACE:${TEMP_TENSILE_CLIENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${TENSILELITE_CLIENT_SOURCE_DIR}/include>
     PRIVATE
         ${TEMP_TENSILELITE_DIR}
 )
