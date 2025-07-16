@@ -27,7 +27,7 @@ Documentation for rocThrust available at
   * ctan
 * Added `test_param_fixtures.hpp` to store all the parameters for typed test suites.
 * Added `test_real_assertions.hpp` to handle unit test assertions for real numbers.
-* Added `test_imag_assertions.hpp` to handle unit tests assertions for imaginary numbers.
+* Added `test_imag_assertions.hpp` to handle unit test assertions for imaginary numbers.
 * `clang++` is now used to compile google benchmarks on Windows.
 * Added gfx950 support.
 * Merged changes from upstream CCCL/thrust 2.6.0
