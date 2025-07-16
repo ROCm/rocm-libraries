@@ -26,6 +26,7 @@
 from itertools import product
 import pathlib
 from rrperf.problems import GEMMRun, CodeGenRun, TensileRun
+from rrperf.utils import rocm_gfx
 
 repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
@@ -1665,6 +1666,9 @@ def generate_gfx950():
 
 
 def all():
+    if rocm_gfx().startswith("gfx95"):
+        # TODO: Add here more GFX950 tests
+        yield from fp4_kernels()
     yield from sgemm()
     yield from hgemm()
     yield from hgemm_no_store_LDS()
