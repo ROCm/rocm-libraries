@@ -338,6 +338,11 @@ def runPerformanceCommand (platform, project, mxDataGeneratorGitURL, mxDataGener
             def estimateString = masterCompare ? "" : " (estimated due to skipped ${env.CHANGE_TARGET} build)"
             commentString += "## Results${estimateString}\n\n"
             commentString += "${results}\n\n"
+            commentString += "<details><summary>Links</summary>\n\n"
+            commentString += "* [HTML Report](${JOB_URL}/Performance_20Report_20for_20${platform.gpu}) \n"
+            commentString += "* [Job Link](${env.BUILD_URL}) \n"
+            commentString += "* [Result Archive](${JOB_URL}/lastSuccessfulBuild/artifact/${project.paths.src_prefix}/rocRoller/performance_${platform.gpu}_archive.zip) \n"
+            commentString += "</details>\n\n"
 
             boolean commentExists = false
             for (prComment in getPrComments(pullRequest)) {
