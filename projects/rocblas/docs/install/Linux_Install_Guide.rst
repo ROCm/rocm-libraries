@@ -138,13 +138,14 @@ The GitHub branches at the rocBLAS site have names like ``rocm-major.minor.x``,
 where the major and minor releases have the same meaning as in the ROCm version.
 
 To download rocBLAS, including all projects in the rocm-libraries repository, use the following commands.
-Replace ``x.y`` in the above command with the ROCm version installed on your machine.
-For example, if you have ROCm 7.0 installed, replace ``release/rocm-rel-x.y`` with ``release/rocm-rel-7.0``.
 
 .. code-block:: shell
 
    git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocm-libraries.git
    cd  rocm-libraries/projects/rocblas
+
+Replace ``x.y`` in the above command with the ROCm version installed on your machine.
+For example, if you have ROCm 7.0 installed, replace ``release/rocm-rel-x.y`` with ``release/rocm-rel-7.0``.
 
 To limit your local checkout to only the rocBLAS and Tensile projects, configure ``sparse-checkout`` before cloning.
 This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.
