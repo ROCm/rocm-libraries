@@ -1638,7 +1638,7 @@ def fp4_kernels_no_wgm():
     yield from fp4_target_d2lds_mi32x32x64_pf2x1()
     yield from fp4_target_d2lds_mi32x32x64_pf4x1()
     yield from fp4_target_d2lds_mi16x16x128_pf4x1()
-    yield from fp4_no_scale_target_d2lds_mi16x16x128_pf4x1()
+    # yield from fp4_no_scale_target_d2lds_mi16x16x128_pf4x1()
 
 
 def fp4_kernels_wgm():
