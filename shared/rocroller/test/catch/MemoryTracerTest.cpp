@@ -51,7 +51,7 @@ namespace MemoryTracerTest
 
         example.setTileSize(128, 256, 8);
         example.setMFMA(32, 32, 2, 1);
-        example.setUseLDS(true, true, true);
+        example.setUseLDS(true, true, true); // TODO: use a single LDS, so a single node exists for later assertions
 
         auto kgraph  = example.getKernelGraph();
         auto params  = example.getCommandParameters();
@@ -97,6 +97,7 @@ namespace MemoryTracerTest
         transforms.push_back(std::make_shared<MergeAdjacentDeallocates>());
         transforms.push_back(std::make_shared<Simplify>());
         transforms.push_back(std::make_shared<SetWorkitemCount>(context.get()));
+        // TODO: figure out how many transforms I really need (ideally closer to the AddDeallocate test)
 
         for(auto& t : transforms)
             kgraph = kgraph.transform(t);
