@@ -1862,13 +1862,15 @@ namespace rocRoller
                                                       " WaveTile ",
                                                       waveTileTag));
 
+            auto packing = DataTypeInfo::Get(store.varType).packing;
+
             // Allocate LDS memory, and store the offset of the beginning of the allocation
             // into ldsOffset.
             Register::ValuePtr ldsAllocation;
             if(!m_context->registerTagManager()->hasRegister(ldsTag))
             {
-                ldsAllocation
-                    = Register::Value::AllocateLDS(m_context, varType, macrotileNumElements);
+                ldsAllocation = Register::Value::AllocateLDS(
+                    m_context, varType, macrotileNumElements / packing);
                 m_context->registerTagManager()->addRegister(ldsTag, ldsAllocation);
             }
             else
@@ -1881,7 +1883,6 @@ namespace rocRoller
             auto [_, lane]         = m_graph->getDimension<Lane>(tag);
             auto activeLanesInWave = getUnsignedInt(evaluate(lane.size));
 
-            auto packing = DataTypeInfo::Get(store.varType).packing;
             AssertFatal(waveTileNumElements % (activeLanesInWave * packing) == 0,
                         ShowValue(waveTileNumElements),
                         ShowValue(activeLanesInWave),
