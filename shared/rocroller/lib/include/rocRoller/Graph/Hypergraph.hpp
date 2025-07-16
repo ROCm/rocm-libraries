@@ -427,7 +427,7 @@ namespace rocRoller
              */
             virtual bool isModificationAllowed(int) const
             {
-                return false;
+                return true;
             }
 
             // clang-format off

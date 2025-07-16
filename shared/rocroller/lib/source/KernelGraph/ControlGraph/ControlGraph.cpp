@@ -133,10 +133,10 @@ namespace rocRoller::KernelGraph::ControlGraph
     bool ControlGraph::isModificationAllowed(int index) const
     {
         if(not isRestricted)
-            return false;
+            return true;
 
         if(not Settings::getInstance()->get(Settings::EnforceGraphConstraints))
-            return false;
+            return true;
 
         auto const& el = getElement(index);
 
@@ -145,10 +145,8 @@ namespace rocRoller::KernelGraph::ControlGraph
             return std::visit(
                 [](auto&& arg) {
                     using OpType = std::decay_t<decltype(arg)>;
-                    if constexpr(std::is_same_v<OpType,
-                                                ForLoopOp> or std::is_same_v<OpType, SetCoordinate>)
-                        return true;
-                    return false;
+                    return !(
+                        std::is_same_v<OpType, ForLoopOp> or std::is_same_v<OpType, SetCoordinate>);
                 },
                 std::get<Operation>(el));
         }
@@ -159,7 +157,7 @@ namespace rocRoller::KernelGraph::ControlGraph
             // delete Body edges is OK (e.g., Simplify), and currently there is no way
             // to know if this is called in a valid or invalid use case.
             //
-            return false;
+            return true;
         }
     }
 
