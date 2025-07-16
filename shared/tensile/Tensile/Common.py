@@ -325,7 +325,7 @@ architectureMap = {
   'gfx1010':'navi10', 'gfx1011':'navi12', 'gfx1012':'navi14',
   'gfx1030':'navi21', 'gfx1031':'navi22', 'gfx1032':'navi23', 'gfx1034':'navi24', 'gfx1035':'rembrandt',
   'gfx1100':'navi31', 'gfx1101':'navi32', 'gfx1102':'navi33', 'gfx1103':'gfx1103',
-  'gfx1150':'strixpoint', 'gfx1151':'gfx1151',
+  'gfx1150':'strixpoint', 'gfx1151':'strixhalo',
   'gfx1200':'gfx1200',
   'gfx1201':'gfx1201'
 }

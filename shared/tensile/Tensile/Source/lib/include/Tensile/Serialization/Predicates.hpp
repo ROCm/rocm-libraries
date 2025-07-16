@@ -235,6 +235,7 @@ namespace Tensile
                 iot::enumCase(io, value, "gfx1102", AMDGPU::Processor::gfx1102);
                 iot::enumCase(io, value, "gfx1103", AMDGPU::Processor::gfx1103);
                 iot::enumCase(io, value, "gfx1150", AMDGPU::Processor::gfx1150);
+                iot::enumCase(io, value, "gfx1151", AMDGPU::Processor::gfx1151);
             }
         };
 
