@@ -69,6 +69,7 @@
 #include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/TopoVisitor.hpp>
+#include <rocRoller/KernelGraph/Transforms/MemoryTracer.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller::KernelGraph
@@ -169,63 +170,38 @@ namespace rocRoller::KernelGraph
                 event.workItem);
         }
 
-        struct Summary
+        std::string Summary::toString() const
         {
-            static constexpr bool echoBanks = true;
-
-            struct Banks
+            std::stringstream ss;
+            for(auto const& [tag, instruction, ldsTag, accessedBanks, banksToWorkitems] :
+                this->accesses)
             {
-                uint   bankIndex;
-                size_t workitemsAccessed;
-                bool   imbalanced;
-            };
-            struct Access
-            {
-                int                           tag;
-                uint                          instruction;
-                int                           ldsTag;
-                std::vector<Banks>            accessedBanks;
-                std::vector<std::vector<int>> banksToWorkitems;
-            };
-
-            std::vector<Access>     accesses;
-            std::unordered_set<int> imbalancedTags;
-
-            std::string toString() const
-            {
-                std::stringstream ss;
-                for(auto const& [tag, instruction, ldsTag, accessedBanks, banksToWorkitems] :
-                    this->accesses)
+                ss << fmt::format(
+                    "Operation tag {} instruction {} accesses LDS {}:\n", tag, instruction, ldsTag);
+                for(auto const& [bankIndex, workitemsAccessed, imbalanced] : accessedBanks)
                 {
-                    ss << fmt::format("Operation tag {} instruction {} accesses LDS {}:\n",
-                                      tag,
-                                      instruction,
-                                      ldsTag);
-                    for(auto const& [bankIndex, workitemsAccessed, imbalanced] : accessedBanks)
-                    {
-                        ss << fmt::format("  Bank {}: {} workitems {}\n",
-                                          bankIndex,
-                                          workitemsAccessed,
-                                          imbalanced ? "(imbalanced)" : "");
-                    }
-                    if constexpr(echoBanks)
-                    {
-                        for(size_t bankIndex = 0; bankIndex < banksToWorkitems.size(); ++bankIndex)
-                        {
-                            ss << fmt::format("  Bank {:2d}: ", bankIndex);
-                            for(auto workitem : banksToWorkitems[bankIndex])
-                            {
-                                ss << fmt::format("{:2d} ", workitem);
-                            }
-                            ss << '\n';
-                        }
-                    }
-                    return ss.str();
+                    ss << fmt::format("  Bank {}: {} workitems {}\n",
+                                      bankIndex,
+                                      workitemsAccessed,
+                                      imbalanced ? "(imbalanced)" : "");
                 }
-                ss << fmt::format("  Imbalanced tags: {}\n", this->imbalancedTags);
+                if constexpr(echoBanks)
+                {
+                    for(size_t bankIndex = 0; bankIndex < banksToWorkitems.size(); ++bankIndex)
+                    {
+                        ss << fmt::format("  Bank {:2d}: ", bankIndex);
+                        for(auto workitem : banksToWorkitems[bankIndex])
+                        {
+                            ss << fmt::format("{:2d} ", workitem);
+                        }
+                        ss << '\n';
+                    }
+                }
                 return ss.str();
             }
-        };
+            ss << fmt::format("  Imbalanced tags: {}\n", this->imbalancedTags);
+            return ss.str();
+        }
 
         std::ostream& operator<<(std::ostream& stream, Summary const& summary)
         {
@@ -758,9 +734,9 @@ namespace rocRoller::KernelGraph
         };
     }
 
-    void memoryTrace(KernelGraph const&      original,
-                     KernelInvocation const& invocation,
-                     KernelArguments const&  arguments)
+    MemoryTracer::Summary memoryTrace(KernelGraph const&      original,
+                                      KernelInvocation const& invocation,
+                                      KernelArguments const&  arguments)
     {
         // XXX REMOVE THIS
         {
@@ -785,7 +761,7 @@ namespace rocRoller::KernelGraph
         auto workitemsPerWorkgroup = product(invocation.workgroupSize);
         tracer.simulateLaunch(model, workgroups, workitemsPerWorkgroup);
 
-        std::cout << model.summary() << std::endl;
+        return model.summary();
     }
 
 }

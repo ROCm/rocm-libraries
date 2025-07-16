@@ -40,45 +40,68 @@ namespace MemoryTracerTest
     TEST_CASE("LDS bank conflicts", "[kernel-graph]")
     {
         using namespace rocRoller;
+        using namespace rocRoller::KernelGraph;
         using namespace rocRoller::KernelGraph::ControlGraph;
         using namespace rocRoller::KernelGraph::CoordinateGraph;
 
-        auto context = TestContext::ForDefaultTarget();
-        auto params  = std::make_shared<CommandParameters>();
-        params->setManualKernelDimension(2);
-        params->setManualWorkgroupSize({256, 1, 1});
-        context.get()->kernel()->setWorkgroupSize({256, 1, 1});
+        using GD = Graph::Direction;
 
-        auto graph = KernelGraph::KernelGraph();
+        auto context = TestContext::ForTestDevice();
+        auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
 
-        auto wgTile = graph.coordinates.addElement(
-            MacroTile({256, 128}, LayoutType::MATRIX_A, {16, 16}, MemoryType::VGPR));
-        auto lds      = graph.coordinates.addElement(LDS());
-        auto waveTile = graph.coordinates.addElement(
-            MacroTile({256, 128}, LayoutType::MATRIX_A, {16, 16, 4, 1}));
+        example.setTileSize(128, 256, 8);
+        example.setMFMA(32, 32, 2, 1);
+        example.setUseLDS(true, true, true);
 
-        auto kernel   = graph.control.addElement(Kernel());
-        auto storeLDS = graph.control.addElement(StoreLDSTile());
-        auto loadLDS  = graph.control.addElement(LoadLDSTile());
+        auto kgraph  = example.getKernelGraph();
+        auto params  = example.getCommandParameters();
+        auto command = example.getCommand();
 
-        graph.control.addElement(Body(), {kernel}, {storeLDS});
-        graph.control.addElement(Sequence(), {storeLDS}, {loadLDS});
+        params->unrollK           = 4;
+        params->prefetch          = true;
+        params->prefetchInFlight  = 2;
+        params->prefetchLDSFactor = 2;
+        params->prefetchMixMemOps = true;
 
-        graph.mapper.connect<LDS>(storeLDS, lds);
-        graph.mapper.connect<MacroTile>(storeLDS, wgTile);
+        std::vector<GraphTransformPtr> transforms;
+        transforms.push_back(std::make_shared<IdentifyParallelDimensions>());
+        transforms.push_back(std::make_shared<OrderMemory>(false));
+        transforms.push_back(std::make_shared<UpdateParameters>(params));
+        transforms.push_back(std::make_shared<AddLDS>(params, context.get()));
+        transforms.push_back(std::make_shared<LowerLinear>(context.get()));
+        transforms.push_back(std::make_shared<LowerTile>(params, context.get()));
+        transforms.push_back(std::make_shared<LowerTensorContraction>(params, context.get()));
+        transforms.push_back(std::make_shared<Simplify>());
+        transforms.push_back(std::make_shared<FuseExpressions>());
+        transforms.push_back(std::make_shared<ConnectWorkgroups>(params, context.get()));
+        transforms.push_back(std::make_shared<UnrollLoops>(params, context.get()));
+        transforms.push_back(std::make_shared<FuseLoops>());
+        transforms.push_back(std::make_shared<RemoveDuplicates>());
+        transforms.push_back(std::make_shared<OrderEpilogueBlocks>());
+        transforms.push_back(std::make_shared<CleanLoops>());
+        transforms.push_back(std::make_shared<AddPrefetch>(params, context.get()));
+        transforms.push_back(std::make_shared<AddComputeIndex>());
+        transforms.push_back(std::make_shared<AddPRNG>(context.get()));
+        transforms.push_back(std::make_shared<UpdateWavefrontParameters>(params));
+        transforms.push_back(std::make_shared<LoadPacked>(context.get()));
+        transforms.push_back(std::make_shared<AddConvert>());
+        transforms.push_back(std::make_shared<NopExtraScopes>());
+        transforms.push_back(std::make_shared<AddDeallocateDataFlow>());
+        transforms.push_back(std::make_shared<InlineIncrements>());
+        transforms.push_back(std::make_shared<InlineInits>());
+        transforms.push_back(std::make_shared<OrderMultiplyNodes>());
+        transforms.push_back(std::make_shared<Simplify>());
+        transforms.push_back(std::make_shared<AliasDataFlowTags>());
+        transforms.push_back(std::make_shared<CleanArguments>(context.get(), command));
+        transforms.push_back(std::make_shared<AddDeallocateArguments>(context.get()));
+        transforms.push_back(std::make_shared<MergeAdjacentDeallocates>());
+        transforms.push_back(std::make_shared<Simplify>());
+        transforms.push_back(std::make_shared<SetWorkitemCount>(context.get()));
 
-        graph.mapper.connect<LDS>(loadLDS, lds);
-        graph.mapper.connect<MacroTile>(loadLDS, waveTile);
+        for(auto& t : transforms)
+            kgraph = kgraph.transform(t);
 
-        auto lowerTile = std::make_shared<KernelGraph::LowerTile>(params, context.get());
-        graph          = graph.transform(lowerTile);
-
-        // XXX REMOVE THIS
-        {
-            std::ofstream dfile;
-            dfile.open("foo.yaml", std::ofstream::out | std::ofstream::trunc);
-            dfile << toYAML(graph);
-            dfile.close();
-        }
+        auto summary = memoryTrace(kgraph, {}, KernelArguments{false});
+        std::cout << summary << std::endl;
     }
 }

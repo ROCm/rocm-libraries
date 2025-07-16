@@ -32,15 +32,44 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+        namespace MemoryTracer
+        {
+            struct Summary
+            {
+                static constexpr bool echoBanks = true;
+
+                struct Banks
+                {
+                    uint   bankIndex;
+                    size_t workitemsAccessed;
+                    bool   imbalanced;
+                };
+                struct Access
+                {
+                    int                           tag;
+                    uint                          instruction;
+                    int                           ldsTag;
+                    std::vector<Banks>            accessedBanks;
+                    std::vector<std::vector<int>> banksToWorkitems;
+                };
+
+                std::vector<Access>     accesses;
+                std::unordered_set<int> imbalancedTags;
+
+                std::string toString() const;
+            };
+
+            std::ostream& operator<<(std::ostream& stream, Summary const& summary);
+        }
         /**
 	 * @brief Memory tracer for the rocRoller kernel graph.
 	 *
 	 * This is a work-in-progress implementation of a memory
 	 * access analysis tool that simulates memory accesses.
 	 */
-	   
-        void memoryTrace(KernelGraph const&      original,
-                         KernelInvocation const& invocation,
-                         KernelArguments const&  arguments);
+
+        MemoryTracer::Summary memoryTrace(KernelGraph const&      original,
+                                          KernelInvocation const& invocation,
+                                          KernelArguments const&  arguments);
     }
 }

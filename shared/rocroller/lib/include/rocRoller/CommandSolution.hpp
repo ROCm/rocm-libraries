@@ -37,6 +37,7 @@
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension_fwd.hpp>
 #include <rocRoller/KernelGraph/KernelGraph_fwd.hpp>
+#include <rocRoller/KernelGraph/Transforms/MemoryTracer.hpp>
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
@@ -285,7 +286,7 @@ namespace rocRoller
          * @param args The runtime arguments being passed to the kernel
          *
          */
-        void memoryTrace(RuntimeArguments const& args);
+        KernelGraph::MemoryTracer::Summary memoryTrace(RuntimeArguments const& args);
 
         KernelGraph::KernelGraphPtr getKernelGraph() const;
 

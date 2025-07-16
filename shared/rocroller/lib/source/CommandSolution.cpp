@@ -39,8 +39,6 @@
 #include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
-#include <rocRoller/KernelGraph/Transforms/MemoryTracer.hpp>
-
 namespace rocRoller
 {
 
@@ -631,11 +629,11 @@ namespace rocRoller
         return {kargs, inv};
     }
 
-    void CommandKernel::memoryTrace(RuntimeArguments const& args)
+    KernelGraph::MemoryTracer::Summary CommandKernel::memoryTrace(RuntimeArguments const& args)
     {
         auto [kargs, inv] = prepKernel(args);
 
-        KernelGraph::memoryTrace(*m_kernelGraph, inv, kargs);
+        return KernelGraph::memoryTrace(*m_kernelGraph, inv, kargs);
     }
 
     void CommandKernel::loadKernelFromAssembly(const std::string& fileName,

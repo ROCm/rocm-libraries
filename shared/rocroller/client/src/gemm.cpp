@@ -467,7 +467,8 @@ namespace rocRoller::Client::GEMMClient
 
         if(runParams.memoryTraceOnly)
         {
-            commandKernel->memoryTrace(runtimeArgs);
+            auto summary = commandKernel->memoryTrace(runtimeArgs);
+            std::cout << summary << std::endl;
         }
         else
         {
