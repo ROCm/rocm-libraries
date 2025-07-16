@@ -114,8 +114,8 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_row_vectorized_kernel_calc(rocblas_int m,
                                                                  const float* __restrict__ A,
                                                                  rocblas_stride lda,
                                                                  const float* __restrict__ x,
-                                                                 rocblas_int    incx,
-                                                                 float          beta,
+                                                                 rocblas_int incx,
+                                                                 float       beta,
                                                                  float* __restrict__ y,
                                                                  rocblas_int incy)
 {
@@ -131,8 +131,7 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_row_vectorized_kernel_calc(rocblas_int m,
     {
         if(tx == 0)
         {
-            y[y_col * int64_t(incy)]
-                = (beta == 0.0f) ? 0.0f : y[y_col * int64_t(incy)] * beta;
+            y[y_col * int64_t(incy)] = (beta == 0.0f) ? 0.0f : y[y_col * int64_t(incy)] * beta;
         }
         return;
     }
@@ -252,9 +251,8 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_row_vectorized_kernel_calc(rocblas_int m,
 
     if(tx == 0)
     {
-        y[y_col * int64_t(incy)] = (beta == 0.0f)
-                                       ? alpha * psum
-                                       : alpha * psum + y[y_col * int64_t(incy)] * beta;
+        y[y_col * int64_t(incy)]
+            = (beta == 0.0f) ? alpha * psum : alpha * psum + y[y_col * int64_t(incy)] * beta;
     }
 }
 
@@ -266,8 +264,8 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_row_vectorized_kernel_calc(rocblas_int m,
                                                                  const double* __restrict__ A,
                                                                  rocblas_stride lda,
                                                                  const double* __restrict__ x,
-                                                                 rocblas_int    incx,
-                                                                 double         beta,
+                                                                 rocblas_int incx,
+                                                                 double      beta,
                                                                  double* __restrict__ y,
                                                                  rocblas_int incy)
 {
@@ -402,19 +400,17 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_row_vectorized_kernel_calc(rocblas_int m,
 
 // Specialized pipelined kernel for rocblas_float_complex
 template <bool CONJ, int TILE_DIM_X, int TILE_DIM_Y>
-ROCBLAS_KERNEL_ILF void rocblas_gemvt_row_vectorized_kernel_calc(
-    rocblas_int m,
-    rocblas_int n,
-    rocblas_float_complex
-        alpha,
-    const rocblas_float_complex* __restrict__ A,
-    rocblas_stride lda,
-    const rocblas_float_complex* __restrict__ x,
-    rocblas_int incx,
-    rocblas_float_complex
-        beta,
-    rocblas_float_complex* __restrict__ y,
-    rocblas_int incy)
+ROCBLAS_KERNEL_ILF void
+    rocblas_gemvt_row_vectorized_kernel_calc(rocblas_int           m,
+                                             rocblas_int           n,
+                                             rocblas_float_complex alpha,
+                                             const rocblas_float_complex* __restrict__ A,
+                                             rocblas_stride lda,
+                                             const rocblas_float_complex* __restrict__ x,
+                                             rocblas_int           incx,
+                                             rocblas_float_complex beta,
+                                             rocblas_float_complex* __restrict__ y,
+                                             rocblas_int incy)
 {
     const int tx = threadIdx.x;
     const int ty = threadIdx.y;
@@ -428,10 +424,9 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_row_vectorized_kernel_calc(
     {
         if(tx == 0)
         {
-            bool beta_is_zero       = beta.real() == 0.0f && beta.imag() == 0.0f;
-            y[y_col * int64_t(incy)] = beta_is_zero
-                                           ? rocblas_float_complex(0.0f, 0.0f)
-                                           : y[y_col * int64_t(incy)] * beta;
+            bool beta_is_zero        = beta.real() == 0.0f && beta.imag() == 0.0f;
+            y[y_col * int64_t(incy)] = beta_is_zero ? rocblas_float_complex(0.0f, 0.0f)
+                                                    : y[y_col * int64_t(incy)] * beta;
         }
         return;
     }
@@ -462,28 +457,22 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_row_vectorized_kernel_calc(
                 if(row_base + i < m)
                 {
                     ((rocblas_float_complex*)&a_vec_k0)[i] = current_A[row_base + i];
-                    ((rocblas_float_complex*)&x_vec_k0)[i]
-                        = x[(row_base + i) * int64_t(incx)];
+                    ((rocblas_float_complex*)&x_vec_k0)[i] = x[(row_base + i) * int64_t(incx)];
                 }
                 else
                 {
-                    ((rocblas_float_complex*)&a_vec_k0)[i]
-                        = rocblas_float_complex(0.0f, 0.0f);
-                    ((rocblas_float_complex*)&x_vec_k0)[i]
-                        = rocblas_float_complex(0.0f, 0.0f);
+                    ((rocblas_float_complex*)&a_vec_k0)[i] = rocblas_float_complex(0.0f, 0.0f);
+                    ((rocblas_float_complex*)&x_vec_k0)[i] = rocblas_float_complex(0.0f, 0.0f);
                 }
                 if(row_base + 2 + i < m)
                 {
                     ((rocblas_float_complex*)&a_vec_k1)[i] = current_A[row_base + 2 + i];
-                    ((rocblas_float_complex*)&x_vec_k1)[i]
-                        = x[(row_base + 2 + i) * int64_t(incx)];
+                    ((rocblas_float_complex*)&x_vec_k1)[i] = x[(row_base + 2 + i) * int64_t(incx)];
                 }
                 else
                 {
-                    ((rocblas_float_complex*)&a_vec_k1)[i]
-                        = rocblas_float_complex(0.0f, 0.0f);
-                    ((rocblas_float_complex*)&x_vec_k1)[i]
-                        = rocblas_float_complex(0.0f, 0.0f);
+                    ((rocblas_float_complex*)&a_vec_k1)[i] = rocblas_float_complex(0.0f, 0.0f);
+                    ((rocblas_float_complex*)&x_vec_k1)[i] = rocblas_float_complex(0.0f, 0.0f);
                 }
             }
         }
@@ -509,36 +498,34 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_row_vectorized_kernel_calc(
                 if(row_base + i < m)
                 {
                     ((rocblas_float_complex*)&a_vec_n0)[i] = current_A[row_base + i];
-                    ((rocblas_float_complex*)&x_vec_n0)[i]
-                        = x[(row_base + i) * int64_t(incx)];
+                    ((rocblas_float_complex*)&x_vec_n0)[i] = x[(row_base + i) * int64_t(incx)];
                 }
                 else
                 {
-                    ((rocblas_float_complex*)&a_vec_n0)[i]
-                        = rocblas_float_complex(0.0f, 0.0f);
-                    ((rocblas_float_complex*)&x_vec_n0)[i]
-                        = rocblas_float_complex(0.0f, 0.0f);
+                    ((rocblas_float_complex*)&a_vec_n0)[i] = rocblas_float_complex(0.0f, 0.0f);
+                    ((rocblas_float_complex*)&x_vec_n0)[i] = rocblas_float_complex(0.0f, 0.0f);
                 }
                 if(row_base + 2 + i < m)
                 {
                     ((rocblas_float_complex*)&a_vec_n1)[i] = current_A[row_base + 2 + i];
-                    ((rocblas_float_complex*)&x_vec_n1)[i]
-                        = x[(row_base + 2 + i) * int64_t(incx)];
+                    ((rocblas_float_complex*)&x_vec_n1)[i] = x[(row_base + 2 + i) * int64_t(incx)];
                 }
                 else
                 {
-                    ((rocblas_float_complex*)&a_vec_n1)[i]
-                        = rocblas_float_complex(0.0f, 0.0f);
-                    ((rocblas_float_complex*)&x_vec_n1)[i]
-                        = rocblas_float_complex(0.0f, 0.0f);
+                    ((rocblas_float_complex*)&a_vec_n1)[i] = rocblas_float_complex(0.0f, 0.0f);
+                    ((rocblas_float_complex*)&x_vec_n1)[i] = rocblas_float_complex(0.0f, 0.0f);
                 }
             }
         }
 
-        const rocblas_float_complex* a_k0 = reinterpret_cast<const rocblas_float_complex*>(&a_vec_k0);
-        const rocblas_float_complex* x_k0 = reinterpret_cast<const rocblas_float_complex*>(&x_vec_k0);
-        const rocblas_float_complex* a_k1 = reinterpret_cast<const rocblas_float_complex*>(&a_vec_k1);
-        const rocblas_float_complex* x_k1 = reinterpret_cast<const rocblas_float_complex*>(&x_vec_k1);
+        const rocblas_float_complex* a_k0
+            = reinterpret_cast<const rocblas_float_complex*>(&a_vec_k0);
+        const rocblas_float_complex* x_k0
+            = reinterpret_cast<const rocblas_float_complex*>(&x_vec_k0);
+        const rocblas_float_complex* a_k1
+            = reinterpret_cast<const rocblas_float_complex*>(&a_vec_k1);
+        const rocblas_float_complex* x_k1
+            = reinterpret_cast<const rocblas_float_complex*>(&x_vec_k1);
 
         for(int i = 0; i < 2; ++i)
         {
@@ -567,28 +554,25 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_row_vectorized_kernel_calc(
 
     if(tx == 0)
     {
-        bool beta_is_zero       = beta.real() == 0.0f && beta.imag() == 0.0f;
-        y[y_col * int64_t(incy)] = beta_is_zero
-                                       ? alpha * psum
-                                       : alpha * psum + y[y_col * int64_t(incy)] * beta;
+        bool beta_is_zero = beta.real() == 0.0f && beta.imag() == 0.0f;
+        y[y_col * int64_t(incy)]
+            = beta_is_zero ? alpha * psum : alpha * psum + y[y_col * int64_t(incy)] * beta;
     }
 }
 
 // Specialized pipelined kernel for rocblas_double_complex
 template <bool CONJ, int TILE_DIM_X, int TILE_DIM_Y>
-ROCBLAS_KERNEL_ILF void rocblas_gemvt_row_vectorized_kernel_calc(
-    rocblas_int m,
-    rocblas_int n,
-    rocblas_double_complex
-        alpha,
-    const rocblas_double_complex* __restrict__ A,
-    rocblas_stride lda,
-    const rocblas_double_complex* __restrict__ x,
-    rocblas_int incx,
-    rocblas_double_complex
-        beta,
-    rocblas_double_complex* __restrict__ y,
-    rocblas_int incy)
+ROCBLAS_KERNEL_ILF void
+    rocblas_gemvt_row_vectorized_kernel_calc(rocblas_int            m,
+                                             rocblas_int            n,
+                                             rocblas_double_complex alpha,
+                                             const rocblas_double_complex* __restrict__ A,
+                                             rocblas_stride lda,
+                                             const rocblas_double_complex* __restrict__ x,
+                                             rocblas_int            incx,
+                                             rocblas_double_complex beta,
+                                             rocblas_double_complex* __restrict__ y,
+                                             rocblas_int incy)
 {
     const int tx = threadIdx.x;
     const int ty = threadIdx.y;
@@ -602,10 +586,9 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_row_vectorized_kernel_calc(
     {
         if(tx == 0)
         {
-            bool beta_is_zero       = beta.real() == 0.0 && beta.imag() == 0.0;
-            y[y_col * int64_t(incy)] = beta_is_zero
-                                           ? rocblas_double_complex(0.0, 0.0)
-                                           : y[y_col * int64_t(incy)] * beta;
+            bool beta_is_zero = beta.real() == 0.0 && beta.imag() == 0.0;
+            y[y_col * int64_t(incy)]
+                = beta_is_zero ? rocblas_double_complex(0.0, 0.0) : y[y_col * int64_t(incy)] * beta;
         }
         return;
     }
@@ -672,10 +655,9 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_row_vectorized_kernel_calc(
 
     if(tx == 0)
     {
-        bool beta_is_zero       = beta.real() == 0.0 && beta.imag() == 0.0;
-        y[y_col * int64_t(incy)] = beta_is_zero
-                                       ? alpha * psum
-                                       : alpha * psum + y[y_col * int64_t(incy)] * beta;
+        bool beta_is_zero = beta.real() == 0.0 && beta.imag() == 0.0;
+        y[y_col * int64_t(incy)]
+            = beta_is_zero ? alpha * psum : alpha * psum + y[y_col * int64_t(incy)] * beta;
     }
 }
 
@@ -686,17 +668,17 @@ rocblas_gemvt_row_vectorized_kernel(rocblas_int    m,
                                     rocblas_int    n,
                                     Tex            alpha_device_host,
                                     rocblas_stride stride_alpha,
-                                    const Ti* Aa,
+                                    const Ti*      Aa,
                                     rocblas_stride shifta,
                                     rocblas_int    lda,
                                     rocblas_stride strideA,
-                                    const Ti* xa,
+                                    const Ti*      xa,
                                     rocblas_stride shiftx,
                                     rocblas_int    incx,
                                     rocblas_stride stridex,
                                     Tex            beta_device_host,
                                     rocblas_stride stride_beta,
-                                    To* ya,
+                                    To*            ya,
                                     rocblas_stride shifty,
                                     rocblas_int    incy,
                                     rocblas_stride stridey,

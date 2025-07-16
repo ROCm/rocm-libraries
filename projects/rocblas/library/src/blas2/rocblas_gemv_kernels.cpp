@@ -120,24 +120,24 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                                               rocblas_operation transA,
                                               rocblas_int       m,
                                               rocblas_int       n,
-                                              const Tex* alpha,
+                                              const Tex*        alpha,
                                               rocblas_stride    stride_alpha,
-                                              const Ti* A,
+                                              const Ti*         A,
                                               rocblas_stride    offseta,
                                               int64_t           lda,
                                               rocblas_stride    strideA,
-                                              const Ti* x,
+                                              const Ti*         x,
                                               rocblas_stride    offsetx,
                                               int64_t           incx,
                                               rocblas_stride    stridex,
-                                              const Tex* beta,
+                                              const Tex*        beta,
                                               rocblas_stride    stride_beta,
-                                              To* y,
+                                              To*               y,
                                               rocblas_stride    offsety,
                                               int64_t           incy,
                                               rocblas_stride    stridey,
                                               rocblas_int       batch_count,
-                                              Tex* workspace)
+                                              Tex*              workspace)
 {
     //quick return
     if(!m || !n || !batch_count)
@@ -165,13 +165,10 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
     static constexpr bool is_float = std::is_same_v<Ti, float> || std::is_same_v<Ti, float const*>;
     static constexpr bool is_double
         = std::is_same_v<Ti, double> || std::is_same_v<Ti, double const*>;
-    static constexpr bool is_complex_float
-        = std::is_same_v<Ti,
-                         rocblas_float_complex> || std::is_same_v<Ti, rocblas_float_complex const*>;
-    static constexpr bool is_complex_double
-        = std::is_same_v<
-              Ti,
-              rocblas_double_complex> || std::is_same_v<Ti, rocblas_double_complex const*>;
+    static constexpr bool is_complex_float = std::is_same_v<Ti, rocblas_float_complex>
+                                             || std::is_same_v<Ti, rocblas_float_complex const*>;
+    static constexpr bool is_complex_double = std::is_same_v<Ti, rocblas_double_complex>
+                                              || std::is_same_v<Ti, rocblas_double_complex const*>;
     const bool is_atomics_allowed = handle->atomics_mode == rocblas_atomics_allowed ? true : false;
 
     //Identifying the architecture to have an appropriate optimization
@@ -450,9 +447,9 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
            && ((is_gfx90a && (m <= n)
                 && ((is_complex_double && m <= 128) || (is_float && m <= 1024)
                     || ((is_double || is_complex_float) && m <= 512)))
-               || (is_gfx942 && (m <= n) 
+               || (is_gfx942 && (m <= n)
                    && ((is_complex_double && m <= 256) || (is_float && m <= 2048)
-                    || ((is_double || is_complex_float) && m <= 512)))))
+                       || ((is_double || is_complex_float) && m <= 512)))))
         {
 #define gemvt_row_vectorized_KARGS(alpha_, beta_)                                              \
     gemvt_grid, gemvt_threads, 0, rocblas_stream, m, n, alpha_, stride_alpha, A, offseta, lda, \
