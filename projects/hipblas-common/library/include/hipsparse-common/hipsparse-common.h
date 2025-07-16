@@ -1,8 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2022-2023 Advanced Micro Devices, Inc.
+/* ************************************************************************
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,33 +18,37 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
- *
- *******************************************************************************/
+ * ************************************************************************ */
 
-#pragma once
-#include <exception>
-#include <hipsparse-common/hipsparse-common.h>
+#ifndef HIPSPARSE_COMMON_H
+#define HIPSPARSE_COMMON_H
 
-// Convert the current C++ exception to hiblasStatus_t
-// This allows extern "C" functions to return this function in a catch(...) block
-// while converting all C++ exceptions to an equivalent hipblasStatus_t here
-inline hipsparseStatus_t exception_to_hipsparselt_status(std::exception_ptr e
-                                                         = std::current_exception())
-try
-{
-    if(e)
-        std::rethrow_exception(e);
-    return HIPSPARSE_STATUS_SUCCESS;
-}
-catch(const hipsparseStatus_t& status)
-{
-    return status;
-}
-catch(const std::bad_alloc&)
-{
-    return HIPSPARSE_STATUS_ALLOC_FAILED;
-}
-catch(...)
-{
-    return HIPSPARSE_STATUS_INTERNAL_ERROR;
-}
+/// \cond DO_NOT_DOCUMENT
+#define DEPRECATED_CUDA_12000(warning)
+#define DEPRECATED_CUDA_11000(warning)
+#define DEPRECATED_CUDA_10000(warning)
+#define DEPRECATED_CUDA_9000(warning)
+
+#ifdef __cplusplus
+#ifndef __has_cpp_attribute
+#define __has_cpp_attribute(X) 0
+#endif
+#define HIPSPARSE_HAS_DEPRECATED_MSG __has_cpp_attribute(deprecated) >= 201309L
+#else
+#ifndef __has_c_attribute
+#define __has_c_attribute(X) 0
+#endif
+#define HIPSPARSE_HAS_DEPRECATED_MSG __has_c_attribute(deprecated) >= 201904L
+#endif
+
+#if HIPSPARSE_HAS_DEPRECATED_MSG
+#define HIPSPARSE_DEPRECATED_MSG(MSG) [[deprecated(MSG)]]
+#else
+#define HIPSPARSE_DEPRECATED_MSG(MSG) HIPSPARSE_DEPRECATED // defined in hipsparse-export.h
+#endif
+/// \endcond
+
+#include "hipsparse-generic-types.h"
+#include "hipsparse-types.h"
+
+#endif

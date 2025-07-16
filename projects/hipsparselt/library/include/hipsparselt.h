@@ -68,7 +68,7 @@
 #ifndef _HIPSPARSELT_H_
 #define _HIPSPARSELT_H_
 
-#include <hipsparse/hipsparse.h>
+#include <hipsparse-common/hipsparse-common.h>
 #include <hipsparselt/hipsparselt-export.h>
 #include <hipsparselt/hipsparselt-version.h>
 

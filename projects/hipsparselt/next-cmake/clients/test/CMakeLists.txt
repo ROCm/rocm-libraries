@@ -20,10 +20,17 @@ add_executable(hipsparselt-test
     ${TEST_SOURCES}
 )
 
-# Test-specific configuration
+target_compile_features(hipsparselt-test PRIVATE cxx_std_17)
+
 target_compile_definitions(hipsparselt-test PRIVATE 
     GOOGLE_TEST
+    ROCM_USE_FLOAT16
+    HIPSPARSELT_INTERNAL_API
+    "__HIP_HCC_COMPAT_MODE__=1"
 )
+
+# TODO: -mf16c may not be required? What does this do?
+target_compile_options(hipsparselt-test PRIVATE -mf16c)
 
 # Link with GTest and BLAS
 target_link_libraries(hipsparselt-test PRIVATE 
@@ -64,33 +71,42 @@ if(NOT WIN32)
     endif()
 endif()
 
-# Generate test data
-set(TEST_DATA_FILE "${PROJECT_BINARY_DIR}/staging/hipsparselt_gtest.data")
+set_target_properties(hipsparselt-test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+)
+
+set(hipsparselt_test_install_program "${_CMAKE_CURRENT_SOURCE_DIR}/../common/hipsparselt_gentest.py")
+set(hipsparselt_test_install_data_file "${PROJECT_BINARY_DIR}/staging/hipsparselt_gtest.data")
+set(hipsparselt_test_install_yaml_files)
+list(APPEND hipsparselt_test_install_yaml_files
+    "${_CMAKE_CURRENT_SOURCE_DIR}/../include/hipsparselt_common.yaml"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/../include/hipsparselt_template.yaml"
+)
+
 add_custom_command(
-    OUTPUT "${TEST_DATA_FILE}"
+    OUTPUT "${hipsparselt_test_install_data_file}"
     COMMAND ${Python3_EXECUTABLE} 
-        "${_CMAKE_CURRENT_SOURCE_DIR}/../common/hipsparselt_gentest.py"
+        "${hipsparselt_test_install_program}"
         -I "${_CMAKE_CURRENT_SOURCE_DIR}/../include"
         "${_CMAKE_CURRENT_SOURCE_DIR}/hipsparselt_gtest.yaml"
-        -o "${TEST_DATA_FILE}"
+        -o "${hipsparselt_test_install_data_file}"
     DEPENDS 
-        "${_CMAKE_CURRENT_SOURCE_DIR}/../common/hipsparselt_gentest.py"
-        "${_CMAKE_CURRENT_SOURCE_DIR}/../include/hipsparselt_common.yaml"
+        ${hipsparselt_test_install_yaml_files}
         "${_CMAKE_CURRENT_SOURCE_DIR}/hipsparselt_gtest.yaml"
     WORKING_DIRECTORY "${_CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Generating test data for hipsparselt-test"
 )
 
-add_custom_target(hipsparselt-test-data DEPENDS "${TEST_DATA_FILE}")
-add_dependencies(hipsparselt-test hipsparselt-test-data)
-
-# Install test executable and data
-install(TARGETS hipsparselt-test
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT tests
+add_custom_target(hipsparselt-test-files ALL
+    DEPENDS
+        ${hipsparselt_test_install_yaml_files}
+        ${hipsparselt_test_install_data_file}
+        ${hipsparselt_test_install_program}
+)
+set_target_properties(hipsparselt-test-files PROPERTIES
+    HIPSPARSELT_INSTALL_YAML_FILES "${hipsparselt_test_install_yaml_files}"
+    HIPSPARSELT_INSTALL_DATA_FILE "${hipsparselt_test_install_data_file}"
+    HIPSPARSELT_INSTALL_PROGRAM "${hipsparselt_test_install_program}"
 )
 
-install(FILES "${TEST_DATA_FILE}"
-    DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT tests
-)
+add_dependencies(hipsparselt-test hipsparselt-test-files)

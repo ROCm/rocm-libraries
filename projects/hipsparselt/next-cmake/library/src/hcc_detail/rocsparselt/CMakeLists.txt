@@ -17,9 +17,9 @@ target_sources(hipsparselt PRIVATE
 )
 
 target_sources(hipsparselt PRIVATE
-    # "${_CMAKE_CURRENT_SOURCE_DIR}/src/spmm/rocsparselt_compress.cpp"
-    # "${_CMAKE_CURRENT_SOURCE_DIR}/src/spmm/rocsparselt_prune.cpp"
-    # "${_CMAKE_CURRENT_SOURCE_DIR}/src/spmm/rocsparselt_spmm.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/src/spmm/rocsparselt_compress.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/src/spmm/rocsparselt_prune.cpp"
+    "${_CMAKE_CURRENT_SOURCE_DIR}/src/spmm/rocsparselt_spmm.cpp"
 )
 
 target_include_directories(hipsparselt PRIVATE

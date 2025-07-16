@@ -29,6 +29,7 @@
 #include "utility.hpp"
 #include <hip/hip_runtime_api.h>
 #include <hipsparselt/hipsparselt.h>
+#include <hipsparselt/hipsparselt-version.h>
 #include <rocsparselt.h>
 #include <stdio.h>
 #include <stdlib.h>

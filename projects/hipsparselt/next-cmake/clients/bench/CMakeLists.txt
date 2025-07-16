@@ -31,7 +31,6 @@ target_link_libraries(hipsparselt-bench PRIVATE hipsparselt-clients-common ${BLA
 #     )
 # endif()
 
-# Additional libraries for benchmarks
 if(NOT WIN32)
     target_link_libraries(hipsparselt-bench PRIVATE 
         -lm 
@@ -49,8 +48,6 @@ if(NOT WIN32)
     endif()
 endif()
 
-# Install benchmark
-install(TARGETS hipsparselt-bench
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT benchmarks
+set_target_properties(hipsparselt-bench PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
 )

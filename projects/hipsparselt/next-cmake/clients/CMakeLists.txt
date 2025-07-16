@@ -37,10 +37,10 @@ add_library(hipsparselt-clients-common OBJECT)
 
 target_compile_features(hipsparselt-clients-common PRIVATE cxx_std_17)
 
-target_compile_definitions(hipsparselt-clients-common PRIVATE HIPSPARSELT_INTERNAL_API)
+target_compile_definitions(hipsparselt-clients-common PUBLIC HIPSPARSELT_INTERNAL_API)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(hipsparselt-clients-common PRIVATE -mf16c)
+    target_compile_options(hipsparselt-clients-common PUBLIC -mf16c)
 endif()
     
 target_sources(hipsparselt-clients-common PRIVATE
@@ -64,11 +64,11 @@ target_include_directories(hipsparselt-clients-common
 )
 
 if(HIPSPARSELT_ENABLE_CUDA)
-    target_compile_definitions(hipsparselt-clients-common PRIVATE __HIP_PLATFORM_NVIDIA__)
-    target_include_directories(hipsparselt-clients-common PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
-    target_link_libraries(hipsparselt-clients-common PRIVATE CUDA::cudart CUDA::cuda_driver)
+    target_compile_definitions(hipsparselt-clients-common PUBLIC __HIP_PLATFORM_NVIDIA__)
+    target_include_directories(hipsparselt-clients-common PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
+    target_link_libraries(hipsparselt-clients-common PUBLIC CUDA::cudart CUDA::cuda_driver)
 else()
-    target_compile_definitions(hipsparselt-clients-common PRIVATE __HIP_PLATFORM_AMD__ ROCM_USE_FLOAT16)
+    target_compile_definitions(hipsparselt-clients-common PUBLIC __HIP_PLATFORM_AMD__ ROCM_USE_FLOAT16)
     target_link_libraries(hipsparselt-clients-common PUBLIC hip::host hip::device)
 endif()
 
@@ -80,7 +80,7 @@ target_link_libraries(hipsparselt-clients-common
 )
 
 if(TARGET OpenMP::OpenMP_CXX)
-    target_link_libraries(hipsparselt-clients-common PRIVATE OpenMP::OpenMP_CXX)
+    target_link_libraries(hipsparselt-clients-common PUBLIC OpenMP::OpenMP_CXX)
 endif()
 
 set_target_properties(hipsparselt-clients-common PROPERTIES
@@ -100,30 +100,3 @@ endif()
 if(HIPSPARSELT_BUILD_TESTING OR BUILD_TESTING)
     add_subdirectory(test)
 endif()
-
-# Installation and packaging
-# ============================================================================
-
-install(FILES ${common_files}
-    DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT clients-common
-)
-
-install(PROGRAMS ${common_scripts}
-    DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT clients-common
-)
-
-if(HIPSPARSELT_ENABLE_SAMPLES)
-    rocm_package_setup_component(samples)
-endif()
-
-if(HIPSPARSELT_ENABLE_BENCHMARKS)
-    rocm_package_setup_component(benchmarks)
-endif()
-
-if(HIPSPARSELT_ENABLE_TESTS)
-    rocm_package_setup_component(tests)
-endif()
-
-rocm_package_setup_client_component(clients-common) 

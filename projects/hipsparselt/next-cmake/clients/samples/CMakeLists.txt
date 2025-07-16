@@ -46,10 +46,4 @@ foreach(sample_name ${SAMPLE_EXECUTABLES})
     set_target_properties(${sample_name} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
     )
-
-    # Install sample
-    install(TARGETS ${sample_name}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        COMPONENT samples
-    )
 endforeach()

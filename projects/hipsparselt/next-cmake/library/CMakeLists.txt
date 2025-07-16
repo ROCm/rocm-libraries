@@ -88,64 +88,14 @@ endif()
     
 if(HIPSPARSELT_ENABLE_HIP)
     target_compile_definitions(hipsparselt PRIVATE BUILD_WITH_TENSILE)
+    target_compile_definitions(hipsparselt PRIVATE __HIP_HCC_COMPAT_MODE__=1)
     target_include_directories(hipsparselt 
         PUBLIC
             $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}> # Needed?
             $<BUILD_INTERFACE:${HIPSPARSE_INCLUDE_DIRS}> # Needed?
     )
     target_link_libraries(hipsparselt PRIVATE hip::device)
-else()
-    target_compile_definitions(hipsparselt PRIVATE BUILD_WITH_TENSILE)
 endif()
 
 add_subdirectory(include)
 add_subdirectory(src)
-
-# ============================================================================
-# Installation
-# ============================================================================
-
-# # Install library and headers
-# rocm_install_targets(
-#     TARGETS hipsparselt
-#     INCLUDE "${PROJECT_BINARY_DIR}/include"
-# )
-
-# # Export targets for find_package
-# if(NOT HIPSPARSELT_ENABLE_CUDA)
-#     rocm_export_targets(
-#         TARGETS roc::hipsparselt
-#         DEPENDS PACKAGE hip
-#         NAMESPACE roc::
-#     )
-# else()
-#     rocm_export_targets(
-#         TARGETS roc::hipsparselt
-#         DEPENDS PACKAGE HIP
-#         NAMESPACE roc::
-#     )
-# endif()
-
-# ============================================================================
-# Package kernel libraries
-# ============================================================================
-
-# TODO: What is this?
-# if(NOT HIPSPARSELT_ENABLE_CUDA)
-#     if(HIPSPARSELT_ENABLE_TENSILELITE)
-#         # Install TensileLite library files
-#         if(WIN32)
-#             set(HIPSPARSELT_TENSILE_LIBRARY_DIR "${CMAKE_INSTALL_BINDIR}/hipsparselt")
-#         else()
-#             set(HIPSPARSELT_TENSILE_LIBRARY_DIR "${CMAKE_INSTALL_LIBDIR}/hipsparselt")
-#         endif()
-        
-#         # Install Tensile library directory
-#         install(
-#             DIRECTORY "${PROJECT_BINARY_DIR}/Tensile/library/"
-#             DESTINATION "${HIPSPARSELT_TENSILE_LIBRARY_DIR}"
-#             COMPONENT runtime
-#             FILES_MATCHING PATTERN "*"
-#         )
-#     endif()
-# endif()
