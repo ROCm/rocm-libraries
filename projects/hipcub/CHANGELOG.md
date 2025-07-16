@@ -19,6 +19,13 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * `UnrolledThreadLoad`, `UnrolledCopy`, and `ThreadLoadVolatilePointer` were added to align hipCUB with CUB.
 * `ThreadStoreVolatilePtr` and the `IterateThreadStore` struct were added to align hipCUB with CUB.
 * Added `hipcub::InclusiveScanInit` for CUB parity.
+* Additional Unit Tests for:
+  * block_exchange
+  * block_merge_sort
+  * block_radix_rank
+  * block_radix_sort
+  * block_reduce
+  * block_shuffle
 
 ### Removed
 

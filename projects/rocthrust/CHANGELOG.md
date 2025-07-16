@@ -28,6 +28,9 @@ Documentation for rocThrust available at
 * Added `test_param_fixtures.hpp` to store all the paramaeters for typed test suites.
 * Added `test_real_assertions.hpp` to handle unit tests assertions for real numbers.
 * Added `test_imag_assertions.hpp` to handle unit tests assertions for imaginary numbers.
+* `clang++` is now used to compile google benchmarks on Windows.
+* Added gfx950 support.
+* Merged changes from upstream CCCL/thrust 2.6.0
 
 ### Removed
 
@@ -44,15 +47,9 @@ Documentation for rocThrust available at
 
 * Fixed an issue with internal calls to unqualified `distance()` which would be ambigious due to also visibile implementation through ADL.
 
-## rocThrust 3.4.0 for ROCm 6.5
-
-### Added
-
-* Added gfx950 support.
-* Merged changes from upstream CCCL/thrust 2.6.0
-
 ### Known Issues
 * The order of the values being compared by thrust::exclusive_scan_by_key and thrust::inclusive_scan_by_key can change between runs when integers are being compared. This can cause incorrect output when a non-commutative operator such as division is being used.
+
 ## rocThrust 3.3.0 for ROCm 6.4
 
 ### Added

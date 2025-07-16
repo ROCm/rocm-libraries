@@ -950,11 +950,18 @@ namespace TensileLite
     inline void ContractionSolution::calculateAutoGSU(Problem const&  problem,
                                                       Hardware const* hardware) const
     {
-        // autoGSU is already calculated
-        if(autoGSU != 0)
+        if(problem.groupedGemm())
         {
+            autoGSU = 1;
             return;
         }
+
+        // Temporal remove until the cache mechanism is fixed
+        // autoGSU is already calculated
+        // if(autoGSU != 0)
+        // {
+        //     return;
+        // }
 
         // original GSU is not -1
         if(sizeMapping.globalSplitU != -1)
@@ -981,7 +988,6 @@ namespace TensileLite
         // WorkspaceCheck
         if(autoGSU > 1)
         {
-#define MAX_GSU_WORKSPACE_SIZE 128 * 1024 * 1024
             int    elemC    = sizeMapping.workspaceSizePerElemC * autoGSU;
             int    elemBias = sizeMapping.workspaceSizePerElemBias * autoGSU;
             size_t rs       = 0;
@@ -1000,34 +1006,37 @@ namespace TensileLite
                     rs += N * elemBias;
                 }
             }
-            autoGSU = min(autoGSU,
-                          (MAX_GSU_WORKSPACE_SIZE - rs) / sizeMapping.workspaceSizePerElemC
-                              / problem.d().totalLogicalElements());
+
+            size_t tiles = problem.getNumTiles(sizeMapping, 1) * B;
+            size_t tileSize = sizeMapping.macroTile.x * sizeMapping.macroTile.y * sizeMapping.workspaceSizePerElemC;
+            size_t bufSize = tiles * tileSize;
+
             if(problem.groupedGemm())
             {
                 assert(problem.workspaceSizeGroupedGemm() <= problem.workspaceSize());
                 autoGSU = min(autoGSU,
                               (problem.workspaceSizeGroupedGemm() - rs)
-                                  / sizeMapping.workspaceSizePerElemC
-                                  / problem.d().totalLogicalElements());
+                                  / bufSize);
             }
             else
                 autoGSU = min(autoGSU,
-                              (problem.workspaceSize() - rs) / sizeMapping.workspaceSizePerElemC
-                                  / problem.d().totalLogicalElements());
+                              (problem.workspaceSize() - rs) / bufSize);
         }
 
         // WorkgroupNumberCheck
 #define MAX_WORKGROUP_NUMBER 16777216
-        autoGSU = min(autoGSU,
-                      MAX_WORKGROUP_NUMBER / std::ceil(static_cast<float>(M) / MT0)
-                          / std::ceil(static_cast<float>(N) / MT1) / B);
+        if(autoGSU > 1)
+            autoGSU = min(autoGSU,
+                        MAX_WORKGROUP_NUMBER / std::ceil(static_cast<float>(M) / MT0)
+                            / std::ceil(static_cast<float>(N) / MT1) / B);
 
         // GlobalSplitUCheckMinK
         if(autoGSU > 1)
-        {
-            autoGSU = min(autoGSU, (uint32_t)std::ceil(K / MT2));
-        }
+            autoGSU = min(autoGSU, std::ceil(static_cast<float>(K) / MT2));
+
+        // SynchronizerSizeCheck
+        if(autoGSU > 1)
+            autoGSU = min(autoGSU, 409600/(sizeMapping.synchronizerSizePerWG * problem.getNumTiles(sizeMapping, 1) * B));
 
         // avoid gsu < 1
         autoGSU = max(autoGSU, 1);

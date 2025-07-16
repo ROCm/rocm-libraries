@@ -10,6 +10,7 @@
 - Added master solution library documentation
 - Added compiler version dependent assembler and architecture capabilities
 - Added documentation from GitHub Wiki to ROCm docs
+- Added support for gfx1150
 
 ### Changed
 

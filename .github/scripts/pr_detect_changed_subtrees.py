@@ -113,6 +113,22 @@ def main(argv=None) -> None:
     client = GitHubCLIClient()
     config = load_repo_config(args.config)
     changed_files = client.get_changed_files(args.repo, int(args.pr))
+
+    if not changed_files:
+        logger.warning("REST API failed or returned no changed files. Falling back to Git CLI...")
+        try:
+            # Ensure fetch is safe
+            os.system("git fetch origin +refs/pull/*/merge:refs/remotes/origin/pr/*")
+            # Get merge commit ref for this PR
+            base_ref = f"origin/{os.getenv('GITHUB_BASE_REF', 'main')}"
+            head_ref = "HEAD"  # Assumes checkout to PR merge ref
+            result = os.popen(f"git diff --name-only {base_ref}...{head_ref}").read()
+            changed_files = result.strip().splitlines()
+            logger.info(f"Fallback changed files: {changed_files}")
+        except Exception as e:
+            logger.error(f"Git CLI fallback failed: {e}")
+            sys.exit(1)
+
     valid_prefixes = get_valid_prefixes(config, args.require_auto_pull, args.require_auto_push)
     matched_subtrees = find_matched_subtrees(changed_files, valid_prefixes)
     output_subtrees(matched_subtrees, args.dry_run)
