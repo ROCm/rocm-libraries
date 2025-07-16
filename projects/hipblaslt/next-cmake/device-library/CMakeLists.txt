@@ -25,6 +25,8 @@ cmake_minimum_required(VERSION 3.25.0)
 project(device-library VERSION 0.0.1 LANGUAGES CXX ASM)
 
 set(TENSILELITE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite)
+set(device_library_dir "${PROJECT_BINARY_DIR}/../Tensile/library")
+file(MAKE_DIRECTORY "${device_library_dir}")
 
 list(JOIN GPU_TARGETS "$<SEMICOLON>" TENSILE_GPU_TARGETS_SEMI_ESCAPED)
 
