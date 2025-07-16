@@ -1,28 +1,5 @@
-# ########################################################################
-# Copyright (C) 2025 Advanced Micro Devices, Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-#
-# ########################################################################
-
-# Need a list of old compilation flags, definitions and link flags
-# to confirm if they are required and document what we dropped if not.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
 
 cmake_minimum_required(VERSION 3.22.1)
 project(hipblaslt VERSION 1.0.0 LANGUAGES CXX)
@@ -50,38 +27,38 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     endif()
 endif()
 
-set(HIPBLASLT_ENABLE_DEVICE ON CACHE BOOL "Build hipBLASLt device libraries.")
-set(HIPBLASLT_ENABLE_CLIENT ON CACHE BOOL "Build hipBLASLt client apps.")
-cmake_dependent_option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON "HIPBLASLT_ENABLE_CLIENT" OFF)
-set(TENSILELITE_ENABLE_CLIENT OFF CACHE BOOL "Build the tensilelite client.")
-set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "Build the tensilelite host library.")
-set(HIPBLASLT_ENABLE_COVERAGE OFF CACHE BOOL "Build gcov support")
+option(HIPBLASLT_ENABLE_DEVICE "Build hipBLASLt device libraries." ON)
+option(HIPBLASLT_ENABLE_CLIENT "Build hipBLASLt client apps." ON)
+option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON)
+option(TENSILELITE_ENABLE_CLIENT "Build the tensilelite client." OFF)
+option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
+option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support" OFF)
 
 if(HIPBLASLT_ENABLE_CLIENT)
-    set(HIPBLASLT_BUILD_TESTING ON CACHE BOOL "Build hipblaslt client tests.")
-    set(HIPBLASLT_ENABLE_SAMPLES ON CACHE BOOL "Build client samples.")
+    option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
+    option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
     # rocm-smi is not presently available on Windows so we do not require it.
     cmake_dependent_option(HIPBLASLT_ENABLE_ROCM_SMI "Require rocm_smi." ON "NOT WIN32" OFF)
 endif()
 
-set(HIPBLASLT_ENABLE_ASAN OFF CACHE BOOL "Build hipBLASLt with address sanitizer enabled.")
-set(HIPBLASLT_ENABLE_LAZY_LOAD ON CACHE BOOL "Enable lazy loading of runtime code oject files to reduce ram usage.")
+option(HIPBLASLT_ENABLE_ASAN "Build hipBLASLt with address sanitizer enabled." OFF)
+option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
 
 if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
-    set(HIPBLASLT_BUILD_SHARED_LIBS ON CACHE BOOL "Build the hipblaslt library as shared vs static")
-    set(HIPBLASLT_ENABLE_HIP ON CACHE BOOL "Use the HIP runtime.")
-    set(HIPBLASLT_ENABLE_MSGPACK ON CACHE BOOL "Use msgpack for parsing configuration files.")
-    set(HIPBLASLT_ENABLE_OPENMP ON CACHE BOOL "Use OpenMP to improve performance.")
-    set(HIPBLASLT_ENABLE_LLVM OFF CACHE BOOL "Use msgpack for parsing configuration files.")
-    set(HIPBLASLT_ENABLE_ROCROLLER OFF CACHE BOOL "Use RocRoller library.")
-    set(HIPBLASLT_ENABLE_BLIS ON CACHE BOOL "Enable BLIS support.") # I don't know that we can build with this OFF
-    set(HIPBLASLT_ENABLE_LAZY_LOAD ON CACHE BOOL "Enable lazy loading of runtime code oject files to reduce ram usage.")
+    option(HIPBLASLT_BUILD_SHARED_LIBS "Build the hipblaslt library as shared vs static" ON)
+    option(HIPBLASLT_ENABLE_HIP "Use the HIP runtime." ON)
+    option(HIPBLASLT_ENABLE_MSGPACK "Use msgpack for parsing configuration files." ON)
+    option(HIPBLASLT_ENABLE_OPENMP "Use OpenMP to improve performance." ON)
+    option(HIPBLASLT_ENABLE_LLVM "Use msgpack for parsing configuration files." OFF)
+    option(HIPBLASLT_ENABLE_ROCROLLER "Use RocRoller library." OFF)
+    option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." OFF)
+    option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
     cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
-    set(HIPBLASLT_ENABLE_HIPBLAS_DIRECT OFF CACHE BOOL "Use the hipblas header directly.")
+    option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
 endif()
 
 if(HIPBLASLT_ENABLE_DEVICE)
-    set(HIPBLASLT_BUNDLE_PYTHON_DEPS ON CACHE BOOL "Build python dependencies requied for device code generation.")
+    option(HIPBLASLT_BUNDLE_PYTHON_DEPS "Build python dependencies requied for device code generation." ON)
     set(HIPBLASLT_DEVICE_JOBS "" CACHE STRING "Number of CPU threads to use for building device libraries (will use nproc if unset).")
     set(HIPBLASLT_KEEP_BUILD_TMP OFF CACHE STRING "Keep temporary build directory for device libraries (turning this ON  bloat the build size).")
     set(HIPBLASLT_LIBLOGIC_PATH "" CACHE STRING "Path to library logic files (will use 'library' if unset).")
@@ -90,8 +67,6 @@ if(HIPBLASLT_ENABLE_DEVICE)
     set(HIPBLASLT_LOGIC_FILTER "" CACHE STRING "Cutomsized logic filter, default is *, i.e. all logics.")
     set(HIPBLASLT_NO_COMPRESS "" CACHE STRING "Do not compress device code object files.")
     set(HIPBLASLT_EXPERIMENTAL "" CACHE STRING "Process experimental logic files.")
-    set(device_library_dir "${CMAKE_BINARY_DIR}/Tensile/library")
-    file(MAKE_DIRECTORY "${device_library_dir}")
 endif()
 
 set(CMAKE_SKIP_BUILD_RPATH FALSE CACHE BOOL "Skip build RPATH")
@@ -104,7 +79,7 @@ mark_as_advanced(CMAKE_BUILD_WITH_INSTALL_RPATH)
 mark_as_advanced(CMAKE_INSTALL_RPATH)
 mark_as_advanced(CMAKE_INSTALL_RPATH_USE_LINK_PATH)
 
-set(TEMP_TENSILE_HOST_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/Tensile/Source/lib")
+set(TENSILELITE_HOST_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/Tensile/Source/lib")
 set(HIPBLASLT_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../library")
 set(HIPBLASLT_CLIENTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../clients")
 set(ROCBLASLT_LIB_DIR "${HIPBLASLT_LIB_DIR}/src/amd_detail/rocblaslt")
@@ -259,7 +234,7 @@ if(TENSILELITE_ENABLE_HOST OR HIPBLASLT_ENABLE_HOST)
 
     target_include_directories(tensilelite-host
         PUBLIC
-            $<BUILD_INTERFACE:${TEMP_TENSILE_HOST_SOURCE_DIR}/include>
+            $<BUILD_INTERFACE:${TENSILELITE_HOST_SOURCE_DIR}/include>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         PRIVATE
             "${CMAKE_CURRENT_BINARY_DIR}/include"
