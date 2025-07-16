@@ -714,11 +714,11 @@ pushd .
   # #################################################
   # configure & build
   # #################################################
-  cmake_common_options="-DAMDGPU_TARGETS=${gpu_architecture}"
+  cmake_common_options="-DGPU_TARGETS=${gpu_architecture}"
   cmake_client_options=""
 
   if [[ "${legacy_hipblas_direct}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DLEGACY_HIPBLAS_DIRECT=ON"
+    cmake_common_options="${cmake_common_options} -DHIPBLASLT_ENABLE_HIPBLAS_DIRECT=ON"
   fi
 
   # build type
@@ -735,7 +735,7 @@ pushd .
 
   # address sanitizer
   if [[ "${build_address_sanitizer}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DBUILD_ADDRESS_SANITIZER=ON"
+    cmake_common_options="${cmake_common_options} -DHIPBLASLT_ENABLE_ASAN=ON"
   fi
 
   # code coverage
@@ -744,76 +744,51 @@ pushd .
           echo "Code coverage is disabled in Release mode, to enable code coverage select either Debug mode (-g | --debug) or RelWithDebInfo mode (-k | --relwithdebinfo); aborting";
           exit 1
       fi
-      cmake_common_options="${cmake_common_options} -DBUILD_CODE_COVERAGE=ON"
+      cmake_common_options="${cmake_common_options} -DHIPBLASLT_ENABLE_COVERAGE=ON"
   fi
 
   # library type
   if [[ "${build_static}" == true ]]; then
-    cmake_common_options="${cmake_common_options} -DBUILD_SHARED_LIBS=OFF"
+    cmake_common_options="${cmake_common_options} -DHIPBLASLT_BUILD_SHARED_LIBS=OFF"
   fi
 
   # clients
   if [[ "${build_clients}" == true ]]; then
-      pushd .
-      mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
-      install_blis
-      popd
-
-      cmake_client_options="${cmake_client_options} -DBUILD_CLIENTS_SAMPLES=ON -DBUILD_CLIENTS_TESTS=ON -DLINK_BLIS=${LINK_BLIS} -DBUILD_CLIENTS_BENCHMARKS=ON"
-
-      #
-      # Add matrices_dir if exists.
-      #
-      if ! [[ "${matrices_dir}" == "" ]];then
-          cmake_client_options="${cmake_client_options} -DCMAKE_MATRICES_DIR=${matrices_dir}"
-      fi
-  fi
-
-  if [[ -n "${tensile_fork}" ]]; then
-    cmake_common_options="${cmake_common_options} -Dtensile_fork=${tensile_fork}"
-  fi
-
-  if [[ -n "${tensile_tag}" ]]; then
-    cmake_common_options="${cmake_common_options} -Dtensile_tag=${tensile_tag}"
-  fi
-
-  if [[ -n "${tensile_test_local_path}" ]]; then
-    cmake_common_options="${cmake_common_options} -DTensile_TEST_LOCAL_PATH=${tensile_test_local_path}"
-  fi
-
-  if [[ -n "${tensile_version}" ]]; then
-    cmake_common_options="${cmake_common_options} -DTENSILE_VERSION=${tensile_version}"
+    pushd .
+    mkdir -p ${build_dir}/deps && cd ${build_dir}/deps
+    install_blis
+    popd
   fi
 
   tensile_opt=""
   if [[ "${build_tensile}" == false ]]; then
-    tensile_opt="${tensile_opt} -DTensile_SKIP_BUILD=ON"
+    tensile_opt="${tensile_opt} -DHIPBLASLT_ENABLE_DEVICE=OFF"
   else
     if [[ -n "${tensile_logic}" ]]; then
-      tensile_opt="${tensile_opt} -DTensile_LOGIC=${tensile_logic}"
+      tensile_opt="${tensile_opt} -D{HIPBLASLT_LIBLOGIC_PATH}=${tensile_logic}"
     fi
-    tensile_opt="${tensile_opt} -DTensile_CODE_OBJECT_VERSION=${tensile_cov}"
+    # tensile_opt="${tensile_opt} -DTensile_CODE_OBJECT_VERSION=${tensile_cov}"
     if [[ ${tensile_threads} != $(nproc) ]]; then
-      tensile_opt="${tensile_opt} -DTensile_CPU_THREADS=${tensile_threads}"
+      tensile_opt="${tensile_opt} -DHIPBLASLT_DEVICE_JOBS=${tensile_threads}"
     fi
   fi
 
   if [[ "${tensile_no_lazy_library_loading}" == true ]]; then
-    tensile_opt="${tensile_opt} -DTensile_NO_LAZY_LIBRARY_LOADING=ON"
+    tensile_opt="${tensile_opt} -DHIPBLASLT_ENABLE_LAZY_LOAD=OFF"
   fi
 
   if [[ "${tensile_msgpack_backend}" == true ]]; then
-    tensile_opt="${tensile_opt} -DTensile_LIBRARY_FORMAT=msgpack"
+    tensile_opt="${tensile_opt} -DHIPBLASLT_LIBRARY_FORMAT=msgpack"
   else
-    tensile_opt="${tensile_opt} -DTensile_LIBRARY_FORMAT=yaml"
+    tensile_opt="${tensile_opt} -DHIPBLASLT_LIBRARY_FORMAT=yaml"
   fi
 
   if [[ "${build_release}" == false ]]; then
-    tensile_opt="${tensile_opt} -DTensile_ASM_DEBUG=ON"
+    tensile_opt="${tensile_opt} -DHIPBLASLT_ASM_DEBUG=ON"
   fi
 
   if ! [[ "${logic_filter}" == "" ]]; then
-    tensile_opt="${tensile_opt} -DTensile_LOGIC_FILTER=${logic_filter}"
+    tensile_opt="${tensile_opt} -DHIPBLASLT_LOGIC_FILTER=${logic_filter}"
   fi
 
   if [[ "${enable_gprof}" == true ]]; then
@@ -824,39 +799,26 @@ pushd .
     cmake_common_options="${cmake_common_options} -DCMAKE_CXX_FLAGS=-pg -DCMAKE_C_FLAGS=-pg"
   fi
 
-  if [[ -n "${tensile_verbose}" ]]; then
-    tensile_opt="${tensile_opt} -DTensile_VERBOSE=${tensile_verbose}"
-  fi
-
-  if [[ "${build_address_sanitizer}" == true ]]; then
-    tensile_opt="${tensile_opt} -DTensile_ASAN_BUILD=ON"
-  fi
-
   if [[ "${keep_build_tmp}" == true ]]; then
-    tensile_opt="${tensile_opt} -DTensile_KEEP_BUILD_TMP=ON"
+    tensile_opt="${tensile_opt} -DHIPBLASLT_KEEP_BUILD_TMP=ON"
   fi
 
   if [[ "${no_compress}" == true ]]; then
-    tensile_opt="${tensile_opt} -DTensile_NO_COMPRESS=ON"
+    tensile_opt="${tensile_opt} -DHIPBLASLT_NO_COMPRESS=ON"
   fi
 
   if [[ "${experimental}" == true ]]; then
-    tensile_opt="${tensile_opt} -DTensile_EXPERIMENTAL=ON"
+    tensile_opt="${tensile_opt} -DHIPBLASLT_EXPERIMENTAL=ON"
   fi
 
   if [[ "${disable_hipblaslt_marker}" == true ]]; then
     tensile_opt="${tensile_opt} -DHIPBLASLT_ENABLE_MARKER=OFF"
   fi
 
-  if [[ "${enable_tensile_marker}" == true ]]; then
-    tensile_opt="${tensile_opt} -DTensile_ENABLE_MARKER=ON"
-  fi
-
   if [[ "${use_rocroller}" == false ]]; then
-    cmake_common_options="${cmake_common_options} -DHIPBLASLT_USE_ROCROLLER=OFF"
+    cmake_common_options="${cmake_common_options} -DHIPBLASLT_ENABLE_ROCROLLER=OFF"
   fi
 
-  echo $cmake_common_options
   cmake_common_options="${cmake_common_options} ${tensile_opt}"
 
   compiler="amdclang++"
@@ -864,29 +826,35 @@ pushd .
     compiler="${rocm_path}/bin/amdclang++"
   fi
 
+  ccompiler="amdclang"
+  if [[ "${build_hip_clang}" == true ]]; then
+    ccompiler="${rocm_path}/bin/amdclang"
+  fi
+
   if [[ "${build_clients}" == false ]]; then
     cmake_client_options=""
   fi
 
+  echo $cmake_common_options ${cmake_client_options}
   # Build library with AMD toolchain because of existense of device kernels
   if [[ "${build_relocatable}" == true ]]; then
-    FC=gfortran CXX=${compiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF \
+    FC=gfortran CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF \
       -DCMAKE_INSTALL_PREFIX=${rocm_path} \
       -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} \
       -DCMAKE_SHARED_LINKER_FLAGS="${rocm_rpath}" \
       -DCMAKE_PREFIX_PATH="${rocm_path} ${rocm_path}/hcc ${rocm_path}/hip" \
       -DCMAKE_MODULE_PATH="${rocm_path}/hip/cmake" \
       -DROCM_DISABLE_LDCONFIG=ON \
-      -DROCM_PATH="${rocm_path}" ${root_path}
+      -DROCM_PATH="${rocm_path}" ${root_path}/next-cmake
   else
-    FC=gfortran CXX=${compiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${install_prefix} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DROCM_PATH="${rocm_path}" ${root_path}
+    FC=gfortran CXX=${compiler} CC=${ccompiler} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF -DCMAKE_INSTALL_PREFIX=${install_prefix} -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} -DROCM_PATH="${rocm_path}" ${root_path}/next-cmake
   fi
   check_exit_code "$?"
 
   if [[ "${quiet}" == true ]]; then
     make -j$(nproc) install
   else
-      make -j$(nproc) install VERBOSE=1
+    make -j$(nproc) install VERBOSE=1
   fi
   check_exit_code "$?"
 
