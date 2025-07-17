@@ -24,7 +24,6 @@
  *
  *******************************************************************************/
 
-#include <rocRoller/Context.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>

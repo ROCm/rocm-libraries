@@ -91,7 +91,7 @@ namespace ScopeTest
         kgraph.control.addElement(Sequence(), {assign3}, {assign4});
         kgraph.control.addElement(Sequence(), {scope2}, {assign2});
 
-        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
         auto sched = GetParam();
         Settings::getInstance()->set(Settings::Scheduler, sched);
@@ -243,7 +243,7 @@ namespace ScopeTest
         kgraph.control.addElement(Body(), {scope3}, {assign2});
         kgraph.control.addElement(Sequence(), {assign2}, {assign5});
 
-        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
         auto sched = GetParam();
         Settings::getInstance()->set(Settings::Scheduler, sched);

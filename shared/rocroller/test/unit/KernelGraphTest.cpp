@@ -2769,7 +2769,7 @@ namespace KernelGraphTest
         kgraph.mapper.connect(trueOp, destReg, NaryArgument::DEST);
         kgraph.mapper.connect(falseOp, destReg, NaryArgument::DEST);
 
-        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
         m_context->schedule(m_context->kernel()->preamble());
         m_context->schedule(m_context->kernel()->prolog());
@@ -2852,7 +2852,7 @@ namespace KernelGraphTest
         kgraph.control.addElement(Else(), {secondConditional}, {assignFalseBranch});
         kgraph.control.addElement(Sequence(), {firstConditional}, {storeIndex});
 
-        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
@@ -2946,7 +2946,7 @@ namespace KernelGraphTest
         kgraph.control.addElement(Body(), {doWhile}, {assignBody});
         kgraph.control.addElement(Sequence(), {doWhile}, {storeIndex});
 
-        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
@@ -2991,7 +2991,7 @@ namespace KernelGraphTest
         auto wait   = kgraph.control.addElement(WaitZero());
         kgraph.control.addElement(Body(), {kernel}, {wait});
 
-        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
@@ -3206,7 +3206,7 @@ namespace KernelGraphTest
         kgraph.control.addElement(Sequence(), {sc4}, {nop4});
         kgraph.control.addElement(Sequence(), {sc4}, {nop5});
 
-        auto removeSetCoordinate = std::make_shared<RemoveSetCoordinate>(m_context);
+        auto removeSetCoordinate = std::make_shared<RemoveSetCoordinate>();
         auto kg2                 = kgraph.transform(removeSetCoordinate);
 
         //  After:
