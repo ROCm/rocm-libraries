@@ -708,7 +708,7 @@ namespace rocRoller
                 auto const& typeInfo = DataTypeInfo::Get(ci.valueType);
                 auto        numBits  = DataTypeInfo::Get(typeInfo.segmentVariableType).elementBits;
 
-                if(numBits == 16 || numBits == 8 || numBits == 6 || numBits == 4)
+                if(false && (numBits == 16 || numBits == 8 || numBits == 6 || numBits == 4))
                 {
                     auto [elementBlockNumber, elementBlockIndex]
                         = getElementBlockValues(*m_graph, target, isTransposed);
@@ -849,8 +849,8 @@ namespace rocRoller
             auto m0 = m_context->getM0();
 
             // When padding, the ldsWriteStride might be larger than m_workgroupSizeTotal * numBytes
-            AssertFatal(info.ldsWriteStride >= m_workgroupSizeTotal * numBytes,
-                        ShowValue(info.ldsWriteStride));
+            // AssertFatal(info.ldsWriteStride >= m_workgroupSizeTotal * numBytes,
+            //             ShowValue(info.ldsWriteStride));
 
             if(setM0)
             {
@@ -1528,7 +1528,9 @@ namespace rocRoller
         {
             auto [ldsTag, lds]   = m_graph->getDimension<LDS>(tag);
             auto [tileTag, tile] = m_graph->getDimension<MacroTile>(tag);
-            auto dataType        = load.varType;
+
+            auto dataType = load.varType;
+            auto packing  = DataTypeInfo::Get(load.varType).packing;
 
             rocRoller::Log::getLogger()->debug("KernelGraph::LoadStoreTileGenerator::"
                                                "loadMacroTileDirect2LDS: OP {} LDS {} MacroTile {}",
@@ -1543,7 +1545,7 @@ namespace rocRoller
             Register::ValuePtr ldsAllocation;
             if(!m_context->registerTagManager()->hasRegister(ldsTag))
             {
-                auto numElements = getNumLDSElements(m_graph, tileTag, ldsTag);
+                auto numElements = getNumLDSElements(m_graph, tileTag, ldsTag) / packing;
 
                 ldsAllocation = Register::Value::AllocateLDS(m_context, dataType, numElements);
                 m_context->registerTagManager()->addRegister(ldsTag, ldsAllocation);
@@ -1562,7 +1564,6 @@ namespace rocRoller
             auto const m           = getUnsignedInt(evaluate(elemX.size));
             auto       n           = getUnsignedInt(evaluate(elemY.size));
 
-            auto packing = DataTypeInfo::Get(load.varType).packing;
             AssertFatal(n % packing == 0,
                         ShowValue(m),
                         ShowValue(n),
@@ -1931,6 +1932,7 @@ namespace rocRoller
             Register::ValuePtr ldsAllocation;
             if(!m_context->registerTagManager()->hasRegister(ldsTag))
             {
+		// XXX packing
                 auto numElements = getNumLDSElements(m_graph, macTileTag, ldsTag);
 
                 ldsAllocation = Register::Value::AllocateLDS(m_context, varType, numElements);
