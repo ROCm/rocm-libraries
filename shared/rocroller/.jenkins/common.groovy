@@ -309,6 +309,7 @@ def runPerformanceCommand (platform, project, mxDataGeneratorGitURL, mxDataGener
 
                         #Run Performance Test
                         export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:${project.paths.project_build_prefix}/build/
+                        export ROCROLLER_BUILD_DIR=`pwd`/build
 
                         ${masterCompareCommand}
 
@@ -372,6 +373,7 @@ def runPerformanceCommand (platform, project, mxDataGeneratorGitURL, mxDataGener
 
                         #Run Performance Test
                         export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:${project.paths.project_build_prefix}/build/
+                        export ROCROLLER_BUILD_DIR=`pwd`/build
                         ./scripts/rrperf run \\
                             --suite ${rrperfSuite} \\
                             --rundir "./performance_${platform.gpu}"
