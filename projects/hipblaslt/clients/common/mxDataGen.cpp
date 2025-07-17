@@ -135,7 +135,7 @@ void packData(std::vector<uint8_t> const& dataBytes, uint8_t* packedData)
 template <typename DT>
 std::vector<float> getAlignedFloat(std::vector<uint8_t>&       dataBytes,
                                    std::vector<uint8_t> const& scaleBytes,
-                                   std::array<int, 2> const    sizes,
+                                   std::array<DGen::index_t, 2> const    sizes,
                                    int                         elementsPerMXBlock,
                                    bool                        isMatrixA)
 {
@@ -215,8 +215,8 @@ template <typename T, typename DT>
 std::vector<float> generateData(T                           dgen,
                                 void*                       data,
                                 void*                       scale,
-                                std::vector<int>            sizes,
-                                std::vector<int>            strides,
+                                std::vector<DGen::index_t>  sizes,
+                                std::vector<DGen::index_t>  strides,
                                 uint32_t                    seed,
                                 DGen::DataGeneratorOptions& opt,
                                 int                         elementsPerMXBlock,
@@ -288,9 +288,9 @@ std::vector<float> generateData(T                           dgen,
 std::vector<float> generateMXInput(hipDataType            dataType,
                                    void*                  data,
                                    void*                  scale,
-                                   int                    rowSize,
-                                   int                    colSize,
-                                   int                    stride,
+                                   DGen::index_t          rowSize,
+                                   DGen::index_t          colSize,
+                                   DGen::index_t          stride,
                                    bool                   isTranspose,
                                    int const              scaleBlockRowSize,
                                    int const              scaleBlockColSize,
@@ -309,8 +309,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
 
     const uint32_t seed = 1713573849;
 
-    std::vector<int> sizes{rowSize, colSize};
-    std::vector<int> strides;
+    std::vector<index_t> sizes = {rowSize, colSize};
+    std::vector<index_t> strides;
 
     strides.push_back(1);
     strides.push_back(stride);

@@ -126,7 +126,7 @@ if( BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
       FetchContent_Declare(
         mxDataGenerator
         GIT_REPOSITORY https://github.com/ROCm/mxDataGenerator.git
-        GIT_TAG 12c016dc694139317feb2e23c59028fde70beaf4
+        GIT_TAG 31407efa7938fd70ea9b28e08a4d53e398415f8b
       )
       FetchContent_MakeAvailable(mxDataGenerator)
 
