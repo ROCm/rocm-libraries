@@ -192,7 +192,6 @@ namespace rocRoller
                 auto sequenceNodes
                     = kg.control.getOutputNodeIndices<CG::Sequence>(sc).to<std::vector>();
 
-                // TODO: use Matt's deleteControlNode to delete SetCoordinate
                 deleteControlNode(kg, sc);
 
                 if(not bodyNodes.empty())
