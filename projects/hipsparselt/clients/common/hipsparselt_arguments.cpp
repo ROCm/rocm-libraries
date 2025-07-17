@@ -103,6 +103,8 @@ void Arguments::init()
     HMM             = false;
     search          = false;
     search_iters    = 10;
+
+    inEqualOut      = false;
 }
 
 // Function to print Arguments out to stream in YAML format
