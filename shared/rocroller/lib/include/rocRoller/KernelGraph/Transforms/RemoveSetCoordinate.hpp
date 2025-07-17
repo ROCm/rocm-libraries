@@ -38,8 +38,7 @@ namespace rocRoller
         class RemoveSetCoordinate : public GraphTransform
         {
         public:
-            RemoveSetCoordinate(ContextPtr context)
-                : m_context(context)
+            RemoveSetCoordinate()
             {
             }
 
@@ -48,9 +47,6 @@ namespace rocRoller
             {
                 return "RemoveSetCoordinate";
             }
-
-        private:
-            ContextPtr m_context;
         };
     }
 }

@@ -115,7 +115,7 @@ namespace AssertTest
             kgraph.control.addElement(Sequence(), {setToZero}, {assertOp});
             kgraph.control.addElement(Sequence(), {assertOp}, {assignOne});
 
-            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
             m_context->schedule(rocRoller::KernelGraph::generate(kgraph, k));
 
@@ -266,7 +266,7 @@ namespace AssertTest
             kgraph.control.addElement(Sequence(), {setToZero}, {assertOp});
             kgraph.control.addElement(Sequence(), {assertOp}, {assignOne});
 
-            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
             m_context->schedule(rocRoller::KernelGraph::generate(kgraph, k));
 

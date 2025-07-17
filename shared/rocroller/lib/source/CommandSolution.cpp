@@ -431,7 +431,7 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::LoadPacked>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::AddConvert>());
 
-        transforms.push_back(std::make_shared<KernelGraph::RemoveSetCoordinate>(m_context));
+        transforms.push_back(std::make_shared<KernelGraph::RemoveSetCoordinate>());
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());        
 
         transforms.push_back(std::make_shared<KernelGraph::NopExtraScopes>());
