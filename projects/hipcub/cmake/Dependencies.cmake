@@ -66,10 +66,34 @@ endforeach()
 
 include(FetchContent)
 
+# This function checks to see if the download branch given by "branch" exists in the repository.
+# It does so using the git ls-remote command.
+# If the branch cannot be found, the variable described by "branch" is changed to "develop" in the host scope.
+function(find_download_branch git_path branch)
+  set(branch_value ${${branch}})
+  execute_process(COMMAND ${git_path} "ls-remote" "https://github.com/ROCm/rocm-libraries.git" "refs/heads/${branch_value}" RESULT_VARIABLE ret_code OUTPUT_VARIABLE output)
+
+  if(NOT ${ret_code} STREQUAL "0")
+    message(WARNING "Unable to check if release branch exists, defaulting to the develop branch.")
+    set(${branch} "develop" PARENT_SCOPE)
+  else()
+    if(${output})
+      string(STRIP ${output} output)
+    endif()
+
+    if(NOT (${output} MATCHES "${branch_value}$"))
+      message(WARNING "Unable to locate requested release branch \"${branch_value}\" in repository. Defaulting to the develop branch.")
+      set(${branch} "develop" PARENT_SCOPE)
+    else()
+      message(STATUS "Found release branch \"${branch_value}\" in repository.")
+    endif()
+  endif()
+endfunction()
+
 # This function fetches repository "repo_name" using the method specified by "method".
 # The result is stored in the parent scope version of "repo_path".
 # It does not build the repo.
-function(fetch_dep method repo_name repo_path)
+function(fetch_dep method repo_name repo_path download_branch)
   set(method_value ${${method}})
 
   if(${method_value} STREQUAL "PACKAGE")
@@ -104,6 +128,7 @@ function(fetch_dep method repo_name repo_path)
   endif()
 
   if(${method_value} STREQUAL "DOWNLOAD")
+    message(STATUS "Preparing to download ${repo_name}")
     message(STATUS "Checking git version")
 
     # Since the monorepo is large, we want to avoid downloading the whole thing if possible.
@@ -128,6 +153,10 @@ function(fetch_dep method repo_name repo_path)
       set(GIT_PATH ${GIT_EXECUTABLE})
     endif()
 
+    message(STATUS "Checking if repository contains requested branch ${${download_branch}}")
+    find_download_branch(${GIT_PATH} ${download_branch})
+    set(download_branch_value ${${download_branch}})
+
     message(STATUS "Downloading ${repo_name} from https://github.com/ROCm/rocm-libraries.git")
     if(GIT_VERSION_STRING GREATER_EQUAL ${GIT_MIN_VERSION_FOR_SPARSE_CHECKOUT})
       # In this case, we have access to git sparse-checkout.
@@ -136,14 +165,14 @@ function(fetch_dep method repo_name repo_path)
       if(${found_path} STREQUAL "found_path-NOTFOUND")
         # First, git clone with options "--no-checkout" and "--filter=tree:0" to prevent files from being pulled immediately.
         # Use option "--depth=1" to avoid downloading past commit history.
-        execute_process(COMMAND ${GIT_PATH} clone --no-checkout --depth=1 --filter=tree:0 https://github.com/ROCm/rocm-libraries.git ${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src)
+        execute_process(COMMAND ${GIT_PATH} clone --branch ${download_branch_value} --no-checkout --depth=1 --filter=tree:0 https://github.com/ROCm/rocm-libraries.git ${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src)
 
         # Next, use git sparse-checkout to ensure we only pull the directory containing the desired repo.
         execute_process(COMMAND ${GIT_PATH} sparse-checkout set --cone projects/${repo_name}
                         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src)
 
         # Finally, download the files using git checkout.
-        execute_process(COMMAND ${GIT_PATH} checkout develop
+        execute_process(COMMAND ${GIT_PATH} checkout ${download_branch_value}
                         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${repo_name}-src)
 
         message(STATUS "${repo_name} download complete")
@@ -160,8 +189,8 @@ function(fetch_dep method repo_name repo_path)
       if(${found_path} STREQUAL "found_path-NOTFOUND")
         # Warn the user that this will take some time.
         message(WARNING "The detected version of git (${GIT_VERSION_STRING}) is older than 2.25 and does not provide sparse-checkout functionality. Falling back to checking out the whole rocm-libraries repository (this may take a long time).")
-        # Avoid downloading anything related to branches other than develop (--single-branch), and avoid any past commit history information (--depth=1)
-        execute_process(COMMAND ${GIT_PATH} clone --single-branch --branch=develop --depth=1 https://github.com/ROCm/rocm-libraries.git ${CMAKE_CURRENT_BINARY_DIR}/monorepo-src)
+        # Avoid downloading anything related to branches other than the desired branch (--single-branch), and avoid any past commit history information (--depth=1)
+        execute_process(COMMAND ${GIT_PATH} clone --single-branch --branch ${download_branch_value} --depth=1 https://github.com/ROCm/rocm-libraries.git ${CMAKE_CURRENT_BINARY_DIR}/monorepo-src)
         message(STATUS "rocm-libraries download complete")
       else()
         message("Found previously downloaded directory, skipping download step.")
@@ -292,7 +321,7 @@ if(HIP_COMPILER STREQUAL "nvcc")
   endif()
 else()
   # rocPRIM (only for ROCm platform)
-  fetch_dep(ROCPRIM_FETCH_METHOD rocprim ROCPRIM_PATH)
+  fetch_dep(ROCPRIM_FETCH_METHOD rocprim ROCPRIM_PATH ROCM_DEP_RELEASE_BRANCH)
 
   if(${ROCPRIM_FETCH_METHOD} STREQUAL "DOWNLOAD" OR ${ROCPRIM_FETCH_METHOD} STREQUAL "MONOREPO")
     # The fetch_dep call above should have downloaded/located the source. We just need to make it available.

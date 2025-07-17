@@ -93,6 +93,14 @@ endfunction()
 
 check_fetch_method(ROCPRIM_FETCH_METHOD)
 
+# Setup download branch for ROCm dependency rocPRIM.
+# If the specified branch is not found in the dependency's repository, the develop branch will be pulled instead.
+# Note that this is only used if the ROCPRIM/ROCRAND_FETCH_METHOD is set to DOWNLOAD. The other fetch methods
+# locate an existing copy of the dependency.
+# Fetch method PACKAGE will use the branch that the pre-existing package was built with.
+# Fetch method MONOREPO will use the branch that is currently checked out in the local monorepo repository.
+set(ROCM_DEP_RELEASE_BRANCH "develop" CACHE STRING "Download branch for ROCm dependencies")
+
 # Add hipCUB's CMake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
