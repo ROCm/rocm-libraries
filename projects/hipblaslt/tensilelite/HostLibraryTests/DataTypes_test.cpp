@@ -121,7 +121,7 @@ TEST_P(Enumerations, Conversions)
     auto const& typeInfo = TensileLite::DataTypeInfo::Get(val);
 
     EXPECT_EQ(typeInfo.name, TensileLite::ToString(val));
-    EXPECT_EQ(typeInfo.abbrev, TensileLite::TypeAbbrev(val));
+    EXPECT_EQ(typeInfo.abbrev, rocisa::TypeAbbrev(val));
     EXPECT_EQ(&typeInfo, &TensileLite::DataTypeInfo::Get(typeInfo.name));
 
     {

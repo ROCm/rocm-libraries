@@ -28,6 +28,7 @@
 
 #include <glob.h>
 #include <unistd.h>
+#include <memory>
 
 #include <boost/version.hpp>
 
