@@ -249,9 +249,13 @@ void testing_spmm_batched_csc(const Arguments& arg)
         {
             hcsc_row_ind[nnz_A * i + j] = hcsc_row_ind_temp[j];
             if(arg.convert_to_int)
+            {
                 hcsc_val[nnz_A * i + j] = convertToInt<A>(hcsc_val_temp[j]);
+            }
             else
+            {
                 hcsc_val[nnz_A * i + j] = hcsc_val_temp[j];
+            }
         }
     }
 

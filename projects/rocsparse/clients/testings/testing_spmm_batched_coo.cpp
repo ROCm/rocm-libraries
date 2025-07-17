@@ -231,9 +231,13 @@ void testing_spmm_batched_coo(const Arguments& arg)
             hcoo_row_ind[nnz_A * i + j] = hcoo_row_ind_temp[j];
             hcoo_col_ind[nnz_A * i + j] = hcoo_col_ind_temp[j];
             if(arg.convert_to_int)
+            {
                 hcoo_val[nnz_A * i + j] = convertToInt<A>(hcoo_val_temp[j]);
+            }
             else
+            {
                 hcoo_val[nnz_A * i + j] = hcoo_val_temp[j];
+            }
         }
     }
 
