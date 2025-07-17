@@ -423,7 +423,7 @@ namespace rocRoller
 
             /**
              * This function is called to disallow certain operations
-             * (add/delete certain elements) if the graph is immutable.
+             * (add/delete certain elements).
              */
             virtual bool isModificationAllowed(int) const
             {
