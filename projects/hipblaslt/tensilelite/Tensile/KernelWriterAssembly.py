@@ -38,7 +38,7 @@ from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUI
                         scalarStaticRemainder, scalarUInt32DivideAndRemainder, sMagicDiv, vectorStaticMultiply, \
                         vectorStaticMultiplyAdd, scalarStaticMultiply64, BranchIfZero, BranchIfNotZero, DSInit, \
                         ArgumentLoader
-from rocisa.enum import InstType, SelectBit
+from rocisa.enum import InstType, SelectBit, CacheScope
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
 from . import CUSTOM_KERNEL_PATH
 from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32, \
@@ -12123,7 +12123,8 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def chooseGlobalWrite(self, useBuffer, bps, srcVgpr, rpv, \
                         addr0, addr1, offset, soffset=0, \
-                        glc=False, slc=False, nt=False, hi16=0, comment="store"):
+                        glc=False, slc=False, nt=False, scope = CacheScope.SCOPE_NONE, \
+                        hi16=0, comment="store"):
     """
     create the store instruction for requested vector width and other parms
     rpv = regs per vector
@@ -12166,7 +12167,7 @@ class KernelWriterAssembly(KernelWriter):
           if offset2 >= 4096:
             module.add(SMovB32(dst=tmpSgpr, src=offset2, comment="large offset"))
             offset2 = 0
-          mubuf2 = MUBUFModifiers(offen=True, offset12=offset2, glc=glc, slc=slc, nt=nt, isStore=True)
+          mubuf2 = MUBUFModifiers(offen=True, offset12=offset2, glc=glc, slc=slc, scope=scope, nt=nt, isStore=True)
           vgprOff = int(srcVgpr + shiftRpv * i) if isinstance(srcVgpr, int) else f"{srcVgpr}+{int(shiftRpv * i)}"
           module.add(BufferStoreB128(src=vgpr(vgprOff, shiftRpv), vaddr=addr0, \
                 saddr=addr1, soffset=tmpSgpr, mubuf=mubuf2, comment=comment))
@@ -12174,7 +12175,7 @@ class KernelWriterAssembly(KernelWriter):
         assert 0, "bad bps"
 
     if useBuffer:
-      mubuf = MUBUFModifiers(offen=True, offset12=offset, glc=glc, slc=slc, nt=nt, isStore=True)
+      mubuf = MUBUFModifiers(offen=True, offset12=offset, glc=glc, slc=slc, scope=scope, nt=nt, isStore=True)
       if soffset != 0:
         assert offset < 4096, "sgpr offset provided with large const offset"
       # buffer_load offset field is 12-bit.
@@ -12191,7 +12192,7 @@ class KernelWriterAssembly(KernelWriter):
         bufferStoreImpl(soffset, mubuf)
 
     else:
-      flat = FLATModifiers(glc=glc, slc=slc, isStore=True)
+      flat = FLATModifiers(glc=glc, slc=slc, scope=scope, isStore=True)
       if bps==2 and hi16:
         module.add(FlatStoreD16HIB16(vaddr=addr0, src=vgpr(srcVgpr*2), flat=flat, comment=comment))
       elif bps==2 and not hi16:
@@ -12321,6 +12322,7 @@ class KernelWriterAssembly(KernelWriter):
       isGlc = False
       isSlc = False
       isNT = False
+      scope = CacheScope.SCOPE_NONE
 
       if tc == 'D':
         isGlc = bool(kernel["NonTemporalD"] & 0x1)
@@ -12361,6 +12363,7 @@ class KernelWriterAssembly(KernelWriter):
         isGlc = True
         isSlc = True
         isNT  = bool(kernel["NonTemporalD"] & 0x4)
+        scope = CacheScope.SCOPE_DEV
 
         bps = self.states.bpeCinternal * ss.cfg.gwvw
         rpv = self.states.bpeCinternal * ss.cfg.gwvw / self.states.bpr
@@ -12410,36 +12413,36 @@ class KernelWriterAssembly(KernelWriter):
           if self.states.asmCaps["HasWMMA_V1"] and kernel["EnableMatrixInstruction"]:
             module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx, rpv, \
                 addr0, addr1, globalOffset, soffset=wsOffset, \
-                glc=isGlc, slc=isSlc, nt=isNT, hi16=0, comment=comment))
+                glc=isGlc, slc=isSlc, nt=isNT, scope=scope, hi16=0, comment=comment))
           else:
             module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx//2, rpv, \
                 addr0, addr1, globalOffset, soffset=wsOffset, \
-                glc=isGlc, slc=isSlc, nt=isNT, hi16=sumIdx%2, comment=comment))
+                glc=isGlc, slc=isSlc, nt=isNT, scope=scope, hi16=sumIdx%2, comment=comment))
         else:
           # (B,B,B,B,S,S), internal S
           # (H,H,H,H,H,H), internal S
           # (H,H,H,H,S,S), internal S
           module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx, rpv, \
               addr0, addr1, globalOffset, soffset=wsOffset, \
-              glc=isGlc, slc=isSlc, nt=isNT, hi16=0, comment=comment))
+              glc=isGlc, slc=isSlc, nt=isNT, scope=scope, hi16=0, comment=comment))
       elif dataType.isInt32() or dataType.isSingle():
         module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx, rpv, \
             addr0, addr1, globalOffset, soffset=wsOffset, \
-            glc=isGlc, slc=isSlc, nt=isNT, comment=comment))
+            glc=isGlc, slc=isSlc, nt=isNT, scope=scope, comment=comment))
       elif dataType.isDouble() or dataType.isSingleComplex():
         module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx*2, rpv, \
             addr0, addr1, globalOffset, soffset=wsOffset, \
-            glc=isGlc, slc=isSlc, nt=isNT, comment=comment))
+            glc=isGlc, slc=isSlc, nt=isNT, scope=scope, comment=comment))
       elif dataType.isDoubleComplex():
         rps = dataType.numRegisters()
         module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx*rps, rpv, \
             addr0, addr1, globalOffset, soffset=wsOffset, \
-            glc=isGlc, slc=isSlc, nt=isNT, comment=comment))
+            glc=isGlc, slc=isSlc, nt=isNT, scope=scope, comment=comment))
       elif dataType.isInt8() or dataType.isAnyFloat8() or dataType.isAnyBFloat8() or dataType.isAnyFloat8BFloat8() or dataType.isAnyBFloat8Float8():
         if kernel["ProblemType"]["HighPrecisionAccumulate"]:
           module.add(self.chooseGlobalWrite(useBuffer, bps, sumIdx, rpv, \
               addr0, addr1, globalOffset, soffset=wsOffset, \
-              glc=isGlc, slc=isSlc, nt=isNT, comment=comment))
+              glc=isGlc, slc=isSlc, nt=isNT, scope=scope, comment=comment))
     return module
 
   ##############################################################################
