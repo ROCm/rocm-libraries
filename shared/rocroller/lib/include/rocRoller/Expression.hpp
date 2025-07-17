@@ -753,6 +753,8 @@ namespace rocRoller
 
         std::string   toString(ExpressionPtr const& expr);
         std::string   toString(Expression const& expr);
+        std::string   toPython(ExpressionPtr const& expr);
+        std::string   toPython(Expression const& expr);
         std::ostream& operator<<(std::ostream&, ExpressionPtr const&);
         std::ostream& operator<<(std::ostream&, Expression const&);
         std::ostream& operator<<(std::ostream&, std::vector<ExpressionPtr> const&);

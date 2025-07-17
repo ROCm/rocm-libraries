@@ -41,10 +41,6 @@ namespace rocRoller
 {
     namespace Expression
     {
-        /*
-         * to string
-         */
-
         struct ExpressionToStringVisitor
         {
             template <CTernary Expr>
@@ -186,5 +182,129 @@ namespace rocRoller
             auto visitor = ExpressionToStringVisitor();
             return visitor.call(expr);
         }
+
+        struct ExpressionToPythonVisitor
+        {
+            template <CTernary Expr>
+            std::string operator()(Expr const& expr) const
+            {
+                return concatenate(ExpressionInfo<Expr>::name(),
+                                   "(",
+                                   call(expr.lhs),
+                                   ", ",
+                                   call(expr.r1hs),
+                                   ", ",
+                                   call(expr.r2hs),
+                                   ")");
+            }
+
+            template <CBinary Expr>
+            std::string operator()(Expr const& expr) const
+            {
+                return concatenate(
+                    ExpressionInfo<Expr>::name(), "(", call(expr.lhs), ", ", call(expr.rhs), ")");
+            }
+
+            template <CUnary Expr>
+            std::string operator()(Expr const& expr) const
+            {
+                return concatenate(ExpressionInfo<Expr>::name(), "(", call(expr.arg), ")");
+            }
+
+            std::string operator()(BitFieldExtract const& expr) const
+            {
+                return concatenate(ExpressionInfo<BitFieldExtract>::name(),
+                                   "(",
+                                   call(expr.arg),
+                                   ", width=",
+                                   expr.width,
+                                   ", offset=",
+                                   expr.offset,
+                                   ")");
+            }
+
+            std::string operator()(Register::ValuePtr const& expr) const
+            {
+                std::string tostr = "UNALLOCATED";
+                if(expr->canUseAsOperand())
+                    tostr = expr->toString();
+
+                return tostr;
+            }
+
+            std::string operator()(ScaledMatrixMultiply const& expr) const
+            {
+                return concatenate("ScaledMatrixMultiply(",
+                                   call(expr.matA),
+                                   ", ",
+                                   call(expr.matB),
+                                   ", ",
+                                   call(expr.matC),
+                                   ", ",
+                                   call(expr.scaleA),
+                                   ", ",
+                                   call(expr.scaleB),
+                                   ")");
+            }
+
+            std::string operator()(CommandArgumentPtr const& expr) const
+            {
+                if(expr)
+                    return concatenate("CommandArgument(\"", expr->name(), "\")");
+                else
+                    return "CommandArgument(None)";
+            }
+
+            std::string operator()(CommandArgumentValue const& expr) const
+            {
+                return std::visit([](auto const& val) { return concatenate(val); }, expr);
+            }
+
+            std::string operator()(AssemblyKernelArgumentPtr const& expr) const
+            {
+                return expr->name;
+            }
+
+            std::string operator()(WaveTilePtr const& expr) const
+            {
+                return "WaveTile";
+            }
+
+            std::string operator()(DataFlowTag const& expr) const
+            {
+                return concatenate("DataFlowTag(", expr.tag, ")");
+            }
+
+            std::string operator()(PositionalArgument const& expr) const
+            {
+                return concatenate("PositionalArgument(", expr.slot, ")");
+            }
+
+            std::string call(Expression const& expr) const
+            {
+                return std::visit(*this, expr);
+            }
+
+            std::string call(ExpressionPtr expr) const
+            {
+                if(!expr)
+                    return "None";
+
+                return call(*expr);
+            }
+        };
+
+        std::string toPython(Expression const& expr)
+        {
+            auto visitor = ExpressionToPythonVisitor();
+            return visitor.call(expr);
+        }
+
+        std::string toPython(ExpressionPtr const& expr)
+        {
+            auto visitor = ExpressionToPythonVisitor();
+            return visitor.call(expr);
+        }
+
     }
 }
