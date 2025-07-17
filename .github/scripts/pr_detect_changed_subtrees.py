@@ -32,9 +32,10 @@ Example Usage:
 """
 
 import argparse
-import sys
-import os
+import json
 import logging
+import os
+import sys
 from typing import List, Optional, Set
 from github_cli_client import GitHubCLIClient
 from repo_config_model import RepoEntry
@@ -118,7 +119,6 @@ def main(argv=None) -> None:
         logger.warning("REST API failed or returned no changed files. Falling back to SHA-based Git diff...")
         try:
             pr_data = os.popen(f"gh api repos/{args.repo}/pulls/{args.pr}").read()
-            import json
             pr = json.loads(pr_data)
             base_sha = pr["base"]["sha"]
             head_sha = pr["head"]["sha"]
