@@ -165,10 +165,13 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
     static constexpr bool is_float = std::is_same_v<Ti, float> || std::is_same_v<Ti, float const*>;
     static constexpr bool is_double
         = std::is_same_v<Ti, double> || std::is_same_v<Ti, double const*>;
-    static constexpr bool is_complex_float = std::is_same_v<Ti, rocblas_float_complex>
-                                             || std::is_same_v<Ti, rocblas_float_complex const*>;
-    static constexpr bool is_complex_double = std::is_same_v<Ti, rocblas_double_complex>
-                                              || std::is_same_v<Ti, rocblas_double_complex const*>;
+    static constexpr bool is_complex_float
+        = std::is_same_v<Ti,
+                         rocblas_float_complex> || std::is_same_v<Ti, rocblas_float_complex const*>;
+    static constexpr bool is_complex_double
+        = std::is_same_v<
+              Ti,
+              rocblas_double_complex> || std::is_same_v<Ti, rocblas_double_complex const*>;
     const bool is_atomics_allowed = handle->atomics_mode == rocblas_atomics_allowed ? true : false;
 
     //Identifying the architecture to have an appropriate optimization

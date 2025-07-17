@@ -65,8 +65,8 @@
 template <typename T>
 __device__ __forceinline__ T rocblas_gemvt_conj_if(T val, bool do_conj)
 {
-    if constexpr(std::is_same_v<T, rocblas_float_complex>
-                 || std::is_same_v<T, rocblas_double_complex>)
+    if constexpr(std::is_same_v<T,
+                                rocblas_float_complex> || std::is_same_v<T, rocblas_double_complex>)
     {
         if(do_conj)
         {
