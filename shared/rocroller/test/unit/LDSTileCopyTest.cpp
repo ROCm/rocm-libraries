@@ -285,7 +285,7 @@ namespace LDSCopyTest
         auto deallocateDF = std::make_shared<AddDeallocateDataFlow>();
         kgraph            = kgraph.transform(deallocateDF);
 
-        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>(m_context));
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
