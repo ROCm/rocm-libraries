@@ -386,13 +386,21 @@ namespace rocRoller
                 return graph.coordinates.get<CT::DataFlow>(tag).has_value();
             };
 
+            auto isLoadPredicate = [&graph](int x) {
+                return graph.control.get<LoadTiled>(x).has_value()
+                       || graph.control.get<LoadLDSTile>(x).has_value();
+            };
+
             auto target = ldsTag;
             while(true)
             {
-                if(!dataType)
+                if(not dataType)
                 {
                     for(auto conn : graph.mapper.getCoordinateConnections(target))
-                        dataType = getVariableType(graph, conn.control).dataType;
+                    {
+                        if(isLoadPredicate(conn.control))
+                            dataType = getVariableType(graph, conn.control).dataType;
+                    }
                 }
 
                 auto edge = only(
@@ -504,6 +512,35 @@ namespace rocRoller
                                                maybeLayoutTypeAndDataType->first};
         }
 
+        std::string makePythonFunction(KernelGraph const&      graph,
+                                       std::string const&      functionName,
+                                       std::vector<int> const& required,
+                                       ExpressionPtr const&    expr)
+        {
+            std::string docstring;
+
+            auto arguments = std::vector<ExpressionPtr>{};
+            for(int i = 0; i < required.size(); ++i)
+            {
+                arguments.push_back(
+                    std::make_shared<rocRoller::Expression::Expression>(PositionalArgument(i)));
+                docstring.append(fmt::format("    # {} = {}\n",
+                                             rocRoller::Expression::toPython(arguments.back()),
+                                             toString(graph.coordinates.getNode(required[i]))));
+            }
+
+            std::string argumentExtract = "    def PositionalArgument(i):\n"
+                                          "        return args[i]\n";
+
+            std::string functionBody = fmt::format("def {}(*args):\n{}\n{}\n    return {}\n",
+                                                   functionName,
+                                                   docstring,
+                                                   argumentExtract,
+                                                   rocRoller::Expression::toPython(expr));
+
+            return functionBody;
+        }
+
         /**
          * @brief Commit LDS padding changes to the graph.
          *
@@ -522,6 +559,78 @@ namespace rocRoller
                           info.upstreamEdge,
                           info.downstreamEdge,
                           paddingElements);
+
+                // Emit global load expression
+                {
+                    namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+
+                    auto isDataFlow = [&](int tag) -> bool {
+                        return graph.coordinates.get<CT::DataFlow>(tag).has_value();
+                    };
+                    auto isUser = [&](int tag) -> bool {
+                        return graph.coordinates.get<CT::User>(tag).has_value();
+                    };
+
+                    auto userTag = only(filter(isUser,
+                                               graph.coordinates.depthFirstVisit(
+                                                   ldsTag, isDataFlow, GD::Upstream)))
+                                       .value();
+
+                    auto [required, _path]
+                        = findRequiredCoordinates(userTag, GD::Downstream, graph);
+                    auto arguments = std::vector<ExpressionPtr>{};
+                    for(int i = 0; i < required.size(); ++i)
+                    {
+                        arguments.push_back(std::make_shared<rocRoller::Expression::Expression>(
+                            PositionalArgument(i)));
+                    }
+                    auto loadExpr = graph.coordinates.reverse(arguments, {userTag}, required);
+
+                    Log::info("KernelGraph::AddLDSPadding: "
+                              "Adding load expression for User tag {} layout {}:\n{}",
+                              userTag,
+                              toString(info.layoutType),
+                              makePythonFunction(graph, "globalLoad", required, loadExpr[0]));
+                }
+
+                // Emit LDS store expression
+                {
+                    auto [required, _path]
+                        = findRequiredCoordinates(info.ldsTag, GD::Upstream, graph);
+                    auto arguments = std::vector<ExpressionPtr>{};
+                    for(int i = 0; i < required.size(); ++i)
+                    {
+                        arguments.push_back(std::make_shared<rocRoller::Expression::Expression>(
+                            PositionalArgument(i)));
+                    }
+                    auto storeExpr = graph.coordinates.forward(arguments, required, {info.ldsTag});
+
+                    Log::info("KernelGraph::AddLDSPadding: "
+                              "Adding store expression for LDS tag {} layout {}:\n{}",
+                              info.ldsTag,
+                              toString(info.layoutType),
+                              makePythonFunction(graph, "ldsStore", required, storeExpr[0]));
+                }
+
+                // Emit LDS load expression
+                {
+                    auto [required, _path]
+                        = findRequiredCoordinates(info.ldsTag, GD::Downstream, graph);
+                    auto arguments = std::vector<ExpressionPtr>{};
+                    for(int i = 0; i < required.size(); ++i)
+                    {
+                        arguments.push_back(std::make_shared<rocRoller::Expression::Expression>(
+                            PositionalArgument(i)));
+                    }
+                    auto loadExpr = graph.coordinates.reverse(arguments, {info.ldsTag}, required);
+
+                    Log::info("KernelGraph::AddLDSPadding: "
+                              "Adding load expression for LDS tag {} layout {}:\n{}",
+                              info.ldsTag,
+                              toString(info.layoutType),
+                              makePythonFunction(graph, "ldsLoad", required, loadExpr[0]));
+                }
+		
 
                 if(paddingElements == 0)
                     continue;
