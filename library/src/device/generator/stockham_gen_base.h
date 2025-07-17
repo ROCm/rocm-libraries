@@ -149,6 +149,9 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     Variable lds_complex{"lds_complex", "scalar_type", true, true};
     Variable lds_row_padding{"lds_row_padding", "unsigned int"};
 
+    // hip thread grid dim
+    Variable grid_dim{"gridDim.x", "unsigned int"};
+
     // hip thread block id
     Variable block_id{"blockIdx.x", "unsigned int"};
 

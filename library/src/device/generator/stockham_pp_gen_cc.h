@@ -106,11 +106,9 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
     Variable tid_hor_pp{"tid_hor_pp", "unsigned int"};
     Variable offset_tid_hor{"offset_tid_hor", "unsigned int"};
     Variable offset_pp{"offset_pp", "unsigned int"};
-    Variable thread_new{"thread_new", "unsigned int"};
-    Variable batch_new{"batch_new", "unsigned int"};
+    Variable thread_pp{"thread_pp", "unsigned int"};
 
-    Variable thread_idx{"thread_idx", "unsigned int"};
-    Variable block_idx{"block_idx", "unsigned int"};
+    Variable block_idx_pp{"block_idx_pp", "unsigned int"};
 
     Variable thread_in_device_twd{"thread_in_device_twd", "unsigned int"};
 
@@ -274,6 +272,8 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         stmts += Declaration{tile_index};
         stmts += Declaration{num_of_tiles};
 
+        stmts += Declaration(block_idx_pp, block_id % Parens{grid_dim / nbatch});
+
         stmts += LineBreak{};
         stmts += CommentLines{"calculate offset for each tile:",
                               "  tile_index  now means index of the tile along dim1",
@@ -283,9 +283,9 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         stmts += Declaration{index_along_d};
         stmts += Assign{num_of_tiles, (lengths[1] - 1) / transforms_per_block_pp + 1};
         stmts += Assign{plength, num_of_tiles};
-        stmts += Assign{tile_index, block_id % num_of_tiles};
+        stmts += Assign{tile_index, block_idx_pp % num_of_tiles};
 
-        stmts += Assign{remaining, (block_id % num_blocks_per_batch) / num_of_tiles};
+        stmts += Assign{remaining, (block_idx_pp % num_blocks_per_batch) / num_of_tiles};
         stmts += Assign{offset, tile_index * transforms_per_block_pp * stride[1]};
         stmts += For{d,
                      2,
@@ -298,7 +298,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         stmts += LineBreak{};
 
-        stmts += Assign{batch, block_id / plength};
+        stmts += Assign{batch, block_id / (plength / pp_factors_curr_prod)};
 
         stmts += Assign{transform,
                         tile_index * transforms_per_block_pp + thread_id / threads_per_transform};
@@ -320,17 +320,13 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         stmts += Declaration(tid_hor_pp,
                              thread_id % transforms_per_block_pp
                                  + lengths[1] * (thread % pp_factors_curr_prod));
-        stmts += Declaration(thread_new,
-                             thread_id / (transforms_per_block_pp * pp_factors_curr_prod));
-        stmts += Declaration(batch_new, block_id / (plength / pp_factors_curr_prod));
-
-        stmts += Declaration(thread_idx, thread_id);
-        stmts += Declaration(block_idx, block_id);
+        stmts
+            += Declaration(thread_pp, thread_id / (transforms_per_block_pp * pp_factors_curr_prod));
 
         stmts += Declaration(
             offset_pp,
             offset + Parens(offset / lengths[1]) * (lengths[1] * pp_factors_curr_prod - lengths[1])
-                + batch_new * stride[dim]);
+                + batch * stride[dim]);
         stmts += Declaration(offset_tid_hor, offset_pp + tid_hor_pp * stride[1]);
 
         stmts += Assign{transform,
@@ -357,7 +353,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
             auto stripmine_h = workgroup_size / stripmine_w;
 
             auto offset_tile_rbuf
-                = [&](unsigned int i) { return (thread_new + i * stripmine_h) * stride0; };
+                = [&](unsigned int i) { return (thread_pp + i * stripmine_h) * stride0; };
             auto offset_tile_wlds = [&](unsigned int i) {
                 return tid_hor_lds * stride_lds
                        + (thread_lds + i * stripmine_h * max_factor_pp) * 1;
@@ -463,7 +459,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         auto stripmine_h = workgroup_size / stripmine_w;
 
         auto offset_tile_wbuf = [&](unsigned int i) {
-            return offset_tid_hor + (thread_new + i * stripmine_h) * stride0;
+            return offset_tid_hor + (thread_pp + i * stripmine_h) * stride0;
         };
         auto offset_tile_rlds = [&](unsigned int i) {
             return tid_hor_lds * stride_lds + (thread_lds + i * stripmine_h * max_factor_pp) * 1;
