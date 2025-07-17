@@ -232,7 +232,6 @@ namespace rocRoller
 
             AssertFatal(isModificationAllowed(index), "addElement is disallowed on this graph");
 
-
             if(elementType == ElementType::Edge)
             {
                 int incidentOrder = 0;
