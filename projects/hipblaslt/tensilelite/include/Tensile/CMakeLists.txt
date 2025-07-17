@@ -1,0 +1,83 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+if(HIPBLASLT_ENABLE_LLVM)
+  add_subdirectory(llvm)
+endif()
+
+if(HIPBLASLT_ENABLE_MSGPACK)
+  add_subdirectory(msgpack)
+endif()
+
+if(HIPBLASLT_ENABLE_HIP)
+  add_subdirectory(hip)
+endif()
+
+add_subdirectory(analytical)
+add_subdirectory(Serialization)
+
+target_sources(tensilelite-host
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/AMDGPU.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AMDGPUPredicates.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AMDGPU_Detail.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Activation.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ArithmeticUnitTypes.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/CachingLibrary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Comparison.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ContractionLibrary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ContractionProblem.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ContractionProblemPredicates.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ContractionProblemProperties.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ContractionProblem_Detail.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ContractionProblem_fwd.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ContractionSolution.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ContractionSolution_fwd.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Contractions.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_BFloat16.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_Float8_BFloat8.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_Half.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_Int8.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_Int8x4.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DataTypes_XFloat32.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Debug.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Distance.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DistinctType.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/EmbeddedData.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/EmbeddedLibrary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ExactLogicLibrary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/FreeSizeLibrary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GranularitySelectionLibrary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/KernelArguments.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/KernelLanguageTypes.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MLFeatures.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MLPClassification.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MLPClassificationLibrary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Macros.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MapLibrary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MasterSolutionLibrary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MatchingLibrary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/PerformanceMetricTypes.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/PlaceholderLibrary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Predicates.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ProblemKey.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Properties.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/PropertyMatching.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ScalarValueTypes.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Serialization.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SingleSolutionLibrary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Singleton.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SolutionLibrary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SolutionLibrary_fwd.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SolutionMapLibrary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile_fwd.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptor.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptor_Detail.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptor_fwd.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TensorOps.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TensorOps_fwd.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Utils.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/geom.hpp"
+)
