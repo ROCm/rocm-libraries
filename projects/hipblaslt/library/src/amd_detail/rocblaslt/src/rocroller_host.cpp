@@ -644,6 +644,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
         elementSizeA_bits,
         elementSizeA_bits,
         elementSizeC_bits,
+        TensileLite::analytical::DataType::Float8,
         kernelType.scaleABlockRowSize * kernelType.scaleABlockColSize, //Handle A vs B block size.
         0.8,
         false,
