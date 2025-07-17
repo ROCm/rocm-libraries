@@ -154,7 +154,7 @@ namespace rocRoller
                 addEdges.template operator()<ControlGraph::Body>();
         }
 
-        static bool const verifyInputEdgesAreOfTheSameType(KernelGraph const& kg, int const node)
+        static bool const getAndVerifyInputEdgesAreOfTheSameType(KernelGraph const& kg, int const node)
         {
             using GD = rocRoller::Graph::Direction;
 
@@ -186,24 +186,14 @@ namespace rocRoller
                                       .to<std::vector>();
                 AssertFatal(not inputNodes.empty());
 
-                bool const isSequenceEdge = verifyInputEdgesAreOfTheSameType(kg, sc);
+                bool const isSequenceEdge = getAndVerifyInputEdgesAreOfTheSameType(kg, sc);
 
                 auto bodyNodes = kg.control.getOutputNodeIndices<CG::Body>(sc).to<std::vector>();
                 auto sequenceNodes
                     = kg.control.getOutputNodeIndices<CG::Sequence>(sc).to<std::vector>();
 
                 // TODO: use Matt's deleteControlNode to delete SetCoordinate
-                std::vector<int> del;
-                for(auto edge : kg.control.getNeighbours<GD::Upstream>(sc))
-                    del.push_back(edge);
-                for(auto edge : kg.control.getNeighbours<GD::Downstream>(sc))
-                    del.push_back(edge);
-
-                for(auto edge : del)
-                    kg.control.deleteElement(edge);
-
-                kg.control.deleteElement(sc);
-                kg.mapper.purge(sc);
+                deleteControlNode(kg, sc);
 
                 if(not bodyNodes.empty())
                 {
