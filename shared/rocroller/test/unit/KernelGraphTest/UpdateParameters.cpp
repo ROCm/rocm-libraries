@@ -133,7 +133,7 @@ namespace KernelGraphTest
         workitemCount = m_context->kernel()->workitemCount();
 
         auto one            = Expression::literal(1u);
-        auto workgroupSizeX = Expression::literal(128u);
+        auto workgroupSizeX = Expression::literal(static_cast<int64_t>(128));
 
         auto expected = Expression::convert(DataType::UInt32,
                                             ((tensorDsizeX->expression() + workgroupSizeX) - one)
