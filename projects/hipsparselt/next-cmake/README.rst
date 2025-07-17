@@ -72,6 +72,43 @@ Full build of |project_name|
 
       View debugging info by adding ``--log-level=VERBOSE`` to the configure command.
 
+List available presets
+----------------------
+
+   .. code-block:: cmake
+
+      cd projects/hipsparselt/next-cmake
+      # View all configure presets
+      cmake --list-presets=configure
+
+Release build
+-------------
+
+   .. code-block:: cmake
+
+      # Configure with default release preset
+      cmake --preset default-release
+
+      # Build using the fast preset (32 parallel jobs)
+      cmake --build _build --parallel 32 --verbose
+
+Debug build for development
+---------------------------
+
+   .. code-block:: cmake
+
+      cmake --preset debug
+      cmake --build _build
+      ./_build/staging/hipsparselt-test
+
+Build specific GPU targets
+--------------------------
+
+   .. code-block:: cmake
+
+      cmake --preset default-release -D GPU_TARGETS="gfx1201"
+      cmake --build _build --parallel 32 --verbose
+
 
 Options
 -------

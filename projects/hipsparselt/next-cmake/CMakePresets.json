@@ -1,0 +1,49 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "default-release",
+      "displayName": "Release Build (Default GPU)",
+      "description": "Standard release build with default GPU target",
+      "binaryDir": "${sourceDir}/_build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
+        "CMAKE_C_COMPILER": "/opt/rocm/bin/amdclang",
+        "CMAKE_PREFIX_PATH": "/opt/rocm",
+        "GPU_TARGETS": "all"
+      },
+      "environment": {
+        "ROCM_PATH": "/opt/rocm"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug Build",
+      "description": "Debug build with debugging symbols and runtime checks",
+      "inherits": "default-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BUILD_CLIENTS_TESTS": "ON",
+        "BUILD_CLIENTS_BENCHMARKS": "ON",
+        "BUILD_CLIENTS_SAMPLES": "ON"
+      }
+    },
+    {
+      "name": "clients-only",
+      "displayName": "Clients Development",
+      "description": "Build with all client applications for testing",
+      "inherits": "debug",
+      "cacheVariables": {
+        "HIPSPARSELT_ENABLE_CLIENTS": "ON",
+        "HIPSPARSELT_ENABLE_CUDA": "OFF",
+        "GPU_TARGETS": "all"
+      }
+    }
+  ]
+} 
