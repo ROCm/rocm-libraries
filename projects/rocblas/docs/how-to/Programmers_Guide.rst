@@ -16,7 +16,8 @@ memory allocation, and other technical considerations.
 Source code organization
 ================================
 
-The rocBLAS code can be found at the `rocBLAS GitHub <https://github.com/ROCm/rocBLAS>`_.
+The rocBLAS code can be found in the `rocBLAS folder <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_
+of the `rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries>`_.
 It is split into three major parts:
 
 * The ``library`` directory contains all the source code for the library.
