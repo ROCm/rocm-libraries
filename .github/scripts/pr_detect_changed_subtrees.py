@@ -119,10 +119,11 @@ def main(argv=None) -> None:
         try:
             # Ensure fetch is safe
             os.system("git fetch origin +refs/pull/*/merge:refs/remotes/origin/pr/*")
+            os.system("git fetch origin develop:develop")
             # Get merge commit ref for this PR
             base_ref = f"origin/{os.getenv('GITHUB_BASE_REF', 'main')}"
             head_ref = "HEAD"  # Assumes checkout to PR merge ref
-            result = os.popen(f"git diff --name-only {base_ref}...{head_ref}").read()
+            result = os.popen(f"git diff --name-only {base_ref} {head_ref}").read()
             changed_files = result.strip().splitlines()
             logger.info(f"Fallback changed files: {changed_files}")
         except Exception as e:
