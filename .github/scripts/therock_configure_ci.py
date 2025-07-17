@@ -6,25 +6,32 @@ Required environment variables:
 """
 
 import json
+import logging
 from therock_matrix import subtree_to_project_map, project_map
 from typing import Mapping
 import os
 
+logging.basicConfig(level=logging.INFO)
 
 def set_github_output(d: Mapping[str, str]):
     """Sets GITHUB_OUTPUT values.
     See https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/passing-information-between-jobs
     """
-    print(f"Setting github output:\n{d}")
+    logging.info(f"Setting github output:\n{d}")
     step_output_file = os.environ.get("GITHUB_OUTPUT", "")
     if not step_output_file:
-        print("Warning: GITHUB_OUTPUT env var not set, can't set github outputs")
+        logging.warning("Warning: GITHUB_OUTPUT env var not set, can't set github outputs")
         return
     with open(step_output_file, "a") as f:
         f.writelines(f"{k}={v}" + "\n" for k, v in d.items())
         
         
 def retrieve_projects(args):
+    # TODO(geomin12): #590 Enable TheRock CI for forked PRs
+    if args.get("is_forked_pr"):
+        logging.info("Warning: not enabling any projects due to is_forked_pr. Builds/tests for forked PRs are disabled pending: https://github.com/ROCm/rocm-libraries/issues/590")
+        return []
+    
     if args.get("is_pull_request"):
         subtrees = args.get("input_subtrees").split("\n")
     
@@ -60,16 +67,21 @@ def run(args):
 
 
 if __name__ == "__main__":
-    github_event_name = os.getenv("GITHUB_EVENT_NAME")
     args = {}
+    github_event_name = os.getenv("GITHUB_EVENT_NAME")
     args["is_pull_request"] = github_event_name == "pull_request"
     args["is_push"] = github_event_name == "push"
     args["is_workflow_dispatch"] = github_event_name == "workflow_dispatch"
+    
+    is_forked_pr = os.getenv("IS_FORKED_PR")
+    args["is_forked_pr"] = is_forked_pr == "true"
     
     input_subtrees = os.getenv("SUBTREES", "")
     args["input_subtrees"] = input_subtrees
     
     input_projects = os.getenv("PROJECTS", "")
     args["input_projects"] = input_projects
+    
+    logging.info(f"Retrieved arguments {args}")
 
     run(args)

@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-#include "../common/common/GEMMProblem.hpp"
+#include "common/GEMMProblem.hpp"
 
 GEMMProblem setup_GEMMF8_NT()
 {
