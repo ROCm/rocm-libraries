@@ -104,17 +104,15 @@ namespace TensileLite
                     // TODO ComplexFloat
                     // TODO ComplexDouble
                     // F16
-                    {MatrixInstruction(32, 32, 4, DataType::Half), 64}, // v_mfma_f32_32x32x4_2b_f16
                     {MatrixInstruction(32, 32, 8, DataType::Half), 32}, // v_mfma_f32_32x32x8_f16
-                    {MatrixInstruction(16, 16, 4, DataType::Half), 32}, // v_mfma_f32_16x16x4_4b_f16
+                    {MatrixInstruction(32, 32, 16, DataType::Half), 32}, // v_mfma_f32_32x32x16_f16
                     {MatrixInstruction(16, 16, 16, DataType::Half), 16}, // v_mfma_f32_16x16x16_f16
-                    {MatrixInstruction(4, 4, 4, DataType::Half), 8}, // v_mfma_f32_4x4x4_16b_f16
+                    {MatrixInstruction(16, 16, 32, DataType::Half), 16}, // v_mfma_f32_16x16x32_f16
                     // BF16
-                    {MatrixInstruction(32, 32, 4, DataType::BFloat16), 64}, // v_mfma_f32_32x32x4_2b_bf16
                     {MatrixInstruction(32, 32, 8, DataType::BFloat16), 32}, // v_mfma_f32_32x32x8_bf16
-                    {MatrixInstruction(16, 16, 4, DataType::BFloat16), 32}, // v_mfma_f32_16x16x4_4b_bf16
+                    {MatrixInstruction(32, 32, 16, DataType::BFloat16), 32}, // v_mfma_f32_32x32x16_bf16
                     {MatrixInstruction(16, 16, 16, DataType::BFloat16), 16}, // v_mfma_f32_16x16x16_bf16
-                    {MatrixInstruction(4, 4, 4, DataType::BFloat16), 8}, // v_mfma_f32_4x4x4_16b_bf16
+                    {MatrixInstruction(16, 16, 32, DataType::BFloat16), 16}, // v_mfma_f32_16x16x16_bf16
                     // F8
                     {MatrixInstruction(32, 32, 64, DataType::Float8), 64}, // v_mfma_f32_32x32x64_f8
                     {MatrixInstruction(32, 32, 16, DataType::Float8), 32}, // v_mfma_f32_32x32x16_f8
@@ -142,11 +140,10 @@ namespace TensileLite
                     {MatrixInstruction(16, 16, 4, DataType::Int8), 32}, // v_mfma_i32_16x16x4_4b_i8
                     {MatrixInstruction(4, 4, 4, DataType::Int8), 8}, // v_mfma_i32_4x4x4_16b_i8
                     // XF32
-                    {MatrixInstruction(32, 32, 4, DataType::XFloat32), 192}, // v_mfma_f32_32x32x4_2b_xf32
-                    {MatrixInstruction(32, 32, 8, DataType::XFloat32), 96}, // v_mfma_f32_32x32x8_xf32
-                    {MatrixInstruction(16, 16, 4, DataType::XFloat32), 96}, // v_mfma_f32_16x16x4_4b_xf32
-                    {MatrixInstruction(16, 16, 16, DataType::XFloat32), 48}, // v_mfma_f32_16x16x16_xf32
-                    {MatrixInstruction(4, 4, 4, DataType::XFloat32), 24}, // v_mfma_f32_4x4x4_16b_xf32
+                    {MatrixInstruction(32, 32, 8, DataType::BFloat16), 96}, // v_mfma_f32_32x32x8_bf16 * 3
+                    {MatrixInstruction(32, 32, 16, DataType::BFloat16), 96}, // v_mfma_f32_32x32x16_bf16 * 3
+                    {MatrixInstruction(16, 16, 16, DataType::BFloat16), 48}, // v_mfma_f32_16x16x16_bf16 * 3
+                    {MatrixInstruction(16, 16, 32, DataType::BFloat16), 48}, // v_mfma_f32_16x16x16_bf16 * 3
                     // MX types F6/F4 use F8 instructions
                 }}};
 
