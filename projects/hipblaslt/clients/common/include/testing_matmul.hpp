@@ -1986,8 +1986,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                         do_swizzle_b));
             CHECK_HIP_ERROR(synchronize(hC[i], dC[i]));
 
-            const char* hipblasltDumpToFile = getenv("HIPBLASLT_DUMP_MATRICES_TO_FILE");
-            if(hipblasltDumpToFile && std::strcmp(hipblasltDumpToFile, "true") == 0)
+            if(arg.dump_matrix)
             {
                 hipblasltDispatchValuesToFile(transA, TiA, M[i], K[i], lda[i], hA[i].buf(), "batch_"+ std::to_string(i)+"_A_input.txt");
                 hipblasltDispatchValuesToFile(transB, TiB, K[i], N[i], ldb[i], hB[i].buf(), "batch_"+ std::to_string(i)+"_B_input.txt");
@@ -3980,8 +3979,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
             {
-                const char* hipblasltDumpToFile = getenv("HIPBLASLT_DUMP_MATRICES_TO_FILE");
-                if(hipblasltDumpToFile && std::strcmp(hipblasltDumpToFile, "true") == 0)
+                if(arg.dump_matrix)
                 {
                     hipblasltDispatchValuesToFile(HIPBLAS_OP_N, To, M[0], N[0], ldd[0], hD_1[0].buf(), "batch_0_D_output.txt");
                     hipblasltDispatchValuesToFile(HIPBLAS_OP_N, To, M[0], N[0], ldd[0], hD_gold[0].buf(), "batch_0_D_Gold_output.txt");
