@@ -241,14 +241,14 @@ struct device_reduce_by_key_benchmark_generator
     CREATE_BENCHMARK_TYPE(KEY, double)
 
 // All of the tuned types
-#define CREATE_BENCHMARK_TYPE_TUNING(KEY)          \
-    CREATE_BENCHMARK_TYPE(KEY, rocprim::int128_t)  \
-    CREATE_BENCHMARK_TYPE(KEY, int64_t)            \
-    CREATE_BENCHMARK_TYPE(KEY, int)            \
-    CREATE_BENCHMARK_TYPE(KEY, short)            \
-    CREATE_BENCHMARK_TYPE(KEY, int8_t)             \
-    CREATE_BENCHMARK_TYPE(KEY, double) \
-    CREATE_BENCHMARK_TYPE(KEY, float)              \
+#define CREATE_BENCHMARK_TYPE_TUNING(KEY)         \
+    CREATE_BENCHMARK_TYPE(KEY, rocprim::int128_t) \
+    CREATE_BENCHMARK_TYPE(KEY, int64_t)           \
+    CREATE_BENCHMARK_TYPE(KEY, int)               \
+    CREATE_BENCHMARK_TYPE(KEY, short)             \
+    CREATE_BENCHMARK_TYPE(KEY, int8_t)            \
+    CREATE_BENCHMARK_TYPE(KEY, double)            \
+    CREATE_BENCHMARK_TYPE(KEY, float)             \
     CREATE_BENCHMARK_TYPE(KEY, rocprim::half)
 
 template<bool Deterministic>
