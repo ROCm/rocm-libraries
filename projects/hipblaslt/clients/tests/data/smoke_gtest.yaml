@@ -412,8 +412,8 @@ Tests:
     - { M:   16,  N:   16,  K:  128  }
     - { M:  256,  N:  256,  K:  256  }
   transA_transB: *transA_transB_range
-  alpha: [ 1.0 ]
-  beta: [ 0.0 ]
+  alpha: [ 1.0, 5.0 ]
+  beta: [ 0.0, 2.0 ]
   initialization: [hpl, rand_int]
   unit_check: 0
   norm_check: 1
@@ -430,8 +430,8 @@ Tests:
     - { M:  256,  N:  256,  K:  256  }
   transA: T
   transB: N
-  alpha: [ 1.0 ]
-  beta: [ 0.0 ]
+  alpha: [ 1.0, 5.0 ]
+  beta: [ 0.0, 2.0 ]
   initialization: [hpl, rand_int]
   unit_check: 0
   norm_check: 1

@@ -644,6 +644,13 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SNop& self, nb::dict&) { return new rocisa::SNop(self); });
 
+    nb::class_<rocisa::VNop, rocisa::Instruction>(m_common, "VNop")
+        .def(nb::init<int, const std::string&>(), nb::arg("count"), nb::arg("comment") = "")
+        .def("getParams", &rocisa::VNop::getParams)
+        .def("__str__", &rocisa::VNop::toString)
+        .def("__deepcopy__",
+             [](const rocisa::VNop& self, nb::dict&) { return new rocisa::VNop(self); });
+
     nb::class_<rocisa::SEndpgm, rocisa::Instruction>(m_common, "SEndpgm")
         .def(nb::init<const std::string&>(), nb::arg("comment") = "")
         .def("getParams", &rocisa::SEndpgm::getParams)

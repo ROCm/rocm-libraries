@@ -1427,6 +1427,45 @@ namespace rocisa
         int waitState;
     };
 
+    struct VNop : public Instruction
+    {
+        VNop(int count, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , count(count)
+        {
+            setInst("v_nop");
+        }
+
+        VNop(const VNop& other)
+            : Instruction(other)
+            , count(other.count)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VNop>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {count};
+        }
+
+        std::string toString() const override
+        {
+            std::string resultStr = "";
+            for (int i = 0; i < count; i++)
+            {
+                resultStr += formatWithComment(instStr);
+            }
+            return resultStr;
+        }
+
+    private:
+        int count;
+    };
+
     struct SEndpgm : public Instruction
     {
         SEndpgm(const std::string& comment = "")
