@@ -107,7 +107,7 @@ namespace rocRoller
                 addEdges.template operator()<ControlGraph::Body>();
         }
 
-        static bool const verifyInputEdgesAreOfTheSameType(KernelGraph const& kg, int const node)
+        static bool const getAndVerifyInputEdgesAreOfTheSameType(KernelGraph const& kg, int const node)
         {
             using GD = rocRoller::Graph::Direction;
 
