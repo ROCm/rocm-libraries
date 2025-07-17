@@ -60,10 +60,10 @@ namespace rocRoller
 
         bool CoordinateGraph::isModificationAllowed(int index) const
         {
-            if(not isRestricted)
+            if(not Settings::getInstance()->get(Settings::EnforceGraphConstraints))
                 return true;
 
-            if(not Settings::getInstance()->get(Settings::EnforceGraphConstraints))
+            if(not isRestricted)
                 return true;
 
             auto const& el = getElement(index);
