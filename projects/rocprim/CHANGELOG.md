@@ -4,9 +4,15 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ## rocPRIM 4.1.0 for ROCm 7.1
 
+### Upcoming changes
+
+* Deprecated the `->` operator for the `zip_iterator`.
+
 ### Resolved issues
 
 * Fixed `device_select`, `device_merge`, and `device_merge_sort` not allocating the correct amount of virtual shared memory on the host.
+* Fixed the `->` operator for the `transform_iterator`, the `texture_cache_iterator` and the `arg_index_iterator`, by now returning a proxy pointer.
+  * The `arg_index_iterator` also now only returns the internal iterator for the `->`.
 
 ## rocPRIM 4.0.0 for ROCm 7.0
 
@@ -66,7 +72,6 @@ when the input or inital type was smaller than the output type.
 ### Upcoming changes
 
 * `rocprim::invoke_result_binary_op` and `rocprim::invoke_result_binary_op_t` are deprecated. Use `rocprim::accumulator_t` now.
-* Deprecated the `->` operator for the `zip_iterator`.
 
 ### Removed
 
@@ -106,8 +111,6 @@ when the input or inital type was smaller than the output type.
 * Fixed constness of equality operators (`==` and `!=`) in `rocprim::key_value_pair`.
 * Fixed an issue for the comparison operators in `arg_index_iterator` and `texture_cache_iterator`, where `<` and `>` comparators were swapped.
 * Fixed an issue for the `rocprim::thread_reduce` not working correctly with a prefix value.
-* Fixed the `->` operator for the `transform_iterator`, the `texture_cache_iterator` and the `arg_index_iterator`, by now returning a proxy pointer.
-  * The `arg_index_iterator` also now only returns the internal iterator for the `->`.
 
 ### Known issues
 * When using `rocprim::deterministic_inclusive_scan_by_key` and `rocprim::deterministic_exclusive_scan_by_key` the intermediate values can change order on Navi3x
