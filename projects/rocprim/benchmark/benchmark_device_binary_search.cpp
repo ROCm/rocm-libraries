@@ -45,18 +45,9 @@
     #include <stdint.h>
 #endif
 
-#define CREATE_BENCHMARK(VALUE_TYPE, OUTPUT_TYPE, K, SORTED, SUBALGORITHM)                     \
-    executor.queue_fn(                                                                         \
-        bench_naming::format_name("{lvl:device,algo:" + SUBALGORITHM{}.name()                  \
-                                  + ",key_type:" #VALUE_TYPE ",needle_distribution:" #K "_percent_"     \
-                                  + std::string(SORTED ? "sorted" : "random")                  \
-                                  + "_needles,cfg:default_config}")                            \
-            .c_str(),                                                                          \
-        [=](benchmark_utils::state&& state)                                                    \
-        {                                                                                      \
-            device_binary_search_benchmark<SUBALGORITHM, VALUE_TYPE, OUTPUT_TYPE, K, SORTED>() \
-                .run(std::forward<benchmark_utils::state>(state));                             \
-        });
+#define CREATE_BENCHMARK(VALUE_TYPE, OUTPUT_TYPE, K, SORTED, SUBALGORITHM) \
+    executor.queue_instance(                                               \
+        device_binary_search_benchmark<SUBALGORITHM, VALUE_TYPE, OUTPUT_TYPE, K, SORTED>());
 
 #define BENCHMARK_ALGORITHMS(VALUE_TYPE, OUTPUT_TYPE, K, SORTED)                     \
     CREATE_BENCHMARK(VALUE_TYPE, OUTPUT_TYPE, K, SORTED, binary_search_subalgorithm) \
