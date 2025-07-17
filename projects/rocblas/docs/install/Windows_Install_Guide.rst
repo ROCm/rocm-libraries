@@ -236,7 +236,7 @@ The rocBLAS clients can be built on their own by using ``rmake.py`` with a pre-e
 
 The version of the rocBLAS clients being built should match the version of the installed rocBLAS.
 You can determine the version of the installed rocBLAS in the HIP SDK directory
-from the file ``projects\rocblas\include\rocblas\internal\rocblas-version.h``.
+from the file ``include\rocblas\internal\rocblas-version.h``.
 If you have installed the ``grep`` utility, you can find the version of rocBLAS being built
 by running the ``grep "VERSION_STRING" CMakeLists.txt`` command in the
 rocBLAS directory where you are building the clients.
