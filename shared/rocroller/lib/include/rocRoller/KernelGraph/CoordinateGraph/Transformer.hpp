@@ -85,7 +85,7 @@ namespace rocRoller
             auto const& getIndexes() const
             {
                 return m_indexes;
-            }            
+            }
 
             /**
              * Forward (bottom-up) coordinate transform.

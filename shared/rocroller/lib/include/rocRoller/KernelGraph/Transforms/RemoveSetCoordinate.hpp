@@ -38,9 +38,7 @@ namespace rocRoller
         class RemoveSetCoordinate : public GraphTransform
         {
         public:
-            RemoveSetCoordinate()
-            {
-            }
+            RemoveSetCoordinate() {}
 
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override
