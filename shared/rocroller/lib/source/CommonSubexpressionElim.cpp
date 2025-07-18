@@ -273,43 +273,16 @@ namespace rocRoller
                 }
 
                 AssertFatal(tree.back().deps.size() == 1);
-
-                auto        depIdx = *tree.back().deps.begin();
-                auto const& dep    = tree.at(depIdx);
-
-                if(dep.reg->variableType() == expr.destinationType)
+                for(auto dep : tree.back().deps)
                 {
-                    // Simplify
-                    tree.pop_back();
-                    tree.back().reg = nullptr;
-                    return tree;
-                }
-                else
-                {
-                    auto depTypeInfo = DataTypeInfo::Get(dep.reg->variableType());
-                    auto expTypeInfo = DataTypeInfo::Get(expr.destinationType);
-
-                    if(depTypeInfo.isIntegral && expTypeInfo.isIntegral
-                       && depTypeInfo.elementBits == expTypeInfo.elementBits)
+                    if(tree.at(dep).reg->variableType() == expr.destinationType)
                     {
-                        auto valueRange = iota(0ul, dep.reg->valueCount()).to<std::vector>();
-
-                        auto reg = dep.reg->element(valueRange);
-                        reg->setVariableType(expr.destinationType);
-
-                        auto regWithName = tree.back().reg ? tree.back().reg : reg;
-                        reg->setName(regWithName->name() + " convertInPlace");
-
-                        Log::trace(
-                            "Forwarding {} to {}", dep.reg->description(), reg->description());
-                        Log::trace("Forwarding {} to {}",
-                                   (void*)dep.reg->allocation().get(),
-                                   (void*)reg->allocation().get());
-
-                        tree.back().reg = reg;
+                        // Simplify
+                        tree.pop_back();
+                        tree.back().reg = nullptr;
+                        return tree;
                     }
                 }
-
                 return tree;
             }
 

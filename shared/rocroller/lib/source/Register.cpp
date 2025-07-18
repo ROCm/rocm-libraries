@@ -115,16 +115,12 @@ namespace rocRoller
             return std::make_shared<Expression::Expression>(shared_from_this());
         }
 
-        bool Value::sameRegistersAs(ValuePtr b) const
-        {
-            return this->regType() == b->regType() && this->registerCount() == b->registerCount()
-                   && this->allocationCoord() == b->allocationCoord()
-                   && this->allocation() == b->allocation();
-        }
-
         bool Value::sameAs(ValuePtr b) const
         {
-            return this->variableType() == b->variableType() && this->sameRegistersAs(b);
+            return this->regType() == b->regType() && this->variableType() == b->variableType()
+                   && this->registerCount() == b->registerCount()
+                   && this->allocationCoord() == b->allocationCoord()
+                   && this->allocation() == b->allocation();
         }
 
         std::vector<ValuePtr> Value::split(std::vector<std::vector<int>> const& indices)

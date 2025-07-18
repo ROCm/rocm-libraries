@@ -351,4 +351,35 @@ namespace ExpressionTest
             EXPECT_TRUE(identical(expr, rebuildExpression(results)));
         }
     }
+
+    TEST_F(CommonSubexpressionElimTest, SameConvert)
+    {
+        auto ra = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int32, 1);
+        ra->allocateNow();
+
+        auto rb = std::make_shared<Register::Value>(
+            m_context, Register::Type::Vector, DataType::Int32, 1);
+        rb->allocateNow();
+
+        auto a = ra->expression();
+        auto b = rb->expression();
+
+        {
+            auto expr    = convert<DataType::UInt32>(a) + convert<DataType::UInt32>(a);
+            auto results = consolidateSubExpressions(expr, m_context);
+            for(const auto& result : results)
+            {
+                std::cout << result.expr << std::endl;
+            }
+            std::cout << rebuildExpression(results) << std::endl;
+            EXPECT_EQ(results.size(), 2);
+            // EXPECT_TRUE(
+            //     !identical(results[2].reg->expression(), m_context->getSCC()->expression())
+            //     || !identical(results[3].reg->expression(), m_context->getSCC()->expression()));
+            // EXPECT_EQ(getConsolidationCount(results), 0);
+
+            // EXPECT_TRUE(identical(expr, rebuildExpression(results)));
+        }
+    }
 }
