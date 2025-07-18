@@ -423,7 +423,7 @@ rocblas_sizeof_datatype function
 
     size_t rocblas_sizeof_datatype(rocblas_datatype type)
 
-Returns the size of a rocBLAS runtime data type.
+Returns the size of a rocBLAS data type.
 
 
 Answering device memory size queries in functions that do not need memory
