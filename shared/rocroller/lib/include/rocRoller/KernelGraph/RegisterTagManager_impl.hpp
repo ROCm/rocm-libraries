@@ -307,12 +307,12 @@ namespace rocRoller
 
     inline bool RegisterTagManager::hasRegister(int tag) const
     {
-        // auto merge = getIndex(tag);
-        // if(merge)
-        // {
-        //     auto [dst, index] = *merge;
-        //     return hasRegister(dst);
-        // }
+        auto merge = getIndex(tag);
+        if(merge)
+        {
+            auto [dst, index] = *merge;
+            return hasRegister(dst);
+        }
 
         auto segment = getSegment(tag);
         if(segment)

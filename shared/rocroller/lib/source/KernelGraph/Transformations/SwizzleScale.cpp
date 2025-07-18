@@ -643,14 +643,14 @@ namespace rocRoller
                 graph.coordinates.addElement(Index(0), {exchangeTileTag}, {tileTag});
                 graph.mapper.connect<MacroTile>(exchange, exchangeTileTag);
 
-                auto destMacTileTag = context->kernelOptions()->skipPermlane
+                auto destMacTileTag = context->kernelOptions()->scaleSkipPermlane
                                           ? exchangeTileTag
                                           : graph.coordinates.addElement(MacroTile());
 
                 graph.mapper.connect(exchange, destMacTileTag, NaryArgument::DEST);
 
                 auto createNode = [&context](int idx) -> rocRoller::KernelGraph::CoordinateGraph::Edge {
-                    if(context->kernelOptions()->skipPermlane)
+                    if(context->kernelOptions()->scaleSkipPermlane)
                         return Segment(idx);
 
                     return Index(idx);
@@ -689,7 +689,7 @@ namespace rocRoller
                             Index(merge.second), {exchangeTileTag}, {tileTag});
                         graph.mapper.connect<MacroTile>(replaceOp, exchangeTileTag);
 
-                        destMacTileTag = context->kernelOptions()->skipPermlane
+                        destMacTileTag = context->kernelOptions()->scaleSkipPermlane
                                           ? exchangeTileTag
                                           : graph.coordinates.addElement(MacroTile());
                         graph.mapper.connect(replaceOp, destMacTileTag, NaryArgument::DEST);

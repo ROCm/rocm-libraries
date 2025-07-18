@@ -1181,7 +1181,7 @@ namespace rocRoller
 
                 auto packedVariableType = DataTypeInfo::Get(exchange.varType).packedVariableType();
 
-                if(packedVariableType && !m_context->kernelOptions()->skipPermlane)
+                if(packedVariableType && !m_context->kernelOptions()->scaleSkipPermlane)
                 {
                     auto allocOptions = Register::AllocationOptions::FullyContiguous();
                     auto temp         = Register::Value::Placeholder(
@@ -1197,7 +1197,7 @@ namespace rocRoller
 
                 auto oMacTileTag = m_graph->mapper.get(tag, NaryArgument::DEST);
 
-                if(m_context->kernelOptions()->skipPermlane)
+                if(m_context->kernelOptions()->scaleSkipPermlane)
                 {
                     AssertFatal(m_context->registerTagManager()->hasRegister(oMacTileTag), ShowValue(oMacTileTag));
                 }

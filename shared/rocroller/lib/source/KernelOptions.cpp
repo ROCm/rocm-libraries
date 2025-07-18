@@ -162,7 +162,7 @@ namespace rocRoller
              values.maxConcurrentControlOps ? std::to_string(*values.maxConcurrentControlOps)
                                             : "none");
         ShowOption(enableFullDivision);
-        ShowOption(skipPermlane);
+        ShowOption(scaleSkipPermlane);
         ShowString(assertOpKind);
 
 #undef Show

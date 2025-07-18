@@ -117,10 +117,11 @@ namespace rocRoller
         bool enableFullDivision = false;
 
         /**
-         * Skip generation of permlane instructions.  This is experimental and
-         * will cause the validation to fail, but will show better performance.
+         * Skip generation of permlane instructions when loading scale data.
+         * This is experimental and will cause the validation to fail, but will
+         * show better performance.
          */
-        bool skipPermlane = false;
+        bool scaleSkipPermlane = false;
 
         /**
          * Which method to use to crash the kernel if an assertion fails.
