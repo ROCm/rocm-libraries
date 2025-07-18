@@ -42,7 +42,7 @@ function(hipblaslt_configure_bundled_python_command python_binary_dir asan_optio
         "${python_binary_dir}"
         # TODO: This should not need to traverse to the parent directory once
         # moved to the root.
-        "${hipblaslt_SOURCE_DIR}/../tensilelite"
+        "${hipblaslt_SOURCE_DIR}/tensilelite"
     )
     list(JOIN _python_path "${_ds}" _python_path)
 

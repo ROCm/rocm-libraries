@@ -25,14 +25,28 @@
         }
       },
       {
-        "name": "hipblaslt-host",
-        "displayName": "Host",
-        "description": "Configures just tensilelite host and client",
+        "name": "hipblaslt",
+        "displayName": "hipBLASLt",
+        "description": "Build just the hipblaslt library and required deps",
         "inherits": "opt-rocm",
         "cacheVariables": {
           "HIPBLASLT_ENABLE_HOST": "ON",
           "HIPBLASLT_ENABLE_DEVICE": "OFF",
           "HIPBLASLT_ENABLE_CLIENT": "OFF"
+        }
+      },
+      {
+        "name": "gemm-libs",
+        "displayName": "Build gemm libraries",
+        "description": "Configures just tensilelite host and client",
+        "inherits": "opt-rocm",
+        "cacheVariables": {
+          "HIPBLASLT_ENABLE_HOST": "OFF",
+          "HIPBLASLT_ENABLE_DEVICE": "ON",
+          "HIPBLASLT_ENABLE_CLIENT": "OFF",
+          "TENSILELITE_ENABLE_HOST": "OFF",
+          "TENSILELITE_ENABLE_CLIENT": "OFF"
+
         }
       }
   ]

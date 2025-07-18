@@ -169,7 +169,7 @@ if(HIPBLASLT_ENABLE_DEVICE)
         # setup. In the meantime, the directory passed here must match the
         # what is set there. Failure to do so will cause a ModuleNotFoundError
         # trying to load rocisa.
-        hipblaslt_configure_bundled_python_command("${CMAKE_BINARY_DIR}/lib" "${asan_opts}")
+        hipblaslt_configure_bundled_python_command("${PROJECT_BINARY_DIR}/lib" "${asan_opts}")
     else()
         # Just pass through to the found python executable and trust that the
         # user set it up properly.
@@ -248,13 +248,13 @@ if(HIPBLASLT_ENABLE_HOST)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_MARKER) # public header?
     endif()
 
-    set(TENSILELITE_HOST_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/Tensile/Source/lib")
+    set(TENSILELITE_HOST_SOURCE_DIR "${hipblaslt_SOURCE_DIR}/tensilelite/Tensile/Source/lib")
     set(HIPBLASLT_CLIENTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../clients")
 
     target_include_directories(hipblaslt
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/include>
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/src/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/include>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         PRIVATE
             "${CMAKE_CURRENT_BINARY_DIR}/library/include"
