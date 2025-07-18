@@ -2599,14 +2599,14 @@ class Solution(collections.abc.Mapping):
           grvw = 1
           vw = 1
           if state["ProblemType"]["Sparse"] == 2:
-            grvw = state["GlobalReadVectorWidthB"] // 4
-            vw = state["VectorWidthB"] // 4
+            grvw = math.ceil(state["GlobalReadVectorWidthB"] / 4)
+            vw = math.ceil(state["VectorWidthB"] / 4)
             if state["GlobalReadVectorWidthB"] % 4 != 0:
               reject(state, printRejectionReason, "Sparse B requires GRVWB %% 4 == 0, current GRVWB is %u"%state["GlobalReadVectorWidthB"])
               break
           else:
-            grvw = state["GlobalReadVectorWidthA"] // 4
-            vw = state["VectorWidthA"] // 4
+            grvw = math.ceil(state["GlobalReadVectorWidthA"] / 4)
+            vw = math.ceil(state["VectorWidthA"] / 4)
             if state["GlobalReadVectorWidthA"] % 4 != 0:
               reject(state, printRejectionReason, "Sparse A requires GRVWA %% 4 == 0, current GRVWA is %u"%state["GlobalReadVectorWidthA"])
               break
@@ -3060,6 +3060,16 @@ class Solution(collections.abc.Mapping):
       if state["DirectToVgprB"] and state['MIWaveGroup'][0] > 1:
         reject(state, printRejectionReason, "DirectToLds + (DirectToVgprB + WaveGroups along M-Dim) is not supported yet")
         return False
+
+    state["enableLDSTrMetadata"] = isaInfoMap[isa].asmCaps["HasLDSTrB64B8"] and state["ProblemType"]["MetadataLayout"]
+    if state["enableLDSTrMetadata"]:
+      state["VectorWidthMetadata"] = 1
+
+      # the VetorWidth of the sparse matrix and metadta need to be the same.
+      if state["ProblemType"]["Sparse"] == 1:
+        state["VectorWidthA"] = 1
+      else:
+        state["VectorWidthB"] = 1
 
     auto_LdsBlockSizePerPadA_for_mix = 0
     if state["LdsBlockSizePerPadA"] == -1:

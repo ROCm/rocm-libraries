@@ -100,6 +100,7 @@ namespace TensileLite
             bool                             m_useUserArgs;
             bool                             m_swizzleTensorA;
             bool                             m_swizzleTensorB;
+            int                              m_metadataLayout;
 
             TensorOps m_aOps;
             TensorOps m_bOps;

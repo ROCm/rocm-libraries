@@ -916,15 +916,21 @@ namespace TensileLite
             return m_highPrecisionAccumulate;
         }
 
-        void setSparse(int value)
+        void setSparse(int value, int layout)
         {
             m_sparse = value;
+            m_metadataLayout = layout;
             normalizeSparse();
         }
 
         int sparse() const
         {
             return m_sparse;
+        }
+
+        int metadataLayout() const
+        {
+            return m_metadataLayout;
         }
 
         void setKernelLanguage(KernelLanguage value)
@@ -1293,6 +1299,7 @@ namespace TensileLite
         ActivationType   m_activationType          = ActivationType::None;
         bool             m_activationNoGuard       = false;
         int              m_sparse                  = 0;
+        int              m_metadataLayout          = 0;
 
         KernelLanguage    m_kernelLanguage    = KernelLanguage::Any;
         PerformanceMetric m_performanceMetric = PerformanceMetric::DeviceEfficiency;

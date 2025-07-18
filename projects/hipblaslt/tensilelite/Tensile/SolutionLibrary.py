@@ -480,6 +480,7 @@ class MasterSolutionLibrary:
                     placeholderName += '_SAV'
                 if problemType.sparse:
                     placeholderName += '_SPB' if problemType.sparse == 2 else '_SPA'
+                    placeholderName += "ML" + str(problemType.metadataLayout)
                 if not problemType.f32XdlMathOp.isSingle() and problemType.computeInputType.isSingle():
                     placeholderName += '_M' + str(problemType.f32XdlMathOp)
                 if problemType.supportDeviceUserArguments:

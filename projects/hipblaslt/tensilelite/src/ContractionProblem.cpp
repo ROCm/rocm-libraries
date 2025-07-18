@@ -969,14 +969,12 @@ namespace TensileLite
                     compressed_sizes[0] /= 2;
                     compressed_strides[1] = compressed_sizes[0];
                     metadata_sizes[0]     = compressed_sizes[0] / 4;
-                    metadata_strides[1]   = metadata_sizes[0];
                 }
                 else
                 {
                     compressed_sizes[1] /= 2;
                     metadata_sizes[1]   = compressed_sizes[0];
                     metadata_sizes[0]   = compressed_sizes[1] / 4;
-                    metadata_strides[1] = metadata_sizes[0];
                 }
             }
             else
@@ -986,16 +984,19 @@ namespace TensileLite
                     compressed_sizes[1] /= 2;
                     metadata_sizes[0]   = compressed_sizes[1] / 4;
                     metadata_sizes[1]   = compressed_sizes[0];
-                    metadata_strides[1] = metadata_sizes[0];
                 }
                 else
                 {
                     compressed_sizes[0] /= 2;
                     compressed_strides[1] = compressed_sizes[0];
                     metadata_sizes[0]     = compressed_sizes[0] / 4;
-                    metadata_strides[1]   = metadata_sizes[0];
                 }
             }
+            if(m_metadataLayout)
+            {
+                std::swap(metadata_sizes[0], metadata_sizes[1]);
+            }
+            metadata_strides[1]   = metadata_sizes[0];
 
             for(int i = 2; i < compressed_sizes.size(); i++)
             {

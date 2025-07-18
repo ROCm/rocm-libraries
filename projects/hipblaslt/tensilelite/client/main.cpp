@@ -375,6 +375,7 @@ namespace TensileLite
                 ("output-amaxD",              po::value<bool>()->default_value(false), "Output AmaxD.")
                 ("timing-instrumentation",    po::value<bool>()->default_value(false)->implicit_value(true), "Enable detailed timing instrumentation output to stderr.")
                 ("rocprof-counter",           vector_default_empty<std::string>(), "Rocprof counters.")
+                ("metadata-layout",           po::value<int32_t>()->default_value(0), "Sparse Metadata Layout")
                 ;
             // clang-format on
 

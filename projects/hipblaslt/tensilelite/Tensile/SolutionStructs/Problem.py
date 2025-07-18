@@ -469,6 +469,7 @@ _defaultProblemType = {
     "SupportUserArgs": True,
     "SwizzleTensorA": False,
     "SwizzleTensorB": False,
+    "MetadataLayout": 0
 }
 
 # The supported typed GEMM, each entry is (Ti, To, Tc).
@@ -842,9 +843,15 @@ class ProblemType(Mapping):
     self["IndexAssignmentsA"] = [0, sumIdx] # N
     self["IndexAssignmentsB"] = [sumIdx, 1] # N
     if self.state["Sparse"] == 2:
-      self["IndexAssignmentsMetadata"] = [sumIdx, 1] # N (ref B)
+      if self.state["MetadataLayout"]:
+        self["IndexAssignmentsMetadata"] = [1, sumIdx] # T (ref B)
+      else:
+        self["IndexAssignmentsMetadata"] = [sumIdx, 1] # N (ref B)
     else:
-      self["IndexAssignmentsMetadata"] = [sumIdx, 0] # T (ref A)
+      if self.state["MetadataLayout"]:
+        self["IndexAssignmentsMetadata"] = [0, sumIdx] # N (ref A)
+      else:
+        self["IndexAssignmentsMetadata"] = [sumIdx, 0] # T (ref A)
     if self["TransposeA"]:
       self["IndexAssignmentsA"] = [sumIdx, 0] # T
     if self["TransposeB"]:
@@ -1060,9 +1067,9 @@ class ProblemType(Mapping):
       name.append("AmaxD")
     if self["Sparse"]:
       if self["Sparse"] == 2:
-        name.append("SPB")
+        name.append("SPBML%d"%(self["MetadataLayout"]))
       else:
-        name.append("SPA")
+        name.append("SPAML%d"%(self["MetadataLayout"]))
 
     # precision and other
     # name += "_SB" if self["StridedBatched"] else "_GB"

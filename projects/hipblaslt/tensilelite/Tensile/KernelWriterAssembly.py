@@ -526,9 +526,7 @@ class KernelWriterAssembly(KernelWriter):
     localRead2Perpendicular = False
     localReadStrideCoalesced = int(kernel[tP["tt"]] * tP["bpeDS"]) // bpr
     localRead2Coalesced = False
-    tP["enableLDSTr"] = False
-    if tChar != "Metadata":
-        tP["enableLDSTr"] = kernel["enableLDSTr%s"%tChar]
+    tP["enableLDSTr"] = kernel["enableLDSTr%s"%tChar]
 
     lrInstPoolName = "LocalRead"
     if tP["enableLDSTr"]:
@@ -539,7 +537,8 @@ class KernelWriterAssembly(KernelWriter):
       elif tP["bpeDS"] != 2:
         assert False, f"Unhandled bpeDS: {tP['bpeDS']}"
 
-      localReadInstructionIdx = self.selectTransposedDSReadInstuctionIdx(min(int(localReadWidth*kernel["MIInputPerThread"]), maxTrLoadNumReturnedVgpr), tP["bpeDS"])
+      loadNumReturnVgrp = min(int(localReadWidth*kernel["MIInputPerThread"]), maxTrLoadNumReturnedVgpr) if tChar != "Metadata" else 2
+      localReadInstructionIdx = self.selectTransposedDSReadInstuctionIdx(loadNumReturnVgrp, tP["bpeDS"])
     else:
       localReadInstructionIdx = self.selectMemoryInstruction("LocalRead", localReadWidth, \
                                  False, \
@@ -7229,6 +7228,8 @@ class KernelWriterAssembly(KernelWriter):
     numReadsIterCoalescedB = self.states.numReadsIterCoalescedB
     numReadsIterCoalesced = max(numReadsIterCoalescedA, numReadsIterCoalescedB)
 
+    tPM = (tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]) if kernel["ProblemType"]["Sparse"] else None
+
     vgprPerInputA    = int(numMIInputA * numRegistersIn)
     vgprPerInputB    = int(numMIInputB * numRegistersIn)
     vgprPerInputM    = int(ceil(numMIInputM // self.states.bpr))
@@ -7754,7 +7755,7 @@ class KernelWriterAssembly(KernelWriter):
 
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             idxM     = idxB if kernel["ProblemType"]["Sparse"] == 2 else idxA
-            m_new    = idxM*self.states.numReadsIterCoalescedMetadata
+            m_new    = idxM * (self.states.numReadsIterCoalescedMetadata if not kernel["enableLDSTrMetadata"] else ceil(self.states.numReadsIterCoalescedMetadata / 2) * 2)
             mStr     = "ValuMetadata_X%u_I%u+%u+%u+%u" % (vgprBufferM_new, iuiM_new, m_new, vgprBufferM_new_offset, iuiM_new_offset)
             mStr     = vgpr(mStr, vgprPerInputM)
 
