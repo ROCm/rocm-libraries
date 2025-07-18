@@ -7915,7 +7915,7 @@ class KernelWriterAssembly(KernelWriter):
                       # hi8  -> r = 1,3
                       # hi16 -> r = 2,3
                       if hi8 or hi16:
-                        # r = 1,2,3, vmcnt needed for one packing
+                        # r = 1,2,3, vlcnt needed for one packing
                         if doTailOpt == 0:
                           packInt8Code.add(SWaitCnt(vlcnt=(int8TempVgpr-r), comment=""))
                         else:
@@ -10409,8 +10409,8 @@ class KernelWriterAssembly(KernelWriter):
         module.add(VMulLOU32(dst=addr0, src0=addr0, src1=sgpr(strideD1), comment="coord1 offset =  coord1 * StrideD"))
         module.add(VAddLShiftLeftU32(dst=addr0, src0=addr0, src1=vgpr(self.vgprs.storeRemapCoord0), shiftHex=hex(log2(bpe)), comment="global write D address"))
 
-        lgkmcnt = min((nElements-i)//gwvw - 1, 15)
-        module.add(SWaitCnt(dscnt=lgkmcnt, comment="wait for LDS read"))
+        dscnt = min((nElements-i)//gwvw - 1, 15)
+        module.add(SWaitCnt(dscnt=dscnt, comment="wait for LDS read"))
 
         numStoreInst += 1
 
@@ -10428,8 +10428,8 @@ class KernelWriterAssembly(KernelWriter):
         for vi in range (0, srvw, edgeVw):
 
           if vi == 0:
-            lgkmcnt = min((nElements-i)//srvw - 1, 15)
-            module.add(SWaitCnt(dscnt=lgkmcnt, comment="wait for LDS read"))
+            dscnt = min((nElements-i)//srvw - 1, 15)
+            module.add(SWaitCnt(dscnt=dscnt, comment="wait for LDS read"))
 
           sizeBoundary = [0,0]
           sizeBoundary[0] = \
@@ -12736,12 +12736,12 @@ class KernelWriterAssembly(KernelWriter):
       scaleBShiftOffset = self.getGlobalShiftOffset(kernel, scaleBDataType, gwvw)
       globalLoadsModule.addModuleAsFlatItems(self.addVectorGlobalLoad(kernel, "ScaleB", scaleBOffsetVgpr, scaleBShiftOffset, scaleBDataType, scaleBBpe, gwvw, tmpVgpr1Res, scaleBDstVgpr, 1))
     # Count global loads
-    vmcnt = 0
+    vlcnt = 0
     for item in globalLoadsModule.items():
       if isinstance(item, MUBUFReadInstruction):
-        vmcnt = vmcnt + 1
+        vlcnt = vlcnt + 1
     module.add(globalLoadsModule)
-    assert vmcnt > 0
+    assert vlcnt > 0
 
     # Local write
     # In local write, all vector shares the same offsetVgpr since the internal data types are all the same.
@@ -12784,8 +12784,8 @@ class KernelWriterAssembly(KernelWriter):
       if isinstance(storeModule, Module):
         for item in storeModule.items():
           if (not isAdded) and isinstance(item, (VCvtInstruction, DSStoreInstruction, VCndMaskB32, VLShiftLeftB32, VAndB32)):
-            vmcnt = vmcnt - 1
-            module.add(SWaitCnt(vlcnt=(vmcnt), comment="wait for global load"))
+            vlcnt = vlcnt - 1
+            module.add(SWaitCnt(vlcnt=(vlcnt), comment="wait for global load"))
             module.add(item)
             isAdded = True
           else:
@@ -13576,10 +13576,10 @@ class KernelWriterAssembly(KernelWriter):
       return module
     count = 0
     if kernel["DirectToVgprA"]:
-      # increase vmcnt for DTVA (no need to wait for DTVA global load)
+      # increase vlcnt for DTVA (no need to wait for DTVA global load)
       count += kernel["NumLoadsPerpendicularA"] * kernel["NumLoadsCoalescedA"]
     if kernel["DirectToVgprB"]:
-      # increase vmcnt for DTVB (no need to wait for DTVB global load)
+      # increase vlcnt for DTVB (no need to wait for DTVB global load)
       count += kernel["NumLoadsPerpendicularB"] * kernel["NumLoadsCoalescedB"]
 
     module.add(self.getWaitcntCodeForDTVSub(kernel, tensorParametersA, tensorParametersB, count, comment))

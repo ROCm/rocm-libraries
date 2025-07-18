@@ -865,16 +865,14 @@ class GSUOn(GSU):
 
                 #####################################> GSUtotal reduction start#####################################
                 module.addComment("buffer add start")
-                vscnt = 0
-                lgkmcnt = -1
-                vmcnt = SyncloadedData = SyncloadedData -1
+                vlcnt = SyncloadedData = SyncloadedData -1
 
                 module.add(Synchronizerlabel)
 
                 for i in range(0, GSUP1):
                     module.addSpaceLine()
-                    vmcnt = SyncloadedData = SyncloadedData -1
-                    module.add(SWaitCnt(vlcnt=vmcnt, comment="(wait for buffer ready)"))
+                    vlcnt = SyncloadedData = SyncloadedData -1
+                    module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
 
                     if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
@@ -935,11 +933,11 @@ class GSUOn(GSU):
                     module.addSpaceLine()
                     module.add(SynchronizerAddEndlabel[k])
 
-                    vmcnt = k
+                    vlcnt = k
                     for i in range(0, k):
                         module.addSpaceLine()
-                        vmcnt = vmcnt -1 if vmcnt > 0 else 0
-                        module.add(SWaitCnt(vlcnt=vmcnt, comment="(wait for buffer ready)"))
+                        vlcnt = vlcnt -1 if vlcnt > 0 else 0
+                        module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
                         if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                             for j in range(0, int(gwvw)):
                                 module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
@@ -1054,9 +1052,7 @@ class GSUOn(GSU):
             ##################################### reduction start #####################################
             module.addComment("buffer add start")
 
-            vscnt = 0
-            lgkmcnt = -1
-            vmcnt = SyncloadedData
+            vlcnt = SyncloadedData
 
             # reduce first 2 WGs
             for elementIdx in range(0, len(batchElements)):
@@ -1064,9 +1060,9 @@ class GSUOn(GSU):
                 addr0 = vgpr(addrCalc.addrDVgpr)
                 data = tmpVAdd[-1][elementIdx]
                 vgprstart   = ss.elementSumIdx[elementIdx]
-                vmcnt       = vmcnt - 2 if vmcnt > 0 else 0
+                vlcnt       = vlcnt - 2 if vlcnt > 0 else 0
 
-                module.add(SWaitCnt(vlcnt=vmcnt, comment="(wait for buffer ready)"))
+                module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
                 if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                     for j in range(0, int(gwvw)):
                         module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
@@ -1088,7 +1084,7 @@ class GSUOn(GSU):
                 module.add(writer.chooseGlobalRead(True, bps, data, \
                            addr0, addr1, soffset=0, offset=addrCalc.globalOffset, glc=True, slc=True,\
                            comment="prefetch element %d " % (elementIdx)))
-                vmcnt += 1
+                vlcnt += 1
 
             module.add(SSubI32(dst=sgpr("GSUSync"), src0=sgpr("GSUSync"), src1=1))
             module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0-unrolledWGs, comment=""))
@@ -1106,9 +1102,9 @@ class GSUOn(GSU):
                     addr0    = vgpr(addrCalc.addrDVgpr)
                     data     = tmpVAdd[uidx][elementIdx]
                     vgprstart   = ss.elementSumIdx[elementIdx]
-                    vmcnt       = vmcnt -1 if vmcnt > 0 else 0
+                    vlcnt       = vlcnt -1 if vlcnt > 0 else 0
 
-                    module.add(SWaitCnt(vlcnt=vmcnt, comment="(wait for buffer ready)"))
+                    module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
                     if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
                             module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
@@ -1130,7 +1126,7 @@ class GSUOn(GSU):
                     module.add(writer.chooseGlobalRead(True, bps, data, \
                                addr0, addr1, soffset=0, offset=addrCalc.globalOffset, glc=True, slc=True,\
                                comment="prefetch element %d " % (elementIdx)))
-                    vmcnt += 1
+                    vlcnt += 1
 
                 module.add(SSubI32(dst=sgpr("GSUSync"), src0=sgpr("GSUSync"), src1=1))
                 module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0-unrolledWGs, comment=""))
@@ -1146,16 +1142,16 @@ class GSUOn(GSU):
             for k in range(unrolledWGs, 0, -1):
                 module.addSpaceLine()
                 module.add(SynchronizerAddEndlabel[k])
-                vmcnt = (k+1) * len(batchElements)
+                vlcnt = (k+1) * len(batchElements)
 
                 # reduce first 2 WGs
                 module.addSpaceLine()
                 for elementIdx in range(0, len(batchElements)):
-                    vmcnt = vmcnt-2 if vmcnt > 0 else 0
+                    vlcnt = vlcnt-2 if vlcnt > 0 else 0
                     vgprstart   = ss.elementSumIdx[elementIdx]
                     data  = tmpVAdd[-1][elementIdx]
 
-                    module.add(SWaitCnt(vlcnt=vmcnt, comment="(wait for buffer ready)"))
+                    module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
                     if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
                             module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
@@ -1173,11 +1169,11 @@ class GSUOn(GSU):
                 for i in range(1, k):
                     module.addSpaceLine()
                     for elementIdx in range(0, len(batchElements)):
-                        vmcnt = vmcnt-1 if vmcnt > 0 else 0
+                        vlcnt = vlcnt-1 if vlcnt > 0 else 0
                         vgprstart   = ss.elementSumIdx[elementIdx]
                         data  = tmpVAdd[i-1][elementIdx]
 
-                        module.add(SWaitCnt(vlcnt=vmcnt, comment="(wait for buffer ready)"))
+                        module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
                         if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                             for j in range(0, int(gwvw)):
                                 module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
@@ -2008,15 +2004,13 @@ class GSUOn(GSU):
 
                 #####################################> GSUtotal reduction start#####################################
                 module.addComment("buffer add start")
-                vscnt = 0
-                lgkmcnt = -1
-                vmcnt = SyncloadedData = SyncloadedData -1
+                vlcnt = SyncloadedData = SyncloadedData -1
 
                 module.add(Synchronizerlabel)
 
                 for i in range(0, GSUP1):
-                    vmcnt = SyncloadedData = SyncloadedData -1
-                    module.add(SWaitCnt(vlcnt=vmcnt, comment="(wait for buffer ready)"))
+                    vlcnt = SyncloadedData = SyncloadedData -1
+                    module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
                     if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
                             module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
@@ -2062,10 +2056,10 @@ class GSUOn(GSU):
                     module.addSpaceLine()
                     module.add(SynchronizerAddEndlabel[k])
 
-                    vmcnt = k
+                    vlcnt = k
                     for i in range(0, k):
-                        vmcnt = vmcnt -1 if vmcnt > 0 else 0
-                        module.add(SWaitCnt(vlcnt=vmcnt, comment="(wait for buffer ready)"))
+                        vlcnt = vlcnt -1 if vlcnt > 0 else 0
+                        module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
                         if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                             for j in range(0, int(gwvw)):
                                 module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(tmpVAdd+0+gwvw*i+j), \
@@ -2183,9 +2177,7 @@ class GSUOn(GSU):
             ##################################### reduction start #####################################
             module.addComment("buffer add start")
 
-            vscnt = 0
-            lgkmcnt = -1
-            vmcnt = SyncloadedData
+            vlcnt = SyncloadedData
 
             # reduce first 2 WGs
             module.add(SMovB32(dst=sgpr(soffset), src=sgpr("WSDstart"), comment="restore offset for element0"))
@@ -2194,9 +2186,9 @@ class GSUOn(GSU):
                 addr0 = vgpr(addrCalc.addrDVgpr)
                 data = tmpVAdd[-1][elementIdx]
                 vgprstart   = ss.elementSumIdx[elementIdx]
-                vmcnt       = vmcnt - 2 if vmcnt > 0 else 0
+                vlcnt       = vlcnt - 2 if vlcnt > 0 else 0
 
-                module.add(SWaitCnt(vlcnt=vmcnt, comment="(wait for buffer ready)"))
+                module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
                 if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                     for j in range(0, int(gwvw)):
                         module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
@@ -2218,7 +2210,7 @@ class GSUOn(GSU):
                 module.add(writer.chooseGlobalRead(True, bps, data, \
                                 addr0, addr1, soffset=sgpr(soffset), offset=0, glc=True, slc=True,\
                                 comment="prefetch element %d " % (elementIdx)))
-                vmcnt += 1
+                vlcnt += 1
 
             module.add(SSubI32(dst=sgpr("GSUSync"), src0=sgpr("GSUSync"), src1=1))
             module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0-unrolledWGs, comment=""))
@@ -2236,9 +2228,9 @@ class GSUOn(GSU):
                     addr0    = vgpr(addrCalc.addrDVgpr)
                     data     = tmpVAdd[uidx][elementIdx]
                     vgprstart   = ss.elementSumIdx[elementIdx]
-                    vmcnt       = vmcnt -1 if vmcnt > 0 else 0
+                    vlcnt       = vlcnt -1 if vlcnt > 0 else 0
 
-                    module.add(SWaitCnt(vlcnt=vmcnt, comment="(wait for buffer ready)"))
+                    module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
                     if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
                             module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
@@ -2260,7 +2252,7 @@ class GSUOn(GSU):
                     module.add(writer.chooseGlobalRead(True, bps, data, \
                                     addr0, addr1, soffset=sgpr(soffset), offset=0, glc=True, slc=True,\
                                     comment="prefetch element %d " % (elementIdx)))
-                    vmcnt += 1
+                    vlcnt += 1
 
                 module.add(SSubI32(dst=sgpr("GSUSync"), src0=sgpr("GSUSync"), src1=1))
                 module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0-unrolledWGs, comment=""))
@@ -2275,15 +2267,15 @@ class GSUOn(GSU):
             for k in range(unrolledWGs, 0, -1):
                 module.addSpaceLine()
                 module.add(SynchronizerAddEndlabel[k])
-                vmcnt = (k+1) * len(batchElements)
+                vlcnt = (k+1) * len(batchElements)
 
                 # reduce first 2 WGs
                 for elementIdx in range(0, len(batchElements)):
-                    vmcnt = vmcnt-2 if vmcnt > 0 else 0
+                    vlcnt = vlcnt-2 if vlcnt > 0 else 0
                     vgprstart   = ss.elementSumIdx[elementIdx]
                     data  = tmpVAdd[-1][elementIdx]
 
-                    module.add(SWaitCnt(vlcnt=vmcnt, comment="(wait for buffer ready)"))
+                    module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
                     if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                         for j in range(0, int(gwvw)):
                             module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \
@@ -2300,11 +2292,11 @@ class GSUOn(GSU):
 
                 for i in range(1, k):
                     for elementIdx in range(0, len(batchElements)):
-                        vmcnt = vmcnt-1 if vmcnt > 0 else 0
+                        vlcnt = vlcnt-1 if vlcnt > 0 else 0
                         vgprstart   = ss.elementSumIdx[elementIdx]
                         data  = tmpVAdd[i-1][elementIdx]
 
-                        module.add(SWaitCnt(vlcnt=vmcnt, comment="(wait for buffer ready)"))
+                        module.add(SWaitCnt(vlcnt=vlcnt, comment="(wait for buffer ready)"))
                         if kernel["ProblemType"]["DataType"].isInt8() or kernel["ProblemType"]["DataType"].isInt32():
                             for j in range(0, int(gwvw)):
                                 module.add(VAddI32(dst=vgpr(vgprstart+j), src0=vgpr(vgprstart+j), src1=vgpr(data+j), \

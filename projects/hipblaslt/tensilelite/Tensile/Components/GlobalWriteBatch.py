@@ -171,9 +171,9 @@ class GlobalWriteBatchWriter:
     self._epilog(module)
     return module
 
-  def globalStoreWait(self, elementIdx, waitCnter, vmcntTotalIssued, lgkmcntTotalIssued, interleaveStoreVmcnt: bool):
-    vmcnt = -1
-    lgkmcnt = -1
+  def globalStoreWait(self, elementIdx, waitCnter, vlcntTotalIssued, dscntTotalIssued, interleaveStoreVmcnt: bool):
+    vlcnt = -1
+    dscnt = -1
     vscnt = -1
     isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel") or self.kernel["StreamK"] > 0
     if interleaveStoreVmcnt:
@@ -200,67 +200,69 @@ class GlobalWriteBatchWriter:
       if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
         waitLocalLoadCnt += self.scaleAlphaVecLoadIssued[elementIdx]
         waitLocalLoadCntStrList.append("%d (scaleAlphaVec)"%self.scaleAlphaVecLoadIssued[elementIdx])
-      # Get vmcnt and lgkmcnt
-      vmcnt = vmcntTotalIssued - waitLoadCnt
-      if waitCnter[0] > 0  or vmcnt != waitCnter[0] : # Check if global load issued > 0
-        if waitCnter[0] == vmcnt: # No need to wait if the global load cnt doesn't change
-          vmcnt = -1
+      # Get vlcnt and dscnt
+      vlcnt = vlcntTotalIssued - waitLoadCnt
+      if waitCnter[0] > 0  or vlcnt != waitCnter[0] : # Check if global load issued > 0
+        if waitCnter[0] == vlcnt: # No need to wait if the global load cnt doesn't change
+          vlcnt = -1
         else:
-          waitCnter[0] = vmcnt
+          waitCnter[0] = vlcnt
       else:
-        vmcnt = -1
+        vlcnt = -1
 
-      lgkmcnt = lgkmcntTotalIssued - waitLocalLoadCnt
-      if waitCnter[1] > 0 or lgkmcnt != waitCnter[1]: # Check if local load issued > 0
-        if waitCnter[1] == lgkmcnt: # No need to wait if the local load cnt doesn't change
-          lgkmcnt = -1
+      dscnt = dscntTotalIssued - waitLocalLoadCnt
+      if waitCnter[1] > 0 or dscnt != waitCnter[1]: # Check if local load issued > 0
+        if waitCnter[1] == dscnt: # No need to wait if the local load cnt doesn't change
+          dscnt = -1
         else:
-          waitCnter[1] = lgkmcnt
+          waitCnter[1] = dscnt
       else:
-        lgkmcnt = -1
+        dscnt = -1
       # Get vscnt
-      if vmcnt != -1 and not (self.parentWriter.states.asmCaps["SeparateVscnt"] or self.parentWriter.states.asmCaps["SeparateVMcnt"]):
+      if vlcnt != -1 and not (self.parentWriter.states.asmCaps["SeparateVscnt"] or self.parentWriter.states.asmCaps["SeparateVMcnt"]):
           vscnt = self.storesIssued if not self.kernel["GroupLoadStore"] else 0
-      if (vmcnt != -1) or (vscnt != -1) or (lgkmcnt != -1):
+      if (vlcnt != -1) or (vscnt != -1) or (dscnt != -1):
         # Get comment
         comment = ""
-        if vmcnt != -1:
+        if vlcnt != -1:
           tmp = ""
           for cntStr in waitLoadCntStrList:
             tmp += " - %s"%cntStr
-          comment = "vmcnt(%s) = %d%s"%(vmcnt, vmcntTotalIssued, tmp)
-        if lgkmcnt != -1:
+          comment = "vlcnt(%s) = %d%s"%(vlcnt, vlcntTotalIssued, tmp)
+        if vscnt != -1:
+          comment = comment + (" " if comment else "") + "vscnt(%s)"%(vscnt)
+        if dscnt != -1:
           tmp = ""
           for cntStr in waitLocalLoadCntStrList:
             tmp += " - %s"%cntStr
-          comment = comment + (" " if comment else "") + "lgkmcnt(%d) = %d%s"%(lgkmcnt, lgkmcntTotalIssued, tmp)
+          comment = comment + (" " if comment else "") + "dscnt(%d) = %d%s"%(dscnt, dscntTotalIssued, tmp)
         # if not self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
-        return SWaitCnt(dscnt=lgkmcnt, vlcnt=vmcnt, vscnt=vscnt, comment="%s (interleaved)"%comment)
+        return SWaitCnt(dscnt=dscnt, vlcnt=vlcnt, vscnt=vscnt, comment="%s (interleaved)"%comment)
     else:
       commentList = []
       # Global read wait
       if self.beta:
-        vmcnt = 0
+        vlcnt = 0
         commentList.append("Beta")
       if self.loadE:
-        vmcnt = 0
+        vlcnt = 0
         commentList.append("E")
       # Local read wait
       if self.parentWriter.states.useBias == DataDirection.READ:
-        lgkmcnt = 0
+        dscnt = 0
         commentList.append("Bias LDS")
       if (self.kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
-        lgkmcnt = 0
+        dscnt = 0
         commentList.append("ScaleABVec")
       if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-        lgkmcnt = 0
+        dscnt = 0
         commentList.append("ScaleAlphaVec")
-      if (vmcnt != -1) or (lgkmcnt != -1):
+      if (vlcnt != -1) or (dscnt != -1):
         # Get comment
         comment = "wait for " + commentList[0]
         for c in commentList[1:]:
           comment += ", %s"%c
-        return SWaitCnt(dscnt=lgkmcnt, vlcnt=vmcnt, vscnt=vscnt, comment=comment)
+        return SWaitCnt(dscnt=dscnt, vlcnt=vlcnt, vscnt=vscnt, comment=comment)
     return None
 
   ##############################################################################
@@ -814,9 +816,9 @@ class GlobalWriteBatchWriter:
         module.add(VMovB32(vgpr(self.cvtVgprStruct.vgprBF8Min), "0xc7600000", comment="BF8 Min value -57344 as float32" ))
 
     storeCode = Module("GroupLoadStore")
-    vmcntTotalIssued = self.loadsBetaIssued + self.loadsEIssued
-    lgkmcntTotalIssued = self.localLoadsBiasIssued + self.loadsScaleAVecIssued + self.loadsScaleBVecIssued + self.loadsScaleAlphaVecIssued
-    waitCnter = [vmcntTotalIssued, lgkmcntTotalIssued]
+    vlcntTotalIssued = self.loadsBetaIssued + self.loadsEIssued
+    dscntTotalIssued = self.localLoadsBiasIssued + self.loadsScaleAVecIssued + self.loadsScaleBVecIssued + self.loadsScaleAlphaVecIssued
+    waitCnter = [vlcntTotalIssued, dscntTotalIssued]
     for elementIdx in range(0, len(self.batchElements)):
       element = self.batchElements[elementIdx]
       addrCalc: AddrCalculation = self.ss.elementAddr[elementIdx]
@@ -849,7 +851,7 @@ class GlobalWriteBatchWriter:
         module.add(self.getEdgeMovInstType()(EXEC(), sgpr(mask, self.laneSGPRC), "sgprs -> exec"))
 
       if interleaveStoreVmcnt:
-        waitcntInst = self.globalStoreWait(elementIdx, waitCnter, vmcntTotalIssued, lgkmcntTotalIssued, True)
+        waitcntInst = self.globalStoreWait(elementIdx, waitCnter, vlcntTotalIssued, dscntTotalIssued, True)
         if waitcntInst:
           module.addSpaceLine()
           module.add(waitcntInst)

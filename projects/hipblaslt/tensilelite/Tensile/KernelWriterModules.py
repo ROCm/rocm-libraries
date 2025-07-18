@@ -57,14 +57,14 @@ def allocPostLoopSrdSuppress(ch: str, labelStr: str, sgprLength) -> Module:
 # specify global read in inst unit (for DirectToVgpr. Optional):
 #   - Pending global reads in inst unit.
 # If a skip* arg is -1, the associated component does not contribute to
-# the expected lgkmcnt or vmcnt
+# the expected dscnt or vlcnt
 ##############################################################################
 def wait(states, kernel, tPA, tPB, skipGlobalRead, skipLocalWrite, \
     skipLocalRead, conservativeWaitCnt: int, comment, skipGlobalReadInst=-1):
     # skip = -1 -> ignore
     # skip =  n -> waitcnt(n*num)
 
-    lgkmcnt = 0 if skipLocalWrite > -1 or skipLocalRead > -1 else -1
+    dscnt = 0 if skipLocalWrite > -1 or skipLocalRead > -1 else -1
 
     if skipLocalWrite > -1 or skipLocalRead > -1:
         if skipLocalWrite > -1:
@@ -77,15 +77,15 @@ def wait(states, kernel, tPA, tPB, skipGlobalRead, skipLocalWrite, \
             if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
               tPM = tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]
               numM = tPM["nrp"]*tPM["nrc"]*max(tPM["nwcv"],tPM["nwpv"])//tPM["nwcvpi"]
-            lgkmcnt += skipLocalWrite * (numA + numB + numM)
+            dscnt += skipLocalWrite * (numA + numB + numM)
         if skipLocalRead > -1:
             numReadsPerIterA = 0 if kernel["DirectToVgprA"] else states.numReadsPerIterA
             numReadsPerIterB = 0 if kernel["DirectToVgprB"] else states.numReadsPerIterB
             readsPerIter = numReadsPerIterA + numReadsPerIterB + states.numReadsPerIterMetadata
-            lgkmcnt += skipLocalRead * readsPerIter
+            dscnt += skipLocalRead * readsPerIter
 
     skipGR = skipGlobalRead > -1 or skipGlobalReadInst > -1
-    vmcnt = 0 if skipGR else -1
+    vlcnt = 0 if skipGR else -1
     if skipGR:
         numA = kernel["NumLoadsPerpendicularA"] * kernel["NumLoadsCoalescedA"]
         numB = kernel["NumLoadsPerpendicularB"] * kernel["NumLoadsCoalescedB"]
@@ -97,12 +97,12 @@ def wait(states, kernel, tPA, tPB, skipGlobalRead, skipLocalWrite, \
           numGR += skipGlobalRead * (numA + numB + numM)
         if skipGlobalReadInst > -1:
           numGR += skipGlobalReadInst
-        vmcnt += numGR
+        vlcnt += numGR
 
         # Unlike flat loads, BufferLoad do not increment the outstanding
-        # lgkmcnt
-        if lgkmcnt > -1 and not kernel["BufferLoad"]:
-            lgkmcnt += numGR
+        # dscnt
+        if dscnt > -1 and not kernel["BufferLoad"]:
+            dscnt += numGR
 
     if (conservativeWaitCnt & 0x2) and skipGR or \
        (conservativeWaitCnt & 0x4) and skipLocalWrite != -1 or \
@@ -112,10 +112,10 @@ def wait(states, kernel, tPA, tPB, skipGlobalRead, skipLocalWrite, \
         imod.add(SBarrier(comment="debug"))
         return imod
 
-    if lgkmcnt >= 0 and vmcnt >= 0:
-        vmcnt = -1 # preserve prior behavior of removing vmcnt here?
+    if dscnt >= 0 and vlcnt >= 0:
+        vlcnt = -1 # preserve prior behavior of removing vlcnt here?
 
-    waitcnt = SWaitCnt(dscnt=lgkmcnt, vlcnt=vmcnt, comment=comment)
+    waitcnt = SWaitCnt(dscnt=dscnt, vlcnt=vlcnt, comment=comment)
     return waitcnt
 
 ##############################################################################

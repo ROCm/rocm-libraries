@@ -568,7 +568,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   #   - may be empty Module if not waiting is desired (perhaps for debug)
   #   - may be multiple instructions (ConservativeWaitCnt)
   #   - typically is a single SWaitCnt.  This routine will
-  #     modify the lgkmcnt to account for any scheduling decisions.
+  #     modify the dscnt to account for any scheduling decisions.
   #     If this is not desired, add the waitCnt to pointerCode and
   #     set waitCode to an empty module
   # macIterCode contains the mac iters.  May be a macro call.
@@ -1346,13 +1346,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # scheduled wait localReads
         ####
         if self.states.numItersPLR == 0 and kernel["EnableMatrixInstruction"] and self.do["OptimizeNumItersPLR0"]:
-          lgkmcnt = -1
+          dscnt = -1
           mfmas = getMFMAs(macIterCode)
           ## To support do["MAC"] is False
           mfma = [mfmas[i],] if len(mfmas) > 0 else []
           instsToCheck = mfma + packItems
           numDsInsts = 0
-          lastLgkmCnt = -1
+          lastDsCnt = -1
           for ds in filter(lambda j: isinstance(j, (DSLoadInstruction, DSStoreInstruction, SWaitCnt)), reversed(prevIterCode.flatitems() + iterCode.flatitems())):
             if isinstance(ds, DSLoadInstruction) and hasAnyDependency(ds, instsToCheck):
               break
@@ -1360,11 +1360,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
             if isinstance(ds, DSLoadInstruction) and not hasAnyDependency(ds, instsToCheck) or isinstance(ds, DSStoreInstruction):
               numDsInsts += 1
             elif isinstance(ds, SWaitCnt):
-              if ds.dscnt >= 0 and lastLgkmCnt == -1:
-                lastLgkmCnt = ds.dscnt + numDsInsts
+              if ds.dscnt >= 0 and lastDsCnt == -1:
+                lastDsCnt = ds.dscnt + numDsInsts
 
-          if lastLgkmCnt != numDsInsts:
-            if lastLgkmCnt == -1 or (lastLgkmCnt >= 0 and lastLgkmCnt > numDsInsts):
+          if lastDsCnt != numDsInsts:
+            if lastDsCnt == -1 or (lastDsCnt >= 0 and lastDsCnt > numDsInsts):
               waitDsRead = SWaitCnt(dscnt=numDsInsts, comment="Wait for dependent lr")
               iterCode.add(waitDsRead)
         else:
@@ -1715,7 +1715,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if isinstance(waitCode, SWaitCnt):
 
       # Set the waitCount, based on the new iter schedule
-      lgkmcnt = waitCode.dscnt
+      dscnt = waitCode.dscnt
       localReads = 0
       localWrites = 0
       if kernel["EnableMatrixInstruction"]:
@@ -1757,7 +1757,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             if localReadsNotWaited > 0:
               localReads += localReadsNotWaited
 
-        lgkmcnt += localReads
+        dscnt += localReads
         iterCode.addComment0("numPrefetchIter=%u" % numPrefetchIter)
         iterCode.addComment0("dataAtIterA=%u numReadsIterA=%u skipReadsIterA=%u readsPerIterA=%u" % (dataAtIterA, numReadsIterA, skipReadsIterA, self.states.numReadsPerIterA))
         iterCode.addComment0("dataAtIterB=%u numReadsIterB=%u skipReadsIterB=%u readsPerIterB=%u" % (dataAtIterB, numReadsIterB, skipReadsIterB, self.states.numReadsPerIterB))
@@ -1777,7 +1777,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             if self.states.numItersPLR:
               skipPreIterLW = self.states.perIterLocalWriteCanSkip[max(dataAtIterA,dataAtIterB)]
               localWrites += skipPreIterLW
-        lgkmcnt += localWrites
+        dscnt += localWrites
       else:
         for item in list(iterCode.items()):
           localReads  = countLocalRead(item)
@@ -1788,23 +1788,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
             #  In that case, LoopIters == 1:
             if kernel["LoopIters"] > 1:
               # here the reads are prefetches so can skip them in the waitcnt
-              lgkmcnt += localReads
+              dscnt += localReads
             # and the writes are targetting another section of LDS and are
             # synchronized through a different waitcnt than this one
             # (which is always just before the macs)
-            lgkmcnt += localWrites
+            dscnt += localWrites
           else:
             # we need to wait for all preceding reads before the macs
             # so only opportunity for optimization is if the writes are at the end
             if localReads:
-              lgkmcnt = 0 # reset to wait for all reads
+              dscnt = 0 # reset to wait for all reads
             else:
-              lgkmcnt = localWrites  # this only survives if writes are at the end
+              dscnt = localWrites  # this only survives if writes are at the end
 
-      waitCode.comment += " old=%u, new=%u newLW=%u newLR=%u" % (waitCode.dscnt, lgkmcnt,localWrites,localReads)
+      waitCode.comment += " old=%u, new=%u newLW=%u newLR=%u" % (waitCode.dscnt, dscnt, localWrites, localReads)
       if iteration == 0:
         waitCode.comment += " for iteration == 0"
-      waitCode.dscnt = lgkmcnt
+      waitCode.dscnt = dscnt
 
     return iterCode
 
@@ -2239,7 +2239,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
             pointerLRCode.addComment1("local read init pointers metadata")
             pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tPM))
 
-      # we initiate lgkmcnt to 0, then assigning it correct value in makeSubIterSchedule()
+      # we initiate dscnt to 0, then assigning it correct value in makeSubIterSchedule()
       waitCode = self._wait(kernel, tensorParametersA, tensorParametersB, \
           -1, 0, 0, \
           "wait for prior local read local write")
@@ -2322,8 +2322,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if not self.states.numItersPLR:
       if kernel["DirectToLdsA"] or kernel["DirectToLdsB"]:
-        vmcntVal = 1 if kernel["PrefetchGlobalRead"] == 2 and isNGLL else 0
-        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, vmcntVal, -1, -1, "10wait for global read"))
+        vlcntVal = 1 if kernel["PrefetchGlobalRead"] == 2 and isNGLL else 0
+        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, "10wait for global read"))
       if not kernel["NoLdsWriteCode"]:
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "4wait for local write"))
       module.add(self._syncThreads(kernel))
@@ -2356,8 +2356,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment2("Unrolled Loop %u/%u - Begin" % (lc+1, loopCopies))
     if kernel["PrefetchGlobalRead"] and not self.states.numItersPLR and not kernel["ScheduleIterAlg"] == 2:
       if kernel["DirectToLdsA"] or kernel["DirectToLdsB"]:
-        vmcntVal = 1 if kernel["PrefetchGlobalRead"] == 2 else 0
-        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, vmcntVal, -1, -1, "11wait for global read"))
+        vlcntVal = 1 if kernel["PrefetchGlobalRead"] == 2 else 0
+        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, "11wait for global read"))
       if not kernel["NoLdsWriteCode"]:
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 1, 0, -1, "1wait for local write"))
       module.add(self._syncThreads(kernel, "4sync for global read"))
@@ -2604,8 +2604,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # put barrier at localWriteEndIter+1
         if u == localWriteEndIter+1 or (u == (localWriteEndIter+1)%kernel["LoopIters"] and kernel["ScheduleIterAlg"] == 2):
           if kernel["DirectToLdsA"] or kernel["DirectToLdsB"]:
-            vmcntVal = 1 if kernel["PrefetchGlobalRead"] == 2 else 0
-            waitLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, vmcntVal, -1, -1, \
+            vlcntVal = 1 if kernel["PrefetchGlobalRead"] == 2 else 0
+            waitLWCode.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, \
                                       "wait for previous set of global reads"))
           # (no local write code. Global read wait for DirectToLds is already done)
           if not kernel["NoLdsWriteCode"]:

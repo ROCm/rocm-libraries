@@ -847,7 +847,7 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                             if hasHolder:
                                 readsToWaitAdjust = readsToWait
                                 if kernel["NoLdsWriteCode"] and kernel["PrefetchGlobalRead"]!=2:
-                                    # DirectToLds for both A and B case, use  the number of global read for both A and B as vmcnt (only for PGR=1)
+                                    # DirectToLds for both A and B case, use  the number of global read for both A and B as vlcnt (only for PGR=1)
                                     readsToWaitAdjust = len(list(writer.codes.globalReadA.middle.items())) + len(list(writer.codes.globalReadB.middle.items()))
                                 for wc in wcList:
                                     replaceHolder(wc, (readsToWaitAdjust))
@@ -899,7 +899,7 @@ def schedLocalWrite(writer, kernel, numLocalWriteModPerIter, numLocalWritesPerSc
                                 imodList.append(itemGR)
                             else:
                                 imodList.append(itemGR)
-                            readsToWait = readsToWait + readsInc # GR instruction increments vmcnt
+                            readsToWait = readsToWait + readsInc # GR instruction increments vlcnt
                             itemsGRToSchedLater.pop(0)
 
                     if readCnt == 2:
