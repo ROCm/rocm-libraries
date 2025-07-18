@@ -368,7 +368,8 @@ void hipblaslt_print_version()
 /*! \brief write a matrix to file. */
 template <typename T>
 void hipblasltStoreValuesToFile(hipblasOperation_t transA, int row, int col,
-                                int lda, T *A, std::string ADataFile) {
+                                int lda, T *A, std::string ADataFile) 
+{
   const int A_row = transA == HIPBLAS_OP_N ? row : col;
   const int A_col = transA == HIPBLAS_OP_N ? col : row;
 
@@ -387,7 +388,8 @@ void hipblasltStoreValuesToFile(hipblasOperation_t transA, int row, int col,
 /*! \brief call hipblasltStoreValuesToFile with appropriate datatype. */
 void hipblasltDispatchValuesToFile(hipblasOperation_t transA, hipDataType T,
                                    int row, int col, int lda, void *hA,
-                                   std::string ADataFile) {
+                                   std::string ADataFile) 
+{
   if (T == HIP_R_32F)
     hipblasltStoreValuesToFile(transA, row, col, lda, static_cast<float *>(hA),
                                ADataFile);
@@ -400,6 +402,18 @@ void hipblasltDispatchValuesToFile(hipblasOperation_t transA, hipDataType T,
   else if (T == HIP_R_16BF)
     hipblasltStoreValuesToFile(transA, row, col, lda,
                                static_cast<hip_bfloat16 *>(hA), ADataFile);
+  else if (T == HIP_R_8F_E4M3_FNUZ)
+    hipblasltStoreValuesToFile(transA, row, col, lda,
+                               static_cast<hipblaslt_f8_fnuz *>(hA), ADataFile);
+  else if (T == HIP_R_8F_E5M2_FNUZ)
+    hipblasltStoreValuesToFile(transA, row, col, lda,
+                               static_cast<hipblaslt_bf8_fnuz *>(hA), ADataFile);
+  else if (T == HIP_R_8F_E4M3)
+    hipblasltStoreValuesToFile(transA, row, col, lda,
+                               static_cast<hipblaslt_f8 *>(hA), ADataFile);
+  else if (T == HIP_R_8F_E5M2)
+    hipblasltStoreValuesToFile(transA, row, col, lda,
+                               static_cast<hipblaslt_bf8 *>(hA), ADataFile);
   else
     hipblaslt_cout << "This datatype " << T
                    << " is Unsupported and could be added to the if-else "
