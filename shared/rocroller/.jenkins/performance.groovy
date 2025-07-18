@@ -128,6 +128,13 @@ ci: {
             name: "Unique Docker image tag",
             defaultValue: false,
             description: "Whether to tag the built docker image with a unique tag. WARNING: Use sparingly, each unique tag costs significant storage space."
+        ),
+        booleanParam(
+            name: "Build target branch for comparison",
+            defaultValue: true,
+            description: "Clone and build the target branch for performance " +
+                         "comparison (if unchecked, will compare to latest results " +
+                         "from target branch)"
         )
     ]
 
@@ -135,15 +142,6 @@ ci: {
         propertyList = [
             "enterprise":[pipelineTriggers([cron('0 1 * * 0')])],
             "rocm-libraries":[pipelineTriggers([cron('0 1 * * 0')])]
-        ]
-        additionalParameters += [
-            booleanParam(
-                name: "Build target branch for comparison",
-                defaultValue: true,
-                description: "Clone and build the target branch for performance " +
-                    "comparison (if unchecked, will compare to latest results " +
-                    "from target branch)"
-            )
         ]
     }
 
