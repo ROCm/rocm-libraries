@@ -148,6 +148,15 @@ class LocalReadVALU(LocalRead):
 
 class LocalReadMFMA(LocalRead):
     kernel = {"EnableMatrixInstruction": True}
+    
+    # LDS size is increased on gfx950. const offset is still 16-bit. 
+    # this function handles both LDS size < 64K and LDS size >= 64K
+    def cal_offset_srcAddr(self, maxLDSConstOffset, tc, offset):
+        num = offset // maxLDSConstOffset
+        offset_val = offset - num * maxLDSConstOffset
+        srcAddr = vgpr("LocalReadAddr%s+%u" %(tc, num))
+        return offset_val, srcAddr
+    
 
     """
     Local Read: Do It A/B
@@ -234,6 +243,7 @@ class LocalReadMFMA(LocalRead):
                     blockStride = elementsPerBlockSMFMA * threadGroups
                     blockOffsetSMFMA = blockStride - elementsPerBlockSMFMA
 
+        maxLDSConstOffset = writer.states.regCaps["maxLDSConstOffset"]                    
         valufIdx = 0
         if enableLDSTr:
             numberMTilesPerWave = kernel["MIWaveTile"][tile01]
@@ -242,20 +252,19 @@ class LocalReadMFMA(LocalRead):
                 offset_val = (tP["localReadOffset"]+MIWaveGroupShape[tile01]*tIdx) * tP["bpeDS"]
                 if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
                     offset_val = offset_val + (offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"]
-                paramList = []
-                paramList.append(int(offset_val))
-                ds = DSModifiers(na=1, offset=paramList[0])
+                offset, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, offset_val)
+                ds = DSModifiers(na=1, offset=offset)
                 LocalReadX = instruction.getInst(highBits)
                 destVgpr = vgpr("Valu%s_X%u_I%u+%u+0"%(tc,bufferIdx,iui, 4*tIdx), 2)
                 comment = "LDS Transpose"
                 valuiIdx = int(valufIdx)
                 localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc,valuiIdx)))
-                localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds, comment=comment))
+                localReadCode.add(LocalReadX(dst=destVgpr, src=srcAddr, ds=ds, comment=comment))
                 destVgpr = vgpr("Valu%s_X%u_I%u+%u+2"%(tc,bufferIdx,iui,4*tIdx), 2)
-                offset_val = paramList[0]+UnrollStride*inputPerThread;
-                paramList.append(int(offset_val))
-                ds = DSModifiers(na=1, offset=paramList[1])
-                localReadCode.add(LocalReadX(dst=destVgpr, src=vgpr("LocalReadAddr%s"%tc), ds=ds, comment=comment))
+                offset_val += UnrollStride*inputPerThread;
+                offset, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, offset_val)
+                ds = DSModifiers(na=1, offset=offset)
+                localReadCode.add(LocalReadX(dst=destVgpr, src=srcAddr, ds=ds, comment=comment))
         else:
             for vIdx in range(0, numVectorsPerTile):
                 for eIdx in range(0, numReadsPerVector):

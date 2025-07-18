@@ -111,6 +111,8 @@ The following computational functions use temporary device memory.
 | - rocblas_Xtrtri_strided_batched               |                                                      |
 +------------------------------------------------+------------------------------------------------------+
 
+.. _rocblas_device_memory_size:
+
 Environment variable for preallocating memory
 =============================================
 

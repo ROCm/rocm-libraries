@@ -8,11 +8,16 @@
 rocBLAS documentation
 ********************************************************************
 
-rocBLAS is the ROCm Basic Linear Algebra Subprograms (BLAS) library. rocBLAS is implemented in the :doc:`HIP programming language <hip:index>` and optimized for AMD GPUs.
+rocBLAS is the ROCm Basic Linear Algebra Subprograms (BLAS) library. rocBLAS is implemented in :doc:`HIP C++ <hip:index>` and optimized for AMD GPUs.
 This documentation set contains instructions for installing, understanding, and using the rocBLAS library.
 To learn more, see :doc:`./what-is-rocblas`
 
-The rocBLAS public repository is located at `<https://github.com/ROCm/rocBLAS>`_.
+The rocBLAS public repository is located at 
+`<https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_.
+
+.. note::
+
+   The rocBLAS repository for ROCm 6.4 and earlier is located at `<https://github.com/ROCm/rocBLAS>`_.
 
 .. grid:: 2
   :gutter: 3
@@ -37,10 +42,11 @@ The rocBLAS public repository is located at `<https://github.com/ROCm/rocBLAS>`_
 
   .. grid-item-card:: Examples
 
-    * `rocBLAS sample code <https://github.com/ROCm/rocBLAS/tree/develop/clients/samples>`_
+    * `rocBLAS sample code <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas/clients/samples>`_
 
   .. grid-item-card:: Reference
 
+    * :ref:`env-variables`
     * :ref:`data-types-support`
     * :ref:`api-reference-guide`
 
