@@ -18,7 +18,8 @@
 #include <thrust/extrema.h>
 #include <thrust/iterator/retag.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(MinElementTests, FullTestsParams);
 TESTS_DEFINE(MinElementPrimitiveTests, NumericalTestsParams);

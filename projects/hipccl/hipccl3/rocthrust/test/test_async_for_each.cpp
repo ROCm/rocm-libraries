@@ -21,7 +21,8 @@
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 #define DEFINE_ASYNC_FOR_EACH_CALLABLE(name, ...)                                         \
   struct THRUST_PP_CAT2(name, _fn)                                                        \
@@ -58,10 +59,9 @@ void test_async_for_each()
   for (auto size : get_sizes())
   {
     SCOPED_TRACE(testing::Message() << "with size = " << size);
-    for (size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
+    for (auto seed : get_seeds())
     {
-      unsigned int seed_value = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
-      thrust::host_vector<T> h0_data = get_random_data<T>(size, T(-1000), T(1000), seed_value);
+      thrust::host_vector<T> h0_data = get_random_data<T>(size, T(-1000), T(1000), seed);
       thrust::device_vector<T> d0_data(h0_data);
 
       thrust::for_each(h0_data.begin(), h0_data.end(), UnaryFunction{});

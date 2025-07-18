@@ -22,9 +22,11 @@
 #include <thrust/sort.h>
 #include <thrust/tuple.h>
 
-#include "test_header.hpp"
+#include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
-TESTS_DEFINE(BinarySearchTestsInKernel, NumericalTestsParams);
+TESTS_DEFINE(SingleValueTests, NumericalTestsParams);
 
 template <typename T>
 struct init_scalar
@@ -44,170 +46,462 @@ struct init_tuple
   }
 };
 
-struct custom_less
+template <typename T>
+bool host_compare(const T& lhs, const T& rhs)
 {
-  template <class T>
-  __device__ inline bool operator()(T a, T b)
+  return lhs < rhs;
+}
+
+template <typename T>
+__device__ bool device_compare(const T& lhs, const T& rhs)
+{
+  return lhs < rhs;
+}
+
+template <typename T, size_t items_per_thread, size_t block_size, class DeviceFunc>
+__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void
+single_value_kernel(T* device_search, T* device_input, size_t* device_output, const size_t N, DeviceFunc f)
+{
+  constexpr size_t items_per_block = items_per_thread * block_size;
+  const size_t offset              = (blockIdx.x * items_per_block) + (threadIdx.x * items_per_thread);
+
+  for (size_t i = 0; i < items_per_thread; i++)
   {
-    return a < b;
+    device_output[offset + i] = f(device_search, device_search + N, device_input[offset + i]);
   }
-};
-
-template <class T>
-__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void lower_bound_kernel(size_t n, T* input, ptrdiff_t* output)
-{
-  output[0] = thrust::lower_bound(thrust::device, input, input + n, T(0), custom_less()) - input;
-  output[1] = thrust::lower_bound(thrust::device, input, input + n, T(1)) - input;
-  output[2] = thrust::lower_bound(thrust::device, input, input + n, T(2)) - input;
-  output[3] = thrust::lower_bound(thrust::device, input, input + n, T(3)) - input;
-  output[4] = thrust::lower_bound(thrust::device, input, input + n, T(4), custom_less()) - input;
-  output[5] = thrust::lower_bound(thrust::device, input, input + n, T(5)) - input;
-  output[6] = thrust::lower_bound(thrust::device, input, input + n, T(6)) - input;
-  output[7] = thrust::lower_bound(thrust::device, input, input + n, T(7)) - input;
-  output[8] = thrust::lower_bound(thrust::device, input, input + n, T(8)) - input;
-  output[9] = thrust::lower_bound(thrust::device, input, input + n, T(9), custom_less()) - input;
 }
 
-TYPED_TEST(BinarySearchTestsInKernel, TestLowerBound)
+template <typename T, class ExpectedFunction, class ThrustDeviceFunction, class ThrustHostFunction>
+void RunSingleValueTest(const ExpectedFunction& ef, const ThrustDeviceFunction& df, const ThrustHostFunction& hf)
+{
+  constexpr size_t grid_size        = 1024;
+  constexpr size_t items_per_thread = 12;
+  constexpr size_t block_size       = 32;
+  constexpr size_t items_per_block  = items_per_thread * block_size;
+  constexpr size_t size             = items_per_block * grid_size;
+
+  double maxi = static_cast<double>(std::numeric_limits<T>::max());
+  double mini = static_cast<double>(std::numeric_limits<T>::min());
+
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<double> dis(mini, maxi);
+
+  T* host_search = new T[size];
+  T* host_input  = new T[size];
+  for (size_t i = 0; i < size; i++)
+  {
+    host_search[i] = static_cast<T>(dis(gen));
+    host_input[i]  = static_cast<T>(dis(gen));
+  }
+
+  std::sort(host_search, host_search + size);
+
+  size_t* host_expected = new size_t[size];
+  for (size_t i = 0; i < size; i++)
+  {
+    host_expected[i] = ef(host_search, host_search + size, host_input[i]);
+  }
+
+  size_t* host_thrust_output = new size_t[size];
+  for (size_t i = 0; i < size; i++)
+  {
+    host_thrust_output[i] = hf(host_search, host_search + size, host_input[i]);
+  }
+
+  T* device_search;
+  T* device_input;
+  HIP_CHECK(hipMalloc(&device_search, sizeof(T) * size));
+  HIP_CHECK(hipMalloc(&device_input, sizeof(size_t) * size));
+  HIP_CHECK(hipMemcpy(device_search, host_search, sizeof(T) * size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(device_input, host_input, sizeof(T) * size, hipMemcpyHostToDevice));
+
+  size_t* device_output;
+  HIP_CHECK(hipMalloc(&device_output, sizeof(size_t) * size));
+
+  hipLaunchKernelGGL(
+    HIP_KERNEL_NAME(single_value_kernel<T, items_per_thread, block_size>),
+    dim3(grid_size),
+    dim3(block_size),
+    0,
+    0,
+    device_search,
+    device_input,
+    device_output,
+    size,
+    df);
+
+  size_t* device_thrust_output = new size_t[size];
+  HIP_CHECK(hipMemcpy(device_thrust_output, device_output, sizeof(size_t) * size, hipMemcpyDeviceToHost));
+
+  for (size_t i = 0; i < size; i++)
+  {
+    ASSERT_EQ(host_expected[i], device_thrust_output[i]);
+    ASSERT_EQ(host_expected[i], host_thrust_output[i]);
+  }
+
+  delete[] host_search;
+  delete[] host_expected;
+  delete[] host_thrust_output;
+  delete[] device_thrust_output;
+
+  HIP_CHECK(hipFree(device_search));
+  HIP_CHECK(hipFree(device_input));
+  HIP_CHECK(hipFree(device_output));
+}
+
+TYPED_TEST(SingleValueTests, LowerBound)
 {
   using T = typename TestFixture::input_type;
-
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::device_vector<T> d_input(5);
-  d_input[0] = 0;
-  d_input[1] = 2;
-  d_input[2] = 5;
-  d_input[3] = 7;
-  d_input[4] = 8;
-
-  thrust::device_vector<ptrdiff_t> d_output(10);
-
-  hipLaunchKernelGGL(
-    HIP_KERNEL_NAME(lower_bound_kernel),
-    dim3(1),
-    dim3(1),
-    0,
-    0,
-    size_t(d_input.size()),
-    thrust::raw_pointer_cast(d_input.data()),
-    thrust::raw_pointer_cast(d_output.data()));
-
-  thrust::host_vector<ptrdiff_t> output = d_output;
-  ASSERT_EQ(output[0], 0);
-  ASSERT_EQ(output[1], 1);
-  ASSERT_EQ(output[2], 1);
-  ASSERT_EQ(output[3], 2);
-  ASSERT_EQ(output[4], 2);
-  ASSERT_EQ(output[5], 2);
-  ASSERT_EQ(output[6], 3);
-  ASSERT_EQ(output[7], 3);
-  ASSERT_EQ(output[8], 4);
-  ASSERT_EQ(output[9], 5);
+  RunSingleValueTest<T>(
+    [=](T* begin, T* end, const T& value) {
+      return std::lower_bound(begin, end, value) - begin;
+    },
+    [=] __device__(T * begin, T * end, const T& value) {
+      return thrust::lower_bound(thrust::device, begin, end, value) - begin;
+    },
+    [=](T* begin, T* end, const T& value) {
+      return thrust::lower_bound(begin, end, value) - begin;
+    });
 }
 
-template <class T>
-__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void upper_bound_kernel(size_t n, T* input, ptrdiff_t* output)
-{
-  output[0] = thrust::upper_bound(thrust::device, input, input + n, T(0)) - input;
-  output[1] = thrust::upper_bound(thrust::device, input, input + n, T(1)) - input;
-  output[2] = thrust::upper_bound(thrust::device, input, input + n, T(2)) - input;
-  output[3] = thrust::upper_bound(thrust::device, input, input + n, T(3)) - input;
-  output[4] = thrust::upper_bound(thrust::device, input, input + n, T(4)) - input;
-  output[5] = thrust::upper_bound(thrust::device, input, input + n, T(5)) - input;
-  output[6] = thrust::upper_bound(thrust::device, input, input + n, T(6)) - input;
-  output[7] = thrust::upper_bound(thrust::device, input, input + n, T(7)) - input;
-  output[8] = thrust::upper_bound(thrust::device, input, input + n, T(8)) - input;
-  output[9] = thrust::upper_bound(thrust::device, input, input + n, T(9)) - input;
-}
-
-TYPED_TEST(BinarySearchTestsInKernel, TestUpperBound)
+TYPED_TEST(SingleValueTests, LowerBoundWithCustomComp)
 {
   using T = typename TestFixture::input_type;
-
-  thrust::device_vector<T> d_input(5);
-  d_input[0] = 0;
-  d_input[1] = 2;
-  d_input[2] = 5;
-  d_input[3] = 7;
-  d_input[4] = 8;
-
-  thrust::device_vector<ptrdiff_t> d_output(10);
-
-  hipLaunchKernelGGL(
-    HIP_KERNEL_NAME(upper_bound_kernel),
-    dim3(1),
-    dim3(1),
-    0,
-    0,
-    size_t(d_input.size()),
-    thrust::raw_pointer_cast(d_input.data()),
-    thrust::raw_pointer_cast(d_output.data()));
-
-  thrust::host_vector<ptrdiff_t> output = d_output;
-  ASSERT_EQ(output[0], 1);
-  ASSERT_EQ(output[1], 1);
-  ASSERT_EQ(output[2], 2);
-  ASSERT_EQ(output[3], 2);
-  ASSERT_EQ(output[4], 2);
-  ASSERT_EQ(output[5], 3);
-  ASSERT_EQ(output[6], 3);
-  ASSERT_EQ(output[7], 4);
-  ASSERT_EQ(output[8], 5);
-  ASSERT_EQ(output[9], 5);
-}
-
-template <class T>
-__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void binary_search_kernel(size_t n, T* input, bool* output)
-{
-  output[0] = thrust::binary_search(thrust::device, input, input + n, T(0));
-  output[1] = thrust::binary_search(thrust::device, input, input + n, T(1));
-  output[2] = thrust::binary_search(thrust::device, input, input + n, T(2));
-  output[3] = thrust::binary_search(thrust::device, input, input + n, T(3));
-  output[4] = thrust::binary_search(thrust::device, input, input + n, T(4));
-  output[5] = thrust::binary_search(thrust::device, input, input + n, T(5));
-  output[6] = thrust::binary_search(thrust::device, input, input + n, T(6));
-  output[7] = thrust::binary_search(thrust::device, input, input + n, T(7));
-  output[8] = thrust::binary_search(thrust::device, input, input + n, T(8));
-  output[9] = thrust::binary_search(thrust::device, input, input + n, T(9));
-}
-
-TYPED_TEST(BinarySearchTestsInKernel, TestBinarySearch)
-{
-  using T = typename TestFixture::input_type;
-
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  thrust::device_vector<T> d_input(5);
-  d_input[0] = 0;
-  d_input[1] = 2;
-  d_input[2] = 5;
-  d_input[3] = 7;
-  d_input[4] = 8;
+  RunSingleValueTest<T>(
+    [=](T* begin, T* end, const T& value) {
+      return std::lower_bound(begin, end, value, host_compare<T>) - begin;
+    },
+    [=] __device__(T * begin, T * end, const T& value) {
+      return thrust::lower_bound(thrust::device, begin, end, value, device_compare<T>) - begin;
+    },
+    [=](T* begin, T* end, const T& value) {
+      return thrust::lower_bound(begin, end, value, host_compare<T>) - begin;
+    });
+}
 
-  thrust::device_vector<bool> d_output(10);
+TYPED_TEST(SingleValueTests, UpperBound)
+{
+  using T = typename TestFixture::input_type;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  RunSingleValueTest<T>(
+    [=](T* begin, T* end, const T& value) {
+      return std::upper_bound(begin, end, value) - begin;
+    },
+    [=] __device__(T * begin, T * end, const T& value) {
+      return thrust::upper_bound(thrust::device, begin, end, value) - begin;
+    },
+    [=](T* begin, T* end, const T& value) {
+      return thrust::upper_bound(begin, end, value) - begin;
+    });
+}
+
+TYPED_TEST(SingleValueTests, UpperBoundWithCustomComp)
+{
+  using T = typename TestFixture::input_type;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  RunSingleValueTest<T>(
+    [=](T* begin, T* end, const T& value) {
+      return std::upper_bound(begin, end, value, host_compare<T>) - begin;
+    },
+    [=] __device__(T * begin, T * end, const T& value) {
+      return thrust::upper_bound(thrust::device, begin, end, value, device_compare<T>) - begin;
+    },
+    [=](T* begin, T* end, const T& value) {
+      return thrust::upper_bound(begin, end, value, host_compare<T>) - begin;
+    });
+}
+
+TYPED_TEST(SingleValueTests, TestSingleValueBinarySearch)
+{
+  using T = typename TestFixture::input_type;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  RunSingleValueTest<T>(
+    [=](T* begin, T* end, const T& value) {
+      return std::binary_search(begin, end, value);
+    },
+    [=] __device__(T * begin, T * end, const T& value) {
+      return thrust::binary_search(thrust::device, begin, end, value);
+    },
+    [=](T* begin, T* end, const T& value) {
+      return thrust::binary_search(begin, end, value);
+    });
+}
+
+TYPED_TEST(SingleValueTests, TestSingleValueBinarySearchWithCustomComp)
+{
+  using T = typename TestFixture::input_type;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  RunSingleValueTest<T>(
+    [=](T* begin, T* end, const T& value) {
+      return std::binary_search(begin, end, value, host_compare<T>);
+    },
+    [=] __device__(T * begin, T * end, const T& value) {
+      return thrust::binary_search(thrust::device, begin, end, value, device_compare<T>);
+    },
+    [=](T* begin, T* end, const T& value) {
+      return thrust::binary_search(begin, end, value, host_compare<T>);
+    });
+}
+
+TYPED_TEST(SingleValueTests, EqualRange)
+{
+  using T = typename TestFixture::input_type;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  RunSingleValueTest<T>(
+    [=](T* begin, T* end, const T& value) {
+      auto out = std::equal_range(begin, end, value);
+      return out.second - out.first;
+    },
+    [=] __device__(T * begin, T * end, const T& value) {
+      auto out = thrust::equal_range(thrust::device, begin, end, value);
+      return out.second - out.first;
+    },
+    [=](T* begin, T* end, const T& value) {
+      auto out = thrust::equal_range(begin, end, value);
+      return out.second - out.first;
+    });
+}
+
+TYPED_TEST(SingleValueTests, EqualRangeWithCustomComp)
+{
+  using T = typename TestFixture::input_type;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  RunSingleValueTest<T>(
+    [=](T* begin, T* end, const T& value) {
+      auto out = std::equal_range(begin, end, value, host_compare<T>);
+      return out.second - out.first;
+    },
+    [=] __device__(T * begin, T * end, const T& value) {
+      auto out = thrust::equal_range(thrust::device, begin, end, value, device_compare<T>);
+      return out.second - out.first;
+    },
+    [=](T* begin, T* end, const T& value) {
+      auto out = thrust::equal_range(begin, end, value, host_compare<T>);
+      return out.second - out.first;
+    });
+}
+
+TESTS_DEFINE(VectorTests, NumericalTestsParams);
+
+template <typename T, size_t items_per_thread, size_t block_size, class DeviceFunc>
+__global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void
+multiple_value_kernel(T* device_search_arr, T* device_input, size_t* device_output, const DeviceFunc& f)
+{
+  constexpr size_t items_per_block = items_per_thread * block_size;
+  const size_t offset              = (items_per_block * blockIdx.x) + (items_per_thread * threadIdx.x);
+
+  f(device_search_arr,
+    device_search_arr + items_per_block,
+    device_input + offset,
+    device_input + offset + items_per_thread,
+    device_output + offset);
+}
+
+template <typename T, class ExpectedFunction, class ThrustDeviceFunction, class ThrustHostFunction>
+void RunVectorTest(const ExpectedFunction& ef, const ThrustDeviceFunction& df, const ThrustHostFunction& hf)
+{
+  constexpr size_t grid_size        = 1024;
+  constexpr size_t items_per_thread = 12;
+  constexpr size_t block_size       = 32;
+  constexpr size_t items_per_block  = items_per_thread * block_size;
+  constexpr size_t size             = items_per_block * grid_size;
+
+  double maxi = static_cast<double>(std::numeric_limits<T>::max());
+  double mini = static_cast<double>(std::numeric_limits<T>::min());
+
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<double> dis(mini, maxi);
+
+  T* host_search_arr = new T[items_per_block];
+  for (size_t i = 0; i < items_per_block; i++)
+  {
+    host_search_arr[i] = static_cast<T>(dis(gen));
+  }
+
+  std::sort(host_search_arr, host_search_arr + items_per_block);
+
+  T* host_input = new T[size];
+  for (size_t grid_idx = 0; grid_idx < grid_size; grid_idx++)
+  {
+    size_t offset = grid_idx * items_per_block;
+    for (size_t i = 0; i < items_per_block; i++)
+    {
+      host_input[offset + i] = static_cast<T>(dis(gen));
+    }
+  }
+
+  size_t* thrust_host_output   = new size_t[size];
+  size_t* thrust_device_output = new size_t[size];
+  size_t* expected_output      = new size_t[size];
+
+  for (size_t bIdx = 0; bIdx < grid_size; bIdx++)
+  {
+    size_t offset = bIdx * items_per_block;
+
+    // getting thrust host output
+    hf(host_search_arr,
+       host_search_arr + items_per_block,
+       host_input + offset,
+       host_input + offset + items_per_block,
+       thrust_host_output + offset);
+    // getting expected output
+    for (size_t i = 0; i < items_per_block; i++)
+    {
+      expected_output[offset + i] = ef(host_search_arr, host_search_arr + items_per_block, host_input[offset + i]);
+    }
+  }
+
+  // getting thrust device output
+  T *device_search_arr, *device_input;
+  size_t* device_output;
+  HIP_CHECK(hipMalloc(&device_search_arr, sizeof(T) * items_per_block));
+  HIP_CHECK(hipMalloc(&device_input, sizeof(T) * size));
+  HIP_CHECK(hipMalloc(&device_output, sizeof(size_t) * size));
+
+  HIP_CHECK(hipMemcpy(device_search_arr, host_search_arr, sizeof(T) * items_per_block, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(device_input, host_input, sizeof(T) * size, hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(
-    HIP_KERNEL_NAME(binary_search_kernel),
-    dim3(1),
-    dim3(1),
+    HIP_KERNEL_NAME(multiple_value_kernel<T, items_per_thread, block_size>),
+    dim3(grid_size),
+    dim3(block_size),
     0,
     0,
-    size_t(d_input.size()),
-    thrust::raw_pointer_cast(d_input.data()),
-    thrust::raw_pointer_cast(d_output.data()));
+    device_search_arr,
+    device_input,
+    device_output,
+    df);
+  HIP_CHECK(hipMemcpy(thrust_device_output, device_output, sizeof(size_t) * size, hipMemcpyDeviceToHost));
 
-  thrust::host_vector<bool> output = d_output;
-  ASSERT_EQ(output[0], true);
-  ASSERT_EQ(output[1], false);
-  ASSERT_EQ(output[2], true);
-  ASSERT_EQ(output[3], false);
-  ASSERT_EQ(output[4], false);
-  ASSERT_EQ(output[5], true);
-  ASSERT_EQ(output[6], false);
-  ASSERT_EQ(output[7], true);
-  ASSERT_EQ(output[8], true);
-  ASSERT_EQ(output[9], false);
+  for (size_t i = 0; i < size; i++)
+  {
+    ASSERT_EQ(expected_output[i], thrust_host_output[i]);
+    ASSERT_EQ(expected_output[i], thrust_device_output[i]);
+  }
+
+  delete[] host_search_arr;
+  delete[] host_input;
+  delete[] thrust_host_output;
+  delete[] thrust_device_output;
+  delete[] expected_output;
+
+  HIP_CHECK(hipFree(device_search_arr));
+  HIP_CHECK(hipFree(device_input));
+  HIP_CHECK(hipFree(device_output));
+}
+
+TYPED_TEST(VectorTests, LowerBound)
+{
+  using T = typename TestFixture::input_type;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  RunVectorTest<T>(
+    [=](T* begin, T* end, const T& value) {
+      return std::lower_bound(begin, end, value) - begin;
+    },
+    [=] __device__(T * s_begin, T * s_end, T * i_begin, T * i_end, size_t * out) {
+      thrust::lower_bound(thrust::device, s_begin, s_end, i_begin, i_end, out);
+    },
+    [=](T* s_begin, T* s_end, T* i_begin, T* i_end, size_t* out) {
+      thrust::lower_bound(s_begin, s_end, i_begin, i_end, out);
+    });
+}
+
+TYPED_TEST(VectorTests, LowerBoundWithCustomComp)
+{
+  using T = typename TestFixture::input_type;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  RunVectorTest<T>(
+    [=](T* begin, T* end, const T& value) {
+      return std::lower_bound(begin, end, value, host_compare<T>) - begin;
+    },
+    [=] __device__(T * s_begin, T * s_end, T * i_begin, T * i_end, size_t * out) {
+      thrust::lower_bound(thrust::device, s_begin, s_end, i_begin, i_end, out, device_compare<T>);
+    },
+    [=](T* s_begin, T* s_end, T* i_begin, T* i_end, size_t* out) {
+      thrust::lower_bound(s_begin, s_end, i_begin, i_end, out, host_compare<T>);
+    });
+}
+
+TYPED_TEST(VectorTests, UpperBound)
+{
+  using T = typename TestFixture::input_type;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  RunVectorTest<T>(
+    [=](T* begin, T* end, const T& value) {
+      return std::upper_bound(begin, end, value) - begin;
+    },
+    [=] __device__(T * s_begin, T * s_end, T * i_begin, T * i_end, size_t * out) {
+      thrust::upper_bound(thrust::device, s_begin, s_end, i_begin, i_end, out);
+    },
+    [=](T* s_begin, T* s_end, T* i_begin, T* i_end, size_t* out) {
+      thrust::upper_bound(s_begin, s_end, i_begin, i_end, out);
+    });
+}
+
+TYPED_TEST(VectorTests, UpperBoundWithCustomComp)
+{
+  using T = typename TestFixture::input_type;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  RunVectorTest<T>(
+    [=](T* begin, T* end, const T& value) {
+      return std::upper_bound(begin, end, value, host_compare<T>) - begin;
+    },
+    [=] __device__(T * s_begin, T * s_end, T * i_begin, T * i_end, size_t * out) {
+      thrust::upper_bound(thrust::device, s_begin, s_end, i_begin, i_end, out, device_compare<T>);
+    },
+    [=](T* s_begin, T* s_end, T* i_begin, T* i_end, size_t* out) {
+      thrust::upper_bound(s_begin, s_end, i_begin, i_end, out, host_compare<T>);
+    });
+}
+
+TYPED_TEST(VectorTests, BinarySearch)
+{
+  using T = typename TestFixture::input_type;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  RunVectorTest<T>(
+    [=](T* begin, T* end, const T& value) {
+      return std::binary_search(begin, end, value);
+    },
+    [=] __device__(T * s_begin, T * s_end, T * i_begin, T * i_end, size_t * out) {
+      thrust::binary_search(thrust::device, s_begin, s_end, i_begin, i_end, out);
+    },
+    [=](T* s_begin, T* s_end, T* i_begin, T* i_end, size_t* out) {
+      thrust::binary_search(s_begin, s_end, i_begin, i_end, out);
+    });
+}
+
+TYPED_TEST(VectorTests, BinarySearchWithCustomComp)
+{
+  using T = typename TestFixture::input_type;
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+  RunVectorTest<T>(
+    [=](T* begin, T* end, const T& value) {
+      return std::binary_search(begin, end, value, host_compare<T>);
+    },
+    [=] __device__(T * s_begin, T * s_end, T * i_begin, T * i_end, size_t * out) {
+      thrust::binary_search(thrust::device, s_begin, s_end, i_begin, i_end, out, device_compare<T>);
+    },
+    [=](T* s_begin, T* s_end, T* i_begin, T* i_end, size_t* out) {
+      thrust::binary_search(s_begin, s_end, i_begin, i_end, out, host_compare<T>);
+    });
 }
 
 TESTS_DEFINE(BinarySearchTests, FullTestsParams);

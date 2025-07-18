@@ -21,7 +21,8 @@
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 template <typename Iterator1, typename Iterator2>
 __global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void
