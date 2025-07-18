@@ -54,6 +54,6 @@ if(TENSILELITE_ENABLE_CLIENT)
     add_subdirectory(client)
 endif()
 
-if(HIPBLASLT_BUILD_TESTING OR BUILD_TESTING)
+if(TENSILELITE_BUILD_TESTING OR BUILD_TESTING)
     add_subdirectory(tests)
 endif()
