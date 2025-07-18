@@ -201,7 +201,7 @@ class LocalReadMFMA(LocalRead):
             lrvwTile = writer.states.lrvwTileMetadata
         else:
             lrvwTile = 1
-        numElementPerRead = 1 if kernel["ConvertAfterDS"] else (int(blockWidth * bpr) // tP['bpe'] // lrvwTile)
+        numElementPerRead = 1 if kernel["ConvertAfterDS"] and not kernel["UseF32XEmulation"] else (int(blockWidth * bpr) // tP['bpe'] // lrvwTile)
         inputPerThread   = kernel["LocalReadVectorWidth"] if not writer.states.inTailLoop else kernel["MIInputPerThread%s"%tc]
 
         # pack register
@@ -213,6 +213,7 @@ class LocalReadMFMA(LocalRead):
         else:
             needPack = blockWidth == 0.25
         needPack |= (kernel["ConvertAfterDS"] and (tP["bpe"] != tP["bpeDS"]))
+        needPack |= kernel["UseF32XEmulation"]
         pack     = Module("pack%s_I%s"%(tc,iui))
 
         # split Metadata when localread width > mi input
@@ -271,6 +272,41 @@ class LocalReadMFMA(LocalRead):
                         isHigh16Bits = (blockWidth == 0.25) and ( ((rIdx % 4) //2) == 1) # 2,3
     
                         if needPack or numSplitMetadata:
+                            if kernel["UseF32XEmulation"]:
+                                if valuiIdx % 4 == 0:
+                                    tmpvgpr01 = writer.vgprPool.checkOutAligned(2, 2)
+                                    tmpvgpr = writer.vgprPool.checkOut(1)
+
+                                    v0 = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx))
+                                    v1 = vgpr("Valu%s_X%u_I%u+%u+1"%(tc, bufferIdx, iui, valuiIdx))
+                                    v2 = vgpr("Valu%s_X%u_I%u+%u+2"%(tc, bufferIdx, iui, valuiIdx))
+                                    v3 = vgpr("Valu%s_X%u_I%u+%u+3"%(tc, bufferIdx, iui, valuiIdx))
+
+                                    packCode.add(VCvtPkF32toBF16(dst=vgpr(tmpvgpr01),   src0=v0, src1=v2))
+                                    packCode.add(VDot2CF32BF16(dst=v0, src0=hex(0x8000bf80), src1=vgpr(tmpvgpr01))) # v0_lo
+                                    packCode.add(VDot2CF32BF16(dst=v2, src0=hex(0xbf800000), src1=vgpr(tmpvgpr01))) # v2_lo
+                                    packCode.add(VCvtPkF32toBF16(dst=vgpr(tmpvgpr01+1), src0=v1, src1=v3))
+
+                                    packCode.add(VDot2CF32BF16(dst=v1, src0=hex(0x8000bf80), src1=vgpr(tmpvgpr01+1))) # v1_lo
+
+                                    # Note: v_dot2c_f32_bf16 needs 4 wait states for inst dependencies.
+                                    #packCode.add(VDot2CF32BF16(dst=v3, src0=hex(0xbf800000), src1=vgpr(tmpvgpr01+1))) # v3_lo
+                                    packCode.add(VCvtBF16toFP32(dst=vgpr(tmpvgpr), src=vgpr(tmpvgpr01+1), vgprMask=None, vi=1))
+                                    packCode.add(VSubF32(dst=v3, src0=v3, src1=vgpr(tmpvgpr)))
+
+                                    packCode.add(VCvtPkF32toBF16(dst=v2, src0=v0, src1=v2))
+                                    packCode.add(VMovB32(dst=v0, src=vgpr(tmpvgpr01)))
+                                    packCode.add(VCvtPkF32toBF16(dst=v3, src0=v1, src1=v3))
+                                    packCode.add(VMovB32(dst=v1, src=vgpr(tmpvgpr01+1)))
+
+                                    writer.vgprPool.checkIn(tmpvgpr01)
+                                    writer.vgprPool.checkIn(tmpvgpr)
+
+
+                                if rIdx == numReadsPerUnroll - 1:
+                                    if not (kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16):
+                                        packCode.add(VSwapB32(dst=vgpr("Valu%s_X%u_I%u+%u+2"%(tc, bufferIdx, iui, baseValuiIdx)), src=vgpr("Valu%s_X%u_I%u+%u+4"%(tc, bufferIdx, iui, baseValuiIdx))))
+                                        packCode.add(VSwapB32(dst=vgpr("Valu%s_X%u_I%u+%u+3"%(tc, bufferIdx, iui, baseValuiIdx)), src=vgpr("Valu%s_X%u_I%u+%u+5"%(tc, bufferIdx, iui, baseValuiIdx))))
                             if kernel["ConvertAfterDS"] and (tP["bpe"] != tP["bpeDS"]):
                                 highBitsForHalf = False
                                 isHigh16Bits = False
@@ -583,6 +619,23 @@ class LocalReadMFMA(LocalRead):
                                             incOffset = 48
                                 incOffset = rIdx * numElementPerRead * UnrollStride + incOffset
                                 offset_val = (incOffset + offset_val + tP["localReadOffset"]) * tP["bpeDS"]
+                            elif kernel["UseF32XEmulation"]:
+                                incOffset = 0
+                                midIdx = numReadsPerUnroll // 2
+                                if rIdx >= midIdx:
+                                    if kernel["UnrollMajorLDS%s" % tP["tensorChar"]] == False:
+                                        # TODO: why are these the offsets???
+                                        if kernel["MatrixInstM"] == 32:
+                                             incOffset = midIdx * numElementPerRead * UnrollStride
+                                        elif kernel["MatrixInstM"] == 16:
+                                            incOffset = 3 * midIdx * numElementPerRead * UnrollStride
+                                    else:
+                                        if kernel["MatrixInstM"] == 32 and kernel["MatrixInstK"] == 16:
+                                            incOffset = 4 # TODOBS:.. check
+                                        elif kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 32:
+                                            incOffset = 12
+                                incOffset = rIdx * numElementPerRead * UnrollStride + incOffset
+                                offset_val = (incOffset + offset_val + tP["localReadOffset"]) * tP["bpeDS"]
                             else:
                                 offset_val = (rIdx * numElementPerRead * UnrollStride + offset_val + tP["localReadOffset"]) * tP["bpeDS"]
     
@@ -666,22 +719,4 @@ class LocalReadMFMA(LocalRead):
         if (tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]:
           imod = Module("LocalReadDo%s_I%s (Empty)" % (tP["tensorChar"],iui))
         
-        if kernel["UseF32XEmulation"] and kernel["EnableF32XEmulationLds"] and tP["isA"] and tc == "A":
-            tf32mod = Module()
-            tf32mod.add(TextBlock("/*TF32 Emulation read lds*/\n"))
-            tf32mod.add(LocalReadX(dst=vgpr("Cvt+0"), src=vgpr("LocalReadAddrA"), ds=DSModifiers(na=1, offset=0)))
-            tf32mod.add(LocalReadX(dst=vgpr("Cvt+1"), src=vgpr("LocalReadAddrA"), ds=DSModifiers(na=1, offset=256)))
-            tf32mod.add(LocalReadX(dst=vgpr("Cvt+2"), src=vgpr("LocalReadAddrA"), ds=DSModifiers(na=1, offset=512)))
-            tf32mod.add(LocalReadX(dst=vgpr("Cvt+3"), src=vgpr("LocalReadAddrA"), ds=DSModifiers(na=1, offset=768)))
-            tf32mod.add(SWaitCnt(lgkmcnt=0, comment="wait for lds read"))
-            tf32mod.add(VMovB32(dst=vgpr("ValuA_X0_I0+0"), src=vgpr("Cvt+0"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1, src0_sel=SelectBit.WORD_1)))
-            tf32mod.add(VMovB32(dst=vgpr("ValuA_X0_I0+1"), src=vgpr("Cvt+2"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1, src0_sel=SelectBit.WORD_1)))
-            tf32mod.add(VMovB32(dst=vgpr("ValuA_X0_I0+2"), src=vgpr("Cvt+0"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1, src0_sel=SelectBit.WORD_0)))
-            tf32mod.add(VMovB32(dst=vgpr("ValuA_X0_I0+3"), src=vgpr("Cvt+2"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_1, src0_sel=SelectBit.WORD_0)))
-            tf32mod.add(VMovB32(dst=vgpr("ValuA_X0_I0+0"), src=vgpr("Cvt+1"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0, src0_sel=SelectBit.WORD_1)))
-            tf32mod.add(VMovB32(dst=vgpr("ValuA_X0_I0+1"), src=vgpr("Cvt+3"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0, src0_sel=SelectBit.WORD_1)))
-            tf32mod.add(VMovB32(dst=vgpr("ValuA_X0_I0+2"), src=vgpr("Cvt+1"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0, src0_sel=SelectBit.WORD_0)))
-            tf32mod.add(VMovB32(dst=vgpr("ValuA_X0_I0+3"), src=vgpr("Cvt+3"), sdwa=SDWAModifiers(dst_sel=SelectBit.WORD_0, src0_sel=SelectBit.WORD_0)))
-            localReadCode.add(tf32mod)
-
         return imod, pack
