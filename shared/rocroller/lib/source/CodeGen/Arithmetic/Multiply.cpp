@@ -78,9 +78,6 @@ namespace rocRoller
         AssertFatal(lhs != nullptr);
         AssertFatal(rhs != nullptr);
 
-        if(rhs->regType() == Register::Type::Literal
-           && !m_context->targetArchitecture().isSupportedConstantValue(rhs))
-            co_yield m_context->copier()->ensureType(rhs, rhs, Register::Type::Vector);
         co_yield_(Instruction("v_mul_lo_u32", {dest}, {lhs, rhs}, {}, ""));
     }
 
