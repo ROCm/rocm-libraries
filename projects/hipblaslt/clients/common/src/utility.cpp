@@ -41,7 +41,7 @@
 #include <stdexcept>
 #include <stdlib.h>
 
-#include "Tensile/Source/client/include/Utility.hpp"
+#include "client/include/Utility.hpp"
 
 #if __has_include(<filesystem>)
 #include <filesystem>
