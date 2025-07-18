@@ -803,12 +803,11 @@ namespace rocRoller
 
             if(setM0)
             {
-                co_yield generate(m0, info.data->expression()).map(AddComment("setTrue"));
+                co_yield generate(m0, info.data->expression());
             }
             else
             {
-                co_yield generate(m0, m0->expression() + Expression::literal(info.ldsWriteStride))
-                    .map(AddComment("setFalse"));
+                co_yield generate(m0, m0->expression() + Expression::literal(info.ldsWriteStride));
             }
 
             if(info.offset->regType() == Register::Type::Literal
@@ -1364,8 +1363,6 @@ namespace rocRoller
 
             if(kind == MemoryInstructions::MemoryKind::Buffer2LDS)
             {
-                // co_yield m_context->copier()->ensureType(
-                //     info.data, info.data, Register::Type::Vector);
                 co_yield getOffset(
                     info, coords, tag, false /* preserveOffset */, true /* direct2LDS */);
 
