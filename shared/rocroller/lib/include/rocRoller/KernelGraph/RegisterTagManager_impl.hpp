@@ -199,13 +199,6 @@ namespace rocRoller
                         getRegister(*existingTag)->toString());
         }
 
-        // if(auto ctx = m_context.lock())
-        // {
-        //     auto inst
-        //         = Instruction::Comment(fmt::format("tag {}: {}", tag, value->toString()));
-        //     ctx->schedule(inst);
-        // }
-
         m_registers.emplace(tag, value);
     }
 
@@ -217,13 +210,6 @@ namespace rocRoller
         AssertFatal(!hasRegister(tag), "Tag ", tag, " already associated with a register");
 
         AssertFatal(!m_aliases.contains(tag), "Cannot alias an expression tag.");
-
-        // if(auto ctx = m_context.lock())
-        // {
-        //     auto inst
-        //         = Instruction::Comment(fmt::format("tag {}: {}", tag, toString(value)));
-        //     ctx->schedule(inst);
-        // }
 
         m_expressions.emplace(tag, std::make_pair(value, attrs));
     }
