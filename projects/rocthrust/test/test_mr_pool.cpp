@@ -19,7 +19,8 @@
 #include <thrust/mr/pool.h>
 #include <thrust/mr/sync_pool.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 template <typename T>
 struct reference
