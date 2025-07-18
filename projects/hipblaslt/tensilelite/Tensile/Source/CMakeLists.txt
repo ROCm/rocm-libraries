@@ -94,5 +94,9 @@ if(TENSILE_BUILD_CLIENT)
     add_subdirectory(client)
 endif()
 
-export(TARGETS TensileHost NAMESPACE Tensile:: FILE TensileExports.cmake)
+if(TENSILE_USE_OPENMP)
+  export(TARGETS custom_openmp_cxx TensileHost NAMESPACE Tensile:: FILE TensileExports.cmake)
+else()
+  export(TARGETS TensileHost NAMESPACE Tensile:: FILE TensileExports.cmake)
+endif()
 
