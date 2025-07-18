@@ -5,10 +5,9 @@ add_subdirectory(amd_detail)
 
 target_sources(hipblaslt
     PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/auxiliary.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/exceptions.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/hipblaslt_ostream.hpp"
-
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/include/auxiliary.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/include/exceptions.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/include/hipblaslt_ostream.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/hipblaslt_internal.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/amd_detail/hipblaslt-ext-op-internal.hpp"
         
