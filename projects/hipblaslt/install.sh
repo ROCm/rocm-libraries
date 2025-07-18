@@ -418,6 +418,7 @@ tensile_test_local_path=
 tensile_version=
 tensile_verbose=
 tensile_msgpack_backend=true
+tensile_use_openmp=true
 build_tensile=true
 update_cmake=true
 enable_gprof=false
@@ -573,6 +574,9 @@ while true; do
             shift;;
         --skip_rocroller)
             skip_rocroller=true
+            shift;;
+        --tensile_disable_openmp)
+            tensile_use_openmp=false
             shift;;
         --logic_yaml_filter|--logic-yaml-filter)
             logic_filter=${2}
@@ -850,6 +854,10 @@ pushd .
 
   if [[ "${enable_tensile_marker}" == true ]]; then
     tensile_opt="${tensile_opt} -DTensile_ENABLE_MARKER=ON"
+  fi
+
+  if [[ "${tensile_use_openmp}" == false ]]; then
+    tensile_opt="${tensile_opt} -DTTENSILE_USE_OPENMP=OFF"
   fi
 
   if [[ "${use_rocroller}" == false ]]; then

@@ -101,6 +101,13 @@ set_target_properties(TensileHost
                       CXX_STANDARD_REQUIRED ON
                       CXX_EXTENSIONS OFF)
 
+if(TENSILE_USE_OPENMP)
+    message(STATUS "OpenMP is enabled and found.")
+    target_link_libraries(TensileHost PRIVATE custom_openmp_cxx)
+else()
+    message(STATUS "OpenMP is not enabled.")
+endif()
+
 # Check if folder exists in virtual env, can remove this after virtual env is removed
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../../rocisa")
     message(FATAL_ERROR "rocisa folder not found. Please check the path.")
