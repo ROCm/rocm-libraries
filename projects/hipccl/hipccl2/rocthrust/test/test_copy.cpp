@@ -26,7 +26,9 @@
 #include <iterator>
 #include <list>
 
-#include "test_header.hpp"
+#include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(CopyTests, FullWithLargeTypesTestsParams)
 TESTS_DEFINE(CopyIntegerTests, IntegerTestsParams)
@@ -430,7 +432,7 @@ TYPED_TEST(CopyIntegerTests, TestCopyIf)
 
 TEST(CopyLargeTypesTests, TestCopyIfStencilLargeType)
 {
-  using T = test::large_data;
+  using T = large_data;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 

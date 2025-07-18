@@ -19,7 +19,8 @@
 #include <thrust/inner_product.h>
 #include <thrust/iterator/retag.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(InnerProductTests, FullTestsParams);
 TESTS_DEFINE(PrimitiveInnerProductTests, NumericalTestsParams);

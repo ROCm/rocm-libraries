@@ -22,7 +22,9 @@
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 
-#include "test_header.hpp"
+#include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 template <typename T>
 struct divide_by_2

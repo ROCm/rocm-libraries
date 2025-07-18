@@ -18,7 +18,8 @@
 #include <thrust/fill.h>
 #include <thrust/mr/new.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 template <typename MemoryResource>
 void TestAlignment(MemoryResource memres, std::size_t size, std::size_t alignment)
