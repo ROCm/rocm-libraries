@@ -9,7 +9,7 @@ What is rocBLAS?
 ********************************************************************
 
 rocBLAS is the AMD library for Basic Linear Algebra Subprograms (BLAS) on the :doc:`ROCm platform <rocm:index>`.
-It is implemented in the :doc:`HIP programming language <hip:index>` and optimized for AMD GPUs.
+It is implemented in the :doc:`HIP C++ <hip:index>` and optimized for AMD GPUs.
 For more detailed component information, see :doc:`rocBLAS design notes <../conceptual/rocblas-design-notes>`.
 
 rocBLAS aims to provide the following:
@@ -17,7 +17,7 @@ rocBLAS aims to provide the following:
 * Functionality similar to legacy BLAS, adapted to run on AMD GPUs
 * A high-performance, robust implementation
 
-rocBLAS is written in C++17 and HIP and uses the AMD ROCm runtime.
+rocBLAS is written in HIP C++ (using C++17 features) and it uses the HIP runtime.
 
 The rocBLAS API is a thin C99 API that uses the hourglass pattern. It contains:
 
