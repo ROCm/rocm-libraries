@@ -305,7 +305,7 @@
       UseScaleAlphaVec: 0
       UseScaleCD: false
     ScheduleGlobalRead: 1
-    ScheduleIterAlg: 1
+    ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 0
     SolutionNameMin: Cijk_Alik_Bjlk_S_MX_B_UserArgs_MT64x16x16_MI16x16x1_SN_GSU1_GSUC0_GSUWGMRR0_K1_MIWT1_1_SU32_SUM0_SUS256_WGM8_WGMXCC1_WGMXCCGn1
