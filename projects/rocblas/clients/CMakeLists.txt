@@ -262,9 +262,10 @@ add_custom_command( OUTPUT "${ROCBLAS_CLIENTS_README}"
 
 add_custom_target( rocblas-common DEPENDS "${ROCBLAS_COMMON}" "${ROCBLAS_TEMPLATE}" "${ROCBLAS_GENERAL_YAML}" "${ROCBLAS_GENTEST}" "${ROCBLAS_CLIENTS_README}" )
 
+set( PACKAGE_NAME "rocblas" )
 rocm_install(
   FILES ${ROCBLAS_COMMON} ${ROCBLAS_TEMPLATE} ${ROCBLAS_GENERAL_YAML}
-  DESTINATION "${CMAKE_INSTALL_BINDIR}"
+  DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}"
   COMPONENT clients-common
 )
 
@@ -277,6 +278,6 @@ rocm_install(
 # this readme also serves to prevent an empty package rocblas-clients which dpkg may auto-remove entire rocblas-clients and non empty children
 rocm_install(
   FILES ${ROCBLAS_CLIENTS_README}
-  DESTINATION "${CMAKE_INSTALL_BINDIR}"
+  DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/${PACKAGE_NAME}"
   COMPONENT clients
 )
