@@ -26,7 +26,9 @@
 #include "../../common/utils_device_ptr.hpp"
 
 // required test headers
+#include "test_utils_assertions.hpp"
 #include "test_utils_data_generation.hpp"
+#include "test_utils_get_random_data.hpp"
 
 // required rocprim headers
 #include <rocprim/device/device_transform.hpp>
@@ -140,5 +142,113 @@ TYPED_TEST(RocprimTextureCacheIteratorTests, Transform)
         }
 
         HIP_CHECK(x.unbind_texture());
+    }
+}
+
+template<typename T, int NumOps>
+__global__
+void texture_iterator_kernel(rocprim::texture_cache_iterator<T> it, T* input, int* output)
+{
+    const int i = threadIdx.x * NumOps;
+
+    // Test dereference
+    output[i] = (*it == input[0]);
+
+    // Test pre-increment
+    ++it;
+    output[i + 1] = (*it == input[1]);
+
+    // Test post-increment
+    rocprim::texture_cache_iterator<T> temp = it++;
+    output[i + 2]                           = (*temp == input[1]);
+    output[i + 3]                           = (*it == input[2]);
+
+    // Test +=
+    it += 2;
+    output[i + 4] = (*it == input[4]);
+
+    // Test -=
+    it -= 2;
+    output[i + 5] = (*it == input[2]);
+
+    // Indexing
+    output[i + 6] = (it[1] == input[3]);
+
+    // Addition
+    auto it_plus  = it + 2;
+    output[i + 7] = (*it_plus == input[4]);
+    output[i + 8] = (*(2 + it) == input[4]);
+
+    // Subtraction
+    auto it_minus = it_plus - 2;
+    output[i + 9] = (*it_minus == input[2]);
+
+    auto begin = it - 2;
+    auto end   = it + 2;
+
+    // Comparisons
+    output[i + 10] = (begin == begin) ? true : false;
+    output[i + 11] = (begin != end) ? true : false;
+    output[i + 12] = (begin < end) ? true : false;
+    output[i + 13] = (end > begin) ? true : false;
+    output[i + 14] = (begin <= begin) ? true : false;
+    output[i + 15] = (begin <= end) ? true : false;
+    output[i + 16] = (end >= begin) ? true : false;
+    output[i + 17] = (end >= end) ? true : false;
+
+    // Substracting iterators
+    output[i + 18] = ((end - begin) == 4);
+}
+
+TYPED_TEST(RocprimTextureCacheIteratorTests, DeviceIteratorOps)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+
+    hipDeviceProp_t props;
+    HIP_CHECK(hipGetDeviceProperties(&props, device_id));
+    std::string deviceName = std::string(props.gcnArchName);
+    if(deviceName.rfind("gfx94", 0) == 0 || deviceName.rfind("gfx120", 0) == 0
+       || deviceName.rfind("gfx95", 0) == 0)
+    {
+        GTEST_SKIP()
+            << "Test not run on gfx94x, gfx120x, or gfx95x as texture cache API is not supported";
+    }
+
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T        = typename TestFixture::input_type;
+    using Iterator = rocprim::texture_cache_iterator<T>;
+
+    constexpr int num_threads  = 10;
+    constexpr int num_ops      = 19;
+    constexpr int result_count = num_threads * num_ops;
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        std::vector<T> input = test_utils::get_random_data_wrapped<T>(10, 1, 200, seed_value);
+
+        common::device_ptr<T>   d_input(input);
+        common::device_ptr<int> d_output(result_count);
+
+        Iterator it;
+        HIP_CHECK(it.bind_texture(d_input.get(), sizeof(T) * input.size()));
+
+        texture_iterator_kernel<T, num_ops>
+            <<<dim3(1), dim3(num_threads), 0, 0>>>(it, d_input.get(), d_output.get());
+
+        HIP_CHECK(hipDeviceSynchronize());
+        HIP_CHECK(hipGetLastError());
+
+        std::vector<int> host_output = d_output.load();
+        std::vector<int> expected(result_count, true);
+
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(host_output, expected));
+
+        HIP_CHECK(it.unbind_texture());
     }
 }

@@ -145,7 +145,10 @@ TEST(RocprimZipIteratorTests, Basics)
     ASSERT_EQ((zit2[0]), rocprim::make_tuple(1, 6, 1.0));
     ASSERT_EQ((zit2[2]), rocprim::make_tuple(3, 8, 3.0));
     // +
-    ASSERT_EQ(*(zit2+3), rocprim::make_tuple(4, 9, 4.0));
+    ASSERT_EQ(*(zit2 + 3), rocprim::make_tuple(4, 9, 4.0));
+    ASSERT_EQ(*(3 + zit2), rocprim::make_tuple(4, 9, 4.0));
+    // -
+    ASSERT_EQ(*(zit - 1), rocprim::make_tuple(1, 6, 1));
 }
 
 template<class T1, class T2, class T3>
@@ -295,44 +298,24 @@ TEST(RocprimZipIteratorTests, TransformReduce)
         U2 expected2 = std::accumulate(input2.begin(), input2.end(), T2(0))
             + std::accumulate(input3.begin(), input3.end(), T2(0));
 
-        // temp storage
-        size_t temp_storage_size_bytes;
-        // Get size of d_temp_storage
-        HIP_CHECK(rocprim::reduce(
-            nullptr,
-            temp_storage_size_bytes,
-            rocprim::make_transform_iterator(
-                rocprim::make_zip_iterator(
-                    rocprim::make_tuple(d_input1.get(), d_input2.get(), d_input3.get())),
-                tuple3to2_transform_op<T1, T2, T3>()),
-            rocprim::make_zip_iterator(rocprim::make_tuple(d_output1.get(), d_output2.get())),
-            input1.size(),
-            tuple2_reduce_op<T1, T2>(),
-            stream,
-            debug_synchronous));
-        HIP_CHECK(hipDeviceSynchronize());
-
-        // temp_storage_size_bytes must be >0
-        ASSERT_GT(temp_storage_size_bytes, 0);
-
-        // allocate temporary storage
-        common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
-        ASSERT_NE(d_temp_storage.get(), nullptr);
-
-        // Run
-        HIP_CHECK(rocprim::reduce(
-            d_temp_storage.get(),
-            temp_storage_size_bytes,
-            rocprim::make_transform_iterator(
-                rocprim::make_zip_iterator(
-                    rocprim::make_tuple(d_input1.get(), d_input2.get(), d_input3.get())),
-                tuple3to2_transform_op<T1, T2, T3>()),
-            rocprim::make_zip_iterator(rocprim::make_tuple(d_output1.get(), d_output2.get())),
-            input1.size(),
-            tuple2_reduce_op<T1, T2>(),
-            stream,
-            debug_synchronous));
-        HIP_CHECK(hipDeviceSynchronize());
+        test_utils::test_kernel_wrapper(
+            [&](void* temp_storage, size_t& storage_bytes)
+            {
+                return rocprim::reduce(
+                    temp_storage,
+                    storage_bytes,
+                    rocprim::make_transform_iterator(
+                        rocprim::make_zip_iterator(
+                            rocprim::make_tuple(d_input1.get(), d_input2.get(), d_input3.get())),
+                        tuple3to2_transform_op<T1, T2, T3>()),
+                    rocprim::make_zip_iterator(
+                        rocprim::make_tuple(d_output1.get(), d_output2.get())),
+                    input1.size(),
+                    tuple2_reduce_op<T1, T2>(),
+                    stream,
+                    debug_synchronous);
+            },
+            stream);
 
         // Copy output to host
         output1 = d_output1.load();
