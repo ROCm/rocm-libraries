@@ -4,11 +4,8 @@ TestParameters:
 GlobalParameters:
   NumElementsToValidate: -1
   Architecture: gfx1250
+  DeviceLDS: 327680
   ROCmAgentEnumeratorPath: rocm_agent_enumerator
-  CpuThreads: 1
-  NumWarmups: 0
-  EnqueuesPerSync: 1
-  PrintWinnersOnly: True
 
 BenchmarkProblems:
   #######################################
