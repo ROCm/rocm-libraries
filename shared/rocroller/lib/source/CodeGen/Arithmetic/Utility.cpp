@@ -26,6 +26,8 @@
 
 #include <rocRoller/CodeGen/Arithmetic/Utility.hpp>
 
+#include <rocRoller/InstructionValues/Register.hpp>
+
 namespace rocRoller
 {
     namespace Arithmetic
