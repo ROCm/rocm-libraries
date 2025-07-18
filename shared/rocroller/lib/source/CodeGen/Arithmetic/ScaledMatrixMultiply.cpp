@@ -176,13 +176,6 @@ namespace rocRoller
                              {opselLo, opselHi, aType, bType},
                              "");
 
-            auto status = m_context->peek(inst);
-
-            if(status.waitCount != WaitCount())
-            {
-                co_yield Instruction::Wait(status.waitCount);
-            }
-
             co_yield inst;
         }
     }
