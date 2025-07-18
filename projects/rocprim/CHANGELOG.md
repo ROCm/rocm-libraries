@@ -121,6 +121,8 @@ This is a complete list of affected functions and how their default accumulator 
 
 * Fixed device radix sort not returning the correct required temporary storage when a double buffer contains `nullptr`.
 * Fixed constness of equality operators (`==` and `!=`) in `rocprim::key_value_pair`.
+* Fixed an issue for the comparison operators in `arg_index_iterator` and `texture_cache_iterator`, where `<` and `>` comparators were swapped.
+* Fixed an issue for the `rocprim::thread_reduce` not working correctly with a prefix value.
 
 ### Upcoming changes
 
