@@ -138,6 +138,7 @@ struct Arguments
     char orderD;
 
     bool inEqualOut;
+    int logging;
     /*************************************************************************
      *                     End Of Arguments                                  *
      *************************************************************************/
@@ -207,7 +208,8 @@ struct Arguments
     OPER(orderB) SEP                 \
     OPER(orderC) SEP                 \
     OPER(orderD) SEP                 \
-    OPER(inEqualOut) SEP
+    OPER(inEqualOut) SEP             \
+    OPER(logging) SEP
     // clang-format on
 
     // Validate input format.

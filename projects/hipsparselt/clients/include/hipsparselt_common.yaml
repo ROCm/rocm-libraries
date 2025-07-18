@@ -146,6 +146,7 @@ Arguments:
   - orderC: c_char
   - orderD: c_char
   - inEqualOut: c_bool
+  - logging: c_int32
 
 # These named dictionary lists [ {dict1}, {dict2}, etc. ] supply subsets of
 # test arguments in a structured way. The dictionaries are applied to the test
@@ -229,4 +230,5 @@ Defaults:
   orderC: C
   orderD: C
   inEqualOut: false
+  logging: -1
 
