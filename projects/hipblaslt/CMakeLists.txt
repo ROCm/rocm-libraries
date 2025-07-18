@@ -55,6 +55,7 @@ if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
     option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
     cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
     option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
+    option(TENSILELITE_BUILD_TESTING "Build tensilelite host library tests." ON)
 endif()
 
 if(HIPBLASLT_ENABLE_DEVICE)
@@ -248,7 +249,6 @@ if(HIPBLASLT_ENABLE_HOST)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_MARKER) # public header?
     endif()
 
-    set(TENSILELITE_HOST_SOURCE_DIR "${hipblaslt_SOURCE_DIR}/tensilelite/Tensile/Source/lib")
     set(HIPBLASLT_CLIENTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../clients")
 
     target_include_directories(hipblaslt
