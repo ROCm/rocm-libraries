@@ -21,6 +21,8 @@
 #include <gtest/gtest.h>
 #include <stdio.h>
 
+
+#include <cmath>
 #include <numeric>
 #include <random>
 
