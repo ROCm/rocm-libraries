@@ -491,7 +491,7 @@ namespace rocRoller
                 auto destTileTag = graph.mapper.get(exchangeTag, NaryArgument::DEST);
 
                 auto pred = m_context->kernelOptions()->scaleSkipPermlane ? CT::isEdge<Segment>
-                                                                     : CT::isEdge<Index>;
+                                                                          : CT::isEdge<Index>;
 
                 auto tileTags
                     = graph.coordinates.getInputNodeIndices(destTileTag, pred).to<std::vector>();

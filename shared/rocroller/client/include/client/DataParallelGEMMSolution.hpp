@@ -99,16 +99,18 @@ namespace rocRoller
                     auto mulInputA = m_tagA;
                     auto mulInputB = m_tagB;
 
-                    AssertFatal(solutionParams.types.scaleA == Operations::ScaleMode::None
-                                    || solutionParams.types.scaleA == Operations::ScaleMode::Separate
-                                    || solutionParams.types.scaleA == Operations::ScaleMode::SingleScale,
-                                "Scale mode not supported!",
-                                ShowValue(solutionParams.types.scaleA));
-                    AssertFatal(solutionParams.types.scaleB == Operations::ScaleMode::None
-                                    || solutionParams.types.scaleB == Operations::ScaleMode::Separate
-                                    || solutionParams.types.scaleB == Operations::ScaleMode::SingleScale,
-                                "Scale mode not supported!",
-                                ShowValue(solutionParams.types.scaleB));
+                    AssertFatal(
+                        solutionParams.types.scaleA == Operations::ScaleMode::None
+                            || solutionParams.types.scaleA == Operations::ScaleMode::Separate
+                            || solutionParams.types.scaleA == Operations::ScaleMode::SingleScale,
+                        "Scale mode not supported!",
+                        ShowValue(solutionParams.types.scaleA));
+                    AssertFatal(
+                        solutionParams.types.scaleB == Operations::ScaleMode::None
+                            || solutionParams.types.scaleB == Operations::ScaleMode::Separate
+                            || solutionParams.types.scaleB == Operations::ScaleMode::SingleScale,
+                        "Scale mode not supported!",
+                        ShowValue(solutionParams.types.scaleB));
 
                     AssertFatal(solutionParams.types.scaleA == Operations::ScaleMode::None
                                     || solutionParams.types.scaleTypeA != DataType::None,
@@ -125,7 +127,9 @@ namespace rocRoller
                     if(solutionParams.types.scaleA == Operations::ScaleMode::Separate)
                     {
                         m_tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                            2, solutionParams.types.scaleTypeA, unitStrides(solutionParams.types.transA)));
+                            2,
+                            solutionParams.types.scaleTypeA,
+                            unitStrides(solutionParams.types.transA)));
                         m_tagLoadScaleA   = command->addOperation(
                             rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleA.value()));
 
@@ -134,7 +138,8 @@ namespace rocRoller
                                 m_tagA,
                                 2,
                                 m_tagLoadScaleA,
-                                {1, static_cast<unsigned long>(solutionParams.types.scaleBlockSize)}));
+                                {1,
+                                 static_cast<unsigned long>(solutionParams.types.scaleBlockSize)}));
                     }
                     else if(solutionParams.types.scaleA == Operations::ScaleMode::SingleScale)
                     {
@@ -149,7 +154,9 @@ namespace rocRoller
                     if(solutionParams.types.scaleB == Operations::ScaleMode::Separate)
                     {
                         m_tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                            2, solutionParams.types.scaleTypeB, unitStrides(solutionParams.types.transB)));
+                            2,
+                            solutionParams.types.scaleTypeB,
+                            unitStrides(solutionParams.types.transB)));
                         m_tagLoadScaleB   = command->addOperation(
                             rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleB.value()));
 
@@ -158,7 +165,8 @@ namespace rocRoller
                                 m_tagB,
                                 2,
                                 m_tagLoadScaleB,
-                                {static_cast<unsigned long>(solutionParams.types.scaleBlockSize), 1}));
+                                {static_cast<unsigned long>(solutionParams.types.scaleBlockSize),
+                                 1}));
                     }
                     else if(solutionParams.types.scaleB == Operations::ScaleMode::SingleScale)
                     {
@@ -495,15 +503,18 @@ namespace rocRoller
 
                     TensorDescriptor descA(fromString<DataType>(problemParams.types.typeA),
                                            {M, K},
-                                           problemParams.types.transA == TransposeType::T ? "T" : "N");
+                                           problemParams.types.transA == TransposeType::T ? "T"
+                                                                                          : "N");
                     TensorDescriptor descB(fromString<DataType>(problemParams.types.typeB),
                                            {K, N},
-                                           problemParams.types.transB == TransposeType::T ? "T" : "N");
+                                           problemParams.types.transB == TransposeType::T ? "T"
+                                                                                          : "N");
 
                     setCommandTensorArg(commandArgs, m_tagTensorA, descA, (float*)nullptr);
                     setCommandTensorArg(commandArgs, m_tagTensorB, descB, (float*)nullptr);
 
-                    TensorDescriptor descC(fromString<DataType>(problemParams.types.typeC), {M, N}, "N");
+                    TensorDescriptor descC(
+                        fromString<DataType>(problemParams.types.typeC), {M, N}, "N");
                     setCommandTensorArg(commandArgs, m_tagTensorC, descC, (float*)nullptr);
 
                     commandArgs.setArgument(
@@ -511,7 +522,8 @@ namespace rocRoller
                     commandArgs.setArgument(
                         m_tagScalarBeta, ArgumentType::Value, problemParams.beta);
 
-                    TensorDescriptor descD(fromString<DataType>(problemParams.types.typeD), {M, N}, "N");
+                    TensorDescriptor descD(
+                        fromString<DataType>(problemParams.types.typeD), {M, N}, "N");
                     setCommandTensorArg(commandArgs, m_tagTensorD, descD, (float*)nullptr);
 
                     if(problemParams.workgroupMapping.first != -1)

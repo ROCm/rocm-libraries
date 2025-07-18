@@ -252,12 +252,11 @@ namespace AssertTest
             m_context->schedule(k->preamble());
             m_context->schedule(k->prolog());
             k->setDynamicSharedMemBytes(zero);
-            
+
             auto                    testReg = kgraph.coordinates.addElement(Linear());
             Expression::DataFlowTag testRegTag{testReg, Register::Type::Scalar, DataType::UInt32};
 
             int setToZero = kgraph.control.addElement(Assign{Register::Type::Scalar, zero});
-
 
             auto assertOp = kgraph.control.addElement(AssertOp{"Unconditional Assert"});
 

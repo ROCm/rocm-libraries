@@ -1197,11 +1197,13 @@ namespace rocRoller
 
                 if(m_context->kernelOptions()->scaleSkipPermlane)
                 {
-                    AssertFatal(m_context->registerTagManager()->hasRegister(oMacTileTag), ShowValue(oMacTileTag));
+                    AssertFatal(m_context->registerTagManager()->hasRegister(oMacTileTag),
+                                ShowValue(oMacTileTag));
                 }
                 else
                 {
-                    AssertFatal(!m_context->registerTagManager()->hasRegister(oMacTileTag), ShowValue(oMacTileTag));
+                    AssertFatal(!m_context->registerTagManager()->hasRegister(oMacTileTag),
+                                ShowValue(oMacTileTag));
                     AssertFatal(vgpr->registerCount() == numVgpr);
 
                     m_context->registerTagManager()->addRegister(oMacTileTag, vgpr);

@@ -227,14 +227,14 @@ namespace rocRoller
         auto reduce = m_context->kernel()->wavefront_size() == 64 ? "s_and_b64" : "s_and_b32";
         if(dst != nullptr && !dst->isSCC())
         {
-            co_yield (Instruction::Lock(Scheduling::Dependency::SCC,
-                                        "Start Compare writing to non-SCC dest"));
+            co_yield Instruction::Lock(Scheduling::Dependency::SCC,
+                                       "Start Compare writing to non-SCC dest");
         }
         co_yield_(Instruction(reduce, {wfp}, {wfp, m_context->getExec()}, {}, ""));
         if(dst != nullptr && !dst->isSCC())
         {
             co_yield m_context->copier()->copy(dst, m_context->getSCC(), "");
-            co_yield (Instruction::Unlock("End Compare writing to non-SCC dest"));
+            co_yield Instruction::Unlock("End Compare writing to non-SCC dest");
         }
     }
 

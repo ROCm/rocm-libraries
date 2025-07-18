@@ -246,11 +246,11 @@ namespace rocRoller
             // to allow user to specify stride types instead of
             // forcing size_t.
 
-            bool     forward    = false;
-            bool isDirect2LDS = false;
-            DataType valueType  = DataType::Count;
-            DataType offsetType = DataType::Count;
-            DataType strideType = DataType::Count;
+            bool     forward      = false;
+            bool     isDirect2LDS = false;
+            DataType valueType    = DataType::Count;
+            DataType offsetType   = DataType::Count;
+            DataType strideType   = DataType::Count;
 
             std::string name() const;
         };

@@ -140,7 +140,7 @@ namespace rocRoller
             {
                 return "Segment";
             }
-	};
+        };
 
         /**
          * Buffer - denotes SRD for MUBUF instructions

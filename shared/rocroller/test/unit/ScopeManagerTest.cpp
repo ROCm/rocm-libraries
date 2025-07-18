@@ -54,7 +54,8 @@ namespace ScopeManagerTest
         scope.addRegister(dim);
 
         // Associate a register with the Dimension
-        Register::ValuePtr reg = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1);
+        Register::ValuePtr reg
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1);
         m_context->registerTagManager()->addRegister(dim, reg);
 
         EXPECT_TRUE(m_context->registerTagManager()->hasRegister(dim));
@@ -78,7 +79,8 @@ namespace ScopeManagerTest
         scope.addRegister(dim);
 
         // Associate a register with the Dimension
-        Register::ValuePtr reg = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1);
+        Register::ValuePtr reg
+            = Register::Value::Placeholder(m_context, Register::Type::Vector, DataType::Int32, 1);
         m_context->registerTagManager()->addRegister(dim, reg);
 
         // Create a Deallocate op associated with the Dimension

@@ -105,8 +105,8 @@ namespace rocRoller
             auto src = loc.incoming[0];
             auto dst = loc.outgoing[0];
 
-            auto segmentEdge
-                = std::get<CT::Segment>(std::get<CT::DataFlowEdge>(kgraph.coordinates.getEdge(edge)));
+            auto segmentEdge = std::get<CT::Segment>(
+                std::get<CT::DataFlowEdge>(kgraph.coordinates.getEdge(edge)));
             auto index = segmentEdge.index;
             AssertFatal(index != -1, "index value for Segment edge is not set");
             addSegment(src, dst, index);

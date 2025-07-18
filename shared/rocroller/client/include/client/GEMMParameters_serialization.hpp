@@ -67,8 +67,7 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "scaleSkipPermlane", params.scaleSkipPermlane);
         }
 
-        static void
-            mapping(IO& io, Client::GEMMClient::TypeParameters& params, EmptyContext& ctx)
+        static void mapping(IO& io, Client::GEMMClient::TypeParameters& params, EmptyContext& ctx)
         {
             mapping(io, params);
         }

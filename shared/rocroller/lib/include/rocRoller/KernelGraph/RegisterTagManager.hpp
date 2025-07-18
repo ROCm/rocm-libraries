@@ -230,6 +230,7 @@ namespace rocRoller
         std::optional<std::pair<int, int>> getIndex(int tag) const;
 
         std::optional<std::pair<int, int>> getSegment(int tag) const;
+
     private:
         std::weak_ptr<Context>            m_context;
         std::map<int, Register::ValuePtr> m_registers;

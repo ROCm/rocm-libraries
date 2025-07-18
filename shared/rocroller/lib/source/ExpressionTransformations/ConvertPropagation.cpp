@@ -288,7 +288,7 @@ namespace rocRoller
             {
                 if(expr->regType() == Register::Type::Vector)
                     return std::make_shared<Expression>(ToScalar{expr->expression()});
-                
+
                 return expr->expression();
             }
 

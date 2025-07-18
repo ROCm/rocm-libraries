@@ -385,7 +385,7 @@ namespace rocRoller
             {
                 if(direct2LDS)
                 {
-                    auto tmp = m_context->registerTagManager()->getRegister(offsetTag);
+                    auto tmp  = m_context->registerTagManager()->getRegister(offsetTag);
                     auto expr = info.data->expression() + tmp->expression();
 
                     if(info.data->regType() == Register::Type::Literal)
@@ -590,8 +590,7 @@ namespace rocRoller
                 auto offsetType = Register::Type::Vector;
                 if(ci.isDirect2LDS)
                     offsetType = Register::Type::Scalar;
-                auto offsetReg
-                    = tagger->getRegister(offset, offsetType, ci.offsetType, 1);
+                auto offsetReg = tagger->getRegister(offset, offsetType, ci.offsetType, 1);
                 offsetReg->setName(concatenate("Offset", tag));
                 scope->addRegister(offset);
 
@@ -624,9 +623,7 @@ namespace rocRoller
                 if(ci.isDirect2LDS)
                     expr = makeScalar(expr);
 
-                co_yield generate(
-                    offsetReg,
-                    convert(offsetReg->variableType(), expr));
+                co_yield generate(offsetReg, convert(offsetReg->variableType(), expr));
                 offsetReg->setReadOnly();
             }
             else
