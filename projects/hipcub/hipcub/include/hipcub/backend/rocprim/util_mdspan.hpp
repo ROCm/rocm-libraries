@@ -103,9 +103,25 @@ using extents = std::extents<IndexType, Extents...>;
 #else
 
 /**
- * \brief The extents descripter as equivalent of std::extents in c++23
- * This class here is only for compatibility. When std::extents is supported
- * we should remove it.
+ * \addtogroup UtilMdspan
+ * \brief This group contains a class `extents` and few helper templates
+ * for extents operations.
+ * @{
+ */
+
+/**
+ * \brief The `extents` descriptor serves as an equivalent of `std::extents` 
+ * in C++23. This class exists only for compatibility. In C++23, `std::extents` 
+ * supports both static and dynamic extents, but supporting dynamic extents 
+ * involves multiple C++20 and C++23 `constexpr` functions and templates. 
+ * Therefore, implementing the full functionality of `std::extents` in this 
+ * file is not a good idea. We should either upgrade the C++ version or adjust
+ *  the compiler to make it possible to include those headers directly. Once 
+ * `std::extents` is supported, we should remove this class.
+ * \note This class only supports static extents. And to be clearer, the function
+ * `extents::extent` is not implemented, please use `static_extent` instead. It's 
+ * also a benefit becasue, we can do all calculations associated witht the extents
+ * during compile time.
  */
 template<class IndexType, size_t... Extents>
 class extents
@@ -156,7 +172,7 @@ public:
 #endif
 
 /**
- * \brief Helper trait, which removes the first extent of `ExtentsType`.
+ * \brief Helper template, which removes the first extent of `ExtentsType`.
  */
 template<class ExtentsType>
 struct extents_remove_first
@@ -169,7 +185,7 @@ struct extents_remove_first<::hipcub::extents<IndexType, First, Extents...>>
 };
 
 /**
- * \brief Helper trait, get the total size of `ExtentsType`
+ * \brief Helper template, to get the total size of `ExtentsType`
  * For example, you have an `::hipcub::extents<int,4,3,2>`,
  * it returns 24 (4 * 3 * 2). 
  */
@@ -187,7 +203,7 @@ struct extents_size<::hipcub::extents<IndexType, First, Extents...>>
 };
 
 /**
- * \brief Helper trait, returns the size of the sub extents of 
+ * \brief Helper template, returns the size of the sub extents of 
  * `ExtentsType`, starting from rank number `StartRank`.
  */
 template<size_t StartRank, class ExtentsType, class Enable = void>
@@ -206,6 +222,8 @@ struct extents_sub_size<StartRank, ExtentsType, typename std::enable_if<StartRan
     constexpr static size_t value
         = extents_sub_size<StartRank - 1, typename extents_remove_first<ExtentsType>::type>::value;
 };
+
+/** @} */ // end group UtilModule
 
 END_HIPCUB_NAMESPACE
 
