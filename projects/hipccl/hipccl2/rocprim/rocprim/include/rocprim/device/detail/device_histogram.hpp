@@ -306,8 +306,9 @@ ROCPRIM_DEVICE ROCPRIM_INLINE void
 }
 
 template<unsigned int BlockSize, unsigned int ActiveChannels, class Counter>
-ROCPRIM_DEVICE ROCPRIM_INLINE void init_histogram(fixed_array<Counter*, ActiveChannels> histogram,
-                                                  fixed_array<unsigned int, ActiveChannels> bins)
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void init_histogram(fixed_array<Counter*, ActiveChannels>           histogram,
+                    const fixed_array<unsigned int, ActiveChannels> bins)
 {
     const unsigned int flat_id  = ::rocprim::detail::block_thread_id<0>();
     const unsigned int block_id = ::rocprim::detail::block_id<0>();
@@ -329,17 +330,17 @@ template<unsigned int BlockSize,
          class SampleIterator,
          class Counter,
          class SampleToBinOp>
-ROCPRIM_DEVICE ROCPRIM_INLINE void
-    histogram_shared(SampleIterator                             samples,
-                     unsigned int                               columns,
-                     unsigned int                               rows,
-                     unsigned int                               row_stride,
-                     unsigned int                               rows_per_block,
-                     unsigned int                               shared_histograms,
-                     fixed_array<Counter*, ActiveChannels>      histogram,
-                     fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
-                     fixed_array<unsigned int, ActiveChannels>  bins,
-                     unsigned int*                              block_histogram_start)
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void histogram_shared(SampleIterator                                   samples,
+                      unsigned int                                     columns,
+                      unsigned int                                     rows,
+                      unsigned int                                     row_stride,
+                      unsigned int                                     rows_per_block,
+                      unsigned int                                     shared_histograms,
+                      fixed_array<Counter*, ActiveChannels>            histogram,
+                      const fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
+                      const fixed_array<unsigned int, ActiveChannels>  bins,
+                      unsigned int*                                    block_histogram_start)
 {
     using sample_type        = typename std::iterator_traits<SampleIterator>::value_type;
     using sample_vector_type = sample_vector<sample_type, Channels>;
@@ -456,13 +457,13 @@ template<unsigned int BlockSize,
          class SampleIterator,
          class Counter,
          class SampleToBinOp>
-ROCPRIM_DEVICE ROCPRIM_INLINE void
-    histogram_global(SampleIterator                             samples,
-                     unsigned int                               columns,
-                     unsigned int                               row_stride,
-                     fixed_array<Counter*, ActiveChannels>      histogram,
-                     fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
-                     fixed_array<unsigned int, ActiveChannels>  bins_bits)
+ROCPRIM_DEVICE ROCPRIM_INLINE
+void histogram_global(SampleIterator                                   samples,
+                      unsigned int                                     columns,
+                      unsigned int                                     row_stride,
+                      fixed_array<Counter*, ActiveChannels>            histogram,
+                      const fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
+                      const fixed_array<unsigned int, ActiveChannels>  bins_bits)
 {
     using sample_type        = typename std::iterator_traits<SampleIterator>::value_type;
     using sample_vector_type = sample_vector<sample_type, Channels>;

@@ -329,36 +329,79 @@ inline OutputIter segmented_generate_n(OutputIter it, size_t size, Generator&& g
     return it + size;
 }
 
+template<typename T, typename U, typename V>
+auto make_distribution(U min, V max)
+{
+    if constexpr(rocprim::is_floating_point<T>::value)
+    {
+        using dis_type = typename std::conditional<std::is_same<rocprim::half, T>::value
+                                                       || std::is_same<rocprim::bfloat16, T>::value,
+                                                   float,
+                                                   T>::type;
+        return std::uniform_real_distribution<dis_type>(static_cast<dis_type>(min),
+                                                        static_cast<dis_type>(max));
+    }
+    else
+    {
+        using dist_t
+            = std::conditional_t<common::is_valid_for_int_distribution<T>::value,
+                                 T,
+                                 std::conditional_t<std::is_signed<T>::value, int, unsigned int>>;
+
+        return common::uniform_int_distribution<dist_t>(saturate_cast<dist_t>(min),
+                                                        saturate_cast<dist_t>(max));
+    }
+}
+
 template<class OutputIter, class U, class V, class Generator>
 inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Generator&& gen)
-    -> std::enable_if_t<rocprim::is_integral<common::it_value_t<OutputIter>>::value, OutputIter>
+    -> std::enable_if_t<(rocprim::is_integral<common::it_value_t<OutputIter>>::value
+                         || rocprim::is_floating_point<common::it_value_t<OutputIter>>::value)
+                            && !common::is_custom_type<common::it_value_t<OutputIter>>::value,
+                        OutputIter>
 {
     using T = common::it_value_t<OutputIter>;
 
-    using dis_type = typename std::conditional<
-        common::is_valid_for_int_distribution<T>::value,
-        T,
-        typename std::conditional<rocprim::is_signed<T>::value, int, unsigned int>::type>::type;
-    common::uniform_int_distribution<dis_type> distribution(saturate_cast<dis_type>(min),
-                                                            saturate_cast<dis_type>(max));
+    auto distribution = make_distribution<T>(min, max);
 
     return segmented_generate_n(it, size, [&]() { return static_cast<T>(distribution(gen)); });
 }
 
 template<class OutputIter, class U, class V, class Generator>
 inline auto generate_random_data_n(OutputIter it, size_t size, U min, V max, Generator&& gen)
-    -> std::enable_if_t<rocprim::is_floating_point<common::it_value_t<OutputIter>>::value
-                            && !common::is_custom_type<common::it_value_t<OutputIter>>::value,
-                        OutputIter>
+    -> std::enable_if_t<
+        std::is_same_v<common::it_value_t<OutputIter>, test_utils::custom_float_type>,
+        OutputIter>
 {
-    using T = common::it_value_t<OutputIter>;
+    using T       = common::it_value_t<OutputIter>;
+    using value_t = typename T::value_type;
 
-    // Generate floats when T is half or bfloat16
-    using dis_type = typename std::conditional<std::is_same<rocprim::half, T>::value || std::is_same<rocprim::bfloat16, T>::value, float, T>::type;
-    std::uniform_real_distribution<dis_type> distribution(static_cast<dis_type>(min),
-                                                          static_cast<dis_type>(max));
+    value_t min_temp;
+    value_t max_temp;
 
-    return segmented_generate_n(it, size, [&]() { return static_cast<T>(distribution(gen)); });
+    if constexpr(common::is_custom_type<U>::value)
+    {
+        min_temp = min.x;
+    }
+    else
+    {
+        min_temp = min;
+    }
+
+    if constexpr(common::is_custom_type<V>::value)
+    {
+        max_temp = max.x;
+    }
+    else
+    {
+        max_temp = max;
+    }
+
+    auto distribution = make_distribution<value_t>(min_temp, max_temp);
+
+    return segmented_generate_n(it,
+                                size,
+                                [&]() { return static_cast<value_t>(distribution(gen)); });
 }
 
 template<class OutputIter, class Generator>
@@ -369,47 +412,23 @@ inline auto generate_random_data_n(OutputIter                     it,
                                    Generator&&                    gen)
     -> std::enable_if_t<
         common::is_custom_type<common::it_value_t<OutputIter>>::value
-            && rocprim::is_integral<typename common::it_value_t<OutputIter>::value_type>::value,
+            && !(rocprim::is_integral<common::it_value_t<OutputIter>>::value
+                 || rocprim::is_floating_point<common::it_value_t<OutputIter>>::value),
         OutputIter>
 {
-    using T       = common::it_value_t<OutputIter>;
-    using value_t = typename T::value_type;
+    using T        = common::it_value_t<OutputIter>;
+    using first_t  = typename T::first_type;
+    using second_t = typename T::second_type;
 
-    using distribution_t
-        = std::conditional_t<common::is_valid_for_int_distribution<value_t>::value,
-                             value_t,
-                             std::conditional_t<std::is_signed<value_t>::value, int, unsigned int>>;
-
-    common::uniform_int_distribution<distribution_t> distribution(
-        saturate_cast<distribution_t>(min.x),
-        saturate_cast<distribution_t>(max.x));
+    auto first_dist  = make_distribution<first_t>(min.x, max.x);
+    auto second_dist = make_distribution<second_t>(min.y, max.y);
 
     return segmented_generate_n(it,
                                 size,
                                 [&]() {
-                                    return T(static_cast<value_t>(distribution(gen)),
-                                             static_cast<value_t>(distribution(gen)));
+                                    return T(static_cast<first_t>(first_dist(gen)),
+                                             static_cast<second_t>(second_dist(gen)));
                                 });
-}
-
-template<class OutputIter, class Generator>
-inline auto generate_random_data_n(OutputIter                     it,
-                                   size_t                         size,
-                                   common::it_value_t<OutputIter> min,
-                                   common::it_value_t<OutputIter> max,
-                                   Generator&&                    gen)
-    -> std::enable_if_t<common::is_custom_type<common::it_value_t<OutputIter>>::value
-                            && rocprim::is_floating_point<
-                                typename common::it_value_t<OutputIter>::value_type>::value,
-                        OutputIter>
-{
-    using T = typename std::iterator_traits<OutputIter>::value_type;
-
-    std::uniform_real_distribution<typename T::value_type> distribution(min.x, max.x);
-
-    return segmented_generate_n(it,
-                                size,
-                                [&]() { return T(distribution(gen), distribution(gen)); });
 }
 
 template<class OutputIter, class Generator>
