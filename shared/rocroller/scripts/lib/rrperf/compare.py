@@ -283,12 +283,6 @@ def markdown_summary(md, perf_runs):
         "Problem",
         "Median Diff %",
         "Moods p-val",
-        "Mean A (ns)",
-        "Mean B (ns)",
-        "Median A (ns)",
-        "Median B (ns)",
-        "Run A (ref)",
-        "Run B",
         "Gen A (ns)",
         "Gen B (ns)",
     ]
@@ -310,12 +304,6 @@ def markdown_summary(md, perf_runs):
                 f"{token}",
                 f"{(percent):.2f}%",
                 f"{comparison.moods_pval:0.4e}",
-                f"{comparison.mean[0]:,}",
-                f"{comparison.mean[1]:,}",
-                f"{comparison.median[0]:,.0f}",
-                f"{comparison.median[1]:,.0f}",
-                f"{A.path.parent.stem}",
-                f"{B.path.parent.stem}",
                 f"{A.kernelGenerate:,.0f}",
                 f"{B.kernelGenerate:,.0f}",
             ]
@@ -344,20 +332,6 @@ def markdown_summary(md, perf_runs):
     print("\n</details>", file=md)
 
     perf_runs.sort()
-
-    machines = dict()
-    for run in perf_runs:
-        if run.machine_spec not in machines:
-            machines[run.machine_spec] = list()
-        machines[run.machine_spec].append(run.name())
-
-    print("\n\n<details><summary>Machines</summary>\n", file=md)
-    for machine in machines:
-        print("### Machine for {}:\n".format(", ".join(machines[machine])), file=md)
-        print("```", file=md)
-        print(machine.pretty_string(), file=md)
-        print("```", file=md)
-    print("</details>\n", file=md)
 
 
 def html_overview_table(html_file, summary, problems):
@@ -532,18 +506,6 @@ def html_summary(  # noqa: C901
                 runs[token].name.append(name)
                 runs[token].kernel.append(ka)
                 runs[token].machine.append(configs.index(run.machine_spec))
-                runs[token].box_data = pd.concat(
-                    [
-                        runs[token].box_data,
-                        pd.DataFrame(
-                            {
-                                "timestamp": run.timestamp,
-                                "commit": run.commit,
-                                "runs": ka,
-                            }
-                        ),
-                    ]
-                )
 
         plot = go.Figure()
         common_args = get_common_args(runs.keys())
