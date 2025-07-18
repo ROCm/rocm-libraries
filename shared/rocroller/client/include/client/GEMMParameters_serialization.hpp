@@ -103,55 +103,6 @@ namespace rocRoller::Serialization
         }
     };
 
-    // template <typename IO>
-    // struct MappingTraits<Client::GEMMClient::SolutionParameters, IO, EmptyContext>
-    // {
-    //     static const bool flow = false;
-    //     using iot              = IOTraits<IO>;
-
-    //     static void mapping(IO& io, Client::GEMMClient::SolutionParameters& params)
-    //     {
-    //         flatMap(io, params.types);
-
-    //         iot::mapRequired(io, "loadLDSScale_A", params.loadLDSScaleA);
-    //         iot::mapRequired(io, "loadLDSScale_B", params.loadLDSScaleB);
-    //         iot::mapRequired(io, "swizzleScale", params.swizzleScale);
-    //         iot::mapRequired(io, "prefetchScale", params.prefetchScale);
-
-    //         iot::mapRequired(io, "mac_m", params.macM);
-    //         iot::mapRequired(io, "mac_n", params.macN);
-    //         iot::mapRequired(io, "mac_k", params.macK);
-    //         iot::mapRequired(io, "wave_m", params.waveM);
-    //         iot::mapRequired(io, "wave_n", params.waveN);
-    //         iot::mapRequired(io, "wave_k", params.waveK);
-    //         iot::mapRequired(io, "wave_b", params.waveB);
-    //         iot::mapRequired(io, "workgroup_size_x", params.workgroupSizeX);
-    //         iot::mapRequired(io, "workgroup_size_y", params.workgroupSizeY);
-    //         iot::mapRequired(io, "workgroupMapping", params.workgroupMapping);
-    //         iot::mapRequired(io, "workgroupRemapXCC", params.workgroupRemapXCC);
-    //         iot::mapRequired(
-    //             io, "workgroupRemapXCCValue", params.workgroupRemapXCCValue);
-    //         iot::mapRequired(io, "unroll_x", params.unrollX);
-    //         iot::mapRequired(io, "unroll_y", params.unrollY);
-    //         iot::mapRequired(io, "loadLDS_A", params.loadLDSA);
-    //         iot::mapRequired(io, "loadLDS_B", params.loadLDSB);
-    //         iot::mapRequired(io, "storeLDS_D", params.storeLDSD);
-    //         iot::mapRequired(io, "direct2LDS_A", params.direct2LDSA);
-    //         iot::mapRequired(io, "direct2LDS_B", params.direct2LDSB);
-    //         iot::mapRequired(io, "prefetch", params.prefetch);
-    //         iot::mapRequired(io, "prefetchInFlight", params.prefetchInFlight);
-    //         iot::mapRequired(io, "prefetchLDSFactor", params.prefetchLDSFactor);
-    //         iot::mapRequired(io, "prefetchMixMemOps", params.prefetchMixMemOps);
-    //         iot::mapRequired(io, "betaInFma", params.betaInFma);
-    //         iot::mapRequired(io, "scheduler", params.scheduler);
-
-    //         iot::mapRequired(io, "streamK", params.streamK);
-    //         iot::mapRequired(io, "streamKTwoTile", params.streamKTwoTile);
-
-    //         iot::mapOptional(io, "version", params.version);
-    //     }
-    // };
-
     template <typename IO>
     struct MappingTraits<Client::GEMMClient::Result, IO, EmptyContext>
     {
@@ -164,19 +115,6 @@ namespace rocRoller::Serialization
 
             flatMap(io, result.problemParams);
             flatMap(io, result.solutionParams);
-
-            // iot::mapRequired(io, "type_A", result.solutionParams.typeA);
-            // iot::mapRequired(io, "type_B", result.solutionParams.typeB);
-            // iot::mapRequired(io, "type_C", result.solutionParams.typeC);
-            // iot::mapRequired(io, "type_D", result.solutionParams.typeD);
-            // iot::mapRequired(io, "type_acc", result.solutionParams.typeAcc);
-
-            // iot::mapRequired(io, "scale_A", result.solutionParams.scaleA);
-            // iot::mapRequired(io, "scaleType_A", result.solutionParams.scaleTypeA);
-            // iot::mapRequired(io, "scale_B", result.solutionParams.scaleB);
-            // iot::mapRequired(io, "scaleType_B", result.solutionParams.scaleTypeB);
-            // iot::mapRequired(io, "scaleSkipPermlane", result.solutionParams.scaleSkipPermlane);
-            // iot::mapRequired(io, "scaleBlockSize", result.solutionParams.scaleBlockSize);
 
             iot::mapRequired(io, "numWGs", result.benchmarkResults.runParams.numWGs);
 
