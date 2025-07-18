@@ -143,6 +143,7 @@ class StateValues:
   bpeCinternal: int = field(init=False)
 
   # KernelWriter
+  invalidLSUCode: bool                   = False
   inTailLoop: bool                       = False
   overflowedResources: int               = 0
   ## Schedule
@@ -4256,7 +4257,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.startVgpr        = vgprIdx
     vgprIdx += self.states.a.numVgprValu
     numVgprValuPackA = 0
-    if tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"]:
+    if tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
       self.states.a.startVgprValuPack = vgprIdx
       if self.states.lrvwTileA > 1:
         numVgprValuPackA = ceil(kernel["VectorWidthA"] * tensorParametersA["bpe"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthA"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadA"]
@@ -4291,7 +4292,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.b.startVgprValu  = vgprIdx
     vgprIdx += self.states.b.numVgprValu
     numVgprValuPackB = 0
-    if tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"]:
+    if tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] and not kernel["enableLDSTrB"]:
       self.states.b.startVgprValuPack = vgprIdx
       if self.states.lrvwTileB > 1:
         numVgprValuPackB = ceil(kernel["VectorWidthB"] * tensorParametersB["bpe"] / self.states.bpr) * kernel["MIWaveTileB"] // kernel["VectorWidthB"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadB"]
@@ -5093,7 +5094,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tP["metadataWriteSwapByteOffset"] = 0
     tP["isSwizzled"] = (kernel["ProblemType"]["SwizzleTensorB"] and tP["isB"]) or (kernel["ProblemType"]["SwizzleTensorA"] and tP["isA"])
 
-    if (cM == "A" or cM == "B") and kernel["ProblemType"]["SwizzleTensor%s"%cM]:
+    if tP["isSwizzled"]:
       # 16 means bytes of buffer_load_dwordx4
       tP["swizzlePackK"] = 16 // kernel["MIInputPerThread%s"%cM] // kernel["ProblemType"]["DataType%s"%cM].numBytes()
       tP["swizzleK"] = kernel["MatrixInstK"] * tP["swizzlePackK"]
