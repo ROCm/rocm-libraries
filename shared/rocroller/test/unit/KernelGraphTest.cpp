@@ -2774,7 +2774,14 @@ namespace KernelGraphTest
 
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
-        EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s3, 1")); //Conditional Test
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
+        {
+            EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s2, 1"));
+        }
+        else
+        {
+            EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s3, 1"));
+        }
         EXPECT_THAT(output(), testing::HasSubstr("s_cbranch_scc0")); //Branch for False
         EXPECT_THAT(output(), testing::HasSubstr("s_branch")); //Branch after True
         EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v1, 1")); //True Body
