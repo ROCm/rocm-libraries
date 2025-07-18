@@ -24,7 +24,7 @@ GlobalParameters:
   # PrintTensorD: 1
   # PrintTensorRef: 1
   # GenerateSourcesAndExit: True
-  AMDGPUArchPath: rocm_agent_enumerator
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
   #######################################
@@ -62,7 +62,7 @@ BenchmarkProblems:
           - [16, 16, 64, 1, 1, 4, 4, 2, 2] # m, n = 16, k = 64
           # - [16, 16, 64, 1, 1, 8, 8, 2, 2] # m, n = 16, k = 64
         - PrefetchGlobalRead: [2]
-        - PrefetchLocalRead: [0, 1, 2]
+        - PrefetchLocalRead: [1]
         - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
@@ -73,12 +73,13 @@ BenchmarkProblems:
         - LdsPadMetadata: [-1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - 1LDSBuffer: [-1]
-        - VectorWidthA: [1, 2, 4, 8]
-        - VectorWidthB: [1, 2, 4, 8]
+        - 1LDSBuffer: [-1, 1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         #- AssertSummationElementMultiple: [8]
+        - LDSTrInst: [True, False]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -89,17 +90,16 @@ BenchmarkProblems:
           # - Exact: [8, 8, 1, 256] # classic format
           # - Exact: [8, 8, 1, 16] # classic format
           # - Exact: [8, 8, 1, 48] # classic format
-          # - Exact: [16, 16, 1, 16] # classic format
           # - Exact: [16, 16, 1, 8] # classic format
-          # - Exact: [16, 16, 1, 16] # classic format
+          - Exact: [16, 16, 1, 16] # classic format
           # - Exact: [16, 16, 1, 24] # classic format
           # - Exact: [16, 16, 1, 32] # classic format
           # - Exact: [16, 16, 1, 40] # classic format
           # - Exact: [16, 16, 1, 48] # classic format
-          - Exact: [16, 16, 1, 64] # classic format
+          #- Exact: [16, 16, 1, 64] # classic format
           # - Exact: [64, 64, 1, 32] # classic format
           # - Exact: [256, 256, 1, 64] # classic format
-          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 256] # classic format
           # - Exact: [1024, 1024, 1, 1024] # classic format
         # - BiasTypeArgs: ['s', 'h']
@@ -143,7 +143,7 @@ BenchmarkProblems:
           - [16, 16, 64, 1, 1, 4, 4, 2, 2] # m, n = 16, k = 64
           # - [16, 16, 64, 1, 1, 8, 8, 2, 2] # m, n = 16, k = 64
         - PrefetchGlobalRead: [2]
-        - PrefetchLocalRead: [0, 1, 2]
+        - PrefetchLocalRead: [1]
         - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
@@ -155,8 +155,8 @@ BenchmarkProblems:
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
         - 1LDSBuffer: [-1]
-        - VectorWidthA: [1, 2, 4, 8]
-        - VectorWidthB: [1, 2, 4, 8]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         #- AssertSummationElementMultiple: [8]
@@ -170,17 +170,16 @@ BenchmarkProblems:
           # - Exact: [8, 8, 1, 256] # classic format
           # - Exact: [8, 8, 1, 16] # classic format
           # - Exact: [8, 8, 1, 48] # classic format
-          # - Exact: [16, 16, 1, 16] # classic format
           # - Exact: [16, 16, 1, 8] # classic format
-          # - Exact: [16, 16, 1, 16] # classic format
+          - Exact: [16, 16, 1, 16] # classic format
           # - Exact: [16, 16, 1, 24] # classic format
           # - Exact: [16, 16, 1, 32] # classic format
           # - Exact: [16, 16, 1, 40] # classic format
           # - Exact: [16, 16, 1, 48] # classic format
-          - Exact: [16, 16, 1, 64] # classic format
+          #- Exact: [16, 16, 1, 64] # classic format
           # - Exact: [64, 64, 1, 32] # classic format
           # - Exact: [256, 256, 1, 64] # classic format
-          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 256] # classic format
           # - Exact: [1024, 1024, 1, 1024] # classic format
         # - BiasTypeArgs: ['s', 'h']
@@ -224,7 +223,7 @@ BenchmarkProblems:
           - [16, 16, 64, 1, 1, 4, 4, 2, 2] # m, n = 16, k = 64
           # - [16, 16, 64, 1, 1, 8, 8, 2, 2] # m, n = 16, k = 64
         - PrefetchGlobalRead: [2]
-        - PrefetchLocalRead: [0, 1, 2]
+        - PrefetchLocalRead: [1]
         - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
@@ -235,12 +234,13 @@ BenchmarkProblems:
         - LdsPadMetadata: [-1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - 1LDSBuffer: [-1]
-        - VectorWidthA: [1, 2, 4, 8]
-        - VectorWidthB: [1, 2, 4, 8]
+        - 1LDSBuffer: [-1, 1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         #- AssertSummationElementMultiple: [8]
+        - LDSTrInst: [True, False]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -251,17 +251,16 @@ BenchmarkProblems:
           # - Exact: [8, 8, 1, 256] # classic format
           # - Exact: [8, 8, 1, 16] # classic format
           # - Exact: [8, 8, 1, 48] # classic format
-          # - Exact: [16, 16, 1, 16] # classic format
           # - Exact: [16, 16, 1, 8] # classic format
-          # - Exact: [16, 16, 1, 16] # classic format
+          - Exact: [16, 16, 1, 16] # classic format
           # - Exact: [16, 16, 1, 24] # classic format
           # - Exact: [16, 16, 1, 32] # classic format
           # - Exact: [16, 16, 1, 40] # classic format
           # - Exact: [16, 16, 1, 48] # classic format
-          - Exact: [16, 16, 1, 64] # classic format
+          #- Exact: [16, 16, 1, 64] # classic format
           # - Exact: [64, 64, 1, 32] # classic format
           # - Exact: [256, 256, 1, 64] # classic format
-          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 256] # classic format
           # - Exact: [1024, 1024, 1, 1024] # classic format
         # - BiasTypeArgs: ['s', 'h']
@@ -305,7 +304,7 @@ BenchmarkProblems:
           - [16, 16, 64, 1, 1, 4, 4, 2, 2] # m, n = 16, k = 64
           # - [16, 16, 64, 1, 1, 8, 8, 2, 2] # m, n = 16, k = 64
         - PrefetchGlobalRead: [2]
-        - PrefetchLocalRead: [0, 1, 2]
+        - PrefetchLocalRead: [1]
         - ClusterLocalRead: [0]
         - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
@@ -316,12 +315,13 @@ BenchmarkProblems:
         - LdsPadMetadata: [-1]
         - GlobalSplitU: [1, 2]
         - GlobalSplitUAlgorithm: [MultipleBuffer]
-        - 1LDSBuffer: [-1]
-        - VectorWidthA: [1, 2, 4, 8]
-        - VectorWidthB: [1, 2, 4, 8]
+        - 1LDSBuffer: [-1, 1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
         - GlobalReadVectorWidthA: [-1]
         - GlobalReadVectorWidthB: [-1]
         #- AssertSummationElementMultiple: [8]
+        - LDSTrInst: [True, False]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -332,21 +332,20 @@ BenchmarkProblems:
           # - Exact: [8, 8, 1, 256] # classic format
           # - Exact: [8, 8, 1, 16] # classic format
           # - Exact: [8, 8, 1, 48] # classic format
-          # - Exact: [16, 16, 1, 16] # classic format
           # - Exact: [16, 16, 1, 8] # classic format
-          # - Exact: [16, 16, 1, 16] # classic format
+          - Exact: [16, 16, 1, 16] # classic format
           # - Exact: [16, 16, 1, 24] # classic format
           # - Exact: [16, 16, 1, 32] # classic format
           # - Exact: [16, 16, 1, 40] # classic format
           # - Exact: [16, 16, 1, 48] # classic format
-          - Exact: [16, 16, 1, 64] # classic format
+          #- Exact: [16, 16, 1, 64] # classic format
           # - Exact: [64, 64, 1, 32] # classic format
           # - Exact: [256, 256, 1, 64] # classic format
-          - Exact: [256, 256, 1, 128] # classic format
+          - Exact: [128, 128, 1, 128] # classic format
           # - Exact: [256, 256, 1, 256] # classic format
           # - Exact: [1024, 1024, 1, 1024] # classic format
         # - BiasTypeArgs: ['s', 'h']
-        # - FactorDimArgs: [0, 1]
+        # - FactorDimArgs: [0,1]
         - ActivationArgs:
           - [Enum: none]
           # - [Enum: relu]

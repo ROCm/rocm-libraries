@@ -24,7 +24,7 @@ GlobalParameters:
   # PrintTensorD: 1
   # PrintTensorRef: 1
   # GenerateSourcesAndExit: True
-  AMDGPUArchPath: rocm_agent_enumerator
+  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
   #######################################
@@ -63,7 +63,7 @@ BenchmarkProblems:
           # - [16, 16, 64, 1, 1, 8, 8, 2, 2] # m, n = 16, k = 64
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
-        - DepthU: [128]
+        - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - ScheduleIterAlg: [3]
         - TransposeLDS: [-1]
@@ -91,7 +91,7 @@ BenchmarkProblems:
           # - Exact: [8, 8, 1, 48] # classic format
           # - Exact: [16, 16, 1, 16] # classic format
           # - Exact: [16, 16, 1, 8] # classic format
-          # - Exact: [16, 16, 1, 16] # classic format
+          - Exact: [16, 16, 1, 16] # classic format
           # - Exact: [16, 16, 1, 24] # classic format
           # - Exact: [16, 16, 1, 32] # classic format
           # - Exact: [16, 16, 1, 40] # classic format

@@ -7756,8 +7756,7 @@ class KernelWriterAssembly(KernelWriter):
             idxM     = idxB if kernel["ProblemType"]["Sparse"] == 2 else idxA
             m_new    = idxM*self.states.numReadsIterCoalescedMetadata
             mStr     = "ValuMetadata_X%u_I%u+%u+%u+%u" % (vgprBufferM_new, iuiM_new, m_new, vgprBufferM_new_offset, iuiM_new_offset)
-            # mStr     = vgpr(mStr, vgprPerInputM)
-            mStr     = vgpr(mStr, 1) # FIXME: workaround for sparse metadata, only 1 vgpr is used
+            mStr     = vgpr(mStr, vgprPerInputM)
 
           if kernel["ProblemType"]["DataType"].isComplex():
             # override because complex mul is emulated by 4 mfma insts
