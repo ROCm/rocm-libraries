@@ -262,6 +262,7 @@ class LocalReadMFMA(LocalRead):
             for vIdx in range(0, numVectorsPerTile):
                 for eIdx in range(0, numReadsPerVector):
                     valuiIdx = int(valufIdx)
+                    baseValuiIdx = valuiIdx
                     localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc,valuiIdx)))
                     if needPack or numSplitMetadata:
                         packCode = pack.add(Module("packCode"))
