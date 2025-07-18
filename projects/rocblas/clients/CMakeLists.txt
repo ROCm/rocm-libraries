@@ -23,14 +23,14 @@
 cmake_minimum_required( VERSION 3.16.8 )
 
 function( apply_omp_settings lib_target_ )
-  if (TARGET OpenMP::OpenMP_CXX)
+  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::OpenMP_CXX)
     set_target_properties( ${lib_target_} PROPERTIES
       BUILD_RPATH "${HIP_CLANG_ROOT}/lib"
     )
     set_target_properties( ${lib_target_} PROPERTIES
       INSTALL_RPATH "$ORIGIN/../llvm/lib"
     )
-  elseif(TARGET OpenMP::omp)
+  elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
     set_target_properties( ${lib_target_} PROPERTIES
       BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}"
     )
@@ -87,28 +87,22 @@ endif()
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
-# Look for openmp config in ROCm install to populate openmp_LIB_DIR and openmp_LIB_INSTALL_DIR
-find_package(OpenMP CONFIG PATHS "${HIP_CLANG_ROOT}/lib/cmake")
+  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    # Look for openmp config in ROCm install to populate openmp_LIB_DIR and openmp_LIB_INSTALL_DIR
+    find_package(OpenMP CONFIG PATHS "${HIP_CLANG_ROOT}/lib/cmake")
+  endif()
 
-if (TARGET OpenMP::omp)
-  set( COMMON_LINK_LIBS "OpenMP::omp")
-  message(STATUS "Found openmp-config.cmake at ${OpenMP_DIR}")
-else()
-  # if it fails to find OpenMP compile and link flags in strange configurations it can just use non-parallel reference computation
-  # if there is no omp.h to find the client compilation will fail and this should be obvious, used to be REQUIRED
-  find_package(OpenMP)
-  if (TARGET OpenMP::OpenMP_CXX)
-    set( COMMON_LINK_LIBS "OpenMP::OpenMP_CXX")
-    if(HIP_PLATFORM STREQUAL amd)
-      list( APPEND COMMON_LINK_LIBS "-L\"${HIP_CLANG_ROOT}/lib\"")
-      if (NOT WIN32)
-        list( APPEND COMMON_LINK_LIBS "-lomp")
-      else()
-        list( APPEND COMMON_LINK_LIBS "libomp")
-      endif()
+  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
+    set( COMMON_LINK_LIBS "OpenMP::omp")
+    message(STATUS "Found openmp-config.cmake at ${OpenMP_DIR}")
+  else()
+    # if it fails to find OpenMP compile and link flags in strange configurations it can just use non-parallel reference computation
+    # if there is no omp.h to find the client compilation will fail and this should be obvious, used to be REQUIRED
+    find_package(OpenMP)
+    if (TARGET OpenMP::OpenMP_CXX)
+      set( COMMON_LINK_LIBS "OpenMP::OpenMP_CXX")
     endif()
   endif()
-endif()
 
 if (TARGET Threads::Threads)
   list( APPEND COMMON_LINK_LIBS "Threads::Threads")
