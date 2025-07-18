@@ -1,0 +1,39 @@
+{
+    "version": 3,
+    "configurePresets": [
+      {
+        "name": "opt-rocm",
+        "displayName": "/opt/rocm Config",
+        "description": "Sets compiler and prefix path for /opt/rocm install",
+        "cacheVariables": {
+          "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
+          "CMAKE_C_COMPILER": "/opt/rocm/bin/amdclang",
+          "CMAKE_PREFIX_PATH": "/opt/rocm",
+          "CMAKE_BUILD_TYPE": "Release",
+          "HIPBLASLT_ENABLE_DEVICE": "OFF"
+        }
+      },
+      {
+        "name": "tensilelite",
+        "displayName": "TensileLite",
+        "description": "Configures just tensilelite host and client",
+        "inherits": "opt-rocm",
+        "cacheVariables": {
+          "HIPBLASLT_ENABLE_HOST": "OFF",
+          "HIPBLASLT_ENABLE_DEVICE": "OFF",
+          "HIPBLASLT_ENABLE_CLIENT": "OFF"
+        }
+      },
+      {
+        "name": "hipblaslt-host",
+        "displayName": "Host",
+        "description": "Configures just tensilelite host and client",
+        "inherits": "opt-rocm",
+        "cacheVariables": {
+          "HIPBLASLT_ENABLE_HOST": "ON",
+          "HIPBLASLT_ENABLE_DEVICE": "OFF",
+          "HIPBLASLT_ENABLE_CLIENT": "OFF"
+        }
+      }
+  ]
+}
