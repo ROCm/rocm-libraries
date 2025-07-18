@@ -156,6 +156,8 @@ class Assembler(Component):
             "--target=amdgcn-amd-amdhsa",
             "-g" if debug else "",
             f"-mcode-object-version={co_version}",
+            "-Xclangas", "-target-feature",
+            "-Xclangas", "+real-true16",
             "-c",
         ]
 

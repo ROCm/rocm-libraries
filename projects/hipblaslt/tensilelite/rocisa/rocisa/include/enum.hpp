@@ -249,6 +249,13 @@ namespace rocisa
         SCOPE_SYS  = 4,
     };
 
+    enum class HighBitSel : int
+    {
+        NONE = -1,
+        LOW  =  0,
+        HIGH =  1
+    };
+
     enum class CvtType : int
     {
         CVT_F16_to_F32          = 1,
@@ -285,6 +292,13 @@ namespace rocisa
     {
         ROUND_UP              = 0,
         ROUND_TO_NEAREST_EVEN = 1
+    };
+
+    enum class ArgType : int
+    {
+        DST  = 0,
+        DST1 = 1,
+        SRC0 = 2
     };
 
     inline std::string toString(SelectBit bit)

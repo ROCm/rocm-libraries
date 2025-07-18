@@ -510,6 +510,41 @@ namespace rocisa
         }
     };
 
+    struct True16Modifiers : public Container
+    {
+        True16Modifiers(HighBitSel high_bit = HighBitSel::NONE)
+            : Container()
+            , high_bit(high_bit)
+        {
+        }
+        True16Modifiers(const int high_bit = -1)
+            : True16Modifiers(static_cast<HighBitSel>(high_bit))
+        {
+        }
+
+        True16Modifiers(const True16Modifiers& other)
+            : Container()
+            , high_bit(other.high_bit)
+        {
+        }
+
+        std::shared_ptr<Container> clone() const override
+        {
+            return std::make_shared<True16Modifiers>(*this);
+        }
+
+        std::string toString() const override
+        {
+            if(high_bit == HighBitSel::NONE)
+            {
+                return "";
+            }
+            return high_bit == HighBitSel::HIGH ? ".h" : ".l";
+        }
+
+        const HighBitSel high_bit;
+    };
+
     struct EXEC : public Container
     {
         EXEC(bool setHi = false)

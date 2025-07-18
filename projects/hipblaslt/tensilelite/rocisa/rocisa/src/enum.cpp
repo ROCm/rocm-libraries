@@ -164,6 +164,18 @@ void init_enum(nb::module_ m)
         .value("CVT_SR_F32_to_BF8", rocisa::CvtType::CVT_SR_F32_to_BF8)
         .export_values();
 
+    nb::enum_<rocisa::ArgType>(m_enum, "ArgType")
+        .value("DST",  rocisa::ArgType::DST)
+        .value("DST1", rocisa::ArgType::DST1)
+        .value("SRC0", rocisa::ArgType::SRC0)
+        .export_values();
+
+    nb::enum_<rocisa::HighBitSel>(m_enum, "HighBitSel")
+        .value("NONE",  rocisa::HighBitSel::NONE)
+        .value("LOW", rocisa::HighBitSel::LOW)
+        .value("HIGH", rocisa::HighBitSel::HIGH)
+        .export_values();
+
     nb::enum_<rocisa::RoundType>(m_enum, "RoundType")
         .value("ROUND_UP", rocisa::RoundType::ROUND_UP)
         .value("ROUND_TO_NEAREST_EVEN", rocisa::RoundType::ROUND_TO_NEAREST_EVEN)
