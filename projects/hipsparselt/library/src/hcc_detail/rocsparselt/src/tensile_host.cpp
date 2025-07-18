@@ -731,6 +731,12 @@ namespace
                 {
                     using MSL = TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>;
                     m_library = std::dynamic_pointer_cast<MSL>(lib);
+                    if(!m_library->initLibraryMapping(tensileLibPath))
+                    {
+                        std::cerr << "\nrocblaslt error: Could not initialize Tensile library "
+                                     "mapping"
+                                  << std::endl;
+                    }
                 }
                 return 0;
             }();

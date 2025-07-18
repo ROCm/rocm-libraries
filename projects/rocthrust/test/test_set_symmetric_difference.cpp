@@ -23,7 +23,9 @@
 
 #include <iostream>
 
-#include "test_header.hpp"
+#include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(SetSymmetricDifferenceTests, FullTestsParams);
 TESTS_DEFINE(SetSymmetricDifferencePrimitiveTests, NumericalTestsParams);
