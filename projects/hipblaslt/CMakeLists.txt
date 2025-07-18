@@ -5,7 +5,6 @@ cmake_minimum_required(VERSION 3.22.1)
 project(hipblaslt VERSION 1.0.0 LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../cmake)
 
 include(Dependencies)
 include(GNUInstallDirs)
@@ -80,10 +79,6 @@ mark_as_advanced(CMAKE_BUILD_WITH_INSTALL_RPATH)
 mark_as_advanced(CMAKE_INSTALL_RPATH)
 mark_as_advanced(CMAKE_INSTALL_RPATH_USE_LINK_PATH)
 
-set(TENSILELITE_HOST_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/Tensile/Source/lib")
-set(HIPBLASLT_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../library")
-set(HIPBLASLT_CLIENTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../clients")
-set(ROCBLASLT_LIB_DIR "${HIPBLASLT_LIB_DIR}/src/amd_detail/rocblaslt")
 set(GPU_TARGETS "" CACHE STRING "AMD GFX targets to cross-compile")
 
 if(NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all")
@@ -164,7 +159,7 @@ if(HIPBLASLT_ENABLE_DEVICE)
 
     if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
         # Build the rocisa python extension.
-        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/rocisa"
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite/rocisa"
             "${CMAKE_CURRENT_BINARY_DIR}/rocisa_pyext")
         set(HIPBLASLT_PYTHON_DEPS "rocisa")
         # TODO: The rocisa build explicitly sets the LIBRARY_OUTPUT_DIR to the
@@ -184,7 +179,7 @@ if(HIPBLASLT_ENABLE_DEVICE)
 endif()
 
 if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBRARIES_SUPERBUILD)
-    find_package(rocroller REQUIRED)
+    find_package(rocroller)
     option(YAML_CPP_INSTALL "" ON)
     # Should we require enabling fetch
     if(NOT rocroller_FOUND)
@@ -224,7 +219,7 @@ if(HIPBLASLT_ENABLE_HOST)
             roc::${hipblas_target}
             hip::device
         PRIVATE
-            tensilelite-host
+            tensilelite::tensilelite-host
             ${CMAKE_DL_LIBS}
             ${rocTracer}
     )
@@ -253,27 +248,27 @@ if(HIPBLASLT_ENABLE_HOST)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_MARKER) # public header?
     endif()
 
+    set(TENSILELITE_HOST_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/Tensile/Source/lib")
+    set(HIPBLASLT_CLIENTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../clients")
+
     target_include_directories(hipblaslt
         PUBLIC
-            $<BUILD_INTERFACE:${HIPBLASLT_LIB_DIR}/src/include>
-            $<BUILD_INTERFACE:${HIPBLASLT_LIB_DIR}/include>
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/library/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/src/include>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         PRIVATE
-            "${ROCBLASLT_LIB_DIR}/include"
-            "${ROCBLASLT_LIB_DIR}/src/include"
-            "${CMAKE_CURRENT_BINARY_DIR}/include"
+            "${CMAKE_CURRENT_BINARY_DIR}/library/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include"
     )
 
     set_target_properties(hipblaslt
         PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/library
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/library"
     )
-endif()
-
-if(HIPBLASLT_ENABLE_DEVICE)
     add_subdirectory(library)
 endif()
+
 
 if(HIPBLASLT_ENABLE_DEVICE)
     add_subdirectory(device-library)
@@ -333,7 +328,7 @@ if(HIPBLASLT_ENABLE_DEVICE)
         set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipblaslt" CACHE PATH "path to tensile library")
     endif()
     rocm_install(
-        DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/Tensile/library
+        DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Tensile/library"
         DESTINATION ${HIPBLASLT_TENSILE_LIBRARY_DIR}
         COMPONENT devel #may need to conditionally set this
     )
@@ -481,7 +476,7 @@ if(HIPBLASLT_ENABLE_SAMPLES)
             sample_hipblaslt_gemm_swish_bias
         RUNTIME
         COMPONENT samples
-        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt-samples
+        DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt-samples"
     )
     rocm_package_setup_client_component(samples)
 endif()
