@@ -53,10 +53,13 @@ def extract_normalised_asm(path: pathlib.Path, strip_metadata: bool = True):
 
     asm = []
     for line in source.splitlines():
-        double_slash = line.find("//")
-        if double_slash != -1:
-            line = line[:double_slash]
-        line = line.rstrip()
+        line = line.strip()
+        # double_slash = line.find("//")
+        # if double_slash != -1:
+        #     line = line[:double_slash]
+        # line = line.rstrip()
+        if line.startswith("//"):
+            continue
         if "kernel_graph_dot" in line:
             continue
         if ".amdgpu_metadata" in line:

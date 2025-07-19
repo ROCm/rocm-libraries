@@ -1406,6 +1406,50 @@ def fp4_target():
     )
 
 
+def does_this_fail():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=32768,
+        beta=0.0,
+        mac_m=64,
+        mac_n=64,
+        mac_k=128,
+        wave_m=16,
+        wave_n=16,
+        wave_k=128,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        unroll_x=0,
+        unroll_y=0,
+        direct2LDS_A=True,
+        direct2LDS_B=True,
+        loadLDSScale_A=False,
+        loadLDSScale_B=False,
+        storeLDS_D=False,
+        prefetch=True,
+        prefetchInFlight=4,
+        prefetchLDSFactor=1,
+        prefetchScale=False,
+        swizzleScale=False,
+        prefetchMixMemOps=True,
+        betaInFma=True,
+        scheduler="Priority",
+        match_memory_access=True,
+        trans_A="T",
+        trans_B="N",
+        type_A="fp4",
+        type_B="fp4",
+        type_C="half",
+        type_D="half",
+        type_acc="float",
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000,
+    )
+
+
 def fp4_target_d2lds_mi32x32x64_pf2x1():
     yield GEMMRun(
         M=4096,

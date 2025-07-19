@@ -367,7 +367,7 @@ namespace rocRoller::KernelGraph
             if(info.isUnroll)
             {
                 offsetDataType = DataType::Int64;
-                strideDataType = DataType::Int64;
+                // strideDataType = DataType::Int64;
             }
             chain.push_back(makeComputeIndex(graph,
                                              target,

@@ -41,6 +41,7 @@ target_sources(rocroller
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/AddInstruction.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/Annotate.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/Annotate_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/ArgumentLoader.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/ArgumentLoader_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/ArgumentLoader_impl.hpp"
