@@ -41,11 +41,11 @@ Optional:
 1. Build rocSPARSE using the `install.sh` script.
 
     ```bash
-    # Clone rocSPARSE using git
-    git clone https://github.com/ROCm/rocSPARSE.git
+    # Clone rocm-libraries, including rocSPARSE, using Git
+    git clone https://github.com/ROCm/rocm-libraries.git
 
     # Go to rocSPARSE directory
-    cd rocSPARSE
+    cd rocm-libraries/projects/rocsparse
 
     # Run install.sh script
     # Command line options:
@@ -60,11 +60,11 @@ Optional:
 2. Compile rocSPARSE (all compiler specifications are automatically determined).
 
     ```bash
-    # Clone rocSPARSE using git
-    git clone https://github.com/ROCm/rocSPARSE.git
+    # Clone rocm-libraries, including rocSPARSE, using Git
+    git clone https://github.com/ROCm/rocm-libraries.git
 
     # Go to rocSPARSE directory, create and go to the build directory
-    cd rocSPARSE; mkdir -p build/release; cd build/release
+    cd rocm-libraries/projects/rocsparse; mkdir -p build/release; cd build/release
 
     # Configure rocSPARSE
     # Build options:
@@ -88,7 +88,7 @@ To run unit tests, you must build rocSPARSE with `-DBUILD_CLIENTS_TESTS=ON`.
 
 ```bash
 # Go to rocSPARSE build directory
-cd rocSPARSE; cd build/release
+cd rocm-libraries/projects/rocsparse; cd build/release
 
 # Run all tests
 ./clients/staging/rocsparse-test
@@ -98,7 +98,7 @@ To run benchmarks, you must build rocSPARSE with `-DBUILD_CLIENTS_BENCHMARKS=ON`
 
 ```bash
 # Go to rocSPARSE build directory
-cd rocSPARSE/build/release
+cd rocm-libraries/projects/rocsparse/build/release
 
 # Run benchmark, e.g.
 ./clients/staging/rocsparse-bench -f hybmv --laplacian-dim 2000 -i 200
@@ -106,8 +106,8 @@ cd rocSPARSE/build/release
 
 ## Issues
 
-To submit an issue, a bug, or a feature request, use the GitHub
-[issue tracker](https://github.com/ROCm/rocSPARSE/issues).
+To submit an issue, a bug, or a feature request, use the rocm-libraries GitHub
+[issue tracker](https://github.com/ROCm/rocm-libraries/issues).
 
 ## License
 
