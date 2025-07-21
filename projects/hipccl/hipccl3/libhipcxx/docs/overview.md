@@ -151,7 +151,7 @@ For automated testing in continuous integration environments or when you need a 
 ## Using CI Scripts for Automated Testing
 1) Change directory to ci directory: `cd ci`
 2) If you want to run tests without HIPRTC: `bash ./test_libhipcxx.sh`
-3) If you want to run tests wit HIPRTC: `bash ./hiprtc_libhipcxx.sh`
+3) If you want to run tests with HIPRTC: `bash ./hiprtc_libhipcxx.sh`
 
 # How to use libhipcxx in your CMake Project
 
