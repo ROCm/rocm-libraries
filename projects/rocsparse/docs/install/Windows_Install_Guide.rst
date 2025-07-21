@@ -97,20 +97,15 @@ For example, the HIP version might be ``5.4.22880-135e1ab4``.
 This corresponds to major release ``5``, minor release ``4``, patch ``22880``, and build identifier ``135e1ab4``.
 The rocSPARSE GitHub includes branches with names like ``release/rocm-rel-major.minor``,
 where major and minor have the same meaning as the HIP version.
-For example, use the following command to download rocSPARSE:
-
-.. code-block:: shell
-
-   git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocm-libraries.git
-   cd rocm-libraries/projects/rocsparse
-
-Replace ``x.y`` in the above command with the version of HIP SDK installed on your machine.
-For example, if you have HIP 7.0 installed, use ``-b release/rocm-rel-7.0``.
-
 
 To limit your local checkout to only the rocSPARSE project, configure ``sparse-checkout`` before cloning.
 This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.
 Use the following commands for a sparse checkout:
+
+.. note::
+
+   To include the rocPRIM and rocBLAS dependencies, set the projects for the sparse checkout using
+   ``git sparse-checkout set projects/rocsparse projects/rocprim projects/rocblas``.
 
 .. code-block:: shell
 
@@ -118,11 +113,22 @@ Use the following commands for a sparse checkout:
    cd rocm-libraries
    git sparse-checkout init --cone
    git sparse-checkout set projects/rocsparse
-   git checkout develop # or use the branch you want to work with
+   git checkout release/rocm-rel-x.y  # or use the branch you want to work with
+
+Replace ``x.y`` in the above command with the version of HIP SDK installed on your machine.
+For example, if you have HIP 7.0 installed, use ``-b release/rocm-rel-7.0``.
+
+To download all projects in rocm-libraries, use these commands. This process takes
+longer but is recommended for those working with a large number of libraries.
+
+.. code-block:: shell
+
+   git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries/projects/rocsparse
 
 .. note::
 
-   To build ROCm 6.4 and earlier, use the rocSPARSE repository at `<https://github.com/ROCm/rocSPARSE>`_.
+   To build ROCm 6.4.2 and earlier, use the rocSPARSE repository at `<https://github.com/ROCm/rocSPARSE>`_.
    For more information, see the documentation associated with the release you want to build.
 
 Add the SDK tools to your path with an entry like the following:

@@ -38,14 +38,36 @@ Optional:
 
 ## Build and install
 
-1. Build rocSPARSE using the `install.sh` script.
+1. Checkout the rocSPARSE code using either a sparse checkout or a full clone of the rocm-libraries repository.
+
+   To limit your local checkout to only the rocSPARSE project, configure ``sparse-checkout`` before cloning.
+   This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.
+   Use the following commands for a sparse checkout:
 
     ```bash
+
+    git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
+    cd rocm-libraries
+    git sparse-checkout init --cone
+    git sparse-checkout set projects/rocsparse # add projects/rocprim and projects/rocblas to include dependencies
+    git checkout develop # or use the branch you want to work with
+    ```
+
+   To clone the entire rocm-libraries repository, use the following commands. This process takes more time,
+   but is recommended if you want to work with a large number of libraries.
+
+    ```bash
+
     # Clone rocm-libraries, including rocSPARSE, using Git
     git clone https://github.com/ROCm/rocm-libraries.git
 
     # Go to rocSPARSE directory
     cd rocm-libraries/projects/rocsparse
+    ```
+
+2. Build rocSPARSE using the `install.sh` script.
+
+    ```bash
 
     # Run install.sh script
     # Command line options:
@@ -57,9 +79,10 @@ Optional:
     ./install.sh -dci
     ```
 
-2. Compile rocSPARSE (all compiler specifications are automatically determined).
+3. Compile rocSPARSE (all compiler specifications are automatically determined).
 
     ```bash
+
     # Clone rocm-libraries, including rocSPARSE, using Git
     git clone https://github.com/ROCm/rocm-libraries.git
 

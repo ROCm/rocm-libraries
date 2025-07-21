@@ -77,16 +77,15 @@ Downloading rocSPARSE
 
 The rocSPARSE source code is available from the `rocSPARSE folder <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsparse>`_
 of the `rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries>`_.
-Download the develop branch using these commands:
-
-.. code-block:: shell
-
-   git clone -b develop https://github.com/ROCm/rocm-libraries.git
-   cd rocm-libraries/projects/rocsparse
 
 To limit your local checkout to only the rocSPARSE project, configure ``sparse-checkout`` before cloning.
 This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.
 Use the following commands for a sparse checkout:
+
+.. note::
+
+   To include the rocPRIM and rocBLAS dependencies, set the projects for the sparse checkout using
+   ``git sparse-checkout set projects/rocsparse projects/rocprim projects/rocblas``.
 
 .. code-block:: shell
 
@@ -96,9 +95,17 @@ Use the following commands for a sparse checkout:
    git sparse-checkout set projects/rocsparse
    git checkout develop # or use the branch you want to work with
 
+To download the develop branch for all projects in rocm-libraries, use these commands. This process takes
+longer but is recommended for those working with a large number of libraries.
+
+.. code-block:: shell
+
+   git clone -b develop https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries/projects/rocsparse
+
 .. note::
 
-   To build ROCm 6.4 and earlier, use the rocSPARSE repository at `<https://github.com/ROCm/rocSPARSE>`_.
+   To build ROCm 6.4.2 and earlier, use the rocSPARSE repository at `<https://github.com/ROCm/rocSPARSE>`_.
    For more information, see the documentation associated with the release you want to build.
 
 Building rocSPARSE using the install script
