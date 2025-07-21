@@ -483,7 +483,6 @@ inline A convertToInt(A value)
     return static_cast<A>(static_cast<int>(value));
 }
 
-
 template <>
 inline rocsparse_float_complex convertToInt(rocsparse_float_complex value)
 {
