@@ -150,12 +150,11 @@ namespace rocRoller
 	 * Map from LayoutType to number of LDS padding elements (not bytes!).
 	 *
 	 * A value of -1 means rocRoller will compute a padding value
-	 * automatically.  This is the default behaviour for MATRIX_A
-	 * and MATRIX_B layouts.  See `computeDefaultLDSPaddingElements()`.
+	 * automatically.  See `computeDefaultLDSPaddingElements()`.
 	 *
-	 * A value of 0 means no padding.
+	 * A value of 0 means no padding.  This is the default.
 	 */
-        std::map<LayoutType, int> padLDS = {{LayoutType::MATRIX_A, -1}, {LayoutType::MATRIX_B, -1}};
+        std::map<LayoutType, int> padLDS = {{LayoutType::MATRIX_A, 0}, {LayoutType::MATRIX_B, 0}};
 
     private:
         std::map<Operations::OperationTag, KernelGraph::CoordinateGraph::Dimension> m_dimInfo;
