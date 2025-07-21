@@ -52,14 +52,27 @@ namespace rocRoller
 
     inline Register::ValuePtr RegisterTagManager::getRegister(int tag) const
     {
+        AssertFatal(tag > 0, ShowValue(tag));
         auto merge = getIndex(tag);
         if(merge)
         {
             auto [dst, index] = *merge;
+
             AssertFatal(hasRegister(dst), ShowValue(dst));
 
-            auto target = m_registers.at(dst);
-            return target->subset({index});
+            auto target = getRegister(dst);
+            return target->element({index});
+        }
+
+        auto segment = getSegment(tag);
+        if(segment)
+        {
+            auto [dst, index] = *segment;
+
+            AssertFatal(hasRegister(dst), ShowValue(dst));
+
+            auto target = getRegister(dst);
+            return target->segment({index});
         }
 
         AssertFatal(hasRegister(tag), ShowValue(tag));
@@ -84,6 +97,7 @@ namespace rocRoller
 
     inline Register::ValuePtr RegisterTagManager::getRegister(int tag, Register::ValuePtr tmpl)
     {
+        AssertFatal(tag > 0, ShowValue(tag));
         AssertFatal(!hasExpression(tag), "Tag already associated with an expression");
         AssertFatal(!isBorrowed(tag), ShowValue(tag), " has already been borrowed.");
 
@@ -94,13 +108,16 @@ namespace rocRoller
             {
                 AssertFatal(reg->variableType() == tmpl->variableType(),
                             ShowValue(tmpl->variableType()),
-                            ShowValue(reg->variableType()));
+                            ShowValue(reg->variableType()),
+                            ShowValue(tag));
                 AssertFatal(reg->valueCount() == tmpl->valueCount(),
                             ShowValue(tmpl->valueCount()),
-                            ShowValue(reg->valueCount()));
+                            ShowValue(reg->valueCount()),
+                            ShowValue(tag));
                 AssertFatal(reg->regType() == tmpl->regType(),
                             ShowValue(tmpl->regType()),
-                            ShowValue(reg->regType()));
+                            ShowValue(reg->regType()),
+                            ShowValue(tag));
             }
             return reg;
         }
@@ -147,10 +164,11 @@ namespace rocRoller
             aliasMsg = fmt::format(" alias {} -> {}", tag, dst);
         }
 
+        if(auto ctx = m_context.lock())
         {
             auto inst
                 = Instruction::Comment(fmt::format("tag {}: {}{}", tag, r->toString(), aliasMsg));
-            m_context.lock()->schedule(inst);
+            ctx->schedule(inst);
         }
 
         m_registers.emplace(tag, r);
@@ -159,12 +177,14 @@ namespace rocRoller
 
     inline void RegisterTagManager::addRegister(int tag, Register::ValuePtr value)
     {
+        AssertFatal(tag > 0, ShowValue(tag));
         AssertFatal(!hasExpression(tag), "Tag already associated with an expression");
         AssertFatal(!hasAlias(tag),
                     "Aliasing tags must not be deferred.",
                     ShowValue(tag),
                     ShowValue(getAlias(tag).value_or(-1)));
         AssertFatal(!hasRegister(tag), "Tag ", tag, " already in RegisterTagManager.");
+        AssertFatal(value != nullptr, ShowValue(tag));
 
         if(auto existingTag = findRegister(value))
         {
@@ -233,6 +253,17 @@ namespace rocRoller
         return std::nullopt;
     }
 
+    inline std::optional<std::pair<int, int>> RegisterTagManager::getSegment(int tag) const
+    {
+        auto iter = m_segments.find(tag);
+        if(iter != m_segments.end())
+        {
+            return iter->second;
+        }
+
+        return std::nullopt;
+    }
+
     inline void RegisterTagManager::deleteTag(int tag)
     {
         auto        ctx = m_context.lock();
@@ -262,6 +293,20 @@ namespace rocRoller
 
     inline bool RegisterTagManager::hasRegister(int tag) const
     {
+        auto merge = getIndex(tag);
+        if(merge)
+        {
+            auto [dst, index] = *merge;
+            return hasRegister(dst);
+        }
+
+        auto segment = getSegment(tag);
+        if(segment)
+        {
+            auto [dst, index] = *segment;
+            return hasRegister(dst);
+        }
+
         return m_registers.contains(tag) && !isBorrowed(tag);
     }
 

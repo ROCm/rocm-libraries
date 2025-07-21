@@ -140,7 +140,21 @@ struct device_merge_sort_benchmark : public benchmark_utils::autotune_interface
                                         seed.get_0());
 
         std::vector<value_type> values_input(size);
-        std::iota(values_input.begin(), values_input.end(), 0);
+
+        if constexpr(common::is_custom_type_copyable<value_type>::value)
+        {
+            for(size_t i = 0; i < size; i++)
+            {
+                value_type value;
+                value.x         = static_cast<typename value_type::first_type>(i);
+                value.y         = static_cast<typename value_type::second_type>(i);
+                values_input[i] = value;
+            }
+        }
+        else
+        {
+            std::iota(values_input.begin(), values_input.end(), 0);
+        }
 
         key_type* d_keys_input;
         key_type* d_keys_output;
