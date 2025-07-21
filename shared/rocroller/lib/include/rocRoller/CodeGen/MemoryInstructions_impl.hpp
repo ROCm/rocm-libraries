@@ -102,7 +102,6 @@ namespace rocRoller
             AssertFatal(offset->regType() == Register::Type::Literal
                         || offset->regType() == Register::Type::Scalar);
             co_yield bufferLoad2LDS(newAddr->subset({0}), bufDesc, buffOpts, numBytes, offset);
-            // co_yield bufferLoad2LDS(newAddr, bufDesc, buffOpts, numBytes, offset);
 
             break;
         default:

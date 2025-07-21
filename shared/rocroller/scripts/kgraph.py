@@ -45,7 +45,8 @@ import yaml
 from dot_diff import diff_dots
 
 
-def extract_normalised_asm(path: pathlib.Path, strip_metadata: bool = True):
+def extract_normalised_asm(path: pathlib.Path,
+                           keep_trailing_comments: bool = False):
     """Extract normalized ASM from assembly file."""
     source = path.read_text()
 
@@ -53,13 +54,15 @@ def extract_normalised_asm(path: pathlib.Path, strip_metadata: bool = True):
 
     asm = []
     for line in source.splitlines():
-        line = line.strip()
-        # double_slash = line.find("//")
-        # if double_slash != -1:
-        #     line = line[:double_slash]
-        # line = line.rstrip()
-        if line.startswith("//"):
-            continue
+        if keep_trailing_comments:
+            line = line.strip()
+            if line.startswith("//"):
+                continue
+        else:
+            double_slash = line.find("//")
+            if double_slash != -1:
+                line = line[:double_slash]
+            line = line.rstrip()
         if "kernel_graph_dot" in line:
             continue
         if ".amdgpu_metadata" in line:
@@ -159,9 +162,9 @@ def process_serialized_graph(graph: dict, out_path: pathlib.Path):
         print(f"Wrote {f.name}")
 
 
-def process_asm(path: pathlib.Path):
+def process_normalized_asm(path: pathlib.Path, keep_trailing_comments: bool = True):
     asm = pathlib.Path(path.stem + "_normalized.s")
-    asm.write_text(extract_normalised_asm(path))
+    asm.write_text(extract_normalised_asm(path, keep_trailing_comments))
     print(f"Wrote {asm}")
 
 
@@ -190,6 +193,13 @@ if __name__ == "__main__":
         help="Output file base name",
     )
     parser.add_argument(
+        "-k",
+        "--keep-trailing",
+        default=False,
+        action="store_true",
+        help="Keep trailing comments in normalized assembly file."
+    )
+    parser.add_argument(
         "--omit_diff",
         default=False,
         action="store_true",
@@ -215,7 +225,7 @@ if __name__ == "__main__":
         if graph is not None and not args.dot_only:
             process_serialized_graph(graph, foutput)
 
-        process_asm(path)
+        process_normalized_asm(path, args.keep_trailing)
 
     elif path.suffix == ".log":
         dots, source_clean = extract_log_dots(path)
