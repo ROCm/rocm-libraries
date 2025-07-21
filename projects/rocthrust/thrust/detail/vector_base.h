@@ -47,7 +47,6 @@
 #include <initializer_list>
 #include <vector>
 #if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits>
 #  include <utility>
 #endif
 
@@ -198,11 +197,7 @@ public:
    *  \param last The end of the range.
    */
   template <typename InputIterator,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-            ::cuda::std::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
-#else
-            ::std::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
-#endif
+            ::internal::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
   vector_base(InputIterator first, InputIterator last);
 
   /*! This constructor builds a vector_base from a range.
@@ -211,11 +206,7 @@ public:
    *  \param alloc The allocator to use by this vector_base.
    */
   template <typename InputIterator,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-            ::cuda::std::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
-#else
-            ::std::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
-#endif
+            ::internal::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
   vector_base(InputIterator first, InputIterator last, const Alloc& alloc);
 
   /*! The destructor erases the elements.

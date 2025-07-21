@@ -18,6 +18,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -29,7 +36,7 @@ namespace detail
 // it's legal to access IteratorFacade2::difference_type
 template <typename IteratorFacade1, typename IteratorFacade2>
 struct distance_from_result
-    : eval_if<is_convertible<IteratorFacade2, IteratorFacade1>::value,
+    : eval_if<::internal::is_convertible<IteratorFacade2, IteratorFacade1>::value,
               identity_<typename IteratorFacade1::difference_type>,
               identity_<typename IteratorFacade2::difference_type>>
 {};

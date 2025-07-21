@@ -40,7 +40,7 @@ std::string type_name()
 // Use this with counting_iterator to avoid generating a range larger than we
 // can represent.
 template <typename T>
-typename THRUST_NS_QUALIFIER::detail::disable_if<::thrust::detail::is_floating_point<T>::value, T>::type
+typename THRUST_NS_QUALIFIER::detail::disable_if<::internal::is_floating_point<T>::value, T>::type
 truncate_to_max_representable(std::size_t n)
 {
   return static_cast<T>(
@@ -49,7 +49,7 @@ truncate_to_max_representable(std::size_t n)
 
 // TODO: This probably won't work for `half`.
 template <typename T>
-typename ::internal::enable_if_t<::thrust::detail::is_floating_point<T>::value, T> truncate_to_max_representable(std::size_t n)
+typename ::internal::enable_if_t<::internal::is_floating_point<T>::value, T> truncate_to_max_representable(std::size_t n)
 {
   return THRUST_NS_QUALIFIER::min<T>(static_cast<T>(n), THRUST_NS_QUALIFIER::numeric_limits<T>::max());
 }

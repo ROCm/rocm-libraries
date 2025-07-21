@@ -38,16 +38,10 @@
 #include <thrust/detail/modern_gcc_required.h>
 #if !defined(THRUST_LEGACY_GCC)
 
+#  include <thrust/detail/functional/address_stability.h>
 #  include <thrust/detail/type_deduction.h>
 #  include <thrust/tuple.h>
 #  include <thrust/type_traits/integer_sequence.h>
-#  if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#    include <thrust/detail/functional/address_stability.h>
-#  endif
-
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#    include <cuda/functional>
-#  endif
 
 THRUST_NAMESPACE_BEGIN
 

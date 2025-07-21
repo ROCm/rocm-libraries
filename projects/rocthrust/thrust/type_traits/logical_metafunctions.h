@@ -26,13 +26,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/__type_traits/conjunction.h>
-#  include <cuda/std/__type_traits/disjunction.h>
-#  include <cuda/std/__type_traits/negation.h>
-#else
-#  include <type_traits>
-#endif
+#include <thrust/detail/type_traits.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -40,23 +34,13 @@ THRUST_NAMESPACE_BEGIN
 //! \{
 //! \addtogroup type_traits Type Traits
 //! \{
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-using ::cuda::std::bool_constant;
-using ::cuda::std::conjunction;
-using ::cuda::std::conjunction_v;
-using ::cuda::std::disjunction;
-using ::cuda::std::disjunction_v;
-using ::cuda::std::negation;
-using ::cuda::std::negation_v;
-#else
-using ::std::bool_constant;
-using ::std::conjunction;
-using ::std::conjunction_v;
-using ::std::disjunction;
-using ::std::disjunction_v;
-using ::std::negation;
-using ::std::negation_v;
-#endif
+
+using ::internal::conjunction;
+using ::internal::conjunction_v;
+using ::internal::disjunction;
+using ::internal::disjunction_v;
+using ::internal::negation;
+using ::internal::negation_v;
 
 //! \brief <a href="https://en.cppreference.com/w/cpp/types/integral_constant"><tt>std::integral_constant</tt></a>
 //! whose value is <tt>(... && Bs)</tt>.
@@ -65,7 +49,7 @@ using ::std::negation_v;
 //! \see conjunction
 //! \see <a href="https://en.cppreference.com/w/cpp/types/conjunction"><tt>std::conjunction</tt></a>
 template <bool... Bs>
-using conjunction_value = conjunction<bool_constant<Bs>...>;
+using conjunction_value = conjunction<::internal::bool_constant<Bs>...>;
 
 //! \brief <tt>constexpr bool</tt> whose value is <tt>(... && Bs)</tt>.
 //!
@@ -82,7 +66,7 @@ constexpr bool conjunction_value_v = conjunction_value<Bs...>::value;
 //! \see disjunction
 //! \see <a href="https://en.cppreference.com/w/cpp/types/disjunction"><tt>std::disjunction</tt></a>
 template <bool... Bs>
-using disjunction_value = disjunction<bool_constant<Bs>...>;
+using disjunction_value = disjunction<::internal::bool_constant<Bs>...>;
 
 //! \brief <tt>constexpr bool</tt> whose value is <tt>(... || Bs)</tt>.
 //!
@@ -99,7 +83,7 @@ constexpr bool disjunction_value_v = disjunction_value<Bs...>::value;
 //! \see negation
 //! \see <a href="https://en.cppreference.com/w/cpp/types/negation"><tt>std::negation</tt></a>
 template <bool B>
-using negation_value = bool_constant<!B>;
+using negation_value = ::internal::bool_constant<!B>;
 
 //! \brief <tt>constexpr bool</tt> whose value is <tt>!Bs</tt>.
 //!

@@ -18,6 +18,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/is_metafunction_defined.h>
 #include <thrust/iterator/detail/any_assign.h>
@@ -30,7 +37,7 @@ namespace detail
 
 template <typename T>
 struct is_void_like
-    : thrust::detail::or_<thrust::detail::is_void<T>, thrust::detail::is_same<T, thrust::detail::any_assign>>
+    : ::internal::disjunction<::internal::is_void<T>, ::internal::is_same<T, thrust::detail::any_assign>>
 {}; // end is_void_like
 
 template <typename T>

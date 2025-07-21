@@ -31,13 +31,10 @@
 #endif // no system header
 #include <thrust/allocate_unique.h>
 #include <thrust/detail/type_deduction.h>
+#include <thrust/detail/type_traits.h>
 #include <thrust/device_allocator.h>
 #include <thrust/device_new.h>
 #include <thrust/device_ptr.h>
-
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <utility>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -48,11 +45,7 @@ THRUST_NAMESPACE_BEGIN
  */
 template <typename T, typename... Args>
 THRUST_HOST auto device_make_unique(Args&&... args)
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  -> decltype(uninitialized_allocate_unique<T>(::cuda::std::declval<device_allocator<T>>()))
-#else
-  -> decltype(uninitialized_allocate_unique<T>(::std::declval<device_allocator<T>>()))
-#endif
+  -> decltype(uninitialized_allocate_unique<T>(::internal::declval<device_allocator<T>>()))
 {
   // FIXME: This is crude - we construct an unnecessary T on the host for
   // `device_new`. We need a proper dispatched `construct` algorithm to

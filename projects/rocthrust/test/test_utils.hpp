@@ -18,6 +18,7 @@
 #pragma once
 
 #include <thrust/detail/event_error.h>
+#include <thrust/detail/type_traits.h>
 #include <thrust/execution_policy.h>
 #include <thrust/host_vector.h>
 #include <thrust/limits.h>
@@ -659,8 +660,7 @@ struct generate_random_integer<
 };
 
 template <typename T>
-struct generate_random_integer<T,
-                               typename thrust::detail::enable_if<thrust::detail::is_non_bool_integral<T>::value>::type>
+struct generate_random_integer<T, typename ::std::enable_if<thrust::detail::is_non_bool_integral<T>::value>::type>
 {
   T operator()(unsigned int i) const
   {
@@ -672,7 +672,7 @@ struct generate_random_integer<T,
 };
 
 template <typename T>
-struct generate_random_integer<T, typename thrust::detail::enable_if<thrust::detail::is_floating_point<T>::value>::type>
+struct generate_random_integer<T, typename ::std::enable_if<::internal::is_floating_point<T>::value>::type>
 {
   T operator()(unsigned int i) const
   {
@@ -743,7 +743,7 @@ thrust::host_vector<T> random_samples(const size_t N)
 // Use this with counting_iterator to avoid generating a range larger than we
 // can represent.
 template <typename T>
-typename thrust::detail::disable_if<thrust::detail::is_floating_point<T>::value, T>::type
+typename thrust::detail::disable_if<::internal::is_floating_point<T>::value, T>::type
 truncate_to_max_representable(std::size_t n)
 {
   return thrust::min<std::size_t>(n, static_cast<std::size_t>(thrust::numeric_limits<T>::max()));
@@ -751,8 +751,7 @@ truncate_to_max_representable(std::size_t n)
 
 // TODO: This probably won't work for `half`.
 template <typename T>
-typename thrust::detail::enable_if<thrust::detail::is_floating_point<T>::value, T>::type
-truncate_to_max_representable(std::size_t n)
+typename ::std::enable_if<::internal::is_floating_point<T>::value, T>::type truncate_to_max_representable(std::size_t n)
 {
   return thrust::min<T>(n, thrust::numeric_limits<T>::max());
 }

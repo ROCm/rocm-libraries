@@ -29,10 +29,6 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/has_member_function.h>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits>
-#endif
-
 // inspired by Roman Perepelitsa's presentation from comp.lang.c++.moderated
 // based on the implementation here: http://www.rsdn.ru/forum/cpp/2759773.1.aspx
 
@@ -67,17 +63,6 @@ struct clone_constness<const src_type, dest_type>
 } // namespace is_call_possible_detail
 } // namespace detail
 THRUST_NAMESPACE_END
-
-namespace detail
-{
-
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-using ::cuda::std::add_lvalue_reference_t;
-#else
-using ::std::add_lvalue_reference_t;
-#endif
-
-} // namespace detail
 
 #define __THRUST_DEFINE_IS_CALL_POSSIBLE(trait_name, member_function_name)                                             \
   __THRUST_DEFINE_HAS_MEMBER_FUNCTION(trait_name##_has_member, member_function_name)                                   \
@@ -125,8 +110,8 @@ using ::std::add_lvalue_reference_t;
     template <typename Result, typename Arg>                                                                           \
     struct impl<true, Result(Arg)>                                                                                     \
     {                                                                                                                  \
-      static ::detail::add_lvalue_reference_t<derived_type> test_me;                                                   \
-      static ::detail::add_lvalue_reference_t<Arg> arg;                                                                \
+      static ::internal::add_lvalue_reference_t<derived_type> test_me;                                                 \
+      static ::internal::add_lvalue_reference_t<Arg> arg;                                                              \
                                                                                                                        \
       static const bool value =                                                                                        \
         sizeof(return_value_check<T, Result>::deduce(                                                                  \
@@ -137,9 +122,9 @@ using ::std::add_lvalue_reference_t;
     template <typename Result, typename Arg1, typename Arg2>                                                           \
     struct impl<true, Result(Arg1, Arg2)>                                                                              \
     {                                                                                                                  \
-      static ::detail::add_lvalue_reference_t<derived_type> test_me;                                                   \
-      static ::detail::add_lvalue_reference_t<Arg1> arg1;                                                              \
-      static ::detail::add_lvalue_reference_t<Arg2> arg2;                                                              \
+      static ::internal::add_lvalue_reference_t<derived_type> test_me;                                                 \
+      static ::internal::add_lvalue_reference_t<Arg1> arg1;                                                            \
+      static ::internal::add_lvalue_reference_t<Arg2> arg2;                                                            \
                                                                                                                        \
       static const bool value =                                                                                        \
         sizeof(return_value_check<T, Result>::deduce(                                                                  \
@@ -150,10 +135,10 @@ using ::std::add_lvalue_reference_t;
     template <typename Result, typename Arg1, typename Arg2, typename Arg3>                                            \
     struct impl<true, Result(Arg1, Arg2, Arg3)>                                                                        \
     {                                                                                                                  \
-      static ::detail::add_lvalue_reference_t<derived_type> test_me;                                                   \
-      static ::detail::add_lvalue_reference_t<Arg1> arg1;                                                              \
-      static ::detail::add_lvalue_reference_t<Arg2> arg2;                                                              \
-      static ::detail::add_lvalue_reference_t<Arg3> arg3;                                                              \
+      static ::internal::add_lvalue_reference_t<derived_type> test_me;                                                 \
+      static ::internal::add_lvalue_reference_t<Arg1> arg1;                                                            \
+      static ::internal::add_lvalue_reference_t<Arg2> arg2;                                                            \
+      static ::internal::add_lvalue_reference_t<Arg3> arg3;                                                            \
                                                                                                                        \
       static const bool value =                                                                                        \
         sizeof(return_value_check<T, Result>::deduce((test_me.member_function_name(arg1, arg2, arg3),                  \
@@ -164,11 +149,11 @@ using ::std::add_lvalue_reference_t;
     template <typename Result, typename Arg1, typename Arg2, typename Arg3, typename Arg4>                             \
     struct impl<true, Result(Arg1, Arg2, Arg3, Arg4)>                                                                  \
     {                                                                                                                  \
-      static ::detail::add_lvalue_reference_t<derived_type> test_me;                                                   \
-      static ::detail::add_lvalue_reference_t<Arg1> arg1;                                                              \
-      static ::detail::add_lvalue_reference_t<Arg2> arg2;                                                              \
-      static ::detail::add_lvalue_reference_t<Arg3> arg3;                                                              \
-      static ::detail::add_lvalue_reference_t<Arg4> arg4;                                                              \
+      static ::internal::add_lvalue_reference_t<derived_type> test_me;                                                 \
+      static ::internal::add_lvalue_reference_t<Arg1> arg1;                                                            \
+      static ::internal::add_lvalue_reference_t<Arg2> arg2;                                                            \
+      static ::internal::add_lvalue_reference_t<Arg3> arg3;                                                            \
+      static ::internal::add_lvalue_reference_t<Arg4> arg4;                                                            \
                                                                                                                        \
       static const bool value =                                                                                        \
         sizeof(return_value_check<T, Result>::deduce((test_me.member_function_name(arg1, arg2, arg3, arg4),            \
