@@ -480,20 +480,9 @@ public:
 template <typename A>
 inline A convertToInt(A value)
 {
-    return value;
+    return static_cast<A>(static_cast<int>(value));
 }
 
-template <>
-inline float convertToInt(float value)
-{
-    return static_cast<float>(static_cast<int>(value));
-}
-
-template <>
-inline double convertToInt(double value)
-{
-    return static_cast<double>(static_cast<int>(value));
-}
 
 template <>
 inline rocsparse_float_complex convertToInt(rocsparse_float_complex value)
