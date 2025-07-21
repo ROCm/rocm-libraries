@@ -195,9 +195,9 @@ namespace rocRoller
             setSize(propagateTo, literal(slowSize * slowStride));
             graph.coordinates.setElement(propagateToTag, propagateTo);
 
-            Log::info("KernelGraph::AddLDSPadding::propagateSize: updating tag {}, new size {}",
-                      propagateToTag,
-                      toString(getSize(propagateTo)));
+            Log::debug("KernelGraph::AddLDSPadding::propagateSize: updating tag {}, new size {}",
+                       propagateToTag,
+                       toString(getSize(propagateTo)));
         }
 
         /**
@@ -230,12 +230,12 @@ namespace rocRoller
             graph.coordinates.setElement(slowerTag, slowerDim);
             graph.coordinates.setElement(fasterTag, fasterDim);
 
-            Log::info("KernelGraph::AddLDSPadding::updateStrides: slow {}, fast {}, "
-                      "numPaddingElements {}, new slow stride {}",
-                      slowerTag,
-                      fasterTag,
-                      numPaddingElements,
-                      toString(slowStride));
+            Log::debug("KernelGraph::AddLDSPadding::updateStrides: slow {}, fast {}, "
+                       "numPaddingElements {}, new slow stride {}",
+                       slowerTag,
+                       fasterTag,
+                       numPaddingElements,
+                       toString(slowStride));
         }
 
         /**
@@ -473,6 +473,9 @@ namespace rocRoller
             auto flattenEdgeTag = getFlattenEdgeTag(graph, ldsTag);
             auto tileEdgeTag    = getTileEdgeTag(graph, ldsTag);
 
+            if((not flattenEdgeTag) or (not tileEdgeTag))
+                return;
+
             if(isDirect2LDS)
             {
                 // Look for Flatten/Tile above/below the slower moving
@@ -485,9 +488,6 @@ namespace rocRoller
                     = *only(take(1, graph.coordinates.getNeighbours<GD::Downstream>(*tileEdgeTag)));
                 tileEdgeTag = getTileEdgeTag(graph, slowTileTag);
             }
-
-            if((not flattenEdgeTag) || (not tileEdgeTag))
-                return;
 
             auto maybeLayoutTypeAndDataType = getLayoutTypeAndDataType(graph, ldsTag);
             if(!maybeLayoutTypeAndDataType)
@@ -512,35 +512,6 @@ namespace rocRoller
                                                maybeLayoutTypeAndDataType->first};
         }
 
-        std::string makePythonFunction(KernelGraph const&      graph,
-                                       std::string const&      functionName,
-                                       std::vector<int> const& required,
-                                       ExpressionPtr const&    expr)
-        {
-            std::string docstring;
-
-            auto arguments = std::vector<ExpressionPtr>{};
-            for(int i = 0; i < required.size(); ++i)
-            {
-                arguments.push_back(
-                    std::make_shared<rocRoller::Expression::Expression>(PositionalArgument(i)));
-                docstring.append(fmt::format("    # {} = {}\n",
-                                             rocRoller::Expression::toPython(arguments.back()),
-                                             toString(graph.coordinates.getNode(required[i]))));
-            }
-
-            std::string argumentExtract = "    def PositionalArgument(i):\n"
-                                          "        return args[i]\n";
-
-            std::string functionBody = fmt::format("def {}(*args):\n{}\n{}\n    return {}\n",
-                                                   functionName,
-                                                   docstring,
-                                                   argumentExtract,
-                                                   rocRoller::Expression::toPython(expr));
-
-            return functionBody;
-        }
-
         /**
          * @brief Commit LDS padding changes to the graph.
          *
@@ -553,84 +524,12 @@ namespace rocRoller
             {
                 uint paddingElements = getLDSPaddingElements(graph, info);
 
-                Log::info("KernelGraph::AddLDSPadding: ldsTag {}, upstreamEdge {}, "
-                          "downstreamEdge {}, paddingElements {}",
-                          info.ldsTag,
-                          info.upstreamEdge,
-                          info.downstreamEdge,
-                          paddingElements);
-
-                // Emit global load expression
-                {
-                    namespace CT = rocRoller::KernelGraph::CoordinateGraph;
-
-                    auto isDataFlow = [&](int tag) -> bool {
-                        return graph.coordinates.get<CT::DataFlow>(tag).has_value();
-                    };
-                    auto isUser = [&](int tag) -> bool {
-                        return graph.coordinates.get<CT::User>(tag).has_value();
-                    };
-
-                    auto userTag = only(filter(isUser,
-                                               graph.coordinates.depthFirstVisit(
-                                                   ldsTag, isDataFlow, GD::Upstream)))
-                                       .value();
-
-                    auto [required, _path]
-                        = findRequiredCoordinates(userTag, GD::Downstream, graph);
-                    auto arguments = std::vector<ExpressionPtr>{};
-                    for(int i = 0; i < required.size(); ++i)
-                    {
-                        arguments.push_back(std::make_shared<rocRoller::Expression::Expression>(
-                            PositionalArgument(i)));
-                    }
-                    auto loadExpr = graph.coordinates.reverse(arguments, {userTag}, required);
-
-                    Log::info("KernelGraph::AddLDSPadding: "
-                              "Adding load expression for User tag {} layout {}:\n{}",
-                              userTag,
-                              toString(info.layoutType),
-                              makePythonFunction(graph, "globalLoad", required, loadExpr[0]));
-                }
-
-                // Emit LDS store expression
-                {
-                    auto [required, _path]
-                        = findRequiredCoordinates(info.ldsTag, GD::Upstream, graph);
-                    auto arguments = std::vector<ExpressionPtr>{};
-                    for(int i = 0; i < required.size(); ++i)
-                    {
-                        arguments.push_back(std::make_shared<rocRoller::Expression::Expression>(
-                            PositionalArgument(i)));
-                    }
-                    auto storeExpr = graph.coordinates.forward(arguments, required, {info.ldsTag});
-
-                    Log::info("KernelGraph::AddLDSPadding: "
-                              "Adding store expression for LDS tag {} layout {}:\n{}",
-                              info.ldsTag,
-                              toString(info.layoutType),
-                              makePythonFunction(graph, "ldsStore", required, storeExpr[0]));
-                }
-
-                // Emit LDS load expression
-                {
-                    auto [required, _path]
-                        = findRequiredCoordinates(info.ldsTag, GD::Downstream, graph);
-                    auto arguments = std::vector<ExpressionPtr>{};
-                    for(int i = 0; i < required.size(); ++i)
-                    {
-                        arguments.push_back(std::make_shared<rocRoller::Expression::Expression>(
-                            PositionalArgument(i)));
-                    }
-                    auto loadExpr = graph.coordinates.reverse(arguments, {info.ldsTag}, required);
-
-                    Log::info("KernelGraph::AddLDSPadding: "
-                              "Adding load expression for LDS tag {} layout {}:\n{}",
-                              info.ldsTag,
-                              toString(info.layoutType),
-                              makePythonFunction(graph, "ldsLoad", required, loadExpr[0]));
-                }
-		
+                Log::debug("KernelGraph::AddLDSPadding: ldsTag {}, upstreamEdge {}, "
+                           "downstreamEdge {}, paddingElements {}",
+                           info.ldsTag,
+                           info.upstreamEdge,
+                           info.downstreamEdge,
+                           paddingElements);
 
                 if(paddingElements == 0)
                     continue;
