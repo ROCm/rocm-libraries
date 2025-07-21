@@ -30,6 +30,10 @@
 #include <gtest/gtest.h>
 
 #include "test_check.hpp"
+
+#include <sstream>
+#include <streambuf>
+
 bool test_check::s_auto_testing_bad_arg;
 
 bool display_timing_info_is_stdout_disabled()
@@ -165,6 +169,159 @@ public:
     void OnTestProgramEnd(const testing::UnitTest& unit_test) override
     {
         eventListener->OnTestProgramEnd(unit_test);
+    }
+};
+
+// Helper class to redirect streams
+class StreamRedirector
+{
+private:
+    std::streambuf*    old_cout_buf;
+    std::streambuf*    old_cerr_buf;
+    std::ostringstream cout_stream;
+    std::ostringstream cerr_stream;
+
+public:
+    void redirect()
+    {
+        // Save original buffers
+        old_cout_buf = std::cout.rdbuf();
+        old_cerr_buf = std::cerr.rdbuf();
+
+        // Redirect to our stringstreams
+        std::cout.rdbuf(cout_stream.rdbuf());
+        std::cerr.rdbuf(cerr_stream.rdbuf());
+    }
+
+    void restore()
+    {
+        // Restore original buffers
+        std::cout.rdbuf(old_cout_buf);
+        std::cerr.rdbuf(old_cerr_buf);
+    }
+
+    std::string get_cout_content() const
+    {
+        return cout_stream.str();
+    }
+
+    std::string get_cerr_content() const
+    {
+        return cerr_stream.str();
+    }
+
+    void clear()
+    {
+        cout_stream.str("");
+        cout_stream.clear();
+        cerr_stream.str("");
+        cerr_stream.clear();
+    }
+};
+
+// Custom test listener to handle output redirection
+class OutputRedirectListener : public ::testing::TestEventListener
+{
+private:
+    StreamRedirector              redirector;
+    ::testing::TestEventListener* default_listener;
+
+public:
+    explicit OutputRedirectListener(::testing::TestEventListener* listener)
+        : default_listener(listener)
+    {
+    }
+
+    ~OutputRedirectListener() override
+    {
+        delete default_listener;
+    }
+
+    void OnTestProgramStart(const ::testing::UnitTest& unit_test) override
+    {
+        default_listener->OnTestProgramStart(unit_test);
+    }
+
+    void OnTestIterationStart(const ::testing::UnitTest& unit_test, int iteration) override
+    {
+        default_listener->OnTestIterationStart(unit_test, iteration);
+    }
+
+    void OnEnvironmentsSetUpStart(const ::testing::UnitTest& unit_test) override
+    {
+        default_listener->OnEnvironmentsSetUpStart(unit_test);
+    }
+
+    void OnEnvironmentsSetUpEnd(const ::testing::UnitTest& unit_test) override
+    {
+        default_listener->OnEnvironmentsSetUpEnd(unit_test);
+    }
+
+    void OnTestCaseStart(const ::testing::TestCase& test_case) override
+    {
+        default_listener->OnTestCaseStart(test_case);
+    }
+
+    void OnTestStart(const ::testing::TestInfo& test_info) override
+    {
+        // Clear and redirect streams before each test
+        redirector.clear();
+        redirector.redirect();
+        default_listener->OnTestStart(test_info);
+    }
+
+    void OnTestPartResult(const ::testing::TestPartResult& test_part_result) override
+    {
+        default_listener->OnTestPartResult(test_part_result);
+    }
+
+    void OnTestEnd(const ::testing::TestInfo& test_info) override
+    {
+        // Restore streams after test
+        redirector.restore();
+
+        // Check if test failed
+        if(test_info.result()->Failed())
+        {
+            std::string cout_content = redirector.get_cout_content();
+            std::string cerr_content = redirector.get_cerr_content();
+
+            if(!cout_content.empty())
+            {
+                std::cout << "=== CAPTURED STDOUT ===\n" << cout_content << "\n";
+            }
+            if(!cerr_content.empty())
+            {
+                std::cerr << "=== CAPTURED STDERR ===\n" << cerr_content << "\n";
+            }
+        }
+
+        default_listener->OnTestEnd(test_info);
+    }
+
+    void OnTestCaseEnd(const ::testing::TestCase& test_case) override
+    {
+        default_listener->OnTestCaseEnd(test_case);
+    }
+
+    void OnEnvironmentsTearDownStart(const ::testing::UnitTest& unit_test) override
+    {
+        default_listener->OnEnvironmentsTearDownStart(unit_test);
+    }
+
+    void OnEnvironmentsTearDownEnd(const ::testing::UnitTest& unit_test) override
+    {
+        default_listener->OnEnvironmentsTearDownEnd(unit_test);
+    }
+
+    void OnTestIterationEnd(const ::testing::UnitTest& unit_test, int iteration) override
+    {
+        default_listener->OnTestIterationEnd(unit_test, iteration);
+    }
+
+    void OnTestProgramEnd(const ::testing::UnitTest& unit_test) override
+    {
+        default_listener->OnTestProgramEnd(unit_test);
     }
 };
 
@@ -336,15 +493,26 @@ int main(int argc, char** argv)
     // [==========] 149 tests from 53 test cases ran. (1 ms total)
     // [  PASSED  ] 149 tests.
     //
-    auto listener       = new ConfigurableEventListener(default_printer);
     auto gtest_listener = getenv("GTEST_LISTENER");
 
-    if(gtest_listener && !strcmp(gtest_listener, "NO_PASS_LINE_IN_LOG"))
+    if(!gtest_listener || strcmp(gtest_listener, "VERBOSE_PASS_IN_LOG") != 0)
     {
-        listener->showTestNames = listener->showSuccesses = listener->showInlineFailures = false;
+        // If the GTEST_LISTENER environment variable is not set to "VERBOSE_PASS_IN_LOG",
+        // we use the OutputRedirectListener to capture output.
+        // This listener will redirect the output to a stringstream and print it only if a test fails.
+        listeners.Append(new OutputRedirectListener(default_printer));
     }
+    else
+    {
+        auto listener = new ConfigurableEventListener(default_printer);
+        if(gtest_listener && !strcmp(gtest_listener, "NO_PASS_LINE_IN_LOG"))
+        {
+            listener->showTestNames = listener->showSuccesses = listener->showInlineFailures
+                = false;
+        }
 
-    listeners.Append(listener);
+        listeners.Append(listener);
+    }
 
     // Run all tests
     int ret = RUN_ALL_TESTS();
