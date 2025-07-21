@@ -124,6 +124,10 @@ The following commands can be run from the root directory to configure libhipcxx
 `make`
 4) `make install`
 
+## Build with HIPRTC
+If you would like to build libhipcxx with HIPRTC support, you can modify step 2 as follows:
+   - Run CMake with HIPRTC support enabled:
+     `cmake -DLIBHIPCXX_TEST_WITH_HIPRTC=ON -DCMAKE_INSTALL_PREFIX=<path-to-install-directory> ..`
 
 # Optional: Creating Distribution Packages
 1) Switch to the build directory
@@ -138,6 +142,16 @@ To run the tests on host and device based on LIT, you can use
 Alternatively, there is a helper script at `utils/amd/linux/perform_tests.bash` which can be used as follows:
 1) Change directory to build directory: `cd build`
 2) `bash ../utils/amd/linux/perform_tests.bash`
+
+Please note the following regarding test behavior:
+- If you pass the `LIBHIPCXX_TEST_WITH_HIPRTC` option to CMake, the tests will run with HIPRTC support enabled.
+- If you do not pass this option, the tests will run without HIPRTC support.
+
+For automated testing in continuous integration environments or when you need a predefined testing workflow, it is recommended to use the CI scripts provided in the `ci` directory. These scripts can run tests with both HIP and HIPRTC configurations.
+## Using CI Scripts for Automated Testing
+1) Change directory to ci directory: `cd ci`
+2) `bash ./test_libhipcxx.sh`
+3) `bash hiprtc_libhipcxx.sh`
 
 # How to use libhipcxx in your CMake Project
 
