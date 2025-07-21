@@ -111,6 +111,8 @@ libhipcxx aims to be a conforming implementation of the
 For running the integrated LIT unit tests:
 - Python 3
 - lit 16.0.0 (more recent versions are currently not supported!)
+- sccache
+- ninja
 
 # Build and Installation
 
