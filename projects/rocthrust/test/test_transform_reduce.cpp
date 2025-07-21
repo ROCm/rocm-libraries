@@ -21,7 +21,9 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/transform_reduce.h>
 
-#include "test_header.hpp"
+#include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(TransformReduceTests, FullTestsParams);
 TESTS_DEFINE(TransformReduceIntegerTests, VectorSignedIntegerTestsParams);

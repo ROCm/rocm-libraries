@@ -24,7 +24,8 @@
 #include <thrust/sort.h>
 #include <thrust/unique.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 template <class Input, class CompareFunction = thrust::less<Input>>
 struct ParamsMerge

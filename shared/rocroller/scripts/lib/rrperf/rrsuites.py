@@ -23,10 +23,12 @@
 #
 ################################################################################
 
-from itertools import product
-import pathlib
 from rrperf.problems import GEMMRun, CodeGenRun, TensileRun
 from rrperf.utils import rocm_gfx
+
+import pathlib
+from itertools import product
+from typing import List
 
 repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
 
@@ -1457,6 +1459,12 @@ def add_wgm(mapping, suite):
         yield run
 
 
+def addSkipPermlane(suite: List[GEMMRun], value=True):
+    for run in suite:
+        run.scaleSkipPermlane = value
+        yield run
+
+
 def fp4_target_d2lds_mi32x32x64_pf2x1_wgm():
     yield from add_wgm((0, 2), fp4_target_d2lds_mi32x32x64_pf2x1())
 
@@ -1585,6 +1593,50 @@ def fp4_target_d2lds_mi16x16x128_pf4x1_both():
     yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
 
 
+def does_this_fail():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=32768,
+        beta=0.0,
+        mac_m=64,
+        mac_n=64,
+        mac_k=128,
+        wave_m=16,
+        wave_n=16,
+        wave_k=128,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        unroll_x=0,
+        unroll_y=0,
+        direct2LDS_A=True,
+        direct2LDS_B=True,
+        loadLDSScale_A=False,
+        loadLDSScale_B=False,
+        storeLDS_D=False,
+        prefetch=True,
+        prefetchInFlight=4,
+        prefetchLDSFactor=1,
+        prefetchScale=False,
+        swizzleScale=False,
+        prefetchMixMemOps=True,
+        betaInFma=True,
+        scheduler="Priority",
+        match_memory_access=True,
+        trans_A="T",
+        trans_B="N",
+        type_A="fp4",
+        type_B="fp4",
+        type_C="half",
+        type_D="half",
+        type_acc="float",
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000,
+    )
+
+
 def fp4_no_scale_target_d2lds_mi16x16x128_pf4x1():
     yield GEMMRun(
         M=4096,
@@ -1648,9 +1700,14 @@ def fp4_kernels_wgm():
     yield from fp4_no_scale_target_d2lds_mi16x16x128_pf4x1_wgm()
 
 
+def fp4_16x16x128_scale_options():
+    yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
+    yield from addSkipPermlane(fp4_target_d2lds_mi16x16x128_pf4x1_wgm())
+
+
 def fp4_kernels():
     yield from fp4_kernels_no_wgm()
-    # yield from fp4_kernels_wgm()
+    yield from fp4_kernels_wgm()
 
 
 def fp4_target_sweep_wgms():
