@@ -23,6 +23,11 @@
 #ifndef ROCPRIM_TEST_UTILS_GET_RANDOM_DATA_HPP
 #define ROCPRIM_TEST_UTILS_GET_RANDOM_DATA_HPP
 
+#include "test_utils_data_generation.hpp"
+#ifdef WITH_ROCRAND
+    #include "test_utils_data_generation_with_rocrand.hpp"
+#endif
+
 namespace test_utils
 {
 template<class T, class U, class V>

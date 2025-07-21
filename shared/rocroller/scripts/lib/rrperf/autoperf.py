@@ -71,12 +71,20 @@ def build_rocroller(
     mx_datagen_git_tag = os.environ.get(mx_datagen_git_tag_env_var)
 
     if not mx_datagen_git_url:
-        print(f"Warning: {mx_datagen_git_url_env_var} not defined. Using mxDataGeneator Git URL in CMakeLists.txt.")
+        print(
+            f"Warning: {mx_datagen_git_url_env_var} not defined. Using mxDataGeneator Git URL in CMakeLists.txt."
+        )
     if not mx_datagen_git_tag:
-        print(f"Warning: {mx_datagen_git_tag_env_var} not defined. Using mxDataGeneator Git tag in CMakeLists.txt.")
+        print(
+            f"Warning: {mx_datagen_git_tag_env_var} not defined. Using mxDataGeneator Git tag in CMakeLists.txt."
+        )
 
-    mx_datagen_git_url_flag = "-DMXDATAGENERATOR_GIT_URL=" + mx_datagen_git_url if mx_datagen_git_url else ""
-    mx_datagen_git_tag_flag = "-DMXDATAGENERATOR_GIT_TAG=" + mx_datagen_git_tag if mx_datagen_git_tag else ""
+    mx_datagen_git_url_flag = (
+        "-DMXDATAGENERATOR_GIT_URL=" + mx_datagen_git_url if mx_datagen_git_url else ""
+    )
+    mx_datagen_git_tag_flag = (
+        "-DMXDATAGENERATOR_GIT_TAG=" + mx_datagen_git_tag if mx_datagen_git_tag else ""
+    )
 
     subprocess.run(
         [

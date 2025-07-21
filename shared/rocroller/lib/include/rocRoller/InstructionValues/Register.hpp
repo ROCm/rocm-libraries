@@ -337,7 +337,7 @@ namespace rocRoller
              *  - bitWidth is zero or greater than number of bits in a register; and/or
              *  - the bitfield would cross register boundaries.
              */
-            ValuePtr bitfield(uint8_t bitOffset, uint8_t bitWidth) const;
+            ValuePtr bitfield(int bitOffset, int bitWidth) const;
 
             /**
              * Return contiguous segments of a packed datatype denotated by indices.
@@ -359,13 +359,13 @@ namespace rocRoller
              * Returns the bit offset of this bitfield Value.
              * Throws FatalError if this is not a bitfield Value.
              */
-            uint8_t getBitOffset() const;
+            int getBitOffset() const;
 
             /**
              * Returns the bit width (length in bits) of this bitfield.
              * Throws FatalError if this is not a bitfield Value.
              */
-            uint8_t getBitWidth() const;
+            int getBitWidth() const;
 
         private:
             /**
@@ -406,8 +406,8 @@ namespace rocRoller
              * Offset and bit-width of the bitfielf in the 32-bit register represented by this value.
              * Multi-register values must have empty bitOffset & bitWidth, otherwise they are invalid.
              */
-            std::optional<uint8_t> m_bitOffset;
-            std::optional<uint8_t> m_bitWidth;
+            std::optional<int> m_bitOffset;
+            std::optional<int> m_bitWidth;
 
             /**
              * Pulls values from the allocation
