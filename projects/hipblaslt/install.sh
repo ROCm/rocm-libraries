@@ -445,7 +445,7 @@ fi
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,hip-clang,static,relocatable,codecoverage,relwithdebinfo,address-sanitizer,no-lazy-library-loading,no_tensile,no-tensile,client-only,msgpack,no-msgpack,logic:,cov:,fork:,branch:,test_local_path:,cpu_ref_lib:,build_dir:,use-custom-version:,architecture:,tensile-verbose:,gprof,keep-build-tmp,no-compress,experimental,quiet,legacy_hipblas_direct,disable-hipblaslt-marker,enable-tensile-marker,skip_rocroller,logic-yaml-filter: --options hicdgrka:j:o:l:f:b:nu:t: -- "$@")
+  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,hip-clang,static,relocatable,codecoverage,relwithdebinfo,address-sanitizer,no-lazy-library-loading,no_tensile,no-tensile,client-only,msgpack,no-msgpack,cmake_install,logic:,cov:,fork:,branch:,test_local_path:,cpu_ref_lib:,build_dir:,use-custom-version:,architecture:,tensile-verbose:,gprof,keep-build-tmp,no-compress,experimental,quiet,legacy_hipblas_direct,disable-hipblaslt-marker,enable-tensile-marker,skip_rocroller,logic-yaml-filter: --options hicdgrka:j:o:l:f:b:nu:t: -- "$@")
 else
   echo "Need a new version of getopt"
   exit 1
