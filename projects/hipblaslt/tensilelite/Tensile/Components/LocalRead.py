@@ -301,7 +301,6 @@ class LocalReadMFMA(LocalRead):
                                     packCode.add(VDot2CF32BF16(dst=v1, src0=hex(0x8000bf80), src1=vgpr(tmpvgpr01+1))) # v1_lo
 
                                     # Note: v_dot2c_f32_bf16 needs 4 wait states for inst dependencies.
-                                    #packCode.add(VDot2CF32BF16(dst=v3, src0=hex(0xbf800000), src1=vgpr(tmpvgpr01+1))) # v3_lo
                                     packCode.add(VCvtBF16toFP32(dst=vgpr(tmpvgpr), src=vgpr(tmpvgpr01+1), vgprMask=None, vi=1))
                                     packCode.add(VSubF32(dst=v3, src0=v3, src1=vgpr(tmpvgpr)))
 
@@ -309,6 +308,12 @@ class LocalReadMFMA(LocalRead):
                                     packCode.add(VMovB32(dst=v0, src=vgpr(tmpvgpr01)))
                                     packCode.add(VCvtPkF32toBF16(dst=v3, src0=v1, src1=v3))
                                     packCode.add(VMovB32(dst=v1, src=vgpr(tmpvgpr01+1)))
+
+                                    # layout:
+                                    # Val+0: bf16 high (0,2)
+                                    # Val+1: bf16 high (1,3)
+                                    # Val+2: bf16 low (0,2)
+                                    # Val+3: bf16 low (1,3)
 
                                     writer.vgprPool.checkIn(tmpvgpr01)
                                     writer.vgprPool.checkIn(tmpvgpr)
@@ -635,14 +640,13 @@ class LocalReadMFMA(LocalRead):
                                 midIdx = numReadsPerUnroll // 2
                                 if rIdx >= midIdx:
                                     if kernel["UnrollMajorLDS%s" % tP["tensorChar"]] == False:
-                                        # TODO: why are these the offsets???
                                         if kernel["MatrixInstM"] == 32:
-                                             incOffset = midIdx * numElementPerRead * UnrollStride
+                                            incOffset = midIdx * numElementPerRead * UnrollStride
                                         elif kernel["MatrixInstM"] == 16:
                                             incOffset = 3 * midIdx * numElementPerRead * UnrollStride
                                     else:
                                         if kernel["MatrixInstM"] == 32 and kernel["MatrixInstK"] == 16:
-                                            incOffset = 4 # TODOBS:.. check
+                                            incOffset = 4
                                         elif kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 32:
                                             incOffset = 12
                                 incOffset = rIdx * numElementPerRead * UnrollStride + incOffset

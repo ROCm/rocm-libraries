@@ -950,7 +950,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
         scheduleTF32Emu = kernel["UseF32XEmulation"]
         if scheduleTF32Emu:
-          # TODOBS: Calculate these numbers using len(packAItems) / numLR{A,B}
           instPerPackA = 24#len(packAItems)
           instPerPackB = 24#len(packBItems)
           while packAItems or packBItems:
