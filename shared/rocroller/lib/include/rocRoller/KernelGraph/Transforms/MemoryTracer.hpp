@@ -61,6 +61,7 @@ namespace rocRoller
 
             std::ostream& operator<<(std::ostream& stream, Summary const& summary);
         }
+
         /**
 	 * @brief Memory tracer for the rocRoller kernel graph.
 	 *

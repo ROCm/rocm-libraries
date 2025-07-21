@@ -54,46 +54,20 @@ namespace rocRoller
 
         void Transformer::fillExecutionCoordinates(ContextPtr context)
         {
-            auto const& kernelWorkgroupIndexes = context->kernel()->workgroupIndex();
-            auto const& kernelWorkitemIndexes  = context->kernel()->workitemIndex();
-            for(auto const& tag : m_graph->getNodes())
+            if(context)
             {
-                auto dimension = m_graph->getNode(tag);
-                if(std::holds_alternative<Workgroup>(dimension))
+                auto kernel = context->kernel();
+
+                std::array<Expression::ExpressionPtr, 3> kernelWorkgroupIndexes,
+                    kernelWorkitemIndexes;
+                for(int i = 0; i < kernel->kernelDimensions(); ++i)
                 {
-<<<<<<< HEAD
                     if(kernel->workgroupIndex().at(i) != nullptr)
                         kernelWorkgroupIndexes[i] = kernel->workgroupIndex().at(i)->expression();
                     if(kernel->workitemIndex().at(i) != nullptr)
                         kernelWorkitemIndexes[i] = kernel->workitemIndex().at(i)->expression();
-=======
-                    auto dimensionWorkgroup = std::get<Workgroup>(dimension);
-                    AssertFatal(dimensionWorkgroup.dim >= 0
-                                    && kernelWorkgroupIndexes.size()
-                                           > (size_t)dimensionWorkgroup.dim,
-                                "Unable to get workgroup size (kernel dimension mismatch).",
-                                ShowValue(toString(dimension)),
-                                ShowValue(dimensionWorkgroup.dim),
-                                ShowValue(kernelWorkgroupIndexes.size()));
-                    auto expr = kernelWorkgroupIndexes.at(dimensionWorkgroup.dim)->expression();
-                    // TODO Remove this when Workgroup removed from RegisterTagManager
-                    context->registerTagManager()->addRegister(
-                        tag, kernelWorkgroupIndexes.at(dimensionWorkgroup.dim));
-                    setCoordinate(tag, expr);
                 }
-                if(std::holds_alternative<Workitem>(dimension))
-                {
-                    auto dimensionWorkitem = std::get<Workitem>(dimension);
-                    AssertFatal(dimensionWorkitem.dim >= 0
-                                    && kernelWorkitemIndexes.size() > (size_t)dimensionWorkitem.dim,
-                                "Unable to get workitem size (kernel dimension mismatch).",
-                                ShowValue(toString(dimension)),
-                                ShowValue(dimensionWorkitem.dim),
-                                ShowValue(kernelWorkitemIndexes.size()));
-                    auto expr = kernelWorkitemIndexes.at(dimensionWorkitem.dim)->expression();
-                    setCoordinate(tag, expr);
->>>>>>> df22e107e2 (temp revert to fix tests)
-                }
+                fillExecutionCoordinates(context, kernelWorkgroupIndexes, kernelWorkitemIndexes);
             }
         }
 

@@ -33,6 +33,7 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/KernelGraph/Transforms/MemoryTracer.hpp>
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
 #include <rocRoller/Serialization/Enum.hpp>
@@ -468,7 +469,7 @@ namespace rocRoller::Client::GEMMClient
         if(runParams.memoryTraceOnly)
         {
             auto summary = commandKernel->memoryTrace(runtimeArgs);
-            std::cout << summary << std::endl;
+            std::cout << summary.toString() << std::endl;
         }
         else
         {
