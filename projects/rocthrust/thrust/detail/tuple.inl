@@ -141,7 +141,7 @@ template <class T> struct access_traits
   using const_type = const T&;
   using non_const_type = T&;
 
-  using parameter_type = const typename thrust::detail::remove_cv<T>::type&;
+  using parameter_type = const typename ::std::remove_cv<T>::type&;
 
 // used as the tuple constructors parameter types
 // Rationale: non-reference tuple element types can be cv-qualified.

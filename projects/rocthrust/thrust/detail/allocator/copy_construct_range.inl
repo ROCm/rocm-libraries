@@ -36,7 +36,7 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/tuple.h>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
 
@@ -73,22 +73,14 @@ template <typename Allocator, typename T>
 struct needs_copy_construct_via_allocator
     : integral_constant<bool,
                         (has_member_construct2<Allocator, T, T>::value
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                         || !::cuda::std::is_trivially_copy_constructible<T>::value)>
-#else
-                         || !::std::is_trivially_copy_constructible<T>::value)>
-#endif
+                         || !_THRUST_STD::is_trivially_copy_constructible<T>::value)>
 {};
 
 // we know that std::allocator::construct's only effect is to call T's
 // copy constructor, so we needn't consider or use its construct() member for copy construction
 template <typename U, typename T>
 struct needs_copy_construct_via_allocator<std::allocator<U>, T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    : integral_constant<bool, !::cuda::std::is_trivially_copy_constructible<T>::value>
-#else
-    : integral_constant<bool, !::std::is_trivially_copy_constructible<T>::value>
-#endif
+    : integral_constant<bool, !_THRUST_STD::is_trivially_copy_constructible<T>::value>
 {};
 
 // XXX it's regrettable that this implementation is copied almost
@@ -215,11 +207,7 @@ copy_construct_range_n(
 
 template <typename FromSystem, typename Allocator, typename InputIterator, typename Pointer>
 THRUST_HOST_DEVICE
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  ::cuda::std::enable_if_t<needs_copy_construct_via_allocator<Allocator, typename pointer_element<Pointer>::type>::value, Pointer>
-#else
-  ::std::enable_if_t<needs_copy_construct_via_allocator<Allocator, typename pointer_element<Pointer>::type>::value, Pointer>
-#endif
+  _THRUST_STD::enable_if_t<needs_copy_construct_via_allocator<Allocator, typename pointer_element<Pointer>::type>::value, Pointer>
   copy_construct_range(thrust::execution_policy<FromSystem>& from_system,
                        Allocator& a,
                        InputIterator first,
@@ -231,11 +219,7 @@ THRUST_HOST_DEVICE
 
 template <typename FromSystem, typename Allocator, typename InputIterator, typename Size, typename Pointer>
 THRUST_HOST_DEVICE
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  ::cuda::std::enable_if_t<needs_copy_construct_via_allocator<Allocator, typename pointer_element<Pointer>::type>::value, Pointer>
-#else
-  ::std::enable_if_t<needs_copy_construct_via_allocator<Allocator, typename pointer_element<Pointer>::type>::value, Pointer>
-#endif
+  _THRUST_STD::enable_if_t<needs_copy_construct_via_allocator<Allocator, typename pointer_element<Pointer>::type>::value, Pointer>
   copy_construct_range_n(
     thrust::execution_policy<FromSystem>& from_system, Allocator& a, InputIterator first, Size n, Pointer result)
 {

@@ -34,8 +34,8 @@
 #include <thrust/detail/contiguous_storage.h>
 #include <thrust/detail/nv_target.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/utility>
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(utility)
 #endif
 
 #include <stdexcept> // for std::runtime_error
@@ -197,8 +197,8 @@ THRUST_EXEC_CHECK_DISABLE
 template <typename T, typename Alloc>
 THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::swap(contiguous_storage& x)
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::swap;
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+  using _THRUST_STD::swap;
 #else
   using thrust::swap;
 #endif
@@ -355,8 +355,8 @@ THRUST_HOST_DEVICE void contiguous_storage<T, Alloc>::swap_allocators(false_type
                  // allocators must be equal when swapping containers with allocators that propagate on swap
                  assert(!is_allocator_not_equal(other));),
                (if (is_allocator_not_equal(other)) { throw allocator_mismatch_on_swap(); }));
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ::cuda::std::swap;
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+  using _THRUST_STD::swap;
 #else
   using thrust::swap;
 #endif

@@ -31,8 +31,8 @@
 #include <thrust/system/detail/generic/swap_ranges.h>
 #include <thrust/tuple.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/utility>
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(utility)
 #endif
 
 THRUST_NAMESPACE_BEGIN
@@ -53,8 +53,8 @@ struct swap_pair_elements
   THRUST_HOST_DEVICE void operator()(Tuple t)
   {
     // use unqualified swap to allow ADL to catch any user-defined swap
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    using ::cuda::std::swap;
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+    using _THRUST_STD::swap;
 #else
     using thrust::swap;
 #endif

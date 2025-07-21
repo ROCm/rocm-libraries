@@ -31,7 +31,7 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/generic/generate.h>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
 
@@ -59,13 +59,8 @@ generate(thrust::execution_policy<ExecutionPolicy>& exec, ForwardIterator first,
   // nice solution that validates the const_cast and doesn't take away any
   // functionality.
   THRUST_STATIC_ASSERT_MSG(
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    !::cuda::std::is_const<
-      ::cuda::std::remove_reference_t<typename thrust::iterator_traits<ForwardIterator>::reference>>::value,
-#else
-    !::std::is_const<
-      ::std::remove_reference_t<typename thrust::iterator_traits<ForwardIterator>::reference>>::value,
-#endif
+    !_THRUST_STD::is_const<
+      _THRUST_STD::remove_reference_t<typename thrust::iterator_traits<ForwardIterator>::reference>>::value,
     "generating to `const` iterators is not allowed");
   thrust::for_each(exec, first, last, typename thrust::detail::generate_functor<ExecutionPolicy, Generator>::type(gen));
 } // end generate()
@@ -86,13 +81,8 @@ generate_n(thrust::execution_policy<ExecutionPolicy>& exec, OutputIterator first
   // nice solution that validates the const_cast and doesn't take away any
   // functionality.
   THRUST_STATIC_ASSERT_MSG(
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    !::cuda::std::is_const<
-      ::cuda::std::remove_reference_t<typename thrust::iterator_traits<OutputIterator>::reference>>::value,
-#else
-    !::std::is_const<
-      ::std::remove_reference_t<typename thrust::iterator_traits<OutputIterator>::reference>>::value,
-#endif
+    !_THRUST_STD::is_const<
+      _THRUST_STD::remove_reference_t<typename thrust::iterator_traits<OutputIterator>::reference>>::value,
     "generating to `const` iterators is not allowed");
   return thrust::for_each_n(
     exec, first, n, typename thrust::detail::generate_functor<ExecutionPolicy, Generator>::type(gen));

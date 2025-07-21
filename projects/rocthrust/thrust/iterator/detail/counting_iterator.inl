@@ -32,7 +32,7 @@
 #include <thrust/iterator/iterator_traits.h>
 
 #include <cstddef>
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
 
@@ -48,11 +48,7 @@ namespace detail
 template <typename Incrementable, typename System, typename Traversal, typename Difference>
 struct counting_iterator_base
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using system = typename thrust::detail::eval_if<::cuda::std::is_same<System, use_default>::value,
-#else
-  using system = typename thrust::detail::eval_if<::std::is_same<System, use_default>::value,
-#endif
+  using system = typename thrust::detail::eval_if<_THRUST_STD::is_same<System, use_default>::value,
                                                   thrust::detail::identity_<thrust::any_system_tag>,
                                                   thrust::detail::identity_<System>>::type;
 
@@ -67,11 +63,7 @@ struct counting_iterator_base
   using difference = typename thrust::detail::ia_dflt_help<
     Difference,
     thrust::detail::eval_if<thrust::detail::is_numeric<Incrementable>::value,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                            thrust::detail::eval_if<::cuda::std::is_integral<Incrementable>::value,
-#else
-                            thrust::detail::eval_if<::std::is_integral<Incrementable>::value,
-#endif
+                            thrust::detail::eval_if<::internal::is_integral<Incrementable>::value,
                                                     thrust::detail::numeric_difference<Incrementable>,
                                                     thrust::detail::identity_<std::ptrdiff_t>>,
                             thrust::iterator_difference<Incrementable>>>::type;
@@ -122,13 +114,8 @@ template <typename Difference, typename Incrementable1, typename Incrementable2>
 struct counting_iterator_equal<Difference,
                                Incrementable1,
                                Incrementable2,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                               ::cuda::std::enable_if_t<::cuda::std::is_floating_point<Incrementable1>::value
-                                                        || ::cuda::std::is_floating_point<Incrementable2>::value>>
-#else
-                               ::std::enable_if_t<::std::is_floating_point<Incrementable1>::value
-                                                  || ::std::is_floating_point<Incrementable2>::value>>
-#endif
+                               _THRUST_STD::enable_if_t<_THRUST_STD::is_floating_point<Incrementable1>::value
+                                                        || _THRUST_STD::is_floating_point<Incrementable2>::value>>
 {
   THRUST_HOST_DEVICE static bool equal(Incrementable1 x, Incrementable2 y)
   {

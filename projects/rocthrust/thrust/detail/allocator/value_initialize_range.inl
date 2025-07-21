@@ -31,7 +31,7 @@
 #include <thrust/for_each.h>
 #include <thrust/uninitialized_fill.h>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
 
@@ -60,17 +60,10 @@ struct construct1_via_allocator
 // we need to construct T via the allocator if...
 template <typename Allocator, typename T>
 struct needs_default_construct_via_allocator
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    : ::cuda::std::disjunction<has_member_construct1<Allocator, T>, // if the Allocator does something interesting
-                                                                    // or if T's default constructor does something
-                                                                    // interesting
-                               thrust::detail::not_<::cuda::std::is_trivially_default_constructible<T>>>
-#else
-    : ::std::disjunction<has_member_construct1<Allocator, T>, // if the Allocator does something interesting
-                                                              // or if T's default constructor does something
-                                                              // interesting
-                         thrust::detail::not_<::std::is_trivially_default_constructible<T>>>
-#endif
+    : _THRUST_STD::disjunction<has_member_construct1<Allocator, T>, // if the Allocator does something interesting
+                                                                   // or if T's default constructor does something
+                                                                   // interesting
+                              thrust::detail::not_<_THRUST_STD::is_trivially_default_constructible<T>>>
 {};
 
 // we know that std::allocator::construct's only effect is to call T's
@@ -78,19 +71,11 @@ struct needs_default_construct_via_allocator
 // unless T's constructor does something interesting
 template <typename U, typename T>
 struct needs_default_construct_via_allocator<std::allocator<U>, T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    : thrust::detail::not_<::cuda::std::is_trivially_default_constructible<T>>
-#else
-    : thrust::detail::not_<::std::is_trivially_default_constructible<T>>
-#endif
+    : thrust::detail::not_<_THRUST_STD::is_trivially_default_constructible<T>>
 {};
 
 template <typename Allocator, typename Pointer, typename Size>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST_DEVICE ::cuda::std::enable_if_t<
-#else
-THRUST_HOST_DEVICE ::std::enable_if_t<
-#endif
+THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<
   needs_default_construct_via_allocator<Allocator, typename pointer_element<Pointer>::type>::value>
 value_initialize_range(Allocator& a, Pointer p, Size n)
 {

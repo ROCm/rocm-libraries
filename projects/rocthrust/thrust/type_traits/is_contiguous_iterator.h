@@ -38,6 +38,9 @@
 #include <iterator>
 #include <type_traits>
 #include <utility>
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
 #if THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC && _MSC_VER < 1916 // MSVC 2017 version 15.9
 #  include <array>
@@ -159,11 +162,7 @@ struct is_libstdcxx_normal_iterator<::__gnu_cxx::__normal_iterator<Iterator, Con
 
 #if defined(_MSC_VER) && _MSC_VER >= 1916 // MSVC 2017 version 15.9.
 template <typename Iterator>
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct is_msvc_contiguous_iterator : ::cuda::std::is_pointer<::std::_Unwrapped_t<Iterator>>
-#  else
-struct is_msvc_contiguous_iterator : ::std::is_pointer<::std::_Unwrapped_t<Iterator>>
-#  endif
+struct is_msvc_contiguous_iterator : _THRUST_STD::is_pointer<::std::_Unwrapped_t<Iterator>>
 {};
 #elif defined(_MSC_VER) && _MSC_VER >= 1700 // MSVC 2012.
 template <typename Iterator>
@@ -207,11 +206,7 @@ template <typename Iterator>
 struct is_contiguous_iterator_impl
     : integral_constant<
         bool,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        ::cuda::std::is_pointer<Iterator>::value || is_thrust_pointer<Iterator>::value
-#else
-        ::std::is_pointer<Iterator>::value || is_thrust_pointer<Iterator>::value
-#endif
+        _THRUST_STD::is_pointer<Iterator>::value || is_thrust_pointer<Iterator>::value
           || is_libcxx_wrap_iter<Iterator>::value || is_libstdcxx_normal_iterator<Iterator>::value
           || is_msvc_contiguous_iterator<Iterator>::value || proclaim_contiguous_iterator<Iterator>::value>
 {};

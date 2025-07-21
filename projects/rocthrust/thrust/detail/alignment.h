@@ -29,15 +29,19 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#include _THRUST_STD_INCLUDE(type_traits) // For `std::alignment_of`.
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  include <cuda/cmath>
-#  include <cuda/std/type_traits>
+#  else
+#  include <hip/cmath>
+#  endif
 #endif
 
 #include <cstddef> // For `std::size_t` and `std::max_align_t`.
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits> // For `std::alignment_of`.
 
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <rocprim/detail/various.hpp>
 #endif
 
@@ -50,11 +54,7 @@ namespace detail
 ///
 /// It is an implementation of C++11's \p std::alignment_of.
 template <typename T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-using alignment_of = ::cuda::std::alignment_of<T>;
-#else
-using alignment_of = ::std::alignment_of<T>;
-#endif
+using alignment_of = _THRUST_STD::alignment_of<T>;
 
 /// \p aligned_type provides the nested type `type`, which is a trivial
 /// type whose alignment requirement is a divisor of `Align`.
@@ -71,11 +71,7 @@ struct aligned_type
 /// strict (as large) as that of every scalar type.
 ///
 /// It is an implementation of C++11's \p std::max_align_t.
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-using max_align_t = ::cuda::std::max_align_t;
-#else
-using max_align_t = ::std::max_align_t;
-#endif
+using max_align_t = _THRUST_STD::max_align_t;
 
 /// \p aligned_reinterpret_cast `reinterpret_cast`s \p u of type \p U to `void*`
 /// and then `reinterpret_cast`s the result to \p T. The indirection through
@@ -91,8 +87,12 @@ THRUST_HOST_DEVICE T aligned_reinterpret_cast(U u)
 
 THRUST_HOST_DEVICE inline std::size_t aligned_storage_size(std::size_t n, std::size_t align)
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
   return ::cuda::ceil_div(n, align) * align;
+#  else
+  return ::hip::ceil_div(n, align) * align;
+#  endif
 #else
   return ::rocprim::detail::ceiling_div(n, align) * align;
 #endif

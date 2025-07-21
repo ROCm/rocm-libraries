@@ -29,7 +29,7 @@
 #include <thrust/detail/execute_with_dependencies.h>
 #include <thrust/detail/type_traits.h>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
 
@@ -57,12 +57,8 @@ public:
       : alloc(alloc_)
   {}
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  ::cuda::std::remove_reference_t<Allocator>& get_allocator(){
-#else
-  ::std::remove_reference_t<Allocator>& get_allocator()
+  THRUST_HOST_DEVICE _THRUST_STD::remove_reference_t<Allocator>& get_allocator()
   {
-#endif
     return alloc;
   }
 

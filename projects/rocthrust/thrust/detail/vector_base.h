@@ -40,15 +40,12 @@
 #include <thrust/iterator/reverse_iterator.h>
 #include <thrust/sequence_access.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/utility>
-#endif
+#include _THRUST_STD_INCLUDE(utility)
 
 #include <initializer_list>
 #include <vector>
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
-#  include <utility>
 #endif
 
 THRUST_NAMESPACE_BEGIN
@@ -198,11 +195,7 @@ public:
    *  \param last The end of the range.
    */
   template <typename InputIterator,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-            ::cuda::std::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
-#else
-            ::std::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
-#endif
+            _THRUST_STD::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
   vector_base(InputIterator first, InputIterator last);
 
   /*! This constructor builds a vector_base from a range.
@@ -211,11 +204,7 @@ public:
    *  \param alloc The allocator to use by this vector_base.
    */
   template <typename InputIterator,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-            ::cuda::std::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
-#else
-            ::std::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
-#endif
+            _THRUST_STD::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int> = 0>
   vector_base(InputIterator first, InputIterator last, const Alloc& alloc);
 
   /*! The destructor erases the elements.
@@ -425,11 +414,7 @@ public:
    */
   void swap(vector_base& v)
   {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    using ::cuda::std::swap;
-#else
-    using ::std::swap;
-#endif
+    using _THRUST_STD::swap;
     swap(m_storage, v.m_storage);
     swap(m_size, v.m_size);
   }

@@ -22,13 +22,29 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/device_delete.h>
 #include <thrust/device_new.h>
 #include <thrust/device_ptr.h>
 #include <thrust/device_reference.h>
 
-#include <limits>
+// Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
+#include _THRUST_STD_INCLUDE(limits)
+
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(cstdint)
+#endif
+
 #include <stdexcept>
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <cstddef>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -63,8 +79,8 @@ public:
   /*! \c const reference to allocated element, \c device_reference<const T>. */
   using const_reference = device_reference<const T>;
 
-  /*! Type of allocation size, \c std::size_t. */
-  using size_type = std::size_t;
+  /*! Type of allocation size, \c _THRUST_STD::size_t. */
+  using size_type = _THRUST_STD::size_t;
 
   /*! Type of allocation difference, \c pointer::difference_type. */
   using difference_type = typename pointer::difference_type;
@@ -77,7 +93,7 @@ public:
   template <typename U>
   struct rebind
   {
-    /*! The typedef \p other gives the type of the rebound \p device_new_allocator.
+    /*! The alias \p other gives the type of the rebound \p device_new_allocator.
      */
     using other = device_new_allocator<U>;
   }; // end rebind
@@ -146,7 +162,11 @@ public:
    */
   THRUST_HOST_DEVICE inline size_type max_size() const
   {
-    return std::numeric_limits<size_type>::max THRUST_PREVENT_MACRO_SUBSTITUTION() / sizeof(T);
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+    return _THRUST_STD::numeric_limits<size_type>::max THRUST_PREVENT_MACRO_SUBSTITUTION() / sizeof(T);
+#else // Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
+    return ::std::numeric_limits<size_type>::max THRUST_PREVENT_MACRO_SUBSTITUTION() / sizeof(T);
+#endif
   } // end max_size()
 
   /*! Compares against another \p device_malloc_allocator for equality.

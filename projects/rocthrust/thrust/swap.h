@@ -31,14 +31,14 @@
 #endif // no system header
 #include <thrust/detail/execution_policy.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/utility>
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(utility)
 #endif
 
 THRUST_NAMESPACE_BEGIN
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-using ::cuda::std::swap;
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+using _THRUST_STD::swap;
 #else
 /*! \p swap assigns the contents of \c a to \c b and the
  *  contents of \c b to \c a. This is used as a primitive operation
