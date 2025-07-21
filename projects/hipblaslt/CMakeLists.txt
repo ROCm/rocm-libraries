@@ -36,7 +36,7 @@ option(TENSILELITE_ENABLE_HOSTLIBTESTS "Build the tensilelite host library tests
 
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
-    option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." OFF)
+    option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
     # rocm-smi is not presently available on Windows so we do not require it.
     cmake_dependent_option(HIPBLASLT_ENABLE_ROCM_SMI "Require rocm_smi." ON "NOT WIN32" OFF)
 endif()
