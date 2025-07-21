@@ -34,12 +34,25 @@ target_sources(tensilelite-tests
 
 target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
+target_compile_definitions(tensilelite-tests PRIVATE BOOST_ERROR_CODE_HEADER_ONLY)
+
 if(HIPBLASLT_ENABLE_LLVM)
+    find_package(LLVM REQUIRED CONFIG)
     target_sources(tensilelite-tests
         PRIVATE
-            "${CMAKE_CURRENT_DIR}/llvm/LibraryPerformance_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/llvm/LibraryPerformance_test.cpp"
     )
-    target_link_libraries(tensilelite-tests PRIVATE LLVM)
+
+    find_library(LLVMObjectYAML_LIBRARY
+        NAMES LLVMObjectYAML
+        PATHS ${LLVM_LIBRARY_DIR})
+
+    if(LLVMObjectYAML_LIBRARY)
+        target_link_libraries(tensilelite-tests PUBLIC LLVMObjectYAML)
+    else()
+        target_link_libraries(tensilelite-tests PUBLIC LLVM)
+    endif()
+    target_include_directories(tensilelite-tests PUBLIC ${LLVM_INCLUDE_DIRS})
 endif()
 
 target_link_libraries(tensilelite-tests

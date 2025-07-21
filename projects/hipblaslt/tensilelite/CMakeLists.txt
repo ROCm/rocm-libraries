@@ -29,7 +29,7 @@ if(HIPBLASLT_ENABLE_MSGPACK)
     if(msgpack-cxx_FOUND)
         target_link_libraries(tensilelite-host PRIVATE msgpack-cxx)
     else()
-        target_link_libraries(tensilelite-host PRIVATE msgpackc-cxx)
+        target_link_libraries(tensilelite-host PRIVATE msgpackc)
     endif()
     target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_MSGPACK>) # make TENSILELITE_MSGPACK
 endif()
