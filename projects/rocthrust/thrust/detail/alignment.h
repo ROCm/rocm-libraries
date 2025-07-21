@@ -29,17 +29,15 @@
 #  pragma system_header
 #endif // no system header
 
+#include <thrust/detail/type_traits.h>
+
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  include <cuda/cmath>
-#  include <cuda/std/type_traits>
-#endif
-
-#include <cstddef> // For `std::size_t` and `std::max_align_t`.
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits> // For `std::alignment_of`.
-
+#else
 #  include <rocprim/detail/various.hpp>
 #endif
+
+#include <cstddef> // For `std::size_t`
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -50,11 +48,7 @@ namespace detail
 ///
 /// It is an implementation of C++11's \p std::alignment_of.
 template <typename T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-using alignment_of = ::cuda::std::alignment_of<T>;
-#else
-using alignment_of = ::std::alignment_of<T>;
-#endif
+using alignment_of = ::internal::alignment_of<T>;
 
 /// \p aligned_type provides the nested type `type`, which is a trivial
 /// type whose alignment requirement is a divisor of `Align`.
@@ -71,11 +65,7 @@ struct aligned_type
 /// strict (as large) as that of every scalar type.
 ///
 /// It is an implementation of C++11's \p std::max_align_t.
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-using max_align_t = ::cuda::std::max_align_t;
-#else
-using max_align_t = ::std::max_align_t;
-#endif
+using max_align_t = ::internal::max_align_t;
 
 /// \p aligned_reinterpret_cast `reinterpret_cast`s \p u of type \p U to `void*`
 /// and then `reinterpret_cast`s the result to \p T. The indirection through

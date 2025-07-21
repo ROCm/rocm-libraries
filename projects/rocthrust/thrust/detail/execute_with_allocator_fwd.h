@@ -29,10 +29,6 @@
 #include <thrust/detail/execute_with_dependencies.h>
 #include <thrust/detail/type_traits.h>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits>
-#endif
-
 THRUST_NAMESPACE_BEGIN
 
 namespace detail
@@ -57,12 +53,8 @@ public:
       : alloc(alloc_)
   {}
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  ::cuda::std::remove_reference_t<Allocator>& get_allocator(){
-#else
-  ::std::remove_reference_t<Allocator>& get_allocator()
+  THRUST_HOST_DEVICE ::internal::remove_reference_t<Allocator>& get_allocator()
   {
-#endif
     return alloc;
   }
 

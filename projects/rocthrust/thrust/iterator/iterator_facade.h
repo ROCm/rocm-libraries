@@ -44,10 +44,6 @@
 #include <thrust/iterator/detail/distance_from_result.h>
 #include <thrust/iterator/detail/iterator_facade_category.h>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits>
-#endif
-
 THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup iterators
@@ -261,11 +257,7 @@ class iterator_core_access
   {
     // dispatch the implementation of this method upon whether or not
     // Facade2 is convertible to Facade1
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    return distance_from(f1, f2, typename ::cuda::std::is_convertible<Facade2, Facade1>::type());
-#else
-    return distance_from(f1, f2, typename ::std::is_convertible<Facade2, Facade1>::type());
-#endif
+    return distance_from(f1, f2, typename ::internal::is_convertible<Facade2, Facade1>::type());
   }
 
   //
@@ -339,11 +331,7 @@ private:
 public:
   /*! The type of element pointed to by \p iterator_facade.
    */
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using value_type = ::cuda::std::remove_const_t<Value>;
-#else
-  using value_type = ::std::remove_const_t<Value>;
-#endif
+  using value_type = ::internal::remove_const_t<Value>;
 
   /*! The return type of \p iterator_facade::operator*().
    */

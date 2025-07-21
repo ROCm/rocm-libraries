@@ -40,9 +40,6 @@
 #include <thrust/transform.h>
 
 #include <limits>
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -137,11 +134,7 @@ THRUST_HOST_DEVICE OutputIterator copy_if(
 
   // create an unsigned version of n (we know n is positive from the comparison above)
   // to avoid a warning in the compare below
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  ::cuda::std::make_unsigned_t<difference_type> unsigned_n(n);
-#else
-  ::std::make_unsigned_t<difference_type> unsigned_n(n);
-#endif
+  ::internal::make_unsigned_t<difference_type> unsigned_n(n);
 
   // use 32-bit indices when possible (almost always)
   if (sizeof(difference_type) > sizeof(unsigned int)

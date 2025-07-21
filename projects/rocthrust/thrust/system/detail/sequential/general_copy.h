@@ -32,10 +32,6 @@
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/detail/type_traits.h>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits>
-#endif
-
 THRUST_NAMESPACE_BEGIN
 namespace system
 {
@@ -47,11 +43,7 @@ namespace general_copy_detail
 {
 
 template <typename T1, typename T2>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct lazy_is_assignable : ::cuda::std::is_assignable<typename T1::type, typename T2::type>
-#else
-struct lazy_is_assignable : ::std::is_assignable<typename T1::type, typename T2::type>
-#endif
+struct lazy_is_assignable : ::internal::is_assignable<typename T1::type, typename T2::type>
 {};
 
 // sometimes OutputIterator's reference type is reported as void
@@ -59,11 +51,7 @@ struct lazy_is_assignable : ::std::is_assignable<typename T1::type, typename T2:
 template <typename InputIterator, typename OutputIterator>
 struct reference_is_assignable
     : thrust::detail::eval_if<
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        ::cuda::std::is_same<typename thrust::iterator_reference<OutputIterator>::type, void>::value,
-#else
-        ::std::is_same<typename thrust::iterator_reference<OutputIterator>::type, void>::value,
-#endif
+        ::internal::is_same<typename thrust::iterator_reference<OutputIterator>::type, void>::value,
         thrust::detail::true_type,
         lazy_is_assignable<thrust::iterator_reference<OutputIterator>, thrust::iterator_reference<InputIterator>>>::type
 {};
@@ -73,11 +61,7 @@ struct reference_is_assignable
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename OutputIterator, typename InputIterator>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-inline THRUST_HOST_DEVICE ::cuda::std::enable_if_t<reference_is_assignable<InputIterator, OutputIterator>::value>
-#else
-inline THRUST_HOST_DEVICE ::std::enable_if_t<reference_is_assignable<InputIterator, OutputIterator>::value>
-#endif
+inline THRUST_HOST_DEVICE ::internal::enable_if_t<reference_is_assignable<InputIterator, OutputIterator>::value>
 iter_assign(OutputIterator dst, InputIterator src)
 {
   *dst = *src;

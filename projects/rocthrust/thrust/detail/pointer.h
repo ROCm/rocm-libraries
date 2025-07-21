@@ -24,6 +24,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/reference_forward_declaration.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/pointer_traits.h>
@@ -81,33 +89,32 @@ struct pointer_base
 {
   // void pointers should have no element type
   // note that we remove_cv from the Element type to get the value_type
-  using value_type =
-    typename thrust::detail::eval_if<thrust::detail::is_void<typename thrust::remove_cvref<Element>::type>::value,
-                                     thrust::detail::identity_<void>,
-                                     thrust::detail::remove_cv<Element>>::type;
+  using value_type = typename thrust::detail::eval_if<::internal::is_void<typename thrust::remove_cvref<Element>::type>::value,
+                                                      thrust::detail::identity_<void>,
+                                                      ::internal::remove_cv<Element>>::type;
 
   // if no Derived type is given, just use pointer
   using derived_type =
-    typename thrust::detail::eval_if<thrust::detail::is_same<Derived, use_default>::value,
+    typename thrust::detail::eval_if<::internal::is_same<Derived, use_default>::value,
                                      thrust::detail::identity_<pointer<Element, Tag, Reference, Derived>>,
                                      thrust::detail::identity_<Derived>>::type;
 
   // void pointers should have no reference type
   // if no Reference type is given, just use reference
   using reference_type = typename thrust::detail::eval_if<
-    thrust::detail::is_void<typename thrust::remove_cvref<Element>::type>::value,
+    ::internal::is_void<typename thrust::remove_cvref<Element>::type>::value,
     thrust::detail::identity_<void>,
-    thrust::detail::eval_if<thrust::detail::is_same<Reference, use_default>::value,
+    thrust::detail::eval_if<::internal::is_same<Reference, use_default>::value,
                             thrust::detail::identity_<reference<Element, derived_type>>,
                             thrust::detail::identity_<Reference>>>::type;
 
   using type =
-    thrust::iterator_adaptor<derived_type, // pass along the type of our Derived class to iterator_adaptor
-                             Element*, // we adapt a raw pointer
-                             value_type, // the value type
-                             Tag, // system tag
-                             thrust::random_access_traversal_tag, // pointers have random access traversal
-                             reference_type, // pass along our Reference type
+    thrust::iterator_adaptor<derived_type,
+                             Element*,
+                             value_type,
+                             Tag,
+                             thrust::random_access_traversal_tag,
+                             reference_type,
                              std::ptrdiff_t>;
 }; // end pointer_base
 
@@ -201,7 +208,6 @@ public:
   {
     return thrust::detail::pointer_traits<derived_type>::pointer_to(r);
   }
-
 }; // end pointer
 
 // Output stream operator

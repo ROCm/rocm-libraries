@@ -18,6 +18,14 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/use_default.h>
 #include <thrust/iterator/iterator_facade.h>
@@ -44,7 +52,7 @@ namespace detail
 template <class T, class DefaultNullaryFn>
 struct ia_dflt_help
     : thrust::detail::
-        eval_if<thrust::detail::is_same<T, thrust::use_default>::value, DefaultNullaryFn, thrust::detail::identity_<T>>
+        eval_if<::internal::is_same<T, thrust::use_default>::value, DefaultNullaryFn, thrust::detail::identity_<T>>
 {}; // end ia_dflt_help
 
 // A metafunction which computes an iterator_adaptor's base class,
@@ -66,9 +74,9 @@ struct iterator_adaptor_base
 
   using reference =
     typename ia_dflt_help<Reference,
-                          thrust::detail::eval_if<thrust::detail::is_same<Value, use_default>::value,
+                          thrust::detail::eval_if<::internal::is_same<Value, use_default>::value,
                                                   thrust::iterator_reference<Base>,
-                                                  thrust::detail::add_reference<Value>>>::type;
+                                                  ::internal::add_lvalue_reference<Value>>>::type;
 
   using difference = typename ia_dflt_help<Difference, iterator_difference<Base>>::type;
 
