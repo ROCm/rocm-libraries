@@ -16,7 +16,7 @@ The rocSPARSE public repository is located at `<https://github.com/ROCm/rocm-lib
 
 .. note::
 
-   The rocSPARSE repository for ROCm 6.4 and earlier is located at `<https://github.com/ROCm/rocSPARSE>`_.
+   The rocSPARSE repository for ROCm 6.4.2 and earlier is located at `<https://github.com/ROCm/rocSPARSE>`_.
 
 For ROCm code examples, see `<https://github.com/ROCm/rocm-examples>`_.
 
