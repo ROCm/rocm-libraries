@@ -36,7 +36,7 @@ option(TENSILELITE_ENABLE_HOSTLIBTESTS "Build the tensilelite host library tests
 
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
-    option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
+    option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." OFF)
     # rocm-smi is not presently available on Windows so we do not require it.
     cmake_dependent_option(HIPBLASLT_ENABLE_ROCM_SMI "Require rocm_smi." ON "NOT WIN32" OFF)
 endif()
@@ -249,15 +249,13 @@ if(HIPBLASLT_ENABLE_HOST)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_MARKER) # public header?
     endif()
 
-    set(HIPBLASLT_CLIENTS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../clients")
-
     target_include_directories(hipblaslt
         PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/library/include>
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/include>
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/include>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         PRIVATE
-            "${CMAKE_CURRENT_BINARY_DIR}/library/include"
             "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include"
             "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include"
     )
@@ -377,18 +375,18 @@ if(HIPBLASLT_ENABLE_CLIENT)
     )
     rocm_install(
         FILES
-            "${HIPBLASLT_CLIENTS_DIR}/include/hipblaslt_common.yaml"
-            "${HIPBLASLT_CLIENTS_DIR}/include/hipblaslt_template.yaml"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/tests/data/hipblaslt_common.yaml"
+            "${CMAKE_CURRENT_SOURCE_DIR}/clients/tests/data/hipblaslt_template.yaml"
         DESTINATION "${CMAKE_INSTALL_BINDIR}"
         COMPONENT clients-common
     )
     rocm_install(
-        PROGRAMS "${HIPBLASLT_CLIENTS_DIR}/common/hipblaslt_gentest.py"
+        PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/tests/hipblaslt_gentest.py"
         DESTINATION "${CMAKE_INSTALL_BINDIR}"
         COMPONENT clients-common
     )
     rocm_install(
-        FILES "${HIPBLASLT_CLIENTS_DIR}/benchmarks/sequence.yaml"
+        FILES "${CMAKE_CURRENT_SOURCE_DIR}/clients/bench/sequence.yaml"
         DESTINATION "${CMAKE_INSTALL_BINDIR}"
         COMPONENT benchmarks
     )
