@@ -719,7 +719,7 @@ inline hipError_t merge_inplace(void*             temporary_storage,
     typename impl::scratch_t* scratch_storage = nullptr;
 
     size_t num_divisions = impl::get_num_global_divisions(left_size, right_size);
-
+    std::cout << "num_divisions = " << num_divisions << std::endl;
     ROCPRIM_RETURN_ON_ERROR(detail::temp_storage::partition(
         temporary_storage,
         storage_size,
