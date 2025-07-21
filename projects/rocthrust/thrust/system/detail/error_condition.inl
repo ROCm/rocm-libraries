@@ -29,7 +29,7 @@
 #include <thrust/functional.h>
 #include <thrust/system/detail/error_condition.inl>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
 
@@ -57,11 +57,7 @@ error_condition ::error_condition(ErrorConditionEnum e
 // XXX WAR msvc's problem with enable_if
 #if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
                                   ,
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                                  ::cuda::std::enable_if_t<is_error_condition_enum<ErrorConditionEnum>::value>*
-#  else
-                                  ::std::enable_if_t<is_error_condition_enum<ErrorConditionEnum>::value>*
-#  endif
+                                  _THRUST_STD::enable_if_t<is_error_condition_enum<ErrorConditionEnum>::value>*
 #endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
 )
 {
@@ -77,11 +73,7 @@ void error_condition ::assign(int val, const error_category& cat)
 template <typename ErrorConditionEnum>
 // XXX WAR msvc's problem with enable_if
 #if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-::cuda::std::enable_if_t<is_error_condition_enum<ErrorConditionEnum>::value, error_condition>&
-#  else
-::std::enable_if_t<is_error_condition_enum<ErrorConditionEnum>::value, error_condition>&
-#  endif
+_THRUST_STD::enable_if_t<is_error_condition_enum<ErrorConditionEnum>::value, error_condition>&
 #else
 error_condition&
 #endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC

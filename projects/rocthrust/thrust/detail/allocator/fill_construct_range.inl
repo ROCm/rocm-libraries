@@ -32,7 +32,7 @@
 #include <thrust/for_each.h>
 #include <thrust/uninitialized_fill.h>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
 
@@ -76,11 +76,7 @@ struct construct2_via_allocator
 };
 
 template <typename Allocator, typename Pointer, typename Size, typename T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST_DEVICE ::cuda::std::enable_if_t<
-#else
-THRUST_HOST_DEVICE ::std::enable_if_t<
-#endif
+THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<
   has_effectful_member_construct2<Allocator, typename pointer_element<Pointer>::type, T>::value>
 fill_construct_range(Allocator& a, Pointer p, Size n, const T& value)
 {
@@ -88,11 +84,7 @@ fill_construct_range(Allocator& a, Pointer p, Size n, const T& value)
 }
 
 template <typename Allocator, typename Pointer, typename Size, typename T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST_DEVICE ::cuda::std::enable_if_t<
-#else
-THRUST_HOST_DEVICE ::std::enable_if_t<
-#endif
+THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<
   !has_effectful_member_construct2<Allocator, typename pointer_element<Pointer>::type, T>::value>
 fill_construct_range(Allocator& a, Pointer p, Size n, const T& value)
 {

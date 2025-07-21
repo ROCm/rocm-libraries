@@ -353,4 +353,4 @@ THRUST_NAMESPACE_END
 
 #  include <thrust/detail/pair.inl>
 
-#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#endif // _THRUST_HAS_DEVICE_SYSTEM_STD

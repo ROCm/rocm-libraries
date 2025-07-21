@@ -36,16 +36,15 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/type_deduction.h>
+#include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #include <thrust/tuple.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/type_traits>
-#  include <cuda/std/utility>
-#else
+#  include _THRUST_STD_INCLUDE(type_traits)
+#  include _THRUST_STD_INCLUDE(utility)
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <tuple>
-#  include <type_traits>
-#  include <utility>
 #endif
 
 THRUST_NAMESPACE_BEGIN
@@ -77,23 +76,15 @@ struct actor : Eval
 };
 
 template <typename T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct is_actor : ::cuda::std::false_type
-#else
-struct is_actor : ::std::false_type
-#endif
+struct is_actor : ::thrust::detail::false_type
 {};
 
 template <typename T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct is_actor<actor<T>> : ::cuda::std::true_type
-#else
-struct is_actor<actor<T>> : ::std::true_type
-#endif
+struct is_actor<actor<T>> : ::thrust::detail::true_type
 {};
 
 // a node selecting and returning one of the arguments to the entire expression template
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <unsigned int Pos>
 struct argument
 {
@@ -139,11 +130,7 @@ struct composite<Eval, SubExpr>
 
   template <typename... Ts>
   THRUST_HOST_DEVICE auto eval(Ts&&... args) const
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    -> decltype(::cuda::std::declval<Eval>().eval(::cuda::std::declval<SubExpr>().eval(THRUST_FWD(args)...)))
-#else
-    -> decltype(::std::declval<Eval>().eval(::std::declval<SubExpr>().eval(THRUST_FWD(args)...)))
-#endif
+    -> decltype(_THRUST_STD::declval<Eval>().eval(_THRUST_STD::declval<SubExpr>().eval(THRUST_FWD(args)...)))
   {
     return m_eval.eval(m_subexpr.eval(THRUST_FWD(args)...));
   }
@@ -167,13 +154,8 @@ struct composite<Eval, SubExpr1, SubExpr2>
 
   template <typename... Ts>
   THRUST_HOST_DEVICE auto eval(Ts&&... args) const
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    -> decltype(::cuda::std::declval<Eval>().eval(::cuda::std::declval<SubExpr1>().eval(THRUST_FWD(args)...),
-                                                  ::cuda::std::declval<SubExpr2>().eval(THRUST_FWD(args)...)))
-#else
-    -> decltype(::std::declval<Eval>().eval(::std::declval<SubExpr1>().eval(THRUST_FWD(args)...),
-                                            ::std::declval<SubExpr2>().eval(THRUST_FWD(args)...)))
-#endif
+    -> decltype(_THRUST_STD::declval<Eval>().eval(_THRUST_STD::declval<SubExpr1>().eval(THRUST_FWD(args)...),
+                                                  _THRUST_STD::declval<SubExpr2>().eval(THRUST_FWD(args)...)))
   {
     return m_eval.eval(m_subexpr1.eval(THRUST_FWD(args)...), m_subexpr2.eval(THRUST_FWD(args)...));
   }
@@ -194,11 +176,7 @@ struct operator_adaptor : F
   constexpr operator_adaptor() = default;
 
   THRUST_HOST_DEVICE operator_adaptor(F f)
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      : F(::cuda::std::move(f))
-#else
-      : F(::std::move(f))
-#endif
+      : F(_THRUST_STD::move(f))
   {}
 
   template <typename... Ts>
@@ -222,17 +200,7 @@ struct value
 };
 
 template <typename T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST_DEVICE auto make_actor(T&& x) -> actor<value<::cuda::std::decay_t<T>>>
-#else
-// If we're not on Windows and we have libstdc++ >= 10, we can use the __decay_t
-// builtin to reduce compilation time.
-#  if defined(_WIN32) || (defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE < 10)
-THRUST_HOST_DEVICE auto make_actor(T&& x) -> actor<value<::std::decay_t<T>>>
-#  else
-THRUST_HOST_DEVICE auto make_actor(T&& x) -> actor<value<::std::__decay_t<T>>>
-#  endif
-#endif
+THRUST_HOST_DEVICE auto make_actor(T&& x) -> actor<value<::internal::decay_t<T>>>
 {
   return {{THRUST_FWD(x)}};
 }
@@ -245,51 +213,27 @@ THRUST_HOST_DEVICE auto make_actor(actor<Eval> x) -> actor<Eval>
 
 template <typename Eval, typename SubExpr>
 THRUST_HOST_DEVICE auto compose(Eval e, const SubExpr& subexpr)
-  -> decltype(actor<composite<operator_adaptor<Eval>, decltype(make_actor(subexpr))>> {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    {
-      {::cuda::std::move(e)}, make_actor(subexpr)
-    }
-  })
+  -> decltype(actor<composite<operator_adaptor<Eval>, decltype(make_actor(subexpr))>>{
+    {{_THRUST_STD::move(e)}, make_actor(subexpr)}})
 {
   return actor<composite<operator_adaptor<Eval>, decltype(make_actor(subexpr))>>{
-    {{::cuda::std::move(e)}, make_actor(subexpr)}};
-#else
-    {{::std::move(e)}, make_actor(subexpr)}})
-{
-  return actor<composite<operator_adaptor<Eval>, decltype(make_actor(subexpr))>>{
-    {{::std::move(e)}, make_actor(subexpr)}};
-#endif
+    {{_THRUST_STD::move(e)}, make_actor(subexpr)}};
 }
 
 template <typename Eval, typename SubExpr1, typename SubExpr2>
 THRUST_HOST_DEVICE auto compose(Eval e, const SubExpr1& subexpr1, const SubExpr2& subexpr2)
-  -> decltype(actor<composite<operator_adaptor<Eval>, decltype(make_actor(subexpr1)), decltype(make_actor(subexpr2))>> {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    {
-      {::cuda::std::move(e)}, make_actor(subexpr1), make_actor(subexpr2)
-    }
-  })
+  -> decltype(actor<composite<operator_adaptor<Eval>, decltype(make_actor(subexpr1)), decltype(make_actor(subexpr2))>>{
+    {{_THRUST_STD::move(e)}, make_actor(subexpr1), make_actor(subexpr2)}})
 {
   return actor<composite<operator_adaptor<Eval>, decltype(make_actor(subexpr1)), decltype(make_actor(subexpr2))>>{
-    {{::cuda::std::move(e)}, make_actor(subexpr1), make_actor(subexpr2)}};
-#else
-    {{::std::move(e)}, make_actor(subexpr1), make_actor(subexpr2)}})
-{
-  return actor<composite<operator_adaptor<Eval>, decltype(make_actor(subexpr1)), decltype(make_actor(subexpr2))>>{
-    {{::std::move(e)}, make_actor(subexpr1), make_actor(subexpr2)}};
-#endif
+    {{_THRUST_STD::move(e)}, make_actor(subexpr1), make_actor(subexpr2)}};
 }
 } // namespace functional
 
 template <typename Eval, typename... Args>
 struct result_of_adaptable_function<functional::actor<Eval>(Args...)>
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using type = decltype(::cuda::std::declval<functional::actor<Eval>>()(::cuda::std::declval<Args>()...));
-#else
-  using type = decltype(::std::declval<functional::actor<Eval>>()(::std::declval<Args>()...));
-#endif
+  using type = decltype(_THRUST_STD::declval<functional::actor<Eval>>()(_THRUST_STD::declval<Args>()...));
 };
 } // namespace detail
 THRUST_NAMESPACE_END

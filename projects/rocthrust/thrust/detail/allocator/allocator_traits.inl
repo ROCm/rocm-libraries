@@ -32,7 +32,7 @@
 #include <thrust/detail/type_traits/is_call_possible.h>
 
 #include <new>
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
 
@@ -71,11 +71,7 @@ public:
   using is_always_equal =
     typename eval_if<allocator_traits_detail::has_is_always_equal<allocator_type>::value,
                      allocator_traits_detail::nested_is_always_equal<allocator_type>,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                     ::cuda::std::is_empty<allocator_type>>::type;
-#else
-                     ::std::is_empty<allocator_type>>::type;
-#endif
+                     _THRUST_STD::is_empty<allocator_type>>::type;
 
   // std::allocator_traits doesn't provide these, but
   // thrust::detail::allocator_traits does. These used to be part of the
@@ -145,11 +141,7 @@ public:
 };
 
 template <typename Alloc>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST_DEVICE ::cuda::std::enable_if_t<has_member_allocate_with_hint<Alloc>::value,
-#else
-THRUST_HOST_DEVICE ::std::enable_if_t<has_member_allocate_with_hint<Alloc>::value,
-#endif
+THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<has_member_allocate_with_hint<Alloc>::value,
                                            typename allocator_traits<Alloc>::pointer>
 allocate(Alloc& a,
          typename allocator_traits<Alloc>::size_type n,
@@ -159,11 +151,7 @@ allocate(Alloc& a,
 }
 
 template <typename Alloc>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST_DEVICE ::cuda::std::enable_if_t<!has_member_allocate_with_hint<Alloc>::value,
-#else
-THRUST_HOST_DEVICE ::std::enable_if_t<!has_member_allocate_with_hint<Alloc>::value,
-#endif
+THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<!has_member_allocate_with_hint<Alloc>::value,
                                            typename allocator_traits<Alloc>::pointer>
 allocate(Alloc& a, typename allocator_traits<Alloc>::size_type n, typename allocator_traits<Alloc>::const_void_pointer)
 {
@@ -178,22 +166,14 @@ struct has_member_construct1 : has_member_construct1_impl<Alloc, void(T*)>
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename Alloc, typename T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-inline THRUST_HOST_DEVICE ::cuda::std::enable_if_t<has_member_construct1<Alloc, T>::value> construct(Alloc& a, T* p)
-#else
-inline THRUST_HOST_DEVICE ::std::enable_if_t<has_member_construct1<Alloc, T>::value> construct(Alloc& a, T* p)
-#endif
+inline THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<has_member_construct1<Alloc, T>::value> construct(Alloc& a, T* p)
 {
   a.construct(p);
 }
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename Alloc, typename T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-inline THRUST_HOST_DEVICE ::cuda::std::enable_if_t<!has_member_construct1<Alloc, T>::value> construct(Alloc&, T* p)
-#else
-inline THRUST_HOST_DEVICE ::std::enable_if_t<!has_member_construct1<Alloc, T>::value> construct(Alloc&, T* p)
-#endif
+inline THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<!has_member_construct1<Alloc, T>::value> construct(Alloc&, T* p)
 {
   ::new (static_cast<void*>(p)) T();
 }
@@ -206,11 +186,7 @@ struct has_member_construct2 : has_member_construct2_impl<Alloc, void(T*, const 
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename Alloc, typename T, typename Arg1>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-inline THRUST_HOST_DEVICE ::cuda::std::enable_if_t<has_member_construct2<Alloc, T, Arg1>::value>
-#else
-inline THRUST_HOST_DEVICE ::std::enable_if_t<has_member_construct2<Alloc, T, Arg1>::value>
-#endif
+inline THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<has_member_construct2<Alloc, T, Arg1>::value>
 construct(Alloc& a, T* p, const Arg1& arg1)
 {
   a.construct(p, arg1);
@@ -218,11 +194,7 @@ construct(Alloc& a, T* p, const Arg1& arg1)
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename Alloc, typename T, typename Arg1>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-inline THRUST_HOST_DEVICE ::cuda::std::enable_if_t<!has_member_construct2<Alloc, T, Arg1>::value>
-#else
-inline THRUST_HOST_DEVICE ::std::enable_if_t<!has_member_construct2<Alloc, T, Arg1>::value>
-#endif
+inline THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<!has_member_construct2<Alloc, T, Arg1>::value>
 construct(Alloc&, T* p, const Arg1& arg1)
 {
   ::new (static_cast<void*>(p)) T(arg1);
@@ -236,11 +208,7 @@ struct has_member_constructN : has_member_constructN_impl<Alloc, void(T*, Args..
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename Alloc, typename T, typename... Args>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-inline THRUST_HOST_DEVICE ::cuda::std::enable_if_t<has_member_constructN<Alloc, T, Args...>::value>
-#else
-inline THRUST_HOST_DEVICE ::std::enable_if_t<has_member_constructN<Alloc, T, Args...>::value>
-#endif
+inline THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<has_member_constructN<Alloc, T, Args...>::value>
 construct(Alloc& a, T* p, Args&&... args)
 {
   a.construct(p, THRUST_FWD(args)...);
@@ -248,11 +216,7 @@ construct(Alloc& a, T* p, Args&&... args)
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename Alloc, typename T, typename... Args>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-inline THRUST_HOST_DEVICE ::cuda::std::enable_if_t<!has_member_constructN<Alloc, T, Args...>::value>
-#else
-inline THRUST_HOST_DEVICE ::std::enable_if_t<!has_member_constructN<Alloc, T, Args...>::value>
-#endif
+inline THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<!has_member_constructN<Alloc, T, Args...>::value>
 construct(Alloc&, T* p, Args&&... args)
 {
   ::new (static_cast<void*>(p)) T(THRUST_FWD(args)...);
@@ -266,22 +230,14 @@ struct has_member_destroy : has_member_destroy_impl<Alloc, void(T*)>
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename Alloc, typename T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-inline THRUST_HOST_DEVICE ::cuda::std::enable_if_t<has_member_destroy<Alloc, T>::value> destroy(Alloc& a, T* p)
-#else
-inline THRUST_HOST_DEVICE ::std::enable_if_t<has_member_destroy<Alloc, T>::value> destroy(Alloc& a, T* p)
-#endif
+inline THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<has_member_destroy<Alloc, T>::value> destroy(Alloc& a, T* p)
 {
   a.destroy(p);
 }
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename Alloc, typename T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-inline THRUST_HOST_DEVICE ::cuda::std::enable_if_t<!has_member_destroy<Alloc, T>::value> destroy(Alloc&, T* p)
-#else
-inline THRUST_HOST_DEVICE ::std::enable_if_t<!has_member_destroy<Alloc, T>::value> destroy(Alloc&, T* p)
-#endif
+inline THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<!has_member_destroy<Alloc, T>::value> destroy(Alloc&, T* p)
 {
   p->~T();
 }
@@ -299,22 +255,14 @@ public:
 };
 
 template <typename Alloc>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST_DEVICE ::cuda::std::enable_if_t<has_member_max_size<Alloc>::value, typename allocator_traits<Alloc>::size_type>
-#else
-THRUST_HOST_DEVICE ::std::enable_if_t<has_member_max_size<Alloc>::value, typename allocator_traits<Alloc>::size_type>
-#endif
+THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<has_member_max_size<Alloc>::value, typename allocator_traits<Alloc>::size_type>
 max_size(const Alloc& a)
 {
   return a.max_size();
 }
 
 template <typename Alloc>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST_DEVICE ::cuda::std::enable_if_t<!has_member_max_size<Alloc>::value,
-#else
-THRUST_HOST_DEVICE ::std::enable_if_t<!has_member_max_size<Alloc>::value,
-#endif
+THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<!has_member_max_size<Alloc>::value,
                                            typename allocator_traits<Alloc>::size_type>
 max_size(const Alloc&)
 {
@@ -323,11 +271,7 @@ max_size(const Alloc&)
 }
 
 template <typename Alloc>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST_DEVICE ::cuda::std::enable_if_t<has_member_system<Alloc>::value, typename allocator_system<Alloc>::type&>
-#else
-THRUST_HOST_DEVICE ::std::enable_if_t<has_member_system<Alloc>::value, typename allocator_system<Alloc>::type&>
-#endif
+THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<has_member_system<Alloc>::value, typename allocator_system<Alloc>::type&>
 system(Alloc& a)
 {
   // return the allocator's system
@@ -335,11 +279,7 @@ system(Alloc& a)
 }
 
 template <typename Alloc>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST_DEVICE ::cuda::std::enable_if_t<!has_member_system<Alloc>::value, typename allocator_system<Alloc>::type>
-#else
-THRUST_HOST_DEVICE ::std::enable_if_t<!has_member_system<Alloc>::value, typename allocator_system<Alloc>::type>
-#endif
+THRUST_HOST_DEVICE _THRUST_STD::enable_if_t<!has_member_system<Alloc>::value, typename allocator_system<Alloc>::type>
 system(Alloc&)
 {
   // return a copy of a value-initialized system

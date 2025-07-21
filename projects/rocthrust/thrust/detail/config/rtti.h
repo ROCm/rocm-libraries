@@ -14,9 +14,9 @@
 
 #include <thrust/detail/config/device_system.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
 
-#  include <cuda/std/__cccl/rtti.h>
+#  include _THRUST_STD_INCLUDE(__cccl/rtti.h)
 
 #  ifdef _CCCL_NO_RTTI
 #    define THRUST_NO_RTTI
@@ -59,6 +59,6 @@
 #    endif
 #  endif // !THRUST_NO_RTTI
 
-#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#endif // _THRUST_HAS_DEVICE_SYSTEM_STD
 
 #endif // CONFIG_RTTI_H

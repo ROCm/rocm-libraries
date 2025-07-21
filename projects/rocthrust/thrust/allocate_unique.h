@@ -20,11 +20,7 @@
 #include <thrust/detail/raw_pointer_cast.h>
 #include <thrust/detail/type_deduction.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/utility>
-#else
-#  include <utility>
-#endif
+#include _THRUST_STD_INCLUDE(utility)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -118,11 +114,7 @@ struct allocator_delete final
 
   void swap(allocator_delete& other) noexcept
   {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    using ::cuda::std::swap;
-#else
-    using ::std::swap;
-#endif
+    using _THRUST_STD::swap;
     swap(alloc_, other.alloc_);
   }
 
@@ -224,11 +216,7 @@ struct array_allocator_delete final
 
   void swap(array_allocator_delete& other) noexcept
   {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    using ::cuda::std::swap;
-#else
-    using ::std::swap;
-#endif
+    using _THRUST_STD::swap;
     swap(alloc_, other.alloc_);
     swap(count_, other.count_);
   }

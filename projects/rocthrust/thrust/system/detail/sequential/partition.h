@@ -34,7 +34,7 @@
 #include <thrust/pair.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <utility>
 #endif
 
@@ -63,15 +63,9 @@ THRUST_HOST_DEVICE void iter_swap(ForwardIterator1 iter1, ForwardIterator2 iter2
   // note: we cannot use swap(*iter1, *iter2) here, because the reference_type's could be proxy references, for which
   // swap() is not guaranteed to work
   using T = typename thrust::iterator_value<ForwardIterator1>::type;
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  T temp = ::cuda::std::move(*iter1);
-  *iter1 = ::cuda::std::move(*iter2);
-  *iter2 = ::cuda::std::move(temp);
-#else
-  T temp = ::std::move(*iter1);
-  *iter1 = ::std::move(*iter2);
-  *iter2 = ::std::move(temp);
-#endif
+  T temp  = _THRUST_STD::move(*iter1);
+  *iter1  = _THRUST_STD::move(*iter2);
+  *iter2  = _THRUST_STD::move(temp);
 }
 
 THRUST_EXEC_CHECK_DISABLE

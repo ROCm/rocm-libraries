@@ -47,7 +47,7 @@
 #include <thrust/iterator/iterator_facade.h>
 #include <thrust/iterator/iterator_traits.h>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
 
@@ -266,11 +266,7 @@ public:
    */
   THRUST_HOST_DEVICE transform_iterator& operator=(const transform_iterator& other)
   {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    return do_assign(other, ::cuda::std::is_copy_assignable<AdaptableUnaryFunction>());
-#else
-    return do_assign(other, ::std::is_copy_assignable<AdaptableUnaryFunction>());
-#endif
+    return do_assign(other, _THRUST_STD::is_copy_assignable<AdaptableUnaryFunction>());
   }
 
   /*! This method returns a copy of this \p transform_iterator's \c AdaptableUnaryFunction.

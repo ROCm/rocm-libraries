@@ -34,7 +34,7 @@
 #include <thrust/system/detail/errno.h>
 
 #include <iostream>
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
 
@@ -261,11 +261,7 @@ public:
 // XXX WAR msvc's problem with enable_if
 #if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
              ,
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-             ::cuda::std::enable_if_t<is_error_code_enum<ErrorCodeEnum>::value>* = 0
-#  else
-             ::std::enable_if_t<is_error_code_enum<ErrorCodeEnum>::value>* = 0
-#  endif
+             _THRUST_STD::enable_if_t<is_error_code_enum<ErrorCodeEnum>::value>* = 0
 #endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
   );
 
@@ -280,11 +276,7 @@ public:
   template <typename ErrorCodeEnum>
 // XXX WAR msvc's problem with enable_if
 #if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  ::cuda::std::enable_if_t<is_error_code_enum<ErrorCodeEnum>::value, error_code>&
-#  else
-  ::std::enable_if_t<is_error_code_enum<ErrorCodeEnum>::value, error_code>&
-#  endif
+  _THRUST_STD::enable_if_t<is_error_code_enum<ErrorCodeEnum>::value, error_code>&
 #else
   error_code&
 #endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
@@ -380,11 +372,7 @@ public:
 // XXX WAR msvc's problem with enable_if
 #if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
                   ,
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                  ::cuda::std::enable_if_t<is_error_condition_enum<ErrorConditionEnum>::value>* = 0
-#  else
-                  ::std::enable_if_t<is_error_condition_enum<ErrorConditionEnum>::value>* = 0
-#  endif
+                  _THRUST_STD::enable_if_t<is_error_condition_enum<ErrorConditionEnum>::value>* = 0
 #endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
   );
 
@@ -407,11 +395,7 @@ public:
   template <typename ErrorConditionEnum>
 // XXX WAR msvc's problem with enable_if
 #if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  ::cuda::std::enable_if_t<is_error_condition_enum<ErrorConditionEnum>::value, error_condition>&
-#  else
-  ::std::enable_if_t<is_error_condition_enum<ErrorConditionEnum>::value, error_condition>&
-#  endif
+  _THRUST_STD::enable_if_t<is_error_condition_enum<ErrorConditionEnum>::value, error_condition>&
 #else
   error_condition&
 #endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC

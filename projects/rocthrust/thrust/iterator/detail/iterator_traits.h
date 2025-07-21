@@ -22,8 +22,8 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/__iterator/iterator_traits.h>
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(__iterator/iterator_traits.h)
 #else
 #  include <type_traits>
 #endif
@@ -42,12 +42,12 @@ THRUST_NAMESPACE_BEGIN
 namespace detail
 {
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
 
 template <typename T>
-using is_cpp17_input_iterator = ::cuda::std::__is_cpp17_input_iterator<T>;
+using is_cpp17_input_iterator = _THRUST_STD::__is_cpp17_input_iterator<T>;
 template <typename T>
-using is_cpp17_random_access_iterator = ::cuda::std::__is_cpp17_random_access_iterator<T>;
+using is_cpp17_random_access_iterator = _THRUST_STD::__is_cpp17_random_access_iterator<T>;
 
 #else
 

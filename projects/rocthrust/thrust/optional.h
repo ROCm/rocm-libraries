@@ -46,8 +46,8 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/swap.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/__type_traits/void_t.h>
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
 #endif
 
 #define THRUST_OPTIONAL_VERSION_MAJOR 0
@@ -58,7 +58,7 @@
 #include <new>
 #include <type_traits>
 #include <utility>
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <type_traits>
 #endif
 
@@ -217,12 +217,7 @@ using get_map_return = optional<fixup_void<invoke_result_t<F, U>>>;
 template <class F, class = void, class... U>
 struct returns_void_impl;
 template <class F, class... U>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct returns_void_impl<F, ::cuda::std::void_t<invoke_result_t<F, U...>>, U...>
-#else
-struct returns_void_impl<F, ::std::void_t<invoke_result_t<F, U...>>, U...>
-#endif
-    : std::is_void<invoke_result_t<F, U...>>
+struct returns_void_impl<F, _THRUST_STD::void_t<invoke_result_t<F, U...>>, U...> : std::is_void<invoke_result_t<F, U...>>
 {};
 template <class F, class... U>
 using returns_void = returns_void_impl<F, void, U...>;
@@ -486,11 +481,7 @@ struct optional_operations_base : optional_storage_base<T>
 
 // This class manages conditionally having a trivial copy constructor
 // This specialization is for when T is trivially copy constructible
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-template <class T, bool = ::cuda::std::is_trivially_copy_constructible<T>::value>
-#else
-template <class T, bool = ::std::is_trivially_copy_constructible<T>::value>
-#endif
+template <class T, bool = _THRUST_STD::is_trivially_copy_constructible<T>::value>
 struct optional_copy_base : optional_operations_base<T>
 {
   using optional_operations_base<T>::optional_operations_base;
@@ -525,11 +516,7 @@ struct optional_copy_base<T, false> : optional_operations_base<T>
   optional_copy_base& operator=(optional_copy_base&& rhs) = default;
 };
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-template <class T, bool = ::cuda::std::is_trivially_move_constructible<T>::value>
-#else
-template <class T, bool = ::std::is_trivially_move_constructible<T>::value>
-#endif
+template <class T, bool = _THRUST_STD::is_trivially_move_constructible<T>::value>
 struct optional_move_base : optional_copy_base<T>
 {
   using optional_copy_base<T>::optional_copy_base;
@@ -564,14 +551,9 @@ struct optional_move_base<T, false> : optional_copy_base<T>
 
 // This class manages conditionally having a trivial copy assignment operator
 template <class T,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-          bool = ::cuda::std::is_trivially_copy_assignable<T>::value
-              && ::cuda::std::is_trivially_copy_constructible<T>::value
-              && ::cuda::std::is_trivially_destructible<T>::value>
-#else
-          bool = ::std::is_trivially_copy_assignable<T>::value && ::std::is_trivially_copy_constructible<T>::value
-              && ::std::is_trivially_destructible<T>::value>
-#endif
+          bool = _THRUST_STD::is_trivially_copy_assignable<T>::value
+              && _THRUST_STD::is_trivially_copy_constructible<T>::value
+              && _THRUST_STD::is_trivially_destructible<T>::value>
 struct optional_copy_assign_base : optional_move_base<T>
 {
   using optional_move_base<T>::optional_move_base;
@@ -600,14 +582,8 @@ struct optional_copy_assign_base<T, false> : optional_move_base<T>
 };
 
 template <class T,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-          bool = ::cuda::std::is_trivially_destructible<T>::value
-              && ::cuda::std::is_trivially_move_constructible<T>::value
-              && ::cuda::std::is_trivially_move_assignable<T>::value>
-#else
-          bool = ::std::is_trivially_destructible<T>::value && ::std::is_trivially_move_constructible<T>::value
-              && ::std::is_trivially_move_assignable<T>::value>
-#endif
+          bool = _THRUST_STD::is_trivially_destructible<T>::value && _THRUST_STD::is_trivially_move_constructible<T>::value
+              && _THRUST_STD::is_trivially_move_assignable<T>::value>
 struct optional_move_assign_base : optional_copy_assign_base<T>
 {
   using optional_copy_assign_base<T>::optional_copy_assign_base;
@@ -1599,8 +1575,8 @@ public:
     {
       if (rhs.has_value())
       {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        using ::cuda::std::swap;
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+        using _THRUST_STD::swap;
 #else
         using thrust::swap;
 #endif
@@ -2871,11 +2847,7 @@ struct hash<THRUST_NS_QUALIFIER::optional<T>>
       return 0;
     }
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    return std::hash<::cuda::std::remove_const_t<T>>()(*o);
-#else
-    return std::hash<::std::remove_const_t<T>>()(*o);
-#endif
+    return std::hash<_THRUST_STD::remove_const_t<T>>()(*o);
   }
 };
 } // namespace std

@@ -27,8 +27,8 @@
 #endif // no system header
 #include <thrust/detail/type_traits.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/__type_traits/void_t.h>
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
 #endif
 
 #include <type_traits>
@@ -59,11 +59,7 @@ public:
 // specialization for invocations which define result_type
 THRUST_SUPPRESS_DEPRECATED_PUSH
 template <typename Functor, typename... ArgTypes>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct result_of_adaptable_function<Functor(ArgTypes...), ::cuda::std::void_t<typename Functor::result_type>>
-#else
-struct result_of_adaptable_function<Functor(ArgTypes...), ::std::void_t<typename Functor::result_type>>
-#endif
+struct result_of_adaptable_function<Functor(ArgTypes...), _THRUST_STD::void_t<typename Functor::result_type>>
 {
   using type = typename Functor::result_type;
 };

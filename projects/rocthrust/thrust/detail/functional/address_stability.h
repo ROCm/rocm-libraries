@@ -21,8 +21,8 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/__functional/address_stability.h>
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_STD_INCLUDE(__functional/address_stability.h)
 #else
 #  include <functional>
 #  include <type_traits>
@@ -34,10 +34,15 @@ THRUST_NAMESPACE_BEGIN
 namespace detail
 {
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
 
+#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 using ::cuda::proclaim_copyable_arguments;
 using ::cuda::proclaims_copyable_arguments;
+#  else
+using ::hip::proclaim_copyable_arguments;
+using ::hip::proclaims_copyable_arguments;
+#endif
 #  define THRUST_MARK_CAN_COPY_ARGUMENTS(functor)                                              \
     /*we know what plus<T> etc. does if T is not a type that could have a weird operatorX() */ \
     template <typename T>                                                                      \

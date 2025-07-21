@@ -32,19 +32,16 @@
 
 #include <thrust/detail/functional/actor.h>
 #include <thrust/detail/functional/address_stability.h>
+#include <thrust/detail/type_traits.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/functional>
-#  include <cuda/std/functional>
-#elif defined(__has_include)
-#  if __has_include(<cuda/functional>)
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #    include <cuda/functional>
-#  endif
-#  if __has_include(<cuda/std/functional>)
-#    include <cuda/std/functional>
-#  endif
+#  else
+#    include <hip/functional>
+#endif
+#  include _THRUST_STD_INCLUDE(functional)
 #else
-#  include <type_traits>
 #  include <utility>
 #endif
 
@@ -55,10 +52,15 @@
 namespace internal
 {
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 using ::cuda::maximum;
 using ::cuda::minimum;
-using identity = ::cuda::std::__identity;
+#  else
+using ::hip::maximum;
+using ::hip::minimum;
+#  endif
+using identity = _THRUST_STD::__identity;
 #else
 // cuda::maximum
 template <typename T = void>
@@ -292,11 +294,7 @@ struct THRUST_DEPRECATED binary_function
  *  \see binary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct plus : public ::cuda::std::plus<T>
-#else
-struct plus : public ::std::plus<T>
-#endif
+struct plus : public _THRUST_STD::plus<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -352,11 +350,7 @@ struct plus : public ::std::plus<T>
  *  \see binary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct minus : public ::cuda::std::minus<T>
-#else
-struct minus : public ::std::minus<T>
-#endif
+struct minus : public _THRUST_STD::minus<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -412,11 +406,7 @@ struct minus : public ::std::minus<T>
  *  \see binary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct multiplies : public ::cuda::std::multiplies<T>
-#else
-struct multiplies : public ::std::multiplies<T>
-#endif
+struct multiplies : public _THRUST_STD::multiplies<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -472,11 +462,7 @@ struct multiplies : public ::std::multiplies<T>
  *  \see binary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct divides : public ::cuda::std::divides<T>
-#else
-struct divides : public ::std::divides<T>
-#endif
+struct divides : public _THRUST_STD::divides<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -532,11 +518,7 @@ struct divides : public ::std::divides<T>
  *  \see binary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct modulus : public ::cuda::std::modulus<T>
-#else
-struct modulus : public ::std::modulus<T>
-#endif
+struct modulus : public _THRUST_STD::modulus<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -589,11 +571,7 @@ struct modulus : public ::std::modulus<T>
  *  \see unary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct negate : ::cuda::std::negate<T>
-#else
-struct negate : ::std::negate<T>
-#endif
+struct negate : _THRUST_STD::negate<T>
 {
   /*! \typedef argument_type
    *  \brief The type of the function object's argument.
@@ -696,11 +674,7 @@ struct square<void>
  *  \see binary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct equal_to : public ::cuda::std::equal_to<T>
-#else
-struct equal_to : public ::std::equal_to<T>
-#endif
+struct equal_to : public _THRUST_STD::equal_to<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -734,11 +708,7 @@ struct equal_to : public ::std::equal_to<T>
  *  \see binary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct not_equal_to : public ::cuda::std::not_equal_to<T>
-#else
-struct not_equal_to : public ::std::not_equal_to<T>
-#endif
+struct not_equal_to : public _THRUST_STD::not_equal_to<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -772,11 +742,7 @@ struct not_equal_to : public ::std::not_equal_to<T>
  *  \see binary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct greater : public ::cuda::std::greater<T>
-#else
-struct greater : public ::std::greater<T>
-#endif
+struct greater : public _THRUST_STD::greater<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -810,11 +776,7 @@ struct greater : public ::std::greater<T>
  *  \see binary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct less : public ::cuda::std::less<T>
-#else
-struct less : public ::std::less<T>
-#endif
+struct less : public _THRUST_STD::less<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -848,11 +810,7 @@ struct less : public ::std::less<T>
  *  \see binary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct greater_equal : public ::cuda::std::greater_equal<T>
-#else
-struct greater_equal : public ::std::greater_equal<T>
-#endif
+struct greater_equal : public _THRUST_STD::greater_equal<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -886,11 +844,7 @@ struct greater_equal : public ::std::greater_equal<T>
  *  \see binary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct less_equal : public ::cuda::std::less_equal<T>
-#else
-struct less_equal : public ::std::less_equal<T>
-#endif
+struct less_equal : public _THRUST_STD::less_equal<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -931,11 +885,7 @@ struct less_equal : public ::std::less_equal<T>
  *  \see binary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct logical_and : public ::cuda::std::logical_and<T>
-#else
-struct logical_and : public ::std::logical_and<T>
-#endif
+struct logical_and : public _THRUST_STD::logical_and<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -968,11 +918,7 @@ struct logical_and : public ::std::logical_and<T>
  *  \see binary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct logical_or : public ::cuda::std::logical_or<T>
-#else
-struct logical_or : public ::std::logical_or<T>
-#endif
+struct logical_or : public _THRUST_STD::logical_or<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -1019,11 +965,7 @@ struct logical_or : public ::std::logical_or<T>
  *  \see unary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct logical_not : public ::cuda::std::logical_not<T>
-#else
-struct logical_not : public ::std::logical_not<T>
-#endif
+struct logical_not : public _THRUST_STD::logical_not<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -1086,11 +1028,7 @@ struct logical_not : public ::std::logical_not<T>
  *  \see binary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct bit_and : public ::cuda::std::bit_and<T>
-#else
-struct bit_and : public ::std::bit_and<T>
-#endif
+struct bit_and : public _THRUST_STD::bit_and<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -1145,11 +1083,7 @@ struct bit_and : public ::std::bit_and<T>
  *  \see binary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct bit_or : public ::cuda::std::bit_or<T>
-#else
-struct bit_or : public ::std::bit_or<T>
-#endif
+struct bit_or : public _THRUST_STD::bit_or<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -1204,11 +1138,7 @@ struct bit_or : public ::std::bit_or<T>
  *  \see binary_function
  */
 template <typename T = void>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct bit_xor : public ::cuda::std::bit_xor<T>
-#else
-struct bit_xor : public ::std::bit_xor<T>
-#endif
+struct bit_xor : public _THRUST_STD::bit_xor<T>
 {
   /*! \typedef first_argument_type
    *  \brief The type of the function object's first argument.
@@ -1257,7 +1187,7 @@ struct bit_xor : public ::std::bit_xor<T>
  *  \see https://en.cppreference.com/w/cpp/utility/functional/identity
  *  \see unary_function
  */
-// TODO(bgruber): this version can also act as a functor casting to T making it not equivalent to ::cuda::std::identity
+// TODO(bgruber): this version can also act as a functor casting to T making it not equivalent to _THRUST_STD::identity
 template <typename T = void>
 struct identity
 {
@@ -1295,11 +1225,7 @@ struct identity
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE constexpr T&& operator()(T&& x) const
   {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    return _CUDA_VSTD::move(x);
-#else
-    return ::std::move(x);
-#endif
+    return _THRUST_STD::move(x);
   }
 };
 
@@ -1710,19 +1636,12 @@ struct not_fun_t
 
 //! Takes a predicate (a callable returning bool) and returns a new predicate that returns the negated result.
 //! \see https://en.cppreference.com/w/cpp/utility/functional/not_fn
-// TODO(bgruber): alias to ::cuda::std::not_fn in C++17
+// TODO(bgruber): alias to _THRUST_STD::not_fn in C++17
 template <class F>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST_DEVICE auto not_fn(F&& f) -> detail::not_fun_t<::cuda::std::decay_t<F>>
+THRUST_HOST_DEVICE auto not_fn(F&& f) -> detail::not_fun_t<::internal::decay_t<F>>
 {
-  return detail::not_fun_t<::cuda::std::decay_t<F>>{std::forward<F>(f)};
+  return detail::not_fun_t<::internal::decay_t<F>>{std::forward<F>(f)};
 }
-#else
-THRUST_HOST_DEVICE auto not_fn(F&& f) -> detail::not_fun_t<::std::decay_t<F>>
-{
-  return detail::not_fun_t<::std::decay_t<F>>{std::forward<F>(f)};
-}
-#endif
 
 /*! \}
  */
@@ -1827,7 +1746,7 @@ THRUST_INLINE_CONSTANT thrust::detail::functional::placeholder<9>::type _10;
 THRUST_NAMESPACE_END
 
 #ifndef THRUST_DOXYGEN_INVOKED // Do not document
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  if _THRUST_HAS_DEVICE_SYSTEM_STD
 _LIBCUDACXX_BEGIN_NAMESPACE_CUDA
 #  else
 THRUST_NAMESPACE_BEGIN
@@ -1853,7 +1772,7 @@ THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::greater);
 THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::logical_and);
 THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::logical_not);
 THRUST_MARK_CAN_COPY_ARGUMENTS(THRUST_NS_QUALIFIER::logical_or);
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  if _THRUST_HAS_DEVICE_SYSTEM_STD
 _LIBCUDACXX_END_NAMESPACE_CUDA
 #  else
 }
