@@ -48,6 +48,20 @@
           "TENSILELITE_ENABLE_CLIENT": "OFF"
 
         }
+      },
+      {
+        "name": "hipblaslt-clients",
+        "displayName": "hipBLASLt Clients",
+        "description": "Configures targets required to build clients",
+        "inherits": "opt-rocm",
+        "cacheVariables": {
+          "HIPBLASLT_ENABLE_HOST": "ON",
+          "HIPBLASLT_ENABLE_DEVICE": "ON",
+          "HIPBLASLT_ENABLE_CLIENT": "ON",
+          "TENSILELITE_ENABLE_HOST": "ON",
+          "TENSILELITE_ENABLE_CLIENT": "OFF",
+          "HIPBLASLT_ENABLE_SAMPLES": "OFF"
+        }
       }
   ]
 }
