@@ -87,6 +87,30 @@ namespace rocRoller
             AssertFatal(index != -1, "index value for Index edge is not set");
             addIndex(src, dst, index);
         }
+
+        auto isSegmentPredicate = [&kgraph](int idx) {
+            auto edge = kgraph.coordinates.getEdge(idx);
+            if(!std::holds_alternative<CT::DataFlowEdge>(edge))
+                return false;
+
+            return std::holds_alternative<CT::Segment>(std::get<CT::DataFlowEdge>(edge));
+        };
+
+        for(auto edge : kgraph.coordinates.getEdges().filter(isSegmentPredicate))
+        {
+            auto loc = kgraph.coordinates.getLocation(edge);
+            AssertFatal(loc.incoming.size() == 1, ShowValue(loc.incoming.size()));
+            AssertFatal(loc.outgoing.size() == 1, ShowValue(loc.outgoing.size()));
+
+            auto src = loc.incoming[0];
+            auto dst = loc.outgoing[0];
+
+            auto segmentEdge = std::get<CT::Segment>(
+                std::get<CT::DataFlowEdge>(kgraph.coordinates.getEdge(edge)));
+            auto index = segmentEdge.index;
+            AssertFatal(index != -1, "index value for Segment edge is not set");
+            addSegment(src, dst, index);
+        }
     }
 
     void RegisterTagManager::addAlias(int src, int dst)
@@ -112,5 +136,14 @@ namespace rocRoller
 
         AssertFatal(!m_indexes.contains(src));
         m_indexes[src] = {dst, index};
+    }
+
+    void RegisterTagManager::addSegment(int src, int dst, int index)
+    {
+        AssertFatal(src > 0, ShowValue(src));
+        AssertFatal(dst > 0, ShowValue(dst));
+
+        AssertFatal(!m_segments.contains(src));
+        m_segments[src] = {dst, index};
     }
 }

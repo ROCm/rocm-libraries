@@ -814,6 +814,11 @@ namespace rocRoller
                 Throw<FatalError>("Register present in runtime expression", ShowValue(expr));
             }
 
+            CommandArgumentValue operator()(ToScalar const& expr)
+            {
+                return call(expr.arg);
+            }
+
             CommandArgumentValue operator()(CommandArgumentPtr const& expr)
             {
                 return expr->getValue(args);

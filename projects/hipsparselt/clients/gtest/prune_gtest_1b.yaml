@@ -33,6 +33,7 @@ Tests:
   alpha_beta: *alpha_beta_range
   prune_algo: [ 0, 1 ]
   sparse_b: [ true, false]
+  inEqualOut: [ true, false]
 
 - name: prune_medium_HMM
   category: HMM

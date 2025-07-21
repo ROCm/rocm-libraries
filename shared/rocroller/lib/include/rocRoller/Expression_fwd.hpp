@@ -80,6 +80,8 @@ namespace rocRoller
 
         struct RandomNumber;
 
+        struct ToScalar;
+
         struct BitFieldExtract;
 
         struct AddShiftL;
@@ -129,6 +131,7 @@ namespace rocRoller
             Exponential2,
             Exponential,
             RandomNumber,
+            ToScalar,
             BitFieldExtract,
 
             // --- Ternary Operations ---
