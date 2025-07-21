@@ -106,16 +106,18 @@ libhipcxx aims to be a conforming implementation of the
 - CMake >=3.12
 - ROCm with HIP >=6.2.0 
 - AMD MI100, MI200, MI300, RDNA3 GPU/gfx1100 (NVIDIA GPUs are currently not supported)
-- Linux OS (Windows is currently not supported)
+- Linux OS (Windows is not supported, currently tested with Ubuntu only)
 
 For running the integrated LIT unit tests:
 - Python 3
-- lit 16.0.0 (more recent versions are currently not supported!)
+- pip (for installing lit)
+- lit 18.1.8+
 - sccache
 - ninja
 
 # Build and Installation
 
+It is assumed that the test dependencies have been installed (e.g., `pip3 install lit==18.1.8` for the lit dependency).
 The following commands can be run from the root directory to configure libhipcxx, build it and run the unit tests:
 
 1) Create build directory
@@ -124,7 +126,7 @@ The following commands can be run from the root directory to configure libhipcxx
 `cmake -DCMAKE_INSTALL_PREFIX=<path to install directory> ..`
 3) Compile all headers that are part of the library
 `make`
-4) `make install`
+4) Install the headers locally: `make install`
 
 ## Build with HIPRTC
 If you would like to build libhipcxx with HIPRTC support, you can modify step 2 as follows:
@@ -132,10 +134,18 @@ If you would like to build libhipcxx with HIPRTC support, you can modify step 2 
      `cmake -DLIBHIPCXX_TEST_WITH_HIPRTC=ON -DCMAKE_INSTALL_PREFIX=<path-to-install-directory> ..`
 
 # Optional: Creating Distribution Packages
+
+Libhipcxx can be packaged using cpack:
+
 1) Switch to the build directory
 `cd build`
 2) Run CPack to generate packaged archives of libhipcxx:
 `cpack .`
+
+Note: Per default, this will only generate TGZ, ZIP and DEB packages. You can generate other package formats, e.g., with:
+```
+cpack -G RPM .
+```
 
 # Running the Tests
 To run the tests on host and device based on LIT, you can use
