@@ -244,6 +244,15 @@ const char* rocsparse_spsv_alg_name(rocsparse_spsv_alg value)
     RETURN_INVALID;
 }
 
+const char* rocsparse_sptrsv_alg_name(rocsparse_sptrsv_alg value)
+{
+    switch(value)
+    {
+        CASE(rocsparse_sptrsv_alg_default);
+    }
+    RETURN_INVALID;
+}
+
 const char* rocsparse_spitsv_alg_name(rocsparse_spitsv_alg value)
 {
     switch(value)
@@ -258,6 +267,15 @@ const char* rocsparse_spsm_alg_name(rocsparse_spsm_alg value)
     switch(value)
     {
         CASE(rocsparse_spsm_alg_default);
+    }
+    RETURN_INVALID;
+}
+
+const char* rocsparse_sptrsm_alg_name(rocsparse_sptrsm_alg value)
+{
+    switch(value)
+    {
+        CASE(rocsparse_sptrsm_alg_default);
     }
     RETURN_INVALID;
 }

@@ -176,12 +176,12 @@ namespace rocsparse
 
             if(handle->pointer_mode == rocsparse_pointer_mode_device)
             {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose_template(
                     handle, mb * block_dim, nrhs, alpha, B, ldb, Xt, ldimX));
             }
             else
             {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose(
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense_transpose_template(
                     handle, mb * block_dim, nrhs, *alpha, B, ldb, Xt, ldimX));
             }
         }

@@ -688,16 +688,18 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsv_buffer_size_template(handle,
-                                                                        rocsparse_operation_none,
-                                                                        mb,
-                                                                        nnzb,
-                                                                        descr,
-                                                                        bsr_val,
-                                                                        bsr_row_ptr,
-                                                                        bsr_col_ind,
-                                                                        info,
-                                                                        buffer_size));
+        RETURN_IF_ROCSPARSE_ERROR(
+            (rocsparse::csrsv_buffer_size_template<rocsparse_int, rocsparse_int, T>(
+                handle,
+                rocsparse_operation_none,
+                mb,
+                nnzb,
+                descr,
+                bsr_val,
+                bsr_row_ptr,
+                bsr_col_ind,
+                info,
+                buffer_size)));
         return rocsparse_status_success;
     }
 

@@ -843,6 +843,12 @@ public:
     {
     }
 
+    template <memory_mode::value_t MODE, typename T>
+    explicit rocsparse_local_dnvec(dense_vector<MODE, T>& h)
+        : rocsparse_local_dnvec(h.size(), h.data(), get_datatype<T>())
+    {
+    }
+
     ~rocsparse_local_dnvec()
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE

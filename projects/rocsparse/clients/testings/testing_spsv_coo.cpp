@@ -182,7 +182,8 @@ void testing_spsv_coo(const Arguments& arg)
         handle, trans_A, &halpha, A, x, y1, ttype, alg, buffersize, &buffer_size, nullptr));
 
     // Allocate buffer
-    void* dbuffer;
+    void*  dbuffer;
+    size_t buffer_size2 = buffer_size;
     CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
 
     // Perform analysis on host
