@@ -209,7 +209,7 @@ namespace rocRoller
                 if(x.workgroupMappingDim != -1)
                 {
                     s << "WG Mapping Dim: " << x.workgroupMappingDim << std::endl;
-                    s << "WG Mapping Size: " << x.workgroupMappingSize << std::endl;
+                    s << "WG Mapping Value: " << x.workgroupMappingValue << std::endl;
                 }
 
                 //if(x.workgroupMapping.first != -1)

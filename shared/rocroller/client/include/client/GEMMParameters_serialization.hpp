@@ -155,7 +155,7 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "wave_b", params.waveB);
             iot::mapRequired(io, "workgroup_size_x", params.workgroupSizeX);
             iot::mapRequired(io, "workgroup_size_y", params.workgroupSizeY);
-            iot::mapRequired(io, "workgroupMapping", params.workgroupMapping);
+            iot::mapRequired(io, "workgroupMappingDim", params.workgroupMappingDim);
             iot::mapRequired(io, "workgroupRemapXCC", params.workgroupRemapXCC);
             iot::mapRequired(io, "workgroupRemapXCCValue", params.workgroupRemapXCCValue);
             iot::mapRequired(io, "unroll_x", params.unrollX);

@@ -127,7 +127,7 @@ namespace rocRoller
 
                 //std::pair<int, int> workgroupMapping       = {-1, -1};
                 int  workgroupMappingDim    = -1;
-                int  workgroupMappingSize   = -1;
+                int  workgroupMappingValue   = -1;
                 bool workgroupRemapXCC      = false;
                 int  workgroupRemapXCCValue = -1;
 

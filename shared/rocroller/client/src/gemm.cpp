@@ -981,7 +981,7 @@ int main(int argc, const char* argv[])
         .workgroupSizeY = 2,
         //.workgroupMapping       = {-1, -1},
         .workgroupMappingDim    = -1,
-        .workgroupMappingSize   = -1,
+        .workgroupMappingValue   = -1,
         .workgroupRemapXCC      = false,
         .workgroupRemapXCCValue = -1,
 
@@ -1181,9 +1181,9 @@ int main(int argc, const char* argv[])
                    solution.workgroupMappingDim,
                    "Workgroup mapping dimension (-1, 0, 1). Default: -1")
         ->check(CLI::IsMember({-1, 0, 1}));
-    app.add_option("--workgroupMappingSize",
-                   solution.workgroupMappingSize,
-                   "Workgroup mapping size. Default: -1")
+    app.add_option("--workgroupMappingValue",
+                   solution.workgroupMappingValue,
+                   "Workgroup mapping value. Default: -1")
         ->check(CLI::Range(-1, -1) | CLI::PositiveNumber);
 
     app.add_flag(
@@ -1381,15 +1381,15 @@ int main(int argc, const char* argv[])
             yamlPath = std::filesystem::path{io.loadCOPath};
         yamlPath.replace_extension(".yaml");
 
-        std::optional<int> workgroupMappingSize;
-        if(app.count("--workgroupMappingSize") > 0)
-            workgroupMappingSize = solution.workgroupMappingSize;
+        //std::optional<int> workgroupMappingSize;
+        //if(app.count("--workgroupMappingSize") > 0)
+        //    workgroupMappingSize = solution.workgroupMappingSize;
 
         solution = Serialization::readYAMLFile<rocRoller::Client::GEMMClient::SolutionParameters>(
             yamlPath);
 
-        if(workgroupMappingSize.has_value())
-            solution.workgroupMappingSize = workgroupMappingSize.value();
+        //if(workgroupMappingSize.has_value())
+        //    solution.workgroupMappingSize = workgroupMappingSize.value();
 
         std::cout << "This is solution : " << solution << "\n";
         overwriteTypesFromSolution(types, solution);
@@ -1428,7 +1428,7 @@ int main(int argc, const char* argv[])
     solution.types = types;
 
     // TODO: Reevaluate the relationship between problem and solution params.
-    problem.workgroupMapping = {solution.workgroupMappingDim, solution.workgroupMappingSize};
+    problem.workgroupMapping = {solution.workgroupMappingDim, solution.workgroupMappingValue};
 
     run.check = !noCheckResult;
 
