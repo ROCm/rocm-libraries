@@ -26,17 +26,10 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/functional/actor.h>
+#include <thrust/detail/type_traits.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_traits.h>
-
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/functional>
-#  include <cuda/std/type_traits>
-#else
-#  include <type_traits>
-#  include <utility>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -50,11 +43,7 @@ template <class UnaryFunc, class Iterator>
 struct transform_iterator_reference
 {
   // by default, dereferencing the iterator yields the same as the function.
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using type = decltype(::cuda::std::declval<UnaryFunc>()(::cuda::std::declval<iterator_value_t<Iterator>>()));
-#else
-  using type = decltype(::std::declval<UnaryFunc>()(::std::declval<iterator_value_t<Iterator>>()));
-#endif
+  using type = decltype(::internal::declval<UnaryFunc>()(::internal::declval<iterator_value_t<Iterator>>()));
 };
 
 // for certain function objects, we need to tweak the reference type. Notably, identity functions must decay to values.
@@ -72,24 +61,15 @@ struct transform_iterator_reference<identity<>, Iterator>
 };
 THRUST_SUPPRESS_DEPRECATED_POP
 template <class Iterator>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct transform_iterator_reference<::cuda::std::identity, Iterator>
-#else
 struct transform_iterator_reference<::internal::identity, Iterator>
-#endif
 {
   using type = iterator_value_t<Iterator>;
 };
 template <typename Eval, class Iterator>
 struct transform_iterator_reference<functional::actor<Eval>, Iterator>
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using type = ::cuda::std::remove_reference_t<decltype(::cuda::std::declval<functional::actor<Eval>>()(
-    ::cuda::std::declval<iterator_value_t<Iterator>>()))>;
-#else
-  using type = ::std::remove_reference_t<decltype(::std::declval<functional::actor<Eval>>()(
-    ::std::declval<iterator_value_t<Iterator>>()))>;
-#endif
+  using type = ::internal::remove_reference_t<decltype(::internal::declval<functional::actor<Eval>>()(
+    ::internal::declval<iterator_value_t<Iterator>>()))>;
 };
 
 // Type function to compute the iterator_adaptor instantiation to be used for transform_iterator
@@ -98,11 +78,7 @@ struct make_transform_iterator_base
 {
 private:
   using reference  = typename ia_dflt_help<Reference, transform_iterator_reference<UnaryFunc, Iterator>>::type;
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using value_type = typename ia_dflt_help<Value, ::cuda::std::remove_cvref<reference>>::type;
-#else
-  using value_type = typename ia_dflt_help<Value, ::std::remove_cv<::std::remove_reference_t<reference>>>::type;
-#endif
+  using value_type = typename ia_dflt_help<Value, ::internal::remove_cvref<reference>>::type;
 
 public:
   using type =

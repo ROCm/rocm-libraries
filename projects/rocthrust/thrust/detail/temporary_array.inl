@@ -31,10 +31,6 @@
 #include <thrust/distance.h>
 #include <thrust/system/detail/generic/select_system.h>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits>
-#endif
-
 THRUST_NAMESPACE_BEGIN
 
 namespace detail
@@ -43,29 +39,17 @@ namespace temporary_array_detail
 {
 
 template <typename T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct avoid_initialization : ::cuda::std::is_trivially_copy_constructible<T>
-#else
-struct avoid_initialization : ::std::is_trivially_copy_constructible<T>
-#endif
+struct avoid_initialization : ::internal::is_trivially_copy_constructible<T>
 {};
 
 template <typename T, typename TemporaryArray, typename Size>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST_DEVICE ::cuda::std::enable_if_t<avoid_initialization<T>::value> construct_values(TemporaryArray&, Size)
-#else
-THRUST_HOST_DEVICE ::std::enable_if_t<avoid_initialization<T>::value> construct_values(TemporaryArray&, Size)
-#endif
+THRUST_HOST_DEVICE ::internal::enable_if_t<avoid_initialization<T>::value> construct_values(TemporaryArray&, Size)
 {
   // avoid the overhead of initialization
 } // end construct_values()
 
 template <typename T, typename TemporaryArray, typename Size>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST_DEVICE ::cuda::std::enable_if_t<!avoid_initialization<T>::value> construct_values(TemporaryArray& a, Size n)
-#else
-THRUST_HOST_DEVICE ::std::enable_if_t<!avoid_initialization<T>::value> construct_values(TemporaryArray& a, Size n)
-#endif
+THRUST_HOST_DEVICE ::internal::enable_if_t<!avoid_initialization<T>::value> construct_values(TemporaryArray& a, Size n)
 {
   a.value_initialize_n(a.begin(), n);
 } // end construct_values()

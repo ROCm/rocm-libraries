@@ -31,6 +31,7 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/reference_forward_declaration.h>
+#include <thrust/detail/type_traits.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/system/detail/adl/assign_value.h>
 #include <thrust/system/detail/adl/get_value.h>
@@ -38,14 +39,7 @@
 #include <thrust/system/detail/generic/memory.h>
 #include <thrust/system/detail/generic/select_system.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/type_traits>
-#endif
-
 #include <ostream>
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -66,11 +60,7 @@ private:
 
 public:
   using pointer    = Pointer;
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using value_type = ::cuda::std::remove_cvref_t<Element>;
-#else
-  using value_type = ::std::remove_cv_t<::std::remove_reference_t<Element>>;
-#endif
+  using value_type = ::internal::remove_cvref_t<Element>;
 
   reference(reference const&) = default;
 

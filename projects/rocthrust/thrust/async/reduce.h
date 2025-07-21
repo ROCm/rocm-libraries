@@ -35,16 +35,11 @@
 
 #  include <thrust/detail/select_system.h>
 #  include <thrust/detail/static_assert.h>
+#  include <thrust/detail/type_traits.h>
 #  include <thrust/future.h>
 #  include <thrust/system/detail/adl/async/reduce.h>
 #  include <thrust/type_traits/is_execution_policy.h>
 #  include <thrust/type_traits/logical_metafunctions.h>
-
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#    include <cuda/std/type_traits>
-#  else
-#    include <type_traits>
-#  endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -106,11 +101,7 @@ struct reduce_fn final
       THRUST_FWD(first),
       THRUST_FWD(last),
       THRUST_FWD(init),
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      thrust::plus<::cuda::std::remove_cvref_t<T>>{})) THRUST_SUPPRESS_DEPRECATED_POP
-#  else
-      thrust::plus<::std::remove_cv_t<::std::remove_reference_t<T>>>{})) THRUST_SUPPRESS_DEPRECATED_POP
-#  endif
+      thrust::plus<::internal::remove_cvref_t<T>>{})) THRUST_SUPPRESS_DEPRECATED_POP
 
     THRUST_SUPPRESS_DEPRECATED_PUSH template <typename DerivedPolicy, typename ForwardIt, typename Sentinel>
     THRUST_HOST static auto call3(
@@ -123,29 +114,15 @@ struct reduce_fn final
       thrust::detail::derived_cast(thrust::detail::strip_const(exec)),
       THRUST_FWD(first),
       THRUST_FWD(last),
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      typename iterator_traits<::cuda::std::remove_cvref_t<ForwardIt>>::value_type{},
-#  else
-      typename iterator_traits<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::value_type{},
-#  endif
+      typename iterator_traits<::internal::remove_cvref_t<ForwardIt>>::value_type{},
       thrust::plus<
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        ::cuda::std::remove_cvref_t<typename iterator_traits<::cuda::std::remove_cvref_t<ForwardIt>>::value_type>>{}))
-#  else
-        ::std::remove_cv_t<::std::remove_reference_t<
-          typename iterator_traits<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::value_type>>>{}))
-#  endif
+        ::internal::remove_cvref_t<typename iterator_traits<::internal::remove_cvref_t<ForwardIt>>::value_type>>{}))
       THRUST_SUPPRESS_DEPRECATED_POP
 
     template <typename ForwardIt, typename Sentinel, typename T, typename BinaryOp>
     THRUST_HOST static auto call4(ForwardIt&& first, Sentinel&& last, T&& init, BinaryOp&& op, thrust::false_type)
       THRUST_RETURNS(reduce_fn::call(
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        thrust::detail::select_system(typename iterator_system<::cuda::std::remove_cvref_t<ForwardIt>>::type{}),
-#  else
-        thrust::detail::select_system(
-          typename iterator_system<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::type{}),
-#  endif
+        thrust::detail::select_system(typename iterator_system<::internal::remove_cvref_t<ForwardIt>>::type{}),
         THRUST_FWD(first),
         THRUST_FWD(last),
         THRUST_FWD(init),
@@ -154,34 +131,18 @@ struct reduce_fn final
         template <typename ForwardIt, typename Sentinel, typename T>
         THRUST_HOST static auto call3(ForwardIt&& first, Sentinel&& last, T&& init, thrust::false_type)
           THRUST_RETURNS(reduce_fn::call(
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-            thrust::detail::select_system(typename iterator_system<::cuda::std::remove_cvref_t<ForwardIt>>::type{}),
-#  else
-            thrust::detail::select_system(
-              typename iterator_system<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::type{}),
-#  endif
+            thrust::detail::select_system(typename iterator_system<::internal::remove_cvref_t<ForwardIt>>::type{}),
             THRUST_FWD(first),
             THRUST_FWD(last),
             THRUST_FWD(init),
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-            thrust::plus<::cuda::std::remove_cvref_t<T>>{}))
-#  else
-            thrust::plus<::std::remove_cv_t<::std::remove_reference_t<T>>>{}))
-#  endif
+            thrust::plus<::internal::remove_cvref_t<T>>{}))
 
     // MSVC WAR: MSVC gets angsty and eats all available RAM when we try to detect
     // if T1 is an execution_policy by using SFINAE. Switching to a static
     // dispatch pattern to prevent this.
     template <typename T1, typename T2, typename T3>
     THRUST_HOST static auto call(T1&& t1, T2&& t2, T3&& t3) THRUST_RETURNS(reduce_fn::call3(
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      THRUST_FWD(t1), THRUST_FWD(t2), THRUST_FWD(t3), thrust::is_execution_policy<::cuda::std::remove_cvref_t<T1>>{}))
-#  else
-      THRUST_FWD(t1),
-      THRUST_FWD(t2),
-      THRUST_FWD(t3),
-      thrust::is_execution_policy<::std::remove_cv_t<::std::remove_reference_t<T1>>>{}))
-#  endif
+      THRUST_FWD(t1), THRUST_FWD(t2), THRUST_FWD(t3), thrust::is_execution_policy<::internal::remove_cvref_t<T1>>{}))
 
       template <typename T1, typename T2, typename T3, typename T4>
       THRUST_HOST static auto call(T1&& t1, T2&& t2, T3&& t3, T4&& t4) THRUST_RETURNS(reduce_fn::call4(
@@ -189,31 +150,16 @@ struct reduce_fn final
         THRUST_FWD(t2),
         THRUST_FWD(t3),
         THRUST_FWD(t4),
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        thrust::is_execution_policy<::cuda::std::remove_cvref_t<T1>>{}))
-#  else
-        thrust::is_execution_policy<::std::remove_cv_t<::std::remove_reference_t<T1>>>{}))
-#  endif
+        thrust::is_execution_policy<::internal::remove_cvref_t<T1>>{}))
 
         template <typename ForwardIt, typename Sentinel>
         THRUST_HOST static auto call(ForwardIt&& first, Sentinel&& last) THRUST_RETURNS(reduce_fn::call(
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-          thrust::detail::select_system(typename iterator_system<::cuda::std::remove_cvref_t<ForwardIt>>::type{}),
-#  else
-          thrust::detail::select_system(
-            typename iterator_system<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::type{}),
-#  endif
+          thrust::detail::select_system(typename iterator_system<::internal::remove_cvref_t<ForwardIt>>::type{}),
           THRUST_FWD(first),
           THRUST_FWD(last),
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-          typename iterator_traits<::cuda::std::remove_cvref_t<ForwardIt>>::value_type{},
-          thrust::plus<::cuda::std::remove_cvref_t<
-            typename iterator_traits<::cuda::std::remove_cvref_t<ForwardIt>>::value_type>>{}))
-#  else
-          typename iterator_traits<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::value_type{},
-          thrust::plus<::std::remove_cv_t<::std::remove_reference_t<
-            typename iterator_traits<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::value_type>>>{}))
-#  endif
+          typename iterator_traits<::internal::remove_cvref_t<ForwardIt>>::value_type{},
+          thrust::plus<
+            ::internal::remove_cvref_t<typename iterator_traits<::internal::remove_cvref_t<ForwardIt>>::value_type>>{}))
 
           template <typename... Args>
           THRUST_NODISCARD THRUST_DEPRECATED THRUST_HOST auto operator()(Args&&... args) const
@@ -286,11 +232,7 @@ struct reduce_into_fn final
       THRUST_FWD(last),
       THRUST_FWD(output),
       THRUST_FWD(init),
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      thrust::plus<::cuda::std::remove_cvref_t<T>>{})) THRUST_SUPPRESS_DEPRECATED_POP
-#  else
-      thrust::plus<::std::remove_cv_t<::std::remove_reference_t<T>>>{})) THRUST_SUPPRESS_DEPRECATED_POP
-#  endif
+      thrust::plus<::internal::remove_cvref_t<T>>{})) THRUST_SUPPRESS_DEPRECATED_POP
 
     THRUST_SUPPRESS_DEPRECATED_PUSH
     template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename OutputIt>
@@ -306,32 +248,17 @@ struct reduce_into_fn final
       THRUST_FWD(first),
       THRUST_FWD(last),
       THRUST_FWD(output),
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      typename iterator_traits<::cuda::std::remove_cvref_t<ForwardIt>>::value_type{},
-#  else
-      typename iterator_traits<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::value_type{},
-#  endif
+      typename iterator_traits<::internal::remove_cvref_t<ForwardIt>>::value_type{},
       thrust::plus<
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        ::cuda::std::remove_cvref_t<typename iterator_traits<::cuda::std::remove_cvref_t<ForwardIt>>::value_type>>{}))
-#  else
-        ::std::remove_cv_t<::std::remove_reference_t<
-          typename iterator_traits<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::value_type>>>{}))
-#  endif
+        ::internal::remove_cvref_t<typename iterator_traits<::internal::remove_cvref_t<ForwardIt>>::value_type>>{}))
       THRUST_SUPPRESS_DEPRECATED_POP
 
     template <typename ForwardIt, typename Sentinel, typename OutputIt, typename T, typename BinaryOp>
     THRUST_HOST static auto call5(
       ForwardIt&& first, Sentinel&& last, OutputIt&& output, T&& init, BinaryOp&& op, thrust::false_type)
       THRUST_RETURNS(reduce_into_fn::call(
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        thrust::detail::select_system(typename iterator_system<::cuda::std::remove_cvref_t<ForwardIt>>::type{},
-                                      typename iterator_system<::cuda::std::remove_cvref_t<OutputIt>>::type{}),
-#  else
-        thrust::detail::select_system(
-          typename iterator_system<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::type{},
-          typename iterator_system<::std::remove_cv_t<::std::remove_reference_t<OutputIt>>>::type{}),
-#  endif
+        thrust::detail::select_system(typename iterator_system<::internal::remove_cvref_t<ForwardIt>>::type{},
+                                      typename iterator_system<::internal::remove_cvref_t<OutputIt>>::type{}),
         THRUST_FWD(first),
         THRUST_FWD(last),
         THRUST_FWD(output),
@@ -342,47 +269,25 @@ struct reduce_into_fn final
         THRUST_HOST static auto call4(
           ForwardIt&& first, Sentinel&& last, OutputIt&& output, T&& init, thrust::false_type)
           THRUST_RETURNS(reduce_into_fn::call(
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-            thrust::detail::select_system(typename iterator_system<::cuda::std::remove_cvref_t<ForwardIt>>::type{},
-                                          typename iterator_system<::cuda::std::remove_cvref_t<OutputIt>>::type{}),
-#  else
-            thrust::detail::select_system(
-              typename iterator_system<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::type{},
-              typename iterator_system<::std::remove_cv_t<::std::remove_reference_t<OutputIt>>>::type{}),
-#  endif
+            thrust::detail::select_system(typename iterator_system<::internal::remove_cvref_t<ForwardIt>>::type{},
+                                          typename iterator_system<::internal::remove_cvref_t<OutputIt>>::type{}),
             THRUST_FWD(first),
             THRUST_FWD(last),
             THRUST_FWD(output),
             THRUST_FWD(init),
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-            thrust::plus<::cuda::std::remove_cvref_t<T>>{}))
-#  else
-            thrust::plus<::std::remove_cv_t<::std::remove_reference_t<T>>>{}))
-#  endif
+            thrust::plus<::internal::remove_cvref_t<T>>{}))
 
             template <typename ForwardIt, typename Sentinel, typename OutputIt>
             THRUST_HOST static auto call(ForwardIt&& first, Sentinel&& last, OutputIt&& output)
               THRUST_RETURNS(reduce_into_fn::call(
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                thrust::detail::select_system(typename iterator_system<::cuda::std::remove_cvref_t<ForwardIt>>::type{},
-                                              typename iterator_system<::cuda::std::remove_cvref_t<OutputIt>>::type{}),
-#  else
-                thrust::detail::select_system(
-                  typename iterator_system<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::type{},
-                  typename iterator_system<::std::remove_cv_t<::std::remove_reference_t<OutputIt>>>::type{}),
-#  endif
+                thrust::detail::select_system(typename iterator_system<::internal::remove_cvref_t<ForwardIt>>::type{},
+                                              typename iterator_system<::internal::remove_cvref_t<OutputIt>>::type{}),
                 THRUST_FWD(first),
                 THRUST_FWD(last),
                 THRUST_FWD(output),
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                typename iterator_traits<::cuda::std::remove_cvref_t<ForwardIt>>::value_type{},
-                thrust::plus<::cuda::std::remove_cvref_t<
-                  typename iterator_traits<::cuda::std::remove_cvref_t<ForwardIt>>::value_type>>{}))
-#  else
-                typename iterator_traits<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::value_type{},
-                thrust::plus<::std::remove_cv_t<::std::remove_reference_t<
-                  typename iterator_traits<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::value_type>>>{}))
-#  endif
+                typename iterator_traits<::internal::remove_cvref_t<ForwardIt>>::value_type{},
+                thrust::plus<::internal::remove_cvref_t<
+                  typename iterator_traits<::internal::remove_cvref_t<ForwardIt>>::value_type>>{}))
 
     // MSVC WAR: MSVC gets angsty and eats all available RAM when we try to detect
     // if T1 is an execution_policy by using SFINAE. Switching to a static
@@ -393,11 +298,7 @@ struct reduce_into_fn final
       THRUST_FWD(t2),
       THRUST_FWD(t3),
       THRUST_FWD(t4),
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      thrust::is_execution_policy<::cuda::std::remove_cvref_t<T1>>{}))
-#  else
-      thrust::is_execution_policy<::std::remove_cv_t<::std::remove_reference_t<T1>>>{}))
-#  endif
+      thrust::is_execution_policy<::internal::remove_cvref_t<T1>>{}))
 
       template <typename T1, typename T2, typename T3, typename T4, typename T5>
       THRUST_HOST static auto call(T1&& t1, T2&& t2, T3&& t3, T4&& t4, T5&& t5) THRUST_RETURNS(reduce_into_fn::call5(
@@ -406,11 +307,7 @@ struct reduce_into_fn final
         THRUST_FWD(t3),
         THRUST_FWD(t4),
         THRUST_FWD(t5),
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        thrust::is_execution_policy<::cuda::std::remove_cvref_t<T1>>{}))
-#  else
-        thrust::is_execution_policy<::std::remove_cv_t<::std::remove_reference_t<T1>>>{}))
-#  endif
+        thrust::is_execution_policy<::internal::remove_cvref_t<T1>>{}))
 
         template <typename... Args>
         THRUST_NODISCARD THRUST_DEPRECATED THRUST_HOST auto operator()(Args&&... args) const

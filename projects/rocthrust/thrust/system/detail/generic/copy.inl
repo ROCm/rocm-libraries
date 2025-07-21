@@ -46,22 +46,14 @@ template <typename DerivedPolicy, typename InputIterator, typename OutputIterato
 THRUST_HOST_DEVICE OutputIterator
 copy(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, InputIterator last, OutputIterator result)
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  return thrust::transform(exec, first, last, result, ::cuda::std::identity{});
-#else
   return thrust::transform(exec, first, last, result, ::internal::identity{});
-#endif
 } // end copy()
 
 template <typename DerivedPolicy, typename InputIterator, typename Size, typename OutputIterator>
 THRUST_HOST_DEVICE OutputIterator
 copy_n(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, Size n, OutputIterator result)
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using xfrm_type = ::cuda::std::identity;
-#else
   using xfrm_type = ::internal::identity;
-#endif
 
   using functor_type = thrust::detail::unary_transform_functor<xfrm_type>;
 

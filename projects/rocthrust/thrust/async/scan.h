@@ -36,16 +36,11 @@
 #  include <thrust/detail/execution_policy.h>
 #  include <thrust/detail/select_system.h>
 #  include <thrust/detail/static_assert.h>
+#  include <thrust/detail/type_traits.h>
 #  include <thrust/future.h>
 #  include <thrust/system/detail/adl/async/scan.h>
 #  include <thrust/type_traits/is_execution_policy.h>
 #  include <thrust/type_traits/logical_metafunctions.h>
-
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#    include <cuda/std/type_traits>
-#  else
-#    include <type_traits>
-#  endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -151,22 +146,12 @@ struct inclusive_scan_fn final
               typename Sentinel,
               typename OutputIt,
               typename BinaryOp,
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-              typename = std::enable_if_t<!is_execution_policy_v<::cuda::std::remove_cvref_t<ForwardIt>>>>
-#  else
-              typename =
-                std::enable_if_t<!is_execution_policy_v<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>>>
-#  endif
+              typename = std::enable_if_t<!is_execution_policy_v<::internal::remove_cvref_t<ForwardIt>>>>
     THRUST_DEPRECATED auto operator()(ForwardIt&& first, Sentinel&& last, OutputIt&& out, BinaryOp&& op) const
     // ADL dispatch.
     THRUST_RETURNS(async_inclusive_scan(
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      thrust::detail::select_system(iterator_system_t<::cuda::std::remove_cvref_t<ForwardIt>>{},
-                                    iterator_system_t<::cuda::std::remove_cvref_t<OutputIt>>{}),
-#  else
-      thrust::detail::select_system(iterator_system_t<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>{},
-                                    iterator_system_t<::std::remove_cv_t<::std::remove_reference_t<OutputIt>>>{}),
-#  endif
+      thrust::detail::select_system(iterator_system_t<::internal::remove_cvref_t<ForwardIt>>{},
+                                    iterator_system_t<::internal::remove_cvref_t<OutputIt>>{}),
       THRUST_FWD(first),
       THRUST_FWD(last),
       THRUST_FWD(out),
@@ -176,13 +161,8 @@ struct inclusive_scan_fn final
     THRUST_DEPRECATED auto operator()(ForwardIt&& first, Sentinel&& last, OutputIt&& out) const
     // ADL dispatch.
     THRUST_RETURNS(async_inclusive_scan(
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      thrust::detail::select_system(iterator_system_t<::cuda::std::remove_cvref_t<ForwardIt>>{},
-                                    iterator_system_t<::cuda::std::remove_cvref_t<OutputIt>>{}),
-#  else
-      thrust::detail::select_system(iterator_system_t<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>{},
-                                    iterator_system_t<::std::remove_cv_t<::std::remove_reference_t<OutputIt>>>{}),
-#  endif
+      thrust::detail::select_system(iterator_system_t<::internal::remove_cvref_t<ForwardIt>>{},
+                                    iterator_system_t<::internal::remove_cvref_t<OutputIt>>{}),
       THRUST_FWD(first),
       THRUST_FWD(last),
       THRUST_FWD(out),
@@ -194,23 +174,13 @@ struct inclusive_scan_fn final
               typename OutputIt,
               typename InitialValueType,
               typename BinaryOp,
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-              typename = std::enable_if_t<!is_execution_policy_v<::cuda::std::remove_cvref_t<ForwardIt>>>>
-#  else
-              typename =
-                std::enable_if_t<!is_execution_policy_v<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>>>
-#  endif
+              typename = std::enable_if_t<!is_execution_policy_v<::internal::remove_cvref_t<ForwardIt>>>>
     THRUST_DEPRECATED auto
     operator()(ForwardIt&& first, Sentinel&& last, OutputIt&& out, InitialValueType&& init, BinaryOp&& op) const
     // ADL dispatch.
     THRUST_RETURNS(async_inclusive_scan(
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      thrust::detail::select_system(iterator_system_t<::cuda::std::remove_cvref_t<ForwardIt>>{},
-                                    iterator_system_t<::cuda::std::remove_cvref_t<OutputIt>>{}),
-#  else
-      thrust::detail::select_system(iterator_system_t<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>{},
-                                    iterator_system_t<::std::remove_cv_t<::std::remove_reference_t<OutputIt>>>{}),
-#  endif
+      thrust::detail::select_system(iterator_system_t<::internal::remove_cvref_t<ForwardIt>>{},
+                                    iterator_system_t<::internal::remove_cvref_t<OutputIt>>{}),
       THRUST_FWD(first),
       THRUST_FWD(last),
       THRUST_FWD(out),
@@ -287,11 +257,7 @@ struct exclusive_scan_fn final
       THRUST_FWD(first),
       THRUST_FWD(last),
       THRUST_FWD(out),
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      iterator_value_t<::cuda::std::remove_cvref_t<ForwardIt>>{},
-#  else
-      iterator_value_t<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>{},
-#  endif
+      iterator_value_t<::internal::remove_cvref_t<ForwardIt>>{},
       thrust::plus<>{})) THRUST_SUPPRESS_DEPRECATED_POP
 
     THRUST_SUPPRESS_DEPRECATED_PUSH
@@ -300,23 +266,13 @@ struct exclusive_scan_fn final
               typename OutputIt,
               typename InitialValueType,
               typename BinaryOp,
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-              typename = std::enable_if_t<!is_execution_policy_v<::cuda::std::remove_cvref_t<ForwardIt>>>>
-#  else
-              typename =
-                std::enable_if_t<!is_execution_policy_v<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>>>
-#  endif
+              typename = std::enable_if_t<!is_execution_policy_v<::internal::remove_cvref_t<ForwardIt>>>>
     THRUST_DEPRECATED auto
     operator()(ForwardIt&& first, Sentinel&& last, OutputIt&& out, InitialValueType&& init, BinaryOp&& op) const
     // ADL dispatch.
     THRUST_RETURNS(async_exclusive_scan(
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      thrust::detail::select_system(iterator_system_t<::cuda::std::remove_cvref_t<ForwardIt>>{},
-                                    iterator_system_t<::cuda::std::remove_cvref_t<OutputIt>>{}),
-#  else
-      thrust::detail::select_system(iterator_system_t<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>{},
-                                    iterator_system_t<::std::remove_cv_t<::std::remove_reference_t<OutputIt>>>{}),
-#  endif
+      thrust::detail::select_system(iterator_system_t<::internal::remove_cvref_t<ForwardIt>>{},
+                                    iterator_system_t<::internal::remove_cvref_t<OutputIt>>{}),
       THRUST_FWD(first),
       THRUST_FWD(last),
       THRUST_FWD(out),
@@ -328,22 +284,12 @@ struct exclusive_scan_fn final
               typename Sentinel,
               typename OutputIt,
               typename InitialValueType,
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-              typename = std::enable_if_t<!is_execution_policy_v<::cuda::std::remove_cvref_t<ForwardIt>>>>
-#  else
-              typename =
-                std::enable_if_t<!is_execution_policy_v<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>>>
-#  endif
+              typename = std::enable_if_t<!is_execution_policy_v<::internal::remove_cvref_t<ForwardIt>>>>
     THRUST_DEPRECATED auto operator()(ForwardIt&& first, Sentinel&& last, OutputIt&& out, InitialValueType&& init) const
     // ADL dispatch.
     THRUST_RETURNS(async_exclusive_scan(
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      thrust::detail::select_system(iterator_system_t<::cuda::std::remove_cvref_t<ForwardIt>>{},
-                                    iterator_system_t<::cuda::std::remove_cvref_t<OutputIt>>{}),
-#  else
-      thrust::detail::select_system(iterator_system_t<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>{},
-                                    iterator_system_t<::std::remove_cv_t<::std::remove_reference_t<OutputIt>>>{}),
-#  endif
+      thrust::detail::select_system(iterator_system_t<::internal::remove_cvref_t<ForwardIt>>{},
+                                    iterator_system_t<::internal::remove_cvref_t<OutputIt>>{}),
       THRUST_FWD(first),
       THRUST_FWD(last),
       THRUST_FWD(out),
@@ -354,21 +300,12 @@ struct exclusive_scan_fn final
     THRUST_DEPRECATED auto operator()(ForwardIt&& first, Sentinel&& last, OutputIt&& out) const
     // ADL dispatch.
     THRUST_RETURNS(async_exclusive_scan(
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      thrust::detail::select_system(iterator_system_t<::cuda::std::remove_cvref_t<ForwardIt>>{},
-                                    iterator_system_t<::cuda::std::remove_cvref_t<OutputIt>>{}),
-#  else
-      thrust::detail::select_system(iterator_system_t<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>{},
-                                    iterator_system_t<::std::remove_cv_t<::std::remove_reference_t<OutputIt>>>{}),
-#  endif
+      thrust::detail::select_system(iterator_system_t<::internal::remove_cvref_t<ForwardIt>>{},
+                                    iterator_system_t<::internal::remove_cvref_t<OutputIt>>{}),
       THRUST_FWD(first),
       THRUST_FWD(last),
       THRUST_FWD(out),
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-      iterator_value_t<::cuda::std::remove_cvref_t<ForwardIt>>{},
-#  else
-      iterator_value_t<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>{},
-#  endif
+      iterator_value_t<::internal::remove_cvref_t<ForwardIt>>{},
       thrust::plus<>{})) THRUST_SUPPRESS_DEPRECATED_POP
 };
 

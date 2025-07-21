@@ -27,9 +27,6 @@
 
 #include <new>
 #include <utility>
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -45,11 +42,7 @@ template <typename Allocator, typename T>
 THRUST_HOST_DEVICE void destroy_at(Allocator const& alloc, T* location) noexcept
 {
   using traits = typename detail::allocator_traits<
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    ::cuda::std::remove_cv_t<::cuda::std::remove_reference_t<Allocator>>>::template rebind_traits<T>::other;
-#else
-    ::std::remove_cv_t<::std::remove_reference_t<Allocator>>>::template rebind_traits<T>::other;
-#endif
+    ::internal::remove_cv_t<::internal::remove_reference_t<Allocator>>>::template rebind_traits<T>::other;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -72,11 +65,7 @@ THRUST_HOST_DEVICE ForwardIt destroy(Allocator const& alloc, ForwardIt first, Fo
 {
   using T      = typename iterator_traits<ForwardIt>::value_type;
   using traits = typename detail::allocator_traits<
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    ::cuda::std::remove_cv_t<::cuda::std::remove_reference_t<Allocator>>>::template rebind_traits<T>::other;
-#else
-    ::std::remove_cv_t<::std::remove_reference_t<Allocator>>>::template rebind_traits<T>::other;
-#endif
+    ::internal::remove_cv_t<::internal::remove_reference_t<Allocator>>>::template rebind_traits<T>::other;
 
   typename traits::allocator_type alloc_T(alloc);
 
@@ -104,11 +93,7 @@ THRUST_HOST_DEVICE ForwardIt destroy_n(Allocator const& alloc, ForwardIt first, 
 {
   using T      = typename iterator_traits<ForwardIt>::value_type;
   using traits = typename detail::allocator_traits<
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    ::cuda::std::remove_cv_t<::cuda::std::remove_reference_t<Allocator>>>::template rebind_traits<T>::other;
-#else
-    ::std::remove_cv_t<::std::remove_reference_t<Allocator>>>::template rebind_traits<T>::other;
-#endif
+    ::internal::remove_cv_t<::internal::remove_reference_t<Allocator>>>::template rebind_traits<T>::other;
 
   typename traits::allocator_type alloc_T(alloc);
 

@@ -31,10 +31,6 @@
 #  include <thrust/detail/execute_with_dependencies.h>
 #endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_NVRTC
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits>
-#endif
-
 THRUST_NAMESPACE_BEGIN
 
 namespace detail
@@ -59,11 +55,7 @@ public:
       : alloc(alloc_)
   {}
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  THRUST_HOST_DEVICE ::cuda::std::remove_reference_t<Allocator>& get_allocator()
-#else
-  THRUST_HOST_DEVICE ::std::remove_reference_t<Allocator>& get_allocator()
-#endif
+  THRUST_HOST_DEVICE ::internal::remove_reference_t<Allocator>& get_allocator()
   {
     return alloc;
   }

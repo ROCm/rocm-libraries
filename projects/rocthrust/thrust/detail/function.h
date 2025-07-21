@@ -26,10 +26,7 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/raw_reference_cast.h>
-
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <utility>
-#endif
+#include <thrust/detail/type_traits.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -45,11 +42,7 @@ struct wrapped_function
   template <typename... Ts>
   inline THRUST_HOST_DEVICE Result operator()(Ts&&... args) const
   {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    return static_cast<Result>(m_f(thrust::raw_reference_cast(::cuda::std::forward<Ts>(args))...));
-#else
-    return static_cast<Result>(m_f(thrust::raw_reference_cast(::std::forward<Ts>(args))...));
-#endif
+    return static_cast<Result>(m_f(thrust::raw_reference_cast(::internal::forward<Ts>(args))...));
   }
 }; // end wrapped_function
 } // namespace detail

@@ -35,16 +35,11 @@
 
 #  include <thrust/detail/select_system.h>
 #  include <thrust/detail/static_assert.h>
+#  include <thrust/detail/type_traits.h>
 #  include <thrust/event.h>
 #  include <thrust/system/detail/adl/async/sort.h>
 #  include <thrust/type_traits/is_execution_policy.h>
 #  include <thrust/type_traits/logical_metafunctions.h>
-
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#    include <cuda/std/type_traits>
-#  else
-#    include <type_traits>
-#  endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -117,11 +112,7 @@ THRUST_SUPPRESS_DEPRECATED_PUSH
       thrust::detail::derived_cast(thrust::detail::strip_const(exec))
     , THRUST_FWD(first), THRUST_FWD(last)
     , thrust::less<
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        typename iterator_traits<::cuda::std::remove_cvref_t<ForwardIt>>::value_type
-#  else
-        typename iterator_traits<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::value_type
-#  endif
+        typename iterator_traits<::internal::remove_cvref_t<ForwardIt>>::value_type
       >{}
     )
   )
@@ -133,11 +124,7 @@ THRUST_SUPPRESS_DEPRECATED_PUSH
   THRUST_RETURNS(
     stable_sort_fn::call(
       thrust::detail::select_system(
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        typename iterator_system<::cuda::std::remove_cvref_t<ForwardIt>>::type{}
-#  else
-        typename iterator_system<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::type{}
-#  endif
+        typename iterator_system<::internal::remove_cvref_t<ForwardIt>>::type{}
       )
     , THRUST_FWD(first), THRUST_FWD(last)
     , THRUST_FWD(comp)
@@ -151,11 +138,7 @@ THRUST_SUPPRESS_DEPRECATED_PUSH
     stable_sort_fn::call(
       THRUST_FWD(first), THRUST_FWD(last)
     , thrust::less<
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        typename iterator_traits<::cuda::std::remove_cvref_t<ForwardIt>>::value_type
-#  else
-        typename iterator_traits<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::value_type
-#  endif
+        typename iterator_traits<::internal::remove_cvref_t<ForwardIt>>::value_type
       >{}
     )
   )
@@ -237,11 +220,7 @@ struct sort_fn final
       exec
     , THRUST_FWD(first), THRUST_FWD(last)
     , thrust::less<
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        typename iterator_traits<::cuda::std::remove_cvref_t<ForwardIt>>::value_type
-#  else
-        typename iterator_traits<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::value_type
-#  endif
+        typename iterator_traits<::internal::remove_cvref_t<ForwardIt>>::value_type
       >{}
     )
   )
@@ -254,11 +233,7 @@ struct sort_fn final
   THRUST_RETURNS(
     sort_fn::call(
       thrust::detail::select_system(
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        typename iterator_system<::cuda::std::remove_cvref_t<ForwardIt>>::type{}
-#  else
-        typename iterator_system<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::type{}
-#  endif
+        typename iterator_system<::internal::remove_cvref_t<ForwardIt>>::type{}
       )
     , THRUST_FWD(first), THRUST_FWD(last)
     , THRUST_FWD(comp)
@@ -273,11 +248,7 @@ struct sort_fn final
   static auto call(T1&& t1, T2&& t2, T3&& t3)
   THRUST_RETURNS(
     sort_fn::call3(THRUST_FWD(t1), THRUST_FWD(t2), THRUST_FWD(t3),
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                   thrust::is_execution_policy<::cuda::std::remove_cvref_t<T1>>{})
-#  else
-                   thrust::is_execution_policy<::std::remove_cv_t<::std::remove_reference_t<T1>>>{})
-#  endif
+                   thrust::is_execution_policy<::internal::remove_cvref_t<T1>>{})
   )
 
   template <typename ForwardIt, typename Sentinel>
@@ -286,19 +257,11 @@ struct sort_fn final
   THRUST_RETURNS(
     sort_fn::call(
       thrust::detail::select_system(
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        typename iterator_system<::cuda::std::remove_cvref_t<ForwardIt>>::type{}
-#  else
-        typename iterator_system<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::type{}
-#  endif
+        typename iterator_system<::internal::remove_cvref_t<ForwardIt>>::type{}
       )
     , THRUST_FWD(first), THRUST_FWD(last)
     , thrust::less<
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        typename iterator_traits<::cuda::std::remove_cvref_t<ForwardIt>>::value_type
-#  else
-        typename iterator_traits<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::value_type
-#  endif
+        typename iterator_traits<::internal::remove_cvref_t<ForwardIt>>::value_type
       >{}
     )
   )

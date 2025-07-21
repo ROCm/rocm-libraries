@@ -30,10 +30,6 @@
 #include <thrust/iterator/detail/minimum_system.h>
 #include <thrust/iterator/iterator_facade.h>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits>
-#endif
-
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
@@ -47,11 +43,7 @@ namespace join_iterator_detail
 template <typename RandomAccessIterator1, typename RandomAccessIterator2, typename Difference, typename Reference>
 struct join_iterator_base
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using value_type = ::cuda::std::remove_reference_t<Reference>;
-#else
-  using value_type = ::std::remove_reference_t<Reference>;
-#endif
+  using value_type = ::internal::remove_reference_t<Reference>;
 
   using system1 = typename thrust::iterator_system<RandomAccessIterator1>::type;
   using system2 = typename thrust::iterator_system<RandomAccessIterator2>::type;

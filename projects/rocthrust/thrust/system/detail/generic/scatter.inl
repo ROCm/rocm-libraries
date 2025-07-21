@@ -63,11 +63,7 @@ THRUST_HOST_DEVICE void scatter_if(
   InputIterator3 stencil,
   RandomAccessIterator output)
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  thrust::scatter_if(exec, first, last, map, stencil, output, ::cuda::std::identity{});
-#else
   thrust::scatter_if(exec, first, last, map, stencil, output, ::internal::identity{});
-#endif
 } // end scatter_if()
 
 template <typename DerivedPolicy,
@@ -86,11 +82,7 @@ THRUST_HOST_DEVICE void scatter_if(
   Predicate pred)
 {
   thrust::transform_if(
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    exec, first, last, stencil, thrust::make_permutation_iterator(output, map), ::cuda::std::identity{}, pred);
-#else
     exec, first, last, stencil, thrust::make_permutation_iterator(output, map), ::internal::identity{}, pred);
-#endif
 } // end scatter_if()
 
 } // end namespace generic

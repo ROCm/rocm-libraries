@@ -26,12 +26,7 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/type_deduction.h>
-
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/type_traits>
-#else
-#  include <type_traits>
-#endif
+#include <thrust/detail/type_traits.h>
 
 #include <tuple>
 #include <type_traits>
@@ -64,11 +59,7 @@ THRUST_DEPRECATED auto capture_as_dependency(Dependency&& dependency) THRUST_DEC
 private:
   using super_t = BaseSystem<execute_with_dependencies<BaseSystem, Dependencies...>>;
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  std::tuple<::cuda::std::remove_cvref_t<Dependencies>...> dependencies;
-#else
-  std::tuple<::std::remove_cv_t<::std::remove_reference_t<Dependencies>>...> dependencies;
-#endif
+  std::tuple<::internal::remove_cvref_t<Dependencies>...> dependencies;
 
 public:
   THRUST_HOST execute_with_dependencies(super_t const& super, Dependencies&&... deps)
@@ -98,11 +89,7 @@ public:
       : dependencies(std::move(deps))
   {}
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  std::tuple<::cuda::std::remove_cvref_t<Dependencies>...> THRUST_HOST extract_dependencies()
-#else
-  std::tuple<::std::remove_cv_t<::std::remove_reference_t<Dependencies>>...> THRUST_HOST extract_dependencies()
-#endif
+  std::tuple<::internal::remove_cvref_t<Dependencies>...> THRUST_HOST extract_dependencies()
   {
     return std::move(dependencies);
   }
@@ -137,11 +124,7 @@ struct THRUST_DEPRECATED execute_with_allocator_and_dependencies
 private:
   using super_t = BaseSystem<execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>>;
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  std::tuple<::cuda::std::remove_cvref_t<Dependencies>...> dependencies;
-#else
-  std::tuple<::std::remove_cv_t<::std::remove_reference_t<Dependencies>>...> dependencies;
-#endif
+  std::tuple<::internal::remove_cvref_t<Dependencies>...> dependencies;
   Allocator alloc;
 
 public:
@@ -172,11 +155,7 @@ public:
       , alloc(a)
   {}
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  std::tuple<::cuda::std::remove_cvref_t<Dependencies>...> THRUST_HOST extract_dependencies()
-#else
-  std::tuple<::std::remove_cv_t<::std::remove_reference_t<Dependencies>>...> THRUST_HOST extract_dependencies()
-#endif
+  std::tuple<::internal::remove_cvref_t<Dependencies>...> THRUST_HOST extract_dependencies()
   {
     return std::move(dependencies);
   }
@@ -210,44 +189,26 @@ public:
 };
 
 template <template <typename> class BaseSystem, typename... Dependencies>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_DEPRECATED THRUST_HOST std::tuple<::cuda::std::remove_cvref_t<Dependencies>...>
-#else
-THRUST_DEPRECATED THRUST_HOST std::tuple<::std::remove_cv_t<::std::remove_reference_t<Dependencies>>...>
-#endif
+THRUST_DEPRECATED THRUST_HOST std::tuple<::internal::remove_cvref_t<Dependencies>...>
 extract_dependencies(thrust::detail::execute_with_dependencies<BaseSystem, Dependencies...>&& system)
 {
   return std::move(system).extract_dependencies();
 }
 template <template <typename> class BaseSystem, typename... Dependencies>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_DEPRECATED THRUST_HOST std::tuple<::cuda::std::remove_cvref_t<Dependencies>...>
-#else
-THRUST_DEPRECATED THRUST_HOST std::tuple<::std::remove_cv_t<::std::remove_reference_t<Dependencies>>...>
-#endif
+THRUST_DEPRECATED THRUST_HOST std::tuple<::internal::remove_cvref_t<Dependencies>...>
 extract_dependencies(thrust::detail::execute_with_dependencies<BaseSystem, Dependencies...>& system)
 {
   return std::move(system).extract_dependencies();
 }
 
 template <typename Allocator, template <typename> class BaseSystem, typename... Dependencies>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_DEPRECATED THRUST_HOST std::tuple<::cuda::std::remove_cvref_t<Dependencies>...>
-#else
-THRUST_DEPRECATED THRUST_HOST std::tuple<::std::remove_cv_t<::std::remove_reference_t<Dependencies>>...>
-#endif
-extract_dependencies(
+THRUST_DEPRECATED THRUST_HOST std::tuple<::internal::remove_cvref_t<Dependencies>...> extract_dependencies(
   thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>&& system)
 {
   return std::move(system).extract_dependencies();
 }
 template <typename Allocator, template <typename> class BaseSystem, typename... Dependencies>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_DEPRECATED THRUST_HOST std::tuple<::cuda::std::remove_cvref_t<Dependencies>...>
-#else
-THRUST_DEPRECATED THRUST_HOST std::tuple<::std::remove_cv_t<::std::remove_reference_t<Dependencies>>...>
-#endif
-extract_dependencies(
+THRUST_DEPRECATED THRUST_HOST std::tuple<::internal::remove_cvref_t<Dependencies>...> extract_dependencies(
   thrust::detail::execute_with_allocator_and_dependencies<Allocator, BaseSystem, Dependencies...>& system)
 {
   return std::move(system).extract_dependencies();

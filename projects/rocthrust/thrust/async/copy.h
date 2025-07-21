@@ -35,14 +35,9 @@
 
 #  include <thrust/detail/select_system.h>
 #  include <thrust/detail/static_assert.h>
+#  include <thrust/detail/type_traits.h>
 #  include <thrust/event.h>
 #  include <thrust/system/detail/adl/async/copy.h>
-
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#    include <cuda/std/type_traits>
-#  else
-#    include <type_traits>
-#  endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -105,28 +100,16 @@ struct copy_fn final
         // Synthesize a suitable new execution policy, because we don't want to
         // try and extract twice from the one we were passed.
         ,
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        typename ::cuda::std::remove_cvref_t<
+        typename ::internal::remove_cvref_t<
           decltype(thrust::detail::derived_cast(thrust::detail::strip_const(exec)))>::tag_type{},
-#  else
-        typename ::std::remove_cv_t<::std::remove_reference_t<
-          decltype(thrust::detail::derived_cast(thrust::detail::strip_const(exec)))>>::tag_type{},
-#  endif
         THRUST_FWD(first),
         THRUST_FWD(last),
         THRUST_FWD(output)))
 
         template <typename ForwardIt, typename Sentinel, typename OutputIt>
         THRUST_HOST static auto call(ForwardIt&& first, Sentinel&& last, OutputIt&& output) THRUST_RETURNS(copy_fn::call(
-          thrust::detail::select_system(
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-            typename thrust::iterator_system<::cuda::std::remove_cvref_t<ForwardIt>>::type{}),
-          thrust::detail::select_system(typename thrust::iterator_system<::cuda::std::remove_cvref_t<OutputIt>>::type{}),
-#  else
-            typename thrust::iterator_system<::std::remove_cv_t<::std::remove_reference_t<ForwardIt>>>::type{}),
-          thrust::detail::select_system(
-            typename thrust::iterator_system<::std::remove_cv_t<::std::remove_reference_t<OutputIt>>>::type{}),
-#  endif
+          thrust::detail::select_system(typename thrust::iterator_system<::internal::remove_cvref_t<ForwardIt>>::type{}),
+          thrust::detail::select_system(typename thrust::iterator_system<::internal::remove_cvref_t<OutputIt>>::type{}),
           THRUST_FWD(first),
           THRUST_FWD(last),
           THRUST_FWD(output)))

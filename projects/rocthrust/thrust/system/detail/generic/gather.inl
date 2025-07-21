@@ -52,11 +52,7 @@ THRUST_HOST_DEVICE OutputIterator gather(
     thrust::make_permutation_iterator(input_first, map_first),
     thrust::make_permutation_iterator(input_first, map_last),
     result,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    ::cuda::std::identity{});
-#else
     ::internal::identity{});
-#endif
 } // end gather()
 
 template <typename DerivedPolicy,
@@ -72,11 +68,7 @@ THRUST_HOST_DEVICE OutputIterator gather_if(
   RandomAccessIterator input_first,
   OutputIterator result)
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  return thrust::gather_if(exec, map_first, map_last, stencil, input_first, result, ::cuda::std::identity{});
-#else
   return thrust::gather_if(exec, map_first, map_last, stencil, input_first, result, ::internal::identity{});
-#endif
 } // end gather_if()
 
 template <typename DerivedPolicy,
@@ -100,11 +92,7 @@ THRUST_HOST_DEVICE OutputIterator gather_if(
     thrust::make_permutation_iterator(input_first, map_last),
     stencil,
     result,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    ::cuda::std::identity{},
-#else
     ::internal::identity{},
-#endif
     pred);
 } // end gather_if()
 

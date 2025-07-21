@@ -31,12 +31,6 @@
 #include <thrust/scan.h>
 #include <thrust/system/detail/generic/transform_scan.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/type_traits>
-#else
-#  include <type_traits>
-#endif
-
 THRUST_NAMESPACE_BEGIN
 namespace system
 {
@@ -61,11 +55,7 @@ THRUST_HOST_DEVICE OutputIterator transform_inclusive_scan(
   // Use the input iterator's value type per https://wg21.link/P0571
   using InputType  = typename thrust::iterator_value<InputIterator>::type;
   using ResultType = thrust::detail::invoke_result_t<UnaryFunction, InputType>;
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ValueType  = ::cuda::std::remove_cvref_t<ResultType>;
-#else
-  using ValueType  = ::std::remove_cv_t<::std::remove_reference_t<ResultType>>;
-#endif
+  using ValueType  = ::internal::remove_cvref_t<ResultType>;
 
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _first(first, unary_op);
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _last(last, unary_op);
@@ -90,11 +80,7 @@ THRUST_HOST_DEVICE OutputIterator transform_inclusive_scan(
 {
   using InputType  = typename thrust::iterator_value<InputIterator>::type;
   using ResultType = thrust::detail::invoke_result_t<UnaryFunction, InputType>;
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ValueType  = ::cuda::std::remove_cvref_t<ResultType>;
-#else
-  using ValueType  = ::std::remove_cv_t<::std::remove_reference_t<ResultType>>;
-#endif
+  using ValueType  = ::internal::remove_cvref_t<ResultType>;
 
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _first(first, unary_op);
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _last(last, unary_op);
@@ -118,11 +104,7 @@ THRUST_HOST_DEVICE OutputIterator transform_exclusive_scan(
   AssociativeOperator binary_op)
 {
   // Use the initial value type per https://wg21.link/P0571
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using ValueType = ::cuda::std::remove_cvref_t<InitialValueType>;
-#else
-  using ValueType = ::std::remove_cv_t<::std::remove_reference_t<InitialValueType>>;
-#endif
+  using ValueType = ::internal::remove_cvref_t<InitialValueType>;
 
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _first(first, unary_op);
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _last(last, unary_op);

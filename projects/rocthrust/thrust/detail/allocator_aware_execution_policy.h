@@ -27,13 +27,7 @@
 #endif // no system header
 #include <thrust/detail/alignment.h>
 #include <thrust/detail/execute_with_allocator_fwd.h>
-
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/type_traits>
-#else
-#  include <type_traits>
-#  include <utility>
-#endif
+#include <thrust/detail/type_traits.h>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -91,18 +85,10 @@ struct allocator_aware_execution_policy
   // into a value by copying for the purpose of storing it in execute_with_allocator
   THRUST_EXEC_CHECK_DISABLE
   template <typename Allocator,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-            typename ::cuda::std::enable_if<!::cuda::std::is_lvalue_reference<Allocator>::value>::type* = nullptr>
-#else
-            typename ::std::enable_if<!::std::is_lvalue_reference<Allocator>::value>::type* = nullptr>
-#endif
+            typename ::internal::enable_if<!::internal::is_lvalue_reference<Allocator>::value>::type* = nullptr>
   THRUST_HOST_DEVICE typename execute_with_allocator_type<Allocator>::type operator()(Allocator&& alloc) const
   {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    return typename execute_with_allocator_type<Allocator>::type(::cuda::std::move(alloc));
-#else
-    return typename execute_with_allocator_type<Allocator>::type(::std::move(alloc));
-#endif
+    return typename execute_with_allocator_type<Allocator>::type(::internal::move(alloc));
   }
 };
 

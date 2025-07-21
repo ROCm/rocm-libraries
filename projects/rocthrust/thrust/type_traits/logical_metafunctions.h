@@ -26,56 +26,29 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/__type_traits/conjunction.h>
-#  include <cuda/std/__type_traits/disjunction.h>
-#  include <cuda/std/__type_traits/negation.h>
-#else
-#  include <type_traits>
-#endif
+#include <thrust/detail/type_traits.h>
 
 THRUST_NAMESPACE_BEGIN
 
 #ifndef THRUST_DOXYGEN_INVOKED
-#  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-using ::cuda::std::conjunction;
-using ::cuda::std::conjunction_v;
-using ::cuda::std::disjunction;
-using ::cuda::std::disjunction_v;
-using ::cuda::std::negation;
-using ::cuda::std::negation_v;
-#  else
-using ::std::conjunction;
-using ::std::conjunction_v;
-using ::std::disjunction;
-using ::std::disjunction_v;
-using ::std::negation;
-using ::std::negation_v;
-#  endif
+using ::internal::conjunction;
+using ::internal::conjunction_v;
+using ::internal::disjunction;
+using ::internal::disjunction_v;
+using ::internal::negation;
+using ::internal::negation_v;
 #endif
 
 template <bool... Bs>
-using conjunction_value THRUST_DEPRECATED_BECAUSE("Use: cuda::std::bool_constant<(Bs && ...)>") =
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  conjunction<::cuda::std::bool_constant<Bs>...>;
-#else
-  conjunction<::std::bool_constant<Bs>...>;
-#endif
+using conjunction_value THRUST_DEPRECATED_BECAUSE("Use: internal::bool_constant<(Bs && ...)>") =
+  conjunction<::internal::bool_constant<Bs>...>;
 
 template <bool... Bs>
-using disjunction_value THRUST_DEPRECATED_BECAUSE("Use: cuda::std::bool_constant<(Bs || ...)>") =
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  disjunction<::cuda::std::bool_constant<Bs>...>;
-#else
-  disjunction<::std::bool_constant<Bs>...>;
-#endif
+using disjunction_value THRUST_DEPRECATED_BECAUSE("Use: internal::bool_constant<(Bs || ...)>") =
+  disjunction<::internal::bool_constant<Bs>...>;
 
 template <bool B>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-using negation_value THRUST_DEPRECATED_BECAUSE("Use cuda::std::bool_constant<!B>") = ::cuda::std::bool_constant<!B>;
-#else
-using negation_value THRUST_DEPRECATED_BECAUSE("Use cuda::std::bool_constant<!B>") = ::std::bool_constant<!B>;
-#endif
+using negation_value THRUST_DEPRECATED_BECAUSE("Use internal::bool_constant<!B>") = ::internal::bool_constant<!B>;
 
 THRUST_SUPPRESS_DEPRECATED_PUSH
 template <bool... Bs>

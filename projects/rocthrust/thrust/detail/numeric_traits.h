@@ -29,10 +29,8 @@
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  include <cuda/std/limits>
-#  include <cuda/std/type_traits>
 #else
 #  include <limits>
-#  include <type_traits>
 #endif
 
 // #include <stdint.h> // for intmax_t (not provided on MSVS 2005)
@@ -131,11 +129,7 @@ public:
 
 template <typename Number>
 struct numeric_difference
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    : eval_if<::cuda::std::is_integral<Number>::value, integer_difference<Number>, identity_<Number>>
-#else
-    : eval_if<::std::is_integral<Number>::value, integer_difference<Number>, identity_<Number>>
-#endif
+    : eval_if<::internal::is_integral<Number>::value, integer_difference<Number>, identity_<Number>>
 {}; // end numeric_difference
 
 template <typename Number>

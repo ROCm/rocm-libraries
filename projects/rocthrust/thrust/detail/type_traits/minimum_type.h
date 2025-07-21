@@ -28,10 +28,6 @@
 
 #include <thrust/detail/type_traits.h>
 
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits>
-#endif
-
 THRUST_NAMESPACE_BEGIN
 
 namespace detail
@@ -69,11 +65,7 @@ struct minimum_type_impl<T1, T2, true, true>
 template <typename T1, typename T2>
 struct primitive_minimum_type
     : minimum_type_detail::
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        minimum_type_impl<T1, T2, ::cuda::std::is_convertible<T1, T2>::value, ::cuda::std::is_convertible<T2, T1>::value>
-#else
-        minimum_type_impl<T1, T2, ::std::is_convertible<T1, T2>::value, ::std::is_convertible<T2, T1>::value>
-#endif
+        minimum_type_impl<T1, T2, ::internal::is_convertible<T1, T2>::value, ::internal::is_convertible<T2, T1>::value>
 {}; // end primitive_minimum_type
 
 // because some types are not convertible (even to themselves)

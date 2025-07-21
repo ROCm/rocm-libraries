@@ -31,12 +31,9 @@
 #endif // no system header
 #include <thrust/detail/function.h>
 #include <thrust/detail/temporary_array.h>
+#include <thrust/detail/type_traits.h>
 #include <thrust/pair.h>
 #include <thrust/system/detail/sequential/execution_policy.h>
-
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <utility>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace detail
@@ -63,15 +60,9 @@ THRUST_HOST_DEVICE void iter_swap(ForwardIterator1 iter1, ForwardIterator2 iter2
   // note: we cannot use swap(*iter1, *iter2) here, because the reference_type's could be proxy references, for which
   // swap() is not guaranteed to work
   using T = typename thrust::iterator_value<ForwardIterator1>::type;
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  T temp = ::cuda::std::move(*iter1);
-  *iter1 = ::cuda::std::move(*iter2);
-  *iter2 = ::cuda::std::move(temp);
-#else
-  T temp = ::std::move(*iter1);
-  *iter1 = ::std::move(*iter2);
-  *iter2 = ::std::move(temp);
-#endif
+  T temp  = ::internal::move(*iter1);
+  *iter1  = ::internal::move(*iter2);
+  *iter2  = ::internal::move(temp);
 }
 
 THRUST_EXEC_CHECK_DISABLE

@@ -38,9 +38,6 @@
 #include <thrust/iterator/iterator_traits.h>
 
 #include <stdexcept>
-#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
-#  include <type_traits>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -275,44 +272,28 @@ void vector_base<T, Alloc>::range_init(ForwardIterator first, ForwardIterator la
 
 template <typename T, typename Alloc>
 template <typename InputIterator,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-          ::cuda::std::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int>>
-#else
-          ::std::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int>>
-#endif
+          ::internal::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int>>
 vector_base<T, Alloc>::vector_base(InputIterator first, InputIterator last)
     : m_storage()
     , m_size(0)
 {
   // check the type of InputIterator: if it's an integral type,
   // we need to interpret this call as (size_type, value_type)
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using Integer = ::cuda::std::is_integral<InputIterator>;
-#else
-  using Integer = ::std::is_integral<InputIterator>;
-#endif
+  using Integer = ::internal::is_integral<InputIterator>;
 
   init_dispatch(first, last, Integer());
 } // end vector_base::vector_base()
 
 template <typename T, typename Alloc>
 template <typename InputIterator,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-          ::cuda::std::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int>>
-#else
-          ::std::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int>>
-#endif
+          ::internal::enable_if_t<::thrust::detail::is_cpp17_input_iterator<InputIterator>::value, int>>
 vector_base<T, Alloc>::vector_base(InputIterator first, InputIterator last, const Alloc& alloc)
     : m_storage(alloc)
     , m_size(0)
 {
   // check the type of InputIterator: if it's an integral type,
   // we need to interpret this call as (size_type, value_type)
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using Integer = ::cuda::std::is_integral<InputIterator>;
-#else
-  using Integer = ::std::is_integral<InputIterator>;
-#endif
+  using Integer = ::internal::is_integral<InputIterator>;
 
   init_dispatch(first, last, Integer());
 } // end vector_base::vector_base()
@@ -617,11 +598,7 @@ void vector_base<T, Alloc>::assign(InputIterator first, InputIterator last)
 {
   // we could have received assign(n, x), so disambiguate on the
   // type of InputIterator
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using integral = typename ::cuda::std::is_integral<InputIterator>;
-#else
-  using integral = typename ::std::is_integral<InputIterator>;
-#endif
+  using integral = typename ::internal::is_integral<InputIterator>;
 
   assign_dispatch(first, last, integral());
 } // end vector_base::assign()
@@ -659,11 +636,7 @@ void vector_base<T, Alloc>::insert(iterator position, InputIterator first, Input
 {
   // we could have received insert(position, n, x), so disambiguate on the
   // type of InputIterator
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using integral = typename ::cuda::std::is_integral<InputIterator>;
-#else
-  using integral = typename ::std::is_integral<InputIterator>;
-#endif
+  using integral = typename ::internal::is_integral<InputIterator>;
 
   insert_dispatch(position, first, last, integral());
 } // end vector_base::insert()
@@ -1167,11 +1140,7 @@ bool vector_equal(InputIterator1 first1, InputIterator1 last1, InputIterator2 fi
   using system2 = typename thrust::iterator_system<InputIterator2>::type;
 
   // dispatch on the sameness of the two systems
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  return vector_equal(first1, last1, first2, ::cuda::std::is_same<system1, system2>());
-#else
-  return vector_equal(first1, last1, first2, ::std::is_same<system1, system2>());
-#endif
+  return vector_equal(first1, last1, first2, ::internal::is_same<system1, system2>());
 }
 
 template <typename T1, typename Alloc1, typename T2, typename Alloc2>

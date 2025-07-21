@@ -32,6 +32,7 @@
 
 #include <thrust/detail/functional/actor.h>
 #include <thrust/detail/functional/address_stability.h>
+#include <thrust/detail/type_traits.h>
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  include <cuda/functional>
@@ -1712,17 +1713,10 @@ struct not_fun_t
 //! \see https://en.cppreference.com/w/cpp/utility/functional/not_fn
 // TODO(bgruber): alias to ::cuda::std::not_fn in C++17
 template <class F>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-THRUST_HOST_DEVICE auto not_fn(F&& f) -> detail::not_fun_t<::cuda::std::decay_t<F>>
+THRUST_HOST_DEVICE auto not_fn(F&& f) -> detail::not_fun_t<::internal::decay_t<F>>
 {
-  return detail::not_fun_t<::cuda::std::decay_t<F>>{std::forward<F>(f)};
+  return detail::not_fun_t<::internal::decay_t<F>>{std::forward<F>(f)};
 }
-#else
-THRUST_HOST_DEVICE auto not_fn(F&& f) -> detail::not_fun_t<::std::decay_t<F>>
-{
-  return detail::not_fun_t<::std::decay_t<F>>{std::forward<F>(f)};
-}
-#endif
 
 /*! \}
  */

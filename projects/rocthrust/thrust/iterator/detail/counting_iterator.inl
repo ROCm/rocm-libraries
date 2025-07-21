@@ -31,13 +31,6 @@
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_traits.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/cstddef>
-#else
-#  include <cstddef>
-#  include <type_traits>
-#endif
-
 THRUST_NAMESPACE_BEGIN
 
 // forward declaration of counting_iterator
@@ -50,11 +43,7 @@ namespace detail
 template <typename Incrementable, typename System, typename Traversal, typename Difference>
 struct counting_iterator_base
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using system = typename thrust::detail::eval_if<::cuda::std::is_same<System, use_default>::value,
-#else
-  using system = typename thrust::detail::eval_if<::std::is_same<System, use_default>::value,
-#endif
+  using system = typename thrust::detail::eval_if<::internal::is_same<System, use_default>::value,
                                                   thrust::detail::identity_<thrust::any_system_tag>,
                                                   thrust::detail::identity_<System>>::type;
 
@@ -69,17 +58,9 @@ struct counting_iterator_base
   using difference = typename thrust::detail::ia_dflt_help<
     Difference,
     thrust::detail::eval_if<thrust::detail::is_numeric<Incrementable>::value,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                            thrust::detail::eval_if<::cuda::std::is_integral<Incrementable>::value,
-#else
-                            thrust::detail::eval_if<::std::is_integral<Incrementable>::value,
-#endif
+                            thrust::detail::eval_if<::internal::is_integral<Incrementable>::value,
                                                     thrust::detail::numeric_difference<Incrementable>,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                                                    thrust::detail::identity_<::cuda::std::ptrdiff_t>>,
-#else
-                                                    thrust::detail::identity_<::std::ptrdiff_t>>,
-#endif
+                                                    thrust::detail::identity_<::internal::ptrdiff_t>>,
                             thrust::iterator_difference<Incrementable>>>::type;
 
   // our implementation departs from Boost's in that counting_iterator::dereference
@@ -128,13 +109,8 @@ template <typename Difference, typename Incrementable1, typename Incrementable2>
 struct counting_iterator_equal<Difference,
                                Incrementable1,
                                Incrementable2,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                               ::cuda::std::enable_if_t<::cuda::std::is_floating_point<Incrementable1>::value
-                                                        || ::cuda::std::is_floating_point<Incrementable2>::value>>
-#else
-                               ::std::enable_if_t<::std::is_floating_point<Incrementable1>::value
-                                                  || ::std::is_floating_point<Incrementable2>::value>>
-#endif
+                               ::internal::enable_if_t<::internal::is_floating_point<Incrementable1>::value
+                                                       || ::internal::is_floating_point<Incrementable2>::value>>
 {
   THRUST_HOST_DEVICE static bool equal(Incrementable1 x, Incrementable2 y)
   {

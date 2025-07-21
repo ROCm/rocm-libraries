@@ -30,14 +30,6 @@
 #include <thrust/detail/type_traits/is_metafunction_defined.h>
 #include <thrust/iterator/iterator_traits.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/cstddef>
-#  include <cuda/std/type_traits>
-#else
-#  include <cstddef>
-#  include <type_traits>
-#endif
-
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
@@ -66,11 +58,7 @@ struct pointer_difference
 template <typename T>
 struct pointer_difference<T*>
 {
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using type = ::cuda::std::ptrdiff_t;
-#else
-  using type = ::std::ptrdiff_t;
-#endif
+  using type = ::internal::ptrdiff_t;
 };
 
 template <typename Ptr, typename T>
@@ -100,7 +88,7 @@ template <template <typename, typename, typename, typename...> class Ptr,
           typename T>
 struct rebind_pointer<Ptr<OldT, Tag, Ref<OldT, RefTail...>, PtrTail...>, T>
 {
-  //  static_assert(::cuda::std::is_same<OldT, Tag>::value, "0");
+  //  static_assert(::internal::is_same<OldT, Tag>::value, "0");
   using type = Ptr<T, Tag, Ref<T, RefTail...>, PtrTail...>;
 };
 
@@ -118,7 +106,7 @@ template <template <typename, typename, typename, typename...> class Ptr,
           typename T>
 struct rebind_pointer<Ptr<OldT, Tag, Ref<OldT, RefTail...>, DerivedPtr<OldT, DerivedPtrTail...>>, T>
 {
-  //  static_assert(::cuda::std::is_same<OldT, Tag>::value, "1");
+  //  static_assert(::internal::is_same<OldT, Tag>::value, "1");
   using type = Ptr<T, Tag, Ref<T, RefTail...>, DerivedPtr<T, DerivedPtrTail...>>;
 };
 
@@ -128,18 +116,10 @@ template <template <typename, typename, typename, typename...> class Ptr,
           typename Tag,
           typename... PtrTail,
           typename T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct rebind_pointer<Ptr<OldT, Tag, typename ::cuda::std::add_lvalue_reference<OldT>::type, PtrTail...>, T>
-#else
-struct rebind_pointer<Ptr<OldT, Tag, typename ::std::add_lvalue_reference<OldT>::type, PtrTail...>, T>
-#endif
+struct rebind_pointer<Ptr<OldT, Tag, typename ::internal::add_lvalue_reference<OldT>::type, PtrTail...>, T>
 {
-  //  static_assert(::cuda::std::is_same<OldT, Tag>::value, "2");
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using type = Ptr<T, Tag, typename ::cuda::std::add_lvalue_reference<T>::type, PtrTail...>;
-#else
-  using type = Ptr<T, Tag, typename ::std::add_lvalue_reference<T>::type, PtrTail...>;
-#endif
+  //  static_assert(::internal::is_same<OldT, Tag>::value, "2");
+  using type = Ptr<T, Tag, typename ::internal::add_lvalue_reference<T>::type, PtrTail...>;
 };
 
 // Rebind `thrust::pointer`-like things with native reference types and templated
@@ -152,19 +132,11 @@ template <template <typename, typename, typename, typename...> class Ptr,
           typename... DerivedPtrTail,
           typename T>
 struct rebind_pointer<
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  Ptr<OldT, Tag, typename ::cuda::std::add_lvalue_reference<OldT>::type, DerivedPtr<OldT, DerivedPtrTail...>>,
-#else
-  Ptr<OldT, Tag, typename ::std::add_lvalue_reference<OldT>::type, DerivedPtr<OldT, DerivedPtrTail...>>,
-#endif
+  Ptr<OldT, Tag, typename ::internal::add_lvalue_reference<OldT>::type, DerivedPtr<OldT, DerivedPtrTail...>>,
   T>
 {
-  //  static_assert(::cuda::std::is_same<OldT, Tag>::value, "3");
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-  using type = Ptr<T, Tag, typename ::cuda::std::add_lvalue_reference<T>::type, DerivedPtr<T, DerivedPtrTail...>>;
-#else
-  using type = Ptr<T, Tag, typename ::std::add_lvalue_reference<T>::type, DerivedPtr<T, DerivedPtrTail...>>;
-#endif
+  //  static_assert(::internal::is_same<OldT, Tag>::value, "3");
+  using type = Ptr<T, Tag, typename ::internal::add_lvalue_reference<T>::type, DerivedPtr<T, DerivedPtrTail...>>;
 };
 
 namespace pointer_traits_detail
@@ -181,11 +153,7 @@ struct pointer_raw_pointer_impl<T*>
 };
 
 template <typename Ptr>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-struct pointer_raw_pointer_impl<Ptr, ::cuda::std::void_t<typename Ptr::raw_pointer>>
-#else
-struct pointer_raw_pointer_impl<Ptr, ::std::void_t<typename Ptr::raw_pointer>>
-#endif
+struct pointer_raw_pointer_impl<Ptr, ::internal::void_t<typename Ptr::raw_pointer>>
 {
   using type = typename Ptr::raw_pointer;
 };
@@ -218,17 +186,9 @@ struct capture_address
 // metafunction to compute the type of pointer_to's parameter below
 template <typename T>
 struct pointer_to_param
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    : thrust::detail::eval_if<::cuda::std::is_void<T>::value,
-#else
-    : thrust::detail::eval_if<::std::is_void<T>::value,
-#endif
+    : thrust::detail::eval_if<::internal::is_void<T>::value,
                               thrust::detail::identity_<capture_address<T>>,
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-                              ::cuda::std::add_lvalue_reference<T>>
-#else
-                              ::std::add_lvalue_reference<T>>
-#endif
+                              ::internal::add_lvalue_reference<T>>
 {};
 
 } // namespace pointer_traits_detail
@@ -353,31 +313,19 @@ struct pointer_traits<const void*>
 
 template <typename FromPtr, typename ToPtr>
 struct is_pointer_system_convertible
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    : ::cuda::std::is_convertible<typename iterator_system<FromPtr>::type, typename iterator_system<ToPtr>::type>
-#else
-    : ::std::is_convertible<typename iterator_system<FromPtr>::type, typename iterator_system<ToPtr>::type>
-#endif
+    : ::internal::is_convertible<typename iterator_system<FromPtr>::type, typename iterator_system<ToPtr>::type>
 {};
 
 template <typename FromPtr, typename ToPtr>
 struct is_pointer_convertible
     : ::internal::_And<
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-        ::cuda::std::is_convertible<typename pointer_element<FromPtr>::type*, typename pointer_element<ToPtr>::type*>,
-#else
-        ::std::is_convertible<typename pointer_element<FromPtr>::type*, typename pointer_element<ToPtr>::type*>,
-#endif
+        ::internal::is_convertible<typename pointer_element<FromPtr>::type*, typename pointer_element<ToPtr>::type*>,
         is_pointer_system_convertible<FromPtr, ToPtr>>
 {};
 
 template <typename FromPtr, typename ToPtr>
 struct is_void_pointer_system_convertible
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    : ::internal::_And<::cuda::std::is_same<typename pointer_element<FromPtr>::type, void>,
-#else
-    : ::internal::_And<::std::is_same<typename pointer_element<FromPtr>::type, void>,
-#endif
+    : ::internal::_And<::internal::is_same<typename pointer_element<FromPtr>::type, void>,
                        is_pointer_system_convertible<FromPtr, ToPtr>>
 {};
 
@@ -404,20 +352,12 @@ struct lazy_is_void_pointer_system_convertible
 
 template <typename FromPtr, typename ToPtr, typename T = void>
 struct enable_if_pointer_is_convertible
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    : ::cuda::std::enable_if<lazy_is_pointer_convertible<FromPtr, ToPtr>::type::value, T>
-#else
-    : ::std::enable_if<lazy_is_pointer_convertible<FromPtr, ToPtr>::type::value, T>
-#endif
+    : ::internal::enable_if<lazy_is_pointer_convertible<FromPtr, ToPtr>::type::value, T>
 {};
 
 template <typename FromPtr, typename ToPtr, typename T = void>
 struct enable_if_void_pointer_is_system_convertible
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    : ::cuda::std::enable_if<lazy_is_void_pointer_system_convertible<FromPtr, ToPtr>::type::value, T>
-#else
-    : ::std::enable_if<lazy_is_void_pointer_system_convertible<FromPtr, ToPtr>::type::value, T>
-#endif
+    : ::internal::enable_if<lazy_is_void_pointer_system_convertible<FromPtr, ToPtr>::type::value, T>
 {};
 
 } // namespace detail

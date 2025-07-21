@@ -30,28 +30,14 @@
 #  include <version>
 #endif // THRUST_HAS_INCLUDE(<version>)
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/type_traits>
-#else
-#  include <type_traits>
-#endif
+#include <thrust/detail/type_traits.h>
 
 THRUST_NAMESPACE_BEGIN
 
 template <typename T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-using remove_cvref THRUST_DEPRECATED_BECAUSE("Use cuda::std::remove_cvref") = ::cuda::std::remove_cvref<T>;
-#else
-using remove_cvref
-  THRUST_DEPRECATED_BECAUSE("Use cuda::std::remove_cvref") = ::std::remove_cv<::std::remove_reference_t<T>>;
-#endif
+using remove_cvref THRUST_DEPRECATED_BECAUSE("Use internal::remove_cvref") = ::internal::remove_cvref<T>;
 
 template <typename T>
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-using remove_cvref_t THRUST_DEPRECATED_BECAUSE("Use cuda::std::remove_cvref_t") = ::cuda::std::remove_cvref_t<T>;
-#else
-using remove_cvref_t
-  THRUST_DEPRECATED_BECAUSE("Use cuda::std::remove_cvref_t") = ::std::remove_cv_t<::std::remove_reference_t<T>>;
-#endif
+using remove_cvref_t THRUST_DEPRECATED_BECAUSE("Use internal::remove_cvref_t") = ::internal::remove_cvref_t<T>;
 
 THRUST_NAMESPACE_END
