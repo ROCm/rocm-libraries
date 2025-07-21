@@ -708,7 +708,7 @@ namespace rocRoller
                 auto const& typeInfo = DataTypeInfo::Get(ci.valueType);
                 auto        numBits  = DataTypeInfo::Get(typeInfo.segmentVariableType).elementBits;
 
-                if(false && (numBits == 16 || numBits == 8 || numBits == 6 || numBits == 4))
+                if(numBits == 16 || numBits == 8 || numBits == 6 || numBits == 4)
                 {
                     auto [elementBlockNumber, elementBlockIndex]
                         = getElementBlockValues(*m_graph, target, isTransposed);
