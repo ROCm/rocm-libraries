@@ -267,6 +267,8 @@ namespace rocRoller
 
                 AssertFatal(resultVariableType(expr) == resultVariableType(v2),
                             ShowValue(expr),
+                            ShowValue(v0),
+                            ShowValue(v1),
                             ShowValue(v2));
 
                 return v2;

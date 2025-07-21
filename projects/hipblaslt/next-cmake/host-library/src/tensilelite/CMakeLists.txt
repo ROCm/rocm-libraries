@@ -21,9 +21,23 @@
 #
 # ########################################################################
 
+if(HIPBLASLT_ENABLE_LLVM)
+  add_subdirectory(llvm)
+endif()
+
+if(HIPBLASLT_ENABLE_MSGPACK)
+  add_subdirectory(msgpack)
+endif()
+
+if(HIPBLASLT_ENABLE_HIP)
+  add_subdirectory(hip)
+endif()
+
+add_subdirectory(analytical)
+
 set(_CMAKE_CURRENT_SOURCE_DIR "${TEMP_TENSILE_HOST_SOURCE_DIR}/source")
 
-target_sources(hipblaslt
+target_sources(tensilelite-host
     PRIVATE
         "${_CMAKE_CURRENT_SOURCE_DIR}/Activation.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/AMDGPU.cpp"
@@ -45,17 +59,3 @@ target_sources(hipblaslt
         "${_CMAKE_CURRENT_SOURCE_DIR}/Tensile.cpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/Utils.cpp"
 )
-
-if(HIPBLASLT_ENABLE_LLVM)
-  add_subdirectory(llvm)
-endif()
-
-if(HIPBLASLT_ENABLE_MSGPACK)
-  add_subdirectory(msgpack)
-endif()
-
-if(HIPBLASLT_ENABLE_HIP)
-  add_subdirectory(hip)
-endif()
-
-add_subdirectory(analytical)

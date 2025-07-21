@@ -13,7 +13,7 @@ def runCI =
 
     //use docker files from this repo
     prj.repoDockerfile = true
-    prj.defaults.ccache = true
+    prj.defaults.ccache = false
 
     def uniqueTag = params?."Unique Docker image tag" ? org.apache.commons.lang.RandomStringUtils.random(9, true, true) : ""
 
