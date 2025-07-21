@@ -44,8 +44,8 @@ namespace detail
 
 template<class Config, unsigned int ActiveChannels, class Counter>
 ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.block_size) void
-    init_histogram_kernel(fixed_array<Counter*, ActiveChannels>     histogram,
-                          fixed_array<unsigned int, ActiveChannels> bins)
+    init_histogram_kernel(fixed_array<Counter*, ActiveChannels>           histogram,
+                          const fixed_array<unsigned int, ActiveChannels> bins)
 {
     static constexpr histogram_config_params params = device_params<Config>();
 
@@ -59,15 +59,15 @@ template<class Config,
          class Counter,
          class SampleToBinOp>
 ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.block_size) void
-    histogram_shared_kernel(SampleIterator                             samples,
-                            unsigned int                               columns,
-                            unsigned int                               rows,
-                            unsigned int                               row_stride,
-                            unsigned int                               rows_per_block,
-                            unsigned int                               shared_histograms,
-                            fixed_array<Counter*, ActiveChannels>      histogram,
-                            fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
-                            fixed_array<unsigned int, ActiveChannels>  bins)
+    histogram_shared_kernel(SampleIterator                                   samples,
+                            unsigned int                                     columns,
+                            unsigned int                                     rows,
+                            unsigned int                                     row_stride,
+                            unsigned int                                     rows_per_block,
+                            unsigned int                                     shared_histograms,
+                            fixed_array<Counter*, ActiveChannels>            histogram,
+                            const fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
+                            const fixed_array<unsigned int, ActiveChannels>  bins)
 {
     static constexpr histogram_config_params params = device_params<Config>();
 
@@ -100,12 +100,12 @@ template<class Config,
          class Counter,
          class SampleToBinOp>
 ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().histogram_config.block_size) void
-    histogram_global_kernel(SampleIterator                             samples,
-                            unsigned int                               columns,
-                            unsigned int                               row_stride,
-                            fixed_array<Counter*, ActiveChannels>      histogram,
-                            fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
-                            fixed_array<unsigned int, ActiveChannels>  bins_bits)
+    histogram_global_kernel(SampleIterator                                   samples,
+                            unsigned int                                     columns,
+                            unsigned int                                     row_stride,
+                            fixed_array<Counter*, ActiveChannels>            histogram,
+                            const fixed_array<SampleToBinOp, ActiveChannels> sample_to_bin_op,
+                            const fixed_array<unsigned int, ActiveChannels>  bins_bits)
 {
     static constexpr histogram_config_params params = device_params<Config>();
 

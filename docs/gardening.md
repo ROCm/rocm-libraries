@@ -52,6 +52,7 @@ Week | North America | Europe / India / APAC
 ---- | ------- | ---------
 Jun 30, 2025 | ellosel | marbre
 July 7, 2025 | geomin12 | kkyang
+July 14, 2025 | jhawk-commits | N/A
 
 It is the responsibility of the current gardeners to update the table when the gardeners rotate.
 
