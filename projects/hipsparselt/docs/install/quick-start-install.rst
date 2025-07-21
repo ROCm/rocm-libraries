@@ -8,7 +8,8 @@
 Quick start hipSPARSELt installation guide
 ****************************************************************
 
-The `hipSPARSELt GitHub <https://github.com/ROCm/hipSPARSELt>`_ root directory contains the
+The root directory of the `hipSPARSELt project <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparselt>`_
+within the `rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries>`_ contains the
 helper bash script ``install.sh`` for building and installing hipSPARSELt on Ubuntu with a single command. The
 script only accepts a few options and hardcodes configuration that can be specified by invoking
 CMake directly. However, it's a great way to get started quickly and can serve as an example of how to build

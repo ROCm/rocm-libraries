@@ -54,9 +54,10 @@ template<int Length, typename T, typename ReductionOp, typename Prefix = std::mo
 ROCPRIM_DEVICE ROCPRIM_INLINE
 auto thread_reduce(T* input, ReductionOp reduction_op, Prefix prefix = {})
 {
-    T retval = input[0];
+    constexpr bool no_prefix = std::is_same_v<Prefix, std::monostate>;
 
-    if constexpr(std::is_same_v<Prefix, std::monostate>)
+    T retval;
+    if constexpr(no_prefix)
     {
         retval = input[0];
     }
@@ -66,7 +67,7 @@ auto thread_reduce(T* input, ReductionOp reduction_op, Prefix prefix = {})
     }
 
     ROCPRIM_UNROLL
-    for(int i = 1; i < Length; ++i)
+    for(int i = 0 + no_prefix; i < Length; ++i)
     {
         retval = reduction_op(retval, input[i]);
     }

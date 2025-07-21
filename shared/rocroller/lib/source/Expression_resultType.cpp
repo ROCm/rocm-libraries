@@ -149,6 +149,9 @@ namespace rocRoller
                 else if constexpr(std::same_as<T, MagicShiftAndSign>)
                     return {argVal.regType, DataType::UInt32};
 
+                if constexpr(std::same_as<T, ToScalar>)
+                    return {Register::Type::Scalar, argVal.varType};
+
                 return argVal;
             }
 

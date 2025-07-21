@@ -3,7 +3,7 @@
 
 find_package(BLAS REQUIRED)
 
-find_package(CLI11)
+find_package(CLI11 QUIET)
 if(NOT CLI11_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
         FetchContent_Declare(
@@ -28,6 +28,7 @@ target_sources(rocroller-gemm
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/BenchmarkSolution.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/DataParallelGEMMSolution.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/GEMMParameters.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/client/GEMMParameters_serialization.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/GEMMSolution.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/GraphInspector.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/GraphInspector_impl.hpp"

@@ -1529,3 +1529,13 @@ void testing_aux_plan_assign(const Arguments& arg)
 
     CHECK_HIP_ERROR(hipStreamDestroy(stream));
 }
+
+template <typename Ti,
+          typename To,
+          typename Tc,
+          typename TBias>
+void testing_spmm_logging(const Arguments& arg)
+{
+    Logger logger(arg.logging);
+    testing_spmm<Ti, To, Tc, TBias>(arg);
+}

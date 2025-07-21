@@ -116,6 +116,16 @@ namespace rocRoller
          */
         bool enableFullDivision = false;
 
+        /**
+         * Skip generation of permlane instructions when loading scale data.
+         * This is experimental and will cause the validation to fail, but will
+         * show better performance.
+         */
+        bool scaleSkipPermlane = false;
+
+        /**
+         * Which method to use to crash the kernel if an assertion fails.
+         */
         AssertOpKind assertOpKind = AssertOpKind::NoOp;
 
         std::string toString() const;
