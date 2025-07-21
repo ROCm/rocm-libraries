@@ -91,6 +91,101 @@ using RocprimTransformIteratorTestsParams
 
 TYPED_TEST_SUITE(RocprimTransformIteratorTests, RocprimTransformIteratorTestsParams);
 
+TYPED_TEST(RocprimTransformIteratorTests, Basic)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using input_type     = typename TestFixture::input_type;
+    using value_type     = typename TestFixture::value_type;
+    using unary_function = typename TestFixture::unary_function;
+    using iterator_type =
+        typename rocprim::transform_iterator<input_type*, unary_function, value_type>;
+    using difference_type = typename iterator_type::difference_type;
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        std::vector<input_type> input
+            = test_utils::get_random_data_wrapped<input_type>(10, 1, 200, seed_value);
+
+        unary_function transform;
+
+        auto begin = rocprim::make_transform_iterator<input_type*, unary_function>(input.data(),
+                                                                                   transform);
+        auto mid   = begin + 5;
+        auto end   = begin + 10;
+
+        // Pre-increment
+        auto it = begin;
+        ++it;
+        ASSERT_EQ(*it, transform(input[1]));
+
+        // Post-increment
+        auto post = it++;
+        ASSERT_EQ(*post, transform(input[1]));
+        ASSERT_EQ(*it, transform(input[2]));
+
+        // Pre-decrement
+        it = it + 2;
+        --it;
+        ASSERT_EQ(*it, transform(input[3]));
+
+        // Post-decrement
+        post = it--;
+        ASSERT_EQ(*post, transform(input[3]));
+        ASSERT_EQ(*it, transform(input[2]));
+
+        // Pre-decrement via -=
+        it -= 2;
+        ASSERT_EQ(*it, transform(input[0]));
+
+        // operator+
+        auto plus_it = begin + 3;
+        ASSERT_EQ(*plus_it, transform(input[3]));
+        auto plus_it_rev = 3 + begin;
+        ASSERT_EQ(*plus_it_rev, transform(input[3]));
+
+        // operator-
+        auto minus_it = end - 3;
+        ASSERT_EQ(*minus_it, transform(input[7]));
+
+        // compound assignment +=
+        auto a = begin;
+        a += 4;
+        ASSERT_EQ(*a, transform(input[4]));
+
+        // compound assignment -=
+        a -= 2;
+        ASSERT_EQ(*a, transform(input[2]));
+
+        // Subtraction of iterators (distance)
+        ASSERT_EQ(end - begin, difference_type(10));
+        ASSERT_EQ(mid - begin, difference_type(5));
+        ASSERT_EQ(begin - mid, difference_type(-5));
+
+        // Indexing operator[]
+        for(int i = 0; i < 10; i++)
+        {
+            ASSERT_EQ(begin[i], transform(input[i]));
+        }
+
+        // Comparisons
+        ASSERT_TRUE(begin == begin);
+        ASSERT_TRUE(begin != end);
+        ASSERT_TRUE(begin < end);
+        ASSERT_TRUE(end > begin);
+        ASSERT_TRUE(begin <= begin);
+        ASSERT_TRUE(begin <= end);
+        ASSERT_TRUE(end >= begin);
+        ASSERT_TRUE(end >= end);
+    }
+}
+
 TYPED_TEST(RocprimTransformIteratorTests, TransformReduce)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -129,35 +224,20 @@ TYPED_TEST(RocprimTransformIteratorTests, TransformReduce)
         value_type expected = std::accumulate(x, x + size, value_type(0), reduce_op);
 
         auto d_iter = iterator_type(d_input.get(), transform);
-        // temp storage
-        size_t temp_storage_size_bytes;
-        // Get size of d_temp_storage
-        HIP_CHECK(rocprim::reduce(nullptr,
-                                  temp_storage_size_bytes,
-                                  d_iter,
-                                  d_output.get(),
-                                  value_type(0),
-                                  input.size(),
-                                  reduce_op,
-                                  stream));
 
-        // temp_storage_size_bytes must be >0
-        ASSERT_GT(temp_storage_size_bytes, 0);
-
-        // allocate temporary storage
-        common::device_ptr<void> d_temp_storage(temp_storage_size_bytes);
-        // Run
-        HIP_CHECK(rocprim::reduce(d_temp_storage.get(),
-                                  temp_storage_size_bytes,
-                                  d_iter,
-                                  d_output.get(),
-                                  value_type(0),
-                                  input.size(),
-                                  reduce_op,
-                                  stream,
-                                  TestFixture::debug_synchronous));
-        HIP_CHECK(hipGetLastError());
-        HIP_CHECK(hipDeviceSynchronize());
+        test_utils::test_kernel_wrapper(
+            [&](void* temp_storage, size_t& storage_bytes)
+            {
+                return rocprim::reduce(temp_storage,
+                                       storage_bytes,
+                                       d_iter,
+                                       d_output.get(),
+                                       value_type(0),
+                                       input.size(),
+                                       reduce_op,
+                                       stream);
+            },
+            stream);
 
         output = d_output.load();
 

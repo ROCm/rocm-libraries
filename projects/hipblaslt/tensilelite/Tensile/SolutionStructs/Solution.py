@@ -582,18 +582,19 @@ class Solution(collections.abc.Mapping):
   # determine can we use DirectToVgpr
   @staticmethod
   def isDirectToVgprDoable(state, tc, printRejectionReason: bool, isaInfoMap: Dict[str, IsaInfo]):
-    MIindex = 0 if tc == 'A' else 1
     numBytes = state["ProblemType"]["DataType"].numBytes()
     numBytesGR = state["ProblemType"]["DataType%s"%tc].numBytes()
+    isSwizzle = state["ProblemType"]["SwizzleTensor%s"%tc]
+
     # With MatrixInstruction only
     if not state["EnableMatrixInstruction"] :
       reject(state, printRejectionReason, "DirectToVgpr is for MatrixInstruction only")
       return False
 
     # disable the following combinations for initial implementation
-    # TODO: enable them
-    if state["LocalSplitU"] != 1 and (not state["ProblemType"]["TLU%c"%tc]):
-      reject(state, printRejectionReason, "DirectToVgpr + LSU + TLU=False has not been enabled yet(tentative)")
+    # TODO: enable them (for pure DTV)
+    if (state["LocalSplitU"] != 1) and (not state["ProblemType"]["TLU%c"%tc]) and (not isSwizzle):
+      reject(state, printRejectionReason, "Non-Swizzled DirectToVgpr + LSU + TLU=False has not been enabled yet(tentative)")
       return False
 
     if state["DirectToVgprA"] and state["DirectToVgprB"]:
@@ -947,8 +948,6 @@ class Solution(collections.abc.Mapping):
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU
       state["InternalSupportParams"]["SupportUserGSU"] = False # Disable UserGSU for Stream-K
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm
-      if state["ProblemType"]["DataType"].isDouble():
-        reject(state, printRejectionReason, "Type {} for DataType not yet supported with StreamK".format(state["ProblemType"]["DataType"].toChar()))
       if not state["EnableMatrixInstruction"]:
         reject(state, printRejectionReason, "Stream-K requires MatrixInstruction")
       if isaInfoMap[isa].asmCaps["HasWMMA"]:
@@ -1739,7 +1738,7 @@ class Solution(collections.abc.Mapping):
           optGRVW = 16 // datatype.numBytes()
         return optGRVW
 
-      def calSwizzleK(state, tc):
+      def calSwizzlePackK(state, tc):
         return 16 // state[f"MIInputPerThread{tc}"] // state["ProblemType"][f"DataType{tc}"].numBytes()
 
       genGRVWA = False
@@ -1755,7 +1754,7 @@ class Solution(collections.abc.Mapping):
               reject(state, printRejectionReason, "GRVWA=-2 is set for skinny MT")
           elif state["GlobalReadVectorWidthA"] == -1:
             if state["ProblemType"]["SwizzleTensorA"]:
-              state["GlobalReadVectorWidthA"] = state["MIInputPerThreadA"] * calSwizzleK(state, "A")
+              state["GlobalReadVectorWidthA"] = state["MIInputPerThreadA"] * calSwizzlePackK(state, "A")
             else:
               optGRVW = calcOptGRVW(state["LocalReadVectorWidth"], state["UnrollMajorLDSA"], state["ProblemType"]["DataTypeA"])
               curGRVW = 1
@@ -1793,7 +1792,7 @@ class Solution(collections.abc.Mapping):
               reject(state, printRejectionReason, "GRVWB=-2 is set for skinny MT")
           elif state["GlobalReadVectorWidthB"] == -1:
             if state["ProblemType"]["SwizzleTensorB"]:
-              state["GlobalReadVectorWidthB"] = state["MIInputPerThreadB"] * calSwizzleK(state, "B")
+              state["GlobalReadVectorWidthB"] = state["MIInputPerThreadB"] * calSwizzlePackK(state, "B")
             else:
               optGRVW = calcOptGRVW(state["LocalReadVectorWidth"], state["UnrollMajorLDSB"], state["ProblemType"]["DataTypeB"])
               curGRVW = 1
@@ -1826,7 +1825,7 @@ class Solution(collections.abc.Mapping):
             reject(state, printRejectionReason, f"Tensor {tc} swizzling supports MI only")
           # Print rejection reason instead of force set
           # 16 means bytes of buffer_load_dwordx4
-          SwizzlePackK = calSwizzleK(state, tc)
+          SwizzlePackK = calSwizzlePackK(state, tc)
           if state[f"GlobalReadVectorWidth{tc}"] != state[f"MIInputPerThread{tc}"] * SwizzlePackK:
             GRVW_TC = state[f"GlobalReadVectorWidth{tc}"]
             MIInPerThread = state[f"MIInputPerThread{tc}"]
@@ -2031,6 +2030,7 @@ class Solution(collections.abc.Mapping):
         totalVectorsCoalescedA = totalElementsCoalescedA // GlobalReadVectorWidthA
         totalVectorsCoalescedB = totalElementsCoalescedB // GlobalReadVectorWidthB
 
+        extraComment = ""
         if validDepthU:
           if not state["ProblemType"]["TLUA"]:
             if depthUA < state["GlobalReadVectorWidthA"]:
@@ -2044,6 +2044,20 @@ class Solution(collections.abc.Mapping):
             if not state["ProblemType"]["TLUMetadata"]:
               if depthUM < state["GlobalReadVectorWidthMetadata"]:
                 validDepthU = False
+
+          # swizzle
+          if state["LocalSplitU"] > 1:
+            if state["ProblemType"]["SwizzleTensorA"]:
+              SwizzlePackK = calSwizzlePackK(state, "A")
+              if depthUA < state["MatrixInstK"] * SwizzlePackK * state["LocalSplitU"]:
+                validDepthU = False
+                extraComment = ": DepthU(%u) < Min-DU for swizzleA + LSU(%u)"%(depthUA, state["LocalSplitU"])
+
+            if state["ProblemType"]["SwizzleTensorB"]:
+              SwizzlePackK = calSwizzlePackK(state, "B")
+              if depthUB < state["MatrixInstK"] * SwizzlePackK * state["LocalSplitU"]:
+                validDepthU = False
+                extraComment = ": DepthU(%u) < Min-DU for swizzleB + LSU(%u)"%(depthUB, state["LocalSplitU"])
         # this depthU is valid, done unless user wants to double (for TN)
         if validDepthU:
           state["DepthU"] = depthU
@@ -2051,7 +2065,7 @@ class Solution(collections.abc.Mapping):
 
         # this depthU not valid
         else:
-          reject(state, printRejectionReason, "No valid DepthU found")
+          reject(state, printRejectionReason, "No valid DepthU found%s"%(extraComment))
           state["ValidDepthU"] = False
           break
       ########################################

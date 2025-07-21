@@ -272,6 +272,7 @@ scaleType_A: None
 scale_B: None
 scaleType_B: None
 scaleBlockSize: 0
+scaleSkipPermlane: false
 loadScaleLDS_A: false
 loadScaleLDS_B: false
 swizzleScale: false
@@ -324,6 +325,7 @@ scaleType_A: None
 scale_B: None
 scaleType_B: None
 scaleBlockSize: 0
+scaleSkipPermlane: false
 loadScaleLDS_A: false
 loadScaleLDS_B: false
 swizzleScale: false
@@ -377,6 +379,7 @@ scaleType_A: None
 scale_B: None
 scaleType_B: None
 scaleBlockSize: 0
+scaleSkipPermlane: false
 loadScaleLDS_A: false
 loadScaleLDS_B: false
 swizzleScale: false

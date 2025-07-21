@@ -37,10 +37,13 @@ This table provides the current status of the migration of specific ROCm librari
 
 
 ## Tentative migration schedule
+> [!NOTE]  
+> This is temporarily paused as we roll forward NPI branches.
+
 
 | Component           | Tentative Date |
 |---------------------|----------------|
-| `hipSparse`         | 7/16           |
+| `hipSparse`         | TBR - see note |
 | `hipBLAS`           | 7/21           |
 | `Origami`           | 7/23           |
 | `composable_kernel` | 7/25           |

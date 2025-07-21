@@ -144,6 +144,8 @@ class GEMMSolution:
     scaleType_A: str = "None"
     scaleType_B: str = "None"
 
+    scaleSkipPermlane: bool = False
+
     # If scale_A or scale_B is Separate, scaleBlockSize
     # needs to be set to a valid block size (e.g. 32)
     scaleBlockSize: int = -1
