@@ -33,9 +33,11 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CommandSolution.hpp>
-#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/CommandArgument_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
+#include <rocRoller/Serialization/Enum.hpp>
+#include <rocRoller/Serialization/GPUArchitecture.hpp>
+#include <rocRoller/Serialization/YAML.hpp>
 #include <rocRoller/Utilities/HipUtils.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
@@ -44,14 +46,15 @@
 #include <common/Utilities.hpp>
 #include <common/mxDataGen.hpp>
 
-#include "client/DataParallelGEMMSolution.hpp"
-#include "client/GEMMParameters.hpp"
-#include "client/GEMMParameters_serialization.hpp"
-#include "client/StreamKGEMMSolution.hpp"
+#include "include/DataParallelGEMMSolution.hpp"
+#include "include/GEMMParameters.hpp"
+#include "include/StreamKGEMMSolution.hpp"
 
 #include <CLI/CLI.hpp>
 
 using namespace rocRoller;
+
+const std::string clientName = "GEMMv00";
 
 enum ReturnCodes : int
 {
@@ -59,6 +62,207 @@ enum ReturnCodes : int
     GenerateFailure            = 1,
     CorrectnessFailure         = 2,
     SolutionNotSupportedOnArch = 3
+};
+
+template <typename IO>
+struct rocRoller::Serialization::
+    MappingTraits<Client::GEMMClient::Result, IO, rocRoller::Serialization::EmptyContext>
+{
+    static const bool flow = false;
+    using iot              = IOTraits<IO>;
+
+    static void mapping(IO& io, Client::GEMMClient::Result& result)
+    {
+        iot::mapRequired(io, "client", clientName);
+        iot::mapRequired(io, "device", result.benchmarkResults.runParams.device);
+        iot::mapRequired(io, "M", result.problemParams.m);
+        iot::mapRequired(io, "N", result.problemParams.n);
+        iot::mapRequired(io, "K", result.problemParams.k);
+        iot::mapRequired(io, "alpha", result.problemParams.alpha);
+        iot::mapRequired(io, "beta", result.problemParams.beta);
+        iot::mapRequired(io, "trans_A", Client::GEMMClient::toString(result.solutionParams.transA));
+        iot::mapRequired(io, "trans_B", Client::GEMMClient::toString(result.solutionParams.transB));
+
+        iot::mapRequired(io, "type_A", result.solutionParams.typeA);
+        iot::mapRequired(io, "type_B", result.solutionParams.typeB);
+        iot::mapRequired(io, "type_C", result.solutionParams.typeC);
+        iot::mapRequired(io, "type_D", result.solutionParams.typeD);
+        iot::mapRequired(io, "type_acc", result.solutionParams.typeAcc);
+
+        iot::mapRequired(io, "scale_A", result.solutionParams.scaleA);
+        iot::mapRequired(io, "scaleType_A", result.solutionParams.scaleTypeA);
+        iot::mapRequired(io, "scale_B", result.solutionParams.scaleB);
+        iot::mapRequired(io, "scaleType_B", result.solutionParams.scaleTypeB);
+        iot::mapRequired(io, "scaleBlockSize", result.solutionParams.scaleBlockSize);
+        iot::mapRequired(io, "loadLDSScale_A", result.solutionParams.loadLDSScaleA);
+        iot::mapRequired(io, "loadLDSScale_B", result.solutionParams.loadLDSScaleB);
+        iot::mapRequired(io, "swizzleScale", result.solutionParams.swizzleScale);
+        iot::mapRequired(io, "prefetchScale", result.solutionParams.prefetchScale);
+
+        iot::mapRequired(io, "mac_m", result.solutionParams.macM);
+        iot::mapRequired(io, "mac_n", result.solutionParams.macN);
+        iot::mapRequired(io, "mac_k", result.solutionParams.macK);
+        iot::mapRequired(io, "wave_m", result.solutionParams.waveM);
+        iot::mapRequired(io, "wave_n", result.solutionParams.waveN);
+        iot::mapRequired(io, "wave_k", result.solutionParams.waveK);
+        iot::mapRequired(io, "wave_b", result.solutionParams.waveB);
+        iot::mapRequired(io, "workgroup_size_x", result.solutionParams.workgroupSizeX);
+        iot::mapRequired(io, "workgroup_size_y", result.solutionParams.workgroupSizeY);
+        iot::mapRequired(io, "workgroupMapping", result.solutionParams.workgroupMapping);
+        iot::mapRequired(io, "workgroupRemapXCC", result.solutionParams.workgroupRemapXCC);
+        iot::mapRequired(
+            io, "workgroupRemapXCCValue", result.solutionParams.workgroupRemapXCCValue);
+        iot::mapRequired(io, "unroll_x", result.solutionParams.unrollX);
+        iot::mapRequired(io, "unroll_y", result.solutionParams.unrollY);
+        iot::mapRequired(io, "loadLDS_A", result.solutionParams.loadLDSA);
+        iot::mapRequired(io, "loadLDS_B", result.solutionParams.loadLDSB);
+        iot::mapRequired(io, "storeLDS_D", result.solutionParams.storeLDSD);
+        iot::mapRequired(io, "direct2LDS_A", result.solutionParams.direct2LDSA);
+        iot::mapRequired(io, "direct2LDS_B", result.solutionParams.direct2LDSB);
+        iot::mapRequired(io, "prefetch", result.solutionParams.prefetch);
+        iot::mapRequired(io, "prefetchInFlight", result.solutionParams.prefetchInFlight);
+        iot::mapRequired(io, "prefetchLDSFactor", result.solutionParams.prefetchLDSFactor);
+        iot::mapRequired(io, "prefetchMixMemOps", result.solutionParams.prefetchMixMemOps);
+        iot::mapRequired(io, "betaInFma", result.solutionParams.betaInFma);
+        iot::mapRequired(io, "scheduler", result.solutionParams.scheduler);
+
+        iot::mapRequired(io, "streamK", result.solutionParams.streamK);
+        iot::mapRequired(io, "numWGs", result.benchmarkResults.runParams.numWGs);
+        iot::mapRequired(io, "streamKTwoTile", result.solutionParams.streamKTwoTile);
+
+        iot::mapRequired(io, "numWarmUp", result.benchmarkResults.runParams.numWarmUp);
+        iot::mapRequired(io, "numOuter", result.benchmarkResults.runParams.numOuter);
+        iot::mapRequired(io, "numInner", result.benchmarkResults.runParams.numInner);
+        iot::mapRequired(io, "rotatingBuffSize", result.benchmarkResults.runParams.rotatingBuffSize);
+
+        iot::mapRequired(io, "kernelGenerate", result.benchmarkResults.kernelGenerate);
+        iot::mapRequired(io, "kernelAssemble", result.benchmarkResults.kernelAssemble);
+        iot::mapRequired(io, "kernelExecute", result.benchmarkResults.kernelExecute);
+
+        iot::mapRequired(io, "checked", result.benchmarkResults.checked);
+        iot::mapRequired(io, "correct", result.benchmarkResults.correct);
+        iot::mapRequired(io, "rnorm", result.benchmarkResults.rnorm);
+    }
+
+    static void mapping(IO& io, Client::GEMMClient::Result& result, EmptyContext& ctx)
+    {
+        mapping(io, result);
+    }
+};
+
+template <typename IO>
+struct rocRoller::Serialization::MappingTraits<Client::GEMMClient::SolutionParameters,
+                                               IO,
+                                               rocRoller::Serialization::EmptyContext>
+{
+    static const bool flow = false;
+    using iot              = IOTraits<IO>;
+
+    static void mapping(IO& io, Client::GEMMClient::SolutionParameters& params)
+    {
+        iot::mapRequired(io, "architecture", params.architecture);
+
+        iot::mapRequired(io, "mac_m", params.macM);
+        iot::mapRequired(io, "mac_n", params.macN);
+        iot::mapRequired(io, "mac_k", params.macK);
+        iot::mapRequired(io, "wave_m", params.waveM);
+        iot::mapRequired(io, "wave_n", params.waveN);
+        iot::mapRequired(io, "wave_k", params.waveK);
+        iot::mapRequired(io, "wave_b", params.waveB);
+        iot::mapRequired(io, "workgroup_size_x", params.workgroupSizeX);
+        iot::mapRequired(io, "workgroup_size_y", params.workgroupSizeY);
+        iot::mapRequired(io, "workgroupMapping", params.workgroupMapping);
+        iot::mapRequired(io, "workgroupRemapXCC", params.workgroupRemapXCC);
+        iot::mapRequired(io, "workgroupRemapXCCValue", params.workgroupRemapXCCValue);
+        iot::mapRequired(io, "unroll_x", params.unrollX);
+        iot::mapRequired(io, "unroll_y", params.unrollY);
+        iot::mapRequired(io, "loadLDS_A", params.loadLDSA);
+        iot::mapRequired(io, "loadLDS_B", params.loadLDSB);
+        iot::mapRequired(io, "storeLDS_D", params.storeLDSD);
+        iot::mapRequired(io, "direct2LDS_A", params.direct2LDSA);
+        iot::mapRequired(io, "direct2LDS_B", params.direct2LDSB);
+        iot::mapRequired(io, "prefetch", params.prefetch);
+        iot::mapRequired(io, "prefetchInFlight", params.prefetchInFlight);
+        iot::mapRequired(io, "prefetchLDSFactor", params.prefetchLDSFactor);
+        iot::mapRequired(io, "prefetchMixMemOps", params.prefetchMixMemOps);
+        iot::mapRequired(io, "betaInFma", params.betaInFma);
+        iot::mapRequired(io, "scheduler", params.scheduler);
+        iot::mapRequired(io, "matchMemoryAccess", params.matchMemoryAccess);
+
+        iot::mapRequired(io, "trans_A", params.transA);
+        iot::mapRequired(io, "trans_B", params.transB);
+
+        iot::mapRequired(io, "type_A", params.typeA);
+        iot::mapRequired(io, "type_B", params.typeB);
+        iot::mapRequired(io, "type_C", params.typeC);
+        iot::mapRequired(io, "type_D", params.typeD);
+        iot::mapRequired(io, "type_acc", params.typeAcc);
+
+        iot::mapRequired(io, "scale_A", params.scaleA);
+        iot::mapRequired(io, "scaleType_A", params.scaleTypeA);
+        iot::mapRequired(io, "scale_B", params.scaleB);
+        iot::mapRequired(io, "scaleType_B", params.scaleTypeB);
+        iot::mapRequired(io, "scaleBlockSize", params.scaleBlockSize);
+        iot::mapRequired(io, "loadScaleLDS_A", params.loadLDSScaleA);
+        iot::mapRequired(io, "loadScaleLDS_B", params.loadLDSScaleB);
+        iot::mapRequired(io, "swizzleScale", params.swizzleScale);
+        iot::mapRequired(io, "prefetchScale", params.prefetchScale);
+
+        iot::mapRequired(io, "streamK", params.streamK);
+        iot::mapRequired(io, "streamKTwoTile", params.streamKTwoTile);
+
+        iot::mapOptional(io, "version", params.version);
+    }
+
+    static void mapping(IO& io, Client::GEMMClient::SolutionParameters& params, EmptyContext& ctx)
+    {
+        mapping(io, params);
+    }
+};
+
+template <typename T>
+struct RotatingBuffer {
+    T* buffer = nullptr;
+    size_t matrix_size = 0;
+    size_t offset_elements = 0;
+    int max_rotations = 1;
+    int rotation_index = 0;
+
+    RotatingBuffer(size_t matrix_elements, size_t rotating_buf_size, int max_rots = 16)
+        : matrix_size(matrix_elements), max_rotations(max_rots) {
+        size_t matrix_bytes = matrix_elements * sizeof(T);
+
+        if (matrix_bytes < rotating_buf_size) {
+            offset_elements = (rotating_buf_size - matrix_bytes) / sizeof(T);
+        } else {
+            offset_elements = 0;
+            max_rotations = 1;
+        }
+
+        size_t total_elements = matrix_size + offset_elements * max_rotations;
+        buffer = new T[total_elements];
+
+        for (size_t i = 0; i < total_elements; ++i)
+            buffer[i] = static_cast<T>(rand()) / RAND_MAX;
+    }
+
+    ~RotatingBuffer() {
+        delete[] buffer;
+    }
+
+    void get_next() {
+        size_t offset = rotation_index * offset_elements;
+        T* ptr = buffer + offset;
+        rotation_index = (rotation_index + 1) % max_rotations;
+    }
+
+    void reset() {
+        rotation_index = 0;
+    }
+
+    T* raw_data() {
+        return buffer;
+    }
 };
 
 namespace rocRoller::Client::GEMMClient
@@ -94,11 +298,11 @@ namespace rocRoller::Client::GEMMClient
                                    problemParams.k,
                                    problemParams.alpha,
                                    problemParams.beta,
-                                   problemParams.types.transA == TransposeType::T,
-                                   problemParams.types.transB == TransposeType::T,
-                                   problemParams.types.scaleBlockSize,
-                                   problemParams.types.scaleTypeA,
-                                   problemParams.types.scaleTypeB);
+                                   problemParams.transA == TransposeType::T,
+                                   problemParams.transB == TransposeType::T,
+                                   problemParams.scaleBlockSize,
+                                   problemParams.scaleTypeA,
+                                   problemParams.scaleTypeB);
         }
         else
         {
@@ -111,8 +315,8 @@ namespace rocRoller::Client::GEMMClient
                   problemParams.k,
                   problemParams.alpha,
                   problemParams.beta,
-                  problemParams.types.transA == TransposeType::T,
-                  problemParams.types.transB == TransposeType::T);
+                  problemParams.transA == TransposeType::T,
+                  problemParams.transB == TransposeType::T);
         }
 
         auto tol = gemmAcceptableError<A, B, D>(
@@ -141,19 +345,19 @@ namespace rocRoller::Client::GEMMClient
     {
         using namespace rocRoller::Client;
         using namespace rocRoller::Client::GEMMClient;
-
+       
         // Host Data
         std::cout << "Generating input data..." << std::endl;
 
-        TensorDescriptor descA(fromString<DataType>(problemParams.types.typeA),
+        TensorDescriptor descA(fromString<DataType>(problemParams.typeA),
                                {static_cast<unsigned long>(problemParams.m),
                                 static_cast<unsigned long>(problemParams.k)},
-                               problemParams.types.transA == TransposeType::T ? "T" : "N");
-        TensorDescriptor descB(fromString<DataType>(problemParams.types.typeB),
+                               problemParams.transA == TransposeType::T ? "T" : "N");
+        TensorDescriptor descB(fromString<DataType>(problemParams.typeB),
                                {static_cast<unsigned long>(problemParams.k),
                                 static_cast<unsigned long>(problemParams.n)},
-                               problemParams.types.transB == TransposeType::T ? "T" : "N");
-        TensorDescriptor descC(fromString<DataType>(problemParams.types.typeC),
+                               problemParams.transB == TransposeType::T ? "T" : "N");
+        TensorDescriptor descC(fromString<DataType>(problemParams.typeC),
                                {static_cast<unsigned long>(problemParams.m),
                                 static_cast<unsigned long>(problemParams.n)},
                                "N");
@@ -166,11 +370,19 @@ namespace rocRoller::Client::GEMMClient
         std::vector<D>           hostD(problemParams.m * problemParams.n, D{});
         std::vector<uint8_t>     hostScaleA, hostScaleB;
 
+        constexpr size_t MAT_SIZE_A = problemParams.m * problemParams.k;
+        constexpr size_t MAT_SIZE_B = problemParams.k; * problemParams.n;
+        constexpr size_t MAT_SIZE_C = problemParams.m; * problemParams.n;
+
+        RotatingBuffer<A> A_buf(MAT_SIZE_A, runParams.rotatingBuffSize);
+        RotatingBuffer<B> B_buf(MAT_SIZE_B, runParams.rotatingBuffSize);
+        RotatingBuffer<C> C_buf(MAT_SIZE_C, runParams.rotatingBuffSize);
+
         auto seed = 31415u;
-        if(problemParams.types.scaleA == Operations::ScaleMode::Separate
-           || problemParams.types.scaleB == Operations::ScaleMode::Separate)
+        if(problemParams.scaleA == Operations::ScaleMode::Separate
+           || problemParams.scaleB == Operations::ScaleMode::Separate)
         {
-            auto scaleBlockSize = problemParams.types.scaleBlockSize;
+            auto scaleBlockSize = problemParams.scaleBlockSize;
             AssertFatal(scaleBlockSize > 0, "scaleBlockSize must be set to scale A or B.");
             AssertFatal(arch.isSupportedScaleBlockSize(scaleBlockSize),
                         fmt::format("Architecture {} does not support block scaling (size: {}).",
@@ -181,46 +393,46 @@ namespace rocRoller::Client::GEMMClient
                                     problemParams.k,
                                     scaleBlockSize));
             DGenInput(seed,
-                      hostA,
+                      A_buf,
                       descA,
-                      hostB,
+                      B_buf,
                       descB,
-                      hostC,
+                      C_buf,
                       descC,
                       hostScaleA,
                       hostScaleB,
-                      problemParams.types.scaleA == Operations::ScaleMode::Separate,
-                      problemParams.types.scaleB == Operations::ScaleMode::Separate,
+                      problemParams.scaleA == Operations::ScaleMode::Separate,
+                      problemParams.scaleB == Operations::ScaleMode::Separate,
                       -1.f,
                       1.f,
                       static_cast<uint>(scaleBlockSize));
         }
         else
         {
-            DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
+            DGenInput(seed, A_buf, descA, B_buf, descB, C_buf, descC);
         }
 
-        auto deviceA = make_shared_device(hostA);
-        auto deviceB = make_shared_device(hostB);
-        auto deviceC = make_shared_device(hostC);
+        auto deviceA = make_shared_device(A_buf);
+        auto deviceB = make_shared_device(B_buf);
+        auto deviceC = make_shared_device(C_buf);
         auto deviceD = make_shared_device<D>(problemParams.m * problemParams.n, D{});
 
         std::shared_ptr<uint8_t> deviceScaleA, deviceScaleB;
-        AssertFatal(problemParams.types.scaleA == Operations::ScaleMode::None
-                        || problemParams.types.scaleA == Operations::ScaleMode::SingleScale
-                        || problemParams.types.scaleA == Operations::ScaleMode::Separate,
+        AssertFatal(problemParams.scaleA == Operations::ScaleMode::None
+                        || problemParams.scaleA == Operations::ScaleMode::SingleScale
+                        || problemParams.scaleA == Operations::ScaleMode::Separate,
                     "Scale mode not supported!",
-                    ShowValue(problemParams.types.scaleA));
-        AssertFatal(problemParams.types.scaleB == Operations::ScaleMode::None
-                        || problemParams.types.scaleB == Operations::ScaleMode::SingleScale
-                        || problemParams.types.scaleB == Operations::ScaleMode::Separate,
+                    ShowValue(problemParams.scaleA));
+        AssertFatal(problemParams.scaleB == Operations::ScaleMode::None
+                        || problemParams.scaleB == Operations::ScaleMode::SingleScale
+                        || problemParams.scaleB == Operations::ScaleMode::Separate,
                     "Scale mode not supported!",
-                    ShowValue(problemParams.types.scaleB));
-        if(problemParams.types.scaleA == Operations::ScaleMode::Separate)
+                    ShowValue(problemParams.scaleB));
+        if(problemParams.scaleA == Operations::ScaleMode::Separate)
         {
             deviceScaleA = make_shared_device(hostScaleA);
         }
-        if(problemParams.types.scaleB == Operations::ScaleMode::Separate)
+        if(problemParams.scaleB == Operations::ScaleMode::Separate)
         {
             deviceScaleB = make_shared_device(hostScaleB);
         }
@@ -237,42 +449,40 @@ namespace rocRoller::Client::GEMMClient
         commandArgs.setArgument(cTag, ArgumentType::Value, (C*)deviceC.get());
         commandArgs.setArgument(dTag, ArgumentType::Value, (D*)deviceD.get());
 
-        if(problemParams.types.scaleA == Operations::ScaleMode::Separate)
+        if(problemParams.scaleA == Operations::ScaleMode::Separate)
         {
             auto dataTypeA  = TypeInfo<A>::Var.dataType;
             auto descAScale = TensorDescriptor(
                 dataTypeA,
                 {static_cast<size_t>(problemParams.m),
-                 static_cast<size_t>(problemParams.k / problemParams.types.scaleBlockSize)},
-                problemParams.types.transA == TransposeType::T ? "T" : "N");
+                 static_cast<size_t>(problemParams.k / problemParams.scaleBlockSize)},
+                problemParams.transA == TransposeType::T ? "T" : "N");
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
             setCommandTensorArg(commandArgs, aScaleTag.value(), descAScale, deviceScaleA.get());
         }
-        else if(problemParams.types.scaleA == Operations::ScaleMode::SingleScale)
+        else if(problemParams.scaleA == Operations::ScaleMode::SingleScale)
         {
-            uint8_t scaleValue
-                = floatToScale(problemParams.types.scaleTypeA, problemParams.scaleValueA);
+            uint8_t scaleValue = floatToScale(problemParams.scaleTypeA, problemParams.scaleValueA);
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
             commandArgs.setArgument(aScaleTag.value(), ArgumentType::Value, scaleValue);
 
             hostScaleA = {scaleValue};
         }
 
-        if(problemParams.types.scaleB == Operations::ScaleMode::Separate)
+        if(problemParams.scaleB == Operations::ScaleMode::Separate)
         {
             auto dataTypeB  = TypeInfo<A>::Var.dataType;
             auto descBScale = TensorDescriptor(
                 dataTypeB,
-                {static_cast<size_t>(problemParams.k / problemParams.types.scaleBlockSize),
+                {static_cast<size_t>(problemParams.k / problemParams.scaleBlockSize),
                  static_cast<size_t>(problemParams.n)},
-                problemParams.types.transB == TransposeType::T ? "T" : "N");
+                problemParams.transB == TransposeType::T ? "T" : "N");
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
             setCommandTensorArg(commandArgs, bScaleTag.value(), descBScale, deviceScaleB.get());
         }
-        else if(problemParams.types.scaleB == Operations::ScaleMode::SingleScale)
+        else if(problemParams.scaleB == Operations::ScaleMode::SingleScale)
         {
-            uint8_t scaleValue
-                = floatToScale(problemParams.types.scaleTypeB, problemParams.scaleValueB);
+            uint8_t scaleValue = floatToScale(problemParams.scaleTypeB, problemParams.scaleValueB);
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
             commandArgs.setArgument(bScaleTag.value(), ArgumentType::Value, scaleValue);
 
@@ -321,6 +531,12 @@ namespace rocRoller::Client::GEMMClient
             HIP_TIMER(t_kernel, "GEMM", runParams.numInner);
             for(int inner = 0; inner < runParams.numInner; ++inner)
             {
+                A_buf.get_next();
+                commandArgs.setArgument(aTag, ArgumentType::Value, (A*) A_buf.get());
+                B_buf.get_next();
+                commandArgs.setArgument(aTag, ArgumentType::Value, (B*) B_buf.get());
+                C_buf.get_next();
+                commandArgs.setArgument(aTag, ArgumentType::Value, (C*) C_buf.get());
                 commandKernel->launchKernel(runtimeArgs, t_kernel, inner);
             }
             HIP_SYNC(t_kernel);
@@ -554,6 +770,25 @@ namespace rocRoller::Client::GEMMClient
         GPUArchitectureTarget target;
     };
 
+    struct TypeParameters
+    {
+        std::string typeA   = "float";
+        std::string typeB   = "float";
+        std::string typeC   = "float";
+        std::string typeD   = "float";
+        std::string typeAcc = "float";
+
+        Client::GEMMClient::TransposeType transA = Client::GEMMClient::TransposeType::N;
+        Client::GEMMClient::TransposeType transB = Client::GEMMClient::TransposeType::N;
+
+        Operations::ScaleMode scaleA     = Operations::ScaleMode::None;
+        DataType              scaleTypeA = DataType::None;
+        Operations::ScaleMode scaleB     = Operations::ScaleMode::None;
+        DataType              scaleTypeB = DataType::None;
+
+        int scaleBlockSize = -1;
+    };
+
     struct IOParameters
     {
         bool        doSaveAsm, doSaveCO;
@@ -629,10 +864,7 @@ namespace rocRoller::Client::GEMMClient
             Settings::getInstance()->set(Settings::Scheduler, schedulerValue);
         }
 
-        auto context
-            = Context::ForTarget(arch,
-                                 solution.generateKernelName(),
-                                 {{.scaleSkipPermlane = solution.types.scaleSkipPermlane}});
+        auto context = Context::ForTarget(arch, solution.generateKernelName());
 
         bool willRunOnGPU = doValidate || doBenchmark;
         if(willRunOnGPU)
@@ -785,17 +1017,11 @@ namespace rocRoller::Client::GEMMClient
                 result.benchmarkResults = GEMMUniform(
                     command, commandKernel, gemm, problem, run, arch, types.typeA, types.typeC);
             }
-            else if((problem.types.typeA != problem.types.typeB) && isF8F6F4(problem.types.typeA)
-                    && isF8F6F4(problem.types.typeB))
+            else if((problem.typeA != problem.typeB) && isF8F6F4(problem.typeA)
+                    && isF8F6F4(problem.typeB))
             {
-                result.benchmarkResults = GEMMMixed<float, float>(command,
-                                                                  commandKernel,
-                                                                  gemm,
-                                                                  problem,
-                                                                  run,
-                                                                  arch,
-                                                                  problem.types.typeA,
-                                                                  problem.types.typeB);
+                result.benchmarkResults = GEMMMixed<float, float>(
+                    command, commandKernel, gemm, problem, run, arch, problem.typeA, problem.typeB);
             }
             else
             {
@@ -826,26 +1052,37 @@ namespace rocRoller::Client::GEMMClient
 
     void overwriteTypesFromSolution(TypeParameters& types, SolutionParameters const& solution)
     {
-        if((types.typeA != solution.types.typeA) || (types.typeB != solution.types.typeB)
-           || (types.typeC != solution.types.typeC) || (types.typeD != solution.types.typeD)
-           || (types.typeAcc != solution.types.typeAcc))
+        if((types.typeA != solution.typeA) || (types.typeB != solution.typeB)
+           || (types.typeC != solution.typeC) || (types.typeD != solution.typeD)
+           || (types.typeAcc != solution.typeAcc))
         {
             std::cout << "NOTE: Types have been superceded by solution." << std::endl;
         }
-        if((types.transA != solution.types.transA) || (types.transB != solution.types.transB))
+        if((types.transA != solution.transA) || (types.transB != solution.transB))
         {
             std::cout << "NOTE: Transposes have been superceded by solution." << std::endl;
         }
-        if((types.scaleA != solution.types.scaleA) || (types.scaleA != solution.types.scaleB))
+        if((types.scaleA != solution.scaleA) || (types.scaleA != solution.scaleB))
         {
             std::cout << "NOTE: MX Scalings have been superceded by solution." << std::endl;
         }
-        if(types.scaleBlockSize != solution.types.scaleBlockSize)
+        if(types.scaleBlockSize != solution.scaleBlockSize)
         {
             std::cout << "NOTE: MX scale block size has been superceded by solution." << std::endl;
         }
 
-        types = solution.types;
+        types.typeA          = solution.typeA;
+        types.typeB          = solution.typeB;
+        types.typeC          = solution.typeC;
+        types.typeD          = solution.typeD;
+        types.typeAcc        = solution.typeAcc;
+        types.transA         = solution.transA;
+        types.transB         = solution.transB;
+        types.scaleA         = solution.scaleA;
+        types.scaleTypeA     = solution.scaleTypeA;
+        types.scaleB         = solution.scaleB;
+        types.scaleTypeB     = solution.scaleTypeB;
+        types.scaleBlockSize = solution.scaleBlockSize;
     }
 }
 
@@ -983,12 +1220,12 @@ int main(int argc, const char* argv[])
         .workgroupRemapXCC      = false,
         .workgroupRemapXCCValue = -1,
 
-        .types = {.scaleA     = Operations::ScaleMode::None,
-                  .scaleTypeA = DataType::None,
-                  .scaleB     = Operations::ScaleMode::None,
-                  .scaleTypeB = DataType::None,
+        .scaleA     = Operations::ScaleMode::None,
+        .scaleTypeA = DataType::None,
+        .scaleB     = Operations::ScaleMode::None,
+        .scaleTypeB = DataType::None,
 
-                  .scaleBlockSize = -1},
+        .scaleBlockSize = -1,
 
         .loadLDSScaleA = false,
         .loadLDSScaleB = false,
@@ -1044,6 +1281,7 @@ int main(int argc, const char* argv[])
         .check     = true,
         .visualize = false,
         .numWGs    = 0,
+        .rotatingBuffSize = 32e6,
     };
 
     rocRoller::Client::GEMMClient::IOParameters io{
@@ -1144,9 +1382,6 @@ int main(int argc, const char* argv[])
     app.add_option("--scaleBlockSize",
                    types.scaleBlockSize,
                    "Set MX scaling block size for A and B. (default: 32)");
-    app.add_option("--scaleSkipPermlane",
-                   types.scaleSkipPermlane,
-                   "Experimental: Skip Permlane instructions for scale data for performance.");
 
     //
     // Kernel options
@@ -1226,6 +1461,7 @@ int main(int argc, const char* argv[])
                    run.numWGs,
                    "Number of workgroups to use with StreamK algorithm.  Defaults to number of WGs "
                    "present on local device.");
+    app.add_option("--rotating_buff_size", run.rotatingBuffSize, "Rotating Buffer Size.");
 
     //
     // Client params and shortcuts
@@ -1396,15 +1632,38 @@ int main(int argc, const char* argv[])
         AssertFatal(arch.HasCapability(GPUCapability::HasBlockScaling32),
                     fmt::format("Architecture {} does not support block scaling.",
                                 arch.target().toString()));
-        types.scaleBlockSize         = arch.GetCapability(GPUCapability::DefaultScaleBlockSize);
-        problem.types.scaleBlockSize = types.scaleBlockSize;
+        types.scaleBlockSize   = arch.GetCapability(GPUCapability::DefaultScaleBlockSize);
+        problem.scaleBlockSize = types.scaleBlockSize;
     }
 
     AssertFatal((types.typeAcc == "float") || (types.typeAcc == "half")
                 || (types.typeAcc == "bf16"));
 
-    problem.types  = types;
-    solution.types = types;
+    problem.typeA          = types.typeA;
+    problem.typeB          = types.typeB;
+    problem.typeC          = types.typeC;
+    problem.typeD          = types.typeD;
+    problem.typeAcc        = types.typeAcc;
+    problem.transA         = types.transA;
+    problem.transB         = types.transB;
+    problem.scaleA         = types.scaleA;
+    problem.scaleTypeA     = types.scaleTypeA;
+    problem.scaleB         = types.scaleB;
+    problem.scaleTypeB     = types.scaleTypeB;
+    problem.scaleBlockSize = types.scaleBlockSize;
+
+    solution.typeA          = types.typeA;
+    solution.typeB          = types.typeB;
+    solution.typeC          = types.typeC;
+    solution.typeD          = types.typeD;
+    solution.typeAcc        = types.typeAcc;
+    solution.transA         = types.transA;
+    solution.transB         = types.transB;
+    solution.scaleA         = types.scaleA;
+    solution.scaleTypeA     = types.scaleTypeA;
+    solution.scaleB         = types.scaleB;
+    solution.scaleTypeB     = types.scaleTypeB;
+    solution.scaleBlockSize = types.scaleBlockSize;
 
     // TODO: Reevaluate the relationship between problem and solution params.
     problem.workgroupMapping = solution.workgroupMapping;
@@ -1417,8 +1676,8 @@ int main(int argc, const char* argv[])
     // Set default MI sizes
     if(arch.HasCapability(GPUCapability::HasMFMA))
     {
-        if(solution.types.typeA == "float" && solution.types.typeB == "float"
-           && solution.types.typeC == "float" && solution.types.typeD == "float")
+        if(problem.typeA == "float" && problem.typeB == "float" && problem.typeC == "float"
+           && problem.typeD == "float")
         {
             if(solution.waveM == -1)
                 solution.waveM = 32;
@@ -1429,7 +1688,7 @@ int main(int argc, const char* argv[])
             if(solution.waveB == -1)
                 solution.waveB = 1;
         }
-        else if(solution.types.typeA == "half" && solution.types.typeB == "half")
+        else if(solution.typeA == "half" && solution.typeB == "half")
         {
             if(solution.waveM == -1)
                 solution.waveM = 32;
@@ -1440,7 +1699,7 @@ int main(int argc, const char* argv[])
             if(solution.waveB == -1)
                 solution.waveB = 1;
         }
-        else if(solution.types.typeA == "bf16" && solution.types.typeB == "bf16")
+        else if(solution.typeA == "bf16" && solution.typeB == "bf16")
         {
             if(solution.waveM == -1)
                 solution.waveM = 16;
@@ -1451,8 +1710,8 @@ int main(int argc, const char* argv[])
             if(solution.waveB == -1)
                 solution.waveB = 1;
         }
-        else if((solution.types.typeA == "fp8" && solution.types.typeB == "fp8")
-                || (solution.types.typeA == "bf8" && solution.types.typeB == "bf8"))
+        else if((solution.typeA == "fp8" && solution.typeB == "fp8")
+                || (solution.typeA == "bf8" && solution.typeB == "bf8"))
         {
             if(solution.waveM == -1)
                 solution.waveM = 16;
@@ -1468,12 +1727,12 @@ int main(int argc, const char* argv[])
     {
         if(arch.target().isRDNA4GPU())
         {
-            if((solution.types.typeA == "half" && solution.types.typeB == "half")
-               || (solution.types.typeA == "bf16" && solution.types.typeB == "bf16")
-               || (solution.types.typeA == "fp8" && solution.types.typeB == "fp8")
-               || (solution.types.typeA == "bf8" && solution.types.typeB == "bf8")
-               || (solution.types.typeA == "bf8" && solution.types.typeB == "fp8")
-               || (solution.types.typeA == "fp8" && solution.types.typeB == "bf8"))
+            if((solution.typeA == "half" && solution.typeB == "half")
+               || (solution.typeA == "bf16" && solution.typeB == "bf16")
+               || (solution.typeA == "fp8" && solution.typeB == "fp8")
+               || (solution.typeA == "bf8" && solution.typeB == "bf8")
+               || (solution.typeA == "bf8" && solution.typeB == "fp8")
+               || (solution.typeA == "fp8" && solution.typeB == "bf8"))
             {
                 if(solution.waveM == -1)
                     solution.waveM = 16;
@@ -1489,24 +1748,24 @@ int main(int argc, const char* argv[])
                 // Override default settings for the `example` and `generate` subcommands.
                 if(example->parsed() || generate->parsed())
                 {
-                    solution.types.typeA = "half";
-                    solution.types.typeB = "half";
-                    solution.types.typeC = "half";
-                    solution.types.typeD = "half";
-                    solution.waveM       = 16;
-                    solution.waveN       = 16;
-                    solution.waveK       = 16;
-                    solution.waveB       = 1;
+                    solution.typeA = "half";
+                    solution.typeB = "half";
+                    solution.typeC = "half";
+                    solution.typeD = "half";
+                    solution.waveM = 16;
+                    solution.waveN = 16;
+                    solution.waveK = 16;
+                    solution.waveB = 1;
                 }
                 else
                 {
                     Throw<FatalError>("Unsupported MI on: ",
                                       arch.target().toString(),
-                                      ShowValue(solution.types.typeA),
-                                      ShowValue(solution.types.typeB),
-                                      ShowValue(solution.types.typeC),
-                                      ShowValue(solution.types.typeD),
-                                      ShowValue(solution.types.typeAcc));
+                                      ShowValue(problem.typeA),
+                                      ShowValue(problem.typeB),
+                                      ShowValue(problem.typeC),
+                                      ShowValue(problem.typeD),
+                                      ShowValue(problem.typeAcc));
                 }
             }
             // TODO Support prefetch on gfx12
@@ -1530,10 +1789,10 @@ int main(int argc, const char* argv[])
         if(solution.prefetchLDSFactor != 0)
             solution.prefetchMixMemOps = true;
 
-        if(solution.types.scaleB == Operations::ScaleMode::Separate && !solution.loadLDSScaleB)
+        if(solution.scaleB == Operations::ScaleMode::Separate && !solution.loadLDSScaleB)
             solution.prefetchMixMemOps = false;
 
-        if(solution.types.scaleA == Operations::ScaleMode::Separate && !solution.loadLDSScaleA)
+        if(solution.scaleA == Operations::ScaleMode::Separate && !solution.loadLDSScaleA)
             solution.prefetchMixMemOps = false;
 
         // TODO: enable (prefetchMixMemOps == true && prefetchLDSFactor == 2 && direct2LDSA/B = true)
