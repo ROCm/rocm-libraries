@@ -1634,7 +1634,7 @@ static void host_csrmv_general(rocsparse_operation  trans,
                 J col  = csr_col_ind[j] - base;
                 A val  = conj_val(csr_val[j], conj);
                 y[col] = std::fma(
-                    val,row_val,y[col]);
+                    static_cast<T>(val), static_cast<T>(row_val), static_cast<T>(y[col]));
             }
         }
     }
