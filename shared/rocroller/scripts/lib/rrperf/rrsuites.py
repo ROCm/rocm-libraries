@@ -217,9 +217,9 @@ def hgemm():
         workgroup_size_y=4,
     )
 
-    yield mkGEMM(HGEMM_7680x8448x8192, TypeParameters(HGEMM_7680x8448x8192["types"], trans_A="T", trans_B="N"))
-    yield mkGEMM(HGEMM_7680x8448x8192, TypeParameters(HGEMM_7680x8448x8192["types"], trans_A="T", trans_B="T"))
-    yield mkGEMM(HGEMM_7680x8448x8192, TypeParameters(HGEMM_7680x8448x8192["types"], trans_A="N", trans_B="T"))
+    yield mkGEMM(HGEMM_7680x8448x8192, types=TypeParameters(HGEMM_7680x8448x8192["types"], trans_A="T", trans_B="N"))
+    yield mkGEMM(HGEMM_7680x8448x8192, types=TypeParameters(HGEMM_7680x8448x8192["types"], trans_A="T", trans_B="T"))
+    yield mkGEMM(HGEMM_7680x8448x8192, types=TypeParameters(HGEMM_7680x8448x8192["types"], trans_A="N", trans_B="T"))
 
     yield mkGEMM(HGEMM_7680x8448x8448)
     yield mkGEMM(
