@@ -256,6 +256,60 @@ constexpr void for_each_arch(F&& f)
                        std::make_index_sequence<std::size(target_architectures)>{});
 }
 
+// Trampoline that is fully specialized at compile-time for a single GPU architecture.
+// By instantiating this template once per supported `target_arch`,the correct tuned config
+// will be derived from the template
+template<typename Config, target_arch Arch, class Kernel>
+__global__
+__launch_bounds__(Config::template architecture_config<Arch>::params.kernel_config.block_size)
+void trampoline(Kernel k)
+{
+    using ArchConfig = typename Config::template architecture_config<Arch>;
+
+#ifndef ROCPRIM_EXPERIMENTAL_SPIRV
+    if constexpr(Arch == device_target_arch())
+#endif
+    {
+        k(ArchConfig{});
+    }
+}
+
+// Host-side helper running at run-time, picking the trampoline whose template
+// argument `Arch` matches the actual GPU we are executing on.
+template<class Config, class Kernel>
+hipError_t launch_kernel(target_arch arch,
+                         Kernel      k,
+                         dim3        grid_size,
+                         dim3        block_size,
+                         size_t      shmem,
+                         hipStream_t stream)
+{
+    bool launched = false;
+
+    for_each_arch(
+        [&](auto arch_tag)
+        {
+            constexpr target_arch Arch = decltype(arch_tag)::value;
+            if(Arch != arch || launched)
+                return;
+
+            using ArchConfig = typename Config::template architecture_config<Arch>;
+
+            assert(block_size.x * block_size.y * block_size.z == ArchConfig::params.kernel_config.block_size);
+
+            trampoline<Config, Arch, Kernel><<<grid_size, block_size, shmem, stream>>>(k);
+            launched = true;
+        });
+
+    if(!launched)
+    {
+        trampoline<Config, target_arch::unknown, Kernel>
+            <<<grid_size, block_size, shmem, stream>>>(k);
+    }
+
+    return hipSuccess;
+}
+
 /**
  * \brief Get the current architecture in device compilation.
  *

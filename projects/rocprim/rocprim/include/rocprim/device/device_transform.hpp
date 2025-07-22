@@ -32,6 +32,7 @@
 #include "device_transform_config.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <iostream>
 #include <iterator>
 #include <tuple>
@@ -45,82 +46,35 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-// Trampoline that is fully specialized at compile-time for a single GPU architecture.
-// By instantiating this template once per supported `target_arch`,the correct tuned config
-// will be derived from the template
-template<target_arch Arch,
-         class Config,
-         bool IsPointer,
-         class ResultType,
-         class InputIt,
-         class OutputIt,
-         class UnaryOp>
-__global__
-__launch_bounds__(Config::template architecture_config<Arch>::params.kernel_config.block_size)
-void transform_trampoline(InputIt in, size_t n, OutputIt out, UnaryOp op)
-{
-    // Pull the per-arch tuned parameters into constexpr scope
-    constexpr auto p = Config::template architecture_config<Arch>::params;
-
-    // Delegate to the real implementation, with the correct constants
-#ifndef ROCPRIM_EXPERIMENTAL_SPIRV
-    if constexpr(Arch == device_target_arch())
-#endif
-    {
-        detail::transform_kernel_impl<
-            IsPointer,
-            Config::template architecture_config<Arch>::params.kernel_config.block_size,
-            Config::template architecture_config<Arch>::params.kernel_config.items_per_thread,
-            Config::template architecture_config<Arch>::params.load_type,
-            ResultType>(in, n, out, op);
-    }
-}
-
-// Host-side helper running at run-time, picking the trampoline whose template
-// argument `Arch` matches the actual GPU we are executing on.
 template<class Config,
          bool IsPointer,
          class ResultType,
          class InputIt,
          class OutputIt,
          class UnaryOp>
-__host__
-inline hipError_t launch_transform_for_arch(target_arch arch,
-                                            InputIt     in,
-                                            OutputIt    out,
-                                            size_t      n,
-                                            UnaryOp     op,
-                                            dim3        grid,
-                                            dim3        block,
-                                            hipStream_t s)
+inline hipError_t launch_transform_for_arch(detail::target_arch arch,
+                                            InputIt             in,
+                                            OutputIt            out,
+                                            size_t              n,
+                                            UnaryOp             op,
+                                            dim3                grid,
+                                            dim3                block,
+                                            size_t              shmem,
+                                            hipStream_t         stream)
 {
-    bool launched = false;
-
-    // Lambda that instantiates & launches the right trampoline
-    auto try_launch = [&](auto arch_tag)
+    auto kernel = [=] __device__ (auto arch_config)
     {
-        constexpr target_arch A = decltype(arch_tag)::value;
-        if(A != arch || launched)
-        {
-            return;
-        }
+        constexpr auto device_params = decltype(arch_config)::params;
 
-        transform_trampoline<A, Config, IsPointer, ResultType>
-            <<<grid, block, 0, s>>>(in, n, out, op);
-
-        launched = true;
+        detail::transform_kernel_impl<
+            IsPointer,
+            device_params.kernel_config.block_size,
+            device_params.kernel_config.items_per_thread,
+            device_params.load_type,
+            ResultType>(in, n, out, op);
     };
 
-    // Enumerate every architecture for which we have a tuned config
-    detail::for_each_arch(try_launch);
-
-    // Fallback for unknown architectures
-    if(!launched)
-    {
-        transform_trampoline<target_arch::unknown, Config, IsPointer, ResultType>
-            <<<grid, block, 0, s>>>(in, n, out, op);
-    }
-    return hipSuccess;
+    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
 template<bool IsPointer,
@@ -187,14 +141,21 @@ inline hipError_t transform_impl(InputIterator     input,
             start = std::chrono::steady_clock::now();
         }
 
-        launch_transform_for_arch<config, IsPointer, result_type>(target_arch,
-                                                                  input + offset,
-                                                                  output + offset,
-                                                                  current_size,
-                                                                  transform_op,
-                                                                  current_blocks,
-                                                                  block_size,
-                                                                  stream);
+        hipError_t launch_err
+            = launch_transform_for_arch<config, IsPointer, result_type>(target_arch,
+                                                                        input + offset,
+                                                                        output + offset,
+                                                                        current_size,
+                                                                        transform_op,
+                                                                        current_blocks,
+                                                                        block_size,
+                                                                        0,
+                                                                        stream);
+
+        if(launch_err != hipSuccess)
+        {
+            return launch_err;
+        }
 
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("transform_kernel", current_size, start);
     }
