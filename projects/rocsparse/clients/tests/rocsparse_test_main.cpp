@@ -176,46 +176,44 @@ public:
 class StreamRedirector
 {
 private:
-    std::streambuf*    old_cout_buf;
-    std::streambuf*    old_cerr_buf;
-    std::ostringstream cout_stream;
-    std::ostringstream cerr_stream;
+    std::streambuf*    m_old_cout_buf{};
+    std::streambuf*    m_old_cerr_buf{};
+    std::ostringstream m_cout_stream;
+    std::ostringstream m_cerr_stream;
 
 public:
     void redirect()
     {
         // Save original buffers
-        old_cout_buf = std::cout.rdbuf();
-        old_cerr_buf = std::cerr.rdbuf();
+        this->m_old_cout_buf = std::cout.rdbuf();
+        this->m_old_cerr_buf = std::cerr.rdbuf();
 
         // Redirect to our stringstreams
-        std::cout.rdbuf(cout_stream.rdbuf());
-        std::cerr.rdbuf(cerr_stream.rdbuf());
+        std::cout.rdbuf(this->m_cout_stream.rdbuf());
+        std::cerr.rdbuf(this->m_cerr_stream.rdbuf());
     }
 
     void restore()
     {
         // Restore original buffers
-        std::cout.rdbuf(old_cout_buf);
-        std::cerr.rdbuf(old_cerr_buf);
+        std::cout.rdbuf(this->m_old_cout_buf);
+        std::cerr.rdbuf(this->m_old_cerr_buf);
     }
 
     std::string get_cout_content() const
     {
-        return cout_stream.str();
+        return this->m_cout_stream.str();
     }
 
     std::string get_cerr_content() const
     {
-        return cerr_stream.str();
+        return this->m_cerr_stream.str();
     }
 
     void clear()
     {
-        cout_stream.str("");
-        cout_stream.clear();
-        cerr_stream.str("");
-        cerr_stream.clear();
+        this->m_cout_stream.clear();
+        this->m_cerr_stream.clear();
     }
 };
 
@@ -223,105 +221,105 @@ public:
 class OutputRedirectListener : public ::testing::TestEventListener
 {
 private:
-    StreamRedirector              redirector;
-    ::testing::TestEventListener* default_listener;
+    StreamRedirector              m_redirector;
+    ::testing::TestEventListener* m_default_listener{};
 
 public:
     explicit OutputRedirectListener(::testing::TestEventListener* listener)
-        : default_listener(listener)
+        : m_default_listener(listener)
     {
     }
 
     ~OutputRedirectListener() override
     {
-        delete default_listener;
+        delete this->m_default_listener;
     }
 
     void OnTestProgramStart(const ::testing::UnitTest& unit_test) override
     {
-        default_listener->OnTestProgramStart(unit_test);
+        this->m_default_listener->OnTestProgramStart(unit_test);
     }
 
     void OnTestIterationStart(const ::testing::UnitTest& unit_test, int iteration) override
     {
-        default_listener->OnTestIterationStart(unit_test, iteration);
+        this->m_default_listener->OnTestIterationStart(unit_test, iteration);
     }
 
     void OnEnvironmentsSetUpStart(const ::testing::UnitTest& unit_test) override
     {
-        default_listener->OnEnvironmentsSetUpStart(unit_test);
+        this->m_default_listener->OnEnvironmentsSetUpStart(unit_test);
     }
 
     void OnEnvironmentsSetUpEnd(const ::testing::UnitTest& unit_test) override
     {
-        default_listener->OnEnvironmentsSetUpEnd(unit_test);
+        this->m_default_listener->OnEnvironmentsSetUpEnd(unit_test);
     }
 
     void OnTestCaseStart(const ::testing::TestCase& test_case) override
     {
-        default_listener->OnTestCaseStart(test_case);
+        this->m_default_listener->OnTestCaseStart(test_case);
     }
 
     void OnTestStart(const ::testing::TestInfo& test_info) override
     {
         // Clear and redirect streams before each test
-        redirector.clear();
-        redirector.redirect();
-        default_listener->OnTestStart(test_info);
+        this->m_redirector.clear();
+        this->m_redirector.redirect();
+        this->m_default_listener->OnTestStart(test_info);
     }
 
     void OnTestPartResult(const ::testing::TestPartResult& test_part_result) override
     {
-        default_listener->OnTestPartResult(test_part_result);
+        this->m_default_listener->OnTestPartResult(test_part_result);
     }
 
     void OnTestEnd(const ::testing::TestInfo& test_info) override
     {
         // Restore streams after test
-        redirector.restore();
+        this->m_redirector.restore();
 
         // Check if test failed
         if(test_info.result()->Failed())
         {
-            std::string cout_content = redirector.get_cout_content();
-            std::string cerr_content = redirector.get_cerr_content();
+            const std::string cout_content = this->m_redirector.get_cout_content();
+            const std::string cerr_content = this->m_redirector.get_cerr_content();
 
             if(!cout_content.empty())
             {
-                std::cout << "=== CAPTURED STDOUT ===\n" << cout_content << "\n";
+                std::cout << "=== CAPTURED STDOUT ===" << std::endl << cout_content << std::endl;
             }
             if(!cerr_content.empty())
             {
-                std::cerr << "=== CAPTURED STDERR ===\n" << cerr_content << "\n";
+                std::cerr << "=== CAPTURED STDERR ===" << std::endl << cerr_content << std::endl;
             }
         }
 
-        default_listener->OnTestEnd(test_info);
+        this->m_default_listener->OnTestEnd(test_info);
     }
 
     void OnTestCaseEnd(const ::testing::TestCase& test_case) override
     {
-        default_listener->OnTestCaseEnd(test_case);
+        this->m_default_listener->OnTestCaseEnd(test_case);
     }
 
     void OnEnvironmentsTearDownStart(const ::testing::UnitTest& unit_test) override
     {
-        default_listener->OnEnvironmentsTearDownStart(unit_test);
+        this->m_default_listener->OnEnvironmentsTearDownStart(unit_test);
     }
 
     void OnEnvironmentsTearDownEnd(const ::testing::UnitTest& unit_test) override
     {
-        default_listener->OnEnvironmentsTearDownEnd(unit_test);
+        this->m_default_listener->OnEnvironmentsTearDownEnd(unit_test);
     }
 
     void OnTestIterationEnd(const ::testing::UnitTest& unit_test, int iteration) override
     {
-        default_listener->OnTestIterationEnd(unit_test, iteration);
+        this->m_default_listener->OnTestIterationEnd(unit_test, iteration);
     }
 
     void OnTestProgramEnd(const ::testing::UnitTest& unit_test) override
     {
-        default_listener->OnTestProgramEnd(unit_test);
+        this->m_default_listener->OnTestProgramEnd(unit_test);
     }
 };
 
