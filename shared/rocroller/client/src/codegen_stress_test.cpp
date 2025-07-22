@@ -54,9 +54,9 @@ struct CodeGenResult : CodeGenProblem
     {
     }
 
-    size_t                   kernelGenerate;
-    size_t                   kernelAssemble;
-    std::vector<size_t>      kernelExecute;
+    size_t              kernelGenerate;
+    size_t              kernelAssemble;
+    std::vector<size_t> kernelExecute;
 };
 
 template <typename IO>

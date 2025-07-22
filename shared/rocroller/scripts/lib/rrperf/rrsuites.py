@@ -206,7 +206,11 @@ def hgemm():
         workgroup_size_y=2,
         prefetchInFlight=2,
         prefetchLDSFactor=2,
-        types=TypeParameters(HGEMM_7680x8448x8192["types"], trans_A="N", trans_B="T",)
+        types=TypeParameters(
+            HGEMM_7680x8448x8192["types"],
+            trans_A="N",
+            trans_B="T",
+        ),
     )
     yield mkGEMM(
         HGEMM_7680x8448x8192,
@@ -217,9 +221,18 @@ def hgemm():
         workgroup_size_y=4,
     )
 
-    yield mkGEMM(HGEMM_7680x8448x8192, types=TypeParameters(HGEMM_7680x8448x8192["types"], trans_A="T", trans_B="N"))
-    yield mkGEMM(HGEMM_7680x8448x8192, types=TypeParameters(HGEMM_7680x8448x8192["types"], trans_A="T", trans_B="T"))
-    yield mkGEMM(HGEMM_7680x8448x8192, types=TypeParameters(HGEMM_7680x8448x8192["types"], trans_A="N", trans_B="T"))
+    yield mkGEMM(
+        HGEMM_7680x8448x8192,
+        types=TypeParameters(HGEMM_7680x8448x8192["types"], trans_A="T", trans_B="N"),
+    )
+    yield mkGEMM(
+        HGEMM_7680x8448x8192,
+        types=TypeParameters(HGEMM_7680x8448x8192["types"], trans_A="T", trans_B="T"),
+    )
+    yield mkGEMM(
+        HGEMM_7680x8448x8192,
+        types=TypeParameters(HGEMM_7680x8448x8192["types"], trans_A="N", trans_B="T"),
+    )
 
     yield mkGEMM(HGEMM_7680x8448x8448)
     yield mkGEMM(
@@ -269,7 +282,11 @@ def hgemm():
             workgroup_size_y=2,
             visualize=False,
             scheduler=sched,
-            types=TypeParameters(fp16, trans_A="N", trans_B="T",)
+            types=TypeParameters(
+                fp16,
+                trans_A="N",
+                trans_B="T",
+            ),
         )
 
         yield mkGEMM(
@@ -283,7 +300,11 @@ def hgemm():
             workgroup_size_y=2,
             visualize=False,
             scheduler=sched,
-            types=TypeParameters(fp16, trans_A="N", trans_B="T",)
+            types=TypeParameters(
+                fp16,
+                trans_A="N",
+                trans_B="T",
+            ),
         )
 
         yield mkGEMM(
@@ -298,7 +319,11 @@ def hgemm():
             betaInFma=False,
             visualize=False,
             scheduler=sched,
-            types=TypeParameters(fp16, trans_A="N", trans_B="T",)
+            types=TypeParameters(
+                fp16,
+                trans_A="N",
+                trans_B="T",
+            ),
         )
 
         yield mkGEMM(
@@ -313,7 +338,11 @@ def hgemm():
             betaInFma=False,
             visualize=False,
             scheduler=sched,
-            types=TypeParameters(fp16, trans_A="N", trans_B="T",)
+            types=TypeParameters(
+                fp16,
+                trans_A="N",
+                trans_B="T",
+            ),
         )
 
         yield mkGEMM(
@@ -327,7 +356,11 @@ def hgemm():
             workgroup_size_y=2,
             visualize=False,
             scheduler=sched,
-            types=TypeParameters(fp16, trans_A="N", trans_B="T",)
+            types=TypeParameters(
+                fp16,
+                trans_A="N",
+                trans_B="T",
+            ),
         )
 
         yield mkGEMM(
@@ -341,7 +374,11 @@ def hgemm():
             workgroup_size_y=1,
             visualize=False,
             scheduler=sched,
-            types=TypeParameters(fp16, trans_A="N", trans_B="T",)
+            types=TypeParameters(
+                fp16,
+                trans_A="N",
+                trans_B="T",
+            ),
         )
 
     # TODO: Enable once visualizer is working
@@ -393,7 +430,11 @@ def visualizer():
         storeLDS_D=False,
         visualize=True,
         prefetch=False,
-        types=TypeParameters(fp16, trans_A="N", trans_B="T",)
+        types=TypeParameters(
+            fp16,
+            trans_A="N",
+            trans_B="T",
+        ),
     )
 
 
@@ -409,7 +450,10 @@ def tail_loop_reproducer():
         mac_m=64,
         mac_n=64,
         mac_k=8,
-        types=TypeParameters(trans_A="T", trans_B="N",)
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+        ),
     )
 
 
@@ -505,7 +549,11 @@ def streamk_sweep():
                                 # prefetchLDSFactor=2,
                                 streamK=True,
                                 streamKTwoTile=twoTile,
-                                types=TypeParameters(base["types"], trans_A="N", trans_B="T",)
+                                types=TypeParameters(
+                                    base["types"],
+                                    trans_A="N",
+                                    trans_B="T",
+                                ),
                             )
 
 
@@ -522,7 +570,11 @@ def streamk():
             # prefetchLDSFactor=2,
             streamK=True,
             streamKTwoTile=twoTile,
-            types=TypeParameters(SGEMM_3072x4096x4096["types"], trans_A="N", trans_B="T",)
+            types=TypeParameters(
+                SGEMM_3072x4096x4096["types"],
+                trans_A="N",
+                trans_B="T",
+            ),
         )
         # HGEMM
         yield mkGEMM(
@@ -537,7 +589,11 @@ def streamk():
             # prefetchLDSFactor=2,
             streamK=True,
             streamKTwoTile=twoTile,
-            types=TypeParameters(HGEMM_7680x8448x8448["types"], trans_A="N", trans_B="T",)
+            types=TypeParameters(
+                HGEMM_7680x8448x8448["types"],
+                trans_A="N",
+                trans_B="T",
+            ),
         )
         yield mkGEMM(
             HGEMM_7680x8448x8192,
@@ -547,7 +603,11 @@ def streamk():
             prefetch=False,  # TODO: Fix k loop unrolling with stream k
             streamK=True,
             streamKTwoTile=twoTile,
-            types=TypeParameters(HGEMM_7680x8448x8192["types"], trans_A="N", trans_B="T",)
+            types=TypeParameters(
+                HGEMM_7680x8448x8192["types"],
+                trans_A="N",
+                trans_B="T",
+            ),
         )
 
 
@@ -584,7 +644,11 @@ def scalar_is_zero():
         workgroup_size_y=2,
         prefetchInFlight=2,
         prefetchLDSFactor=2,
-        types=TypeParameters(hgemm["types"], trans_A="N", trans_B="T",)
+        types=TypeParameters(
+            hgemm["types"],
+            trans_A="N",
+            trans_B="T",
+        ),
     )
     yield mkGEMM(
         hgemm,
@@ -738,7 +802,14 @@ def gemm_mixed_16x16x128_f8f6f4():
         for B in TB:
             yield GEMMRun(
                 **params,
-                types = TypeParameters(type_A=A, type_B=B, type_C="float", type_D="float", trans_A="T", trans_B="N",)
+                types=TypeParameters(
+                    type_A=A,
+                    type_B=B,
+                    type_C="float",
+                    type_D="float",
+                    trans_A="T",
+                    trans_B="N",
+                ),
             )
 
 
@@ -762,7 +833,14 @@ def gemm_mixed_32x32x64_f8f6f4():
         for B in TB:
             yield GEMMRun(
                 **params,
-                types = TypeParameters(type_A=A, type_B=B, type_C="float", type_D="float", trans_A="T", trans_B="N",)
+                types=TypeParameters(
+                    type_A=A,
+                    type_B=B,
+                    type_C="float",
+                    type_D="float",
+                    trans_A="T",
+                    trans_B="N",
+                ),
             )
 
 
@@ -787,10 +865,7 @@ def _f8f6f4_gemm_macrotiles(
         workgroup_size_x=64,
         workgroup_size_y=1,
     )
-    yield GEMMRun(
-        **params,
-        types = TypeParameters(gemmTypes, trans_A="T", trans_B="N")
-    )
+    yield GEMMRun(**params, types=TypeParameters(gemmTypes, trans_A="T", trans_B="N"))
 
 
 def gemm_f8f6f4_different_macrotiles():
@@ -824,7 +899,7 @@ def _f8f6f4_gemm_prefetch(wave_m, wave_n, wave_k, gemmTypes, prefetchFactor):
     )
     yield GEMMRun(
         **params,
-        types = TypeParameters(gemmTypes, trans_A="T", trans_B="N"),
+        types=TypeParameters(gemmTypes, trans_A="T", trans_B="N"),
     )
 
 
@@ -932,19 +1007,19 @@ def fp4_target():
         betaInFma=True,
         scheduler="Priority",
         matchMemoryAccess=True,
-        types = TypeParameters(
-        trans_A="T",
-        trans_B="N",
-        type_A="fp4",
-        type_B="fp4",
-        type_C="half",
-        type_D="half",
-        type_acc="float",
-        scale_A="Separate",
-        scaleType_A="E8M0",
-        scale_B="Separate",
-        scaleType_B="E8M0",
-        scaleBlockSize=32,
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
+            scale_A="Separate",
+            scaleType_A="E8M0",
+            scale_B="Separate",
+            scaleType_B="E8M0",
+            scaleBlockSize=32,
         ),
         numOuter=1,
         numWarmUp=1000,
@@ -979,19 +1054,19 @@ def fp4_target_d2lds_mi32x32x64_pf2x1():
         betaInFma=True,
         scheduler="Priority",
         matchMemoryAccess=True,
-        types = TypeParameters(
-        trans_A="T",
-        trans_B="N",
-        type_A="fp4",
-        type_B="fp4",
-        type_C="half",
-        type_D="half",
-        type_acc="float",
-        scale_A="Separate",
-        scaleType_A="E8M0",
-        scale_B="Separate",
-        scaleType_B="E8M0",
-        scaleBlockSize=32,
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
+            scale_A="Separate",
+            scaleType_A="E8M0",
+            scale_B="Separate",
+            scaleType_B="E8M0",
+            scaleBlockSize=32,
         ),
         numOuter=1,
         numWarmUp=1000,
@@ -1054,19 +1129,19 @@ def fp4_target_d2lds_mi32x32x64_pf4x1():
         betaInFma=True,
         scheduler="Priority",
         matchMemoryAccess=True,
-        types = TypeParameters(
-        trans_A="T",
-        trans_B="N",
-        type_A="fp4",
-        type_B="fp4",
-        type_C="half",
-        type_D="half",
-        type_acc="float",
-        scale_A="Separate",
-        scaleType_A="E8M0",
-        scale_B="Separate",
-        scaleType_B="E8M0",
-        scaleBlockSize=32,
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
+            scale_A="Separate",
+            scaleType_A="E8M0",
+            scale_B="Separate",
+            scaleType_B="E8M0",
+            scaleBlockSize=32,
         ),
         numOuter=1,
         numWarmUp=1000,
@@ -1114,19 +1189,19 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
         betaInFma=True,
         scheduler="Priority",
         matchMemoryAccess=True,
-        types = TypeParameters(
-        trans_A="T",
-        trans_B="N",
-        type_A="fp4",
-        type_B="fp4",
-        type_C="half",
-        type_D="half",
-        type_acc="float",
-        scale_A="Separate",
-        scaleType_A="E8M0",
-        scale_B="Separate",
-        scaleType_B="E8M0",
-        scaleBlockSize=32,
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
+            scale_A="Separate",
+            scaleType_A="E8M0",
+            scale_B="Separate",
+            scaleType_B="E8M0",
+            scaleBlockSize=32,
         ),
         numOuter=1,
         numWarmUp=1000,
@@ -1174,14 +1249,14 @@ def does_this_fail():
         betaInFma=True,
         scheduler="Priority",
         matchMemoryAccess=True,
-        types = TypeParameters(
-        trans_A="T",
-        trans_B="N",
-        type_A="fp4",
-        type_B="fp4",
-        type_C="half",
-        type_D="half",
-        type_acc="float",
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
         ),
         numOuter=1,
         numWarmUp=1000,
@@ -1220,14 +1295,14 @@ def fp4_no_scale_target_d2lds_mi16x16x128_pf4x1():
         betaInFma=True,
         scheduler="Priority",
         matchMemoryAccess=True,
-        types = TypeParameters(
-        trans_A="T",
-        trans_B="N",
-        type_A="fp4",
-        type_B="fp4",
-        type_C="half",
-        type_D="half",
-        type_acc="float",
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
         ),
         numOuter=1,
         numWarmUp=1000,

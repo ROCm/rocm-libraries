@@ -73,9 +73,11 @@ class RRPerfResult:
     checked: bool = field(repr=False, hash=False, compare=False, default=False)
     correct: bool = field(repr=False, hash=False, compare=False, default=True)
 
+
 @dataclass(unsafe_hash=True)
 class TypeParameters:
     """All types that are part of the problem description"""
+
     type_A: str = "float"
     type_B: str = "float"
     type_C: str = "float"
@@ -100,7 +102,9 @@ class TypeParameters:
             for f in fields(self):
                 setattr(self, f.name, getattr(typeParams, f.name))
         elif typeParams is not None:
-            raise TypeError(f"Expected TypeParameters or None, got {type(typeParams).__name__}")
+            raise TypeError(
+                f"Expected TypeParameters or None, got {type(typeParams).__name__}"
+            )
 
         for key, value in kwargs.items():
             if hasattr(self, key):
@@ -109,14 +113,16 @@ class TypeParameters:
                 raise AttributeError(f"Unknown field: {key}")
 
     def asArgs(self) -> List[str]:
-        rv:List[str] = []
+        rv: List[str] = []
         for f in fields(self):
             rv.append(f"--{f.name}={self.__getattribute__(f.name)}")
         return rv
 
+
 @dataclass(unsafe_hash=True)
 class GPUArchitectureTarget:
     """GPUArchitectureTarget"""
+
     ArchString: str = ""
     Xnack: bool = False
     Sramecc: bool = False
@@ -125,10 +131,14 @@ class GPUArchitectureTarget:
         if len(self.ArchString) == 0:
             return ""
         else:
-            archFeatures:str = ""
+            archFeatures: str = ""
             archFeatures += archFeatures + (f":xnack+" if self.Xnack else "")
             archFeatures += archFeatures + (f":sramecc+" if self.Sramecc else "")
-            return (f"--arch={self.ArchString}" + archFeatures if len(self.ArchString) != 0 else "")
+            return (
+                f"--arch={self.ArchString}" + archFeatures
+                if len(self.ArchString) != 0
+                else ""
+            )
 
 
 #
@@ -323,7 +333,7 @@ class GEMMRun(GEMM):
                     args.append(arg)
             else:
                 if isinstance(value, tuple):
-                    args.append( f"--{key}={','.join(map(str, value))}")
+                    args.append(f"--{key}={','.join(map(str, value))}")
                 else:
                     args.append(f"--{key}={value}")
 
