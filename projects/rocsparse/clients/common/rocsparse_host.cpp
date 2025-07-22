@@ -1634,7 +1634,7 @@ static void host_csrmv_general(rocsparse_operation  trans,
                 J col  = csr_col_ind[j] - base;
                 A val  = conj_val(csr_val[j], conj);
                 y[col] = std::fma(
-                    val, row_val, y[col]);
+                    val,row_val,y[col]);
             }
         }
     }
@@ -1702,7 +1702,7 @@ static void host_csrmv_symmetric(rocsparse_operation  trans,
                     if(j + k < row_end)
                     {
                         A val  = conj_val(csr_val[j + k], conj);
-                        sum[k] = std::fma(static_cast<T>(alpha * val), static_cast<T>(x[csr_col_ind[j + k] - base]), static_cast<T>(sum[k]));
+                        sum[k] = std::fma(alpha * val, x[csr_col_ind[j + k] - base], sum[k]);
                     }
                 }
             }
@@ -1721,7 +1721,7 @@ static void host_csrmv_symmetric(rocsparse_operation  trans,
             }
             else
             {
-                y[i] = std::fma(static_cast<T>(beta), static_cast<T>(y[i]), static_cast<T>(sum[0]));
+                y[i] = std::fma(beta, y[i], sum[0]);
             }
         }
 
