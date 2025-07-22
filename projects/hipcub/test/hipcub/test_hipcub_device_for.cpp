@@ -28,6 +28,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <new>
 
 // Params for tests
 template<class InputType, bool UseGraphs = false>
@@ -944,14 +945,14 @@ struct LinearStore
     using op_data_t = IndexType[Size];
     void* d_data;
 
-    template<typename... TArgs>
+    template<typename... Args>
     __device__ __forceinline__
-    void operator()(IndexType idx, TArgs... args)
+    void operator()(IndexType idx, Args... args)
     {
-        static_assert(sizeof...(TArgs) == Size, "wrong number of arguments");
-        auto&     i    = static_cast<op_data_t*>(d_data)[idx];
-        op_data_t temp = {args...};
-        memcpy(&i, &temp, sizeof(op_data_t));
+        static_assert(sizeof...(Args) == Size, "wrong number of arguments");
+        auto& i = static_cast<op_data_t*>(d_data)[idx];
+        // We use the "placement new" operator to copy the data from an initializer list.
+        new(&i) op_data_t{args...};
     }
 };
 
@@ -998,9 +999,9 @@ TEST(HipcubDeviceForEachInExtentsTests, ForEachInExtentsAPI)
         __device__ __host__ __forceinline__
         void  operator()(int idx, int x, int y, int z)
         {
-            auto&     i    = static_cast<op_data_t*>(d_data)[idx];
-            op_data_t temp = {x, y, z};
-            memcpy(&i, &temp, sizeof(op_data_t));
+            auto& i = static_cast<op_data_t*>(d_data)[idx];
+            // We use the "placement new" operator to copy the data from an initializer list.
+            new(&i) op_data_t{x, y, z};
         }
     };
 
@@ -1056,7 +1057,7 @@ TYPED_TEST(HipcubDeviceForEachInExtentsTests, ForEachInExtentsStatic)
     HIP_CHECK(hipFree(d_input));
 }
 
-#endif
+#endif // (defined(__HIP_PLATFORM_NVIDIA__) && defined(__cccl_lib_mdspan)) || defined(__HIP_PLATFORM_AMD__)
 
 template<class Params>
 class HipcubDeviceForBulkTests : public HipcubDeviceForTests<Params>

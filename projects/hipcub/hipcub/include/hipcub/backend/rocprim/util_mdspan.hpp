@@ -120,7 +120,7 @@ using extents = std::extents<IndexType, Extents...>;
  * `std::extents` is supported, we should remove this class.
  * \note This class only supports static extents. And to be clearer, the function
  * `extents::extent` is not implemented, please use `static_extent` instead. It's 
- * also a benefit becasue, we can do all calculations associated witht the extents
+ * also a benefit because, we can do all calculations associated with the extents
  * during compile time.
  */
 template<class IndexType, size_t... Extents>
@@ -186,7 +186,7 @@ struct extents_remove_first<::hipcub::extents<IndexType, First, Extents...>>
 
 /**
  * \brief Helper template, to get the total size of `ExtentsType`
- * For example, you have an `::hipcub::extents<int,4,3,2>`,
+ * For example, if you have `::hipcub::extents<int,4,3,2>`,
  * it returns 24 (4 * 3 * 2). 
  */
 template<class ExtentsType>

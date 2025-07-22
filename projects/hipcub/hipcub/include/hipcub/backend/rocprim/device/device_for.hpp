@@ -301,6 +301,15 @@ HIPCUB_RUNTIME_FUNCTION
         return Bulk(shape, op, stream);
     }
 
+    /**
+     * \brief Iterate through a multi-dimensional extents.
+     * 
+     * \tparam IndexType The index type to create the extents.
+     * \tparam Extents The sizes of each extent.
+     * \tparam OpT The function that will be applied for each iteration. The function should be callable
+     * with arguments (IndexType, ExtentsIndexType...extents_idx). The size of extents_idx... should be 
+     * the same as the rank of the the multi-dimensional extents.
+     */
     template<class IndexType, size_t... Extents, typename OpT>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ForEachInExtents(void*   d_temp_storage,
@@ -309,6 +318,11 @@ HIPCUB_RUNTIME_FUNCTION
                                        OpT                                             op,
                                        hipStream_t                                     stream = {})
     {
+        // Index overlapping is checked by the `in_range` in the implementation in `::hipcub::extents`.
+        // TODO: it's better to add a check here:
+        // `static_assert(std::is_invocable::<OpT, IndexType, decltype(static_cast<extents_index_type>(Extents))...>::value,"check invocable.")`
+        // But the `std::is_invocalble` does not work well here. Checked on a host environment with clang 19.1.0, and it works there. Since this
+        // could be a compiler bug and invocability is also checked by the compiler. So, a "TODO" is left here.
         if(d_temp_storage == nullptr)
         {
             temp_storage_bytes = 1;
@@ -317,6 +331,15 @@ HIPCUB_RUNTIME_FUNCTION
         return ForEachInExtents(extents, op, stream);
     }
 
+    /**
+     * \brief Iterate through a multi-dimensional extents.
+     * 
+     * \tparam IndexType The index type to create the extents.
+     * \tparam Extents The sizes of each extent.
+     * \tparam OpT The function that will be applied for each iteration. The function should be callable
+     * with arguments (IndexType, ExtentsIndexType...extents_idx). The size of extents_idx... should be 
+     * the same as the rank of the the multi-dimensional extents.
+     */
     template<class IndexType, size_t... Extents, typename OpT>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ForEachInExtents(const ::hipcub::extents<IndexType, Extents...>&,
@@ -328,22 +351,28 @@ HIPCUB_RUNTIME_FUNCTION
         using wrapped_op_type
             = detail::for_each_in_extents::OpWrapper<OpT, IndexType, ext_index_type, Extents...>;
 
-        using InputIterator  = typename hipcub::CountingInputIterator<IndexType>;
+        // CountingInputIterator only holds the index, not the data.
+        using InputIterator = typename hipcub::CountingInputIterator<IndexType>;
+        // We don't actually need the output, so we use DiscardOutputIterator here as a placeholder.
         using OutputIterator = typename hipcub::DiscardOutputIterator<IndexType>;
 
+        // How many times rocprim::transform will iterate.
         constexpr auto ext_size = ::hipcub::extents_size<ext_type>::value;
 
-        InputIterator  input(IndexType(0));
+        InputIterator  input(IndexType(0)); // Initialize the input iterator, starting from 0.
         OutputIterator output;
 
+        // `ForEachInExtents` only iterates over the extents on device and does not guarantee ordering.
+        // We only need to invoke `$op` `$ext_size` times. Therefore, `rocprim::transform` is suitable.
+        // In `ForEachInExtents`, the data isn’t necessarily needed, but even if it's needed, it may be embedded
+        // in `OpT`. We only need to iterate exactly `$ext_size` times. Therefore, we use a `CountingInputIterator`,
+        // which provides only the index, and a `DiscardOutputIterator` for output.
         return rocprim::transform(input,
                                   output,
                                   ext_size,
                                   wrapped_op_type{op},
                                   stream,
                                   HIPCUB_DETAIL_DEBUG_SYNC_VALUE);
-
-        return hipSuccess;
     }
 };
 
