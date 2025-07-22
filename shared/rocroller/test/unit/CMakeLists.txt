@@ -57,6 +57,7 @@ target_sources(rocroller-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/CommandTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CommonSubexpressionElimTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ComponentTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ComputeIndexTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ControlGraphTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ConversionInstructions/Convert_F16_F32.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ConversionTest.cpp"

@@ -624,6 +624,7 @@ namespace rocRoller
                     expr = makeScalar(expr);
 
                 co_yield generate(offsetReg, convert(offsetReg->variableType(), expr));
+                std::cout << "YL: tile generator computeindex " << toString(expr) << "into offset " << offset << std::endl;
                 offsetReg->setReadOnly();
             }
             else
