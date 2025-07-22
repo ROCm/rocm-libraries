@@ -145,6 +145,7 @@ namespace rocRoller
         KernelGraph RemoveSetCoordinate::apply(KernelGraph const& k)
         {
             TIMER(t, "KernelGraph::RemoveSetCoordinate");
+            std::cout << "remove setcoordinates" << std::endl;
 
             auto newGraph = k;
 
