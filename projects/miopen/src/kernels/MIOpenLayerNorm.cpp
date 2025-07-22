@@ -208,10 +208,7 @@ __device__ void layernormfwd(const TI* __restrict__ x,
         {
             FLOAT_ACCUM px = CVT_FLOAT2ACCUM(tmpx.data[k]);
             pmean += px;
-            auto tmpvar = px * px;
-            asm volatile("" : "+v"(tmpvar)); // Due to compiler bug with FMA
-            pvar += tmpvar;
-            // pvar += px * px;
+            pvar += px * px;
         }
         __builtin_amdgcn_sched_barrier(0);
         tmpx = tmp;
@@ -221,10 +218,7 @@ __device__ void layernormfwd(const TI* __restrict__ x,
     {
         FLOAT_ACCUM px = CVT_FLOAT2ACCUM(tmpx.data[k]);
         pmean += px;
-        auto tmpvar = px * px;
-        asm volatile("" : "+v"(tmpvar)); // Due to compiler bug with FMA
-        pvar += tmpvar;
-        // pvar += px * px;
+        pvar += px * px;
     }
 
     __shared__ FLOAT_ACCUM ltmp1[ADJUSTED_LOCAL_SIZE];
