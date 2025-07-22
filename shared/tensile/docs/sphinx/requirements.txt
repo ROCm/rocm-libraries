@@ -278,7 +278,7 @@ urllib3==2.2.1
     # via
     #   pygithub
     #   requests
-waitress==3.0.0
+waitress==3.0.1
     # via webtest
 wcwidth==0.2.13
     # via prompt-toolkit
