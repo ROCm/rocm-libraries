@@ -227,13 +227,13 @@ int main(int argc, char** argv)
     if(!gtest_listener || strcmp(gtest_listener, "VERBOSE_PASS_IN_LOG") != 0)
     {
         // If the GTEST_LISTENER environment variable is not set to "VERBOSE_PASS_IN_LOG",
-        // we use the OutputRedirectListener to capture output.
+        // we use the output_redirect_listener to capture output.
         // This listener will redirect the output to a stringstream and print it only if a test fails.
-        listeners.Append(new rocsparse_clients::OutputRedirectListener(default_printer));
+        listeners.Append(new rocsparse_clients::output_redirect_listener(default_printer));
     }
     else
     {
-        auto listener = new rocsparse_clients::ConfigurableEventListener(default_printer);
+        auto listener = new rocsparse_clients::configurable_event_listener(default_printer);
         if(gtest_listener && !strcmp(gtest_listener, "NO_PASS_LINE_IN_LOG"))
         {
             listener->showTestNames = listener->showSuccesses = listener->showInlineFailures
