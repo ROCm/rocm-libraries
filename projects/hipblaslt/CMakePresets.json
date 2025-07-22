@@ -9,8 +9,7 @@
           "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
           "CMAKE_C_COMPILER": "/opt/rocm/bin/amdclang",
           "CMAKE_PREFIX_PATH": "/opt/rocm",
-          "CMAKE_BUILD_TYPE": "Release",
-          "HIPBLASLT_ENABLE_DEVICE": "OFF"
+          "CMAKE_BUILD_TYPE": "Release"
         }
       },
       {
