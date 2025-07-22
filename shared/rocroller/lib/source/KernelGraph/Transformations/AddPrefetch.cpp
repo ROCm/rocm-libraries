@@ -24,6 +24,24 @@
  *
  *******************************************************************************/
 
+#include <rocRoller/KernelGraph/Transforms/AddPrefetch.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddPrefetch_detail.hpp>
+
+#include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/Expression.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
+
+#include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
+#include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
+#include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
+#include <rocRoller/KernelGraph/Visitors.hpp>
+#include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/Operations/Operations.hpp>
+
 /**
 @class AddPrefetch
 @brief Add prefetching for load operations.
@@ -139,22 +157,6 @@ the scheduling of operations in unrolled segment $u$ are:
                 PL [(u+1) % U]
 
 */
-
-#include <rocRoller/CommandSolution.hpp>
-#include <rocRoller/Expression.hpp>
-#include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
-#include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
-#include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
-#include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
-#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
-#include <rocRoller/KernelGraph/Transforms/AddPrefetch.hpp>
-#include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
-#include <rocRoller/KernelGraph/Utils.hpp>
-#include <rocRoller/KernelGraph/Visitors.hpp>
-#include <rocRoller/Operations/Command.hpp>
-#include <rocRoller/Operations/Operations.hpp>
-
-#include <rocRoller/KernelGraph/Transforms/AddPrefetch_detail.hpp>
 
 namespace rocRoller
 {
@@ -487,9 +489,12 @@ namespace rocRoller
             for(auto exchangeTag : graph.control.findNodes(starts, isExchangePredicate))
             {
                 auto destTileTag = graph.mapper.get(exchangeTag, NaryArgument::DEST);
+
+                auto pred = m_context->kernelOptions()->scaleSkipPermlane ? CT::isEdge<Segment>
+                                                                          : CT::isEdge<Index>;
+
                 auto tileTags
-                    = graph.coordinates.getInputNodeIndices(destTileTag, CT::isEdge<Index>)
-                          .to<std::vector>();
+                    = graph.coordinates.getInputNodeIndices(destTileTag, pred).to<std::vector>();
                 AssertFatal(!tileTags.empty(), "swizzle indexed tiles not found");
                 for(auto tileTag : tileTags)
                     loadMap[tileTag] = getTopSetCoordinate(graph, exchangeTag);
@@ -982,8 +987,12 @@ namespace rocRoller
         std::optional<int>
             getExchangeForMultiply(KernelGraph const& graph, int multiplyTag, NaryArgument arg)
         {
-            auto isIndexPredicate    = rocRoller::KernelGraph::CoordinateGraph::isEdge<Index>;
-            auto isExchangePredicate = [&](int operation) -> bool {
+            auto coordPredicate = [](auto const& edge) {
+                return rocRoller::KernelGraph::CoordinateGraph::isEdge<Segment>(edge)
+                       || rocRoller::KernelGraph::CoordinateGraph::isEdge<Index>(edge);
+            };
+
+            auto isExchangePredicate = [&graph](int operation) -> bool {
                 auto maybeExchange = graph.control.get<Exchange>(operation);
                 return maybeExchange.has_value();
             };
@@ -992,7 +1001,7 @@ namespace rocRoller
             if(scale == -1)
                 return {};
 
-            auto tileTag = only(graph.coordinates.getOutputNodeIndices(scale, isIndexPredicate));
+            auto tileTag = only(graph.coordinates.getOutputNodeIndices(scale, coordPredicate));
             if(not tileTag)
                 return {};
 

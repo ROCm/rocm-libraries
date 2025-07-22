@@ -1,19 +1,26 @@
-/*
- *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+// Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+#pragma once
+
+#include <thrust/execution_policy.h>
 
 #include <algorithm>
 #include <cmath>
@@ -29,145 +36,9 @@
 #include "bitwise_repro/bwr_db.hpp"
 #include <gtest/gtest.h>
 
-// HIP API
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-#  include <hip/hip_runtime.h>
-#  include <hip/hip_runtime_api.h>
-
-// GoogleTest-compatible HIP_CHECK macro. FAIL is called to log the Google Test trace.
-// The lambda is invoked immediately as assertions that generate a fatal failure can
-// only be used in void-returning functions.
-#  ifndef HIP_CHECK
-#    define HIP_CHECK(condition)                                                 \
-      do                                                                         \
-      {                                                                          \
-        hipError_t error = condition;                                            \
-        if (error != hipSuccess)                                                 \
-        {                                                                        \
-          [error]() {                                                            \
-            FAIL() << "HIP error " << error << ": " << hipGetErrorString(error); \
-          }();                                                                   \
-          exit(error);                                                           \
-        }                                                                        \
-      } while (0)
-#  endif
-
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
-
-#include <cctype>
-#include <cstdlib>
-#include <string>
-
-#include "test_assertions.hpp"
-#include "test_utils.hpp"
-
-namespace test
-{
-
-inline char* get_env(const char* name)
-{
-  char* env;
-#ifdef _MSC_VER
-  size_t len;
-  errno_t err = _dupenv_s(&env, &len, name);
-  if (err)
-  {
-    return nullptr;
-  }
-#else
-  env = std::getenv(name);
-#endif
-  return env;
-}
-
-inline void clean_env(char* name)
-{
-#ifdef _MSC_VER
-  if (name != nullptr)
-  {
-    free(name);
-  }
-#endif
-  (void) name;
-}
-
-inline int set_device_from_ctest()
-{
-  static const std::string rg0 = "CTEST_RESOURCE_GROUP_0";
-  char* env                    = get_env(rg0.c_str());
-  int device                   = 0;
-  if (env != nullptr)
-  {
-    std::string amdgpu_target(env);
-    std::transform(
-      amdgpu_target.cbegin(),
-      amdgpu_target.cend(),
-      amdgpu_target.begin(),
-      // Feeding std::toupper plainly results in implicitly truncating conversions between int and char triggering
-      // warnings.
-      [](unsigned char c) {
-        return static_cast<char>(std::toupper(c));
-      });
-    char* env_reqs = get_env((rg0 + "_" + amdgpu_target).c_str());
-    std::string reqs(env_reqs);
-    device = std::atoi(reqs.substr(reqs.find(':') + 1, reqs.find(',') - (reqs.find(':') + 1)).c_str());
-    clean_env(env_reqs);
-    HIP_CHECK(hipSetDevice(device));
-  }
-  clean_env(env);
-  return device;
-}
-} // namespace test
-
-// If enabled, set up the database for inter-run bitwise reproducibility testing.
-// Inter-run testing is enabled through the following environment variables:
-// ROCTHRUST_BWR_PATH - path to the database (or where it should be created)
-// ROCTHRUST_BWR_GENERATE - if set to 1, info about any function calls not
-// found in the database will be inserted. No errors will be reported in this mode.
-namespace inter_run_bwr
-{
-// Disable this testing by default.
-bool enabled = false;
-
-// This code doesn't need to be visible outside this file.
-namespace
-{
-const static std::string path_env     = "ROCTHRUST_BWR_PATH";
-const static std::string generate_env = "ROCTHRUST_BWR_GENERATE";
-
-// Check the environment variables to see if the database should be
-// instantiated, and if so, what mode it should be in.
-std::unique_ptr<BitwiseReproDB> create_db()
-{
-  // Get the path to the database from an environment variable.
-  const char* db_path = std::getenv(path_env.c_str());
-  const char* db_mode = std::getenv(generate_env.c_str());
-  if (db_path)
-  {
-    // Check if we are allowed to insert rows into the database if
-    // we encounter calls that aren't already recorded.
-    BitwiseReproDB::Mode mode = BitwiseReproDB::Mode::test_mode;
-    if (db_mode && std::stoi(db_mode) > 0)
-    {
-      mode = BitwiseReproDB::Mode::generate_mode;
-    }
-
-    enabled = true;
-    return std::make_unique<BitwiseReproDB>(db_path, mode);
-  }
-  else if (db_mode)
-  {
-    throw std::runtime_error("ROCTHRUST_BWR_GENERATE is defined, but no database path was given.\n"
-                             "Please set ROCTHRUST_BWR_PATH to the database path.");
-  }
-
-  return nullptr;
-}
-} // namespace
-
-// Create/open the run-to-run bitwise reproducibility database.
-std::unique_ptr<BitwiseReproDB> db = create_db();
-} // namespace inter_run_bwr
+/**
+ * test_param_fixtures contains all parameters for typed_test suites
+ */
 
 // Input type parameter
 template <class InputType, class ExecutionPolicy = std::decay_t<decltype(thrust::hip::par)>>
@@ -197,8 +68,7 @@ struct Params<thrust::device_vector<T>, ExecutionPolicy>
   TYPED_TEST_SUITE(x, y);
 
 // Set of test parameter types
-namespace test
-{
+
 class large_data
 {
 public:
@@ -241,7 +111,6 @@ bool __host__ __device__ operator==(T const& lhs, large_data const& rhs)
 {
   return static_cast<large_data>(lhs).data[0] == rhs.data[0];
 }
-} // namespace test
 
 // Host and device vectors of all type as a test parameter
 using FullTestsParams = ::testing::Types<
@@ -285,7 +154,7 @@ using FullWithLargeTypesTestsParams = ::testing::Types<
   Params<thrust::device_vector<float>, std::decay_t<decltype(thrust::hip::par_det)>>,
   Params<thrust::device_vector<float>, std::decay_t<decltype(thrust::hip::par_det_nosync)>>,
   Params<thrust::device_vector<double>>,
-  Params<thrust::device_vector<test::large_data>>>;
+  Params<thrust::device_vector<large_data>>>;
 
 // Host and device vectors of signed type
 using VectorSignedTestsParams =
@@ -436,3 +305,25 @@ using AllInOutTestsParams = ::testing::Types<
   ParamsInOut<int, long long>,
   ParamsInOut<unsigned int, unsigned long long>,
   ParamsInOut<float, double>>;
+
+// --------------------Pairs test parameters--------
+template <class T, class U>
+
+struct ParamsPairs
+{
+  using first_type  = T;
+  using second_type = U;
+};
+
+#define TESTS_PAIRS_DEFINE(x, y)                           \
+  template <class ParamsPairs>                             \
+  class x : public ::testing::Test                         \
+  {                                                        \
+  public:                                                  \
+    using first_type  = typename ParamsPairs::first_type;  \
+    using second_type = typename ParamsPairs::second_type; \
+  };                                                       \
+  TYPED_TEST_SUITE(x, y);
+
+using PairsTestsParams = ::testing::
+  Types<ParamsPairs<float, float>, ParamsPairs<double, double>, ParamsPairs<float, double>, ParamsPairs<double, float>>;

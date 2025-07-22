@@ -276,12 +276,6 @@ try
 {
     // Check if handle is valid
     rocsparselt::Debug::Instance().markerStart("hipsparseLtInit");
-    if(handle == nullptr)
-    {
-        rocsparselt::Debug::Instance().markerStop();
-        return HIPSPARSE_STATUS_INVALID_VALUE;
-    }
-
     int               deviceId;
     hipError_t        err;
     hipsparseStatus_t retval = HIPSPARSE_STATUS_SUCCESS;
