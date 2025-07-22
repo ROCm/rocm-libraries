@@ -36,7 +36,7 @@
 
 #define REAL_TEMPLATE(NAME_, ...)                              \
     template <typename T>                                      \
-    inline rocsparse_status (*rocsparse_##NAME_)(__VA_ARGS__);        \
+    inline rocsparse_status (*rocsparse_##NAME_)(__VA_ARGS__); \
     template <>                                                \
     inline auto rocsparse_##NAME_<float> = rocsparse_s##NAME_; \
     template <>                                                \
@@ -44,7 +44,7 @@
 
 #define COMPLEX_TEMPLATE(NAME_, ...)                                             \
     template <typename T>                                                        \
-    inline rocsparse_status (*rocsparse_##NAME_)(__VA_ARGS__);                          \
+    inline rocsparse_status (*rocsparse_##NAME_)(__VA_ARGS__);                   \
     template <>                                                                  \
     inline auto rocsparse_##NAME_<rocsparse_float_complex> = rocsparse_c##NAME_; \
     template <>                                                                  \
@@ -52,7 +52,7 @@
 
 #define REAL_COMPLEX_TEMPLATE(NAME_, ...)                                        \
     template <typename T>                                                        \
-    inline rocsparse_status (*rocsparse_##NAME_)(__VA_ARGS__);                          \
+    inline rocsparse_status (*rocsparse_##NAME_)(__VA_ARGS__);                   \
     template <>                                                                  \
     inline auto rocsparse_##NAME_<float> = rocsparse_s##NAME_;                   \
     template <>                                                                  \

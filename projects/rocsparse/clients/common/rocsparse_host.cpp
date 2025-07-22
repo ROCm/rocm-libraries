@@ -52,7 +52,7 @@ void host_axpby(
 
     for(I i = 0; i < nnz; ++i)
     {
-        y[x_ind[i] - base] = std::fma(static_cast<T>(alpha), static_cast<T>(x_val[i]), static_cast<T>(y[x_ind[i] - base]));
+        y[x_ind[i] - base] = std::fma(alpha, x_val[i], y[x_ind[i] - base]);
     }
 }
 
@@ -66,7 +66,7 @@ void host_doti(
 
     for(I i = 0; i < nnz; ++i)
     {
-        *result = std::fma(static_cast<T>(y[x_ind[i] - base]), static_cast<T>(x_val[i]), static_cast<T>(*result));
+        *result = std::fma(y[x_ind[i] - base], x_val[i], *result);
     }
 }
 
@@ -80,7 +80,7 @@ void host_dotci(
 
     for(I i = 0; i < nnz; ++i)
     {
-        *result = std::fma(static_cast<T>(rocsparse_conj(x_val[i])), static_cast<T>(y[x_ind[i] - base]), static_cast<T>(*result));
+        *result = std::fma(rocsparse_conj(x_val[i]), y[x_ind[i] - base], *result);
     }
 }
 
@@ -1401,7 +1401,7 @@ void host_coomv(rocsparse_operation  trans,
         for(int64_t i = 0; i < nnz; ++i)
         {
             y[coo_row_ind[i] - base]
-                = std::fma(static_cast<T>(alpha * coo_val[i]), static_cast<T>(x[coo_col_ind[i] - base]), static_cast<T>(y[coo_row_ind[i] - base]));
+                = std::fma(alpha * coo_val[i], x[coo_col_ind[i] - base], y[coo_row_ind[i] - base]);
         }
     }
     else
@@ -1421,7 +1421,7 @@ void host_coomv(rocsparse_operation  trans,
             T val = (trans == rocsparse_operation_transpose) ? coo_val[i]
                                                              : rocsparse_conj(coo_val[i]);
 
-            y[col] = std::fma(static_cast<T>(alpha * val), static_cast<T>(x[row]), static_cast<T>(y[col]));
+            y[col] = std::fma(alpha * val, x[row], y[col]);
         }
     }
 }
@@ -1456,7 +1456,7 @@ void host_coomv_aos(rocsparse_operation  trans,
         for(int64_t i = 0; i < nnz; ++i)
         {
             y[coo_ind[2 * i] - base] = std::fma(
-                static_cast<T>(alpha * coo_val[i]), static_cast<T>(x[coo_ind[2 * i + 1] - base]), static_cast<T>(y[coo_ind[2 * i] - base]));
+                alpha * coo_val[i], x[coo_ind[2 * i + 1] - base], y[coo_ind[2 * i] - base]);
         }
 
         break;
@@ -1479,7 +1479,7 @@ void host_coomv_aos(rocsparse_operation  trans,
             T val = (trans == rocsparse_operation_transpose) ? coo_val[i]
                                                              : rocsparse_conj(coo_val[i]);
 
-            y[col] = std::fma(static_cast<T>(alpha * val), static_cast<T>(x[row]), static_cast<T>(y[col]));
+            y[col] = std::fma(alpha * val, x[row], y[col]);
         }
 
         break;
@@ -1556,9 +1556,9 @@ static void host_csrmv_general(rocsparse_operation  trans,
                     {
                         if(j + k < row_end)
                         {
-                            sum[k] = std::fma(static_cast<T>(alpha * conj_val(csr_val[j + k], conj)),
-                                              static_cast<T>(x[csr_col_ind[j + k] - base]),
-                                              static_cast<T>(sum[k]));
+                            sum[k] = std::fma(alpha * conj_val(csr_val[j + k], conj),
+                                              x[csr_col_ind[j + k] - base],
+                                              sum[k]);
                         }
                     }
                 }
@@ -1577,7 +1577,7 @@ static void host_csrmv_general(rocsparse_operation  trans,
                 }
                 else
                 {
-                    y[i] = std::fma(static_cast<T>(beta), static_cast<T>(y[i]), static_cast<T>(sum[0]));
+                    y[i] = std::fma(beta, y[i], sum[0]);
                 }
             }
         }
@@ -1605,7 +1605,7 @@ static void host_csrmv_general(rocsparse_operation  trans,
 
                 if(beta != static_cast<T>(0))
                 {
-                    y[i] = std::fma(static_cast<T>(beta), static_cast<T>(y[i]), static_cast<T>(sum + err));
+                    y[i] = std::fma(beta, y[i], sum + err);
                 }
                 else
                 {
@@ -1634,7 +1634,7 @@ static void host_csrmv_general(rocsparse_operation  trans,
                 J col  = csr_col_ind[j] - base;
                 A val  = conj_val(csr_val[j], conj);
                 y[col] = std::fma(
-                    static_cast<T>(val), static_cast<T>(row_val), static_cast<T>(y[col]));
+                    val, row_val, y[col]);
             }
         }
     }
@@ -2717,7 +2717,7 @@ void host_csrmm(J                    M,
                     }
 
                     sum = std::fma(
-                        static_cast<T>(conj_val(csr_val_A[k], conj_A)), static_cast<T>(conj_val(dense_B[idx_B], conj_B)), static_cast<T>(sum));
+                        conj_val(csr_val_A[k], conj_A), conj_val(dense_B[idx_B], conj_B), sum);
                 }
 
                 int64_t idx_C = (order_C == rocsparse_order_column) ? i + j * ldc : i * ldc + j;
@@ -2728,7 +2728,7 @@ void host_csrmm(J                    M,
                 }
                 else
                 {
-                    dense_C[idx_C] = std::fma(static_cast<T>(beta), static_cast<T>(dense_C[idx_C]), static_cast<T>(alpha * sum));
+                    dense_C[idx_C] = std::fma(beta, dense_C[idx_C], alpha * sum);
                 }
             }
         }
@@ -2957,7 +2957,7 @@ void host_coomm(I                    M,
                     idx_B = (j + col * ldb);
                 }
 
-                dense_C[idx_C] = std::fma(static_cast<T>(val), static_cast<T>(conj_val(dense_B[idx_B], conj_B)), static_cast<T>(dense_C[idx_C]));
+                dense_C[idx_C] = std::fma(val, conj_val(dense_B[idx_B], conj_B), dense_C[idx_C]);
             }
         }
     }
@@ -2999,7 +2999,7 @@ void host_coomm(I                    M,
                     idx_B = (j + row * ldb);
                 }
 
-                dense_C[idx_C] = std::fma(static_cast<T>(val), static_cast<T>(conj_val(dense_B[idx_B], conj_B)), static_cast<T>(dense_C[idx_C]));
+                dense_C[idx_C] = std::fma(val, conj_val(dense_B[idx_B], conj_B), dense_C[idx_C]);
             }
         }
     }
