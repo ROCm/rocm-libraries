@@ -3702,9 +3702,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         raise RuntimeError("Sparse MatrixInstruction not supported for {0}".format(self.states.version))
 
       if (kernel["EnableF32XdlMathOp"] and kernel["ProblemType"]["F32XdlMathOp"].isXFloat32() and (not self.states.asmCaps["HasMFMA_xf32"])):
-        if kernel["UseF32XEmulation"]:
-          printWarning("XF32 MatrixInstruction not supported for {0}, using emulation".format(self.states.version))
-        else:
+        if not kernel["UseF32XEmulation"]:
           raise RuntimeError("XF32 MatrixInstruction not supported for {0}".format(self.states.version))
 
     if not self.states.asmCaps["HasDirectToLds"]:
