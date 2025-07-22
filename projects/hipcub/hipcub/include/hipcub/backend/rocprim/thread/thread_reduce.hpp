@@ -35,8 +35,6 @@
 BEGIN_HIPCUB_NAMESPACE
 
 /// Internal namespace (to prevent ADL mishaps between static functions when mixing different CUB installations)
-namespace internal {
-
 template <
     int         LENGTH,
     typename    T,
@@ -81,8 +79,6 @@ __device__ __forceinline__ T ThreadReduce(
     ReductionOp reduction_op)
 {
     return ThreadReduce<LENGTH, true>((T*)input, reduction_op);
-}
-
 }
 
 END_HIPCUB_NAMESPACE
