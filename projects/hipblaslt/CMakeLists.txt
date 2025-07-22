@@ -1,10 +1,10 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.22.1)
+cmake_minimum_required(VERSION 3.24.4)
 project(hipblaslt VERSION 1.0.0 LANGUAGES CXX)
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(Dependencies)
 include(GNUInstallDirs)
@@ -33,6 +33,7 @@ option(TENSILELITE_ENABLE_CLIENT "Build the tensilelite client." ON)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support" OFF)
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_ENABLE_HOSTLIBTESTS "Build the tensilelite host library tests." ON)
+option(TENSILELITE_ENABLE_AUTOBUILD "Build the tensilelite host library tests." OFF)
 
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
@@ -160,8 +161,7 @@ if(HIPBLASLT_ENABLE_DEVICE)
 
     if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
         # Build the rocisa python extension.
-        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite/rocisa"
-            "${CMAKE_CURRENT_BINARY_DIR}/rocisa_pyext")
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite/rocisa")
         set(HIPBLASLT_PYTHON_DEPS "rocisa")
         # TODO: The rocisa build explicitly sets the LIBRARY_OUTPUT_DIR to the
         # (top-level!) CMAKE_BINARY_DIR/lib directory. This is not a great idea
@@ -170,7 +170,7 @@ if(HIPBLASLT_ENABLE_DEVICE)
         # setup. In the meantime, the directory passed here must match the
         # what is set there. Failure to do so will cause a ModuleNotFoundError
         # trying to load rocisa.
-        hipblaslt_configure_bundled_python_command("${PROJECT_BINARY_DIR}/lib" "${asan_opts}")
+        hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa/lib" "${asan_opts}")
     else()
         # Just pass through to the found python executable and trust that the
         # user set it up properly.
@@ -197,9 +197,7 @@ if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBRARIES_SUPERBUILD)
     endif()
 endif()
 
-if(TENSILELITE_ENABLE_HOST OR HIPBLASLT_ENABLE_HOST)
-    add_subdirectory(tensilelite)
-endif()
+add_subdirectory(tensilelite)
 
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_BUILD_SHARED_LIBS)
