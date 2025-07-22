@@ -641,6 +641,10 @@ class LocalReadMFMA(LocalRead):
                                 incOffset = rIdx * numElementPerRead * UnrollStride + incOffset
                                 offset_val = (incOffset + offset_val + tP["localReadOffset"]) * tP["bpeDS"]
                             elif kernel["UseF32XEmulation"]:
+                                # Previously a single ds_read could be used to load all inputs for mfma
+                                # For emulated TF32, 2x ds_read is required along with a different mfma layout
+                                # so we need to adjust the offsets accordingly for the second ds_read.
+                                # Numbers here are specific to the mfma layout
                                 incOffset = 0
                                 midIdx = numReadsPerUnroll // 2
                                 if rIdx >= midIdx:
