@@ -341,6 +341,12 @@ public:
         return status;
     }
 
+    bool isHipBLASLtForcedOn()
+    {
+        // Only true if the user has set the environment variable on
+        return hipblasltEnvVar == 1;
+    }
+
     inline int getDefaultDeviceMemorySize()
     {
 
