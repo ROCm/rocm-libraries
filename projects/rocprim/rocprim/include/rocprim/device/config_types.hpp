@@ -277,12 +277,8 @@ void trampoline(Kernel k)
 // Host-side helper running at run-time, picking the trampoline whose template
 // argument `Arch` matches the actual GPU we are executing on.
 template<class Config, class Kernel>
-hipError_t launch_kernel(target_arch arch,
-                         Kernel      k,
-                         dim3        grid_size,
-                         dim3        block_size,
-                         size_t      shmem,
-                         hipStream_t stream)
+hipError_t launch_kernel(
+    target_arch arch, Kernel k, dim3 grid_size, dim3 block_size, size_t shmem, hipStream_t stream)
 {
     bool launched = false;
 
@@ -295,7 +291,8 @@ hipError_t launch_kernel(target_arch arch,
 
             using ArchConfig = typename Config::template architecture_config<Arch>;
 
-            assert(block_size.x * block_size.y * block_size.z == ArchConfig::params.kernel_config.block_size);
+            assert(block_size.x * block_size.y * block_size.z
+                   == ArchConfig::params.kernel_config.block_size);
 
             trampoline<Config, Arch, Kernel><<<grid_size, block_size, shmem, stream>>>(k);
             launched = true;
