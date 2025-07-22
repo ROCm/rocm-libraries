@@ -167,7 +167,7 @@ class LSUOn(LSU):
         regsPerStep = int((bytesPerVector+3)//4)
         elementStep = bytesPerVector // bytesPerElem
         numTotalAccVgprLdsReduction = len(self.LSUelements)*regsPerStep*(self.LSUfullVw//elementStep)
-        assert (numTotalAccVgprLdsReduction%kernel["LocalSplitU"]) == 0
+        assert (numTotalAccVgprLdsReduction%kernel["LocalSplitU"]) == 0, "AccVgprLdsRedcution % LSU != 0"
         numTotalAccVgprLdsReduction = numTotalAccVgprLdsReduction // kernel["LocalSplitU"]
         self.accVgprLdsReduction    = writer.vgprPool.checkOutAligned(numTotalAccVgprLdsReduction, 4, "LsuReduction")
         module.add(RegSet("v", "vgprLsuReduction", self.accVgprLdsReduction))
@@ -209,6 +209,12 @@ class LSUOn(LSU):
             # lsuProcessOffset is used when local read
             numVgprPerLSU    = len(neededAccVGPRIdx[0])
             lsuProcessOffset = numVgprPerLSU * kernel["WavefrontSize"] * 4
+
+            # break here instead of assert to release resource and do a post-rejection
+            # caused by range(startLSUaccIdxSet, endLSUaccIdxSet) = range(1,1)
+            if numAccVgpr <= 0:
+                writer.states.invalidLSUCode = True
+                break
 
             assert numAccVgpr > 0,"startLSUaccIdxSet=%u,endLSUaccIdxSet=%u,numAccIdx=%u"%(startLSUaccIdxSet,endLSUaccIdxSet,numAccIdx)
             accVgprRes = writer.vgprPool.checkOutAligned(numAccVgpr, 4, "accLSUVgprRes")

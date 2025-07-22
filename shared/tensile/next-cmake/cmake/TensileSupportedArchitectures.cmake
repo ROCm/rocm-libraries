@@ -49,6 +49,7 @@ if(NOT BUILD_ADDRESS_SANITIZER)
         "gfx1101"
         "gfx1102"
         "gfx1103"
+        "gfx1150"
         "gfx1151"
         "gfx1200"
         "gfx1201")

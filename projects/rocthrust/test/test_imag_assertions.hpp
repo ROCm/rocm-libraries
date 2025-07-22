@@ -1,46 +1,12 @@
-/*
- *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
-
-#include <thrust/complex.h>
-#include <thrust/host_vector.h>
+#pragma once
 
 #include <cfloat>
 #include <cmath>
 
 #include <gtest/gtest.h>
 
-template <typename T1, typename T2>
-testing::AssertionResult
-CmpHelperEQQuite(const char* lhs_expression, const char* rhs_expression, const T1& lhs, const T2& rhs)
-{
-  if (lhs == rhs)
-  {
-    return testing::AssertionSuccess();
-  }
-
-  testing::Message msg;
-  msg << "Expressions during equality check:";
-  msg << "\n  " << lhs_expression;
-  msg << "\n  " << rhs_expression;
-
-  return testing::AssertionFailure() << msg;
-}
-
-#define ASSERT_EQ_QUIET(val1, val2) ASSERT_PRED_FORMAT2(CmpHelperEQQuite, val1, val2)
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 template <typename T>
 testing::AssertionResult ComplexCompare(
@@ -158,51 +124,3 @@ testing::AssertionResult ComplexVectorNearPredFormat(
 #define ASSERT_NEAR_COMPLEX_VECTOR(val1, val2) \
   ASSERT_NEAR_COMPLEX_VECTOR_ERROR(            \
     val1, val2, thrust::complex<T>(std::numeric_limits<T>::epsilon(), std::numeric_limits<T>::epsilon()))
-
-template <typename T>
-testing::AssertionResult bitwise_equal(const char* a_expr, const char* b_expr, const T& a, const T& b)
-{
-  if (std::memcmp(&a, &b, sizeof(T)) == 0)
-  {
-    return testing::AssertionSuccess();
-  }
-
-  // googletest's operator<< doesn't see the above overload for int128_t
-  std::stringstream a_str;
-  std::stringstream b_str;
-  a_str << std::hexfloat << a;
-  b_str << std::hexfloat << b;
-
-  return testing::AssertionFailure()
-      << "Expected strict/bitwise equality of these values: " << std::endl
-      << "     " << a_expr << ": " << std::hexfloat << a_str.str() << std::endl
-      << "     " << b_expr << ": " << std::hexfloat << b_str.str() << std::endl;
-}
-
-#define ASSERT_BITWISE_EQ(a, b) ASSERT_PRED_FORMAT2(bitwise_equal, a, b)
-
-template <typename IterA, typename IterB>
-void assert_bit_eq(IterA result_begin, IterA result_end, IterB expected_begin, IterB expected_end)
-{
-  using value_a_t = typename std::iterator_traits<IterA>::value_type;
-  using value_b_t = typename std::iterator_traits<IterB>::value_type;
-
-  ASSERT_EQ(std::distance(result_begin, result_end), std::distance(expected_begin, expected_end));
-  auto result_it   = result_begin;
-  auto expected_it = expected_begin;
-  for (size_t index = 0; result_it != result_end; ++result_it, ++expected_it, ++index)
-  {
-    // The cast is needed, because the argument can be an std::vector<bool> iterator, which's operator*
-    // returns a proxy object that must be converted to bool
-    const auto result   = static_cast<value_a_t>(*result_it);
-    const auto expected = static_cast<value_b_t>(*expected_it);
-
-    ASSERT_BITWISE_EQ(result, expected) << "where index = " << index;
-  }
-}
-
-template <typename T>
-void assert_bit_eq(const thrust::host_vector<T>& result, const thrust::host_vector<T>& expected)
-{
-  assert_bit_eq(result.begin(), result.end(), expected.begin(), expected.end());
-}
