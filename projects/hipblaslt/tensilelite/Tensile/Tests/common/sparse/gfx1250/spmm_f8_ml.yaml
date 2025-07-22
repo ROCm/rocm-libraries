@@ -44,7 +44,7 @@ BenchmarkProblems:
       Batched: True
       Activation: False
       UseBias: 0
-      MetadataLayout: 0
+      MetadataLayout: 1
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -108,7 +108,7 @@ BenchmarkProblems:
       Batched: True
       Activation: False
       UseBias: 0
-      MetadataLayout: 0
+      MetadataLayout: 1
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -151,9 +151,6 @@ BenchmarkProblems:
           # - Exact: [16, 16, 1, 64] # classic format
           - Exact: [16, 16, 1, 128] # classic format
           - Exact: [64, 64, 1, 128] # classic format
-          - Exact: [256, 256, 1, 128] # classic format
-          - Exact: [256, 256, 1, 256] # classic format
-          - Exact: [256, 256, 1, 384] # classic format
           - Exact: [256, 256, 1, 512] # classic format
         - ActivationArgs:
           - [Enum: none]
@@ -175,7 +172,7 @@ BenchmarkProblems:
       Batched: True
       Activation: False
       UseBias: 0
-      MetadataLayout: 0
+      MetadataLayout: 1
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -239,7 +236,7 @@ BenchmarkProblems:
       Batched: True
       Activation: False
       UseBias: 0
-      MetadataLayout: 0
+      MetadataLayout: 1
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -303,7 +300,7 @@ BenchmarkProblems:
       Batched: True
       Activation: False
       UseBias: 0
-      MetadataLayout: 0
+      MetadataLayout: 1
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -367,7 +364,7 @@ BenchmarkProblems:
       Batched: True
       Activation: False
       UseBias: 0
-      MetadataLayout: 0
+      MetadataLayout: 1
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -410,9 +407,6 @@ BenchmarkProblems:
           # - Exact: [16, 16, 1, 64] # classic format
           - Exact: [16, 16, 1, 128] # classic format
           - Exact: [64, 64, 1, 128] # classic format
-          - Exact: [256, 256, 1, 128] # classic format
-          - Exact: [256, 256, 1, 256] # classic format
-          - Exact: [256, 256, 1, 384] # classic format
           - Exact: [256, 256, 1, 512] # classic format
         - ActivationArgs:
           - [Enum: none]
@@ -434,7 +428,7 @@ BenchmarkProblems:
       Batched: True
       Activation: False
       UseBias: 0
-      MetadataLayout: 0
+      MetadataLayout: 1
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -498,7 +492,7 @@ BenchmarkProblems:
       Batched: True
       Activation: False
       UseBias: 0
-      MetadataLayout: 0
+      MetadataLayout: 1
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:

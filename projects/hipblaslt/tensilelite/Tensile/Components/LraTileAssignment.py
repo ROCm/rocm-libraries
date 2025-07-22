@@ -309,7 +309,10 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
         #FIXME: tail loop with transposed load b128
         inputPerThread   = kernel["LocalReadVectorWidth"]
 
+        isSparseDenseMatrix = False
         if kernel["ProblemType"]["Sparse"]:
+          if (kernel["ProblemType"]["Sparse"] == 1 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 2 and  tP["isA"]):
+            isSparseDenseMatrix = True
           if (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and  tP["isA"]):
             inputPerThread = inputPerThread // 2
           elif tP["isM"]:
@@ -370,7 +373,11 @@ class LraTileAssignmentTransposedMFMAB8(LraTileAssignmentTransposedMFMA):
                 # unroll offset
                 module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, "wtId=tid%wavelen"))
                 module.add(vectorStaticDivide(kReg, kReg, self.NUM_UNROLLED_STRIDE_ELEMENTS, tmpSgprInfo, f"kOffset=wtId//{self.NUM_UNROLLED_STRIDE_ELEMENTS}"))
-                module.add(vectorStaticMultiply(vgpr(mReg), vgpr(kReg), self.NUM_UNROLLED_STRIDE_ELEMENTS, tmpSgprInfo, f"kOffset*={self.NUM_UNROLLED_STRIDE_ELEMENTS}"))
+                if isSparseDenseMatrix:
+                    # Dense matrix of SPARSE are interleaved format, so we need to multiply by 2
+                    module.add(vectorStaticMultiply(vgpr(mReg), vgpr(kReg), self.NUM_UNROLLED_STRIDE_ELEMENTS*2, tmpSgprInfo, f"kOffset*={self.NUM_UNROLLED_STRIDE_ELEMENTS}x2"))
+                else:
+                    module.add(vectorStaticMultiply(vgpr(mReg), vgpr(kReg), self.NUM_UNROLLED_STRIDE_ELEMENTS, tmpSgprInfo, f"kOffset*={self.NUM_UNROLLED_STRIDE_ELEMENTS}"))
                 module.add(vectorStaticRemainder(dummy, kReg, dividendReg, waveWidth, tmpVgprRes, tmpSgprInfo, "wtId=tid%wavelen"))
                 module.add(vectorStaticRemainder(dummy, kReg, dividendReg, self.NUM_UNROLLED_STRIDE_ELEMENTS, tmpVgprRes, tmpSgprInfo, "ktOffset=wtId%16"))
                 module.add(vectorStaticDivide(kReg, kReg, self.NUM_READ_ELEMENT_PER_THREAD, tmpSgprInfo, f"kOffset=ktOffset//{self.NUM_READ_ELEMENT_PER_THREAD}"))

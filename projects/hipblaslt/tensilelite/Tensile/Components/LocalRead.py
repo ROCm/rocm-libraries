@@ -685,10 +685,12 @@ class LocalReadMFMA(LocalRead):
                     wtRegStride = kernel[f"MIInputPerThread{tc}"] * tP["bpeDS"] // bpr
                     numUnrolledIncrements = 32
                     vwTrLoad = 8
+                    numberLRVWPerMIInput = kernel["MIInputPerThread%s"%tc] // kernel["LocalReadVectorWidth"]
                     for tIdx in range(numberMTilesPerWave):
                         offset = int((tP["localReadOffset"] + MIWaveGroupShape[tile01] * tIdx) * tP["bpeDS"])
                         if tP["isM"]:
-                            for v in range(kernel["LocalReadVectorWidth"]//vwTrLoad):
+                            numLoadTrPerMetadata = max(kernel["MIInputPerThread%s"%tc] // vwTrLoad, 1)
+                            for v in range(numLoadTrPerMetadata):
                                 incrementBytes = int((v * vwTrLoad ) * tP["bpeDS"] * UnrollStride)
                                 paddedOffset = offset + incrementBytes
                                 if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
@@ -702,7 +704,17 @@ class LocalReadMFMA(LocalRead):
                             for i in range(kernel["MIInputPerThread%s"%tc]//kernel["LocalReadVectorWidth"]):
                                 for v in range(kernel["LocalReadVectorWidth"]//vwTrLoad):
                                     incrementBytes = int((v * vwTrLoad + i * numUnrolledIncrements) * tP["bpeDS"] * UnrollStride)
-                                    paddedOffset = offset + incrementBytes
+                                    sparseDenseOffset = 0
+                                    if numberLRVWPerMIInput == 4 and kernel["ProblemType"]["Sparse"] != 0:
+                                        sparseDenseOffset = int((numUnrolledIncrements) * tP["bpeDS"] * UnrollStride) // 2
+                                        if i%2 == 1:
+                                            # For sparse, interleaved so that the 2nd part will have an offset.
+                                            paddedOffset = offset + incrementBytes - sparseDenseOffset
+                                        else:
+                                            paddedOffset = offset + incrementBytes
+                                    else:
+                                        paddedOffset = offset + incrementBytes
+
                                     if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
                                         paddedOffset += int((paddedOffset // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"])
                                     ds = DSModifiers(na=1, offset=paddedOffset)
