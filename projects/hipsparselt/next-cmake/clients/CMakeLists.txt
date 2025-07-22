@@ -3,7 +3,10 @@
 
 set(_CMAKE_CURRENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../clients")
 
-find_package(cblas REQUIRED)
+if(HIPSPARSELT_ENABLE_HIP)
+    find_package(cblas REQUIRED)
+endif()
+
 find_package(Threads REQUIRED)
 find_package(OpenMP)
 

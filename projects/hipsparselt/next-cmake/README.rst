@@ -109,6 +109,17 @@ Build specific GPU targets
       cmake --preset default-release -D GPU_TARGETS="gfx1201"
       cmake --build _build --parallel 32 --verbose
 
+Build with CUDA support
+-----------------------
+
+   .. code-block:: cmake
+
+      cmake --preset cuda
+      cmake --build _build --parallel 32 --verbose
+
+.. tip::
+
+      Make sure that `HIP_PLATFORM="nvidia"` is set in the environment when building with CUDA.
 
 Options
 -------
@@ -153,7 +164,6 @@ Options
 * ``HIPSPARSELT_ENABLE_BENCHMARKS``: Build benchmark client (default: ``ON``)
 * ``HIPSPARSELT_ENABLE_SAMPLES``: Build client samples (default: ``ON``)
 * ``HIPSPARSELT_ENABLE_FORTRAN``: Build Fortran clients (default: ``OFF``)
-* ``HIPSPARSELT_REQUIRE_ROCM_SMI``: Require rocm_smi (default: ``ON`` on Linux, ``OFF`` on Windows)
 
 CMake Targets
 -------------

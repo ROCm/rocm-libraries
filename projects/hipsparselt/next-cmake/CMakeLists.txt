@@ -38,21 +38,24 @@ endif()
 # ============================================================================
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile_commands.json for clang tooling support" ON)
 
-option(HIPSPARSELT_ENABLE_CLIENT "Build hipSPARSELt clients." ON)
 option(HIPSPARSELT_ENABLE_CUDA "Build hipSPARSELt with CUDA backend." OFF)
-option(HIPSPARSELT_ENABLE_HIP "Build hipSPARSELt with HIP backend." ON)
+cmake_dependent_option(HIPSPARSELT_ENABLE_HIP "Build hipSPARSELt with HIP backend." ON "NOT HIPSPARSELT_ENABLE_CUDA" OFF)
+if(HIPSPARSELT_ENABLE_CUDA AND HIPSPARSELT_ENABLE_HIP)
+  message(STATUS "HIPSPARSELT_ENABLE_CUDA: ${HIPSPARSELT_ENABLE_CUDA}")
+  message(STATUS "HIPSPARSELT_ENABLE_HIP: ${HIPSPARSELT_ENABLE_HIP}")
+  message(FATAL_ERROR "Cannot enable CUDA and HIP support simultaneously.")
+endif()
 
 option(HIPSPARSELT_BUILD_SHARED_LIBS "Build the hipSPARSELt shared library." ON)
 option(HIPSPARSELT_BUILD_TESTING "Build test client." ON)
 option(HIPSPARSELT_BUILD_COVERAGE "Build tests with coverage enabled." OFF)
 
+option(HIPSPARSELT_ENABLE_CLIENT "Build hipSPARSELt clients." ON)
 if(HIPSPARSELT_ENABLE_CLIENT)
   option(HIPSPARSELT_ENABLE_BENCHMARKS "Build benchmark client." ON)
   option(HIPSPARSELT_ENABLE_SAMPLES "Build client samples." ON)
   option(HIPSPARSELT_ENABLE_FORTRAN "Build Fortran clients." OFF)
   option(HIPSPARSELT_ENABLE_BLIS "Enable BLIS support for reference implementations." ON)
-  # rocm-smi is not presently available on Windows
-  cmake_dependent_option(HIPSPARSELT_ENABLE_ROCM_SMI "Require rocm_smi." ON "NOT WIN32" OFF)
 endif()
 
 option(HIPSPARSELT_ENABLE_MARKER "Enable rocTracer marker support." OFF)
@@ -95,31 +98,25 @@ endif()
 
 # Dependency Setup
 # ============================================================================
+find_package(PkgConfig REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 find_package(hip REQUIRED)
 find_package(hipblas-common REQUIRED)
-
-if(HIPSPARSELT_ENABLE_ROCM_SMI)
-  find_package(rocm_smi REQUIRED)
-endif()
 
 if(HIPSPARSELT_ENABLE_MARKER)
   find_library(ROCTX64_LIBRARY REQUIRED NAMES roctx64 libroctx64)
 endif()
 
 if(HIPSPARSELT_ENABLE_CUDA)
-  find_package(CUDAToolkit REQUIRED)
-  find_library(
-    CUSPARSELT_LIBRARY
-    NAMES cusparseLt
-    PATHS ${CUDAToolkit_LIBRARY_ROOT}
-    HINTS lib64 lib REQUIRED
-  )
-  message(STATUS "Found cuSPARSELt: ${CUSPARSELT_LIBRARY}")
-endif()
+  find_path(cusparselt_INCLUDE_DIR REQUIRED NAMES cusparseLt.h)
+  message(STATUS "CUSPARSELT_INCLUDE_DIR: ${CUSPARSELT_INCLUDE_DIR}")
 
-# Add Subdirectories
-# ============================================================================
+  find_library(cusparselt_LIBRARY REQUIRED NAMES cusparseLt)
+  message(STATUS "CUSPARSELT_LIBRARY: ${CUSPARSELT_LIBRARY}")
+
+  message(STATUS "Found cusparseLt: ${CUSPARSELT_LIBRARY}")
+endif()
+  
 if(HIPSPARSELT_ENABLE_HIP)
   set(HIPBLASLT_PATH "${HIPSPARSELT_HIPBLASLT_PATH}")
   if(NOT EXISTS "${HIPBLASLT_PATH}")

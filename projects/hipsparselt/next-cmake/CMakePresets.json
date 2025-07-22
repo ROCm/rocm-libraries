@@ -44,6 +44,22 @@
         "HIPSPARSELT_ENABLE_CUDA": "OFF",
         "GPU_TARGETS": "all"
       }
+    },
+    {
+      "name": "cuda",
+      "displayName": "CUDA Build",
+      "description": "Build with CUDA support",
+      "environment": {
+        "HIP_PLATFORM": "nvidia"
+      },
+      "binaryDir": "${sourceDir}/_build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "HIPSPARSELT_ENABLE_CUDA": "ON",
+        "HIPSPARSELT_ENABLE_ROCM_SMI": "OFF",
+        "CMAKE_CXX_COMPILER": "nvcc",
+        "CMAKE_PREFIX_PATH": "/usr/local/cuda;/opt/rocm;/usr/lib/x86_64-linux-gnu"
+      }
     }
   ]
 } 
