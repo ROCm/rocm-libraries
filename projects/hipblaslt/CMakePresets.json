@@ -24,6 +24,20 @@
         }
       },
       {
+        "name": "tensilelite-auto-build",
+        "displayName": "TensileLite Auto Build",
+        "description": "Builds tensilelite bash scripts",
+        "inherits": "tensilelite",
+        "cacheVariables": {
+          "DEVELOP_MODE": "ON",
+          "BUILD_TESTING": "OFF",
+          "TENSILELITE_ENABLE_HOST": "OFF",
+          "TENSILELITE_ENABLE_CLIENT": "OFF",
+          "TENSILELITE_ENABLE_AUTOBUILD": "ON"
+        }
+      },
+
+      {
         "name": "hipblaslt",
         "displayName": "hipBLASLt",
         "description": "Build just the hipblaslt library and required deps",
