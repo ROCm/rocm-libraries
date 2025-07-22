@@ -98,6 +98,15 @@ endif()
 string( CONCAT TESTS_OUT_DIR "${PROJECT_BINARY_DIR}" ${TESTS_OUT_DIR} )
 
 option( BUILD_CLIENTS_TESTS_OPENMP "Build tests with OpenMP" ON )
+if( BUILD_CLIENTS_TESTS_OPENMP )
+  find_package(OpenMP REQUIRED)
+  if( BUILD_WITH_LIB STREQUAL "CUDA" )
+    message( STATUS "OpenMP is not supported on CUDA, building tests without it" )
+  else()
+    target_link_libraries( hipfft-test PRIVATE OpenMP::OpenMP_CXX
+                           -L${HIP_CLANG_ROOT}/lib -Wl,-rpath=${HIP_CLANG_ROOT}/lib )
+  endif()
+endif()
 
 foreach( target ${TEST_TARGETS} )
   set_target_properties( ${target} PROPERTIES
@@ -140,20 +149,6 @@ foreach( target ${TEST_TARGETS} )
     target_compile_definitions( ${target} PUBLIC _CUFFT_BACKEND )
   endif()
 
-  if( BUILD_CLIENTS_TESTS_OPENMP )
-    find_package(OpenMP REQUIRED)
-    if( BUILD_WITH_LIB STREQUAL "CUDA" )
-      message( STATUS "OpenMP is not supported on CUDA, building tests without it" )
-    else()
-      target_compile_options( ${target} PRIVATE -DBUILD_CLIENTS_TESTS_OPENMP )
-      if(NOT (CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+"))
-        target_link_libraries( ${target} PRIVATE OpenMP::OpenMP_CXX )
-        target_include_directories( ${target} PRIVATE ${HIP_CLANG_ROOT}/include )
-      else()
-	target_link_libraries( ${target} PRIVATE OpenMP::OpenMP_CXX )
-      endif()
-    endif()
-  endif()
 
   target_include_directories( ${target}
     PRIVATE
