@@ -84,6 +84,20 @@ public:
         }
     }
 
+    // split communicator
+    void split(MPI_Comm parent_comm, int color, int key)
+    {
+        free(); // clean old communicator (if any)
+
+        // now create new communicator from parent_comm
+        if(parent_comm == MPI_COMM_NULL)
+            throw std::runtime_error("MPI_Comm_split: parent communicator is MPI_COMM_NULL");
+
+        int mpi_result = MPI_Comm_split(parent_comm, color, key, &mpi_comm);
+        if(mpi_result != MPI_SUCCESS || mpi_comm == MPI_COMM_NULL)
+            throw std::runtime_error("MPI_Comm_split failed");
+    }
+
     // check if communicator has been initialized
     operator bool() const
     {

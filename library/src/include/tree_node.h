@@ -42,6 +42,7 @@
 #include "kargs.h"
 #include "load_store_ops.h"
 #include "logging.h"
+#include "rocfft_mpi.h"
 #include "rtc_kernel.h"
 #include <hip/hip_runtime_api.h>
 
@@ -1362,6 +1363,15 @@ private:
     std::vector<hipEvent_wrapper_t> events;
 };
 
+// Macro for sub-communicator
+#ifdef ROCFFT_MPI_ENABLE
+#define ROCFFT_COMMALLTOALL_SUBCOMM_ARG , MPI_Comm_wrapper_t subcomm = {}
+#define ROCFFT_COMMALLTOALL_SUBCOMM_INIT , subcomm(std::move(subcomm))
+#else
+#define ROCFFT_COMMALLTOALL_SUBCOMM_ARG
+#define ROCFFT_COMMALLTOALL_SUBCOMM_INIT
+#endif
+
 // Send data from all ranks to all ranks in the plan.  Each rank must
 // send from/to a single buffer (with different read/write offsets
 // for each other rank).
@@ -1369,6 +1379,7 @@ private:
 // The former is preferable, as it is usually more optimized.
 struct CommAllToAll : public MultiPlanItem
 {
+
     CommAllToAll(rocfft_precision           _precision,
                  rocfft_array_type          _arrayType,
                  const std::vector<size_t>& _sendOffsets,
@@ -1376,7 +1387,9 @@ struct CommAllToAll : public MultiPlanItem
                  const std::vector<size_t>& _recvOffsets,
                  const std::vector<size_t>& _recvCounts,
                  BufferPtr                  _sendBuf,
-                 BufferPtr                  _recvBuf)
+                 BufferPtr                  _recvBuf,
+                 bool                       uniformCounts,
+                 bool                       useSubcomm = false ROCFFT_COMMALLTOALL_SUBCOMM_ARG)
         : precision(_precision)
         , arrayType(_arrayType)
         , sendOffsets(_sendOffsets)
@@ -1385,6 +1398,8 @@ struct CommAllToAll : public MultiPlanItem
         , recvCounts(_recvCounts)
         , sendBuf(_sendBuf)
         , recvBuf(_recvBuf)
+        , uniform_counts(uniformCounts)
+        , use_subcomm(useSubcomm) ROCFFT_COMMALLTOALL_SUBCOMM_INIT
     {
         // Currently MPI interface uses 32-bit signed ints, so assert
         // that our counts/offsets don't overflow that type
@@ -1433,6 +1448,21 @@ struct CommAllToAll : public MultiPlanItem
         return true;
     }
 
+#ifdef ROCFFT_MPI_ENABLE
+    // helper methods
+    static std::array<int, 3> rank_to_coords(int rank, const std::array<int, 3>& grid);
+
+    static int calculate_color_for_subcomm(int rank, const std::array<int, 3>& grid, int split_dim);
+
+    static int calculate_subcomm_size(const std::array<int, 3>& grid, int split_dim);
+
+    static bool can_form_subcommunicators(MPI_Comm                   global_comm,
+                                          const std::vector<size_t>& send_counts,
+                                          const std::vector<size_t>& recv_counts,
+                                          const std::array<int, 3>&  in_grid,
+                                          const std::array<int, 3>&  out_grid);
+#endif
+
 private:
     const rocfft_precision  precision;
     const rocfft_array_type arrayType;
@@ -1447,6 +1477,16 @@ private:
     // send/receive buffers
     const BufferPtr sendBuf;
     const BufferPtr recvBuf;
+
+    // check uniform counts for using AlltoAll instead of AlltoAllv
+    bool uniform_counts = false;
+
+    // subcomm for optimizations whenever possible
+    bool use_subcomm = false;
+
+#ifdef ROCFFT_MPI_ENABLE
+    MPI_Comm_wrapper_t subcomm;
+#endif
 };
 
 // Tree-structured FFT plan.  This is specific to a single device on
