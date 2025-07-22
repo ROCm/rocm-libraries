@@ -950,6 +950,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
         scheduleTF32Emu = kernel["UseF32XEmulation"]
         if scheduleTF32Emu:
+          # 24 is the instruction count for the TF32 emulation sequence in LocalRead.py
           instPerPackA = 24#len(packAItems)
           instPerPackB = 24#len(packBItems)
           while packAItems or packBItems:
@@ -974,30 +975,28 @@ class KernelWriter(metaclass=abc.ABCMeta):
                     packINtemsA[j].append(packAItems.pop(0))
                   else:
                     break
-
-        if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-          while packMItems:
-            for j in range(self.states.numReadsIterCoalescedMetadata):
-              for n in range(ceil(instPerPackM)):
-                if packMItems:
-                  packINtemsM[j].append(packMItems.pop(0))
-                else:
-                  break
-
-        while packBItems:
-          if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeB"].isAnyFloat8():
-            for n in range(instPerPackB):
-              if packBItems:
-                packINtemsB[0].append(packBItems.pop(0))
-              else:
-                break
-          else:
-            for j in range(self.states.numReadsIterCoalescedB):
+          if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+            while packMItems:
+              for j in range(self.states.numReadsIterCoalescedMetadata):
+                for n in range(ceil(instPerPackM)):
+                  if packMItems:
+                    packINtemsM[j].append(packMItems.pop(0))
+                  else:
+                    break
+          while packBItems:
+            if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeB"].isAnyFloat8():
               for n in range(instPerPackB):
                 if packBItems:
-                  packINtemsB[j].append(packBItems.pop(0))
+                  packINtemsB[0].append(packBItems.pop(0))
                 else:
                   break
+            else:
+              for j in range(self.states.numReadsIterCoalescedB):
+                for n in range(instPerPackB):
+                  if packBItems:
+                    packINtemsB[j].append(packBItems.pop(0))
+                  else:
+                    break
 
         for j in range(max(self.states.numReadsIterCoalescedA,self.states.numReadsIterCoalescedB,self.states.numReadsIterCoalescedMetadata)):
           if schedulePackConsiderMetadata:

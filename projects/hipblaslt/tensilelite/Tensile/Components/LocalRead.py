@@ -293,6 +293,8 @@ class LocalReadMFMA(LocalRead):
                                     v2 = vgpr("Valu%s_X%u_I%u+%u+2"%(tc, bufferIdx, iui, valuiIdx))
                                     v3 = vgpr("Valu%s_X%u_I%u+%u+3"%(tc, bufferIdx, iui, valuiIdx))
 
+                                    # For the TF32 emu we need 4x cvt+sub pairs to compute the "LO" parts. Here we use
+                                    # dot2 to replace one instance of cvt+sub pair.
                                     packCode.add(VCvtPkF32toBF16(dst=vgpr(tmpvgpr01),   src0=v0, src1=v2))
                                     packCode.add(VDot2CF32BF16(dst=v0, src0=hex(0x8000bf80), src1=vgpr(tmpvgpr01))) # v0_lo
                                     packCode.add(VDot2CF32BF16(dst=v2, src0=hex(0xbf800000), src1=vgpr(tmpvgpr01))) # v2_lo
@@ -300,7 +302,10 @@ class LocalReadMFMA(LocalRead):
 
                                     packCode.add(VDot2CF32BF16(dst=v1, src0=hex(0x8000bf80), src1=vgpr(tmpvgpr01+1))) # v1_lo
 
-                                    # Note: v_dot2c_f32_bf16 needs 4 wait states for inst dependencies.
+                                    # Note: v_dot2c_f32_bf16 needs 4 wait states for inst dependencies. Using 4 dot2 would require
+                                    # 2 extra dummy waits for the last dot2 (we don't have enough extra work to avoid dummy waits),
+                                    # so here we don't use dot2 and just use a cvt+sub pair. We use one extra instruction by
+                                    # not using dot2, but save on the 2 extra dummy waits - net savings of one instruction.
                                     packCode.add(VCvtBF16toFP32(dst=vgpr(tmpvgpr), src=vgpr(tmpvgpr01+1), vgprMask=None, vi=1))
                                     packCode.add(VSubF32(dst=v3, src0=v3, src1=vgpr(tmpvgpr)))
 
