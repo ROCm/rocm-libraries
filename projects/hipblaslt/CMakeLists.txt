@@ -32,7 +32,6 @@ option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON)
 option(TENSILELITE_ENABLE_CLIENT "Build the tensilelite client." ON)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support" OFF)
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
-option(TENSILELITE_ENABLE_HOSTLIBTESTS "Build the tensilelite host library tests." ON)
 option(TENSILELITE_ENABLE_AUTOBUILD "Build the tensilelite host library tests." OFF)
 
 if(HIPBLASLT_ENABLE_CLIENT)

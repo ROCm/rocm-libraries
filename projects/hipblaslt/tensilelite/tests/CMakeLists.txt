@@ -37,9 +37,9 @@ target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR
 if(HIPBLASLT_ENABLE_LLVM)
     target_sources(tensilelite-tests
         PRIVATE
-            "${CMAKE_CURRENT_DIR}/llvm/LibraryPerformance_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/llvm/LibraryPerformance_test.cpp"
     )
-    target_link_libraries(tensilelite-tests PRIVATE LLVM)
+    target_link_libraries(tensilelite-tests PRIVATE LLVMObjectYAML)
 endif()
 
 target_link_libraries(tensilelite-tests
