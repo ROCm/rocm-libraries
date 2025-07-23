@@ -23,6 +23,11 @@ from types import SimpleNamespace as NS
 
 # yapf: disable
 pp_3d_kernels = [
+        NS(length=[32,32,128], dims=[0,2], factors=[[8,4],[2,4,4,4]], factors_pp=[[4],[8]], threads_per_transform=[8,16], workgroup_size=[64,128], direct_to_from_reg=[False,False]),
+        NS(length=[32,32,64], dims=[0,2], factors=[[4,8],[4,4,4]], factors_pp=[[4],[8]], threads_per_transform=[8,16], workgroup_size=[64,128], direct_to_from_reg=[False,False]),
+        NS(length=[64,32,128], dims=[0,2], factors=[[8,8],[2,4,4,4]], factors_pp=[[4],[8]], threads_per_transform=[8,16], workgroup_size=[64,128], direct_to_from_reg=[False,False]),
+        NS(length=[64,64,128], dims=[0,2], factors=[[8,8],[2,4,4,4]], factors_pp=[[4],[16]], threads_per_transform=[8,16], workgroup_size=[64,256], direct_to_from_reg=[False,False]),        
         NS(length=[64,64,64], dims=[0,2], factors=[[8,8],[4,4,4]], factors_pp=[[4],[16]], threads_per_transform=[8,16], workgroup_size=[64,256], direct_to_from_reg=[False,False]),
         NS(length=[64,64,52], dims=[0,2], factors=[[8,8],[13,4]], factors_pp=[[4],[16]], threads_per_transform=[8,4], workgroup_size=[64,64], direct_to_from_reg=[False,False]),
+        NS(length=[60,60,60], dims=[0,2], factors=[[6,10],[6,10]], factors_pp=[[6],[10]], threads_per_transform=[10,10], workgroup_size=[20,100], direct_to_from_reg=[False,False]),        
 ]

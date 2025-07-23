@@ -233,20 +233,21 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         StatementList work;
 
         for(unsigned int w = 0; w < width; ++w)
-            work += Assign(R[w], lds_complex[offset_lds + (w * stride_lds)]);
+            work += Assign(R[hr * width + w],
+                           lds_complex[offset_lds + ((hr * width + w) * stride_lds)]);
 
         return work;
     }
 
     ArgumentList device_lds_reg_inout_pp_arguments()
     {
-        ArgumentList args{R, lds_complex, stride_lds, offset_lds};
+        ArgumentList args{R, lds_complex, stride_lds, offset_lds, thread};
         return args;
     }
 
     std::vector<Expression> device_lds_reg_inout_pp_device_call_arguments()
     {
-        return {R, lds_complex, stride_lds_pp, offset_lds_pp};
+        return {R, lds_complex, stride_lds_pp, offset_lds_pp, thread_id / max_factor_pp};
     }
 
     TemplateList device_lds_reg_inout_pp_templates()
@@ -266,17 +267,22 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         f.arguments = device_lds_reg_inout_pp_arguments();
         f.qualifier = "__device__";
 
+        auto effective_length = std::max(length, length_pp);
+
         StatementList& body = f.body;
 
         auto load_lds = std::mem_fn(&StockhamPartialPassKernelRR::load_lds_step_1_2_generator);
         // first pass of load (full)
-        unsigned int width  = max_factor_pp;
-        float        height = static_cast<float>(length) / width / threads_per_transform;
+        unsigned int width  = factors_pp[0];
+        float        height = static_cast<float>(effective_length) / width / threads_per_transform;
         body += SyncThreads();
         body += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5),
                          width,
                          height,
-                         ThreadGuardMode::NO_GUARD);
+                         ThreadGuardMode::GUARD_BY_IF,
+                         false,
+                         std::nullopt,
+                         effective_length);
 
         return f;
     }
@@ -289,7 +295,8 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         StatementList work;
 
         for(unsigned int w = 0; w < width; ++w)
-            work += Assign(lds_complex[offset_lds + (w * stride_lds)], R[w]);
+            work += Assign(lds_complex[offset_lds + ((hr * width + w) * stride_lds)],
+                           R[hr * width + w]);
 
         return work;
     }
@@ -304,17 +311,22 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         f.arguments = device_lds_reg_inout_pp_arguments();
         f.qualifier = "__device__";
 
+        auto effective_length = std::max(length_pp, length);
+
         StatementList& body = f.body;
 
         auto store_lds = std::mem_fn(&StockhamPartialPassKernelRR::store_pp_step_1_2_lds_generator);
         // last pass of store (full)
-        unsigned int width  = max_factor_pp;
-        float        height = static_cast<float>(length) / width / threads_per_transform;
+        unsigned int width  = factors_pp.back();
+        float        height = static_cast<float>(effective_length) / width / threads_per_transform;
         body += SyncThreads();
         body += add_work(std::bind(store_lds, this, _1, _2, _3, _4, _5),
                          width,
                          height,
-                         ThreadGuardMode::NO_GUARD);
+                         ThreadGuardMode::GUARD_BY_IF,
+                         false,
+                         std::nullopt,
+                         effective_length);
         return f;
     }
 
