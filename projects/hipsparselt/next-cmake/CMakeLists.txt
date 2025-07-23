@@ -98,7 +98,6 @@ endif()
 
 # Dependency Setup
 # ============================================================================
-find_package(PkgConfig REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 find_package(hip REQUIRED)
 find_package(hipblas-common REQUIRED)

@@ -97,5 +97,7 @@ if(HIPSPARSELT_ENABLE_HIP)
     target_link_libraries(hipsparselt PRIVATE hip::device)
 endif()
 
+target_link_libraries(hipsparselt PRIVATE roc::hipblas-common hip::device)
+
 add_subdirectory(include)
 add_subdirectory(src)
