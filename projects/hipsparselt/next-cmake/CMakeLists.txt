@@ -108,13 +108,15 @@ if(HIPSPARSELT_ENABLE_MARKER)
 endif()
 
 if(HIPSPARSELT_ENABLE_CUDA)
+  find_package(CUDAToolkit REQUIRED)
+
   find_path(cusparselt_INCLUDE_DIR REQUIRED NAMES cusparseLt.h)
-  message(STATUS "CUSPARSELT_INCLUDE_DIR: ${CUSPARSELT_INCLUDE_DIR}")
+  message(STATUS "cusparselt_INCLUDE_DIR: ${cusparselt_INCLUDE_DIR}")
 
   find_library(cusparselt_LIBRARY REQUIRED NAMES cusparseLt)
-  message(STATUS "CUSPARSELT_LIBRARY: ${CUSPARSELT_LIBRARY}")
+  message(STATUS "cusparselt_LIBRARY: ${cusparselt_LIBRARY}")
 
-  message(STATUS "Found cusparseLt: ${CUSPARSELT_LIBRARY}")
+  message(STATUS "Found cusparseLt: ${cusparselt_LIBRARY}")
 endif()
   
 if(HIPSPARSELT_ENABLE_HIP)
