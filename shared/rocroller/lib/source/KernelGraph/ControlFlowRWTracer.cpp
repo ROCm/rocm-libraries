@@ -267,6 +267,17 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(Assign const& op, int tag)
     {
+        auto dst = m_graph.mapper.getConnections(tag)[0].coordinate;
+
+        auto maybeStride = m_graph.coordinates.get<Stride>(dst).has_value();
+        auto maybeOffset = m_graph.coordinates.get<Offset>(dst).has_value();
+
+        // TODO: track dst register for memory operations
+        if(maybeStride || maybeOffset)
+        {
+            return;
+        }
+
         CollectDataFlowExpressionVisitor visitor;
         visitor.call(op.expression);
         for(auto src : visitor.tags)
@@ -274,7 +285,6 @@ namespace rocRoller::KernelGraph
             trackRegister(tag, src, ReadWrite::READ);
         }
 
-        auto dst = m_graph.mapper.getConnections(tag)[0].coordinate;
         trackRegister(tag, dst, ReadWrite::WRITE);
     }
 
