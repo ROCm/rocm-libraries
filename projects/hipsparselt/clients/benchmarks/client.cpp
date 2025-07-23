@@ -96,10 +96,13 @@ struct perf_sparse<
             && std::is_same<Tc, int32_t>{})
         || (std::is_same<Ti, int8_t>{} && (std::is_same<To, hip_bfloat16>{})
             && std::is_same<Tc, int32_t>{})
+#ifdef HIP_FP8_TYPE_OCP
         || (std::is_same<Ti, __hip_fp8_e4m3>{} && (std::is_same<To, float>{})
             && std::is_same<Tc, float>{})
         || (std::is_same<Ti, __hip_fp8_e5m2>{} && (std::is_same<To, float>{})
-            && std::is_same<Tc, float>{})>> : hipsparselt_test_valid
+            && std::is_same<Tc, float>{})
+#endif
+	>> : hipsparselt_test_valid
 {
     void operator()(const Arguments& arg)
     {
