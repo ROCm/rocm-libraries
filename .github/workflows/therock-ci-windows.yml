@@ -64,40 +64,40 @@ jobs:
         run: |
           pip install -r TheRock/requirements.txt
 
-      - name: Install requirements
-        run: |
-          choco install --no-progress -y ccache
-          choco install --no-progress -y ninja
-          choco install --no-progress -y strawberryperl
-          echo "$PATH;C:\Strawberry\c\bin" >> $GITHUB_PATH
-          choco install --no-progress -y awscli
-          echo "$PATH;C:\Program Files\Amazon\AWSCLIV2" >> $GITHUB_PATH
+      # - name: Install requirements
+      #   run: |
+      #     choco install --no-progress -y ccache
+      #     choco install --no-progress -y ninja
+      #     choco install --no-progress -y strawberryperl
+      #     echo "$PATH;C:\Strawberry\c\bin" >> $GITHUB_PATH
+      #     choco install --no-progress -y awscli
+      #     echo "$PATH;C:\Program Files\Amazon\AWSCLIV2" >> $GITHUB_PATH
 
-      # After other installs, so MSVC get priority in the PATH.
-      - name: Configure MSVC
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+      # # After other installs, so MSVC get priority in the PATH.
+      # - name: Configure MSVC
+      #   uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
-      - name: Fetch sources
-        run: |
-          git config --global core.longpaths true
-          python ./TheRock/build_tools/fetch_sources.py --jobs 96 --no-include-math-libs
+      # - name: Fetch sources
+      #   run: |
+      #     git config --global core.longpaths true
+      #     python ./TheRock/build_tools/fetch_sources.py --jobs 96 --no-include-math-libs
 
-      - name: Checkout closed source AMDGPU/ROCm interop library folder
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          repository: nod-ai/amdgpu-windows-interop
-          path: amdgpu-windows-interop
-          lfs: true
+      # - name: Checkout closed source AMDGPU/ROCm interop library folder
+      #   uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      #   with:
+      #     repository: nod-ai/amdgpu-windows-interop
+      #     path: amdgpu-windows-interop
+      #     lfs: true
 
-      - name: Configure Projects
-        env:
-          amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
-          package_version: "ADHOCBUILD"
-          extra_cmake_options: "-DBUILD_TESTING=OFF -DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=${{ github.workspace }} ${{ inputs.cmake_options }}"
-        run: |
-          # clear cache before build and after download
-          ccache -z
-          python3 TheRock/build_tools/github_actions/build_configure.py
+      # - name: Configure Projects
+      #   env:
+      #     amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
+      #     package_version: "ADHOCBUILD"
+      #     extra_cmake_options: "-DBUILD_TESTING=OFF -DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=${{ github.workspace }} ${{ inputs.cmake_options }}"
+      #   run: |
+      #     # clear cache before build and after download
+      #     ccache -z
+      #     python3 TheRock/build_tools/github_actions/build_configure.py
 
       - name: Build therock-dist
         run: cmake --build "${{ env.BUILD_DIR }}" --target therock-dist
