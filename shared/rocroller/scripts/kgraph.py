@@ -45,8 +45,7 @@ import yaml
 from dot_diff import diff_dots
 
 
-def extract_normalised_asm(path: pathlib.Path,
-                           keep_trailing_comments: bool = False):
+def extract_normalised_asm(path: pathlib.Path, keep_trailing_comments: bool = False):
     """Extract normalized ASM from assembly file."""
     source = path.read_text()
 
@@ -197,7 +196,7 @@ if __name__ == "__main__":
         "--keep-trailing",
         default=False,
         action="store_true",
-        help="Keep trailing comments in normalized assembly file."
+        help="Keep trailing comments in normalized assembly file.",
     )
     parser.add_argument(
         "--omit_diff",

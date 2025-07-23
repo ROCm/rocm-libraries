@@ -74,15 +74,14 @@ namespace rocRoller
         return "";
     }
 
-    inline AddLocation::AddLocation(EnumBitset<SourceLocationPart> parts,
-                                    std::source_location loc)
-        : m_parts(parts)
-        , m_location(loc)
+    inline AddLocation::AddLocation(EnumBitset<SourceLocationPart> parts, std::source_location loc)
+        : m_parts(std::move(parts))
+        , m_location(std::move(loc))
     {
     }
 
     inline AddLocation::AddLocation(std::source_location loc)
-        : AddLocation({SourceLocationPart::Line}, loc)
+        : AddLocation({SourceLocationPart::Line}, std::move(loc))
     {
     }
 
