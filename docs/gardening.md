@@ -46,7 +46,34 @@ as a group and likely admins should be approving the majority of those.
 
 As an example to include an admin: *we have a critical feature but develop is broken and it is unrelated to our changes*
 
-## Rotation
+## Scope of Gardeners and Developers
+
+In scope:
+- Gardeners are responsible for ensuring *develop* (post-submit) check remain green.
+- If a post-submit check is red, the gardeners should review the failing CI system and triage the issue.
+- No matter the issue, gardeners should notify the larger gardening team at least once per day about any post-submit failures.
+- If the issue is related to a failure in the CI system (not a code change), the gardener should note the issue, 
+  verify whether existing PRs are facing the same problem, and notify the appropriate CI team, escalating the issue if required.
+- If the issue is related to a code change (not the CU system), the gardener should isolate the error message and failed log, and notify the
+  appropriate component owners (reference the [CODEOWNERS](../.github/CODEOWNERS) file).
+
+Not in scope:
+- Gardeners are not responsible for fixing code changes that broke the post-submit checks.
+- Gardeners are not responsible for monitoring the health of every open PR.
+
+Developer responsibilities:
+- If developers find CI system failures in their PR (pre-submit) pipelines they should notify the appropriate CI team.
+
+### CI Teams
+
+CI | Main primary contact | Team
+---- | ------- | ---------
+Math CI | eidenyoshida | [ROCm/rocm-math-lib-ci-team](https://github.com/orgs/ROCm/teams/rocm-math-lib-ci-team)
+External (Azure) CI | jayhawk-commits | [ROCm/external-ci](https://github.com/orgs/ROCm/teams/external-ci)
+TheRock CI | geomin12 | [ROCm/therockinfra](https://github.com/orgs/ROCm/teams/therockinfra)
+
+
+## Gardener Rotation
 
 Week | North America | Europe / India / APAC
 ---- | ------- | ---------
@@ -55,6 +82,7 @@ July 7, 2025 | geomin12 | kkyang
 July 14, 2025 | jhawk-commits | N/A
 
 It is the responsibility of the current gardeners to update the table when the gardeners rotate.
+
 
 ### Log
 
