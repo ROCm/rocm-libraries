@@ -183,7 +183,7 @@ class Scale:
         if self.mode is not None:
             params.extend(["--scale_" + self.argument, self.mode])
             if self.value is not None:
-                params.extend(["--scaleValue_" + self.argument, str(self.value)])
+                params.extend(["--scaleValue" + self.argument, str(self.value)])
             if self.lds:
                 params.append("--loadLDSScale_" + self.argument)
 

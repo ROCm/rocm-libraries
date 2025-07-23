@@ -1071,8 +1071,8 @@ int main(int argc, const char* argv[])
     app.add_option("-K,--K", problem.k, "Tensor size K.");
     app.add_option("--alpha", problem.alpha, "Alpha scalar.");
     app.add_option("--beta", problem.beta, "Beta scalar.");
-    app.add_option("--scaleValue_A", problem.scaleValueA, "Single scale value for A.");
-    app.add_option("--scaleValue_B", problem.scaleValueB, "Single scale value for B.");
+    app.add_option("--scaleValueA", problem.scaleValueA, "Single scale value for A.");
+    app.add_option("--scaleValueB", problem.scaleValueB, "Single scale value for B.");
 
     //
     // Problem types

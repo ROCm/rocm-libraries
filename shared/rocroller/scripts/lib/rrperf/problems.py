@@ -132,8 +132,8 @@ class GPUArchitectureTarget:
             return ""
         else:
             archFeatures: str = ""
-            archFeatures += archFeatures + (f":xnack+" if self.Xnack else "")
-            archFeatures += archFeatures + (f":sramecc+" if self.Sramecc else "")
+            archFeatures += archFeatures + (":xnack+" if self.Xnack else "")
+            archFeatures += archFeatures + (":sramecc+" if self.Sramecc else "")
             return (
                 f"--arch={self.ArchString}" + archFeatures
                 if len(self.ArchString) != 0
@@ -157,8 +157,8 @@ class GEMMProblem:
 
     types: TypeParameters = TypeParameters()
 
-    scaleValueA: int = -1
-    scaleValueB: int = -1
+    scaleValueA: float = 1.0
+    scaleValueB: float = 1.0
 
     workgroupMapping: tuple[int, int] = (-1, -1)
 
@@ -322,8 +322,8 @@ class GEMMRun(GEMM):
 
         args = []
         for key, value in arg_dict.items():
-            # TODO: supported these parameters in our client
-            if key == "version" or key == "scaleValueA" or key == "scaleValueB":
+            # TODO: supported these parameters in our client?
+            if key == "version":
                 pass
             elif key == "types":
                 args.extend(TypeParameters(**value).asArgs())
