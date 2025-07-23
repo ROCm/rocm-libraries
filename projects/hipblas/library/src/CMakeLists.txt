@@ -54,6 +54,7 @@ set (hipblas_f90_source
 # Create hipBLAS Fortran module
 if(NOT WIN32)
     add_library(hipblas_fortran ${hipblas_f90_source})
+    rocm_install(TARGETS hipblas_fortran)
 endif()
 
 if(BUILD_ADDRESS_SANITIZER)
