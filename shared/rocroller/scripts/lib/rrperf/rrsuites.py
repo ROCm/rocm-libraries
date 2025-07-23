@@ -735,9 +735,9 @@ def f8gemm():
 
 def mx_gemm_16x16x128_f8f6f4():
     params = dict(
-        M=256,
-        N=256,
-        K=512,
+        M=4096,
+        N=4096,
+        K=8192,
         mac_m=64,
         mac_n=64,
         mac_k=128,
@@ -757,9 +757,9 @@ def mx_gemm_16x16x128_f8f6f4():
 
 def mx_gemm_32x32x64_f8f6f4():
     params = dict(
-        M=256,
-        N=256,
-        K=512,
+        M=4096,
+        N=4096,
+        K=8192,
         mac_m=128,
         mac_n=128,
         mac_k=64,
