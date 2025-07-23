@@ -64,6 +64,17 @@ Not in scope:
 Developer responsibilities:
 - If developers find CI system failures in their PR (pre-submit) checks they should notify the gardener on rotation and the appropriate CI team.
 
+### Beyond the Responsibilities
+
+Gardeners should generally aim to be efficient at operating the CI/CD systems and doing first pass triage and routing.
+Especially for people new to the role, this will involve more reaching out for help and coordinating resolution, but as experience increases,
+it is natural to take a more active role in helping to route and do first pass triage oneself.
+While going the extra mile on this is not a requirement of the role, efficient gardeners should aim to develop a proficiency with the
+tools and their colleagues such that their judgment reduces the overall toil to the team. Often people who develop these skills find it
+more effective to look a little bit more deeply at failures and route for resolution properly in one step.
+
+This kind of investment is deeply valued for the overall health of the team and is encouraged.
+
 ### CI Teams
 
 CI | Main primary contact | Team
