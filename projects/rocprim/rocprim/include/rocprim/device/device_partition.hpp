@@ -41,6 +41,7 @@
 #include "device_transform.hpp"
 #include "rocprim/detail/virtual_shared_memory.hpp"
 #include "rocprim/device/config_types.hpp"
+#include "rocprim/device/detail/ordered_block_id.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -61,21 +62,21 @@ template<select_method SelectMethod,
          class InequalityOp,
          class OffsetLookbackScanState,
          class... UnaryPredicates>
-ROCPRIM_KERNEL
-    ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
-    partition_kernel(KeyIterator             keys_input,
-                     ValueIterator           values_input,
-                     FlagIterator            flags,
-                     OutputKeyIterator       keys_output,
-                     OutputValueIterator     values_output,
-                     size_t*                 selected_count,
-                     size_t*                 prev_selected_count,
-                     size_t                  prev_processed,
-                     const size_t            total_size,
-                     InequalityOp            inequality_op,
-                     OffsetLookbackScanState offset_scan_state,
-                     const unsigned int      number_of_blocks,
-                     detail::vsmem_t         vsmem,
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
+    partition_kernel(KeyIterator                        keys_input,
+                     ValueIterator                      values_input,
+                     FlagIterator                       flags,
+                     OutputKeyIterator                  keys_output,
+                     OutputValueIterator                values_output,
+                     size_t*                            selected_count,
+                     size_t*                            prev_selected_count,
+                     size_t                             prev_processed,
+                     const size_t                       total_size,
+                     InequalityOp                       inequality_op,
+                     OffsetLookbackScanState            offset_scan_state,
+                     const unsigned int                 number_of_blocks,
+                     detail::vsmem_t                    vsmem,
+                     detail::ordered_block_id<uint32_t> block_id,
                      UnaryPredicates... predicates)
 {
     using offset_type = typename OffsetLookbackScanState::value_type;
@@ -112,6 +113,7 @@ ROCPRIM_KERNEL
                                         inequality_op,
                                         offset_scan_state,
                                         number_of_blocks,
+                                        block_id,
                                         storage,
                                         predicates...);
 }
@@ -258,7 +260,8 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                                                                         offset_scan_state_type>();
     }
     virtual_shared_memory_size *= number_of_blocks;
-
+    unsigned int* block_id_pool;
+    
     // temporary storage partition
     result = detail::temp_storage::partition(
         temporary_storage,
@@ -271,6 +274,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
             // They have the same base type, so there is no padding between the types.
             detail::temp_storage::ptr_aligned_array(&selected_count, selected_count_size),
             detail::temp_storage::ptr_aligned_array(&prev_selected_count, selected_count_size),
+            detail::temp_storage::ptr_aligned_array(&block_id_pool, 1),
             // vsmem
             detail::temp_storage::make_partition(&vsmem,
                                                  virtual_shared_memory_size,
@@ -280,6 +284,8 @@ inline hipError_t partition_impl(void*                       temporary_storage,
         return result;
     }
 
+    auto block_id = detail::ordered_block_id<unsigned int>::create(block_id_pool);
+    
     // Start point for time measurements
     std::chrono::steady_clock::time_point start;
 
@@ -371,6 +377,12 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                                                     current_number_of_blocks,
                                                     start);
 
+        result = hipMemsetAsync(block_id_pool, 0, sizeof(unsigned int), stream);
+        if (result != hipSuccess)
+        {
+            return result;
+        }
+        
         if(debug_synchronous) start = std::chrono::steady_clock::now();
 
         with_scan_state(
@@ -391,6 +403,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                         scan_state,
                         current_number_of_blocks,
                         detail::vsmem_t{vsmem},
+                        block_id,
                         predicates...);
             });
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start);

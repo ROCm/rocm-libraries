@@ -22,12 +22,10 @@
 #define ROCPRIM_DEVICE_DETAIL_ORDERED_BLOCK_ID_HPP_
 
 #include <type_traits>
-#include <limits>
 
 #include "../../detail/temp_storage.hpp"
-#include "../../detail/various.hpp"
-#include "../../intrinsics.hpp"
-#include "../../types.hpp"
+#include "../../intrinsics/atomic.hpp"
+#include "../../intrinsics/thread.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
