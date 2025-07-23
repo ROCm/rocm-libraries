@@ -73,17 +73,19 @@ public:
         auto [cpuVendor, cpuModel]  = GetCpuInfo();
         const std::string ramSize   = GetRamSize();
         const std::string gpuInfo   = GetGpuInfo();
+        const std::string amdgpuVer = GetAmdGpuVersion();
 
         // Format final output
         std::cout << "Timestamp: " << timestamp << "; "
                   << "Host Name: " << hostname << "; "
                   << "Operating System: " << osInfo << "; "
                   << "ROCm: " << hipVer << "; "
-                  << "OpDriver: " << miopMajor << "." << miopMinor << "." << miopPatch << "; "
+                  << "MIOpenDriver: " << miopMajor << "." << miopMinor << "." << miopPatch << "; "
                   << "CPU Vendor: " << cpuVendor << "; "
                   << "CPU Model: " << cpuModel << "; "
                   << "RAM Size: " << ramSize << "; "
-                  << "GPU Model: " << gpuInfo << std::endl;
+                  << "GPU Model: " << gpuInfo << "; "
+                  << "AMDGPU Driver: " << amdgpuVer << std::endl;
 #endif
     }
 
@@ -190,6 +192,20 @@ private:
         }
 #endif
         return "Unknown";
+    }
+
+    std::string GetAmdGpuVersion()
+    {
+        std::string version = "0.0.0";
+#ifdef __linux__
+        std::ifstream amdgpuVer("/sys/module/amdgpu/version");
+        if(amdgpuVer.is_open())
+        {
+            std::getline(amdgpuVer, version);
+        }
+#endif
+
+        return version;
     }
 
     std::string GetHipVersion()
