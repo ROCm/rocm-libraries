@@ -26,12 +26,13 @@
 
 #include <rocRoller/Assemblers/Assembler.hpp>
 #include <rocRoller/Utilities/Component.hpp>
+#include <rocRoller/Utilities/ComponentCopy.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
 namespace rocRoller
 {
-    RegisterComponentBase(Assembler);
+    RegisterComponentBaseCopy(Assembler);
 
     std::string toString(AssemblerType t)
     {

@@ -26,13 +26,14 @@
 
 #pragma once
 
-#include <rocRoller/Utilities/Component.hpp>
+#include <rocRoller/Utilities/ComponentCopy.hpp>
+#include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {
-    namespace Component
+    namespace ComponentCopy
     {
 
         template <ComponentBase Base>
