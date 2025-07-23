@@ -294,6 +294,25 @@ class GEMMRun(GEMM):
     def set_output(self, path: pathlib.Path):
         self.output = path
 
+    def parseArgDict(arg_dict: dict[str, Any]) -> List[str]:
+        args = []
+        for key, value in arg_dict.items():
+            # TODO: supported these parameters in our client?
+            if key == "version":
+                pass
+            elif key == "types":
+                args.extend(TypeParameters(**value).asArgs())
+            elif key == "architecture":
+                arg = str(GPUArchitectureTarget(**value))
+                if len(arg) > 0:
+                    args.append(arg)
+            else:
+                if isinstance(value, tuple):
+                    args.append(f"--{key}={','.join(map(str, value))}")
+                else:
+                    args.append(f"--{key}={value}")
+        return args
+
     def command(
         self, generate_only=False, architecture=None, **extra_args
     ) -> List[str]:
@@ -320,22 +339,7 @@ class GEMMRun(GEMM):
             for attr in ["yaml", "num_warmup", "num_inner", "num_outer"]:
                 arg_dict.pop(attr)
 
-        args = []
-        for key, value in arg_dict.items():
-            # TODO: supported these parameters in our client?
-            if key == "version":
-                pass
-            elif key == "types":
-                args.extend(TypeParameters(**value).asArgs())
-            elif key == "architecture":
-                arg = str(GPUArchitectureTarget(**value))
-                if len(arg) > 0:
-                    args.append(arg)
-            else:
-                if isinstance(value, tuple):
-                    args.append(f"--{key}={','.join(map(str, value))}")
-                else:
-                    args.append(f"--{key}={value}")
+        args = self.parseArgDict(arg_dict)
 
         if generate_only:
             args.append("generate")
