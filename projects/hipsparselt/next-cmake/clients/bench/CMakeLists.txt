@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-find_package(cblas REQUIRED CONFIG)
+# find_package(cblas REQUIRED CONFIG)
 
 set(_CMAKE_CURRENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../clients/benchmarks")
 
