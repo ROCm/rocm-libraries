@@ -13,6 +13,11 @@ target_link_libraries(tensilelite-client
         Boost::filesystem
         OpenMP::OpenMP_CXX
 )
+if(NOT WIN32)
+    find_package(rocm_smi REQUIRED)
+else()
+    find_package(rocm_smi)
+endif()
 if(rocm_smi_FOUND)
     target_link_libraries(tensilelite-client PRIVATE rocm_smi64)
 endif()

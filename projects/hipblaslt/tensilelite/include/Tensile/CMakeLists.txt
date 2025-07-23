@@ -2,18 +2,15 @@
 # SPDX-License-Identifier:  MIT
 
 if(HIPBLASLT_ENABLE_LLVM)
-  add_subdirectory(llvm)
+    add_subdirectory(llvm)
 endif()
 
 if(HIPBLASLT_ENABLE_MSGPACK)
-  add_subdirectory(msgpack)
-endif()
-
-if(HIPBLASLT_ENABLE_HIP)
-  add_subdirectory(hip)
+    add_subdirectory(msgpack)
 endif()
 
 add_subdirectory(analytical)
+add_subdirectory(hip)
 add_subdirectory(Serialization)
 
 target_sources(tensilelite-host
