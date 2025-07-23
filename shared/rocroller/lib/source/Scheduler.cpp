@@ -221,14 +221,14 @@ namespace rocRoller
                         ShowValue(topDep),
                         ShowValue(dep));
 
-            // if the stream itself is non-preemptible,
             if(m_stack.empty())
                 return true;
 
+            // if the stream itself is non-preemptible,
             // it's schedulable
             if(isNonPreemptibleStream(streamId))
                 return true;
-            // if another stream is non-preemptible,
+            // else if another stream is non-preemptible,
             // it's not schedulable.
             else if(m_nonPreemptibleStream.has_value())
                 return false;
@@ -268,7 +268,12 @@ namespace rocRoller
 
         void LockState::add(Instruction const& instruction, int streamId)
         {
-            //lockCheck(instruction, streamId);
+	    // TODO: Enable lockCheck after fixing the locking around 
+	    //       the instruction(s) that hasImplicitAccess() and 
+	    //       readsSpecialRegister().
+	    //       Also, identify which particular dependency lock 
+	    //       is required among M0, VCC and SCC.
+            // lockCheck(instruction, streamId);
 
             AssertFatal(isSchedulable(instruction, streamId),
                         "cannot add any instruction from this stream at this point");
