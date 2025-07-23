@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -98,11 +98,12 @@
 #else
 #define ASSERT_HALF_EQ(a, b)                             \
     do                                                   \
-    {                                                    \
-        auto absA    = (a > 0) ? a : negate(a);          \
-        auto absB    = (b > 0) ? b : negate(b);          \
-        auto absDiff = (a - b > 0) ? a - b : b - a;      \
-        ASSERT_TRUE(absDiff / (absA + absB + 1) < 0.01); \
+    {                                                       \
+	auto zero    = __half(0.0);                         \
+        auto absA    = (a > zero) ? a : negate(a);          \
+        auto absB    = (b > zero) ? b : negate(b);          \
+        auto absDiff = (a - b > zero) ? a - b : b - a;      \
+        ASSERT_TRUE(absDiff / (absA + absB + __half(1.0)) < __half(0.01)); \
     } while(0)
 #endif
 
@@ -207,6 +208,7 @@ inline void
     UNIT_CHECK(M, N, lda, 0, hCPU, hGPU, 1, ASSERT_EQ);
 }
 
+#ifdef HIP_FP8_TYPE_OCP
 template <>
 inline void unit_check_general(
     int64_t M, int64_t N, int64_t lda, const __hip_fp8_e4m3* hCPU, const __hip_fp8_e4m3* hGPU)
@@ -220,6 +222,7 @@ inline void unit_check_general(
 {
     UNIT_CHECK(M, N, lda, 0, hCPU, hGPU, 1, ASSERT_F8_EQ);
 }
+#endif
 
 template <typename T, typename T_hpa = T>
 void unit_check_general(int64_t                        M,
@@ -314,6 +317,7 @@ inline void unit_check_general(int64_t       M,
     UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_EQ);
 }
 
+#ifdef HIP_FP8_TYPE_OCP
 template <>
 inline void unit_check_general(int64_t               M,
                                int64_t               N,
@@ -337,6 +341,7 @@ inline void unit_check_general(int64_t               M,
 {
     UNIT_CHECK(M, N, lda, strideA, hCPU, hGPU, batch_count, ASSERT_F8_EQ);
 }
+#endif
 
 template <typename T, typename T_hpa = T>
 void unit_check_general(int64_t                                    M,
@@ -508,6 +513,7 @@ inline void unit_check_general(int64_t             M,
     UNIT_CHECK_B(M, N, lda, hCPU, hGPU, batch_count, ASSERT_DOUBLE_EQ);
 }
 
+#ifdef HIP_FP8_TYPE_OCP
 template <>
 inline void unit_check_general(int64_t                     M,
                                int64_t                     N,
@@ -529,6 +535,7 @@ inline void unit_check_general(int64_t                     M,
 {
     unit_check_general(M, N, lda, &hCPU[0], &hGPU[0], batch_count);
 }
+#endif
 
 template <typename T>
 inline void trsm_err_res_check(T max_error, int64_t M, T forward_tolerance, T eps)
@@ -548,7 +555,11 @@ template <typename T>
 inline int64_t unit_check_diff(
     int64_t M, int64_t N, int64_t lda, int64_t stride, T* hCPU, T* hGPU, int64_t batch_count)
 {
-    using c_type  = std::conditional_t<std::is_same<__half, T>::value || std::is_same<__hip_fp8_e4m3, T>::value || std::is_same<__hip_fp8_e5m2, T>::value, float, T>;
+    using c_type  = std::conditional_t<std::is_same<__half, T>::value
+#ifdef HIP_FP8_TYPE_OCP
+	    || std::is_same<__hip_fp8_e4m3, T>::value || std::is_same<__hip_fp8_e5m2, T>::value
+#endif
+	    , float, T>;
     int64_t error = 0;
     do
     {
