@@ -112,6 +112,11 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
     Variable global_idx{"global_idx", "unsigned int"};
     Variable transpose_idx{"transpose_idx", "unsigned int"};
 
+    Variable len_1_2{"len_1_2", "unsigned int"};
+    Variable len_1_2_3{"len_1_2_3", "unsigned int"};
+    Variable len_pp_factors_curr_prod{"len_pp_factors_curr_prod", "unsigned int"};
+    Variable len_pp_factors_other_prod{"len_pp_factors_other_prod", "unsigned int"};
+
     std::vector<unsigned int> launcher_lengths() override
     {
         return params.parent_length;
@@ -466,7 +471,12 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
             tmp_stmts += StoreGlobal{
                 buf,
                 CallExpr{"local_transpose_pp_length" + std::to_string(length) + "_device",
-                         {offset_tile_wbuf(i), lengths}},
+                         {offset_tile_wbuf(i),
+                          lengths,
+                          len_1_2,
+                          len_1_2_3,
+                          len_pp_factors_curr_prod,
+                          len_pp_factors_other_prod}},
                 lds_complex[offset_tile_rlds(i)]};
 
         stmts += CommentLines{
@@ -688,41 +698,30 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
             = "local_transpose_pp_length" + std::to_string(length) + "_device";
 
         Function f{function_name};
-        f.arguments   = ArgumentList{global_idx, lengths};
+        f.arguments   = ArgumentList{global_idx,
+                                   lengths,
+                                   len_1_2,
+                                   len_1_2_3,
+                                   len_pp_factors_curr_prod,
+                                   len_pp_factors_other_prod};
         f.return_type = "unsigned int";
         f.qualifier   = "__device__";
 
         StatementList& body = f.body;
 
-        auto len_1     = lengths[2];
-        auto len_2     = lengths[1];
-        auto len_3     = lengths[0];
-        auto len_1_2   = len_1 * len_2;
-        auto len_1_2_3 = len_1 * len_2 * len_3;
-
-        auto pp_factor_1 = pp_factors_curr_prod;
-        auto pp_factor_2 = pp_factors_other_prod;
-
-        auto pp_factor_len = pp_factor_1 * len_2;
+        auto len_1 = lengths[2];
+        auto len_2 = lengths[1];
+        auto len_3 = lengths[0];
 
         body += Declaration{transpose_idx, global_idx % len_1_2_3};
 
-        Variable idx_1{"idx_1", "unsigned int"};
-        body += Declaration{idx_1, transpose_idx % len_2};
-
-        Variable idx_2{"idx_2", "unsigned int"};
-        body += Declaration{idx_2, transpose_idx % pp_factor_len};
-        body += Assign{idx_2, idx_2 / len_2};
-        body += Assign{idx_2, idx_2 * pp_factor_2 * len_2};
-
-        Variable idx_3{"idx_3", "unsigned int"};
-        body += Declaration{idx_3, transpose_idx % len_1_2};
-        body += Assign{idx_3, Parens{idx_3 / pp_factor_len} * len_2};
-
-        Variable idx_4{"idx_4", "unsigned int"};
-        body += Declaration{idx_4, Parens{transpose_idx / len_1_2} * len_1_2};
-
-        body += Assign{transpose_idx, idx_1 + idx_2 + idx_3 + idx_4};
+        body += Assign{
+            transpose_idx,
+            Parens{transpose_idx % len_2}
+                + Parens{Parens{Parens{transpose_idx % len_pp_factors_curr_prod} / len_2}
+                         * len_pp_factors_other_prod}
+                + Parens{Parens{Parens{transpose_idx % len_1_2} / len_pp_factors_curr_prod} * len_2}
+                + Parens{Parens{transpose_idx / len_1_2} * len_1_2}};
 
         body += Assign{transpose_idx, transpose_idx + Parens{global_idx / len_1_2_3} * len_1_2_3};
 
@@ -969,6 +968,18 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
             }
         }
         return f;
+    }
+
+    ArgumentList global_arguments() override
+    {
+        // insert large twiddles
+        ArgumentList arglist = StockhamKernel::global_arguments();
+        arglist.arguments.insert(arglist.arguments.begin() + 1, large_twiddles);
+        arglist.arguments.insert(arglist.arguments.begin() + 2, len_1_2);
+        arglist.arguments.insert(arglist.arguments.begin() + 3, len_1_2_3);
+        arglist.arguments.insert(arglist.arguments.begin() + 4, len_pp_factors_curr_prod);
+        arglist.arguments.insert(arglist.arguments.begin() + 5, len_pp_factors_other_prod);
+        return arglist;
     }
 
     Function generate_global_function() override
