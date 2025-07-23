@@ -100,12 +100,6 @@ string( CONCAT TESTS_OUT_DIR "${PROJECT_BINARY_DIR}" ${TESTS_OUT_DIR} )
 option( BUILD_CLIENTS_TESTS_OPENMP "Build tests with OpenMP" ON )
 if( BUILD_CLIENTS_TESTS_OPENMP )
   find_package(OpenMP REQUIRED)
-  if( BUILD_WITH_LIB STREQUAL "CUDA" )
-    message( STATUS "OpenMP is not supported on CUDA, building tests without it" )
-  else()
-    target_link_libraries( hipfft-test PRIVATE OpenMP::OpenMP_CXX
-                           -L${HIP_CLANG_ROOT}/lib -Wl,-rpath=${HIP_CLANG_ROOT}/lib )
-  endif()
 endif()
 
 foreach( target ${TEST_TARGETS} )
@@ -163,6 +157,16 @@ foreach( target ${TEST_TARGETS} )
     hip::hipfft
     ${FFTW_LIBRARIES}
   )
+  
+  if( BUILD_CLIENTS_TESTS_OPENMP )
+    if( BUILD_WITH_LIB STREQUAL "CUDA" )
+      message( STATUS "OpenMP is not supported on CUDA, building tests without it" )
+    else()
+      set_target_properties( ${target} PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
+      set_target_properties( ${target} PROPERTIES BUILD_RPATH "${HIP_CLANG_ROOT}/lib" )
+      target_link_libraries( ${target} PRIVATE OpenMP::OpenMP_CXX )
+    endif()
+  endif()
 
   if( HIPFFT_MPI_ENABLE )
     target_link_libraries( ${target}
