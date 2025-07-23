@@ -40,11 +40,11 @@ This table provides the current status of the migration of specific ROCm librari
 
 | Component           | Tentative Date |
 |---------------------|----------------|
-| `Origami`           | 7/23           |
-| `composable_kernel` | 7/25           |
-| `MIOpen`            | 7/25           |
-| `hipSolver`         | 7/28           |
+| `Origami`           | 7/25           |
+| `MIOpen`            | 7/28           |
+| `hipSolver`         | 7/30           |
 | `rocSolver`         | 7/30           |
+| `composable_kernel` | TBD           |
 
 
 *Remaining math libraries will be migrated in August*
