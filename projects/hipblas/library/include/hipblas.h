@@ -20884,10 +20884,13 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrmmStridedBatched_64(hipblasHandle_t    
     Note about memory allocation:
     When trsm is launched with a k evenly divisible by the internal block size of 128,
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
-    memory found in the handle to increase overall performance (where k is m when
-    HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT). For more information on
-    pre-allocated memory in the handle, see the Device Memory Allocation
-    in rocBLAS section of the rocBLAS API Reference.
+    memory found in the handle to increase overall performance. This memory can be managed by using
+    the environment variable WORKBUF_TRSM_B_CHNK. When this variable is not set the device memory
+    used for temporary storage will default to 1 MB and may result in chunking, which in turn may
+    reduce performance. Under these circumstances it is recommended that WORKBUF_TRSM_B_CHNK be set
+    to the desired chunk of right hand sides to be used at a time.
+
+    (where k is m when HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT)
 
     - Supported precisions in rocBLAS : s,d,c,z
     - Supported precisions in cuBLAS  : s,d,c,z
@@ -21076,10 +21079,12 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsm_64(hipblasHandle_t         handle,
     Note about memory allocation:
     When trsm is launched with a k evenly divisible by the internal block size of 128,
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
-    memory found in the handle to increase overall performance (where k is m when
-    HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT). For more information on
-    pre-allocated memory in the handle, see the Device Memory Allocation
-    in rocBLAS section of the rocBLAS API Reference.
+    memory found in the handle to increase overall performance. This memory can be managed by using
+    the environment variable WORKBUF_TRSM_B_CHNK. When this variable is not set the device memory
+    used for temporary storage will default to 1 MB and may result in chunking, which in turn may
+    reduce performance. Under these circumstances it is recommended that WORKBUF_TRSM_B_CHNK be set
+    to the desired chunk of right hand sides to be used at a time.
+    (where k is m when HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT)
 
     - Supported precisions in rocBLAS : s,d,c,z
     - Supported precisions in cuBLAS  : s,d,c,z
@@ -21266,10 +21271,12 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasZtrsmBatched_64(hipblasHandle_t           
     Note about memory allocation:
     When trsm is launched with a k evenly divisible by the internal block size of 128,
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
-    memory found in the handle to increase overall performance (where k is m when
-    HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT). For more information on
-    pre-allocated memory in the handle, see the Device Memory Allocation
-    in rocBLAS section of the rocBLAS API Reference.
+    memory found in the handle to increase overall performance. This memory can be managed by using
+    the environment variable WORKBUF_TRSM_B_CHNK. When this variable is not set the device memory
+    used for temporary storage will default to 1 MB and may result in chunking, which in turn may
+    reduce performance. Under these circumstances it is recommended that WORKBUF_TRSM_B_CHNK be set
+    to the desired chunk of right hand sides to be used at a time.
+    (where k is m when HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT)
 
     - Supported precisions in rocBLAS : s,d,c,z
     - Supported precisions in cuBLAS  : No support
