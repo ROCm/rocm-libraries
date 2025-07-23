@@ -778,7 +778,7 @@ namespace TensileLite
             if(MI_N == 0 && MI_M == 0 && MI_K == 0)
             {
                 // We only use Dot2 for NN layout where M < 3
-                if (M > 3)
+                if (M > 3 && !transA && !transB)
                     return std::numeric_limits<double>::max();
                 MI_M = 1;
                 MI_N = 1;
