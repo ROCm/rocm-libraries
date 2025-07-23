@@ -173,9 +173,9 @@ namespace rocRoller::KernelGraph
         std::string Summary::toString() const
         {
             std::stringstream ss;
-            for(auto const& [tag, instruction, ldsTag, accessedBanks, banksToWorkitems] :
-                this->accesses)
+            for(auto const& [tag, access] : this->accesses)
             {
+                auto const& [instruction, ldsTag, accessedBanks, banksToWorkitems] = access;
                 ss << fmt::format(
                     "Operation tag {} instruction {} accesses LDS {}:\n", tag, instruction, ldsTag);
                 for(auto const& [bankIndex, workitemsAccessed, imbalanced] : accessedBanks)
@@ -334,8 +334,11 @@ namespace rocRoller::KernelGraph
                         }
                     }
 
-                    summary.accesses.emplace_back(
-                        tag, instruction, ldsTag, workitemsInfo, banksToWorkitems);
+                    summary.accesses.emplace(
+                        std::piecewise_construct,
+                        std::forward_as_tuple(tag),
+                        std::forward_as_tuple(
+                            instruction, ldsTag, workitemsInfo, banksToWorkitems));
                 }
 
                 return summary;
@@ -590,7 +593,7 @@ namespace rocRoller::KernelGraph
 
             void operator()(int tag, LoadTiled const& load, Transformer coords)
             {
-                return; // XXX
+                return; // Untested
 
                 auto [userTag, user] = m_graph.getDimension<User>(tag);
                 auto [tileTag, tile] = m_graph.getDimension<MacroTile>(tag);

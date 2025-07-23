@@ -46,15 +46,14 @@ namespace rocRoller
                 };
                 struct Access
                 {
-                    int                           tag;
                     uint                          instruction;
                     int                           ldsTag;
                     std::vector<Banks>            accessedBanks;
                     std::vector<std::vector<int>> banksToWorkitems;
                 };
 
-                std::vector<Access>     accesses;
-                std::unordered_set<int> imbalancedTags;
+                std::map<int, Access> accesses;
+                std::set<int>         imbalancedTags;
 
                 std::string toString() const;
             };
