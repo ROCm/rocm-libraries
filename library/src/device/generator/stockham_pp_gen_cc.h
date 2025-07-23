@@ -72,7 +72,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         case 1:
             num_blocks_per_batch = ((params.parent_length[1]) - 1) / transforms_per_block + 1;
             num_blocks_per_batch *= params.parent_length[2];
-            off_dim_length = params.parent_length[2];
             break;
         case 2:
             throw std::runtime_error(
@@ -89,8 +88,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
     unsigned int transforms_per_block_pp;
     unsigned int max_factor_pp;
-
-    unsigned int off_dim_length;
 
     std::vector<unsigned int> factors_pp_curr;
     unsigned int              pp_factors_curr_prod;
