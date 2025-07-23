@@ -49,20 +49,20 @@ As an example to include an admin: *we have a critical feature but develop is br
 ## Scope of Gardeners and Developers
 
 In scope:
-- Gardeners are responsible for ensuring *develop* (post-submit) check remain green.
+- Gardeners are responsible for ensuring develop (post-submit) checks remain green.
 - If a post-submit check is red, the gardeners should review the failing CI system and triage the issue.
 - No matter the issue, gardeners should notify the larger gardening team at least once per day about any post-submit failures.
 - If the issue is related to a failure in the CI system (not a code change), the gardener should note the issue, 
   verify whether existing PRs are facing the same problem, and notify the appropriate CI team, escalating the issue if required.
-- If the issue is related to a code change (not the CU system), the gardener should isolate the error message and failed log, and notify the
-  appropriate component owners (reference the [CODEOWNERS](../.github/CODEOWNERS) file).
+- If the issue is related to a code change, the gardener should isolate the error message, and notify the
+  appropriate component owners with a link to the log (reference the [CODEOWNERS](../.github/CODEOWNERS) file).
 
 Not in scope:
-- Gardeners are not responsible for fixing code changes that broke the post-submit checks.
+- Gardeners are not responsible for fixing code changes that break post-submit checks.
 - Gardeners are not responsible for monitoring the health of every open PR.
 
 Developer responsibilities:
-- If developers find CI system failures in their PR (pre-submit) pipelines they should notify the appropriate CI team.
+- If developers find CI system failures in their PR (pre-submit) checks they should notify the gardener on rotation and the appropriate CI team.
 
 ### CI Teams
 
