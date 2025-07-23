@@ -8,7 +8,7 @@ application and the backend RAND library, where it marshals inputs to the backen
 application. hipRAND exports an interface that doesn't require the client to change, regardless of the
 chosen backend.
 
-hipRAND supports [rocRAND](https://github.com/ROCm/rocRAND) and
+hipRAND supports [rocRAND](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand) and
 [NVIDIA CUDA cuRAND](https://developer.nvidia.com/curand).
 
 ## Requirements
@@ -37,7 +37,7 @@ supported platforms):
 
 * Bash helper build script:
 
-  The helper script `install` is located in the root repository. Note that this method doesn't take many
+  The helper script `install` is located in the root of the `projects/hiprand` folder. Note that this method doesn't take many
   options and hard-codes a configuration that you can specify by invoking CMake directly.
 
   A few commands in the script need sudo access, so it may prompt you for a password.
@@ -51,6 +51,9 @@ supported platforms):
   If you use a distribution other than Ubuntu, or want more control over the build process, the
   [hipRAND build wiki](https://github.com/ROCm/hipRAND/wiki/Build) has helpful
   information on how to configure CMake and build manually.
+
+  For information on cloning and building the hipRAND library, see the
+  [hipRAND installation documentation](https://rocm.docs.amd.com/projects/hipRAND/en/latest/install/installation.html) for version 7.0 or later.
 
 ### Supported functions
 
