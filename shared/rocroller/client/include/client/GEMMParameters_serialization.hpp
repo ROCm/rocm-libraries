@@ -90,8 +90,6 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "scaleValueA", params.scaleValueA);
             iot::mapRequired(io, "scaleValueB", params.scaleValueB);
             iot::mapRequired(io, "workgroupMapping", params.workgroupMapping);
-
-            // flatMap(io, params.types);
         }
 
         static void
@@ -173,7 +171,6 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "scheduler", params.scheduler);
             iot::mapRequired(io, "matchMemoryAccess", params.matchMemoryAccess);
 
-            // flatMap(io, params.types);
             iot::mapRequired(io, "types", params.types);
 
             iot::mapRequired(io, "loadLDSScale_A", params.loadLDSScaleA);
