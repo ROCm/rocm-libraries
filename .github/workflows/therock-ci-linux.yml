@@ -53,37 +53,37 @@ jobs:
           repository: "ROCm/TheRock"
           path: "TheRock"
 
-      # - name: Runner Health Settings
-      #   run: |
-      #     echo "CCACHE_DIR=${CCACHE_DIR}"
-      #     df -h
-      #     ccache -z
-      #     mkdir -p $CCACHE_DIR
-      #     cmake --version
-      #     echo "Installed Python versions:"
-      #     ls -d /opt/python
-      #     echo "python: $(which python), python3: $(which python3)"
-      #     echo "Git version: $(git --version)"
-      #     git config --global --add safe.directory $PWD
-      #     git config fetch.parallel 10
+      - name: Runner Health Settings
+        run: |
+          echo "CCACHE_DIR=${CCACHE_DIR}"
+          df -h
+          ccache -z
+          mkdir -p $CCACHE_DIR
+          cmake --version
+          echo "Installed Python versions:"
+          ls -d /opt/python
+          echo "python: $(which python), python3: $(which python3)"
+          echo "Git version: $(git --version)"
+          git config --global --add safe.directory $PWD
+          git config fetch.parallel 10
       
-      # - name: Fetch sources
-      #   run: |
-      #     ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-math-libs
+      - name: Fetch sources
+        run: |
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-math-libs
 
-      # - name: Install python deps
-      #   run: |
-      #     pip install -r TheRock/requirements.txt
-      #     pip freeze
+      - name: Install python deps
+        run: |
+          pip install -r TheRock/requirements.txt
+          pip freeze
 
-      # - name: Configure Projects
-      #   env:
-      #     amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
-      #     package_version: ADHOCBUILD
-      #     extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
-      #     BUILD_DIR: build
-      #   run: |
-      #     python3 TheRock/build_tools/github_actions/build_configure.py
+      - name: Configure Projects
+        env:
+          amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
+          package_version: ADHOCBUILD
+          extra_cmake_options: "-DTHEROCK_USE_EXTERNAL_ROCM_LIBRARIES=ON -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ ${{ inputs.cmake_options }}"
+          BUILD_DIR: build
+        run: |
+          python3 TheRock/build_tools/github_actions/build_configure.py
 
       - name: Build therock-dist
         run: cmake --build TheRock/build --target therock-dist
