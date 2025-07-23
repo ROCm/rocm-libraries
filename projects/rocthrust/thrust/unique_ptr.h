@@ -408,7 +408,26 @@ public:
 
 template <class T, class D>
 class unique_ptr<T[], D>
-{};
+{
+public:
+  using pointer      = typename thrust::detail::pointer_detector<T, D>::type;
+  using element_type = T;
+  using deleter_type = D;
+
+
+
+private:
+  template <class Up, class OtherDeleter>
+  freind class unique_ptr;
+
+  pointer                            m_ptr;
+  [[no_unique_address]] deleter_type m_deleter;
+  // bounds checker
+
+  // ... SFINAE checks
+
+
+};
 
 template <class T, class D, std::enable_if_t<std::is_swappable_v<D>, void>>
 inline THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr<T, D>& x, unique_ptr<T, D>& y) noexcept
