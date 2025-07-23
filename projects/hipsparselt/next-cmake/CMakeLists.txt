@@ -261,3 +261,4 @@ if(HIPSPARSELT_BUILD_COVERAGE)
   target_compile_options(hipsparselt PRIVATE -fprofile-arcs -ftest-coverage)
   target_link_libraries(hipsparselt PRIVATE --coverage -lgcov)
 endif()
+
