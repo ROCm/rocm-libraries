@@ -774,6 +774,16 @@ namespace TensileLite
                                      size_t          mx_block_size,
                                      bool            debug)
         {
+            //Override dot2 matrix instruction with vector lane widths.
+            if(MI_N == 0 && MI_M == 0 && MI_K == 0)
+            {
+                // We only use Dot2 for NN layout where M < 3
+                if (M > 3)
+                    return std::numeric_limits<double>::max();
+                MI_M = 1;
+                MI_N = 1;
+                MI_K = 64;
+            }
 
             //std::cout << "Split " << split << "\n";
             H_mem1
