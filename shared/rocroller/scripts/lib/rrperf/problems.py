@@ -294,7 +294,7 @@ class GEMMRun(GEMM):
     def set_output(self, path: pathlib.Path):
         self.output = path
 
-    def parseArgDict(arg_dict: dict[str, Any]) -> List[str]:
+    def parseArgDict(self, arg_dict: dict[str, Any]) -> List[str]:
         args = []
         for key, value in arg_dict.items():
             # TODO: supported these parameters in our client?
