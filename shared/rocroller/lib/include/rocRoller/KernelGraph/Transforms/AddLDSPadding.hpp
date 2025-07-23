@@ -40,8 +40,9 @@ namespace rocRoller
         class AddLDSPadding : public GraphTransform
         {
         public:
-            AddLDSPadding(CommandParametersPtr params)
-                : m_params(params)
+            AddLDSPadding(ContextPtr context, CommandParametersPtr params)
+                : m_context(context)
+                , m_params(params)
             {
             }
 
@@ -52,6 +53,7 @@ namespace rocRoller
             }
 
         private:
+            ContextPtr           m_context;
             CommandParametersPtr m_params;
         };
     }
