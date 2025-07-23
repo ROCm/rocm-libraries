@@ -268,11 +268,11 @@ namespace rocRoller
 
         void LockState::add(Instruction const& instruction, int streamId)
         {
-	    // TODO: Enable lockCheck after fixing the locking around 
-	    //       the instruction(s) that hasImplicitAccess() and 
-	    //       readsSpecialRegister().
-	    //       Also, identify which particular dependency lock 
-	    //       is required among M0, VCC and SCC.
+            // TODO: Enable lockCheck after fixing the locking around
+            //       the instruction(s) that hasImplicitAccess() and
+            //       readsSpecialRegister().
+            //       Also, identify which particular dependency lock
+            //       is required among M0, VCC and SCC.
             // lockCheck(instruction, streamId);
 
             AssertFatal(isSchedulable(instruction, streamId),
