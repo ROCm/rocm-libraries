@@ -951,44 +951,44 @@ class KernelWriter(metaclass=abc.ABCMeta):
               for n in range(instPerPackB):
                 packINtemsB[j].append(packBItems.pop(0))
 
-        while packAItems:
-          if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeA"].isAnyFloat8():
-            for n in range(instPerPackA):
-              if packAItems:
-                packINtemsA[0].append(packAItems.pop(0))
-              else:
-                break
-          else:
-            for j in range(self.states.numReadsIterCoalescedA):
+          while packAItems:
+            if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeA"].isAnyFloat8():
               for n in range(instPerPackA):
                 if packAItems:
-                  packINtemsA[j].append(packAItems.pop(0))
+                  packINtemsA[0].append(packAItems.pop(0))
                 else:
                   break
+            else:
+              for j in range(self.states.numReadsIterCoalescedA):
+                for n in range(instPerPackA):
+                  if packAItems:
+                    packINtemsA[j].append(packAItems.pop(0))
+                  else:
+                    break
 
-        if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
-          while packMItems:
-            for j in range(self.states.numReadsIterCoalescedMetadata):
-              for n in range(ceil(instPerPackM)):
-                if packMItems:
-                  packINtemsM[j].append(packMItems.pop(0))
-                else:
-                  break
+          if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
+            while packMItems:
+              for j in range(self.states.numReadsIterCoalescedMetadata):
+                for n in range(ceil(instPerPackM)):
+                  if packMItems:
+                    packINtemsM[j].append(packMItems.pop(0))
+                  else:
+                    break
 
-        while packBItems:
-          if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeB"].isAnyFloat8():
-            for n in range(instPerPackB):
-              if packBItems:
-                packINtemsB[0].append(packBItems.pop(0))
-              else:
-                break
-          else:
-            for j in range(self.states.numReadsIterCoalescedB):
+          while packBItems:
+            if kernel["ConvertAfterDS"] and kernel["ProblemType"]["DataTypeB"].isAnyFloat8():
               for n in range(instPerPackB):
                 if packBItems:
-                  packINtemsB[j].append(packBItems.pop(0))
-                else:
-                  break
+                  packINtemsB[0].append(packBItems.pop(0))
+              else:
+                break
+            else:
+              for j in range(self.states.numReadsIterCoalescedB):
+                for n in range(instPerPackB):
+                  if packBItems:
+                    packINtemsB[j].append(packBItems.pop(0))
+                  else:
+                    break
 
         for j in range(max(self.states.numReadsIterCoalescedA,self.states.numReadsIterCoalescedB,self.states.numReadsIterCoalescedMetadata)):
           if schedulePackConsiderMetadata:
@@ -1286,9 +1286,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 skipLocalWriteWaitcnt += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
               if not localReadItemsThisLoop:
                 self.states.perIterLocalWriteCanSkip[iteration] += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
-            if kernel["D_U_iseqMI_K"] and (writeItems and i == numMfmaPerIter - 1):
-              writeItem = writeItems.pop(0)
-              iterCode.add(writeItem)
+            if kernel["D_U_iseqMI_K"] and (writeItems and i == (numMfmaPerIter - 1)):
+              # if D_U_iseqMI_K, we need to schedule all localWrite in last mfma
+              while writeItems:      
+                writeItem = writeItems.pop(0)
+                iterCode.add(writeItem)
         if mfmaIndex == self.states.lwEndMfmaIndex:
           while writeItems:
             localWriteCodeCounts.pop(0)
@@ -2099,11 +2101,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.codes.unrollLoopHeader)
 
       if kernel["D_U_iseqMI_K"]:
-        mfmaiter0 =  math.ceil(kernel["MIWaveTile"][0]/2) * math.ceil(kernel["MIWaveTile"][1]/2)
-        mfmaiter1 = math.floor(kernel["MIWaveTile"][0]/2) * math.ceil(kernel["MIWaveTile"][1]/2)
-        mfmaiter2 = math.ceil(kernel["MIWaveTile"][0]/2) * math.floor(kernel["MIWaveTile"][1]/2)
         self.states.lwStartMfmaIndex = math.floor((kernel["MIWaveTile"][1] + kernel["MIWaveTile"][0])/2) -1
-        self.states.syncPlrMfmaIndex = mfmaiter0 + mfmaiter1 + mfmaiter2
 
       # which loop iteration to reset the LRO,
       # note if PLR=0, isResetLroIter is False for all u
@@ -2112,7 +2110,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       isSwapLroIter = isResetLroIter
       if kernel["ScheduleIterAlg"] == 3:
         if kernel["D_U_iseqMI_K"]:
-          isSwapAndResetLwoIter = (u == 2)
+          isSwapAndResetLwoIter = 1
         else:
           isSwapAndResetLwoIter = (u == self.states.lwEndMfmaIndex//(self.states.numMfmaPerIter))
 
@@ -2126,8 +2124,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
             extraComment += " (swap and reset local write pointers iteration) "
         if isSwapLroIter:
             extraComment += " (swap local read pointers iteration) "
-
-      module.addComment1("iter %u%s"%(u,extraComment))
+      if kernel["D_U_iseqMI_K"]:
+        module.addComment1("subiter %u"%(u))
+      else:
+        module.addComment1("iter %u%s"%(u,extraComment))
       plrIdx = (u+pflr) % self.states.numVgprBuffer
       plrIdxDTV = (u+pflr) % kernel["LoopIters"]
       localReads = Module()
@@ -2187,6 +2187,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if needNextBufLR:
             localReads.add(localReadCodeA)
           pack[plrIdx*self.states.numIterPerCoalescedReadA].add(packCodeA)
+          if kernel["D_U_iseqMI_K"]:
+            pack[1] = Module()
+            pack[1].add(packCodeA)
         if doReadM:
           localReads.addComment1("local read metadata")
           localReadCodeM, packCodeM = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadMetadata, iui*self.states.numReadsIterCoalescedMetadata, 0, tPM)
@@ -2200,6 +2203,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # DTV + pack or input conversion case, offset bufferIdx for local read packing instructions
             bufferIdx = plrIdxDTV*self.states.numIterPerCoalescedReadB + vregSetIdxLR * kernel["LoopIters"]
           localReadCodeB, packCodeB = self.localReadDo(kernel, bufferIdx, iui*self.states.numReadsIterCoalescedB, 0, tensorParametersB)
+          if kernel["D_U_iseqMI_K"]:
+            pack[1].add(packCodeB)
           if needNextBufLR:
             localReads.add(localReadCodeB)
           pack[plrIdx*self.states.numIterPerCoalescedReadB].add(packCodeB)
@@ -2272,6 +2277,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           module.add(self.getWaitcntCodeForDirectToVgpr(kernel, tensorParametersA, tensorParametersB, localWriteEndIter, u, isNLL=(not isNGLL), NLLlast=NLLlast))
 
       luIdx = u % self.states.numVgprBuffer # local to use for MACs
+      if kernel["D_U_iseqMI_K"]:
+        luIdx = u
       if kernel["EnableMatrixInstruction"]:
         macIterCode.add(self.mfmaIter(kernel, tensorParametersA, tensorParametersB, u, kernel["InnerUnroll"], vregSetIdxMFMA, unrollIdx = u))
       else:
@@ -2522,11 +2529,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # which loop iteration to reset the LRO,
       # note if PLR=0, isResetLroIter is False for all u
       if kernel["D_U_iseqMI_K"]:
-        mfmaiter0 =  math.ceil(kernel["MIWaveTile"][0]/2) * math.ceil(kernel["MIWaveTile"][1]/2)
-        mfmaiter1 = math.floor(kernel["MIWaveTile"][0]/2) * math.ceil(kernel["MIWaveTile"][1]/2)
-        mfmaiter2 = math.ceil(kernel["MIWaveTile"][0]/2) * math.floor(kernel["MIWaveTile"][1]/2)
         self.states.lwStartMfmaIndex = math.floor((kernel["MIWaveTile"][1] + kernel["MIWaveTile"][0])/2) -1
-        self.states.syncPlrMfmaIndex = mfmaiter0 + mfmaiter1 + mfmaiter2
         #self.states.lwEndMfmaIndex = min(self.states.syncPlrMfmaIndex-1 ,self.states.lwStartMfmaIndex + kernel["MIWaveTile"][1] + kernel["MIWaveTile"][0])
         
       isResetLroIter = 1 if kernel["D_U_iseqMI_K"] else (u == localWriteEndIter)
@@ -2534,7 +2537,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       isSwapLroIter = isResetLroIter
       if kernel["ScheduleIterAlg"] == 3:
         if kernel["D_U_iseqMI_K"]:
-          isSwapAndResetLwoIter = (u == 2)
+          isSwapAndResetLwoIter = 1
         else:
           isSwapAndResetLwoIter = (u == self.states.lwEndMfmaIndex//(self.states.numMfmaPerIter))
       extraComment = ""
@@ -2545,7 +2548,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if isSwapLroIter:
         extraComment += " (swap local read pointers iteration) "
 
-      module.addComment1("iter %u%s"%(u,extraComment))
+      if kernel["D_U_iseqMI_K"]:
+        module.addComment1("subiter %u"%(u))
+      else:
+        module.addComment1("iter %u%s"%(u,extraComment))
+
       plrIdx = (u+pflr) % self.states.numVgprBuffer
       plrIdxDTV = (u+pflr) % kernel["LoopIters"]
 
@@ -2606,6 +2613,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           localReads.add(localReadCodeA)
           localReadsA.add(localReadCodeA)
           pack[plrIdx*self.states.numIterPerCoalescedReadA].add(packCodeA)
+          if kernel["D_U_iseqMI_K"]:
+            pack[1] = Module()
+            pack[1].add(packCodeA)
         if doReadM:
           localReads.addComment1("local read metadata")
           localReadCodeM, packCodeM = self.localReadDo(kernel, plrIdx*self.states.numIterPerCoalescedReadMetadata, iui*self.states.numReadsIterCoalescedMetadata, 0, tPM)
@@ -2622,6 +2632,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           localReads.add(localReadCodeB)
           localReadsB.add(localReadCodeB)
           pack[plrIdx*self.states.numIterPerCoalescedReadB].add(packCodeB)
+          if kernel["D_U_iseqMI_K"]:
+            pack[1].add(packCodeB)
+
         # Don't increment the LRO if we are going to reset them below:
         if not isResetLroIter or iui != kernel["InnerUnroll"]-1:
           if doReadA:
@@ -2717,6 +2730,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # Is this test necessary because of the global variable this if was previously always true
       # after removing the global variable it is always false...
       # if self.states.numItersPLR:
+      if kernel["D_U_iseqMI_K"]:
+        luIdx = u
       subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
                       u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[luIdx], module)
       module.add(subIterCode) # add scheduled "other", local reads, local writes
@@ -2770,8 +2785,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if self.do["executeToPrefetchEnd"]:
       module.add(self.functionEnd(kernel, addLabel=False))
-
-    pack = [ Module() for i in range (self.states.numVgprBuffer) ]
+    if kernel["D_U_iseqMI_K"]:
+      pack = [ Module() for i in range (4) ] 
+    else:
+      pack = [ Module() for i in range (self.states.numVgprBuffer) ]
     self.preLoopLocalWriteCode = None
 
     if kernel["PrefetchGlobalRead"]:

@@ -55,8 +55,9 @@ class SIA3(SIA):
             numLocalWriteModPerMfma = roundUp(kernel["LocalWritePerMfma"]*PRECISION)
 
         writer.states.numGlobalReadInsPerMfma, writer.states.numLocalWriteModPerMfma = calculateGRPMandLWPM(writer, kernel, numLocalWriteModPerMfma)
-        localWriteEndIter = fixLocalWriteEndMfmaIndex(writer, kernel, tensorParametersA, tensorParametersB, \
-            globalReadIncACode, globalReadIncBCode, numMfmaBetweenLWandBarrier, lastLoop)
+        if not kernel["D_U_iseqMI_K"]:
+            localWriteEndIter = fixLocalWriteEndMfmaIndex(writer, kernel, tensorParametersA, tensorParametersB, \
+                globalReadIncACode, globalReadIncBCode, numMfmaBetweenLWandBarrier, lastLoop)
         numGlobalReadInsPerIter, numLocalWriteModPerIter, numEmptyGlobalReadIncCode = getScheduleParamMfma(writer)
         numLocalWritesPerSched = writer.states.numLocalWriteModPerMfma
         # Schedule global read
@@ -262,7 +263,9 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
         mfmaiter0 =  math.ceil(kernel["MIWaveTile"][0]/2) * math.ceil(kernel["MIWaveTile"][1]/2)
         mfmaiter1 = math.floor(kernel["MIWaveTile"][0]/2) * math.ceil(kernel["MIWaveTile"][1]/2)
         mfmaiter2 = math.ceil(kernel["MIWaveTile"][0]/2) * math.floor(kernel["MIWaveTile"][1]/2)
-        writer.states.syncPlrMfmaIndex = mfmaiter0 + mfmaiter1 + mfmaiter2
+        writer.states.syncPlrMfmaIndex = (mfmaiter0 + mfmaiter1 + mfmaiter2)
+        if ( kernel["UseF32XEmulation"]) :
+            writer.states.syncPlrMfmaIndex = writer.states.syncPlrMfmaIndex *3   # TF32
 
     numMfmaBetweenLWandBarrier = 2 if kernel["MatrixInstM"] == 32 else 3
     writer.states.lwEndMfmaIndex = max(writer.states.syncPlrMfmaIndex - numMfmaBetweenLWandBarrier,0) if writer.states.numItersPLR else numMfmaPerIter*kernel["LoopIters"] - 1
@@ -737,6 +740,8 @@ def assignLWSchedIndexSIA3(writer, kernel, numLocalWritesPerSched, localWriteEnd
     if kernel["1LDSBuffer"] or kernel["DirectToLds"]:
         writer.states.sync1LdsMfmaIndex = max(writer.states.lwStartMfmaIndex - 1, 0)
     startIter = writer.states.lwStartMfmaIndex//numMfmaPerIter
+    if kernel["D_U_iseqMI_K"]:
+        startIter = min(1,startIter) # if D_U_iseqMI_K, startIter should be 0 or 1
     assert startIter < localWriteEndIter+1 # startIter should be at or before the endIter
     return startIter
 

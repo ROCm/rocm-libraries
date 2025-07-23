@@ -238,6 +238,7 @@ class LocalReadMFMA(LocalRead):
                     blockStride = elementsPerBlockSMFMA * threadGroups
                     blockOffsetSMFMA = blockStride - elementsPerBlockSMFMA
 
+        valufIdx = 0
         if enableLDSTr:
             numberMTilesPerWave = kernel["MIWaveTile"][tile01]
             highBits = 0
@@ -300,6 +301,7 @@ class LocalReadMFMA(LocalRead):
                     valufIdx = (vIdx * numReadsPerVector + eIdx) * blockWidth * numReadsPerUnroll
 
                 valuiIdx = int(valufIdx)
+                baseValuiIdx = valuiIdx
                 localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc,valuiIdx)))
                 readCount += 1
                 if needPack or numSplitMetadata:
