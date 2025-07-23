@@ -3,6 +3,6 @@
 
 target_sources(tensilelite-host
     PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/llvm/YAML.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/llvm/Loading.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/YAML.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Loading.cpp"
 )

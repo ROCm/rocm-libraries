@@ -2,11 +2,14 @@
 # SPDX-License-Identifier:  MIT
 
 cmake_minimum_required(VERSION 3.24.4)
-project(tensilelite)
+project(tensilelite LANGUAGES CXX)
 
 option(TENSILELITE_ENABLE_AUTOBUILD "Build the tensilelite host library tests." ON)
 option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." OFF)
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." OFF)
+option(HIPBLASLT_ENABLE_MSGPACK "Use msgpack for parsing configuration files." ON)
+option(HIPBLASLT_ENABLE_OPENMP "Use OpenMP to improve performance." ON)
+option(HIPBLASLT_ENABLE_LLVM "Use msgpack for parsing configuration files." OFF)
 
 if(TENSILELITE_ENABLE_AUTOBUILD)
     list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -14,6 +17,26 @@ if(TENSILELITE_ENABLE_AUTOBUILD)
 endif()
 
 if(TENSILELITE_ENABLE_HOST OR HIPBLASLT_ENABLE_HOST)
+    if(HIPBLASLT_ENABLE_OPENMP)
+        find_package(OpenMP REQUIRED)
+    endif()
+    if(HIPBLASLT_ENABLE_MSGPACK)
+        # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
+        # Prefer 6.x (msgpack-cxx)
+        find_package(msgpack-cxx CONFIG)
+        if(msgpack-cxx_FOUND)
+            message(STATUS "Found msgpack-cxx (>=6.x)")
+        else()
+            # TODO: set minimum version requied for *-cxx library
+            find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
+            message(STATUS "Found msgpack (<=5.x)")
+        endif()
+    endif()
+    if(HIPBLASLT_ENABLE_LLVM)
+        find_package(LLVM REQUIRED)
+    endif()
+
+    find_package(hip REQUIRED)
     add_subdirectory(rocisa/rocisa-cpp)
 
     add_library(tensilelite-host OBJECT)
@@ -28,9 +51,7 @@ if(TENSILELITE_ENABLE_HOST OR HIPBLASLT_ENABLE_HOST)
             __HIP_PLATFORM_AMD__
     )
 
-    if(HIPBLASLT_ENABLE_HIP)
-        target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_USE_HIP>)
-    endif()
+    target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_USE_HIP>)
 
     if(HIPBLASLT_ENABLE_LLVM)
         target_link_libraries(tensilelite-host PRIVATE LLVMObjectYAML)
