@@ -1129,10 +1129,14 @@ namespace TensileLite
             uint32_t       staggerUMapping = (sizeMapping.staggerUMapping << 13);
             uint32_t       staggerUShift   = staggerMask1 & ((sizeMapping.staggerStrideShift) << 8);
             uint32_t       staggerU        = mask8 & sizeMapping.staggerU;
+            if(Debug::Instance().disableStaggerU())
+                staggerU = 0;
             staggerU                       = staggerU | staggerUShift;
             staggerU                       = staggerU | staggerUMapping;
             internalArg0                   = internalArg0 | (staggerU << 16);
         }
+        else if(T_Debug && Debug::Instance().disableStaggerU())
+            std::cout << "solution doesn't support configurable staggerU" << std::endl;
 
         args.template append<uint32_t>("internalArgs", internalArg0);
 
