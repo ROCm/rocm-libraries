@@ -468,49 +468,9 @@ namespace rocRoller
                 auto fullStop  = [&](int tag) { return tag == increment; };
                 auto [required, path] = findRequiredCoordinates(target, direction, fullStop, kgraph);
 
-
-                std::map<int, Expression::ExpressionPtr> regCoords;
-                auto isRegisterDim = [&maybeForLoop](auto dim) -> bool {
-                    using T = std::decay_t<decltype(dim)>;
-                    if (maybeForLoop)
-                        return CIsAnyOf<T, Wavefront, Workitem, Workgroup, ForLoop>;
-                    else
-                        return CIsAnyOf<T, Wavefront, Workitem, Workgroup>;
-                };
-                for(auto coord : required)
-                {
-                    if(std::visit(isRegisterDim, kgraph.coordinates.getNode(coord)))
-                    {
-                        auto parentCoord = coord;
-                        // if the coordinate if ForLoop, it might be a duplicate,
-                        // use the parent coordinate instead
-                        // if (kgraph.coordinates.get<ForLoop>(coord))
-                        // {
-                        //         auto maybeParentForLoop = only(kgraph.coordinates.getInputNodeIndices(coord, rocRoller::KernelGraph::CoordinateGraph::isEdge<DataFlow>));
-                        //         if(maybeParentForLoop)
-                        //         {
-                        //             parentCoord = *maybeParentForLoop;
-                        //         }
-     
-                        // }
-
-                        auto registerType = Register::Type::Vector;
-                        auto coordDF
-                            = std::make_shared<Expression::Expression>(Expression::DataFlowTag{
-                                parentCoord, registerType, DataType::UInt32});
-                        regCoords[coord] = coordDF;
-                    }
-                }
-                for(auto const& [coord, expr] : regCoords)
-                {
-                    if (!xform.hasCoordinate(coord))
-                        xform.setCoordinate(coord, expr);
-                }
-
-                // 2. Set remaining coordinates 
-                for(auto coord : required)
-                    if((coord  != increment) && (!xform.hasCoordinate(coord)))
-                        xform.setCoordinate(coord , L(0u));
+                for(auto requiredTag : required)
+                    if((requiredTag  != increment) && (!coords.hasCoordinate(requiredTag )))
+                        coords.setCoordinate(requiredTag , L(0u));
 
                 // 3. Set the increment coordinate to zero if it doesn't
                 // already have a value
