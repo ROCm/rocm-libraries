@@ -72,7 +72,6 @@ Math CI | eidenyoshida | [ROCm/rocm-math-lib-ci-team](https://github.com/orgs/RO
 External (Azure) CI | jayhawk-commits | [ROCm/external-ci](https://github.com/orgs/ROCm/teams/external-ci)
 TheRock CI | geomin12 | [ROCm/therockinfra](https://github.com/orgs/ROCm/teams/therockinfra)
 
-
 ## Gardener Rotation
 
 Week | North America | Europe / India / APAC
@@ -82,7 +81,6 @@ July 7, 2025 | geomin12 | kkyang
 July 14, 2025 | jhawk-commits | N/A
 
 It is the responsibility of the current gardeners to update the table when the gardeners rotate.
-
 
 ### Log
 
