@@ -384,12 +384,8 @@ namespace rocRoller::KernelGraph
          */
         struct MemoryTracer
         {
-            MemoryTracer(KernelGraph const&      graph,
-                         KernelInvocation const& invocation,
-                         KernelArguments const&  arguments)
+            MemoryTracer(KernelGraph const& graph)
                 : m_graph(graph)
-                , m_invocation(invocation)
-                , m_arguments(arguments)
             {
                 for(int i = 0; i < 3; ++i)
                 {
@@ -726,8 +722,7 @@ namespace rocRoller::KernelGraph
 
             std::list<MemoryEventExpression> m_events;
 
-            KernelArguments  m_arguments;
-            KernelInvocation m_invocation;
+            KernelArguments m_arguments;
 
             std::array<uint, 3>          m_workgroupOffset, m_workitemOffset;
             std::array<ExpressionPtr, 3> m_kernelWorkgroupIndexes, m_kernelWorkitemIndexes;
@@ -735,21 +730,12 @@ namespace rocRoller::KernelGraph
     }
 
     MemoryTracer::Summary memoryTrace(KernelGraph const&      original,
-                                      KernelInvocation const& invocation,
-                                      KernelArguments const&  arguments)
+                                      KernelInvocation const& invocation)
     {
-        // XXX REMOVE THIS
-        {
-            std::ofstream dfile;
-            dfile.open("SIMULATED.yaml", std::ofstream::out | std::ofstream::trunc);
-            dfile << toYAML(original);
-            dfile.close();
-        }
-
         Log::info("MemoryTracer::memoryTrace()");
 
         auto graph  = original;
-        auto tracer = MemoryTracer::MemoryTracer(graph, invocation, arguments);
+        auto tracer = MemoryTracer::MemoryTracer(graph);
         tracer.trace();
 
         Log::info("MemoryTracer::LDSBankModel()");

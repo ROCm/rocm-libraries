@@ -51,7 +51,10 @@ namespace MemoryTracerTest
 
         example.setTileSize(128, 256, 8);
         example.setMFMA(32, 32, 2, 1);
-        example.setUseLDS(true, true, true); // TODO: use a single LDS, so a single node exists for later assertions
+        example.setUseLDS(
+            true,
+            true,
+            true); // TODO: use a single LDS, so a single node exists for later assertions
 
         auto kgraph  = example.getKernelGraph();
         auto params  = example.getCommandParameters();
@@ -102,7 +105,7 @@ namespace MemoryTracerTest
         for(auto& t : transforms)
             kgraph = kgraph.transform(t);
 
-        auto summary = memoryTrace(kgraph, {}, KernelArguments{false});
+        auto summary = memoryTrace(kgraph, {});
         std::cout << summary << std::endl;
     }
 }

@@ -631,9 +631,9 @@ namespace rocRoller
 
     KernelGraph::MemoryTracer::Summary CommandKernel::memoryTrace(RuntimeArguments const& args)
     {
-        auto [kargs, inv] = prepKernel(args);
+        auto [_, inv] = prepKernel(args);
 
-        return KernelGraph::memoryTrace(*m_kernelGraph, inv, kargs);
+        return KernelGraph::memoryTrace(*m_kernelGraph, inv);
     }
 
     void CommandKernel::loadKernelFromAssembly(const std::string& fileName,

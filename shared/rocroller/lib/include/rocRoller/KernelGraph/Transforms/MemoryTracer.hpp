@@ -70,7 +70,6 @@ namespace rocRoller
 	 */
 
         MemoryTracer::Summary memoryTrace(KernelGraph const&      original,
-                                          KernelInvocation const& invocation,
-                                          KernelArguments const&  arguments);
+                                          KernelInvocation const& invocation);
     }
 }
