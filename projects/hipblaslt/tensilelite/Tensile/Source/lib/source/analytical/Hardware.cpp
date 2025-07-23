@@ -98,8 +98,8 @@ namespace TensileLite
                     {MatrixInstruction(16, 16, 4, DataType::Float), 32}, // v_mfma_f32_16x16x4_f32
                     {MatrixInstruction(16, 16, 1, DataType::Float), 32}, // v_mfma_f32_16x16x1_4b_f32
                     {MatrixInstruction(4, 4, 1, DataType::Float), 8}, // v_mfma_f32_4x4x1_16b_f32
-                    // F64 TODO Check values
-                    {MatrixInstruction(16, 16, 4, DataType::Double), 32}, // v_mfma_f64_16x16x4_f64
+                    // F64
+                    {MatrixInstruction(16, 16, 4, DataType::Double), 64}, // v_mfma_f64_16x16x4_f64
                     {MatrixInstruction(4, 4, 4, DataType::Double), 16}, // v_mfma_f64_4x4x4_4b_f64
                     // TODO ComplexFloat
                     // TODO ComplexDouble
@@ -144,7 +144,12 @@ namespace TensileLite
                     {MatrixInstruction(32, 32, 16, DataType::BFloat16), 96}, // v_mfma_f32_32x32x16_bf16 * 3
                     {MatrixInstruction(16, 16, 16, DataType::BFloat16), 48}, // v_mfma_f32_16x16x16_bf16 * 3
                     {MatrixInstruction(16, 16, 32, DataType::BFloat16), 48}, // v_mfma_f32_16x16x16_bf16 * 3
-                    // MX types F6/F4 use F8 instructions
+                    // F6
+                    {MatrixInstruction(32, 32, 64, DataType::Float6), 32}, // v_mfma_f32_32x32x64_f6
+                    {MatrixInstruction(16, 16, 128, DataType::Float6), 16}, // v_mfma_f32_16x16x128_f6
+                    // F4
+                    {MatrixInstruction(32, 32, 64, DataType::Float6), 32}, // v_mfma_f32_32x32x64_f4
+                    {MatrixInstruction(16, 16, 128, DataType::Float6), 16}, // v_mfma_f32_16x16x128_f4
                 }}};
 
     } // namespace analytical

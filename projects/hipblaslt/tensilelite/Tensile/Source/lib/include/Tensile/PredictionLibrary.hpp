@@ -159,11 +159,11 @@ namespace TensileLite
             bool                  debug   = Debug::Instance().printPropertyEvaluation();
             hip::HipAMDGPU const* pAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
             size_t elementSizeA_bits
-                = problem.a().elementBytes() * 8; // TODO update for A/B different types
+                = problem.a().elementBytes() * 8;
             size_t elementSizeB_bits
-                = problem.b().elementBytes() * 8; // TODO update for A/B different types
+                = problem.b().elementBytes() * 8;
             size_t elementSizeC_bits
-                = problem.c().elementBytes() * 8; // TODO update for A/B different types
+                = problem.c().elementBytes() * 8;
             const analytical::Hardware& analaytical_hardware = *(pAMDGPU->analyticalHardware);
             int WGM
                 = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
@@ -180,7 +180,7 @@ namespace TensileLite
                 *(pAMDGPU->analyticalHardware),
                 tile_list,
                 elementSizeA_bits,
-                elementSizeA_bits,
+                elementSizeB_bits,
                 elementSizeC_bits,
                 miDataType,
                 0, //mx_block_size -> MX Data types come from rocroller.

@@ -58,52 +58,58 @@ namespace TensileLite
             BFloat8,
             Float8BFloat8,
             BFloat8Float8,
+            Float6,
+            Float4,
             Count,
             None = Count
         };
 
-        inline int dataTypeToBytes(DataType type)
+        inline int dataTypeToBits(DataType type)
         {
             switch(type)
             {
             case DataType::Float:
-                return 4;
+                return 32;
             case DataType::Double:
-                return 8;
+                return 64;
             case DataType::ComplexFloat:
-                return 8;
+                return 64;
             case DataType::ComplexDouble:
-                return 16;
+                return 128;
             case DataType::Half:
-                return 2;
+                return 16;
             case DataType::Int8x4:
-                return 4;
+                return 32;
             case DataType::Int32:
-                return 4;
+                return 32;
             case DataType::BFloat16:
-                return 2;
+                return 16;
             case DataType::Int8:
-                return 1;
-            case DataType::Int64:
                 return 8;
+            case DataType::Int64:
+                return 64;
             case DataType::XFloat32:
-                return 4;
+                return 32;
             case DataType::Float8_fnuz:
-                return 1;
+                return 8;
             case DataType::BFloat8_fnuz:
-                return 1;
+                return 8;
             case DataType::Float8BFloat8_fnuz:
-                return 1;
+                return 8;
             case DataType::BFloat8Float8_fnuz:
-                return 1;
+                return 8;
             case DataType::Float8:
-                return 1;
+                return 8;
             case DataType::BFloat8:
-                return 1;
+                return 8;
             case DataType::Float8BFloat8:
-                return 1;
+                return 8;
             case DataType::BFloat8Float8:
-                return 1;
+                return 8;
+            case DataType::Float6:
+                return 6;
+            case DataType::Float4:
+                return 4;
             default:
                 return -1; // Invalid type
             }
@@ -151,6 +157,10 @@ namespace TensileLite
                 return "Float8BFloat8";
             case DataType::BFloat8Float8:
                 return "BFloat8Float8";
+            case DataType::Float6:
+                return "Float6";
+            case DataType::Float4:
+                return "Float4";
             default:
                 return "Invalid";
             }
