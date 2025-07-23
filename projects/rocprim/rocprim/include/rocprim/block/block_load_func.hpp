@@ -289,14 +289,16 @@ void block_load_direct_striped(unsigned int flat_id,
                                T (&items)[ItemsPerThread],
                                unsigned int valid)
 {
-    InputIterator thread_iter = block_input + flat_id;
     ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
         unsigned int offset = item * BlockSize;
         if (flat_id + offset < valid)
         {
-            items[item] = thread_iter[offset];
+            // Note: Loading data using thread_iter like the other overloads do (thread_iter[offset])
+            // doesn't work here for gfx11xx on Windows due to a compiler bug.
+            // Temporarily load using the approach below until we have a fix.
+            items[item] = block_input[flat_id + offset];
         }
     }
 }
