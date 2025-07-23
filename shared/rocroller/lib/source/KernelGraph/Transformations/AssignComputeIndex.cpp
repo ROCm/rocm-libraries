@@ -94,21 +94,21 @@ namespace rocRoller
             if(ci.isDirect2LDS)
                     expr = makeScalar(expr);
 
-            // auto assignNode         = Assign{offsetRegisterType, convert(ci.offsetType, expr)};
-            // assignNode.variableType = ci.offsetType;
-            // auto assignTag          = graph.control.addElement(assignNode);
-            // graph.mapper.connect(assignTag, offset, NaryArgument::DEST);
+            auto assignNode         = Assign{offsetRegisterType, convert(ci.offsetType, expr)};
+            assignNode.variableType = ci.offsetType;
+            auto assignTag          = graph.control.addElement(assignNode);
+            graph.mapper.connect(assignTag, offset, NaryArgument::DEST);
 
-            // rocRoller::Log::getLogger()->debug(
-            //     "KernelGraph::makeAssignBase: assign {} expression {} to offset {}",
-            //     assignTag,
-            //     toString(assignNode.expression),
-            //     offset);
+            rocRoller::Log::getLogger()->debug(
+                "KernelGraph::makeAssignBase: assign {} expression {} to offset {}",
+                assignTag,
+                toString(assignNode.expression),
+                offset);
 
-            // return assignTag;
+            
 
             std::cout << "YL: makeAssignBase (target, offset, expression) " << target << ", " << offset << ", " << toString(expr) << std::endl;
-            return 0;
+            return assignTag;
 
         }
 
@@ -124,6 +124,8 @@ namespace rocRoller
             // search candidates
             auto candidates = kgraph.control.findNodes( *kgraph.control.roots().begin(), isComputeIndexPredicate).to<std::vector>();
             std::cout << "Number of ComputeIndex nodes " << candidates.size() << std::endl;
+
+            std::vector<std::pair<int, int>> ciAndAssign;
 
             // commit changes
             for (const auto& tag : candidates)
@@ -143,8 +145,19 @@ namespace rocRoller
 
                 auto ci = kgraph.control.get<ComputeIndex>(tag).value();
 
-                // get Transformer
-                Transformer coords(&kgraph.coordinates);
+                // get fake Transformer
+
+                // auto regCoords    = fillRegisterCoords(coords, graph, context);
+
+                
+                // for(auto const& [coord, expr] : staticCoords)
+                //     xform.setCoordinate(coord, expr);
+
+
+                // std::set<int> remainingCoords;
+                // for(auto coord : targetRequired)
+                // if(!xform.hasCoordinate(coord))
+                //     remainingCoords.insert(coord);
 
                 // check maybeLDS
                 auto maybeLDS = kgraph.coordinates.get<LDS>(target).has_value();
@@ -176,9 +189,33 @@ namespace rocRoller
                   == 1;
 
                 // Set the zero-coordinates to zero
+                Transformer coords(&kgraph.coordinates);
+
+                // Set required coordinates
                 auto fullStop  = [&](int tag) { return tag == increment; };
                 auto direction = ci.forward ? Graph::Direction::Upstream : Graph::Direction::Downstream;
                 auto [required, path] = findRequiredCoordinates(target, direction, fullStop, kgraph);
+
+                // Set required register coordinate
+                std::map<int, Expression::ExpressionPtr> regCoords;
+                auto isRegisterDim = [](auto dim) -> bool {
+                    using T = std::decay_t<decltype(dim)>;
+                    return CIsAnyOf<T, Wavefront, Workitem, Workgroup, ForLoop>;
+                };
+                for(auto requiredTag : required)
+                {
+                    if(std::visit(isRegisterDim, kgraph.coordinates.getNode(requiredTag)))
+                    {
+                        auto coordDF
+                            = std::make_shared<Expression::Expression>(Expression::DataFlowTag{
+                                requiredTag, Register::Type::Vector, DataType::UInt32});
+                        regCoords[requiredTag] = coordDF;
+                    }
+                }
+                for(auto const& [regCoord, expr] : regCoords)
+                {
+                    coords.setCoordinate(regCoord, expr);
+                }
 
                 for(auto requiredTag : required)
                     if((requiredTag  != increment) && (!coords.hasCoordinate(requiredTag )))
@@ -193,17 +230,26 @@ namespace rocRoller
                 }
 
 
+
                 // if (stride > 0)
                 // {
                 //     auto assignStrideTag = makeAssignStride();
                 //     // insertAfter(kgraph, tag, assignStrideTag);                    
                 // }
 
-                if (base < 0 && offset > 0)
+                if(base < 0 && offset > 0)
                 {
                     auto assignBaseTag = makeAssignBase(kgraph, ci, target, offset, maybeLDS, isTransposed, m_context, coords);
-                    // insertAfter(kgraph, tag, assignBaseTag);
+                    ciAndAssign.push_back({tag, assignBaseTag});
+                    // insertAfter(kgraph, tag, assignBaseTag, assignBaseTag);
                 }
+            }
+
+            for (auto const& pair : ciAndAssign)
+            {
+                auto ciTag = pair.first;
+                auto assignTag = pair.second;
+                insertAfter(kgraph, ciTag, assignTag, assignTag);
             }
 
             return kgraph;
