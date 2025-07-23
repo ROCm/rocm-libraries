@@ -197,7 +197,6 @@ namespace rocRoller::KernelGraph
                         ss << '\n';
                     }
                 }
-                return ss.str();
             }
             ss << fmt::format("  Imbalanced tags: {}\n", this->imbalancedTags);
             return ss.str();

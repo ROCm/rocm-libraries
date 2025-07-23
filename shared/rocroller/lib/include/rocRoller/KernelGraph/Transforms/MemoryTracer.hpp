@@ -36,7 +36,7 @@ namespace rocRoller
         {
             struct Summary
             {
-                static constexpr bool echoBanks = true;
+                static constexpr bool echoBanks = false;
 
                 struct Banks
                 {
