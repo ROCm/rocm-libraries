@@ -664,7 +664,17 @@ namespace rocRoller
                     if(dest->name().empty())
                         dest->setName(concatenate("DataFlowTag", dimTag));
                 }
-                co_yield Expression::generate(dest, assign.expression, m_context);
+
+                // if (assign.regType == Register::Type::Scalar)
+                // {
+                //     std::cout << "dest register type is scalar at assign " << tag << std::endl;
+                //     co_yield Expression::generate(dest, makeScalar(assign.expression), m_context);
+                // }
+                // else 
+                {
+                    co_yield Expression::generate(dest, assign.expression, m_context);
+                }
+                
 
                 if(deferred)
                 {

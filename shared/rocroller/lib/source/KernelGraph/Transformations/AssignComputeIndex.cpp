@@ -92,7 +92,13 @@ namespace rocRoller
             auto expr = toBytes(indexExpr) + paddingBytes;
 
             if(ci.isDirect2LDS)
-                    expr = makeScalar(expr);
+            {
+                std::cout << "ci isDirect2LDS, make scalar" << std::endl;
+                // expr = Expression::ToScalar(expr);
+
+                expr = std::make_shared<Expression::Expression>(Expression::ToScalar{expr});
+            }
+                    
 
             auto assignNode         = Assign{offsetRegisterType, convert(ci.offsetType, expr)};
             assignNode.variableType = ci.offsetType;
@@ -206,9 +212,12 @@ namespace rocRoller
                 {
                     if(std::visit(isRegisterDim, kgraph.coordinates.getNode(requiredTag)))
                     {
+                        auto registerType = Register::Type::Vector;
+                        // if(ci.isDirect2LDS)
+                        //     registerType = Register::Type::Scalar;
                         auto coordDF
                             = std::make_shared<Expression::Expression>(Expression::DataFlowTag{
-                                requiredTag, Register::Type::Vector, DataType::UInt32});
+                                requiredTag, registerType, DataType::UInt32});
                         regCoords[requiredTag] = coordDF;
                     }
                 }
