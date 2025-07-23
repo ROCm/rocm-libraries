@@ -331,6 +331,9 @@ class GEMMRun(GEMM):
                 return specialNames[key]
             return key
 
+        if architecture is not None:
+            self.architecture.ArchString = architecture
+
         arg_dict = {argName(key): value for key, value in asdict(self).items()}
         for key, value in extra_args.items():
             arg_dict[key] = value
