@@ -34,7 +34,168 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
-/// Internal namespace (to prevent ADL mishaps between static functions when mixing different CUB installations)
+namespace internal
+{
+
+// template <
+//     int         LENGTH,
+//     typename    T,
+//     typename    ReductionOp,
+//     bool        NoPrefix = false>
+//     [[nodiscard]]
+// __device__ __forceinline__ T ThreadReduce(
+//     T*           input,
+//     ReductionOp reduction_op,
+//     T           prefix = T(0))
+// {
+//     T retval;
+//     if(NoPrefix)
+//         retval = input[0];
+//     else
+//         retval = prefix;
+
+//     #pragma unroll
+//     for (int i = 0 + NoPrefix; i < LENGTH; ++i)
+//         retval = reduction_op(retval, input[i]);
+
+//     return retval;
+// }
+
+template<typename AccumT, typename Input, typename ReductionOp>
+[[nodiscard]]
+__device__ __forceinline__
+AccumT ThreadReduceSequential(const Input& input, ReductionOp reduction_op)
+{
+    AccumT        retval = input[0];
+    constexpr int length = ::hipcub::detail::static_size_v<Input>();
+#pragma unroll
+    for(int i = 1; i < length; ++i)
+    {
+        retval = reduction_op(retval, input[i]);
+    }
+    return retval;
+}
+
+template<typename AccumT, typename Input, typename ReductionOp>
+[[nodiscard]]
+__device__ __forceinline__
+AccumT ThreadReduceBinaryTree(const Input& input, ReductionOp reduction_op)
+{
+    constexpr auto length = ::hipcub::detail::static_size_v<Input>();
+#pragma unroll
+    for(int i = 1; i < length; i *= 2)
+    {
+#pragma unroll
+        for(int j = 0; j + i < length; j += i * 2)
+        {
+            input[j] = reduction_op(input[j], input[j + i]);
+        }
+    }
+    return input[0];
+}
+
+template<typename AccumT, typename Input, typename ReductionOp>
+[[nodiscard]]
+__device__ __forceinline__
+AccumT ThreadReduceTernaryTree(const Input& input, ReductionOp reduction_op)
+{
+    constexpr auto length = ::hipcub::detail::static_size_v<Input>();
+#pragma unroll
+    for(int i = 1; i < length; i *= 3)
+    {
+#pragma unroll
+        for(int j = 0; j + i < length; j += i * 3)
+        {
+            auto value = reduction_op(input[j], input[j + i]);
+            input[j]   = (j + i * 2 < length) ? reduction_op(value, input[j + i * 2]) : value;
+        }
+    }
+    return input[0];
+}
+
+// TODO: we should also implement ThreadReduceSimd after simd intrinsics are available.
+
+} // namespace internal
+
+// declare
+template<typename Input,
+         typename ReductionOp,
+         typename ValueT = typename ::std::remove_cv<
+             typename ::std::remove_reference<decltype(::std::declval<Input>()[0])>::type>::type,
+         typename AccumT = ::rocprim::accumulator_t<ReductionOp, ValueT>>
+[[nodiscard]]
+__device__ __forceinline__
+AccumT ThreadReduceNew([[maybe_unused]] const Input& input,
+                       [[maybe_unused]] ReductionOp  reduction_op)
+{
+    static_assert(::hipcub::detail::is_fixed_size_random_access_range<Input>::value,
+                  "Input must support the subscript operator[] and have a compile-time size");
+    static_assert(std::is_invocable<ReductionOp, Input, Input>::value,
+                  "ReductionOp must be invocable with operator()(ValueT, ValueT)");
+    return ::hipcub::internal::ThreadReduceSequential<AccumT>(input, reduction_op);
+}
+
+template<typename Input,
+         typename ReductionOp,
+         typename PrefixT,
+         typename ValueT = typename ::std::remove_cv<
+             typename ::std::remove_reference<decltype(::std::declval<Input>()[0])>::type>::type,
+         typename AccumT = ::rocprim::accumulator_t<ReductionOp, ValueT, PrefixT>>
+[[nodiscard]]
+__device__ __forceinline__
+AccumT ThreadReduceNew([[maybe_unused]] const Input& input,
+                       [[maybe_unused]] ReductionOp  reduction_op,
+                       [[maybe_unused]] PrefixT      prefix)
+{
+    static_assert(::hipcub::detail::is_fixed_size_random_access_range<Input>::value,
+                  "Input must support the subscript operator[] and have a compile-time size");
+    static_assert(std::is_invocable<ReductionOp, Input, Input>::value,
+                  "ReductionOp must be invocable with operator()(ValueT, ValueT)");
+    constexpr auto length = ::hipcub::detail::static_size_v<Input>();
+    return 0;
+}
+
+template<int Length,
+         typename T,
+         typename ReductionOp,
+         typename AccumT = ::rocprim::accumulator_t<ReductionOp, T>>
+[[nodiscard]]
+__device__ __forceinline__
+AccumT ThreadReduceNew([[maybe_unused]] const T* input, [[maybe_unused]] ReductionOp reduction_op)
+{
+    static_assert(Length > 0, "Length must be greater than 0");
+    static_assert(std::is_invocable<ReductionOp, T, T>::value,
+                  "ReductionOp must have the binary call operator: operator(V1, V2)");
+    return 0;
+}
+
+template<int Length,
+         typename T,
+         typename ReductionOp,
+         typename PrefixT,
+         typename AccumT = ::rocprim::accumulator_t<ReductionOp, T, PrefixT>,
+         typename std::enable_if<(Length > 0), int>::type = 0>
+[[nodiscard]]
+__device__ __forceinline__
+AccumT ThreadReduceNew([[maybe_unused]] const T*    input,
+                       [[maybe_unused]] ReductionOp reduction_op,
+                       [[maybe_unused]] PrefixT     prefix)
+{
+    return 0;
+}
+
+template<int Length,
+         typename T,
+         typename ReductionOp,
+         typename PrefixT,
+         typename std::enable_if<(Length == 0), int>::type = 0>
+[[nodiscard]]
+__device__ __forceinline__
+T ThreadReduceNew([[maybe_unused]] const T*, ReductionOp, [[maybe_unused]] PrefixT prefix)
+{
+    return prefix;
+}
+
 template <
     int         LENGTH,
     typename    T,

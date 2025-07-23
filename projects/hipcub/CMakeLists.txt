@@ -20,8 +20,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
-cmake_policy(VERSION 3.16...3.25)
+# CMake version, 3.18 or later is needed for the CUDA_STANDARD 17
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+cmake_policy(VERSION 3.18...3.25)
 
 # Install prefix
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
@@ -43,7 +44,7 @@ elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
 endif()
 
 # Set HIP flags
-set(CMAKE_HIP_STANDARD 14)
+set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 set(CMAKE_HIP_EXTENSIONS OFF)
 
