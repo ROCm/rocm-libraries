@@ -157,8 +157,8 @@ class GEMMProblem:
 
     types: TypeParameters = TypeParameters()
 
-    scaleValueA: float = 1.0
-    scaleValueB: float = 1.0
+    scaleValue_A: float = 1.0
+    scaleValue_B: float = 1.0
 
     workgroupMapping: tuple[int, int] = (-1, -1)
 
