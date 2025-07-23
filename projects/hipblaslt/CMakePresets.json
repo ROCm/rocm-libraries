@@ -18,9 +18,13 @@
         "description": "Configures just tensilelite host and client",
         "inherits": "opt-rocm",
         "cacheVariables": {
-          "HIPBLASLT_ENABLE_HOST": "OFF",
+          "DEVELOP_MODE": "ON",
+          "HIPBLASLT_ENABLE_CLIENT": "OFF",
           "HIPBLASLT_ENABLE_DEVICE": "OFF",
-          "HIPBLASLT_ENABLE_CLIENT": "OFF"
+          "HIPBLASLT_ENABLE_HOST": "OFF",
+          "HIPBLASLT_ENABLE_MSGPACK": "ON",
+          "HIPBLASLT_ENABLE_LLVM": "ON",
+          "TENSILELITE_ENABLE_AUTOBUILD": "ON"
         }
       },
       {
@@ -36,7 +40,6 @@
           "TENSILELITE_ENABLE_AUTOBUILD": "ON"
         }
       },
-
       {
         "name": "hipblaslt",
         "displayName": "hipBLASLt",
