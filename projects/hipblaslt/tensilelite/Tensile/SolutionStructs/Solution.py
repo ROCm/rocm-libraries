@@ -1059,6 +1059,17 @@ class Solution(collections.abc.Mapping):
         if state["MatrixInstruction"] == [4,4,4,4] and (not state['ISA'] == IsaVersion(9,0,10)) and state["ScheduleIterAlg"] == 3:
           reject(state, printRejectionReason, "Currently Matrix instructions [4,4,4,4] is disabled.")
           return
+      if state["UseF32XEmulation"]:
+        if not isaInfoMap[isa].archCaps["HasF32XEmulation"]:
+          reject(state, printRejectionReason, "Missing emulation for F32X")
+          return
+        if state["ScheduleIterAlg"] != 3:
+          reject(state, printRejectionReason, "F32X Emulation only supported with Schedule Iter Alg == 3")
+          return
+        if tuple(state["MatrixInstruction"])[:3] in ((16, 16, 8), (16, 16, 16), (32, 32, 4)):
+          reject(state, printRejectionReason, "tf32 emulation currently only supports mfma MI 16x16x32 and 32x32x16")
+          return
+
     else:
       if not state["ProblemType"]["HighPrecisionAccumulate"] \
          and state["ProblemType"]["ComputeDataType"].numRegisters() > state["ProblemType"]["DataType"].numRegisters() :
@@ -2008,14 +2019,6 @@ class Solution(collections.abc.Mapping):
         if state["ProblemType"]["Sparse"] and state["DirectToVgprSparseMetadata"]:
           if state["VectorWidthA"] > 1 or state["VectorWidthB"] > 1 :
             reject(state, printRejectionReason, "Not implement DTVSM with VW>1")
-            break
-
-        if state["UseF32XEmulation"]:
-          if not isaInfoMap[isa].archCaps["HasF32XEmulation"]:
-            reject(state, "Missing emulation for F32X")
-            break
-          if state["ScheduleIterAlg"] != 3:
-            reject(state, "F32X Emulation only supported with Schedule Iter Alg == 3")
             break
 
         # Now convert elements to vectors based on GlobalReadVectorWidth
