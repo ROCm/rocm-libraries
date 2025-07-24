@@ -404,15 +404,148 @@ public:
 
 private:
   template <class Up, class OtherDeleter>
-  freind class unique_ptr;
+  friend class unique_ptr;
 
   pointer                            m_ptr;
   [[no_unique_address]] deleter_type m_deleter;
-  // bounds checker
 
-  // ... SFINAE checks
+  using DeleterSFINAE = unique_ptr_deleter_sfinae<D>;
 
+  template <bool Dummy>
+  using LValRefType = typename thrust::detail::dependent_type<DeleterSFINAE, Dummy>::type::lval_ref_type;
 
+  template <bool Dummy>
+  using GoodRValRefType = typename thrust::detail::dependent_type<DeleterSFINAE, Dummy>::type::good_rval_ref_type;
+
+  template <bool Dummy>
+  using BadRValRefType = typename thrust::detail::dependent_type<DeleterSFINAE, Dummy>::type::bad_rval_ref_type;
+
+  template <bool Dummy,
+            class Deleter = typename thrust::detail::dependent_type<typename thrust::detail::identity_<deleter_type>::type, Dummy>::type>
+  using EnableIfDeleterDefaultConstructible = typename thrust::detail::enable_if<
+    thrust::detail::and_<std::is_default_constructible<Deleter>,
+                         thrust::detail::not_<thrust::detail::is_pointer<Deleter>>>::value>::type;
+
+  template <class ArgType>
+  using EnableIfDeleterConstructible =
+    typename thrust::detail::enable_if<std::is_constructible<deleter_type, ArgType>::value>::type;
+
+  template <class Pp>
+  using EnableIfPointerConvertible = typename thrust::detail::enable_if<thrust::detail::is_same<Pp, pointer>::value>::type;
+
+  template <bool Dummy,
+            class Tp = typename thrust::detail::dependent_type<typename thrust::detail::identity_<element_type>::type, Dummy>::type>
+  using EnableIfTriviallyDestructible =
+    typename thrust::detail::enable_if<std::is_trivially_destructible<Tp>::value>::type;
+
+  template <bool Dummy,
+            class Tp = typename thrust::detail::dependent_type<typename thrust::detail::identity_<element_type>::type, Dummy>::type>
+  using EnableIfNotTriviallyDestructible =
+    typename thrust::detail::enable_if<thrust::detail::not_<std::is_trivially_destructible<Tp>>::value>::type;
+
+  template <class UPtr, class Up, class ElemT = typename UPtr::element_type>
+  using EnableIfMoveConvertible = typename thrust::detail::enable_if<
+    thrust::detail::and_<std::is_array<Up>,
+                         thrust::detail::is_same<pointer, element_type*>,
+                         thrust::detail::is_same<typename UPtr::pointer, ElemT*>,
+                         thrust::detail::is_convertible<ElemT (*)[], element_type (*)[]>>::value>;
+
+  template <class E>
+  using EnableIfDeleterConvertible = typename thrust::detail::enable_if<
+    thrust::detail::or_<thrust::detail::and_<thrust::detail::is_reference<D>, thrust::detail::is_same<D, E>>,
+                        thrust::detail::and_<thrust::detail::not_<thrust::detail::is_reference<D>>,
+                                             thrust::detail::is_convertible<E, D>>>::value>::type;
+
+public:
+  //==========================================================================
+  // Constructors
+  //==========================================================================
+
+  template <bool Dummy = true, class = EnableIfDeleterDefaultConstructible<Dummy>>
+  THRUST_HOST constexpr unique_ptr() noexcept
+      : m_ptr()
+      , m_deleter()
+  {}
+
+  template <bool Dummy = true, class = EnableIfDeleterDefaultConstructible<Dummy>>
+  THRUST_HOST constexpr unique_ptr(std::nullptr_t) noexcept
+      : unique_ptr()
+  {}
+
+  template <class Pp,
+            bool Dummy = true,
+            class      = EnableIfDeleterDefaultConstructible<Dummy>,
+            class      = EnableIfPointerConvertible<Pp>,
+            class      = EnableIfTriviallyDestructible<Dummy>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(Pp p) noexcept
+      : m_ptr(p)
+      , m_deleter()
+  {}
+
+  template <class Pp,
+            bool Dummy = true,
+            class      = EnableIfDeleterDefaultConstructible<Dummy>,
+            class      = EnableIfPointerConvertible<Pp>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(Pp p, size_t size) noexcept
+      : m_ptr(p)
+      , m_deleter(size)
+  {}
+
+  template <class Pp,
+            bool Dummy = true,
+            class      = EnableIfDeleterConstructible<LValRefType<Dummy>>,
+            class      = EnableIfPointerConvertible<Pp>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(Pp p, LValRefType<Dummy> deleter) noexcept
+      : m_ptr(p)
+      , m_deleter(deleter)
+  {}
+
+  template <bool Dummy = true, class = EnableIfDeleterConstructible<LValRefType<Dummy>>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(std::nullptr_t, LValRefType<Dummy> deleter) noexcept
+      : m_ptr(nullptr)
+      , m_deleter(deleter)
+  {}
+
+  template <class Pp,
+            bool Dummy = true,
+            class      = EnableIfDeleterConstructible<GoodRValRefType<Dummy>>,
+            class      = EnableIfPointerConvertible<Pp>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(Pp p, GoodRValRefType<Dummy> deleter) noexcept
+      : m_ptr(p)
+      , m_deleter(std::move(deleter))
+  {
+    static_assert(thrust::detail::not_<thrust::detail::is_reference<deleter_type>>::value,
+                  "rvalue deleter bound to reference");
+  }
+
+  template <bool Dummy = true, class = EnableIfDeleterConstructible<GoodRValRefType<Dummy>>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(std::nullptr_t, GoodRValRefType<Dummy> deleter) noexcept
+      : m_ptr(nullptr)
+      , m_deleter(std::move(deleter))
+  {
+    static_assert(thrust::detail::not_<thrust::detail::is_reference<deleter_type>>::value,
+                  "rvalue deleter bound to reference");
+  }
+
+  template <class Pp,
+            bool Dummy = true,
+            class      = EnableIfDeleterConstructible<BadRValRefType<Dummy>>,
+            class      = EnableIfPointerConvertible<Pp>>
+  THRUST_HOST unique_ptr(Pp ptr, BadRValRefType<Dummy> deleter) = delete;
+
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr&& u) noexcept
+      : m_ptr(u.release())
+      , m_deleter(std::forward<deleter_type>(u.get_deleter()))
+  {}
+
+  template <class Up,
+            class Ep,
+            class = EnableIfMoveConvertible<unique_ptr<Up, Ep>, Up>,
+            class = EnableIfDeleterConvertible<Ep>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(unique_ptr<Up, Ep>&& u) noexcept
+      : m_ptr(u.release())
+      , m_deleter(std::forward<Ep>(u.get_deleter()))
+  {}
 };
 
 template <class T, class D, typename std::enable_if<std::is_swappable<D>::value, void>::type>
