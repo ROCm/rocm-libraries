@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -104,9 +104,11 @@ void self_validate(T*             A,
     // n1, n2, n3 are matrix dimensions, sometimes called m, n, batch_count
     // s1, s1, s3 are matrix strides, sometimes called 1, lda, stride_a
     using c_type = std::conditional_t<std::is_same<__half, T>::value
+#ifdef HIP_FP8_TYPE_OCP
                                           || std::is_same<__hip_fp8_e4m3, T>::value
-                                          || std::is_same<__hip_fp8_e5m2, T>::value,
-                                      float,
+                                          || std::is_same<__hip_fp8_e5m2, T>::value
+#endif
+                                      ,float,
                                       T>;
     for(int i3 = 0; i3 < m_n3; i3++)
     {
@@ -177,9 +179,11 @@ void compress(const Ti*      in,
 {
     constexpr int tiles_y = 8;
     using c_type          = std::conditional_t<std::is_same<__half, Ti>::value
+#ifdef HIP_FP8_TYPE_OCP
                                           || std::is_same<__hip_fp8_e4m3, Ti>::value
-                                          || std::is_same<__hip_fp8_e5m2, Ti>::value,
-                                      float,
+                                          || std::is_same<__hip_fp8_e5m2, Ti>::value
+#endif
+                                      ,float,
                                       Ti>;
 
     for(int b = 0; b < num_batches; b++)
@@ -346,7 +350,7 @@ void testing_compress_bad_arg(const Arguments& arg)
         EXPECT_HIPSPARSE_STATUS(
             hipsparseLtSpMMACompressedSize2(nullptr, matA, &compressed_size, &compress_buffer_size),
             HIPSPARSE_STATUS_INVALID_VALUE);
-    
+
         EXPECT_HIPSPARSE_STATUS(
             hipsparseLtSpMMACompressedSize2(&handle_, matA, &compressed_size, &compress_buffer_size),
             HIPSPARSE_STATUS_INVALID_VALUE);
