@@ -328,12 +328,11 @@ namespace rocsparse
                                    - idx_base)
                                 : 0;
 
-                const T v = (k < row_end)
-                                ? static_cast<T>(rocsparse::conj_val(
-                                      rocsparse::nontemporal_load(
-                                          csr_val + k + columns_values_batch_stride_A * batch),
-                                      conj_A))
-                                : static_cast<T>(0);
+                const T v = (k < row_end) ? static_cast<T>(rocsparse::conj_val(
+                                rocsparse::nontemporal_load(
+                                    csr_val + k + columns_values_batch_stride_A * batch),
+                                conj_A))
+                                          : static_cast<T>(0);
 
                 for(uint32_t i = 0; i < SUBWFSIZE; ++i)
                 {
@@ -672,12 +671,11 @@ namespace rocsparse
                                - idx_base)
                             : 0;
 
-            const T v = (k < row_end)
-                            ? static_cast<T>(rocsparse::conj_val(
-                                  rocsparse::nontemporal_load(
-                                      csr_val + k + columns_values_batch_stride_A * batch),
-                                  conj_A))
-                            : static_cast<T>(0);
+            const T v = (k < row_end) ? static_cast<T>(rocsparse::conj_val(
+                            rocsparse::nontemporal_load(csr_val + k
+                                                        + columns_values_batch_stride_A * batch),
+                            conj_A))
+                                      : static_cast<T>(0);
 
             for(uint32_t i = 0; i < SUBWFSIZE; ++i)
             {
