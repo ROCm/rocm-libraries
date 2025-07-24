@@ -352,7 +352,6 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 
 
 set(ROCSPARSE_CLIENTS_COMMON
-  ../common/rocsparse.cpp
   ../common/utility.cpp
   ../common/rocsparse_random.cpp
   ../common/rocsparse_reproducibility.cpp
