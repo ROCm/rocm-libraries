@@ -178,6 +178,7 @@ class StateValues:
   numMfmaPerIter: int                    = 0
   SubTileIdxA: int                       = 0
   SubTileIdxB: int                       = 0
+  mfmaIndex: int                         = -1  # For MFMA, index of the current mfma instruction
   numReadsIterCoalescedA: int            = 0
   numReadsIterCoalescedB: int            = 0
   numReadsIterCoalescedMetadata: int     = 0
@@ -1115,8 +1116,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       itemCounter = 0
       for i in range(numMfmaPerIter):
-        kernel["mfmaIndex"] = kernel["mfmaIndex"] + 1
-        mfmaIndex = kernel["mfmaIndex"]
+        self.states.mfmaIndex = self.states.mfmaIndex + 1
+        mfmaIndex = self.states.mfmaIndex
         insertInst = countInstruction(iterCode)
         iterCode.addComment0(" mfmaIndex:%u " %(mfmaIndex))
 
@@ -2062,7 +2063,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # for MFMA, use opposite side
       vregSetIdxMFMA = 1 - vregSetIdxGR
     tPM = tensorParametersA["tpsMetadata"] if tensorParametersA["is_sparse"] else tensorParametersB["tpsMetadata"]
-    kernel["mfmaIndex"] = -1  # reset mfmaIndex for noLoadLoopBody
+    self.states.mfmaIndex = -1  # reset mfmaIndex for noLoadLoopBody
     for uIdx in range(0, kernel["LoopIters"]):
       u = uIdx % kernel["LoopIters"]    #   u: index in compute loop (in contrast to the notion of global read loop)
       isLastLoop = not isNGLL
@@ -2505,7 +2506,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     ############################################################################
     # unrolled loop: mac iterations
     ############################################################################
-    kernel["mfmaIndex"] = -1
+    self.states.mfmaIndex = -1
     # double/quadruple the number of compute loop for each DepthU's worth of data read
     for uIdx in range(0, kernel["LoopIters"]):
       u = uIdx % kernel["LoopIters"]    #   u: index in compute loop (in contrast to the notion of global read loop)
