@@ -624,12 +624,12 @@ namespace rocRoller
                     expr = makeScalar(expr);
 
                 // co_yield generate(offsetReg, convert(offsetReg->variableType(), expr));
-                std::cout << "YL: tile generator computeindex " << toString(expr) << "into offset " << offset << std::endl;
+                // std::cout << "YL: tile generator computeindex " << toString(expr) << "into offset " << offset << std::endl;
                 // offsetReg->setReadOnly();
             }
             else
             {
-                std::cout << "YL: insert (offset, base) " << offset << ", base " << base << std::endl;
+                // std::cout << "YL: insert (offset, base) " << offset << ", base " << base << std::endl;
                 // TODO: use mapper connection to replace m_baseOffsets
                 m_baseOffsets.insert_or_assign(offset, base);
             }
