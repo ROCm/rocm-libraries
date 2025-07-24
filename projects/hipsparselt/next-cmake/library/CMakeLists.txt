@@ -95,10 +95,13 @@ if(HIPSPARSELT_ENABLE_HIP)
             $<BUILD_INTERFACE:${HIP_INCLUDE_DIRS}> # Needed?
             $<BUILD_INTERFACE:${HIPSPARSE_INCLUDE_DIRS}> # Needed?
     )
-    target_link_libraries(hipsparselt PRIVATE hip::device)
+    target_link_libraries(hipsparselt PRIVATE hip::host hip::device)
 endif()
 
-target_link_libraries(hipsparselt PRIVATE roc::hipblas-common hip::device)
+target_link_libraries(hipsparselt 
+    PUBLIC
+        roc::hipblas-common
+)
 
 add_subdirectory(include)
 add_subdirectory(src)
