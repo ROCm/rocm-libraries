@@ -26,12 +26,14 @@
 
 #pragma once
 
+#include "rocRoller/Utilities/Component.hpp"
 #include <memory>
 #include <string>
 #include <vector>
 
 #include <rocRoller/Assemblers/Assembler_fwd.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
+#include <rocRoller/Utilities/ComponentRegistration.hpp>
 
 namespace rocRoller
 {
@@ -45,6 +47,11 @@ namespace rocRoller
         static const std::string Basename;
 
         static AssemblerPtr Get();
+
+        void registerAssemblers()
+        {
+            ComponentRegistration::getInstance()->registerComponent();
+        }
 
         virtual std::string name() const = 0;
 
