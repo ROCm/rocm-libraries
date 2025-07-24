@@ -37,8 +37,8 @@ target_link_libraries(hipsparselt-test PRIVATE
     hipsparselt-clients-common
     GTest::gtest 
     GTest::gtest_main
-    ${BLAS_LIBRARIES_TO_LINK}
 )
+hipsparselt_link_blas_libraries(hipsparselt-test)
 
 # Platform-specific linking for tests
 if(HIPSPARSELT_ENABLE_CUDA)

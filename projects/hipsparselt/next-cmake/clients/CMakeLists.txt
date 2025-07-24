@@ -11,17 +11,11 @@ find_package(BLAS REQUIRED)
 find_package(cblas REQUIRED)
 find_package(LAPACK REQUIRED)
 
-# Set up BLAS library (prefer BLIS if available)
+# Optional BLIS support
 if(HIPSPARSELT_ENABLE_BLIS)
     find_package(BLIS QUIET)
-    if(BLIS_FOUND)
-        set(BLAS_LIBRARIES_TO_LINK BLIS::blis ${LAPACK_LIBRARIES})
-    else()
-        set(BLAS_LIBRARIES_TO_LINK ${BLAS_LIBRARIES} ${CBLAS_LIBRARIES} ${LAPACK_LIBRARIES})
-    endif()
-else()
-    set(BLAS_LIBRARIES_TO_LINK ${BLAS_LIBRARIES} ${CBLAS_LIBRARIES} ${LAPACK_LIBRARIES})
 endif()
+
 
 # TODO: Fix these to be found in the source tree during build?
 configure_file("${_CMAKE_CURRENT_SOURCE_DIR}/include/hipsparselt_common.yaml"

@@ -19,6 +19,7 @@ set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.md")
 
 include(FetchROCmCMake)
 include(hipSPARSELtSupportedArchitectures)
+include(hipSPARSELtLinkBLASLibraries)
 include(CMakeDependentOption)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
