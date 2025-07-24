@@ -39,7 +39,7 @@ foreach(sample_name ${SAMPLE_EXECUTABLES})
         PRIVATE
             $<BUILD_INTERFACE:${CUDAToolkit_INCLUDE_DIRS}>
         )
-        target_link_libraries(${sample_name} PRIVATE ${CUSPARSELT_LIBRARY} CUDA::cudart CUDA::cuda_driver)
+        target_link_libraries(${sample_name} PRIVATE ${cusparselt_LIBRARY} CUDA::cudart CUDA::cuda_driver)
     endif()
 
     set_target_properties(${sample_name} PROPERTIES
