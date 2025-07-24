@@ -11,6 +11,8 @@ option(HIPBLASLT_ENABLE_MSGPACK "Use msgpack for parsing configuration files." O
 option(HIPBLASLT_ENABLE_OPENMP "Use OpenMP to improve performance." ON)
 option(HIPBLASLT_ENABLE_LLVM "Use msgpack for parsing configuration files." OFF)
 
+add_subdirectory(rocisa)
+
 if(TENSILELITE_ENABLE_AUTOBUILD)
     list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
     include(tensilelite_auto_build)
@@ -37,7 +39,6 @@ if(TENSILELITE_ENABLE_HOST OR HIPBLASLT_ENABLE_HOST)
     endif()
 
     find_package(hip REQUIRED)
-    add_subdirectory(rocisa/rocisa-cpp)
 
     add_library(tensilelite-host OBJECT)
     add_library(tensilelite::tensilelite-host ALIAS tensilelite-host)
