@@ -3583,7 +3583,7 @@ namespace GEMMDriverTest
 
         basicGEMM<Half>(gemm);
     }
-    
+
     TEST_P(GEMMTestGPU, GPU_BasicGEMMStoreDWave)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);

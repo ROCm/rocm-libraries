@@ -1137,11 +1137,11 @@ namespace rocRoller
 
         Expression::ExpressionPtr tileCeilDivide(Expression::ExpressionPtr sdSize, int tileSize)
         {
-            auto tileSizeExpr = std::has_single_bit(static_cast<uint>(tileSize)) ?
-                                        Expression::literal(static_cast<uint>(tileSize)) :
-                                        Expression::literal(static_cast<int64_t>(tileSize));
-            
-            auto one          = Expression::literal(1u);
+            auto tileSizeExpr = std::has_single_bit(static_cast<uint>(tileSize))
+                                    ? Expression::literal(static_cast<uint>(tileSize))
+                                    : Expression::literal(static_cast<int64_t>(tileSize));
+
+            auto one = Expression::literal(1u);
 
             return (sdSize + tileSizeExpr - one) / tileSizeExpr;
         }
