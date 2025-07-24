@@ -131,6 +131,7 @@ rocsparse_arguments_config::rocsparse_arguments_config()
         this->skip_reproducibility        = false;
         this->sparsity_pattern_statistics = false;
         this->call_stage_analysis         = true;
+        this->convert_to_int              = false;
         this->filename[0]                 = '\0';
         this->function[0]                 = '\0';
         this->name[0]                     = '\0';
