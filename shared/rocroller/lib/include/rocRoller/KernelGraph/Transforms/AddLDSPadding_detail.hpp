@@ -38,6 +38,10 @@ namespace rocRoller
 	     *
 	     * Information about LDS padding that is being added to
 	     * the graph.
+	     *
+	     * If wgContiguousWrites is true (eg, for direct-to-lds)
+	     * then the LDS writes across all lanes in the workgroup
+	     * must be contiguous.
 	     */
             struct LDSPaddingInfo
             {
@@ -47,6 +51,7 @@ namespace rocRoller
                 std::array<int, 2> downstreamTags;
                 DataType           dataType;
                 LayoutType         layoutType;
+                bool               wgContiguousWrites;
             };
 
             /**
