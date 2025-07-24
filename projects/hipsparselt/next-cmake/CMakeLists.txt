@@ -103,21 +103,28 @@ find_package(hip REQUIRED)
 find_package(hipblas-common REQUIRED)
 
 if(HIPSPARSELT_ENABLE_MARKER)
-  find_library(ROCTX64_LIBRARY REQUIRED NAMES roctx64 libroctx64)
+  if(HIPSPARSELT_ENABLE_CUDA)
+    message(FATAL_ERROR "rocTracer marker is not supported with CUDA backend.")
+  else()
+    find_library(ROCTX64_LIBRARY REQUIRED NAMES roctx64 libroctx64)
+  endif()
 endif()
 
 if(HIPSPARSELT_ENABLE_CUDA)
   find_package(CUDAToolkit REQUIRED)
-
   find_path(cusparselt_INCLUDE_DIR REQUIRED NAMES cusparseLt.h)
-  message(STATUS "cusparselt_INCLUDE_DIR: ${cusparselt_INCLUDE_DIR}")
-
   find_library(cusparselt_LIBRARY REQUIRED NAMES cusparseLt)
-  message(STATUS "cusparselt_LIBRARY: ${cusparselt_LIBRARY}")
 
   message(STATUS "Found cusparseLt: ${cusparselt_LIBRARY}")
 endif()
   
+# DELTEME
+get_cmake_property(_variableNames VARIABLES)
+list(SORT _variableNames)
+foreach(_variableName ${_variableNames})
+  message(STATUS "${_variableName} = [${${_variableName}}]")
+endforeach()
+
 if(HIPSPARSELT_ENABLE_HIP)
   set(HIPBLASLT_PATH "${HIPSPARSELT_HIPBLASLT_PATH}")
   if(NOT EXISTS "${HIPBLASLT_PATH}")
