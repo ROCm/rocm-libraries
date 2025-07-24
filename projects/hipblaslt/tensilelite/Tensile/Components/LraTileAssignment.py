@@ -217,6 +217,12 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                 strideK = 16
             else:
                 strideK = (mt + LdsPad) * 16
+        elif kernel["UseF32XEmulation"] and not (kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16):
+            if umlds:
+                strideK = 4
+            else:
+                strideK = (mt + LdsPad) * 4
+
         strideBlock      = kernel["MatrixInstM"] * strideTile
         if enableLDSTr:
            strideWave = kernel["MatrixInstM"] * vectorWidth

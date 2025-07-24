@@ -20,7 +20,7 @@ def runCompileCommand(platform, project, jobName, boolean sameOrg=false)
         }
     }
     def command = """#!/usr/bin/env bash
-                set -x
+                set -ex
                 cd ${project.paths.project_build_prefix}
                 ${getDependenciesCommand}
                 export LD_LIBRARY_PATH=/opt/rocm/lib/
@@ -93,7 +93,7 @@ def runTestWithSanitizerCommand (platform, project, gfilter, String dirmode = "r
     String centos7Workaround = platform.jenkinsLabel.contains('centos7') ? 'export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/opt/rocm/lib64/' : ''
 
     def command = """#!/usr/bin/env bash
-                set -x
+                set -ex
                 cd ${project.paths.project_build_prefix}/build/${dirmode}/clients/staging
 		        export ASAN_LIB_PATH=\$(/opt/rocm/llvm/bin/clang -print-file-name=libclang_rt.asan-x86_64.so)
                 export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:\$(dirname "\${ASAN_LIB_PATH}")
@@ -113,7 +113,7 @@ def runCoverageCommand (platform, project, gfilter, String dirmode = "release")
     withCredentials([string(credentialsId: "mathlibs-codecov-token-rocsparse", variable: 'CODECOV_TOKEN')])
     {
         def command = """#!/usr/bin/env bash
-                    set -x
+                    set -ex
                     cd ${project.paths.project_build_prefix}/build/${dirmode}
                     export LD_LIBRARY_PATH=/opt/rocm/lib/
                     GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
@@ -152,7 +152,7 @@ def runPackageCommand(platform, project, String dirmode = "release")
         pkgInfoCommand = "for pkg in package/*.deb; do dpkg -I \$pkg; dpkg -c \$pkg; done"
     }
     command = """
-            set -x
+            set -ex
             cd ${project.paths.project_build_prefix}/build/${dirmode}
             make package
             mkdir -p package
