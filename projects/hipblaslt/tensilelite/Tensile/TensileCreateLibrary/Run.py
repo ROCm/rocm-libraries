@@ -49,9 +49,9 @@ from Tensile.Common import (
     state,
     tqdm,
     setVerbosity,
-    getVerbosity
+    getVerbosity,
 )
-from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX
+from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
 from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
@@ -635,6 +635,7 @@ def run():
     else:
         archs = arguments["Architecture"].split("_")
     archs = SUPPORTED_GFX if "all" in archs else archs
+    archs, requestedPredicateMap = splitArchsFromPredicates(archs)
 
     targetIsas = [gfxToIsa(a) for a in archs]
     isaInfoMap = makeIsaInfoMap(targetIsas, cxxCompiler)
@@ -681,10 +682,10 @@ def run():
         arguments["LogicPath"], f"**/{arguments['LogicFilter']}{logicExtFormat}"
     )
     print1(f"# LogicFilter:       {globPattern}")
-    logicFiles = (
-        os.path.join(arguments["LogicPath"], file)
-        for file in glob.iglob(globPattern, recursive=True)
-    )
+    logicFiles = [
+        file for file in glob.iglob(globPattern, recursive=True)
+    ]
+
     logicFiles = [file for file in logicFiles if validLogicFile(Path(file))]
 
     print1(f"# Experimental:      {arguments['Experimental']}")
@@ -693,7 +694,14 @@ def run():
             file for file in logicFiles if "experimental" not in map(str.lower, Path(file).parts)
         ]
 
-    print2(f"# LibraryLogicFiles: {len(logicFiles)}")
+    print1("# Archs: " + ' ,'.join(archs))
+    if requestedPredicateMap:
+        print1("# Predicates:\n" + "\n".join(f"#   {arch}: {', '.join(v) if v else 'all variants'}" for arch, v in requestedPredicateMap.items()))
+        numPrior = len(logicFiles)
+        logicFiles = filterLogicFilesByPredicates(logicFiles, requestedPredicateMap)
+        print1(f"# Filtered {numPrior - len(logicFiles)} logic files not matching requested predicates")
+
+    print1(f"# LibraryLogicFiles: {len(logicFiles)}")
 
     for logicFile in logicFiles:
         print2("#   %s" % logicFile)

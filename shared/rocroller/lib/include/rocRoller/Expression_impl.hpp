@@ -422,6 +422,8 @@ namespace rocRoller
 
         EXPRESSION_INFO(RandomNumber);
 
+        EXPRESSION_INFO(ToScalar);
+
         EXPRESSION_INFO(BitFieldExtract);
 
         EXPRESSION_INFO(Convert);

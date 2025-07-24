@@ -22,7 +22,8 @@
 
 #include <cstdint>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(CountingIteratorTests, NumericalTestsParams);
 

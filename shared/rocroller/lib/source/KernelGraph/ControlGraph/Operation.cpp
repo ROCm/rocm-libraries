@@ -106,18 +106,6 @@ namespace rocRoller::KernelGraph::ControlGraph
         return concatenate(name(), " ", addTID);
     }
 
-    ComputeIndex::ComputeIndex() = default;
-    ComputeIndex::ComputeIndex(bool     forward,
-                               DataType valueType,
-                               DataType offsetType,
-                               DataType strideType)
-        : forward(forward)
-        , valueType(valueType)
-        , offsetType(offsetType)
-        , strideType(strideType)
-    {
-    }
-
     LoadLinear::LoadLinear() = default;
     LoadLinear::LoadLinear(rocRoller::VariableType const varType)
         : varType(varType)

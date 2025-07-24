@@ -628,6 +628,13 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(kernelType.typeB).elementBits;
     size_t elementSizeC_bits = rocRoller::DataTypeInfo::Get(kernelType.typeC).elementBits; 
 
+    size_t maxAB_bits = std::max(elementSizeA_bits, elementSizeB_bits);
+    TensileLite::analytical::DataType dataType = TensileLite::analytical::DataType::Float8;
+    if(maxAB_bits == 6)
+        dataType = TensileLite::analytical::DataType::Float6;
+    else if(maxAB_bits == 4)
+        dataType = TensileLite::analytical::DataType::Float4;
+
     const TensileLite::analytical::Hardware analaytical_hardware = TensileLite::analytical::Hardware::getHardwareForDevice(0);
 
     int WGM = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
@@ -642,8 +649,9 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
         analaytical_hardware,
         tile_list,
         elementSizeA_bits,
-        elementSizeA_bits,
+        elementSizeB_bits,
         elementSizeC_bits,
+        dataType,
         kernelType.scaleABlockRowSize * kernelType.scaleABlockColSize, //Handle A vs B block size.
         0.8,
         false,

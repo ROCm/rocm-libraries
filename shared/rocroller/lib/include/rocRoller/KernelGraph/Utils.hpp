@@ -325,6 +325,11 @@ namespace rocRoller
         int duplicateControlNode(KernelGraph& graph, int tag);
 
         /**
+         * @brief Delete a control node from the graph.
+         */
+        void deleteControlNode(KernelGraph& graph, int);
+
+        /**
          * Updates the threadtile size for enabling the use of long dword instructions
          */
         void updateThreadTileForLongDwords(int& t_m,

@@ -402,8 +402,11 @@ endif()
 
 if(HIPBLASLT_ENABLE_DEVICE)
     if(WIN32)
-        set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}hipblaslt/bin" CACHE PATH "path to tensile library")
+        # Put files used at runtime adjacent to '.dll's and '.exe's in bin/.
+        set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_BINDIR}/hipblaslt" CACHE PATH "path to tensile library")
     else()
+        # Put files used at runtime adjacent to shared libraries ('.so') in
+        # lib/, separate from executables (no extension) in bin/.
         set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipblaslt" CACHE PATH "path to tensile library")
     endif()
     rocm_install(
