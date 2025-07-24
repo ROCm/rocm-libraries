@@ -57,55 +57,6 @@
 // uses recursive folding reduction
 #include "../blas1/reduction.hpp"
 
-// ********************************************************************************************************************
-// *** NEW KERNELS AND HELPERS FOR SPECIALIZED GEMV-TRANSPOSE (gemvT_row_vectorized)
-// ********************************************************************************************************************
-
-// Helper for conditional conjugation
-template <typename T>
-__device__ __forceinline__ T rocblas_gemvt_conj_if(T val, bool do_conj)
-{
-    if constexpr(std::is_same_v<T,
-                                rocblas_float_complex> || std::is_same_v<T, rocblas_double_complex>)
-    {
-        if(do_conj)
-        {
-            return T(val.real(), -val.imag());
-        }
-    }
-    return val;
-}
-
-// Helper for warp reduction
-template <typename T>
-__device__ inline T rocblas_gemvt_warp_reduce_sum(T psum, int width)
-{
-    if constexpr(std::is_same_v<T, float> || std::is_same_v<T, double>)
-    {
-        for(int s = width / 2; s > 0; s >>= 1)
-        {
-            psum += __shfl_down(psum, s, width);
-        }
-        return psum;
-    }
-    else if constexpr(std::is_same_v<T, rocblas_float_complex>)
-    {
-        float real_part = rocblas_gemvt_warp_reduce_sum(psum.real(), width);
-        float imag_part = rocblas_gemvt_warp_reduce_sum(psum.imag(), width);
-        return T(real_part, imag_part);
-    }
-    else if constexpr(std::is_same_v<T, rocblas_double_complex>)
-    {
-        double real_part = rocblas_gemvt_warp_reduce_sum(psum.real(), width);
-        double imag_part = rocblas_gemvt_warp_reduce_sum(psum.imag(), width);
-        return T(real_part, imag_part);
-    }
-    else
-    {
-        return psum; // Should not happen with supported types
-    }
-}
-
 // Specialized pipelined kernel for float
 template <bool CONJ, int TILE_DIM_X, int TILE_DIM_Y>
 ROCBLAS_KERNEL_ILF void rocblas_gemvt_row_vectorized_kernel_calc(rocblas_int m,
@@ -247,7 +198,7 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_row_vectorized_kernel_calc(rocblas_int m,
     psum += a_vec_k1.z * x_vec_k1.z;
     psum += a_vec_k1.w * x_vec_k1.w;
 
-    psum = rocblas_gemvt_warp_reduce_sum(psum, TILE_DIM_X);
+    psum = rocblas_wavefront_reduce<TILE_DIM_X>(psum);
 
     if(tx == 0)
     {
@@ -389,7 +340,7 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_row_vectorized_kernel_calc(rocblas_int m,
     psum += a_vec_k1.x * x_vec_k1.x;
     psum += a_vec_k1.y * x_vec_k1.y;
 
-    psum = rocblas_gemvt_warp_reduce_sum(psum, TILE_DIM_X);
+    psum = rocblas_wavefront_reduce<TILE_DIM_X>(psum);
 
     if(tx == 0)
     {
@@ -529,8 +480,8 @@ ROCBLAS_KERNEL_ILF void
 
         for(int i = 0; i < 2; ++i)
         {
-            psum += rocblas_gemvt_conj_if(a_k0[i], CONJ) * x_k0[i];
-            psum += rocblas_gemvt_conj_if(a_k1[i], CONJ) * x_k1[i];
+            psum += conj_if_true<CONJ>(a_k0[i]) * x_k0[i];
+            psum += conj_if_true<CONJ>(a_k1[i]) * x_k1[i];
         }
 
         a_vec_k0 = a_vec_n0;
@@ -546,11 +497,11 @@ ROCBLAS_KERNEL_ILF void
 
     for(int i = 0; i < 2; ++i)
     {
-        psum += rocblas_gemvt_conj_if(a_k0[i], CONJ) * x_k0[i];
-        psum += rocblas_gemvt_conj_if(a_k1[i], CONJ) * x_k1[i];
+        psum += conj_if_true<CONJ>(a_k0[i]) * x_k0[i];
+        psum += conj_if_true<CONJ>(a_k1[i]) * x_k1[i];
     }
 
-    psum = rocblas_gemvt_warp_reduce_sum(psum, TILE_DIM_X);
+    psum = rocblas_wavefront_reduce<TILE_DIM_X>(psum);
 
     if(tx == 0)
     {
@@ -639,8 +590,8 @@ ROCBLAS_KERNEL_ILF void
             x_n1 = rocblas_double_complex(0.0, 0.0);
         }
 
-        psum += rocblas_gemvt_conj_if(a_k0, CONJ) * x_k0;
-        psum += rocblas_gemvt_conj_if(a_k1, CONJ) * x_k1;
+        psum += conj_if_true<CONJ>(a_k0) * x_k0;
+        psum += conj_if_true<CONJ>(a_k1) * x_k1;
 
         a_k0 = a_n0;
         x_k0 = x_n0;
@@ -648,10 +599,10 @@ ROCBLAS_KERNEL_ILF void
         x_k1 = x_n1;
     }
 
-    psum += rocblas_gemvt_conj_if(a_k0, CONJ) * x_k0;
-    psum += rocblas_gemvt_conj_if(a_k1, CONJ) * x_k1;
+    psum += conj_if_true<CONJ>(a_k0) * x_k0;
+    psum += conj_if_true<CONJ>(a_k1) * x_k1;
 
-    psum = rocblas_gemvt_warp_reduce_sum(psum, TILE_DIM_X);
+    psum = rocblas_wavefront_reduce<TILE_DIM_X>(psum);
 
     if(tx == 0)
     {
@@ -1222,6 +1173,7 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvn_kernel_calc(rocblas_int                   
     }
 }
 
+//Optimized kernel for GEMV transpose case when m or n is less than gemvt_threshold
 template <bool CONJ, int NB_X, typename Ti, typename Tex, typename To>
 ROCBLAS_KERNEL_ILF void rocblas_gemvt_kernel_calc(rocblas_int m,
                                                   rocblas_int n,
@@ -1290,7 +1242,6 @@ ROCBLAS_KERNEL_ILF void rocblas_gemvt_kernel_calc(rocblas_int m,
     }
 }
 
-//Optimized kernel for GEMV transpose case when m or n is less than 6000
 template <bool CONJ, int NB_X, typename T_Index, typename Ti, typename Tex, typename To>
 ROCBLAS_KERNEL_ILF void rocblas_gemvt_reduce_kernel_calc(rocblas_int m,
                                                          rocblas_int n,
@@ -1745,6 +1696,7 @@ rocblas_gemvn_kernel(rocblas_int    m,
 }
 
 // lda always cast to size_t so single kernel
+//Optimized kernel for GEMV transpose case when m or n is less than gemvt_threshold
 template <bool CONJ, int NB_X, typename Ti, typename Tex, typename To>
 ROCBLAS_KERNEL(NB_X)
 rocblas_gemvt_kernel(rocblas_int    m,
@@ -1798,7 +1750,6 @@ rocblas_gemvt_kernel(rocblas_int    m,
 #endif
 }
 
-//Optimized kernel for GEMV transpose case when m or n is less than 6000
 template <bool CONJ, int NB_X, typename T_Index, typename Ti, typename Tex, typename To>
 ROCBLAS_KERNEL(NB_X)
 rocblas_gemvt_warp_reduce_kernel(rocblas_int    m,
