@@ -46,7 +46,6 @@ namespace rocRoller
                 };
                 struct Access
                 {
-                    uint                          instruction;
                     int                           ldsTag;
                     std::vector<Banks>            accessedBanks;
                     std::vector<std::vector<int>> banksToWorkitems;

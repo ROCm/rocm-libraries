@@ -105,7 +105,6 @@ namespace rocRoller::KernelGraph
             int           destinationTag; //< Destination coordinate tag
             Direction     direction; //< Memory access type
             ExpressionPtr index; //< Index expression
-            uint          instructionNumber; //< Instruction number
             uint          bytesRequested; //< Number of bytes requested
         };
 
@@ -128,7 +127,6 @@ namespace rocRoller::KernelGraph
             int       operationTag; //< Operation tag
             int       sourceTag; //< Source coordinate tag
             int       destinationTag; //< Destination coordinate tag
-            uint      instructionNumber; //< Instruction number
             Direction direction; //< Memory access type: GlobalLoad, GlobalStore, LDSLoad, LDSStore
             uint      byteOffset; //< Buffer offset in bytes
             uint      bytesRequested; //< Number of bytes requested
@@ -175,9 +173,8 @@ namespace rocRoller::KernelGraph
             std::stringstream ss;
             for(auto const& [tag, access] : this->accesses)
             {
-                auto const& [instruction, ldsTag, accessedBanks, banksToWorkitems] = access;
-                ss << fmt::format(
-                    "Operation tag {} instruction {} accesses LDS {}:\n", tag, instruction, ldsTag);
+                auto const& [ldsTag, accessedBanks, banksToWorkitems] = access;
+                ss << fmt::format("Operation tag {} accesses LDS {}:\n", tag, ldsTag);
                 for(auto const& [bankIndex, workitemsAccessed, imbalanced] : accessedBanks)
                 {
                     ss << fmt::format("  Bank {}: {} workitems {}\n",
@@ -251,12 +248,8 @@ namespace rocRoller::KernelGraph
                                                                          : event.sourceTag;
 
                     // XXX When we break this down by instruction, need to add to LDSBankAccess struct
-                    m_bankAccesses[{event.operationTag, event.instructionNumber}].push_back(
-                        LDSBankAccess{event.operationTag,
-                                      ldsTag,
-                                      event.direction,
-                                      event.workItem,
-                                      bankIndex});
+                    m_bankAccesses[event.operationTag].push_back(LDSBankAccess{
+                        event.operationTag, ldsTag, event.direction, event.workItem, bankIndex});
                 }
             }
 
@@ -265,10 +258,8 @@ namespace rocRoller::KernelGraph
                 Summary summary;
 
                 // For each operation tag and instruction...
-                for(auto const& [key, accesses] : m_bankAccesses)
+                for(auto const& [tag, accesses] : m_bankAccesses)
                 {
-                    auto [tag, instruction] = key;
-
                     auto ldsTag = accesses[0].ldsTag;
 
                     //
@@ -337,8 +328,7 @@ namespace rocRoller::KernelGraph
                     summary.accesses.emplace(
                         std::piecewise_construct,
                         std::forward_as_tuple(tag),
-                        std::forward_as_tuple(
-                            instruction, ldsTag, workitemsInfo, banksToWorkitems));
+                        std::forward_as_tuple(ldsTag, workitemsInfo, banksToWorkitems));
                 }
 
                 return summary;
@@ -359,7 +349,7 @@ namespace rocRoller::KernelGraph
             uint m_numBanks;
             uint m_numEntriesPerBank;
 
-            std::map<std::pair<int, uint>, std::vector<LDSBankAccess>> m_bankAccesses;
+            std::map<int, std::vector<LDSBankAccess>> m_bankAccesses;
         };
 
         std::ostream& operator<<(std::ostream& stream, LDSBankModel const& ldsBankModel)
@@ -582,7 +572,6 @@ namespace rocRoller::KernelGraph
                                         tileTag,
                                         Direction::LDSLoad,
                                         index * Expression::literal(numBits),
-                                        0, // XXX
                                         numBytes});
                 }
             }
@@ -625,7 +614,6 @@ namespace rocRoller::KernelGraph
                                             tileTag,
                                             Direction::GlobalLoad,
                                             index * Expression::literal(numBytes),
-                                            0, // XXX
                                             numBytes});
                     }
                 }
@@ -706,7 +694,6 @@ namespace rocRoller::KernelGraph
                             auto simulated = MemoryEventSimulated{event.operationTag,
                                                                   event.sourceTag,
                                                                   event.destinationTag,
-                                                                  event.instructionNumber,
                                                                   event.direction,
                                                                   static_cast<uint>(offset),
                                                                   event.bytesRequested,
