@@ -25,7 +25,7 @@
 
 import pathlib
 from dataclasses import dataclass, field, fields, asdict
-from typing import List
+from typing import Any, List, Optional
 import yaml
 
 
@@ -61,7 +61,7 @@ class RRPerfResult:
     contain timers or counters.
     """
 
-    client: str = field(repr=False)
+    resultType: str = field(repr=False)
     path: pathlib.Path = field(repr=False, hash=False)
 
     kernelGenerate: int = field(repr=False, hash=False)
@@ -72,6 +72,73 @@ class RRPerfResult:
 
     checked: bool = field(repr=False, hash=False, compare=False, default=False)
     correct: bool = field(repr=False, hash=False, compare=False, default=True)
+
+
+@dataclass(unsafe_hash=True)
+class TypeParameters:
+    """All types that are part of the problem description"""
+
+    type_A: str = "float"
+    type_B: str = "float"
+    type_C: str = "float"
+    type_D: str = "float"
+    type_acc: str = "float"
+
+    trans_A: str = "N"
+    trans_B: str = "N"
+
+    scale_A: str = "None"
+    scaleType_A: str = "None"
+    scale_B: str = "None"
+    scaleType_B: str = "None"
+
+    # If scale_A or scale_B is Separate, scaleBlockSize
+    # needs to be set to a valid block size (e.g. 32)
+    scaleBlockSize: int = -1
+    scaleSkipPermlane: bool = False
+
+    def __init__(self, typeParams: Optional[Any] = None, **kwargs):
+        if isinstance(typeParams, TypeParameters):
+            for f in fields(self):
+                setattr(self, f.name, getattr(typeParams, f.name))
+        elif typeParams is not None:
+            raise TypeError(
+                f"Expected TypeParameters or None, got {type(typeParams).__name__}"
+            )
+
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+            else:
+                raise AttributeError(f"Unknown field: {key}")
+
+    def asArgs(self) -> List[str]:
+        rv: List[str] = []
+        for f in fields(self):
+            rv.append(f"--{f.name}={self.__getattribute__(f.name)}")
+        return rv
+
+
+@dataclass(unsafe_hash=True)
+class GPUArchitectureTarget:
+    """GPUArchitectureTarget"""
+
+    ArchString: str = ""
+    Xnack: bool = False
+    Sramecc: bool = False
+
+    def __str__(self):
+        if len(self.ArchString) == 0:
+            return ""
+        else:
+            archFeatures: str = ""
+            archFeatures += archFeatures + (":xnack+" if self.Xnack else "")
+            archFeatures += archFeatures + (":sramecc+" if self.Sramecc else "")
+            return (
+                f"--arch={self.ArchString}" + archFeatures
+                if len(self.ArchString) != 0
+                else ""
+            )
 
 
 #
@@ -88,14 +155,12 @@ class GEMMProblem:
     alpha: float = 2.0
     beta: float = 0.5
 
-    type_A: str = "float"
-    type_B: str = "float"
-    type_C: str = "float"
-    type_D: str = "float"
-    type_acc: str = "float"
+    types: TypeParameters = TypeParameters()
 
-    trans_A: str = "N"
-    trans_B: str = "N"
+    scaleValue_A: float = 1.0
+    scaleValue_B: float = 1.0
+
+    workgroupMapping: tuple[int, int] = (-1, -1)
 
     def __post_init__(self):
         convert_class_params(GEMMProblem, self)
@@ -116,7 +181,6 @@ class GEMMSolution:
 
     workgroup_size_x: int = 64 * 2
     workgroup_size_y: int = 2
-    workgroupMapping: tuple[int, int] = (-1, -1)
     workgroupRemapXCC: bool = False
     workgroupRemapXCCValue: int = -1
 
@@ -138,18 +202,6 @@ class GEMMSolution:
     prefetchLDSFactor: int = 0
     prefetchMixMemOps: bool = False
 
-    scale_A: str = "None"
-    scale_B: str = "None"
-
-    scaleType_A: str = "None"
-    scaleType_B: str = "None"
-
-    scaleSkipPermlane: bool = False
-
-    # If scale_A or scale_B is Separate, scaleBlockSize
-    # needs to be set to a valid block size (e.g. 32)
-    scaleBlockSize: int = -1
-
     loadLDSScale_A: bool = False
     loadLDSScale_B: bool = False
     swizzleScale: bool = False
@@ -158,6 +210,11 @@ class GEMMSolution:
     streamK: bool = False
     numWGs: int = 0
     streamKTwoTile: bool = False
+
+    architecture: GPUArchitectureTarget = GPUArchitectureTarget()
+    matchMemoryAccess: bool = True
+
+    version: str = ""
 
     def __post_init__(self):
         convert_class_params(GEMMSolution, self)
@@ -172,8 +229,6 @@ class GEMM(GEMMProblem, GEMMSolution):
     numInner: int = 10
 
     visualize: bool = False
-
-    match_memory_access: bool = True
 
     def __post_init__(self):
         convert_class_params(GEMM, self)
@@ -239,6 +294,25 @@ class GEMMRun(GEMM):
     def set_output(self, path: pathlib.Path):
         self.output = path
 
+    def parseArgDict(self, arg_dict: dict[str, Any]) -> List[str]:
+        args = []
+        for key, value in arg_dict.items():
+            # TODO: supported these parameters in our client?
+            if key == "version":
+                pass
+            elif key == "types":
+                args.extend(TypeParameters(**value).asArgs())
+            elif key == "architecture":
+                arg = str(GPUArchitectureTarget(**value))
+                if len(arg) > 0:
+                    args.append(arg)
+            else:
+                if isinstance(value, tuple):
+                    args.append(f"--{key}={','.join(map(str, value))}")
+                else:
+                    args.append(f"--{key}={value}")
+        return args
+
     def command(
         self, generate_only=False, architecture=None, **extra_args
     ) -> List[str]:
@@ -257,6 +331,9 @@ class GEMMRun(GEMM):
                 return specialNames[key]
             return key
 
+        if architecture is not None:
+            self.architecture.ArchString = architecture
+
         arg_dict = {argName(key): value for key, value in asdict(self).items()}
         for key, value in extra_args.items():
             arg_dict[key] = value
@@ -265,20 +342,10 @@ class GEMMRun(GEMM):
             for attr in ["yaml", "num_warmup", "num_inner", "num_outer"]:
                 arg_dict.pop(attr)
 
-        args = [
-            (
-                f"--{key}={','.join(map(str, value))}"
-                if isinstance(value, tuple)
-                else f"--{key}={value}"
-            )
-            for key, value in arg_dict.items()
-        ]
+        args = self.parseArgDict(arg_dict)
 
         if generate_only:
             args.append("generate")
-
-        if architecture is not None:
-            args.extend(["--arch", architecture])
 
         return [command] + args
 
@@ -299,11 +366,11 @@ class GEMMResult(GEMM, RRPerfResult):
             "K": self.K,
             "PREC": "".join(
                 [
-                    {"half": "h", "float": "f"}[getattr(self, "type_" + x)]
+                    {"half": "h", "float": "f"}[getattr(self.types, "type_" + x)]
                     for x in ["A", "B", "C", "D", "acc"]
                 ]
             ),
-            "AB": self.trans_A + self.trans_B,
+            "AB": self.types.trans_A + self.types.trans_B,
             "m": self.mac_m,
             "n": self.mac_n,
             "k": self.mac_k,
@@ -459,8 +526,8 @@ class TensileRun(GEMM):
 #
 
 _client_to_result_class = {
-    "GEMMv00": GEMMResult,
-    "CodeGenv00": CodeGenResult,
+    "GEMM": GEMMResult,
+    "CodeGen": CodeGenResult,
 }
 
 _base_to_run_class = {
@@ -475,7 +542,7 @@ def load_results(path: pathlib.Path):
     """
     rv = []
     for r in yaml.load_all(path.read_text(), Loader=yaml.FullLoader):
-        ResultClass = _client_to_result_class[r["client"]]
+        ResultClass = _client_to_result_class[r["resultType"]]
         r.pop("path", None)
         rv.append(ResultClass(path=path, **r))
     return rv

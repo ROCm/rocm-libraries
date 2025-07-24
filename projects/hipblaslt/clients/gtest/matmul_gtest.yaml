@@ -1685,7 +1685,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
-  gpu_arch: '942'
+  gpu_arch: '9(42|50)'
 
 - name: matmul_gemm_double
   category: pre_checkin

@@ -22,6 +22,11 @@ subtrees:
   - file: how-to/contribute
     title: Contribute to rocSPARSE
 
+- caption: Examples
+  entries:
+  - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsparse/clients/samples
+    title: Client samples
+
 - caption: API reference
   entries:
   - file: reference/reference.rst
