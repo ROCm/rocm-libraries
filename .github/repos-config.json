@@ -1,172 +1,165 @@
 {
   "repositories": [
     {
-      "name": "miopen",
-      "url": "ROCm/MIOpen",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
-    },
-    {
       "name": "tensile",
       "url": "ROCm/Tensile",
-      "branch": "develop",
+      "branch": "release/rocm-rel-7.0",
       "category": "shared",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
-    },
-    {
-      "name": "mxdatagenerator",
-      "url": "ROCm/mxDataGenerator",
-      "branch": "develop",
-      "category": "shared",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": true,
+      "enable_pr_fanout": false
     },
     {
       "name": "composablekernel",
       "url": "ROCm/composable_kernel",
-      "branch": "develop",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "enable_pr_fanout": false
     },
     {
       "name": "hipblas",
       "url": "ROCm/hipBLAS",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "enable_pr_fanout": false
     },
     {
       "name": "hipblas-common",
       "url": "ROCm/hipBLAS-common",
-      "branch": "develop",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": true,
+      "enable_pr_fanout": false
     },
     {
       "name": "hipblaslt",
       "url": "ROCm/hipBLASLt",
-      "branch": "develop",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
-    },
-    {
-      "name": "hipcub",
-      "url": "ROCm/hipCUB",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": true,
+      "enable_pr_fanout": false
     },
     {
       "name": "hipfft",
       "url": "ROCm/hipFFT",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
-    },
-    {
-      "name": "hiprand",
-      "url": "ROCm/hipRAND",
-      "branch": "develop",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": false,
+      "enable_pr_fanout": false
     },
     {
       "name": "hipsolver",
       "url": "ROCm/hipSOLVER",
-      "branch": "develop",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "enable_pr_fanout": false
     },
     {
       "name": "hipsparse",
       "url": "ROCm/hipSPARSE",
-      "branch": "develop",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": false,
+      "enable_pr_fanout": false
     },
     {
       "name": "hipsparselt",
       "url": "ROCm/hipSPARSELt",
-      "branch": "develop",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": true,
+      "enable_pr_fanout": false
     },
     {
       "name": "rocblas",
       "url": "ROCm/rocBLAS",
-      "branch": "develop",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": true,
+      "enable_pr_fanout": false
     },
     {
       "name": "rocfft",
       "url": "ROCm/rocFFT",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
-    },
-    {
-      "name": "rocprim",
-      "url": "ROCm/rocPRIM",
-      "branch": "develop",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
-    },
-    {
-      "name": "rocrand",
-      "url": "ROCm/rocRAND",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": true
-    },
-    {
-      "name": "rocroller",
-      "url": "ROCm/rocRoller",
-      "branch": "develop",
-      "category": "shared",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": false,
+      "enable_pr_fanout": false
     },
     {
       "name": "rocsolver",
       "url": "ROCm/rocSOLVER",
-      "branch": "develop",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false,
+      "enable_pr_fanout": false
     },
     {
       "name": "rocsparse",
       "url": "ROCm/rocSPARSE",
-      "branch": "develop",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": true,
+      "enable_pr_fanout": false
+    },{
+      "name": "hipcub",
+      "url": "ROCm/hipCUB",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "enable_pr_fanout": false
+    },
+    {
+      "name": "rocprim",
+      "url": "ROCm/rocPRIM",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "enable_pr_fanout": false
+    },
+    {
+      "name": "rocrand",
+      "url": "ROCm/rocRAND",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "enable_pr_fanout": false
     },
     {
       "name": "rocthrust",
       "url": "ROCm/rocThrust",
-      "branch": "develop",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_push": true,
+      "enable_pr_fanout": false
+    },
+    {
+      "name": "hiprand",
+      "url": "ROCm/hipRAND",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true,
+      "enable_pr_fanout": false
     }
   ]
 }
