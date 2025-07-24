@@ -8,7 +8,7 @@ if(HIPSPARSELT_ENABLE_HIP)
 endif()
 
 find_package(Threads REQUIRED)
-find_package(OpenMP)
+find_package(OpenMP REQUIRED)
 
 # if(NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
 #   set(CMAKE_Fortran_COMPILER "gfortran")
