@@ -222,12 +222,16 @@ struct verify_reduce_with_indices
         }
 
         invariantLengths.resize(invariantDims.size());
-        for(int i = 0; i < invariantDims.size(); i++)
-            invariantLengths[i] = inLengths[invariantDims[i]];
+        std::transform(invariantDims.begin(),
+                       invariantDims.end(),
+                       invariantLengths.begin(),
+                       [&](int i) { return inLengths[i]; });
 
         toReduceLengths.resize(toReduceDims.size());
-        for(int i = 0; i < toReduceDims.size(); i++)
-            toReduceLengths[i] = inLengths[toReduceDims[i]];
+        std::transform(toReduceDims.begin(),
+                       toReduceDims.end(),
+                       toReduceLengths.begin(),
+                       [&](int i) { return inLengths[i]; });
 
         bool reduceAllDims = invariantDims.empty();
 
@@ -856,14 +860,14 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
         }
 
         // default data gneration (used by MIN/MAX)
-        auto gen_value = [&](auto... is) {
+        auto gen_value_min_max = [&](auto... is) {
             return (tensor_elem_gen_integer{max_value}(is...) *
                     tensor_elem_gen_checkboard_sign{}(is...));
         };
 
         // data generation used by ADD/AVG, data is distributed around 1.0 rather than 0.0, very low
         // probability to get a reduced result of zero-value
-        auto gen_value_1 = [&](auto... is) {
+        auto gen_value_add_avg = [&](auto... is) {
             auto rand_value = tensor_elem_gen_integer{max_value}(is...);
             auto sign_value = tensor_elem_gen_checkboard_sign{}(is...);
 
@@ -872,7 +876,7 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
 
         // Special data generation for MUL, to avoid all-zero and large accumulative error in the
         // reduced result
-        auto gen_value_2 = [&](auto... is) {
+        auto gen_value_mul = [&](auto... is) {
             auto rand_value = tensor_elem_gen_integer{max_value}(is...);
             auto sign_value = tensor_elem_gen_checkboard_sign{}(is...);
 
@@ -881,7 +885,7 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
         };
 
         // Special data generation for NORM1 and NORM2 using a space of limitless number of values.
-        auto gen_value_3 = [&](auto... is) {
+        auto gen_value_norm1_norm2 = [&](auto... is) {
             auto rand_upper = tensor_elem_gen_integer{max_value}(is...);
             auto sign_value = tensor_elem_gen_checkboard_sign{}(is...);
             auto rand_ratio = prng::gen_A_to_B(
@@ -891,7 +895,7 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
         };
 
         // Special data generation for AMAX, no zero value used
-        auto gen_value_4 = [&](auto... is) {
+        auto gen_value_amax = [&](auto... is) {
             auto rand_value = tensor_elem_gen_integer{max_value}(is...);
             auto sign_value = tensor_elem_gen_checkboard_sign{}(is...);
 
@@ -924,19 +928,19 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
         {
         case MIOPEN_REDUCE_TENSOR_ADD:
         case MIOPEN_REDUCE_TENSOR_AVG:
-            inputTensor = tensor<T>{this->inLengths}.generate(gen_value_1);
+            inputTensor = tensor<T>{this->inLengths}.generate(gen_value_add_avg);
             break;
         case MIOPEN_REDUCE_TENSOR_MUL:
-            inputTensor = tensor<T>{this->inLengths}.generate(gen_value_2);
+            inputTensor = tensor<T>{this->inLengths}.generate(gen_value_mul);
             break;
         case MIOPEN_REDUCE_TENSOR_NORM1:
         case MIOPEN_REDUCE_TENSOR_NORM2:
-            inputTensor = tensor<T>{this->inLengths}.generate(gen_value_3);
+            inputTensor = tensor<T>{this->inLengths}.generate(gen_value_norm1_norm2);
             break;
         case MIOPEN_REDUCE_TENSOR_AMAX:
-            inputTensor = tensor<T>{this->inLengths}.generate(gen_value_4);
+            inputTensor = tensor<T>{this->inLengths}.generate(gen_value_amax);
             break;
-        default: inputTensor = tensor<T>{this->inLengths}.generate(gen_value);
+        default: inputTensor = tensor<T>{this->inLengths}.generate(gen_value_min_max);
         };
 
         auto outputTensor = tensor<T>{outLengths};
@@ -984,7 +988,7 @@ private:
                                  const tensor<T>& workspace,
                                  const tensor<int>& indices,
                                  float alpha,
-                                 float beta)
+                                 float beta) const
     {
         verify_reduce_with_indices<T, toVerifyData> reduce_with_indices(
             reduce, input, output, workspace, indices, alpha, beta);
@@ -996,14 +1000,14 @@ private:
                                const tensor<T>& output,
                                const tensor<T>& workspace,
                                float alpha,
-                               float beta)
+                               float beta) const
     {
         verify_reduce_no_indices<T> reduce_no_indices(
             reduce, input, output, workspace, alpha, beta);
         CompareResults(reduce_no_indices, true);
     }
 
-    std::string GetOutputValuesForError()
+    std::string GetOutputValuesForError() const
     {
         std::ostringstream oss;
         oss << "reduceOp: " << reduceOp << std::endl
@@ -1014,7 +1018,7 @@ private:
     }
 
     template <class TVerifier>
-    void CompareResults(const TVerifier& verifier, bool toVerifyData)
+    void CompareResults(const TVerifier& verifier, bool toVerifyData) const
     {
         const tensor<float> cpu = std::move(verifier.cpu());
         const tensor<float> gpu = std::move(verifier.gpu());
@@ -1031,7 +1035,7 @@ private:
                 std::cout << "Tolerance: " << tolerance << std::endl;
             }
 
-            ASSERT_LE(error, threshold) << GetOutputValuesForError();
+            EXPECT_LE(error, threshold) << GetOutputValuesForError();
         }
         else
         {
@@ -1042,7 +1046,7 @@ private:
                 verifier.fail();
             }
 
-            ASSERT_GE(idx, range) << GetOutputValuesForError();
+            EXPECT_GE(idx, range) << GetOutputValuesForError();
         }
     }
 
