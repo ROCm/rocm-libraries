@@ -112,8 +112,11 @@ endif()
 
 if(HIPSPARSELT_ENABLE_CUDA)
   find_package(CUDAToolkit REQUIRED)
+  message(VERBOSE "CUDAToolkit_INCLUDE_DIRS: ${CUDAToolkit_INCLUDE_DIRS}")
   find_path(cusparselt_INCLUDE_DIR REQUIRED NAMES cusparseLt.h)
+  message(VERBOSE "cusparselt_INCLUDE_DIR: ${cusparselt_INCLUDE_DIR}")
   find_library(cusparselt_LIBRARY REQUIRED NAMES cusparseLt)
+  message(VERBOSE "cusparselt_LIBRARY: ${cusparselt_LIBRARY}")
 
   message(STATUS "Found cusparseLt: ${cusparselt_LIBRARY}")
 endif()

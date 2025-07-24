@@ -81,6 +81,7 @@
 #include <hip/hip_fp8.h>
 #include <hip/library_types.h>
 #else
+#include <library_types.h>
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #endif
