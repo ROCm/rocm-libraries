@@ -776,12 +776,6 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
         auto&& handle           = get_handle();
         std::string device_name = handle.GetDeviceName();
 
-        if(std::is_same<T, double>::value && !miopen::StartsWith(device_name, "gfx103") &&
-           !miopen::StartsWith(device_name, "gfx110") && !miopen::StartsWith(device_name, "gfx94"))
-        {
-            GTEST_SKIP();
-        }
-
         prng::reset_seed();
 
         handle.EnableProfiling();
