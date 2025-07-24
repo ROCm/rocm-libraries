@@ -56,7 +56,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "HIPSPARSELT_ENABLE_CUDA": "ON",
-        "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
+        "CMAKE_CXX_COMPILER": "/usr/bin/g++",
         "CMAKE_CUDA_COMPILER": "/usr/local/cuda/bin/nvcc",
         "CMAKE_PREFIX_PATH": "/usr/local/cuda;/opt/rocm;/usr/lib/x86_64-linux-gnu"
       }

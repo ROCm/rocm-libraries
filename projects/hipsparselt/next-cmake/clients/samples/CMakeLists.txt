@@ -30,18 +30,17 @@ foreach(sample_name ${SAMPLE_EXECUTABLES})
 
     target_link_libraries(${sample_name} PRIVATE roc::hipsparselt)
 
-    if( NOT BUILD_CUDA )
-        target_compile_definitions(${sample_name} PRIVATE ROCM_USE_FLOAT16 )
+    if(HIPSPARSELT_ENABLE_HIP)
+        target_compile_definitions(${sample_name} PRIVATE __HIP_PLATFORM_AMD__ ROCM_USE_FLOAT16 )
         target_link_libraries(${sample_name} PRIVATE hip::host hip::device  )
-    else( )
+    elseif(HIPSPARSELT_ENABLE_CUDA)
         target_compile_definitions(${sample_name} PRIVATE __HIP_PLATFORM_NVIDIA__ )
         target_include_directories(${sample_name}
         PRIVATE
-            $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>
-
+            $<BUILD_INTERFACE:${CUDAToolkit_INCLUDE_DIRS}>
         )
-        target_link_libraries(${sample_name} PRIVATE ${CUDA_LIBRARIES} )
-    endif( )
+        target_link_libraries(${sample_name} PRIVATE CUDA::cudart CUDA::cuda_driver)
+    endif()
 
     set_target_properties(${sample_name} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
