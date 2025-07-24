@@ -74,6 +74,7 @@ namespace TensileLite
                                           size_t          MI_K,
                                           size_t          element_size_A, //In bits
                                           size_t          element_size_B, //In bits,
+                                          DataType        miDataType,
                                           bool            debug);
 
         // Computes the number of MT timesteps required to compute all MT. Last wave may be less occupied.
@@ -135,6 +136,7 @@ namespace TensileLite
                                     size_t          element_size_A, //In bits
                                     size_t          element_size_B, //In bits,
                                     size_t          element_size_out, //In bits
+                                    DataType        miDataType,
                                     size_t          mx_block_size,
                                     bool            debug);
 
@@ -178,6 +180,7 @@ namespace TensileLite
                                     size_t          element_size_A, //In bits
                                     size_t          element_size_B, //In bits,
                                     size_t          element_size_out, //In bits
+                                    DataType        miDataType,
                                     size_t          mx_block_size,
                                     bool            debug);
 
@@ -201,6 +204,7 @@ namespace TensileLite
                                      size_t          element_size_A, //In bits
                                      size_t          element_size_B, //In bits,
                                      size_t          element_size_out, //In bits
+                                     DataType        miDataType,
                                      int             WGM,
                                      size_t          mx_block_size,
                                      bool            debug);
