@@ -25,7 +25,7 @@ name: Merged PR to Patch Subrepos
 on:
   push:
     branches:
-      - 'develop'
+      - 'release/rocm-rel-7.0'
 
 concurrency:
   group: pr-merge-sync-patch-${{ github.sha }}
