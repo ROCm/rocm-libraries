@@ -53,7 +53,8 @@
 int verbose;
 
 // User-defined random seed
-size_t random_seed;
+size_t             random_seed;
+std::random_device default_seed_dev;
 // Overall probability of running conventional tests
 double test_prob;
 // Probability of running tests from the emulation suite
@@ -315,16 +316,9 @@ int main(int argc, char* argv[])
         "      HP - hermitian planar\n"
         "\n"
         "Usage"};
-
-    // Override CLI11 help to print after later CLI11 options that are defined, and allow gtest's
-    // help.
-    // After removing the stage-1 options, individual options are set to null (even if set), but we
-    // can still capture the behaviour by using a flag.
-
-    for(auto opt : app.get_options())
-    {
-        app.remove_option(opt);
-    }
+    // Override CLI11 help to print it along gtest's help
+    app.set_help_flag("");
+    const auto opt_help = app.add_flag("-h, --help", "Produces this help message");
     app.add_option("-v, --verbose", verbose, "Print out detailed information for the tests")
         ->default_val(0);
     app.add_option("--nrand", n_random_tests, "Number of extra randomized tests")->default_val(0);
@@ -443,53 +437,8 @@ int main(int argc, char* argv[])
         manual_params.run_callbacks = true;
     });
 
-    {
-        // We explicitly scope opt_seed so that the object falls out of scope before the final
-        // parsing of the command line arguments.  Otherwise, the second parsing would mark the
-        // option as not having been specified, which can get rather confusing.
-
-        auto opt_seed = app.add_option(
-            "--seed", random_seed, "Random seed; if unset, use an actual random seed");
-
-        // Try parsing initial args that will be used to configure tests.
-        // Allow extras to pass on gtest and rocFFT arguments without error.
-        app.allow_extras();
-        try
-        {
-            app.parse(argc, argv);
-        }
-        catch(const CLI::ParseError& e)
-        {
-            return app.exit(e);
-        }
-
-        if(!*opt_seed)
-        {
-            std::cout << "Generating random seed: ";
-            std::random_device dev;
-            random_seed = dev();
-            std::cout << random_seed << std::endl;
-        }
-    }
-
-    app.set_help_flag("");
-    auto opt_help = app.add_flag("-h, --help", "Produces this help message");
-
-    std::vector<std::string> remaining_args = app.remaining();
-    // Google test ignores the first element, so add something there so that it parses all of hte
-    // arguments that we want it to parse.:
-    remaining_args.insert(remaining_args.begin(), argv0);
-    // NB: If we initialize gtest first, then it removes all of its own command-line
-    // arguments and sets argc and argv correctly;
-    std::vector<char*> carg;
-    for(std::string& s : remaining_args)
-    {
-        carg.push_back(&s[0]);
-    }
-    carg.push_back(NULL);
-    decltype(argc) cargc = carg.size() - 1;
-    ::testing::InitGoogleTest(&cargc, carg.data());
-
+    app.add_option("--seed", random_seed, "Random seed; if unset, use an actual random seed")
+        ->default_val(default_seed_dev());
     // Filename for fftw and fftwf wisdom.
     std::string fftw_wisdom_filename;
 
@@ -602,29 +551,50 @@ int main(int argc, char* argv[])
                    "2) linearly-spaced sequence (device)\n"
                    "3) linearly-spaced sequence (host)");
 
-    // Parse rest of args and catch any errors here
+    // Try parsing initial args that will be used to configure tests
+    // Allow extras to pass on gtest arguments without error
+    app.allow_extras();
     try
     {
-        app.parse(cargc, carg.data());
+        app.parse(argc, argv);
     }
     catch(const CLI::ParseError& e)
     {
         return app.exit(e);
     }
 
+    // extract remaining arguments for subsequent gtest initialization
+    std::vector<std::string> remaining_args = app.remaining();
+    std::string              gtest_help_opt = "--help";
+    // NB: If we initialize gtest first, then it removes all of its own command-line
+    // arguments and sets argc and argv correctly;
+    std::vector<char*> gtest_argv;
+    gtest_argv.insert(gtest_argv.begin(), argv[0]);
+    for(std::string& s : remaining_args)
+    {
+        gtest_argv.push_back(&s[0]);
+    }
+    if(*opt_help)
+    {
+        // make sure gtest prints its help as well
+        gtest_argv.push_back(&gtest_help_opt[0]);
+    }
+    gtest_argv.push_back(NULL);
+    decltype(argc) gtest_argc = gtest_argv.size() - 1;
+    ::testing::InitGoogleTest(&gtest_argc, gtest_argv.data()); // gtest-relevant args are removed
+
     if(*opt_help)
     {
         std::cout << app.help() << "\n";
         return EXIT_SUCCESS;
     }
-
-    // Ensure there are no leftover options used by neither gtest nor CLI11
-    const auto leftover_args = app.remaining();
-    if(!leftover_args.empty())
+    // no help was used, gtest_argc is expected to be 1 at this point. If not, some of the
+    // used options were not recognized at all
+    if(gtest_argc > 1)
     {
         std::cout << "Unrecognised option(s) found:\n  ";
-        for(auto i : leftover_args)
-            std::cout << i << " ";
+        for(auto i = 1; i < gtest_argc; i++)
+            std::cout << gtest_argv[i] << " ";
         std::cout << "\nRun with --help for more information.\n";
         return EXIT_FAILURE;
     }

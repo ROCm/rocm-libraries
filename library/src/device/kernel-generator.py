@@ -346,7 +346,10 @@ def list_2d_kernels():
     expanded.extend(
         NS(**kernel.__dict__,
            scheme='CS_KERNEL_2D_SINGLE',
-           runtime_compile=True) for kernel in fused_2d_kernels)
+           runtime_compile=True,
+           precision=['sp', 'dp'] if not hasattr(kernel, 'double_precision')
+           or kernel.double_precision else ['sp'])
+        for kernel in fused_2d_kernels)
 
     return expanded
 
