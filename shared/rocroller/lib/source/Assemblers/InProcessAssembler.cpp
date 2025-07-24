@@ -53,7 +53,13 @@
 
 namespace rocRoller
 {
+    // Expands to(?):
     RegisterComponent(InProcessAssembler);
+    // const std::string InProcessAssembler::Name = "InProcessAssembler";
+    // namespace
+    // {
+    //     auto InProcessAssembler61 = rocRoller::Component::RegisterComponentImpl<InProcessAssembler>();
+    // }
     static_assert(Component::Component<InProcessAssembler>);
 
     bool InProcessAssembler::Match(Argument arg)

@@ -516,8 +516,23 @@ namespace rocRoller
         Throw<FatalError>("Convert to Double not supported");
     }
 
+    // Expands to(?):
     RegisterComponentTemplateSpec(SRConvertGenerator, DataType::FP8);
+    // template <>                                                                \
+    // const std::string SRConvertGenerator<DataType::FP8>::Name = "SRConvertGenerator<DataType::FP8>";      \
+    // namespace                                                                  \
+    // {                                                                          \
+    //     auto SRConvertGenerator525 = rocRoller::Component::RegisterComponentImpl<SRConvertGenerator<DataType::FP8>>(); \
+    // }
+
+    // Expands to(?):
     RegisterComponentTemplateSpec(SRConvertGenerator, DataType::BF8);
+    // template <>                                                                \
+    // const std::string SRConvertGenerator<DataType::BF8>::Name = "SRConvertGenerator<DataType::BF8>";      \
+    // namespace                                                                  \
+    // {                                                                          \
+    //     auto SRConvertGenerator534 = rocRoller::Component::RegisterComponentImpl<SRConvertGenerator<DataType::BF8>>(); \
+    // }
 
 #define DefineSpecializedGetGeneratorSRConvert(dtype)                                             \
     template <>                                                                                   \
