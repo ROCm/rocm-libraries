@@ -73,6 +73,9 @@ namespace rocRoller
             {
                 if(dataTypeInfoDest.isSigned)
                 {
+                    if(rhs->regType() == Register::Type::Literal
+                       && !m_context->targetArchitecture().isSupportedConstantValue(rhs))
+                        co_yield m_context->copier()->ensureType(rhs, rhs, Register::Type::Vector);
                     co_yield_(Instruction("v_mul_hi_i32", {dest}, {lhs, rhs}, {}, ""));
                 }
                 else
