@@ -468,6 +468,35 @@ namespace rocRoller
                 auto fullStop  = [&](int tag) { return tag == increment; };
                 auto [required, path] = findRequiredCoordinates(target, direction, fullStop, kgraph);
 
+                auto maybeInForLoop = findContainingOperation<ForLoopOp>(tag, kgraph).has_value();
+
+                // Set required register coordinate
+                std::map<int, Expression::ExpressionPtr> regCoords;
+                auto isRegisterDim = [&maybeInForLoop](auto dim) -> bool {
+                    using T = std::decay_t<decltype(dim)>;
+                    if (maybeInForLoop)
+                        return CIsAnyOf<T, Wavefront, Workitem, Workgroup, ForLoop>;
+                    else
+                        return CIsAnyOf<T, Wavefront, Workitem, Workgroup>;
+                };
+                for(auto requiredTag : required)
+                {
+                    if(std::visit(isRegisterDim, kgraph.coordinates.getNode(requiredTag)))
+                    {
+                        auto registerType = Register::Type::Vector;
+                        // if(ci.isDirect2LDS)
+                        //     registerType = Register::Type::Scalar;
+                        auto coordDF
+                            = std::make_shared<Expression::Expression>(Expression::DataFlowTag{
+                                requiredTag, registerType, DataType::UInt32});
+                        regCoords[requiredTag] = coordDF;
+                    }
+                }
+                for(auto const& [regCoord, expr] : regCoords)
+                {
+                    coords.setCoordinate(regCoord, expr);
+                }
+
                 for(auto requiredTag : required)
                     if((requiredTag  != increment) && (!coords.hasCoordinate(requiredTag )))
                         coords.setCoordinate(requiredTag , L(0u));
