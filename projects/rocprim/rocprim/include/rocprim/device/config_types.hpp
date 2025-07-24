@@ -262,7 +262,7 @@ constexpr void for_each_arch(F&& f)
 template<typename Config, target_arch Arch, class Kernel>
 __global__
 __launch_bounds__(Config::template architecture_config<Arch>::params.kernel_config.block_size)
-void trampoline(Kernel k)
+void trampoline(Kernel kernel)
 {
     using ArchConfig = typename Config::template architecture_config<Arch>;
 
@@ -270,41 +270,67 @@ void trampoline(Kernel k)
     if constexpr(Arch == device_target_arch())
 #endif
     {
-        k(ArchConfig{});
+        kernel(ArchConfig{});
     }
 }
 
-// Host-side helper running at run-time, picking the trampoline whose template
-// argument `Arch` matches the actual GPU we are executing on.
-template<class Config, class Kernel>
-hipError_t launch_kernel(
-    target_arch arch, Kernel k, dim3 grid_size, dim3 block_size, size_t shmem, hipStream_t stream)
+template<typename Kernel>
+struct tuned_kernel
 {
-    bool launched = false;
+    using kernel_type = void (*)(Kernel);
+    kernel_type kernel;
+    Kernel      device_callback;
+
+    void launch(dim3 grid_size, dim3 block_size, size_t shared_mem, hipStream_t stream) const
+    {
+        hipLaunchKernelGGL(HIP_KERNEL_NAME(kernel),
+                           grid_size,
+                           block_size,
+                           shared_mem,
+                           stream,
+                           device_callback);
+    }
+};
+
+template<class Config, class Kernel>
+auto configure_kernel(target_arch arch, Kernel kernel) -> tuned_kernel<Kernel>
+{
+    std::optional<void (*)(Kernel)> tuned_kernel = std::nullopt;
 
     for_each_arch(
         [&](auto arch_tag)
         {
             constexpr target_arch Arch = decltype(arch_tag)::value;
-            if(Arch != arch || launched)
+            if(Arch != arch || tuned_kernel)
                 return;
 
             using ArchConfig = typename Config::template architecture_config<Arch>;
-
-            assert(block_size.x * block_size.y * block_size.z
-                   == ArchConfig::params.kernel_config.block_size);
-
-            trampoline<Config, Arch, Kernel><<<grid_size, block_size, shmem, stream>>>(k);
-            launched = true;
+            tuned_kernel     = trampoline<Config, Arch, Kernel>;
         });
 
-    if(!launched)
+    if(!tuned_kernel)
     {
-        trampoline<Config, target_arch::unknown, Kernel>
-            <<<grid_size, block_size, shmem, stream>>>(k);
+        tuned_kernel = trampoline<Config, target_arch::unknown, Kernel>;
+
+        printf("[transform][unknow]\n");
     }
 
-    return hipSuccess;
+    return {tuned_kernel.value(), kernel};
+}
+
+// Host-side helper running at run-time, picking the trampoline whose template
+// argument `Arch` matches the actual GPU we are executing on.
+template<class Config, class Kernel>
+hipError_t launch_kernel(target_arch arch,
+                         Kernel      kernel,
+                         dim3        grid_size,
+                         dim3        block_size,
+                         size_t      shmem,
+                         hipStream_t stream)
+{
+    const auto tuned_kernel = configure_kernel<Config>(arch, kernel);
+    tuned_kernel.launch(grid_size, block_size, shmem, stream);
+    return hipGetLastError();
 }
 
 /**
@@ -326,7 +352,7 @@ constexpr target_arch device_target_arch()
 #endif
 }
 
-template<class Config, bool IgnoreConfig = ROCPRIM_EXPERIMENTAL_SPIRV>
+template<class Config, bool IgnoreConfig>
 auto dispatch_target_arch([[maybe_unused]] const target_arch target_arch)
 {
     if constexpr(!IgnoreConfig)
