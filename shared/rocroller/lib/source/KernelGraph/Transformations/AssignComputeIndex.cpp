@@ -113,7 +113,7 @@ namespace rocRoller
 
             
 
-            std::cout << "YL: makeAssignBase (target, offset, expression) " << target << ", " << offset << ", " << toString(expr) << std::endl;
+            // std::cout << "YL: makeAssignBase (target, offset, expression) " << target << ", " << offset << ", " << toString(expr) << std::endl;
             return assignTag;
 
         }
@@ -150,6 +150,8 @@ namespace rocRoller
                 tag, Connections::ComputeIndex{Connections::ComputeIndexArgument::BUFFER});
 
                 auto ci = kgraph.control.get<ComputeIndex>(tag).value();
+
+                // TODO: check if ComputeIndex nodes are within the ForLoop. If it is in the ForLoop, set register for ForLoop, else, set to 0
 
                 // get fake Transformer
 
@@ -202,11 +204,16 @@ namespace rocRoller
                 auto direction = ci.forward ? Graph::Direction::Upstream : Graph::Direction::Downstream;
                 auto [required, path] = findRequiredCoordinates(target, direction, fullStop, kgraph);
 
+                auto maybeInForLoop = findContainingOperation<ForLoopOp>(tag, kgraph).has_value();
+
                 // Set required register coordinate
                 std::map<int, Expression::ExpressionPtr> regCoords;
-                auto isRegisterDim = [](auto dim) -> bool {
+                auto isRegisterDim = [&maybeInForLoop](auto dim) -> bool {
                     using T = std::decay_t<decltype(dim)>;
-                    return CIsAnyOf<T, Wavefront, Workitem, Workgroup, ForLoop>;
+                    if (maybeInForLoop)
+                        return CIsAnyOf<T, Wavefront, Workitem, Workgroup, ForLoop>;
+                    else
+                        return CIsAnyOf<T, Wavefront, Workitem, Workgroup>;
                 };
                 for(auto requiredTag : required)
                 {
