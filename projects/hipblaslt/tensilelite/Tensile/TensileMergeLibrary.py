@@ -144,7 +144,7 @@ def removeDuplicatedSolutions(oriData, prefix=""):
     for i, solution in enumerate(solutions):
         solution["SolutionIndex"] = i
 
-    if oriData[7] is not None: # When the Grid is defined in the original logic file
+    if oriData[7] is not None:
         for data in oriData[7]:
             index = data[1][0]
             data[1][0] = solutionsName[oriData[5][index]["SolutionNameMin"]]
@@ -215,7 +215,7 @@ def findSolutionWithIndex(solutionData, solIndex):
 
 # returns merged logic data as list
 def mergeLogic(oriData, incData, forceMerge, noEff=False):
-    origNumSizes = len(oriData[7])
+    origNumSizes = len(oriData[7] or [])
     origNumSolutions = len(oriData[5])
 
     incData[7] = incData[7] or []
@@ -328,16 +328,11 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
         # So far "SolutionIndex" in logic yamls has zero impact on actual 1-1 size mapping (but the order of the Solution does)
         # since mergeLogic() takes that value very seriously so we reindex them here so it doesn't choke on duplicated SolutionIndex
         oriData, numRemoved, numSolutions, numKernels = removeDuplicatedSolutions(oriData)
-        if oriData[7] is None:
-            oriData[7] = []
         msg("Base logic file:", numRemoved, "duplicated solution(s) removed,",\
-            "sizes: %d, solutions: %d, kernels: %d"%(len(oriData[7]),numSolutions,numKernels))
-        
+            "sizes: %d, solutions: %d, kernels: %d"%(len(oriData[7] or []),numSolutions,numKernels))
         incData, numRemoved, numSolutions, numKernels = removeDuplicatedSolutions(incData)
-        if incData[7] is None:
-            incData[7] = []
         msg("Inc logic file:", numRemoved, "duplicated solution(s) removed,",\
-            "sizes: %d, solutions: %d, kernels: %d"%(len(incData[7]),numSolutions,numKernels))
+            "sizes: %d, solutions: %d, kernels: %d"%(len(incData[7] or []),numSolutions,numKernels))
 
         mergedData, *stats = mergeLogic(oriData, incData, forceMerge, noEff)
         mergedData[0] = {"MinimumRequiredVersion": "%s"%__version__}
