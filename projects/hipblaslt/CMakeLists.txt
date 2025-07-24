@@ -6,14 +6,15 @@ project(hipblaslt VERSION 1.0.0 LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-include(Dependencies)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 include(GenerateExportHeader)
 include(CMakeDependentOption)
+
+include(dependencies)
 include(hipblaslt_python)
 include(hipblaslt_target_configure_sanitizers)
-include(TensileliteSupportedArchitectures)
+include(tensilelite_supported_architectures)
 
 rocm_setup_version(VERSION ${PROJECT_VERSION})
 set(hipblaslt_SOVERSION 1.0)
@@ -29,8 +30,8 @@ endif()
 option(HIPBLASLT_ENABLE_DEVICE "Build hipBLASLt device libraries." ON)
 option(HIPBLASLT_ENABLE_CLIENT "Build hipBLASLt client apps." ON)
 option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." ON)
-option(TENSILELITE_ENABLE_CLIENT "Build the tensilelite client." ON)
 option(HIPBLASLT_ENABLE_COVERAGE "Build coverage support" OFF)
+option(TENSILELITE_ENABLE_CLIENT "Build the tensilelite client." ON)
 option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." ON)
 option(TENSILELITE_ENABLE_AUTOBUILD "Build the tensilelite host library tests." OFF)
 
@@ -158,16 +159,7 @@ if(HIPBLASLT_ENABLE_DEVICE)
     endif()
 
     if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
-        # Build the rocisa python extension.
-        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/tensilelite/rocisa")
         set(HIPBLASLT_PYTHON_DEPS "rocisa")
-        # TODO: The rocisa build explicitly sets the LIBRARY_OUTPUT_DIR to the
-        # (top-level!) CMAKE_BINARY_DIR/lib directory. This is not a great idea
-        # and should be removed/changed to a locally scoped directory. However,
-        # that is hard to do while this is all glued together with the old venv
-        # setup. In the meantime, the directory passed here must match the
-        # what is set there. Failure to do so will cause a ModuleNotFoundError
-        # trying to load rocisa.
         hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa/lib" "${asan_opts}")
     else()
         # Just pass through to the found python executable and trust that the

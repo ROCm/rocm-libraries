@@ -18,9 +18,6 @@ set(VALID_BINS
 # Find Python interpreter
 find_package(Python COMPONENTS Interpreter REQUIRED)
 
-# Add rocisa
-add_subdirectory(rocisa)
-
 # Set common variables
 set(TENSILE_BIN_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/bin")
 set(PYTHONPATH "${PROJECT_BINARY_DIR}/rocisa/lib")
