@@ -2745,30 +2745,47 @@ namespace KernelGraphTest
         auto kernel = kgraph.control.addElement(Kernel());
         auto unit   = Expression::literal(1);
         auto zero   = Expression::literal(0);
-        auto test   = std::make_shared<Register::Value>(
-            m_context, Register::Type::Scalar, DataType::Int32, 1);
-        test->allocateNow();
-        auto conditionalAssign = kgraph.control.addElement(
-            Assign{Register::Type::Vector, test->expression() = Expression::literal(0)});
-        kgraph.control.addElement(Body(), {kernel}, {conditionalAssign});
 
-        auto conditional = kgraph.control.addElement(
-            ConditionalOp{test->expression() < unit, "Test Conditional"});
+        auto test = m_context->kernel()->addArgument({"foo", DataType::Int32});
 
-        kgraph.control.addElement(Sequence(), {conditionalAssign}, {conditional});
+        auto                    destReg = kgraph.coordinates.addElement(Linear());
+        Expression::DataFlowTag destRegTag{destReg, Register::Type::Vector, DataType::Int32};
+
+        auto beforeConditionalAssign
+            = kgraph.control.addElement(Assign{Register::Type::Vector, Expression::literal(0)});
+        kgraph.control.addElement(Body(), {kernel}, {beforeConditionalAssign});
+
+        auto conditional
+            = kgraph.control.addElement(ConditionalOp{test < unit, "Test Conditional"});
+
+        kgraph.control.addElement(Sequence(), {beforeConditionalAssign}, {conditional});
 
         auto trueOp    = kgraph.control.addElement(Assign{Register::Type::Vector, unit});
         auto trueBody  = kgraph.control.addElement(Body(), {conditional}, {trueOp});
         auto falseOp   = kgraph.control.addElement(Assign{Register::Type::Vector, zero});
         auto falseBody = kgraph.control.addElement(Else(), {conditional}, {falseOp});
 
+        kgraph.mapper.connect(beforeConditionalAssign, destReg, NaryArgument::DEST);
+        kgraph.mapper.connect(trueOp, destReg, NaryArgument::DEST);
+        kgraph.mapper.connect(falseOp, destReg, NaryArgument::DEST);
+
+        m_context->schedule(m_context->kernel()->preamble());
+        m_context->schedule(m_context->kernel()->prolog());
+
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
-        EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s0, 1")); //Conditional Test
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
+        {
+            EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s2, 1"));
+        }
+        else
+        {
+            EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s3, 1"));
+        }
         EXPECT_THAT(output(), testing::HasSubstr("s_cbranch_scc0")); //Branch for False
         EXPECT_THAT(output(), testing::HasSubstr("s_branch")); //Branch after True
-        EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v0, 1")); //True Body
-        EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v0, 0")); //False Body
+        EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v1, 1")); //True Body
+        EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v1, 0")); //False Body
     }
 
     TEST_F(KernelGraphTestGPU, GPU_ConditionalExecute)

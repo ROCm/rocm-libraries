@@ -477,6 +477,26 @@ public:
     }
 };
 
+template <typename A>
+inline A convertToInt(A value)
+{
+    return static_cast<A>(static_cast<int>(value));
+}
+
+template <>
+inline rocsparse_float_complex convertToInt(rocsparse_float_complex value)
+{
+    return rocsparse_float_complex(static_cast<float>(static_cast<int>(std::real(value))),
+                                   static_cast<float>(static_cast<int>(std::imag(value))));
+}
+
+template <>
+inline rocsparse_double_complex convertToInt(rocsparse_double_complex value)
+{
+    return rocsparse_double_complex(static_cast<double>(static_cast<int>(std::real(value))),
+                                    static_cast<double>(static_cast<int>(std::imag(value))));
+}
+
 inline void missing_file_error_message(const char* filename)
 {
     std::cerr << "#" << std::endl;

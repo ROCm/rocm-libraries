@@ -217,7 +217,7 @@ else()
       if (TENSILE_VERSION)
         find_package(Tensile ${TENSILE_VERSION} EXACT REQUIRED HIP LLVM OpenMP PATHS "${INSTALLED_TENSILE_PATH}")
       else()
-        find_package(Tensile 4.33.0 EXACT REQUIRED HIP LLVM OpenMP PATHS "${INSTALLED_TENSILE_PATH}")
+        find_package(Tensile 5.0.0 EXACT REQUIRED HIP LLVM OpenMP PATHS "${INSTALLED_TENSILE_PATH}")
       endif()
     endif()
 endif()
@@ -250,7 +250,7 @@ if(HIPSPARSELT_ENABLE_MARKER)
 endif()
 
 # Setup version
-set (VERSION_STRING "0.2.4" )
+set (VERSION_STRING "0.2.5" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 set(hipsparselt_SOVERSION 0.2)
 

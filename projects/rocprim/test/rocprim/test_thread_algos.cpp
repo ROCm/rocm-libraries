@@ -292,23 +292,39 @@ template<class Type, int32_t Length>
 __global__
 void thread_reduce_kernel(Type* const device_input, Type* device_output)
 {
-    size_t input_index = (blockIdx.x * blockDim.x + threadIdx.x) * Length;
-    size_t output_index = (blockIdx.x * blockDim.x + threadIdx.x) * Length;
-    device_output[output_index] = rocprim::thread_reduce<Length>(&device_input[input_index], sum_op());
+    size_t index = (blockIdx.x * blockDim.x + threadIdx.x) * Length;
+
+    device_output[index] = rocprim::thread_reduce<Length>(&device_input[index], sum_op());
+}
+
+template<class Type, int32_t Length>
+__global__
+void thread_reduce_kernel_array_prefix(Type* const device_input, Type* device_output, Type prefix)
+{
+    size_t index = (blockIdx.x * blockDim.x + threadIdx.x) * Length;
+
+    Type device_input_array[Length];
+    for(int32_t i = 0; i < Length; i++)
+    {
+        device_input_array[i] = device_input[index + i];
+    }
+
+    device_output[index] = rocprim::thread_reduce(device_input_array, sum_op(), prefix);
 }
 
 TYPED_TEST(RocprimThreadOperationTests, Reduction)
 {
-    using T = typename TestFixture::type;
-    static constexpr uint32_t length = 4;
+    using T                              = typename TestFixture::type;
+    static constexpr uint32_t length     = 4;
     static constexpr uint32_t block_size = 128 / length;
-    static constexpr uint32_t grid_size = 128;
-    static constexpr uint32_t size = block_size * grid_size * length;
-    sum_op operation;
+    static constexpr uint32_t grid_size  = 128;
+    static constexpr uint32_t size       = block_size * grid_size * length;
+    sum_op                    operation;
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
@@ -316,64 +332,94 @@ TYPED_TEST(RocprimThreadOperationTests, Reduction)
         std::vector<T> output(size);
         std::vector<T> expected(size);
 
-        // Calculate expected results on host
-        for(uint32_t grid_index = 0; grid_index < grid_size; grid_index++)
+        for(uint32_t prefix = 0; prefix < 2; prefix++)
         {
-            for(uint32_t i = 0; i < block_size; i++)
+            // Calculate expected results on host
+            for(uint32_t grid_index = 0; grid_index < grid_size; grid_index++)
             {
-                uint32_t offset = (grid_index * block_size + i) * length;
-                T result = T(0);
-                for(uint32_t j = 0; j < length; j++)
+                for(uint32_t i = 0; i < block_size; i++)
                 {
-                    result = operation(result, input[offset + j]);
+                    uint32_t offset = (grid_index * block_size + i) * length;
+                    T        result = T(prefix);
+                    for(uint32_t j = 0; j < length; j++)
+                    {
+                        result = operation(result, input[offset + j]);
+                    }
+                    expected[offset] = result;
                 }
-                expected[offset] = result;
             }
-        }
 
-        // Preparing device
-        common::device_ptr<T> device_input(input);
-        common::device_ptr<T> device_output(input.size());
+            // Preparing device
+            common::device_ptr<T> device_input(input);
+            common::device_ptr<T> device_output(input.size());
+            if(prefix == 0)
+            {
+                thread_reduce_kernel<T, length>
+                    <<<grid_size, block_size>>>(device_input.get(), device_output.get());
+            }
+            else
+            {
+                thread_reduce_kernel_array_prefix<T, length>
+                    <<<grid_size, block_size>>>(device_input.get(), device_output.get(), T(prefix));
+            }
 
-        thread_reduce_kernel<T, length>
-            <<<grid_size, block_size>>>(device_input.get(), device_output.get());
-        HIP_CHECK(hipGetLastError());
+            HIP_CHECK(hipGetLastError());
 
-        // Reading results back
-        output = device_output.load();
+            // Reading results back
+            output = device_output.load();
 
-        // Verifying results
-        for(size_t i = 0; i < output.size(); i+=length)
-        {
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[i], expected[i]));
+            // Verifying results
+            for(size_t i = 0; i < output.size(); i += length)
+            {
+                ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[i], expected[i]));
+            }
         }
     }
 }
 
 template<class Type, int32_t Length>
 __global__
-void thread_scan_kernel(Type* const device_input, Type* device_output)
+void thread_scan_inclusive_kernel(Type* const device_input, Type* device_output)
 {
-    size_t input_index = (blockIdx.x * blockDim.x + threadIdx.x) * Length;
-    size_t output_index = (blockIdx.x * blockDim.x + threadIdx.x) * Length;
+    size_t index = (blockIdx.x * blockDim.x + threadIdx.x) * Length;
 
-    rocprim::thread_scan_inclusive<Length>(&device_input[input_index],
-                                                  &device_output[output_index],
-                                                  sum_op());
+    rocprim::thread_scan_inclusive<Length>(&device_input[index], &device_output[index], sum_op());
 }
 
-TYPED_TEST(RocprimThreadOperationTests, Scan)
+template<class Type, int32_t Length>
+__global__
+void thread_scan_inclusive_kernel_array_prefix(Type* const device_input,
+                                               Type*       device_output,
+                                               Type        prefix)
 {
-    using T = typename TestFixture::type;
-    static constexpr uint32_t length = 4;
+    size_t index = (blockIdx.x * blockDim.x + threadIdx.x) * Length;
+
+    Type device_input_array[Length];
+    for(int32_t i = 0; i < Length; i++)
+    {
+        device_input_array[i] = device_input[index + i];
+    }
+
+    rocprim::thread_scan_inclusive<Length>(&device_input[index],
+                                           &device_output[index],
+                                           sum_op(),
+                                           prefix,
+                                           threadIdx.x > 0);
+}
+
+TYPED_TEST(RocprimThreadOperationTests, ScanInclusive)
+{
+    using T                              = typename TestFixture::type;
+    static constexpr uint32_t length     = 4;
     static constexpr uint32_t block_size = 128 / length;
-    static constexpr uint32_t grid_size = 128;
-    static constexpr uint32_t size = block_size * grid_size * length;
-    sum_op operation;
+    static constexpr uint32_t grid_size  = 128;
+    static constexpr uint32_t size       = block_size * grid_size * length;
+    sum_op                    operation;
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         // Generate data
@@ -381,18 +427,112 @@ TYPED_TEST(RocprimThreadOperationTests, Scan)
         std::vector<T> output(size);
         std::vector<T> expected(size);
 
+        for(uint32_t prefix = 0; prefix < 2; prefix++)
+        {
+            // Calculate expected results on host
+            for(uint32_t grid_index = 0; grid_index < grid_size; grid_index++)
+            {
+                for(uint32_t i = 0; i < block_size; i++)
+                {
+                    uint32_t offset = (grid_index * block_size + i) * length;
+                    // Skip the first value of every block
+                    T result         = i > 0 ? T(prefix) : T(0);
+                    expected[offset] = result;
+                    for(uint32_t j = 0; j < length; j++)
+                    {
+                        result               = operation(result, input[offset + j]);
+                        expected[offset + j] = result;
+                    }
+                }
+            }
+
+            // Preparing device
+            common::device_ptr<T> device_input(input);
+            common::device_ptr<T> device_output(input.size());
+            if(prefix == 0)
+            {
+                thread_scan_inclusive_kernel<T, length>
+                    <<<grid_size, block_size>>>(device_input.get(), device_output.get());
+            }
+            else
+            {
+                thread_scan_inclusive_kernel_array_prefix<T, length>
+                    <<<grid_size, block_size>>>(device_input.get(), device_output.get(), T(prefix));
+            }
+            HIP_CHECK(hipGetLastError());
+
+            // Reading results back
+            output = device_output.load();
+
+            // Verifying results
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
+        }
+    }
+}
+
+template<class Type, int32_t Length>
+__global__
+void thread_scan_exclusive_kernel(Type* const device_input, Type* device_output, Type prefix)
+{
+    size_t index = (blockIdx.x * blockDim.x + threadIdx.x) * Length;
+
+    Type device_input_array[Length];
+    for(int32_t i = 0; i < Length; i++)
+    {
+        device_input_array[i] = device_input[index + i];
+    }
+
+    rocprim::thread_scan_exclusive<Length>(&device_input[index],
+                                           &device_output[index],
+                                           sum_op(),
+                                           prefix,
+                                           threadIdx.x > 0);
+}
+
+TYPED_TEST(RocprimThreadOperationTests, ScanExclusive)
+{
+    using T                              = typename TestFixture::type;
+    static constexpr uint32_t length     = 4;
+    static constexpr uint32_t block_size = 128 / length;
+    static constexpr uint32_t grid_size  = 128;
+    static constexpr uint32_t size       = block_size * grid_size * length;
+    sum_op                    operation;
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        // Generate data
+        std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 2, 200, seed_value);
+        std::vector<T> output(size);
+        std::vector<T> expected(size);
+        T              prefix = test_utils::get_random_value<T>(2, 200, seed_value);
+
         // Calculate expected results on host
         for(uint32_t grid_index = 0; grid_index < grid_size; grid_index++)
         {
             for(uint32_t i = 0; i < block_size; i++)
             {
                 uint32_t offset = (grid_index * block_size + i) * length;
-                T result = input[offset];
-                expected[offset] = result;
+
+                // Initialize the scan with the first value and apply prefix if needed
+                T inclusive = input[offset];
+                inclusive   = i > 0 ? operation(prefix, inclusive) : inclusive;
+
+                // First output value is the prefix
+                expected[offset] = prefix;
+
+                // Exclusive value to track for the next element
+                T exclusive = inclusive;
+
+                // Perform the rest of the scan
                 for(uint32_t j = 1; j < length; j++)
                 {
-                    result = operation(result, input[offset + j]);
-                    expected[offset + j] = result;
+                    inclusive            = operation(exclusive, input[offset + j]);
+                    expected[offset + j] = exclusive;
+                    exclusive            = inclusive;
                 }
             }
         }
@@ -401,8 +541,9 @@ TYPED_TEST(RocprimThreadOperationTests, Scan)
         common::device_ptr<T> device_input(input);
         common::device_ptr<T> device_output(input.size());
 
-        thread_scan_kernel<T, length>
-            <<<grid_size, block_size>>>(device_input.get(), device_output.get());
+        thread_scan_exclusive_kernel<T, length>
+            <<<grid_size, block_size>>>(device_input.get(), device_output.get(), prefix);
+
         HIP_CHECK(hipGetLastError());
 
         // Reading results back
@@ -575,4 +716,77 @@ TYPED_TEST(RocprimThreadOperationTests, Search)
     using OffsetT = unsigned int;
     merge_path_search_test<T, OffsetT, rocprim::less<T>>();
     merge_path_search_test<T, OffsetT, rocprim::greater<T>>();
+}
+
+template<class Type, class OffsetT, OffsetT Length>
+__global__
+void upper_lower_bound_kernel(Type* const device_input, OffsetT* device_output, Type value)
+{
+    size_t index_input  = (blockIdx.x * blockDim.x + threadIdx.x) * Length;
+    size_t index_output = (blockIdx.x * blockDim.x + threadIdx.x) * 3;
+
+    device_output[index_output] = rocprim::lower_bound(&device_input[index_input], Length, value);
+    device_output[index_output + 1]
+        = rocprim::upper_bound(&device_input[index_input], Length, value);
+    device_output[index_output + 2]
+        = rocprim::static_upper_bound<Length>(&device_input[index_input], Length, value);
+}
+
+TYPED_TEST(RocprimThreadOperationTests, UpperLowerBound)
+{
+    using T                              = typename TestFixture::type;
+    using OffsetT                        = uint32_t;
+    static constexpr uint32_t length     = 16;
+    static constexpr uint32_t block_size = 256 / length;
+    static constexpr uint32_t grid_size  = 128;
+    static constexpr uint32_t size       = block_size * grid_size * length;
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        // Generate data
+        std::vector<T> input = test_utils::get_random_data_wrapped<T>(size, 1, 10, seed_value);
+        std::vector<OffsetT> output(block_size * grid_size * 3);
+        std::vector<OffsetT> expected(block_size * grid_size * 3);
+        T                    value = test_utils::get_random_value<T>(1, 10, seed_value);
+
+        // Calculate expected results on host
+        for(uint32_t grid_index = 0; grid_index < grid_size; grid_index++)
+        {
+            for(uint32_t i = 0; i < block_size; i++)
+            {
+                uint32_t offset          = (grid_index * block_size + i) * length;
+                uint32_t offset_expected = (grid_index * block_size + i) * 3;
+
+                expected[offset_expected] = std::lower_bound(input.begin() + offset,
+                                                             input.begin() + offset + length,
+                                                             value)
+                                            - (input.begin() + offset);
+                expected[offset_expected + 1] = std::upper_bound(input.begin() + offset,
+                                                                 input.begin() + offset + length,
+                                                                 value)
+                                                - (input.begin() + offset);
+
+                expected[offset_expected + 2] = expected[offset_expected + 1];
+            }
+        }
+
+        // Preparing device
+        common::device_ptr<T>       device_input(input);
+        common::device_ptr<OffsetT> device_output(output.size());
+
+        upper_lower_bound_kernel<T, OffsetT, length>
+            <<<grid_size, block_size>>>(device_input.get(), device_output.get(), value);
+
+        HIP_CHECK(hipGetLastError());
+
+        // Reading results back
+        output = device_output.load();
+
+        // Verifying results
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
+    }
 }
