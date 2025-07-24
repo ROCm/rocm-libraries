@@ -79,7 +79,7 @@ target_include_directories(hipsparselt
 )
 
 if(HIPSPARSELT_ENABLE_CUDA)
-    target_include_directories(hipsparselt PRIVATE $<BUILD_INTERFACE:${CUDA_INCLUDE_DIRS}>)
+    target_include_directories(hipsparselt PRIVATE $<BUILD_INTERFACE:${CUDAToolkit_INCLUDE_DIRS}>)
     target_link_libraries(hipsparselt PRIVATE 
         ${CUSPARSELT_LIBRARY}
         CUDA::cusparse
