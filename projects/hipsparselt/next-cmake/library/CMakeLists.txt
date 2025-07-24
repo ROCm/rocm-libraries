@@ -83,6 +83,7 @@ if(HIPSPARSELT_ENABLE_CUDA)
     target_link_libraries(hipsparselt PRIVATE 
         ${CUSPARSELT_LIBRARY}
         CUDA::cusparse
+        CUDA::cudart
     )
 endif()
     
