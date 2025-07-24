@@ -1698,7 +1698,7 @@ class Solution(collections.abc.Mapping):
         autoLRVW = 0
         if state["LocalReadVectorWidth"] == -1:
           autoLRVW = 1
-          if state["TransposeLDS"] and (not state["DirectToLds"]):
+          if state["TransposeLDS"]:
             state["LocalReadVectorWidth"] = 16 // state["ProblemType"]["DataType"].numBytes()
           else:
             if state["MIInputPerThread"] * state["ProblemType"]["DataType"].numBytes() > 16:
