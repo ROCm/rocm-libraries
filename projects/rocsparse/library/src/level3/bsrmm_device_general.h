@@ -65,8 +65,8 @@ namespace rocsparse
         const I block_row_start = (block_row < Mb) ? (bsr_row_ptr[block_row] - idx_base) : 0;
         const I block_row_end   = (block_row < Mb) ? (bsr_row_ptr[block_row + 1] - idx_base) : 0;
 
-        __shared__ T shared_B[BSR_BLOCK_DIM * BLK_SIZE_Y];
-        __shared__ T shared_A[BSR_BLOCK_DIM * BSR_BLOCK_DIM];
+        __shared__ B shared_B[BSR_BLOCK_DIM * BLK_SIZE_Y];
+        __shared__ A shared_A[BSR_BLOCK_DIM * BSR_BLOCK_DIM];
 
         const J global_col = tidy + hipBlockIdx_y * BLK_SIZE_Y;
 

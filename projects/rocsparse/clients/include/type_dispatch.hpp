@@ -416,32 +416,32 @@ auto rocsparse_iaxyt_dispatch(const Arguments& arg)
 
     const auto T = arg.compute_type;
 
-    bool f32r_case = (A == rocsparse_datatype_f32_r && A == X && A == Y && A == T);
-    bool f64r_case = (A == rocsparse_datatype_f64_r && A == X && A == Y && A == T);
-    bool f32c_case = (A == rocsparse_datatype_f32_c && A == X && A == Y && A == T);
-    bool f64c_case = (A == rocsparse_datatype_f64_c && A == X && A == Y && A == T);
+    const bool f32r_case = (A == rocsparse_datatype_f32_r && A == X && A == Y && A == T);
+    const bool f64r_case = (A == rocsparse_datatype_f64_r && A == X && A == Y && A == T);
+    const bool f32c_case = (A == rocsparse_datatype_f32_c && A == X && A == Y && A == T);
+    const bool f64c_case = (A == rocsparse_datatype_f64_c && A == X && A == Y && A == T);
 
-    bool i8r_i8r_i32r_i32r_case
+    const bool i8r_i8r_i32r_i32r_case
         = (A == rocsparse_datatype_i8_r && X == rocsparse_datatype_i8_r
            && Y == rocsparse_datatype_i32_r && T == rocsparse_datatype_i32_r);
 
-    bool i8r_i8r_f32r_f32r_case
+    const bool i8r_i8r_f32r_f32r_case
         = (A == rocsparse_datatype_i8_r && X == rocsparse_datatype_i8_r
            && Y == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool f16r_f16r_f32r_f32r_case
+    const bool f16r_f16r_f32r_f32r_case
         = (A == rocsparse_datatype_f16_r && X == rocsparse_datatype_f16_r
            && Y == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool bf16r_bf16r_f32r_f32r_case
+    const bool bf16r_bf16r_f32r_f32r_case
         = (A == rocsparse_datatype_bf16_r && X == rocsparse_datatype_bf16_r
            && Y == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool f32r_f32c_f32c_f32c_case
+    const bool f32r_f32c_f32c_f32c_case
         = (A == rocsparse_datatype_f32_r && X == rocsparse_datatype_f32_c
            && Y == rocsparse_datatype_f32_c && T == rocsparse_datatype_f32_c);
 
-    bool f64r_f64c_f64c_f64c_case
+    const bool f64r_f64c_f64c_f64c_case
         = (A == rocsparse_datatype_f64_r && X == rocsparse_datatype_f64_c
            && Y == rocsparse_datatype_f64_c && T == rocsparse_datatype_f64_c);
 
@@ -535,32 +535,32 @@ auto rocsparse_ijaxyt_dispatch(const Arguments& arg)
 
     const auto T = arg.compute_type;
 
-    bool f32r_case = (A == rocsparse_datatype_f32_r && A == X && A == Y && A == T);
-    bool f64r_case = (A == rocsparse_datatype_f64_r && A == X && A == Y && A == T);
-    bool f32c_case = (A == rocsparse_datatype_f32_c && A == X && A == Y && A == T);
-    bool f64c_case = (A == rocsparse_datatype_f64_c && A == X && A == Y && A == T);
+    const bool f32r_case = (A == rocsparse_datatype_f32_r && A == X && A == Y && A == T);
+    const bool f64r_case = (A == rocsparse_datatype_f64_r && A == X && A == Y && A == T);
+    const bool f32c_case = (A == rocsparse_datatype_f32_c && A == X && A == Y && A == T);
+    const bool f64c_case = (A == rocsparse_datatype_f64_c && A == X && A == Y && A == T);
 
-    bool i8r_i8r_i32r_i32r_case
+    const bool i8r_i8r_i32r_i32r_case
         = (A == rocsparse_datatype_i8_r && X == rocsparse_datatype_i8_r
            && Y == rocsparse_datatype_i32_r && T == rocsparse_datatype_i32_r);
 
-    bool i8r_i8r_f32r_f32r_case
+    const bool i8r_i8r_f32r_f32r_case
         = (A == rocsparse_datatype_i8_r && X == rocsparse_datatype_i8_r
            && Y == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool f16r_f16r_f32r_f32r_case
+    const bool f16r_f16r_f32r_f32r_case
         = (A == rocsparse_datatype_f16_r && X == rocsparse_datatype_f16_r
            && Y == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool bf16r_bf16r_f32r_f32r_case
+    const bool bf16r_bf16r_f32r_f32r_case
         = (A == rocsparse_datatype_bf16_r && X == rocsparse_datatype_bf16_r
            && Y == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool f32r_f32c_f32c_f32c_case
+    const bool f32r_f32c_f32c_f32c_case
         = (A == rocsparse_datatype_f32_r && X == rocsparse_datatype_f32_c
            && Y == rocsparse_datatype_f32_c && T == rocsparse_datatype_f32_c);
 
-    bool f64r_f64c_f64c_f64c_case
+    const bool f64r_f64c_f64c_f64c_case
         = (A == rocsparse_datatype_f64_r && X == rocsparse_datatype_f64_c
            && Y == rocsparse_datatype_f64_c && T == rocsparse_datatype_f64_c);
 
@@ -682,24 +682,24 @@ auto rocsparse_iabct_dispatch(const Arguments& arg)
 
     const auto T = arg.compute_type;
 
-    bool f32r_case = (A == rocsparse_datatype_f32_r && A == B && A == C && A == T);
-    bool f64r_case = (A == rocsparse_datatype_f64_r && A == B && A == C && A == T);
-    bool f32c_case = (A == rocsparse_datatype_f32_c && A == B && A == C && A == T);
-    bool f64c_case = (A == rocsparse_datatype_f64_c && A == B && A == C && A == T);
+    const bool f32r_case = (A == rocsparse_datatype_f32_r && A == B && A == C && A == T);
+    const bool f64r_case = (A == rocsparse_datatype_f64_r && A == B && A == C && A == T);
+    const bool f32c_case = (A == rocsparse_datatype_f32_c && A == B && A == C && A == T);
+    const bool f64c_case = (A == rocsparse_datatype_f64_c && A == B && A == C && A == T);
 
-    bool i8r_i8r_i32r_i32r_case
+    const bool i8r_i8r_i32r_i32r_case
         = (A == rocsparse_datatype_i8_r && B == rocsparse_datatype_i8_r
            && C == rocsparse_datatype_i32_r && T == rocsparse_datatype_i32_r);
 
-    bool i8r_i8r_f32r_f32r_case
+    const bool i8r_i8r_f32r_f32r_case
         = (A == rocsparse_datatype_i8_r && B == rocsparse_datatype_i8_r
            && C == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool f16r_f16r_f32r_f32r_case
+    const bool f16r_f16r_f32r_f32r_case
         = (A == rocsparse_datatype_f16_r && B == rocsparse_datatype_f16_r
            && C == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool bf16r_bf16r_f32r_f32r_case
+    const bool bf16r_bf16r_f32r_f32r_case
         = (A == rocsparse_datatype_bf16_r && B == rocsparse_datatype_bf16_r
            && C == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
@@ -777,24 +777,24 @@ auto rocsparse_ijabct_dispatch(const Arguments& arg)
 
     const auto T = arg.compute_type;
 
-    bool f32r_case = (A == rocsparse_datatype_f32_r && A == B && A == C && A == T);
-    bool f64r_case = (A == rocsparse_datatype_f64_r && A == B && A == C && A == T);
-    bool f32c_case = (A == rocsparse_datatype_f32_c && A == B && A == C && A == T);
-    bool f64c_case = (A == rocsparse_datatype_f64_c && A == B && A == C && A == T);
+    const bool f32r_case = (A == rocsparse_datatype_f32_r && A == B && A == C && A == T);
+    const bool f64r_case = (A == rocsparse_datatype_f64_r && A == B && A == C && A == T);
+    const bool f32c_case = (A == rocsparse_datatype_f32_c && A == B && A == C && A == T);
+    const bool f64c_case = (A == rocsparse_datatype_f64_c && A == B && A == C && A == T);
 
-    bool i8r_i8r_i32r_i32r_case
+    const bool i8r_i8r_i32r_i32r_case
         = (A == rocsparse_datatype_i8_r && B == rocsparse_datatype_i8_r
            && C == rocsparse_datatype_i32_r && T == rocsparse_datatype_i32_r);
 
-    bool i8r_i8r_f32r_f32r_case
+    const bool i8r_i8r_f32r_f32r_case
         = (A == rocsparse_datatype_i8_r && B == rocsparse_datatype_i8_r
            && C == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool f16r_f16r_f32r_f32r_case
+    const bool f16r_f16r_f32r_f32r_case
         = (A == rocsparse_datatype_f16_r && B == rocsparse_datatype_f16_r
            && C == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool bf16r_bf16r_f32r_f32r_case
+    const bool bf16r_bf16r_f32r_f32r_case
         = (A == rocsparse_datatype_bf16_r && B == rocsparse_datatype_bf16_r
            && C == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
