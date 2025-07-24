@@ -33,7 +33,7 @@
 
 // Google Benchmark
 #include <benchmark/benchmark.h>
-#include <benchmarks/bench_utils/common/types.hpp>
+#include <benchmark/bench_utils/common/types.hpp>
 
 // STL
 #include <cstdlib>
