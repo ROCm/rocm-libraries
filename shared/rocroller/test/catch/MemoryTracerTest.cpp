@@ -51,10 +51,7 @@ namespace MemoryTracerTest
 
         example.setTileSize(128, 256, 8);
         example.setMFMA(32, 32, 2, 1);
-        example.setUseLDS(
-            true,
-            true,
-            true); // TODO: use a single LDS, so a single node exists for later assertions
+        example.setUseLDS(true, false, false); // For easier assertions
 
         auto kgraph  = example.getKernelGraph();
         auto params  = example.getCommandParameters();
@@ -64,7 +61,6 @@ namespace MemoryTracerTest
         params->prefetch          = true;
         params->prefetchInFlight  = 2;
         params->prefetchLDSFactor = 2;
-        params->prefetchMixMemOps = true;
 
         std::vector<GraphTransformPtr> transforms;
         transforms.push_back(std::make_shared<IdentifyParallelDimensions>());
@@ -86,21 +82,6 @@ namespace MemoryTracerTest
         transforms.push_back(std::make_shared<AddComputeIndex>());
         transforms.push_back(std::make_shared<AddPRNG>(context.get()));
         transforms.push_back(std::make_shared<UpdateWavefrontParameters>(params));
-        transforms.push_back(std::make_shared<LoadPacked>(context.get()));
-        transforms.push_back(std::make_shared<AddConvert>());
-        transforms.push_back(std::make_shared<NopExtraScopes>());
-        transforms.push_back(std::make_shared<AddDeallocateDataFlow>());
-        transforms.push_back(std::make_shared<InlineIncrements>());
-        transforms.push_back(std::make_shared<InlineInits>());
-        transforms.push_back(std::make_shared<OrderMultiplyNodes>());
-        transforms.push_back(std::make_shared<Simplify>());
-        transforms.push_back(std::make_shared<AliasDataFlowTags>());
-        transforms.push_back(std::make_shared<CleanArguments>(context.get(), command));
-        transforms.push_back(std::make_shared<AddDeallocateArguments>(context.get()));
-        transforms.push_back(std::make_shared<MergeAdjacentDeallocates>());
-        transforms.push_back(std::make_shared<Simplify>());
-        transforms.push_back(std::make_shared<SetWorkitemCount>(context.get()));
-        // TODO: figure out how many transforms I really need (ideally closer to the AddDeallocate test)
 
         for(auto& t : transforms)
             kgraph = kgraph.transform(t);
