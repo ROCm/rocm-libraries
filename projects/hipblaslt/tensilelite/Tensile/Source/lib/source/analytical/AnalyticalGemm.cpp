@@ -95,6 +95,7 @@ namespace TensileLite
                                           size_t          MI_K,
                                           size_t          element_size_A,
                                           size_t          element_size_B,
+                                          DataType        miDataType,
                                           bool            debug)
         {
 
@@ -102,8 +103,7 @@ namespace TensileLite
             size_t N_MI = compute_number_matrix_instructions(
                 hardware, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, debug);
             // Latency of a single MT_MxMT_NxMT_k tile is the latency of one MI multiplied by number of MI per MT_MxMT_NxMT_k.
-            size_t L_MI = hardware.get_MI_latency(
-                MI_M, MI_N, MI_K, std::max(element_size_A, element_size_B));
+            size_t L_MI = hardware.get_MI_latency(MI_M, MI_N, MI_K, miDataType);
 
             // size_t mt_arith = arithmetic_intensity(MT_M, MT_N, MT_K, 2);
             // printf("MT_M:%d MT_N:%d MT_K:%d arith:%d\n", MT_M, MT_N, MT_K, mt_arith);
@@ -450,6 +450,7 @@ namespace TensileLite
                                     size_t          element_size_A,
                                     size_t          element_size_B,
                                     size_t          element_size_out,
+                                    DataType        miDataType,
                                     size_t          mx_block_size,
                                     bool            debug)
         {
@@ -468,6 +469,7 @@ namespace TensileLite
                                                           MI_K,
                                                           element_size_A,
                                                           element_size_B,
+                                                          miDataType,
                                                           debug);
 
             double L_mem = compute_memory_latency(hardware,
@@ -716,6 +718,7 @@ namespace TensileLite
                                     size_t          element_size_A,
                                     size_t          element_size_B,
                                     size_t          element_size_out,
+                                    DataType        miDataType,
                                     size_t          mx_block_size,
                                     bool            debug)
         {
@@ -739,6 +742,7 @@ namespace TensileLite
                                                  element_size_A,
                                                  element_size_B,
                                                  element_size_out,
+                                                 miDataType,
                                                  mx_block_size,
                                                  debug);
 
@@ -765,6 +769,7 @@ namespace TensileLite
                                      size_t          element_size_A,
                                      size_t          element_size_B,
                                      size_t          element_size_out,
+                                     DataType        miDataType,
                                      int             WGM,
                                      size_t          mx_block_size,
                                      bool            debug)
@@ -797,6 +802,7 @@ namespace TensileLite
                                                  element_size_A,
                                                  element_size_B,
                                                  element_size_out,
+                                                 miDataType,
                                                  mx_block_size,
                                                  debug);
 
@@ -931,6 +937,7 @@ namespace TensileLite
                                    size_t          element_size_A,
                                    size_t          element_size_B,
                                    size_t          element_size_out,
+                                   DataType        miDataType,
                                    int             WGM,
                                    double          H_mem1,
                                    bool            debug)
@@ -959,6 +966,7 @@ namespace TensileLite
                                                           element_size_A,
                                                           element_size_B,
                                                           element_size_out,
+                                                          miDataType,
                                                           WGM,
                                                           mx_block_size,
                                                           debug);

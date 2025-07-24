@@ -11,6 +11,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Added support for ``HIPBLASLT_EPILOGUE_GELU_AUX_BIAS`` for gfx942
 * Added `HIPBLASLT_TUNING_USER_MAX_WORKSPACE` to constrain max workspace size for user offline tuning
 * Added ``HIPBLASLT_ORDER_COL16_4R16`` and ``HIPBLASLT_ORDER_COL16_4R8`` to ``hipblasLtOrder_t`` to support FP16/BF16 swizzle GEMM and FP8/BF8 swizzle GEMM respectively.
+* Added TF32 emulation on gfx950
 
 ### Changed
 
