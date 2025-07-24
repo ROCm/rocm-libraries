@@ -30,6 +30,7 @@
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
+#include "../intrinsics/arch.hpp"
 
 /// \addtogroup primitivesmodule_deviceconfigs
 /// @{
@@ -256,6 +257,36 @@ constexpr void for_each_arch(F&& f)
                        std::make_index_sequence<std::size(target_architectures)>{});
 }
 
+constexpr arch::wavefront::target arch_wavefront_size(const target_arch target_arch)
+{
+    switch(target_arch)
+    {
+        case target_arch::unknown: return arch::wavefront::target::dynamic;
+        case target_arch::gfx803: return arch::wavefront::target::size64;
+        case target_arch::gfx900: return arch::wavefront::target::size64;
+        case target_arch::gfx906: return arch::wavefront::target::size64;
+        case target_arch::gfx908: return arch::wavefront::target::size64;
+        case target_arch::gfx90a: return arch::wavefront::target::size64;
+        case target_arch::gfx942: return arch::wavefront::target::size64;
+        case target_arch::gfx1030: return arch::wavefront::target::size32;
+        case target_arch::gfx1100: return arch::wavefront::target::size32;
+        case target_arch::gfx1102: return arch::wavefront::target::size32;
+        case target_arch::gfx1200: return arch::wavefront::target::size32;
+        case target_arch::gfx1201: return arch::wavefront::target::size32;
+
+        // Unreachable
+        case target_arch::invalid: return arch::wavefront::target::dynamic;
+    }
+}
+
+template<class Config, target_arch Arch>
+struct target_config
+{
+    constexpr static auto params    = Config::template architecture_config<Arch>::params;
+    constexpr static auto wavefront = arch_wavefront_size(Arch);
+    constexpr static auto arch      = Arch;
+};
+
 // Trampoline that is fully specialized at compile-time for a single GPU architecture.
 // By instantiating this template once per supported `target_arch`,the correct tuned config
 // will be derived from the template
@@ -264,7 +295,7 @@ __global__
 __launch_bounds__(Config::template architecture_config<Arch>::params.kernel_config.block_size)
 void trampoline(Kernel kernel)
 {
-    using ArchConfig = typename Config::template architecture_config<Arch>;
+    using ArchConfig = target_config<Config, Arch>;
 
 #ifndef ROCPRIM_EXPERIMENTAL_SPIRV
     if constexpr(Arch == device_target_arch())
@@ -304,8 +335,7 @@ auto configure_kernel(target_arch arch, Kernel kernel) -> tuned_kernel<Kernel>
             if(Arch != arch || tuned_kernel)
                 return;
 
-            using ArchConfig = typename Config::template architecture_config<Arch>;
-            tuned_kernel     = trampoline<Config, Arch, Kernel>;
+            tuned_kernel = trampoline<Config, Arch, Kernel>;
         });
 
     if(!tuned_kernel)
