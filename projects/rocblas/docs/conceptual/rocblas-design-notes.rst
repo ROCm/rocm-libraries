@@ -11,6 +11,8 @@ rocBLAS design and usage notes
 This topic covers the structure, organization, and concepts underlying rocBLAS. It also includes some notes on how
 to use rocBLAS effectively.
 
+.. _rocblas-tensile-hipblaslt:
+
 Use of Tensile and hipBLASLt
 ============================
 

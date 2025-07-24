@@ -12,7 +12,7 @@
 # Requires an Azure Personal Access Token with permissions to manage builds.
 # The token should be stored in the repository secrets as `AZ_PAT`.
 
-name: Dispatch Azure CI
+name: Trigger Azure CI
 
 on:
   pull_request_target:
@@ -26,10 +26,6 @@ on:
       - staging
       - main
       - release-staging/rocm-rel-7.*
-    paths-ignore:
-      - '.github/**'
-      - 'docs/**'
-      - '*.md'
 
 concurrency:
   group: azure-ci-dispatcher-${{ github.event.pull_request.number || github.ref }}
@@ -37,9 +33,9 @@ concurrency:
 
 jobs:
   dispatch-azure-ci:
-    name: Dispatch Azure CI
+    name: Trigger Azure CI
+    if: github.repository == 'ROCm/rocm-libraries' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
-    timeout-minutes: 720
     steps:
     - name: Generate a token
       id: generate-token
@@ -48,6 +44,35 @@ jobs:
         app-id: ${{ secrets.APP_ID }}
         private-key: ${{ secrets.APP_PRIVATE_KEY }}
         owner: ${{ github.repository_owner }}
+        repositories: |
+          rocm-libraries
+
+    - name: Wait until refs/pull/${{ github.event.pull_request.number }}/merge exists
+      run: |
+        merge_ref="refs/pull/${{ github.event.pull_request.number }}/merge"
+        check_merge_ref() {
+          git ls-remote "https://github.com/ROCm/rocm-libraries" "$merge_ref" | grep -q "$merge_ref"
+        }
+
+        max_attempts=10
+        attempt=0
+
+        while [ $attempt -lt $max_attempts ]; do
+          if check_merge_ref; then
+            echo "$merge_ref found."
+            break
+          else
+            retry_delay=60
+            echo "$merge_ref not found. Retrying in $retry_delay seconds..."
+            sleep $retry_delay
+          fi
+          attempt=$((attempt + 1))
+        done
+
+        if [ $attempt -ge $max_attempts ]; then
+          echo "$merge_ref not found. Maximum attempts reached."
+          exit 1
+        fi
 
     - name: Checkout code
       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -73,9 +98,102 @@ jobs:
           --config ".github/repos-config.json" \
           --require-auto-push
 
-    - name: Dispatch Azure CI runs
-      id: dispatch
+    - name: Cancel in-progress/not-started runs for current PR
+      id: cancel-in-progress
       if: steps.detect.outputs.subtrees
+      run: |
+        pr_number=${{ github.event.pull_request.number }}
+        pr_filter_query="branchName=refs/pull/$pr_number/merge&repositoryType=GitHub&repositoryId=ROCm/rocm-libraries&api-version=7.1"
+
+        res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?$pr_filter_query" \
+          -H "Content-Type: application/json")
+
+        runs=$(echo "$res" | jq -r ".value[] | select((.status == \"inProgress\" or .status == \"notStarted\") and .definition.name != \"rocm-ci-caller\") | .id")
+
+        if [ -z "$runs" ]; then
+          echo "No in-progress/not-started runs found for ROCm/rocm-libraries PR #$pr_number"
+          echo "status=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        echo "Found in-progress/not-started runs for ROCm/rocm-libraries PR #$pr_number: $runs"
+        echo "status=true" >> $GITHUB_OUTPUT
+
+        for run_id in $runs; do
+          echo "Cancelling run ID: $run_id"
+          echo "Run URL: https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
+          response=$(curl -sSX PATCH "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds/$run_id?api-version=7.1" \
+            -u ":${{ secrets.AZ_PAT }}" \
+            -H "Content-Type: application/json" \
+            -d '{"status": "cancelling"}')
+
+          if [ $? -ne 0 ]; then
+            echo "Failed to cancel run ID: $run_id"
+          else
+            echo "Cancelled run ID: $run_id"
+          fi
+        done
+
+    - name: Rerun previous failed/cancelled runs for current PR merge commit
+      id: rerun-failed
+      if: steps.detect.outputs.subtrees && steps.cancel-in-progress.outputs.status == 'false'
+      run: |
+        pr_number=${{ github.event.pull_request.number }}
+        pr_merge_sha=$(curl -sSX GET "https://api.github.com/repos/ROCm/rocm-libraries/git/ref/pull/${pr_number}/merge" | jq -r '.object.sha')
+        pr_filter_query="branchName=refs/pull/$pr_number/merge&repositoryType=GitHub&repositoryId=ROCm/rocm-libraries&api-version=7.1"
+
+        res=$(curl -sSX GET "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds?$pr_filter_query" \
+          -H "Content-Type: application/json")
+
+        failed_runs_info=$(echo "$res" | jq -r ".value[] |
+          select((.result == \"failed\" or .result == \"canceled\")
+          and (.sourceVersion | contains(\"$pr_merge_sha\")))
+          | {id: .id, name: .definition.name}")
+        success_runs_info=$(echo "$res" | jq -r ".value[] |
+          select((.result == \"succeeded\")
+          and (.sourceVersion | contains(\"$pr_merge_sha\")))
+          | {id: .id, name: .definition.name}")
+
+        failed_run_ids=$(echo "$failed_runs_info" | jq -r '.id')
+        failed_project_names=$(echo "$failed_runs_info" | jq -r '.name')
+        success_run_ids=$(echo "$success_runs_info" | jq -r '.id')
+        success_project_names=$(echo "$success_runs_info" | jq -r '.name')
+
+        if [ -z "$failed_run_ids" ]; then
+          echo "No failed/cancelled runs found for ROCm/rocm-libraries PR #$pr_number at merge commit $pr_merge_sha"
+          echo "status=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        echo "Found failed/cancelled runs for ROCm/rocm-libraries PR #$pr_number at merge commit $pr_merge_sha: ${failed_run_ids[*]}"
+        echo "Found successful runs for ROCm/rocm-libraries PR #$pr_number at merge commit $pr_merge_sha: ${success_run_ids[*]}"
+        echo "status=true" >> $GITHUB_OUTPUT
+
+        new_run_ids=()
+
+        for run_id in $failed_run_ids; do
+          echo "Rerunning failed run ID: $run_id"
+          echo "Run URL: https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
+          response=$(curl -sSX PATCH "https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds/$run_id?retry=true&api-version=7.1" \
+            -u ":${{ secrets.AZ_PAT }}" \
+            -H "Content-Type: application/json")
+
+          if [ $? -ne 0 ]; then
+            echo "Failed to rerun run ID: $run_id"
+          else
+            echo "Rerun requested for run ID: $run_id"
+            new_run_ids+=("$run_id")
+          fi
+        done
+
+        echo "run_ids=${new_run_ids[*]}" >> $GITHUB_OUTPUT
+        echo "project_names=${failed_project_names[*]}" >> $GITHUB_OUTPUT
+        echo "success_run_ids=${success_run_ids[*]}" >> $GITHUB_OUTPUT
+        echo "success_project_names=${success_project_names[*]}" >> $GITHUB_OUTPUT
+
+    - name: Start new Azure CI runs
+      id: dispatch
+      if: steps.detect.outputs.subtrees && (steps.cancel-in-progress.outputs.status == 'true' || steps.rerun-failed.outputs.status == 'false')
       env:
         GH_TOKEN: ${{ steps.generate-token.outputs.token }}
       run: |
@@ -86,6 +204,7 @@ jobs:
           > resolved_subtrees.txt
 
         run_ids=()
+        project_names=()
 
         while IFS= read -r line; do
           IFS='=' read -r project_name definition_id <<< "$line"
@@ -124,8 +243,9 @@ jobs:
             run_id=$(echo "$response" | jq -r '.id' || echo "null")
             if [ "$run_id" != "null" ]; then
               echo "Run ID for $project_name: $run_id"
-              echo "https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
+              echo "Run URL: https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
               run_ids+=("$run_id")
+              project_names+=("$project_name")
             else
               echo "Failed to request run for $project_name"
             fi
@@ -137,82 +257,89 @@ jobs:
         done < resolved_subtrees.txt
 
         echo "run_ids=${run_ids[*]}" >> $GITHUB_OUTPUT
+        echo "project_names=${project_names[*]}" >> $GITHUB_OUTPUT
 
-    - name: Wait for and report Azure CI status
-      if: steps.dispatch.outputs.run_ids
-      timeout-minutes: 720
+    - name: Create summary check
+      env:
+        GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        PR_TITLE: ${{ toJSON(github.event.pull_request.title) }}
       run: |
-        run_ids=(${{ steps.dispatch.outputs.run_ids }})
-        echo "Waiting on runs: ${run_ids[*]}"
-
-        all_finished=0
-        exit_status=0
-
-        while [[ $all_finished -eq 0 ]]; do
-          sleep 120
-          all_finished=1
-          echo "=================================================================="
-
-          for run_id in "${run_ids[@]}"; do
-            max_attempts=3
-            retry_delay=5
-            attempt=1
-            success=false
-
-            while [ $attempt -le $max_attempts ]; do
-              response=$(curl -sSX GET https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds/$run_id?api-version=7.1 \
-                -u ":${{ secrets.AZ_PAT }}" \
-                -H "Content-Type: application/json")
-
-              if [[ $? -eq 0 ]]; then
-                success=true
-                break
-              fi
-
-              echo "Attempt $attempt failed. Retrying in $retry_delay seconds..."
-              sleep $retry_delay
-              attempt=$((attempt + 1))
-            done
-
-            if [[ "$success" == true ]]; then
-              pipeline_name=$(echo "$response" | jq -r '.definition.name')
-              status=$(echo "$response" | jq -r '.status')
-              result=$(echo "$response" | jq -r '.result')
-
-              if [[ "$status" == "completed" ]]; then
-                echo "$pipeline_name - run $run_id is finished with result: $result"
-                echo "https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
-                if [[ "$result" != "succeeded" ]]; then
-                  exit_status=1
-                fi
-              else
-                all_finished=0
-                echo "$pipeline_name - run $run_id is in progress..."
-                echo "https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
-              fi
-            else
-              echo "Failed to fetch status for run $run_id after $max_attempts attempts"
-              echo "https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=$run_id"
-              exit_status=1
-              continue
-            fi
-          done
-        done
-
-        if [[ $exit_status -ne 0 ]] then
-          exit $exit_status
+        if [[ -n "${{ steps.dispatch.outputs.run_ids }}" && -n "${{ steps.dispatch.outputs.project_names }}" ]]; then             # If new runs were started
+          run_ids=(${{ steps.dispatch.outputs.run_ids }})
+          project_names=(${{ steps.dispatch.outputs.project_names }})
+        elif [[ -n "${{ steps.rerun-failed.outputs.run_ids }}" && -n "${{ steps.rerun-failed.outputs.project_names }}" ]]; then   # If reruns were requested
+          run_ids=(${{ steps.rerun-failed.outputs.run_ids }})
+          project_names=(${{ steps.rerun-failed.outputs.project_names }})
+          success_run_ids=(${{ steps.rerun-failed.outputs.success_run_ids }})
+          success_project_names=(${{ steps.rerun-failed.outputs.success_project_names }})
+        else
+          echo "No run IDs or project names found, creating empty summary check."
         fi
 
-    - name: Cancel Azure CI runs
-      if: ${{ cancelled() }}
-      run: |
-        run_ids=(${{ steps.dispatch.outputs.run_ids }})
-        echo "Cancelling runs: ${run_ids[*]}"
+        pr_number=${{ github.event.pull_request.number }}
+        pr_head_sha=${{ github.event.pull_request.head.sha }}
+        pr_merge_sha=$(curl -sSX GET "https://api.github.com/repos/ROCm/rocm-libraries/git/ref/pull/${pr_number}/merge" | jq -r '.object.sha')
 
-        for run_id in "${run_ids[@]}"; do
-          response=$(curl -sSX PATCH https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/builds/$run_id?api-version=7.1 \
-            -u ":${{ secrets.AZ_PAT }}" \
-            -H "Content-Type: application/json" \
-            -d '{"status": "cancelling"}')
-          echo $response | jq -r '.status' || echo "Failed to cancel run $run_id"
+        newline=$'\n'
+
+        summary="PR: [$PR_TITLE #$pr_number](${{ github.event.pull_request.html_url }})${newline}${newline}"
+        summary+="HEAD: [$pr_head_sha](https://github.com/ROCm/rocm-libraries/commit/$pr_head_sha)${newline}${newline}"
+        summary+="MERGE: [$pr_merge_sha](https://github.com/ROCm/rocm-libraries/commit/$pr_merge_sha)${newline}${newline}"
+
+        if [[ -z "${run_ids[*]}" && -z "${success_run_ids[*]}" ]]; then
+          summary+="### No Azure CI runs were started for this PR.${newline}${newline}"
+          gh_output=$(gh api repos/ROCm/rocm-libraries/check-runs \
+            -f "name=Azure CI Summary" \
+            -f "head_sha=$pr_head_sha" \
+            -f "status=completed" \
+            -f "conclusion=neutral" \
+            -f "output[title]=Azure CI Summary" \
+            -f "output[summary]=$summary")
+          echo "Created empty summary check with ID: $(echo "$gh_output" | jq -r '.id')"
+          echo "Summary check URL: https://github.com/ROCm/rocm-libraries/pull/561/checks?check_run_id=$(echo "$gh_output" | jq -r '.id')"
+          exit 0
+        fi
+
+        summary+="### Pipelines triggered for this PR${newline}${newline}"
+        summary+="| Project | Run ID | Status |${newline}"
+        summary+="|--------------|--------|--------|${newline}"
+
+        if [[ -n "${success_run_ids[*]}" ]]; then
+          for i in "${!success_project_names[@]}"; do
+            summary+="| ${success_project_names[i]} | [${success_run_ids[i]}](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=${success_run_ids[i]}) | success |${newline}"
+          done
+        fi
+
+        for i in "${!project_names[@]}"; do
+          summary+="| ${project_names[i]} | [${run_ids[i]}](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/results?buildId=${run_ids[i]}) | pending |${newline}"
         done
+
+        summary+="${newline}${newline}"
+        summary+="### Rerun instructions${newline}${newline}"
+        summary+="To request Azure to rerun jobs, click the \`Re-run all jobs\` button on the [corresponding \`Trigger Azure CI\` run](https://github.com/ROCm/rocm-libraries/actions/runs/${{ github.run_id }}).${newline}${newline}"
+        summary+="If there are any pending runs for this PR, they will be cancelled, and new runs will be started.${newline}${newline}"
+        summary+="If there are no pending runs, but there are existing failed or cancelled runs for this PR and merge SHA, the existing runs will be rerun.${newline}${newline}"
+        summary+="Otherwise, new runs will be started.${newline}${newline}"
+
+        text=""
+
+        if [[ -n "${success_run_ids[*]}" ]]; then
+          for i in "${!success_run_ids[@]}"; do
+            text+="${success_run_ids[i]}=success;"
+          done
+        fi
+
+        for i in "${!project_names[@]}"; do
+          text+="${run_ids[i]}=pending;"
+        done
+
+        gh_output=$(gh api repos/ROCm/rocm-libraries/check-runs \
+          -f "name=Azure CI Summary" \
+          -f "head_sha=$pr_head_sha" \
+          -f "status=in_progress" \
+          -f "output[title]=Azure CI Summary" \
+          -f "output[summary]=$summary" \
+          -f "output[text]=$text")
+
+        echo "Created summary check with ID: $(echo "$gh_output" | jq -r '.id')"
+        echo "Summary check URL: https://github.com/ROCm/rocm-libraries/pull/561/checks?check_run_id=$(echo "$gh_output" | jq -r '.id')"

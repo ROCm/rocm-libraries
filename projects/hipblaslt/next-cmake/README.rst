@@ -12,11 +12,12 @@ Quick Start Guide
 This section describes how to configure and build the |project_name| project. We assume the user has a
 ROCm installation, Python 3.8 or newer and CMake 3.25.0 or newer.
 
-The |project_name| project consists of three components:
+The |project_name| project consists of four components:
 
 1. host library
 2. device libraries
 3. client applications
+4. tensilelite client
 
 Each component has a corresponding subdirectory. The host and device libraries are independently
 configurable and buildable but the client applications require the host library build time and the
@@ -89,6 +90,8 @@ Options
 * `HIPBLASLT_ENABLE_HOST`: Enables generation of host library (default: `ON`)
 * `HIPBLASLT_ENABLE_DEVICE`: Enables generation of device libraries (default: `ON`)
 * `HIPBLASLT_ENABLE_CLIENT`: Enables generation of client applications (default: `ON`)
+* `TENSILELITE_ENABLE_HOST`: Enables generation of tensilelite host (default: `ON`)
+* `TENSILELITE_ENABLE_CLIENT`: Enables generation of tensilelite client application (default: `OFF`)
 * `HIPBLASLT_ENABLE_LAZY_LOAD` Enable lazy loading of runtime code oject files to reduce init costs (default: `ON`)
 * `GPU_TARGETS:` Semicolon separated list of gfx targets to build
 
@@ -119,16 +122,18 @@ CMake Targets
 
 * `roc::hipblaslt`
 * `rocisa::rocisa-cpp`
+* `tensilelite::tensilelite-client`
 
 ---------------
 Physical Design
 ---------------
 
-|project_name| consists of three components:
+|project_name| consists of four components:
 
 1. host library
 2. device libraries
 3. client applications
+4. tensilelite client
 
 Each component has a corresponding directory. The host
 and device libraries are independently configurable and

@@ -23,7 +23,9 @@
 #include <thrust/scatter.h>
 #include <thrust/sequence.h>
 
-#include "test_header.hpp"
+#include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(FillTests, FullTestsParams);
 TESTS_DEFINE(FillPrimitiveTests, NumericalTestsParams);

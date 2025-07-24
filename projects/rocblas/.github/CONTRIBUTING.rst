@@ -34,10 +34,10 @@ Contributors wanting to submit new implementations, improvements, or bug fixes
 should follow the below mentioned guidelines.
 
 Pull requests will be reviewed by members of
-`CODEOWNERS.md <https://github.com/ROCm/rocBLAS/blob/develop/.github/CODEOWNERS>`__
+`CODEOWNERS.md <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/.github/CODEOWNERS>`__
 Continuous Integration tests will be run on the pull request. Once the pull request
 is approved and tests pass it will be merged by a member of
-`CODEOWNERS.md <https://github.com/ROCm/rocBLAS/blob/develop/.github/CODEOWNERS>`__.
+`CODEOWNERS.md <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/.github/CODEOWNERS>`__.
 Attribution for your commit will be preserved when it is merged.
 
 
@@ -63,7 +63,7 @@ Pull requests should:
 Code License
 ============
 All code contributed to this project will be licensed under the license identified in the
-`LICENSE.md <https://github.com/ROCm/rocBLAS/blob/develop/LICENSE.md>`__.
+`LICENSE.md <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/LICENSE.md>`__.
 Your contribution will be accepted under the same license.
 
 For each new file in repository, please include the licensing header
@@ -250,21 +250,21 @@ Coding Style
 
 #.  When tests are added to ``rocblas-test`` and ``rocblas-bench``,
     refer to `this
-    guide <https://github.com/ROCmSoftwarePlatform/rocBLAS/blob/develop/clients/gtest/README.md>`__.
+    guide <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/clients/gtest/README.md>`__.
 
     The test framework is templated, and uses
     SFINAE (substitution failure is not an error) pattern and ``std::enable_if<...>`` to enable and disable certain types for
     certain tests.
 
     YAML files are used to describe tests as combinations of arguments.
-    `rocblas_gentest.py <https://github.com/ROCmSoftwarePlatform/rocBLAS/blob/develop/clients/common/rocblas_gentest.py>`__
+    `rocblas_gentest.py <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/clients/common/rocblas_gentest.py>`__
     is used to parse the YAML files and generate tests in the form of a
     binary file of
-    `Arguments <https://github.com/ROCmSoftwarePlatform/rocBLAS/blob/develop/clients/include/rocblas_arguments.hpp>`__
+    `Arguments <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/clients/include/rocblas_arguments.hpp>`__
     records.
 
     The ``rocblas-test`` and ``rocblas-bench`` `type dispatch
-    file <https://github.com/ROCmSoftwarePlatform/rocBLAS/blob/develop/clients/include/type_dispatch.hpp>`__
+    file <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/clients/include/type_dispatch.hpp>`__
     is central to all tests. Basically, rather than duplicate:
 
     .. code:: cpp
@@ -280,9 +280,9 @@ Coding Style
     template argument is passed to specify which action is actually
     taken. It's fairly abstract, but it is powerful. There are examples
     of using the type dispatch in
-    `clients/gtest/*_gtest.cpp <https://github.com/ROCmSoftwarePlatform/rocBLAS/tree/develop/clients/gtest>`__
+    `clients/gtest/*_gtest.cpp <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/clients/gtest>`__
     and
-    `clients/benchmarks/client.cpp <https://github.com/ROCmSoftwarePlatform/rocBLAS/blob/develop/clients/benchmarks/client.cpp>`__.
+    `clients/benchmarks/client.cpp <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/clients/benchmarks/client.cpp>`__.
 
 #.  Code should not be copied-and pasted, but rather, templates, macros,
     SFINAE (substitution failure is not an error) pattern and CRTP (curiously recurring template pattern),
@@ -593,11 +593,11 @@ Coding Style
 
     Note: Some blocked matrix-vector algorithms which call other BLAS
     kernels may not work if this simple transformation is used; see
-    `TRSV <https://github.com/ROCmSoftwarePlatform/rocBLAS/blob/develop/library/src/blas2/rocblas_trsv.cpp>`__
+    `TRSV <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/library/src/blas2/rocblas_trsv.cpp>`__
     for an example, and how it's handled there.
 
 #.  For reduction operations, the file
-    `reduction.hpp <https://github.com/ROCm/rocBLAS/blob/develop/library/src/blas1/reduction.hpp>`
+    `reduction.hpp <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/library/src/blas1/reduction.hpp>`_
     has been created to systematize reductions and perform their device
     kernels in one place. This works for ``amax``, ``amin``, ``asum``,
     ``nrm2``, and (partially) ``dot`` and ``gemv``.

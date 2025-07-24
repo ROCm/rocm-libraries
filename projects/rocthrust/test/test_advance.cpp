@@ -18,7 +18,9 @@
 #include <thrust/advance.h>
 #include <thrust/sequence.h>
 
-#include "test_header.hpp"
+#include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(AdvanceVectorTests, VectorSignedIntegerTestsParams);
 

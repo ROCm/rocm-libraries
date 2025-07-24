@@ -26,6 +26,8 @@
 
 #include <rocRoller/CodeGen/Arithmetic/Utility.hpp>
 
+#include <rocRoller/InstructionValues/Register.hpp>
+
 namespace rocRoller
 {
     namespace Arithmetic
@@ -72,6 +74,23 @@ namespace rocRoller
                 Throw<FatalError>("Unable to determine MI modifier: unhandled data type.",
                                   ShowValue(dtype));
             }
+        }
+
+        std::tuple<std::string, std::string> getOpselModifiers2xByte(uint lhsByte, uint rhsByte)
+        {
+            AssertFatal(lhsByte < 4, ShowValue(lhsByte));
+            AssertFatal(rhsByte < 4, ShowValue(rhsByte));
+
+            auto lhsLo = lhsByte & 1;
+            auto rhsLo = rhsByte & 1;
+
+            auto lhsHi = (lhsByte >> 1) & 1;
+            auto rhsHi = (rhsByte >> 1) & 1;
+
+            auto modLo = fmt::format("op_sel:[{},{}]", lhsLo, rhsLo);
+            auto modHi = fmt::format("op_sel_hi:[{},{}]", lhsHi, rhsHi);
+
+            return {modLo, modHi};
         }
     }
 }

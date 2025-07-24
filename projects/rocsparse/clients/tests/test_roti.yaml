@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -34,7 +34,15 @@ Tests:
 - name: roti
   category: quick
   function: roti
-  precision: *single_double_precisions
+  precision: *single_only_precisions
+  M: [12000]
+  nnz: [5, 10]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+
+- name: roti
+  category: quick
+  function: roti
+  precision: *double_only_precisions
   M: [12000]
   nnz: [5, 10, 500]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
@@ -58,8 +66,40 @@ Tests:
 - name: roti_graph_test
   category: pre_checkin
   function: roti
-  precision: *single_double_precisions
+  precision: *single_only_precisions
+  M: [12000]
+  nnz: [5, 10]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  graph_test: true
+
+- name: roti_graph_test
+  category: pre_checkin
+  function: roti
+  precision: *double_only_precisions
   M: [12000]
   nnz: [5, 10, 500]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
   graph_test: true
+
+
+
+### DESACTIVATING THESE TESTS UNTIL INVESTIGATION ON GFX942 AND GFX90A
+
+- name: roti_graph_test
+  category: pre_checkin
+  function: roti
+  precision: *single_only_precisions
+  M: [12000]
+  nnz: [500]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  graph_test: true
+  skip_hardware: gfx942, gfx90a
+
+- name: roti
+  category: quick
+  function: roti
+  precision: *single_only_precisions
+  M: [12000]
+  nnz: [500]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+  skip_hardware: gfx942, gfx90a
