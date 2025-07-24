@@ -36,7 +36,7 @@ import origami
 hardware = origami.getHardwareForDevice(args.device)
 
 result = origami.select_best_macro_tile_size(
-            args.m, args.n, args.k, args.transA, args.transB, hardware, tile_list, args.element_size, 0.8, args.debug, args.print, args.wgm
+            args.m, args.n, args.k, args.transA, args.transB, hardware, tile_list, args.element_size, args.miDataType, 0.8, args.debug, args.print, args.wgm
         )
 ```
 
