@@ -19,8 +19,9 @@
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 
-#include "test_header.hpp"
-
+#include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 THRUST_DISABLE_MSVC_POSSIBLE_LOSS_OF_DATA_WARNING_BEGIN
 
 using VectorParams = ::testing::Types<Params<thrust::host_vector<short>>, Params<thrust::host_vector<int>>>;

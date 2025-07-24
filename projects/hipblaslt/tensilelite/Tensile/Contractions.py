@@ -458,19 +458,22 @@ class ProblemPredicate(Properties.Predicate):
             rv += [cls('BatchSizeEqual', index=0, value=state["BatchSizeEqual"])]
 
         if "SynchronizerSizeCheck" in state:
-            valuepredicates = []
-            valuepredicates.append(state["MacroTile0"])
-            valuepredicates.append(state["MacroTile1"])
-            if state["EnableMatrixInstruction"]:
-                valuepredicates.append(state["MIWaveTile"][0]*state["MIWaveTile"][1])
-            else:
-                valuepredicates.append(state["ThreadTile0"]*state["ThreadTile1"])
-            if state["NumElementsPerBatchStore"] != 0:
-                valuepredicates.append(int((state["NumElementsPerThread"])/state["NumElementsPerBatchStore"]))
-            else:
-                valuepredicates.append(1)
-            valuepredicates.append(ceil(state["NumThreads"] / state["WavefrontSize"]))
-            rv += [cls('SynchronizerSizeCheck', index=0, value=valuepredicates)]
+            if state["SynchronizerSizeCheck"]:
+                valuepredicates = []
+                valuepredicates.append(state["MacroTile0"])
+                valuepredicates.append(state["MacroTile1"])
+                if state["EnableMatrixInstruction"]:
+                    valuepredicates.append(state["MIWaveTile"][0]*state["MIWaveTile"][1])
+                else:
+                    valuepredicates.append(state["ThreadTile0"]*state["ThreadTile1"])
+                if state["NumElementsPerBatchStore"] != 0:
+                    valuepredicates.append(int((state["NumElementsPerThread"])/state["NumElementsPerBatchStore"]))
+                else:
+                    valuepredicates.append(1)
+                valuepredicates.append(ceil(state["NumThreads"] / state["WavefrontSize"]))
+                valuepredicates.append(state["GlobalSplitU"])
+
+                rv += [cls('SynchronizerSizeCheck', index=0, value=valuepredicates)]
 
         if state["InternalSupportParams"]["KernArgsVersion"] >= 1 and \
                  not (('StreamK' in state) and (state['StreamK'] > 0)):

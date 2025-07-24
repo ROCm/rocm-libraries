@@ -24,11 +24,12 @@
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 ################################################################################
-
+set -e
+set -x
 
 cd $(git rev-parse --git-dir)
 cd hooks
 
 echo "Installing hooks..."
-ln -s ../../.githooks/pre-commit pre-commit
+ln -s ../../shared/rocroller/.githooks/pre-commit pre-commit
 echo "Done!"

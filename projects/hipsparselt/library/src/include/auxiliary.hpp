@@ -203,6 +203,7 @@ __host__ __device__ inline bool hipsparselt_isnan(__nv_bfloat16 arg)
 }
 #endif
 
+#ifdef HIP_FP8_TYPE_OCP
 __host__ __device__ inline bool hipsparselt_isnan(__hip_fp8_e4m3 arg)
 {
     return internal::hip_fp8_ocp_is_nan(arg, __HIP_E4M3);
@@ -212,6 +213,7 @@ __host__ __device__ inline bool hipsparselt_isnan(__hip_fp8_e5m2 arg)
 {
     return internal::hip_fp8_ocp_is_nan(arg, __HIP_E5M2);
 }
+#endif
 /*******************************************************************************
 * \brief  returns true if arg is Infinity
 ********************************************************************************/

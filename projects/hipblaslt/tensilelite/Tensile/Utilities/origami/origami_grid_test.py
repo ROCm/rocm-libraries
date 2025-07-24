@@ -21,6 +21,7 @@ def parseArguments():
     parser.add_argument(
         "--element_size", type=int, default=2, help="Size of each element in bytes"
     )
+    parser.add_argument("--miDataType", type=int, default=0, help="Instruction input type")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     parser.add_argument("--print", action="store_true", help="Print hardware info")
     parser.add_argument(
@@ -59,6 +60,7 @@ def main():
         args.element_size * 8,
         args.element_size * 8,
         args.element_size * 8,
+        args.miDataType,
         0,  # mx_block_size
         0.8,  # H_L2,
         False,  # debug

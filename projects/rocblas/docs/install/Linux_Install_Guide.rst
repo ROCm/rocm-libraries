@@ -110,10 +110,15 @@ run the following help command:
 
    ./install.sh --help
 
+.. note::
+
+   You can run the ``install.sh`` script from the ``projects/rocblas`` directory.
+
 Download rocBLAS
 ----------------
 
-The rocBLAS source code is available at the `rocBLAS GitHub page <https://github.com/ROCm/rocBLAS>`_.
+The rocBLAS source code is available from the `rocBLAS folder <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_
+of the `rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries>`_.
 Verify the ROCm version on your system. On an Ubuntu distribution, use:
 
 .. code-block:: shell
@@ -131,17 +136,35 @@ For example, the ROCm version might be ``4.0.0.40000-23``. This corresponds to m
 minor release = ``0``, patch = ``0``, and build identifier ``40000-23``.
 The GitHub branches at the rocBLAS site have names like ``rocm-major.minor.x``,
 where the major and minor releases have the same meaning as in the ROCm version.
-To download rocBLAS, use the following command:
+
+To download rocBLAS, including all projects in the rocm-libraries repository, use the following commands.
 
 .. code-block:: shell
 
-   git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocBLAS.git
-   cd rocBLAS
+   git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocm-libraries.git
+   cd  rocm-libraries/projects/rocblas
 
 Replace ``x.y`` in the above command with the ROCm version installed on your machine.
-For example, if you have ROCm 6.2 installed, replace ``release/rocm-rel-x.y`` with ``release/rocm-rel-6.2``.
+For example, if you have ROCm 7.0 installed, replace ``release/rocm-rel-x.y`` with ``release/rocm-rel-7.0``.
 
+To limit your local checkout to only the rocBLAS and Tensile projects, configure ``sparse-checkout`` before cloning.
+This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.
+Use the following commands for a sparse checkout:
 
+.. code-block:: shell
+
+   git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries
+   git sparse-checkout init --cone
+   git sparse-checkout set projects/rocblas shared/tensile
+   git checkout develop # or use the branch you want to work with
+
+.. note::
+
+   To build ROCm 6.4 and older, use the rocBLAS repository at `<https://github.com/ROCm/rocBLAS>`_.
+   For more information, see the documentation associated with the release you want to build.
+
+The rocBLAS source code is found in the ``projects/rocblas`` directory.
 The following sections list the steps to build rocBLAS using the ``install.sh`` script.
 You can build either:
 
