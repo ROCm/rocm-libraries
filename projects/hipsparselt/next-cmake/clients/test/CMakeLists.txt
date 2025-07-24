@@ -37,7 +37,7 @@ target_link_libraries(hipsparselt-test PRIVATE
     hipsparselt-clients-common
     GTest::gtest 
     GTest::gtest_main
-    ${BLAS_LIBRARY}
+    ${BLAS_LIBRARIES_TO_LINK}
 )
 
 # Platform-specific linking for tests

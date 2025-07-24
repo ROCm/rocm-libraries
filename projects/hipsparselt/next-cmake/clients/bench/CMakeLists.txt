@@ -16,7 +16,7 @@ target_compile_definitions(hipsparselt-bench PRIVATE
     HIPSPARSELT_BENCH
 )
 
-target_link_libraries(hipsparselt-bench PRIVATE hipsparselt-clients-common ${BLAS_LIBRARY})
+target_link_libraries(hipsparselt-bench PRIVATE hipsparselt-clients-common ${BLAS_LIBRARIES_TO_LINK})
 
 # # Platform-specific linking
 # if(HIPSPARSELT_ENABLE_CUDA)

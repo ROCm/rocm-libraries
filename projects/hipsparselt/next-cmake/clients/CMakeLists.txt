@@ -3,27 +3,24 @@
 
 set(_CMAKE_CURRENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../clients")
 
-if(HIPSPARSELT_ENABLE_HIP)
-    find_package(cblas REQUIRED)
-endif()
-
 find_package(Threads REQUIRED)
 find_package(OpenMP REQUIRED)
 
-# if(NOT DEFINED CMAKE_Fortran_COMPILER AND NOT DEFINED ENV{FC})
-#   set(CMAKE_Fortran_COMPILER "gfortran")
-# endif()
+# Find BLAS libraries - need both BLAS implementation and cblas interface
+find_package(BLAS REQUIRED)
+find_package(cblas REQUIRED)
+find_package(LAPACK REQUIRED)
 
 # Set up BLAS library (prefer BLIS if available)
 if(HIPSPARSELT_ENABLE_BLIS)
     find_package(BLIS QUIET)
     if(BLIS_FOUND)
-        set(BLAS_LIBRARY BLIS::blis)
+        set(BLAS_LIBRARIES_TO_LINK BLIS::blis ${LAPACK_LIBRARIES})
     else()
-        set(BLAS_LIBRARY cblas)
+        set(BLAS_LIBRARIES_TO_LINK ${BLAS_LIBRARIES} ${CBLAS_LIBRARIES} ${LAPACK_LIBRARIES})
     endif()
 else()
-    set(BLAS_LIBRARY cblas)
+    set(BLAS_LIBRARIES_TO_LINK ${BLAS_LIBRARIES} ${CBLAS_LIBRARIES} ${LAPACK_LIBRARIES})
 endif()
 
 # TODO: Fix these to be found in the source tree during build?
