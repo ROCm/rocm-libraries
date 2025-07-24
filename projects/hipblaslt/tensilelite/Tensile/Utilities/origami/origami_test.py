@@ -13,6 +13,7 @@ def parseArguments():
     parser.add_argument("--transB", type=bool, default=False)
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--element_size", type=int, default=2)
+    parser.add_argument("--miDataType", type=int, default=4)
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--print", action="store_true")
     parser.add_argument("--wgm", type=int, default=6)
@@ -224,6 +225,7 @@ def main():
             args.element_size * 8,
             args.element_size * 8,
             args.element_size * 8,
+            args.miDataType,
             0,
             0.8,
             args.debug,
