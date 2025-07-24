@@ -5,7 +5,7 @@ on:
 
 env:
   MONOREPO_URL: github.com/ROCm/rocm-libraries.git
-  MONOREPO_BRANCH: release/rocm-rel-7.0
+  MONOREPO_BRANCH: ${{ github.ref_name }}
 
 jobs:
   setup-monorepo:
