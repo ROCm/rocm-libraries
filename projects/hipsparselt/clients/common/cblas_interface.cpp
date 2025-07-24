@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -765,6 +765,8 @@ void cblas_gemm<int8_t, hip_bfloat16, float>(hipsparseOrder_t     order,
         C[i] = static_cast<hip_bfloat16>(C_double[i]);
 }
 
+
+#ifdef HIP_FP8_TYPE_OCP
 template <>
 void cblas_gemm<__hip_fp8_e4m3, float, float>(hipsparseOrder_t      order,
                                               hipsparseOperation_t  transA,
@@ -942,3 +944,4 @@ void cblas_gemm<__hip_fp8_e5m2, float, float>(hipsparseOrder_t      order,
     for(size_t i = 0; i < sizeC; i++)
         C[i] = static_cast<float>(C_double[i]);
 }
+#endif
