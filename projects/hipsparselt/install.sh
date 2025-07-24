@@ -706,6 +706,7 @@ pushd .
 
   # Build library with AMD toolchain because of existense of device kernels
   if [[ "${build_relocatable}" == true ]]; then
+    echo "!!!!!!!!!!!!!!!!!!!!!! ${compiler} ${cmake_common_options} ${cmake_client_options} !!!!!!!!!!!!!!!!!!!!"
     FC=gfortran CXX=${compiler} CC=${compiler_c} ${cmake_executable} ${cmake_common_options} ${cmake_client_options} -DCPACK_SET_DESTDIR=OFF \
       -DCMAKE_INSTALL_PREFIX=${install_prefix} \
       -DCPACK_PACKAGING_INSTALL_PREFIX=${rocm_path} \
