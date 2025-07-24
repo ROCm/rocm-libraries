@@ -25,7 +25,8 @@
 #include <thrust/sort.h>
 #include <thrust/unique.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(MergeTests, FullTestsParams);
 TESTS_DEFINE(PrimitiveMergeTests, NumericalTestsParams);

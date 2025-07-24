@@ -852,6 +852,28 @@ namespace rocRoller
             return op;
         }
 
+        void deleteControlNode(KernelGraph& graph, int nodeIdx)
+        {
+            using namespace rocRoller::KernelGraph::ControlGraph;
+
+            {
+                auto incomingNodes
+                    = graph.control.getInputNodeIndices<ControlEdge>(nodeIdx).to<std::vector>();
+                for(auto inc : incomingNodes)
+                    graph.control.deleteElement(graph.control.findEdge(inc, nodeIdx).value());
+            }
+
+            {
+                auto outgoingNodes
+                    = graph.control.getOutputNodeIndices<ControlEdge>(nodeIdx).to<std::vector>();
+                for(auto out : outgoingNodes)
+                    graph.control.deleteElement(graph.control.findEdge(nodeIdx, out).value());
+            }
+
+            graph.control.deleteElement(nodeIdx);
+            graph.mapper.purge(nodeIdx);
+        }
+
         void updateThreadTileForLongDwords(int& t_m,
                                            int& t_n,
                                            int  maxWidth,

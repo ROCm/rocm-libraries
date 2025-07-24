@@ -83,7 +83,7 @@ namespace rocRollerTest
         EXPECT_THROW({ AssertFatal(IntA < IntB, ShowValue(IntB), message); }, FatalError);
 
         std::string expected = R"(
-            test/unit/ErrorTest.cpp:92: FatalError(IntA < IntB)
+            rocm-libraries/shared/rocroller/test/unit/ErrorTest.cpp:92: FatalError(IntA < IntB)
                 IntA = 5
             FatalError Test)";
 
@@ -115,7 +115,7 @@ namespace rocRollerTest
                      RecoverableError);
 
         std::string expected = R"(
-            test/unit/ErrorTest.cpp:125: RecoverableError(StrA == StrB)
+            rocm-libraries/shared/rocroller/test/unit/ErrorTest.cpp:125: RecoverableError(StrA == StrB)
                 StrA = StrA
                 StrB = StrB
             RecoverableError Test)";

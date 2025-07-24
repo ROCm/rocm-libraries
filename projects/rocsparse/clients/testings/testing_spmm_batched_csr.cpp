@@ -247,7 +247,14 @@ void testing_spmm_batched_csr(const Arguments& arg)
         for(size_t j = 0; j < nnz_A; j++)
         {
             hcsr_col_ind[nnz_A * i + j] = hcsr_col_ind_temp[j];
-            hcsr_val[nnz_A * i + j]     = hcsr_val_temp[j];
+            if(arg.convert_to_int)
+            {
+                hcsr_val[nnz_A * i + j] = convertToInt<A>(hcsr_val_temp[j]);
+            }
+            else
+            {
+                hcsr_val[nnz_A * i + j] = hcsr_val_temp[j];
+            }
         }
     }
 
@@ -260,6 +267,14 @@ void testing_spmm_batched_csr(const Arguments& arg)
     // Initialize data on CPU
     rocsparse_init<B>(hB, batch_count_B * nnz_B, 1, 1);
     rocsparse_init<C>(hC_1, batch_count_C * nnz_C, 1, 1);
+
+    if(arg.convert_to_int)
+    {
+        for(J i = 0; i < batch_count_B * nnz_B; i++)
+        {
+            hB[i] = convertToInt<B>(hB[i]);
+        }
+    }
 
     hC_2    = hC_1;
     hC_gold = hC_1;

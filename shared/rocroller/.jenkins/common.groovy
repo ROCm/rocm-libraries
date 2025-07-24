@@ -87,7 +87,7 @@ def runTestCommand (platform, project)
                 pushd build
                 echo Using `nproc` threads for testing.
                 OMP_NUM_THREADS=8 ctest -j ${numThreads} --output-on-failure ${testExclude}
-                export ROCROLLER_BUILD_DIR=`pwd`
+                export ROCROLLER_BUILD_DIR="\$(pwd)"
                 popd
                 scripts/rrperf generate --suite generate_gfx950 --arch gfx950
             """
@@ -308,7 +308,8 @@ def runPerformanceCommand (platform, project, mxDataGeneratorGitURL, mxDataGener
                         ${sshBlock}
 
                         #Run Performance Test
-                        export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:${project.paths.project_build_prefix}/build/
+                        export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH}:${project.paths.project_build_prefix}/build/"
+                        export ROCROLLER_BUILD_DIR="\$(pwd)/build"
 
                         ${masterCompareCommand}
 
@@ -371,7 +372,8 @@ def runPerformanceCommand (platform, project, mxDataGeneratorGitURL, mxDataGener
                         unzip archive.zip
 
                         #Run Performance Test
-                        export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:${project.paths.project_build_prefix}/build/
+                        export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH}:${project.paths.project_build_prefix}/build/"
+                        export ROCROLLER_BUILD_DIR="\$(pwd)/build"
                         ./scripts/rrperf run \\
                             --suite ${rrperfSuite} \\
                             --rundir "./performance_${platform.gpu}"
