@@ -118,12 +118,12 @@ if(HIPSPARSELT_ENABLE_CUDA)
   message(STATUS "Found cusparseLt: ${cusparselt_LIBRARY}")
 endif()
   
-# DELTEME
-get_cmake_property(_variableNames VARIABLES)
-list(SORT _variableNames)
-foreach(_variableName ${_variableNames})
-  message(STATUS "${_variableName} = [${${_variableName}}]")
-endforeach()
+# # DELTEME
+# get_cmake_property(_variableNames VARIABLES)
+# list(SORT _variableNames)
+# foreach(_variableName ${_variableNames})
+#   message(STATUS "${_variableName} = [${${_variableName}}]")
+# endforeach()
 
 if(HIPSPARSELT_ENABLE_HIP)
   set(HIPBLASLT_PATH "${HIPSPARSELT_HIPBLASLT_PATH}")
