@@ -24,8 +24,8 @@
 #  include <thrust/device_vector.h>
 #  include <thrust/host_vector.h>
 
-#  include "test_real_assertions.hpp"
 #  include "test_param_fixtures.hpp"
+#  include "test_real_assertions.hpp"
 #  include "test_utils.hpp"
 
 using BuiltinNumericTypes = ::testing::Types<

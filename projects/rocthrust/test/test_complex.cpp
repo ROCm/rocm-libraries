@@ -1298,4 +1298,3 @@ TYPED_TEST(ComplexPairsTests, TestInequalOperator_ThrustComplex_Scalar)
     },
     true);
 }
-

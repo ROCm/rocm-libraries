@@ -21,8 +21,8 @@
 #include <thrust/tabulate.h>
 #include <thrust/universal_vector.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
 using VectorTestsParams = ::testing::Types<
