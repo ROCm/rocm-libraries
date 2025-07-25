@@ -121,18 +121,6 @@ endif()
 if(HIPBLASLT_ENABLE_OPENMP)
     find_package(OpenMP REQUIRED)
 endif()
-if(HIPBLASLT_ENABLE_MSGPACK)
-    # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
-    # Prefer 6.x (msgpack-cxx)
-    find_package(msgpack-cxx CONFIG)
-    if(msgpack-cxx_FOUND)
-        message(STATUS "Found msgpack-cxx (>=6.x)")
-    else()
-        # TODO: set minimum version requied for *-cxx library
-        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack) 
-        message(STATUS "Found msgpack (<=5.x)")
-    endif()
-endif()
 
 if(HIPBLASLT_ENABLE_LLVM)
     find_package(LLVM REQUIRED)
@@ -189,6 +177,20 @@ if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBRARIES_SUPERBUILD)
         endif()
     endblock()
 endif()
+
+if(HIPBLASLT_ENABLE_MSGPACK)
+    # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
+    # Prefer 6.x (msgpack-cxx)
+    find_package(msgpack-cxx CONFIG)
+    if(msgpack-cxx_FOUND)
+        message(STATUS "Found msgpack-cxx (>=6.x)")
+    else()
+        # TODO: set minimum version requied for *-cxx library
+        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack) 
+        message(STATUS "Found msgpack (<=5.x)")
+    endif()
+endif()
+
 
 add_subdirectory(tensilelite)
 
