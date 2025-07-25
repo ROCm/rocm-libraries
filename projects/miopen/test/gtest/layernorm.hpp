@@ -520,7 +520,13 @@ protected:
 
     void Verify()
     {
-        auto threshold = std::is_same<T, float>::value ? 1.5e-5 : 4e-3;
+        // Take the greater of twice a random walk of floating point errors in the accumulator type
+        // or one floating point error in the buffer type
+        auto mantissa_bits = std::is_same<T, float>::value              ? 23
+                             : std::is_same<T, half_float::half>::value ? 10
+                                                                        : 7;
+        auto threshold =
+            std::max(2.0 * std::sqrt(output.GetSize()) / (1 << 23), 1.0 / (1 << mantissa_bits));
 
         auto error = miopen::rms_range(ref_output, output);
         EXPECT_TRUE(miopen::range_distance(ref_output) == miopen::range_distance(output));
@@ -699,7 +705,13 @@ protected:
 
     void Verify()
     {
-        auto threshold = std::is_same<T, float>::value ? 1.5e-5 : 4e-3;
+        // Take the greater of twice a random walk of floating point errors in the accumulator type
+        // or one floating point error in the buffer type
+        auto mantissa_bits = std::is_same<T, float>::value              ? 23
+                             : std::is_same<T, half_float::half>::value ? 10
+                                                                        : 7;
+        auto threshold =
+            std::max(2.0 * std::sqrt(dx.GetSize()) / (1 << 23), 1.0 / (1 << mantissa_bits));
 
         auto error = miopen::rms_range(ref_dx, dx);
         EXPECT_TRUE(miopen::range_distance(ref_dx) == miopen::range_distance(dx));

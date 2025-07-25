@@ -77,7 +77,7 @@ public:
     int RunBackwardGPU() override;
     int RunBackwardCPU();
 
-    T GetTolerance();
+    double GetTolerance();
     int VerifyBackward() override;
     int VerifyForward() override;
     ~LayerNormDriver() override
@@ -527,15 +527,15 @@ int LayerNormDriver<T>::RunBackwardCPU()
 }
 
 template <typename T>
-T LayerNormDriver<T>::GetTolerance()
+double LayerNormDriver<T>::GetTolerance()
 {
-    // Computation error of fp16 is ~2^13 (=8192) bigger than
-    // the one of fp32 because mantissa is shorter by 13 bits.
-    auto tolerance = std::is_same<T, float>::value ? 1.5e-6 : 8.2e-3;
-
-    // bf16 mantissa has 7 bits, by 3 bits shorter than fp16.
-    if(std::is_same<T, bfloat16>::value)
-        tolerance *= 8.0;
+    // Take the greater of twice a random walk of floating point errors in the accumulator type or
+    // one floating point error in the buffer type
+    auto mantissa_bits = std::is_same<T, float>::value              ? 23
+                         : std::is_same<T, half_float::half>::value ? 10
+                                                                    : 7;
+    auto tolerance =
+        std::max(2.0 * std::sqrt(in.GetSize()) / (1 << 23), 1.0 / (1 << mantissa_bits));
     return tolerance;
 }
 
@@ -543,7 +543,7 @@ template <typename T>
 int LayerNormDriver<T>::VerifyForward()
 {
     RunForwardCPU();
-    const T tolerance       = GetTolerance();
+    const double tolerance  = GetTolerance();
     auto error              = miopen::rms_range(outhost, out);
     std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
 
@@ -592,7 +592,7 @@ template <typename T>
 int LayerNormDriver<T>::VerifyBackward()
 {
     RunBackwardCPU();
-    const T tolerance       = GetTolerance();
+    const double tolerance  = GetTolerance();
     auto error              = miopen::rms_range(dxhost, dx);
     std::string solver_type = use_multithread ? "multi-threaded" : "single-threaded";
 
