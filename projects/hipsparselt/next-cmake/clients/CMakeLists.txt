@@ -1,5 +1,4 @@
-# Copyright Advanced Micro Devices, Inc., or its affiliates.
-# SPDX-License-Identifier: MIT
+# Copyright Advanced Micro Devices, Inc., or its affiliates. SPDX-License-Identifier: MIT
 
 set(_CMAKE_CURRENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../clients")
 
@@ -13,19 +12,24 @@ find_package(LAPACK REQUIRED)
 
 # Optional BLIS support
 if(HIPSPARSELT_ENABLE_BLIS)
-    find_package(BLIS QUIET)
+  find_package(BLIS QUIET)
 endif()
 
-
 # TODO: Fix these to be found in the source tree during build?
-configure_file("${_CMAKE_CURRENT_SOURCE_DIR}/include/hipsparselt_common.yaml"
-               "${CMAKE_CURRENT_BINARY_DIR}/staging/hipsparselt_common.yaml" COPYONLY)
+configure_file(
+  "${_CMAKE_CURRENT_SOURCE_DIR}/include/hipsparselt_common.yaml"
+  "${CMAKE_CURRENT_BINARY_DIR}/staging/hipsparselt_common.yaml" COPYONLY
+)
 
-configure_file("${_CMAKE_CURRENT_SOURCE_DIR}/include/hipsparselt_template.yaml"
-               "${CMAKE_CURRENT_BINARY_DIR}/staging/hipsparselt_template.yaml" COPYONLY)
+configure_file(
+  "${_CMAKE_CURRENT_SOURCE_DIR}/include/hipsparselt_template.yaml"
+  "${CMAKE_CURRENT_BINARY_DIR}/staging/hipsparselt_template.yaml" COPYONLY
+)
 
-configure_file("${_CMAKE_CURRENT_SOURCE_DIR}/common/hipsparselt_gentest.py"
-               "${CMAKE_CURRENT_BINARY_DIR}/staging/hipsparselt_gentest.py" COPYONLY)
+configure_file(
+  "${_CMAKE_CURRENT_SOURCE_DIR}/common/hipsparselt_gentest.py"
+  "${CMAKE_CURRENT_BINARY_DIR}/staging/hipsparselt_gentest.py" COPYONLY
+)
 
 add_library(hipsparselt-clients-common OBJECT)
 
@@ -34,63 +38,62 @@ target_compile_features(hipsparselt-clients-common PRIVATE cxx_std_17)
 target_compile_definitions(hipsparselt-clients-common PUBLIC HIPSPARSELT_INTERNAL_API)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(hipsparselt-clients-common PUBLIC -mf16c)
+  target_compile_options(hipsparselt-clients-common PUBLIC -mf16c)
 endif()
-    
-target_sources(hipsparselt-clients-common PRIVATE
-    "${_CMAKE_CURRENT_SOURCE_DIR}/common/singletons.cpp"
-    "${_CMAKE_CURRENT_SOURCE_DIR}/common/utility.cpp"
-    "${_CMAKE_CURRENT_SOURCE_DIR}/common/cblas_interface.cpp"
-    "${_CMAKE_CURRENT_SOURCE_DIR}/common/argument_model.cpp"
-    "${_CMAKE_CURRENT_SOURCE_DIR}/common/hipsparselt_parse_data.cpp"
-    "${_CMAKE_CURRENT_SOURCE_DIR}/common/hipsparselt_arguments.cpp"
-    "${_CMAKE_CURRENT_SOURCE_DIR}/common/hipsparselt_random.cpp")
 
-target_include_directories(hipsparselt-clients-common
-    PUBLIC
-        $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}/include/spmm>
-        $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}/../library/include>
-        # Ideally, for the build interface, we can just look into the source tree
-        $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
-        # TODO: This is a hack to allow the clients to find the headers during build
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+target_sources(
+  hipsparselt-clients-common
+  PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/common/singletons.cpp"
+          "${_CMAKE_CURRENT_SOURCE_DIR}/common/utility.cpp"
+          "${_CMAKE_CURRENT_SOURCE_DIR}/common/cblas_interface.cpp"
+          "${_CMAKE_CURRENT_SOURCE_DIR}/common/argument_model.cpp"
+          "${_CMAKE_CURRENT_SOURCE_DIR}/common/hipsparselt_parse_data.cpp"
+          "${_CMAKE_CURRENT_SOURCE_DIR}/common/hipsparselt_arguments.cpp"
+          "${_CMAKE_CURRENT_SOURCE_DIR}/common/hipsparselt_random.cpp"
+)
+
+target_include_directories(
+  hipsparselt-clients-common
+  PUBLIC $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}/include>
+         $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}/include/spmm>
+         $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}/../library/include>
+         # Ideally, for the build interface, we can just look into the source tree
+         $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
+         # TODO: This is a hack to allow the clients to find the headers during build
+         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 if(HIPSPARSELT_ENABLE_CUDA)
-    target_compile_definitions(hipsparselt-clients-common PUBLIC __HIP_PLATFORM_NVIDIA__)
-    target_include_directories(hipsparselt-clients-common PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
-    target_link_libraries(hipsparselt-clients-common PUBLIC CUDA::cudart CUDA::cuda_driver)
+  target_compile_definitions(hipsparselt-clients-common PUBLIC __HIP_PLATFORM_NVIDIA__)
+  target_include_directories(hipsparselt-clients-common PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
+  target_link_libraries(hipsparselt-clients-common PUBLIC CUDA::cudart CUDA::cuda_driver)
 else()
-    target_compile_definitions(hipsparselt-clients-common PUBLIC __HIP_PLATFORM_AMD__ ROCM_USE_FLOAT16)
-    target_link_libraries(hipsparselt-clients-common PUBLIC hip::host hip::device)
+  target_compile_definitions(
+    hipsparselt-clients-common PUBLIC __HIP_PLATFORM_AMD__ ROCM_USE_FLOAT16
+  )
+  target_link_libraries(hipsparselt-clients-common PUBLIC hip::host hip::device)
 endif()
 
-target_link_libraries(hipsparselt-clients-common
-    PRIVATE
-        Threads::Threads
-    PUBLIC 
-        roc::hipsparselt
-)
+target_link_libraries(hipsparselt-clients-common PRIVATE Threads::Threads PUBLIC roc::hipsparselt)
 
 if(TARGET OpenMP::OpenMP_CXX)
-    target_link_libraries(hipsparselt-clients-common PUBLIC OpenMP::OpenMP_CXX)
+  target_link_libraries(hipsparselt-clients-common PUBLIC OpenMP::OpenMP_CXX)
 endif()
 
-set_target_properties(hipsparselt-clients-common PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+set_target_properties(
+  hipsparselt-clients-common PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
 )
 
-# Add subdirectories 
+# Add subdirectories
 # ============================================================================
 if(HIPSPARSELT_ENABLE_SAMPLES)
-    add_subdirectory(samples)
+  add_subdirectory(samples)
 endif()
 
 if(HIPSPARSELT_ENABLE_BENCHMARKS)
-    add_subdirectory(bench)
+  add_subdirectory(bench)
 endif()
 
 if(HIPSPARSELT_BUILD_TESTING OR BUILD_TESTING)
-    add_subdirectory(test)
+  add_subdirectory(test)
 endif()

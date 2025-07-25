@@ -40,7 +40,9 @@ endif()
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile_commands.json for clang tooling support" ON)
 
 option(HIPSPARSELT_ENABLE_CUDA "Build hipSPARSELt with CUDA backend." OFF)
-cmake_dependent_option(HIPSPARSELT_ENABLE_HIP "Build hipSPARSELt with HIP backend." ON "NOT HIPSPARSELT_ENABLE_CUDA" OFF)
+cmake_dependent_option(
+  HIPSPARSELT_ENABLE_HIP "Build hipSPARSELt with HIP backend." ON "NOT HIPSPARSELT_ENABLE_CUDA" OFF
+)
 if(HIPSPARSELT_ENABLE_CUDA AND HIPSPARSELT_ENABLE_HIP)
   message(STATUS "HIPSPARSELT_ENABLE_CUDA: ${HIPSPARSELT_ENABLE_CUDA}")
   message(STATUS "HIPSPARSELT_ENABLE_HIP: ${HIPSPARSELT_ENABLE_HIP}")
@@ -121,13 +123,6 @@ if(HIPSPARSELT_ENABLE_CUDA)
 
   message(STATUS "Found cusparseLt: ${cusparselt_LIBRARY}")
 endif()
-  
-# # DELTEME
-# get_cmake_property(_variableNames VARIABLES)
-# list(SORT _variableNames)
-# foreach(_variableName ${_variableNames})
-#   message(STATUS "${_variableName} = [${${_variableName}}]")
-# endforeach()
 
 if(HIPSPARSELT_ENABLE_HIP)
   set(HIPBLASLT_PATH "${HIPSPARSELT_HIPBLASLT_PATH}")
@@ -206,14 +201,16 @@ endif()
 rocm_install(
   TARGETS hipsparselt
   EXPORT hipsparselt-targets
-  ARCHIVE COMPONENT "devel"
-  LIBRARY COMPONENT "runtime"
-  RUNTIME COMPONENT "runtime"
+  ARCHIVE
+  COMPONENT "devel"
+  LIBRARY
+  COMPONENT "runtime"
+  RUNTIME
+  COMPONENT "runtime"
 )
 
 rocm_install(
-  DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/include/"
-  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+  DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/include/" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   COMPONENT "devel"
 )
 
@@ -221,7 +218,8 @@ rocm_export_targets(
   NAMESPACE roc::
   TARGETS hipsparselt
   EXPORT hipsparselt-targets
-  DEPENDS PACKAGE hip
+  DEPENDS
+  PACKAGE hip
 )
 
 if(HIPSPARSELT_ENABLE_CLIENT)
@@ -263,8 +261,7 @@ rocm_create_package(
   DESCRIPTION "ROCm structured sparsity matrix multiplication marshalling library"
   MAINTAINER "hipSPARSELt Maintainer <hipsparselt-maintainer@amd.com>"
   LDCONFIG
-  LDCONFIG_DIR
-  ${HIPSPARSELT_CONFIG_DIR}
+  LDCONFIG_DIR ${HIPSPARSELT_CONFIG_DIR}
 )
 
 # Coverage Setup
@@ -273,4 +270,3 @@ if(HIPSPARSELT_BUILD_COVERAGE)
   target_compile_options(hipsparselt PRIVATE -fprofile-arcs -ftest-coverage)
   target_link_libraries(hipsparselt PRIVATE --coverage -lgcov)
 endif()
-
