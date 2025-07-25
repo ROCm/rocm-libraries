@@ -86,6 +86,9 @@ namespace MemoryTracerTest
         for(auto& t : transforms)
             kgraph = kgraph.transform(t);
 
+        std::ofstream file("lds_bank_conflicts.dot");
+        file << kgraph.toDOT() << std::endl;
+
         auto summary = memoryTrace(kgraph, {});
         std::cout << summary << std::endl;
     }

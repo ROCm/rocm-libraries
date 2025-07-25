@@ -32,6 +32,7 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/AliasDataFlowTagsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AnnotateInstructionsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ArgumentTracerTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/BenchmarkLDS.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/BinaryExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/BranchGeneratorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CommandArgumentValueTest.cpp"
