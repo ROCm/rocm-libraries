@@ -37,6 +37,8 @@
 // for complex number, the real/imag part would be initialized with the same value
 
 // Initialize vector with random values
+// If use_exact is false (default value), the values will be random floating point values
+// If use_exact is true, the values will be integers in the range [a, b]
 template <typename T>
 void rocsparse_init(T*     A,
                     size_t M,
@@ -48,6 +50,7 @@ void rocsparse_init(T*     A,
                     T      a           = static_cast<T>(0),
                     T      b           = static_cast<T>(1));
 
+// Initialize vector with random floating point values
 template <typename T>
 void rocsparse_init_inexact(T*     A,
                             size_t M,
@@ -69,6 +72,9 @@ void rocsparse_init_exact(T*     A,
                           int    a           = 1,
                           int    b           = 10);
 
+// Initialize vector with random values
+// If use_exact is false (default value), the values will be random floating point values
+// If use_exact is true, the values will be integers in the range [a, b]
 template <typename T>
 void rocsparse_init(std::vector<T>& A,
                     size_t          M,
@@ -80,6 +86,7 @@ void rocsparse_init(std::vector<T>& A,
                     T               a           = static_cast<T>(0),
                     T               b           = static_cast<T>(1));
 
+// Initialize vector with random floating point values
 template <typename T>
 void rocsparse_init_inexact(std::vector<T>& A,
                             size_t          M,
