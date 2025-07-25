@@ -774,6 +774,16 @@ namespace TensileLite
                                      size_t          mx_block_size,
                                      bool            debug)
         {
+            //Override dot2 instruction with vector lane widths
+            if(MI_N == 0 && MI_M == 0 && MI_K == 0)
+            {
+                // We only use Dot2 for NN layout where M < 3
+                if (M > 2 || transA || transB)
+                    return std::numeric_limits<double>::max();
+                MI_M = 1;
+                MI_N = 1;
+                MI_K = 64;
+            }
 
             //std::cout << "Split " << split << "\n";
             H_mem1
@@ -838,6 +848,15 @@ namespace TensileLite
 
             if(enable_heuristics)
             {
+                if(MI_M == 1 && MI_N == 1 && MI_K == 64)
+                {
+                    // Dot2 kernels
+                    if(MT_M == M || MT_K == K)
+                    {
+                        total_latency = total_latency * 0.8;
+                    }
+                }
+
                 if(MT_M == 256 && MT_N == 256 && MT_K == 128 && (element_size_A == 8))
                 {
                     //The kernel for this is more optimized
