@@ -819,6 +819,15 @@ namespace GEMMDriverTest
 
                 if(debuggable && !res.ok)
                 {
+                    const auto asmFileName = commandKernel.getKernelName() + ".s";
+                    const auto logFileName = commandKernel.getKernelName() + ".log";
+
+                    // Write to file on error
+                    std::ofstream asmFile(asmFileName);
+                    std::ofstream logFile(logFileName);
+                    asmFile << commandKernel.getInstructions() << std::endl;
+
+                    const auto instructions = commandKernel.getInstructions();
                     for(size_t i = 0; i < M; i++)
                     {
                         for(size_t j = 0; j < N; j++)
@@ -828,11 +837,11 @@ namespace GEMMDriverTest
                             if((a - b) * (a - b) / (b * b)
                                > res.acceptableError.relativeL2Tolerance)
                             {
-                                std::cout << std::setw(8) << i << std::setw(8) << j //
-                                          << std::setw(16) << std::scientific << a //
-                                          << std::setw(16) << std::scientific << b //
-                                          << std::setw(16) << std::scientific << a - b //
-                                          << std::endl;
+                                logFile << std::setw(8) << i << std::setw(8) << j //
+                                        << std::setw(16) << std::scientific << a //
+                                        << std::setw(16) << std::scientific << b //
+                                        << std::setw(16) << std::scientific << a - b //
+                                        << std::endl;
                             }
                         }
                     }
