@@ -586,6 +586,48 @@ public:
     reset();
   }
 
+  //==========================================================================
+  // Observers
+  //==========================================================================
+
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 auto operator[](size_t i) const noexcept
+  {
+    return m_ptr[i];
+  }
+
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer get() const noexcept
+  {
+    return m_ptr;
+  }
+
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 T* get_raw() const noexcept
+  {
+    return thrust::raw_pointer_cast(m_ptr);
+  }
+
+
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 deleter_type& get_deleter() noexcept
+  {
+    return m_deleter;
+  }
+
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 const deleter_type& get_deleter() const noexcept
+  {
+    return m_deleter;
+  }
+
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit operator bool() const noexcept
+  {
+    return m_ptr != nullptr;
+  }
+
+  //==========================================================================
+  // Modifiers
+  //==========================================================================
+  
+
+
+
 };
 
 template <class T, class D, typename std::enable_if<std::is_swappable<D>::value, void>::type>
