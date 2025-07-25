@@ -773,7 +773,7 @@ namespace rocRoller
 
         KernelGraph UnrollLoops::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::unrollLoops");
+            TIMER(t, "KernelGraph::UnrollLoops");
             auto graph = original;
             commit(graph);
             return graph;

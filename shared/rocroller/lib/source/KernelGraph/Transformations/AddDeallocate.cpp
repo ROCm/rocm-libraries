@@ -394,7 +394,7 @@ namespace rocRoller::KernelGraph
 
     KernelGraph AddDeallocateDataFlow::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::addDeallocateDataFlow");
+        TIMER(t, "KernelGraph::AddDeallocateDataFlow");
         rocRoller::Log::getLogger()->debug("KernelGraph::addDeallocateDataFlow()");
 
         auto graph = original;
@@ -408,7 +408,7 @@ namespace rocRoller::KernelGraph
 
     KernelGraph AddDeallocateArguments::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::addDeallocateArguments");
+        TIMER(t, "KernelGraph::AddDeallocateArguments");
         rocRoller::Log::getLogger()->debug("KernelGraph::addDeallocate()");
 
         auto graph  = original;
@@ -423,7 +423,7 @@ namespace rocRoller::KernelGraph
 
     KernelGraph MergeAdjacentDeallocates::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::mergeAdjacentDeallocates");
+        TIMER(t, "KernelGraph::MergeAdjacentDeallocates");
         rocRoller::Log::getLogger()->debug("KernelGraph::mergeAdjacentDeallocates()");
 
         auto graph = original;

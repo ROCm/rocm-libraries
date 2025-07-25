@@ -411,6 +411,8 @@ namespace rocRoller
 
         KernelGraph SetWorkitemCount::apply(KernelGraph const& original)
         {
+            TIMER(t, "KernelGraph::SetWorkitemCount");
+
             auto workgroupSize = m_context->kernel()->workgroupSize();
             auto workitemCount = std::array<ExpressionPtr, 3>{nullptr, nullptr, nullptr};
             auto workgroupTags = original.coordinates.getNodes<Workgroup>().to<std::vector>();

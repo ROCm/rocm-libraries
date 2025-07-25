@@ -40,7 +40,7 @@ namespace rocRoller
 
         KernelGraph CleanLoops::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::cleanLoops");
+            TIMER(t, "KernelGraph::CleanLoops");
 
             auto k = original;
             for(auto const& loop : k.control.getNodes<ForLoopOp>().to<std::vector>())

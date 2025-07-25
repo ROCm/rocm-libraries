@@ -243,6 +243,8 @@ namespace rocRoller
 
         KernelGraph IdentifyParallelDimensions::apply(KernelGraph const& original)
         {
+	    TIMER(t, "KernelGraph::IdentifyParallelDimensions");
+
             auto copy = original;
 
             auto parallelDims = mergeSets(identifyParallelDimensionSets(copy));

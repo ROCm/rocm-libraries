@@ -148,7 +148,7 @@ namespace rocRoller
 
         KernelGraph InlineIncrements::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::inlineIncrements");
+            TIMER(t, "KernelGraph::InlineIncrementer");
 
             auto graph     = original;
             auto transform = InlineIncrementer();

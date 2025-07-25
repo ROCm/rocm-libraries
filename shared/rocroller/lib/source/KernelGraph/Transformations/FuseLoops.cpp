@@ -436,7 +436,7 @@ namespace rocRoller
 
         KernelGraph FuseLoops::apply(KernelGraph const& k)
         {
-            TIMER(t, "KernelGraph::fuseLoops");
+            TIMER(t, "KernelGraph::FuseLoops");
 
             auto newGraph = k;
 

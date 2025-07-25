@@ -397,6 +397,8 @@ namespace rocRoller
 
         KernelGraph ConnectWorkgroups::apply(KernelGraph const& original)
         {
+	    TIMER(t, "KernelGraph::ConnectWorkgroups");
+
             using namespace ConnectWorkgroupsDetail;
 
             auto kgraph = original;

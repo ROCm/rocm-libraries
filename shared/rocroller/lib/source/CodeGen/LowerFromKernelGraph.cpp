@@ -1290,7 +1290,7 @@ namespace rocRoller
                                             std::optional<ControlFlowArgumentTracer> argTracer)
         {
 
-            TIMER(t, "KernelGraph::generate");
+            TIMER(t, "LowerFromKernelGraph::generate");
             auto graphPtr = std::make_shared<KernelGraph>(std::move(graph));
 
             if(Settings::getInstance()->get(Settings::LogGraphs))

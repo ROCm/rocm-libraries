@@ -186,7 +186,7 @@ namespace rocRoller::KernelGraph
 
     KernelGraph FuseExpressions::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::fuseExpressions");
+        TIMER(t, "KernelGraph::FuseExpressions");
         return fuseMultiplyAdd(original);
     }
 }

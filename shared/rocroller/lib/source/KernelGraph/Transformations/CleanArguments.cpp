@@ -315,7 +315,7 @@ namespace rocRoller
          */
         KernelGraph CleanArguments::apply(KernelGraph const& k)
         {
-            TIMER(t, "KernelGraph::cleanArguments");
+            TIMER(t, "KernelGraph::CleanArguments");
             rocRoller::Log::getLogger()->debug("KernelGraph::cleanArguments()");
             auto visitor = CleanArgumentsVisitor(k, m_context, m_command);
             return rewriteDimensions(k, visitor);
