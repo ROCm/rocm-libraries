@@ -24,9 +24,6 @@
  *
  *******************************************************************************/
 
-// TODO: if this header is only used for batch norm, it should also use the type defined
-// in configurations.hpp. We should move these common parts into a separate header,
-// maybe call it `batchnorm_common.hpp`.
 #ifndef MIOPEN_NRN_OP_ID
 #define MIOPEN_NRN_OP_ID 0
 #endif
