@@ -1273,8 +1273,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
             iterCode.add(SSetPrior(prior=3, comment="store optimization"))
         if (mfmaIndex >= self.states.lwStartMfmaIndex):
           numLoops, itemCounter = calculateRangeAndUpdateCounter(itemCounter, localWriteCodeCounts, self.states.numLocalWriteModPerMfma)
-          if kernel["D_U_iseqMI_K"]:
-            numLoops = 2
           for j in range(min(len(writeItems), numLoops)):
             # in case there are localWrite and globalread in same iteration
             # we need to make sure globalRead before localWrite
@@ -1287,11 +1285,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 skipLocalWriteWaitcnt += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
               if not localReadItemsThisLoop:
                 self.states.perIterLocalWriteCanSkip[iteration] += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
-            if kernel["D_U_iseqMI_K"] and (writeItems and i == (numMfmaPerIter - 1)):
-              # if D_U_iseqMI_K, we need to schedule all localWrite in last mfma
-              while writeItems:      
-                writeItem = writeItems.pop(0)
-                iterCode.add(writeItem)
+          if kernel["D_U_iseqMI_K"] and (writeItems and i == (numMfmaPerIter - 1)):
+            # if D_U_iseqMI_K, we need to schedule all localWrite in last mfma
+            while writeItems:      
+              writeItem = writeItems.pop(0)
+              iterCode.add(writeItem)
         if mfmaIndex == self.states.lwEndMfmaIndex:
           while writeItems:
             localWriteCodeCounts.pop(0)
