@@ -621,6 +621,10 @@ namespace rocRoller
                     concatenate("Assign dim(", dimTag, ") = ", assign.expression));
 
                 auto scope = m_context->getScopeManager();
+
+                auto maybeOffset = m_graph->coordinates.get<Offset>(dimTag).has_value();
+                // auto maybeStride = assign.strideExpressionAttributes.has_value();
+
                 if(assign.strideExpressionAttributes)
                 {
                     co_yield Instruction::Comment("Assign stride expression");
@@ -630,6 +634,16 @@ namespace rocRoller
                         *(assign.strideExpressionAttributes));
                     scope->addRegister(dimTag);
                 }
+                // else if (maybeOffset)
+                // {
+                //     // auto tagger = m_context->registerTagManager();
+                //     AssertFatal(assign.variableType);
+                //     auto varType = (assign.variableType) ? ssign.variableType.value() : resultVariableType(assign.expression);
+                //     auto offsetReg = m_context->registerTagManager()->getRegister(dimTag, assign.regType, assign.variableType.value(), 1);
+                //     offsetReg->setName(concatenate("Offset", tag));
+                //     scope->addRegister(dimTag);
+                //     co_yield Expression::generate(offsetReg, assign.expression, m_context);
+                // }
                 else
                 {
                 scope->addRegister(dimTag);

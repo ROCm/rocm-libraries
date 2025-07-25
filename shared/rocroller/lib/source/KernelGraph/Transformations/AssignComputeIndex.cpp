@@ -245,7 +245,7 @@ namespace rocRoller
 
             if(ci.isDirect2LDS)
             {
-                std::cout << "ci isDirect2LDS, make scalar" << std::endl;
+                // std::cout << "ci isDirect2LDS, make scalar" << std::endl;
                 // expr = Expression::ToScalar(expr);
 
                 expr = std::make_shared<Expression::Expression>(Expression::ToScalar{expr});
@@ -403,7 +403,7 @@ namespace rocRoller
 
             // search candidates
             auto candidates = kgraph.control.findNodes( *kgraph.control.roots().begin(), isComputeIndexPredicate).to<std::vector>();
-            std::cout << "Number of ComputeIndex nodes " << candidates.size() << std::endl;
+            // std::cout << "Number of ComputeIndex nodes " << candidates.size() << std::endl;
 
             std::vector<std::tuple<int, int, int>> ciAndAssign;
 
@@ -517,7 +517,7 @@ namespace rocRoller
 
                 if (assignStrideTag != -1 || assignBaseTag != -1)
                 {
-                    std::cout << "YL: add (ciTag, assignBaseTag, assignStrideTag) " << tag << ", " << assignBaseTag << ", " << assignStrideTag << std::endl;
+                    // std::cout << "YL: add (ciTag, assignBaseTag, assignStrideTag) " << tag << ", " << assignBaseTag << ", " << assignStrideTag << std::endl;
                     ciAndAssign.push_back({tag, assignBaseTag, assignStrideTag});
                 }
             }
