@@ -456,6 +456,10 @@ private:
                         thrust::detail::and_<thrust::detail::not_<thrust::detail::is_reference<D>>,
                                              thrust::detail::is_convertible<E, D>>>::value>::type;
 
+  template <class E>
+  using EnableIfDeleterAssignable =
+    typename thrust::detail::enable_if<thrust::detail::is_assignable<D&, E&&>::value>::type;
+
 public:
   //==========================================================================
   // Constructors
@@ -546,6 +550,35 @@ public:
       : m_ptr(u.release())
       , m_deleter(std::forward<Ep>(u.get_deleter()))
   {}
+
+  //==========================================================================
+  // Assignment
+  //==========================================================================
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(unique_ptr&& p) noexcept
+  {
+    reset(p.release());
+    m_deleter = std::forward<deleter_type>(p.get_deleter());
+    return *this;
+  }
+
+  template <class Up,
+            class Ep,
+            class = EnableIfMoveConvertible<unique_ptr<Up, Ep>, Up>,
+            class = EnableIfDeleterAssignable<Ep>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(unique_ptr<Up, Ep>&& p) noexcept
+  {
+    reset(p.release());
+    m_deleter = std::forward<Ep>(p.get_deleter());
+    return *this;
+  }
+
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr& operator=(std::nullptr_t) noexcept
+  {
+    reset();
+    return *this;
+  }
+
+
 };
 
 template <class T, class D, typename std::enable_if<std::is_swappable<D>::value, void>::type>
