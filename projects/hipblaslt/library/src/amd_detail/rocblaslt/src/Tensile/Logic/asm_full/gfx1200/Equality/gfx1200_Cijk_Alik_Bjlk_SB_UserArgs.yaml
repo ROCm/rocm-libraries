@@ -110,8 +110,8 @@
     ExpandPointerSwap: 0
     ForceDisableShadowInit: false
     GlobalReadPerMfma: 1
-    GlobalReadVectorWidthA: 4
-    GlobalReadVectorWidthB: 4
+    GlobalReadVectorWidthA: 2
+    GlobalReadVectorWidthB: 2
     GlobalSplitU: 1
     GlobalSplitUAlgorithm: MultipleBuffer
     GlobalSplitUCoalesced: false
