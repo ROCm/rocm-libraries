@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -85,34 +85,38 @@ rocblas_status rocblas_internal_gemm_ex_typecasting_64(rocblas_handle     handle
         = BATCHED ? "rocblas_gemm_batched_ex_64"
                   : (stride_a ? "rocblas_gemm_strided_batched_ex_64" : "rocblas_gemm_ex_64");
 
-    if(check_numerics && !std::is_same_v<Ti, signed char>)
+    constexpr bool check_numerics_supported = !std::is_same_v<Ti, int8_t>;
+    if constexpr(check_numerics_supported)
     {
-        bool           is_input = true;
-        rocblas_status gemm_ex_check_numerics_status
-            = rocblas_gemm_check_numerics(rocblas_gemm_ex_name,
-                                          handle,
-                                          trans_a,
-                                          trans_b,
-                                          m_64,
-                                          n_64,
-                                          k_64,
-                                          (Ta)a,
-                                          offsetAin,
-                                          lda_64,
-                                          stride_a,
-                                          (Tb)b,
-                                          offsetBin,
-                                          ldb_64,
-                                          stride_b,
-                                          (Tc)c,
-                                          offsetCin,
-                                          ldc_64,
-                                          stride_c,
-                                          batch_count_64,
-                                          check_numerics,
-                                          is_input);
-        if(gemm_ex_check_numerics_status != rocblas_status_success)
-            return gemm_ex_check_numerics_status;
+        if(check_numerics)
+        {
+            bool           is_input = true;
+            rocblas_status gemm_ex_check_numerics_status
+                = rocblas_gemm_check_numerics(rocblas_gemm_ex_name,
+                                              handle,
+                                              trans_a,
+                                              trans_b,
+                                              m_64,
+                                              n_64,
+                                              k_64,
+                                              (Ta)a,
+                                              offsetAin,
+                                              lda_64,
+                                              stride_a,
+                                              (Tb)b,
+                                              offsetBin,
+                                              ldb_64,
+                                              stride_b,
+                                              (Tc)c,
+                                              offsetCin,
+                                              ldc_64,
+                                              stride_c,
+                                              batch_count_64,
+                                              check_numerics,
+                                              is_input);
+            if(gemm_ex_check_numerics_status != rocblas_status_success)
+                return gemm_ex_check_numerics_status;
+        }
     }
 
     constexpr int64_t limit = c_i32_max * 16; // source kernels must have m and n blocks >= 16
@@ -174,34 +178,37 @@ rocblas_status rocblas_internal_gemm_ex_typecasting_64(rocblas_handle     handle
             return status;
     }
 
-    if(check_numerics && !std::is_same_v<Ti, signed char>)
+    if constexpr(check_numerics_supported)
     {
-        bool           is_input = false;
-        rocblas_status gemm_ex_check_numerics_status
-            = rocblas_gemm_check_numerics(rocblas_gemm_ex_name,
-                                          handle,
-                                          trans_a,
-                                          trans_b,
-                                          m_64,
-                                          n_64,
-                                          k_64,
-                                          (Ta)a,
-                                          offsetAin,
-                                          lda_64,
-                                          stride_a,
-                                          (Tb)b,
-                                          offsetBin,
-                                          ldb_64,
-                                          stride_b,
-                                          (Td)d,
-                                          offsetDin,
-                                          ldd_64,
-                                          stride_d,
-                                          batch_count_64,
-                                          check_numerics,
-                                          is_input);
-        if(gemm_ex_check_numerics_status != rocblas_status_success)
-            return gemm_ex_check_numerics_status;
+        if(check_numerics)
+        {
+            bool           is_input = false;
+            rocblas_status gemm_ex_check_numerics_status
+                = rocblas_gemm_check_numerics(rocblas_gemm_ex_name,
+                                              handle,
+                                              trans_a,
+                                              trans_b,
+                                              m_64,
+                                              n_64,
+                                              k_64,
+                                              (Ta)a,
+                                              offsetAin,
+                                              lda_64,
+                                              stride_a,
+                                              (Tb)b,
+                                              offsetBin,
+                                              ldb_64,
+                                              stride_b,
+                                              (Td)d,
+                                              offsetDin,
+                                              ldd_64,
+                                              stride_d,
+                                              batch_count_64,
+                                              check_numerics,
+                                              is_input);
+            if(gemm_ex_check_numerics_status != rocblas_status_success)
+                return gemm_ex_check_numerics_status;
+        }
     }
 
     return status;

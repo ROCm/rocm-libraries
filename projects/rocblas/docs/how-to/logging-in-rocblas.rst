@@ -8,31 +8,15 @@
 rocBLAS logging
 ********************************************************************
 
-You can set four environment variables to control logging:
+You can set five environment variables to control logging:
 
-* ``ROCBLAS_LAYER``
+.. _rocblas_logging_env:
 
-* ``ROCBLAS_LOG_TRACE_PATH``
-
-* ``ROCBLAS_LOG_BENCH_PATH``
-
-* ``ROCBLAS_LOG_PROFILE_PATH``
+.. include:: ../data/reference/env-variables/logging-env.rst
 
 .. caution::
 
    Performance will degrade when logging is enabled.
-
-``ROCBLAS_LAYER`` is a bitwise OR of zero or more bit masks as follows:
-
-*  If ``ROCBLAS_LAYER`` is not set, then there is no logging.
-
-*  ``(ROCBLAS_LAYER & 1) != 0`` enables trace logging.
-
-*  ``(ROCBLAS_LAYER & 2) != 0`` enables bench logging.
-
-*  ``(ROCBLAS_LAYER & 4) != 0`` enables profile logging.
-
-*  ``(ROCBLAS_LAYER & 8) != 0`` enables internal API logging, for example, the GEMM backend.
 
 See the ``rocblas_layer_mode`` enumeration for these values as constants.
 
@@ -57,12 +41,9 @@ of the function.
 Internal API logging outputs information like the GEMM backend used for a particular GEMM call.
 Not all internal APIs are logged. The log output goes to the same stream as trace logging.
 
-The default stream for logging output is standard error. Three
-environment variables can set the full path name for a log file:
-
-*  ``ROCBLAS_LOG_TRACE_PATH`` sets the full path name for trace logging.
-*  ``ROCBLAS_LOG_BENCH_PATH`` sets the full path name for bench logging.
-*  ``ROCBLAS_LOG_PROFILE_PATH`` sets the full path name for profile logging.
+The default stream for logging output is standard error. :ref:`Four
+environment variables <rocblas_logging_env>` can set the full path name for a
+log file.
 
 For example, in a Bash shell, use the following to output bench logging to the file
 ``bench_logging.txt`` in your present working directory:

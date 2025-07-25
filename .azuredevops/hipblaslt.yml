@@ -37,8 +37,11 @@ trigger:
 
 pr: none
 
-jobs:
+stages:
+- stage: hipblaslt
+  jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/hipBLASLt.yml@pipelines_repo
     parameters:
       sparseCheckoutDir: projects/hipblaslt
       triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
+- template: templates/report-summary-check-wrapper.yml

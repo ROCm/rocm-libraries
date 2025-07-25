@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,7 @@
 #include <Tensile/Tensile.hpp>
 
 #include <algorithm>
+#include <map>
 
 namespace TensileLite
 {
@@ -120,7 +121,7 @@ namespace TensileLite
         case LazyLoadingInit::gfx1150:
             return "TensileLibrary_*_gfx1150";
         case LazyLoadingInit::gfx1151:
-             return "TensileLibrary_*_gfx1151";
+            return "TensileLibrary_*_gfx1151";
         case LazyLoadingInit::gfx1200:
             return "TensileLibrary_*_gfx1200";
         case LazyLoadingInit::gfx1201:
@@ -135,12 +136,16 @@ namespace TensileLite
     struct PlaceholderLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
         mutable std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> library;
+        mutable std::set<std::string>*                                  loadedFiles;
         mutable SolutionMap<MySolution>*                                masterSolutions;
         mutable std::mutex*                                             solutionsGuard;
         mutable std::mutex                                              lazyLoadingGuard;
         std::string                                                     filePrefix;
         std::string                                                     suffix;
         std::string                                                     libraryDirectory;
+
+        mutable std::map<std::string, std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>>*
+            indexLoadedLibraries;
 
         PlaceholderLibrary() = default;
 
@@ -157,6 +162,20 @@ namespace TensileLite
                 library = mLibrary->library;
 
                 std::lock_guard<std::mutex> lock(*solutionsGuard);
+                if(loadedFiles->find(filePrefix) != loadedFiles->end())
+                {
+                    if(indexLoadedLibraries->find(filePrefix) == indexLoadedLibraries->end())
+                        return true;
+                    library = (*indexLoadedLibraries)[filePrefix];
+                    indexLoadedLibraries->erase(filePrefix);
+
+                    // If the library is already loaded, just return it
+                    if(Debug::Instance().printCodeObjectInfo())
+                        std::cout << "load placeholder library " << filePrefix
+                                  << " from MasterLibrary cache" << std::endl;
+                    return true;
+                }
+
                 using std::begin;
                 using std::end;
 
@@ -167,6 +186,7 @@ namespace TensileLite
                                    i.second->codeObjectFilename = getCodeObjectFileName();
                                    return i;
                                });
+                loadedFiles->insert(filePrefix);
 
                 if(Debug::Instance().printCodeObjectInfo())
                     std::cout << "load placeholder library " << path << std::endl

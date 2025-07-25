@@ -71,6 +71,7 @@ target_link_libraries(hipblaslt-bench
     PRIVATE
         hip::device
         hipblaslt-clients-common
+        OpenMP::OpenMP_CXX
 )
 
 if(HIPBLASLT_ENABLE_OPENMP)

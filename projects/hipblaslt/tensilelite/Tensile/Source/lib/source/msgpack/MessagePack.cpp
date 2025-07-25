@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,7 +34,7 @@ namespace TensileLite
 {
     namespace Serialization
     {
-        void objectToMap(msgpack::object&                                  object,
+        void objectToMap(const msgpack::object&                            object,
                          std::unordered_map<std::string, msgpack::object>& result)
         {
             if(object.type != msgpack::type::object_type::MAP)
@@ -67,13 +67,10 @@ namespace TensileLite
         }
     }
 
-    template <typename MyProblem, typename MySolution>
-    std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
-        MessagePackLoadLibraryFile(std::string const&                  filename,
-                                   const std::vector<LazyLoadingInit>& preloaded)
+    inline bool fileToMsgObject(std::string const& filename, msgpack::object_handle& result)
     {
         // parse file into a msgpack::object_handle
-        msgpack::object_handle result;
+
         try
         {
             std::ifstream in(filename, std::ios::in | std::ios::binary);
@@ -83,7 +80,7 @@ namespace TensileLite
                     std::cout << "Error loading " << filename << " (msgpack):\nFailed to open file"
                               << std::endl;
 
-                return nullptr;
+                return false;
             }
 
             msgpack::unpacker unp;
@@ -107,7 +104,7 @@ namespace TensileLite
                               << error_str << std::endl;
                 }
 
-                return nullptr;
+                return false;
             }
         }
         catch(std::runtime_error const& exc)
@@ -115,8 +112,52 @@ namespace TensileLite
             if(Debug::Instance().printDataInit())
                 std::cout << "Error loading msgpack data:\n" << exc.what() << std::endl;
 
-            return nullptr;
+            return false;
         }
+        return true;
+    }
+
+    std::map<int, std::string> MessagePackLoadLibraryMapping(std::string const& filename)
+    {
+        if(Debug::Instance().printDataInit())
+            std::cout << "Loading library mapping from file: " << filename << std::endl;
+        msgpack::object_handle result;
+        if(!fileToMsgObject(filename, result))
+            return {};
+
+        std::map<int, std::string> libraryMapping;
+        try
+        {
+            std::unordered_map<std::string, msgpack::object> objectMap;
+            Serialization::objectToMap(result.get(), objectMap);
+
+            for(auto const& pair : objectMap)
+            {
+                int         key = std::stoi(pair.first);
+                std::string value;
+                pair.second.convert(value);
+                libraryMapping[key] = value;
+            }
+        }
+        catch(std::runtime_error const& exc)
+        {
+            if(Debug::Instance().printDataInit())
+                std::cout << "Error loading library mapping: " << exc.what() << std::endl;
+
+            return {};
+        }
+
+        return libraryMapping;
+    }
+
+    template <typename MyProblem, typename MySolution>
+    std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
+        MessagePackLoadLibraryFile(std::string const&                  filename,
+                                   const std::vector<LazyLoadingInit>& preloaded)
+    {
+        msgpack::object_handle result;
+        if(!fileToMsgObject(filename, result))
+            return nullptr;
 
         // copy data from msgpack::object_handle into MasterSolutionLibrary
         try

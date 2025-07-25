@@ -153,6 +153,8 @@ namespace rocRoller
          */
         ExpressionPtr convertPropagation(ExpressionPtr expr);
 
+        ExpressionPtr makeScalar(ExpressionPtr expr);
+
         /**
          * @brief Replace unsigned ArithmeticShiftR with LogicalShiftR
          *

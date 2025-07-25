@@ -168,7 +168,7 @@ namespace rocsparse
                     if(match)
                     {
                         // Tell all other threads about the matching index
-                        rocsparse_int m = __shfl(q, match - 1);
+                        rocsparse_int m = rocsparse::shfl(q, match - 1);
 
                         // Load BSR block from row k into shared memory
                         sdata1[threadIdx.y][threadIdx.x]
@@ -477,7 +477,7 @@ namespace rocsparse
                     if(match)
                     {
                         // Tell all other threads about the matching index
-                        rocsparse_int m = __shfl(q, match - 1);
+                        rocsparse_int m = rocsparse::shfl(q, match - 1);
 
                         // Load BSR block from row k into shared memory
                         for(rocsparse_int p = threadIdx.x; p < block_dim; p += DIMX)
@@ -781,7 +781,7 @@ namespace rocsparse
                     if(match)
                     {
                         // Tell all other threads about the matching index
-                        rocsparse_int m = __shfl(q, match - 1);
+                        rocsparse_int m = rocsparse::shfl(q, match - 1);
 
                         // Load BSR block from row k into shared memory
                         for(rocsparse_int p = threadIdx.x; p < block_dim; p += DIMX)
@@ -1079,7 +1079,7 @@ namespace rocsparse
                     if(match)
                     {
                         // Tell all other threads about the matching index
-                        rocsparse_int m = __shfl(q, match - 1);
+                        rocsparse_int m = rocsparse::shfl(q, match - 1);
 
                         for(rocsparse_int bi = lid; bi < block_dim; bi += WFSIZE)
                         {

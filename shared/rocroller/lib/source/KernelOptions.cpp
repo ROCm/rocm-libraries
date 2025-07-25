@@ -26,6 +26,8 @@
 
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
+
+#include <rocRoller/AssertOpKinds.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
@@ -160,6 +162,8 @@ namespace rocRoller
              values.maxConcurrentControlOps ? std::to_string(*values.maxConcurrentControlOps)
                                             : "none");
         ShowOption(enableFullDivision);
+        ShowOption(scaleSkipPermlane);
+        ShowString(assertOpKind);
 
 #undef Show
 #undef ShowOption

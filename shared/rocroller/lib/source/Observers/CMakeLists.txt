@@ -1,0 +1,38 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+target_sources(rocroller
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/ACCVGPRReadWrite.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ACCVGPRWriteWrite.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/BufferStoreDwordXXRead.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/CMPXWriteExec.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DGEMM16x16x4Write.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DGEMM4x4x4Write.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DLWrite.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/FileWritingObserver.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MEMObserver.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MFMAObserver.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ObserverCreation.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/OPSEL94x.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/RegisterLivenessObserver.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SupportedInstructionObserver.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/VALUTransWrite94x.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/VALUWrite.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/VALUWriteReadlane94x.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/VALUWriteSGPRVCC.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/VALUWriteSGPRVMEM.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/VALUWriteVCCVDIVFMAS.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/VCMPXWrite94x.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/WaitcntObserver.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/WMMAObserver.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/WMMAReadSrcD.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/WMMAWrite.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/WMMAWriteSrcD.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/XDLReadSrcC908.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/XDLReadSrcC90a.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/XDLReadSrcC94x.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/XDLWrite908.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/XDLWrite90a.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/XDLWrite94x.cpp"
+)

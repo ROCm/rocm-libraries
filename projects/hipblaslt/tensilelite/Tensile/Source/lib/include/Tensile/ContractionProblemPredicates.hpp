@@ -213,10 +213,10 @@ namespace TensileLite
                     HasValue = true
                 };
                 size_t             index;
-                std::array<int, 5> value;
+                std::array<int, 6> value;
 
                 SynchronizerSizeCheck() = default;
-                SynchronizerSizeCheck(size_t index, std::array<int, 5> value)
+                SynchronizerSizeCheck(size_t index, std::array<int, 6> value)
                     : index(index)
                     , value(value)
                 {
@@ -229,6 +229,10 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
+                    int16_t gsu = problem.getParams().gsu() != 0 ? problem.getParams().gsu() : value[5];
+                    if(gsu == -1 || gsu == 1)
+                        return 1;
+
                     // WorkGroup numbers x number of global write instruction x Wave numbers
                     // M/MT0 x N/MT1 x NumElementsPerThread/StoreVectorWidth x x Wavenumbers x batch
                     bool ret = (std::ceil(static_cast<float>(problem.freeSizeA(0)) / value[0])
