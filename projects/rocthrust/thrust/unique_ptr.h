@@ -811,4 +811,14 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique(Args&&
   return unique_ptr<T>(thrust::device_new<T>(p, T(std::forward<Args>(args)...), 1));
 }
 
+template <class T, class = typename thrust::detail::enable_if<thrust::detail::is_unbounded_array<T>::value>::type>
+THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique(size_t n)
+{
+  using U = typename std::remove_extent<T>::type;
+  return unique_ptr<T>(thrust::device_new<U>(n), n);
+}
+
+template <class T, class... Args, class = typename thrust::detail::enable_if<thrust::detail::is_bounded_array<T>::value>::type>
+THRUST_HOST void make_unique(Args&&...) = delete;
+
 THRUST_NAMESPACE_END
