@@ -12,13 +12,14 @@ target_compile_features(sample-helper INTERFACE cxx_std_17)
 
 target_sources(sample-helper
     INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/helper.h>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/helper.h>
 )
 
 target_include_directories(sample-helper
     INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../common/include>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/include>
 )
 
 if(HIPBLASLT_ENABLE_ASAN)

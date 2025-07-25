@@ -9,6 +9,7 @@ target_include_directories(hipblaslt-clients-common
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/common/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite>
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/include>
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite" # not sure about this
 )
@@ -31,13 +32,21 @@ target_link_libraries(hipblaslt-clients-common
 
 # grep doesn't return any hits
 # target_compile_definitions(hipblaslt-clients-common PRIVATE CLIENTS_NO_FORTRAN) # necessary?
-
 if(HIPBLASLT_ENABLE_ROCROLLER)
     if(NOT ROCM_LIBRARIES_SUPERBUILD)
-        find_package(mxDataGenerator REQUIRED)
+        find_package(mxDataGenerator QUIET)
+        if(NOT mxDataGenerator_FOUND)
+            FetchContent_Declare(
+                mxDataGenerator
+                GIT_REPOSITORY https://github.com/ROCm/mxDataGenerator.git
+                GIT_TAG 3ac153eec4c1a1e0da7546abc9c0c4f54e180f43
+            )
+            FetchContent_MakeAvailable(mxDataGenerator)
+        endif()
     endif()
     target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_USE_ROCROLLER)
     target_link_libraries(hipblaslt-clients-common PRIVATE roc::rocroller roc::mxDataGenerator)
+    target_compile_features(hipblaslt-clients-common PRIVATE cxx_std_20)
 endif()
 
 if(HIPBLASLT_ENABLE_ASAN)

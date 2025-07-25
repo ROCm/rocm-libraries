@@ -31,6 +31,13 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
     set_target_properties(hipblaslt-rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
     target_link_libraries(hipblaslt-rocroller PRIVATE hip::host roc::hipblas-common roc::rocroller)
     target_compile_definitions(hipblaslt-rocroller PRIVATE HIPBLASLT_USE_ROCROLLER)
-    target_include_directories(hipblaslt-rocroller PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_include_directories(hipblaslt-rocroller
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+            "${PROJECT_BINARY_DIR}/library/include"
+            "${PROJECT_SOURCE_DIR}/library/include"
+            "${PROJECT_SOURCE_DIR}/tensilelite/include"
+    )
     target_link_libraries(hipblaslt PRIVATE hipblaslt-rocroller)
 endif()

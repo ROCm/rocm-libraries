@@ -50,7 +50,7 @@ if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
     option(HIPBLASLT_ENABLE_MSGPACK "Use msgpack for parsing configuration files." ON)
     option(HIPBLASLT_ENABLE_OPENMP "Use OpenMP to improve performance." ON)
     option(HIPBLASLT_ENABLE_LLVM "Use msgpack for parsing configuration files." OFF)
-    option(HIPBLASLT_ENABLE_ROCROLLER "Use RocRoller library." OFF)
+    option(HIPBLASLT_ENABLE_ROCROLLER "Use RocRoller library." ON)
     option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." OFF)
     option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
     cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
@@ -170,21 +170,24 @@ if(HIPBLASLT_ENABLE_DEVICE)
 endif()
 
 if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBRARIES_SUPERBUILD)
-    find_package(rocroller)
-    option(YAML_CPP_INSTALL "" ON)
-    # Should we require enabling fetch
-    if(NOT rocroller_FOUND)
-        set(ROCROLLER_ENABLE_FETCH ON)
-        set(ROCROLLER_BUILD_TESTING OFF)
-        set(ROCROLLER_ENABLE_CLIENT OFF)
-        FetchContent_Declare(
-            rocRoller
-            GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
-            GIT_TAG main
-            SOURCE_SUBDIR next-cmake
-        )
-        FetchContent_MakeAvailable(rocRoller)
-    endif()
+    find_package(rocroller QUIET)
+    block()
+        option(YAML_CPP_INSTALL "" ON)
+        if(NOT rocroller_FOUND)
+            #set(ROCROLLER_ENABLE_FETCH ON)
+            #set(ROCROLLER_BUILD_TESTING OFF)
+            #set(ROCROLLER_ENABLE_CLIENT OFF)
+            set(BUILD_TESTING OFF)
+            set(BUILD_CLIENTS OFF)
+            include(FetchContent)
+            FetchContent_Declare(
+                rocRoller
+                GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
+                GIT_TAG a9cbf901489a27a530a699d1d6a6b765a9c02426
+            )
+            FetchContent_MakeAvailable(rocRoller)
+        endif()
+    endblock()
 endif()
 
 add_subdirectory(tensilelite)
@@ -241,9 +244,9 @@ if(HIPBLASLT_ENABLE_HOST)
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/library/include>
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/include>
-            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/include>
             $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
         PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/include"
             "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include"
             "${CMAKE_CURRENT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include"
     )
