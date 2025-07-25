@@ -181,8 +181,8 @@ void testing_spmm_coo(const Arguments& arg)
     host_vector<C> hC_gold(nnz_C, 0);
 
     // Initialize data on CPU
-    rocsparse_init<B>(hB, nnz_B, 1, 1);
-    rocsparse_init<C>(hC_1, nnz_C, 1, 1);
+    rocsparse_init_inexact<B>(hB, nnz_B, 1, 1);
+    rocsparse_init_inexact<C>(hC_1, nnz_C, 1, 1);
 
     hC_2    = hC_1;
     hC_gold = hC_1;

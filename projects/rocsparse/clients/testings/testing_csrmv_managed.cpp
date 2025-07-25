@@ -163,8 +163,8 @@ void testing_csrmv_managed(const Arguments& arg)
     host_vector<T> ty(M);
 
     // Initialize data on CPU
-    rocsparse_init<T>(tx, 1, N, 1);
-    rocsparse_init<T>(ty, 1, M, 1);
+    rocsparse_init_inexact<T>(tx, 1, N, 1);
+    rocsparse_init_inexact<T>(ty, 1, M, 1);
 
     // Allocate managed memory
     managed_dense_vector<rocsparse_int> csr_row_ptr(M + 1);

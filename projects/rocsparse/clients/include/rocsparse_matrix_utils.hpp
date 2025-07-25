@@ -66,7 +66,7 @@ struct rocsparse_matrix_utils
         {
         case rocsparse_order_column:
         {
-            rocsparse_init<T>(that, that.m, that.n, that.ld);
+            rocsparse_init_inexact<T>(that, that.m, that.n, that.ld);
             break;
         }
 
@@ -76,7 +76,7 @@ struct rocsparse_matrix_utils
             // Little trick but the resulting matrix is the transpose of the matrix obtained from rocsparse_order_column.
             // If this poses a problem, we need to refactor rocsparse_init.
             //
-            rocsparse_init<T>(that, that.n, that.m, that.ld);
+            rocsparse_init_inexact<T>(that, that.n, that.m, that.ld);
             break;
         }
         }

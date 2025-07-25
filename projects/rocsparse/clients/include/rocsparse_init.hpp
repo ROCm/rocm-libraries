@@ -42,10 +42,21 @@ void rocsparse_init(T*     A,
                     size_t M,
                     size_t N,
                     size_t lda,
+                    bool   use_inexact = true,
                     size_t stride      = 0,
                     size_t batch_count = 1,
                     T      a           = static_cast<T>(0),
                     T      b           = static_cast<T>(1));
+
+template <typename T>
+void rocsparse_init_inexact(T*     A,
+                            size_t M,
+                            size_t N,
+                            size_t lda,
+                            size_t stride      = 0,
+                            size_t batch_count = 1,
+                            T      a           = static_cast<T>(0),
+                            T      b           = static_cast<T>(1));
 
 // Initialize vector with random integer values
 template <typename T>
@@ -63,10 +74,21 @@ void rocsparse_init(std::vector<T>& A,
                     size_t          M,
                     size_t          N,
                     size_t          lda,
+                    bool            use_inexact = true,
                     size_t          stride      = 0,
                     size_t          batch_count = 1,
                     T               a           = static_cast<T>(0),
                     T               b           = static_cast<T>(1));
+
+template <typename T>
+void rocsparse_init_inexact(std::vector<T>& A,
+                            size_t          M,
+                            size_t          N,
+                            size_t          lda,
+                            size_t          stride      = 0,
+                            size_t          batch_count = 1,
+                            T               a           = static_cast<T>(0),
+                            T               b           = static_cast<T>(1));
 
 // Initialize vector with random integer values
 template <typename T>

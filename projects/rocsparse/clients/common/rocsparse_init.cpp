@@ -211,7 +211,91 @@ void rocsparse_init_exact(
 }
 
 template <typename T>
-void rocsparse_init(
+void rocsparse_init(T*     A,
+                    size_t M,
+                    size_t N,
+                    size_t lda,
+                    bool   use_inexact,
+                    size_t stride,
+                    size_t batch_count,
+                    T      a,
+                    T      b)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
+    if(use_inexact)
+    {
+        rocsparse_init_inexact<T>(A, M, N, lda, stride, batch_count, a, b);
+    }
+    else
+    {
+        rocsparse_init_exact<T>(
+            A, M, N, lda, stride, batch_count, static_cast<int>(a), static_cast<int>(b));
+    }
+}
+
+template <>
+void rocsparse_init(rocsparse_float_complex* A,
+                    size_t                   M,
+                    size_t                   N,
+                    size_t                   lda,
+                    bool                     use_inexact,
+                    size_t                   stride,
+                    size_t                   batch_count,
+                    rocsparse_float_complex  a,
+                    rocsparse_float_complex  b)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
+    if(use_inexact)
+    {
+        rocsparse_init_inexact<rocsparse_float_complex>(A, M, N, lda, stride, batch_count, a, b);
+    }
+    else
+    {
+        rocsparse_init_exact<rocsparse_float_complex>(A,
+                                                      M,
+                                                      N,
+                                                      lda,
+                                                      stride,
+                                                      batch_count,
+                                                      static_cast<int>(std::real(a)),
+                                                      static_cast<int>(std::real(b)));
+    }
+}
+
+template <>
+void rocsparse_init(rocsparse_double_complex* A,
+                    size_t                    M,
+                    size_t                    N,
+                    size_t                    lda,
+                    bool                      use_inexact,
+                    size_t                    stride,
+                    size_t                    batch_count,
+                    rocsparse_double_complex  a,
+                    rocsparse_double_complex  b)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
+    if(use_inexact)
+    {
+        rocsparse_init_inexact<rocsparse_double_complex>(A, M, N, lda, stride, batch_count, a, b);
+    }
+    else
+    {
+        rocsparse_init_exact<rocsparse_double_complex>(A,
+                                                       M,
+                                                       N,
+                                                       lda,
+                                                       stride,
+                                                       batch_count,
+                                                       static_cast<int>(std::real(a)),
+                                                       static_cast<int>(std::real(b)));
+    }
+}
+
+template <typename T>
+void rocsparse_init_inexact(
     T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count, T a, T b)
 {
     ROCSPARSE_CLIENTS_ROUTINE_TRACE
@@ -244,12 +328,28 @@ void rocsparse_init_exact(std::vector<T>& A,
 }
 
 template <typename T>
-void rocsparse_init(
+void rocsparse_init(std::vector<T>& A,
+                    size_t          M,
+                    size_t          N,
+                    size_t          lda,
+                    bool            use_inexact,
+                    size_t          stride,
+                    size_t          batch_count,
+                    T               a,
+                    T               b)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+
+    rocsparse_init(A.data(), M, N, lda, use_inexact, stride, batch_count, a, b);
+}
+
+template <typename T>
+void rocsparse_init_inexact(
     std::vector<T>& A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count, T a, T b)
 {
     ROCSPARSE_CLIENTS_ROUTINE_TRACE
 
-    rocsparse_init(A.data(), M, N, lda, stride, batch_count, a, b);
+    rocsparse_init_inexact(A.data(), M, N, lda, stride, batch_count, a, b);
 }
 
 // Initializes sparse index vector with nnz entries ranging from start to end
@@ -1788,10 +1888,19 @@ void rocsparse_init_gebsr_pentadiagonal(std::vector<I>&      row_ptr,
                                        size_t M,                                                   \
                                        size_t N,                                                   \
                                        size_t lda,                                                 \
+                                       bool   use_inexact,                                         \
                                        size_t stride,                                              \
                                        size_t batch_count = 1,                                     \
                                        TYPE   a           = static_cast<TYPE>(0),                  \
                                        TYPE   b           = static_cast<TYPE>(1));                             \
+    template void rocsparse_init_inexact<TYPE>(TYPE * A,                                           \
+                                               size_t M,                                           \
+                                               size_t N,                                           \
+                                               size_t lda,                                         \
+                                               size_t stride,                                      \
+                                               size_t batch_count = 1,                             \
+                                               TYPE   a           = static_cast<TYPE>(0),          \
+                                               TYPE   b           = static_cast<TYPE>(1));                     \
     template void rocsparse_init_exact<TYPE>(TYPE * A,                                             \
                                              size_t M,                                             \
                                              size_t N,                                             \
@@ -1804,10 +1913,19 @@ void rocsparse_init_gebsr_pentadiagonal(std::vector<I>&      row_ptr,
                                        size_t M,                                                   \
                                        size_t N,                                                   \
                                        size_t lda,                                                 \
+                                       bool   use_inexact,                                         \
                                        size_t stride,                                              \
                                        size_t batch_count = 1,                                     \
                                        TYPE   a           = static_cast<TYPE>(0),                  \
                                        TYPE   b           = static_cast<TYPE>(1));                             \
+    template void rocsparse_init_inexact<TYPE>(std::vector<TYPE> & A,                              \
+                                               size_t M,                                           \
+                                               size_t N,                                           \
+                                               size_t lda,                                         \
+                                               size_t stride,                                      \
+                                               size_t batch_count,                                 \
+                                               TYPE   a = static_cast<TYPE>(0),                    \
+                                               TYPE   b = static_cast<TYPE>(1));                     \
     template void rocsparse_init_exact<TYPE>(std::vector<TYPE> & A,                                \
                                              size_t M,                                             \
                                              size_t N,                                             \
