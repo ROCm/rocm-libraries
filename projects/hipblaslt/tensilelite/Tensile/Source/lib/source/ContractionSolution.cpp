@@ -3136,6 +3136,7 @@ namespace TensileLite
                 = problem.b().elementBytes() * 8; // TODO update for A/B different types
             size_t elementSizeC_bits
                 = problem.c().elementBytes() * 8; // TODO update for A/B different types
+            analytical::DataType miDataType = static_cast<analytical::DataType>(problem.computeInputType());
             return analytical::select_best_grid_size(x,
                                                      y,
                                                      z,
@@ -3152,6 +3153,7 @@ namespace TensileLite
                                                      elementSizeA_bits,
                                                      elementSizeB_bits,
                                                      elementSizeC_bits,
+                                                     miDataType,
                                                      0,
                                                      0.0,
                                                      false,
