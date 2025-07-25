@@ -1,0 +1,73 @@
+# Update documentation on Read the docs
+# -----------------------------------
+# This GitHub Actions workflow runs on push commits. It detects commit's target branch and project,
+# then triggers the corresponding build on Read the Docs.
+# Key Steps:
+# 1. Compare the current commit to the last commit and obtain the path of changed files
+# 2. Extract a set of project names from changed file path
+# 3. Obtain the target branch name and convert it into Read the Docs format
+# 4. Use Read the Docs V3 API to trigger the build for the corresponding docs:
+#    Github project name -> Read the docs project name
+#    Github branch name -> Read the docs version
+#
+# This ensures live documentation is synchronized with the latest change.
+
+name: Trigger documentation build on Read the Docs
+
+on:
+  push:
+    branches:
+      - 'develop'
+      - 'docs/**'
+      - 'users/alexxu12/docs-demo' # for test
+    paths:
+      - 'projects/**'
+
+jobs:
+  trigger-rtd:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get changed files using GitHub REST API
+        id: diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Fetching changed files between ${{ github.event.before }} and ${{ github.event.after }}"
+
+          changed_files=$(gh api \
+            repos/${{ github.repository }}/compare/${{ github.event.before }}...${{ github.event.after }} \
+            --jq '.files[].filename')
+
+          echo "Changed files:"
+          echo "$changed_files"
+
+          # Extract project names from paths like projects/rocprim/...
+          project_names=$(echo "$changed_files" \
+            | grep '^projects/' \
+            | awk -F/ '{print $2}' \
+            | sort -u)
+
+          echo "Detected changed projects:"
+          echo "$project_names"
+
+          echo "changed_projects<<EOF" >> $GITHUB_ENV
+          echo "$project_names" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Trigger RTD build
+        env: 
+          changed_projects: ${{ env.changed_projects }}
+          RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+        run: |
+          branch_name="${GITHUB_REF#refs/heads/}"
+          version_slug="${branch_name//\//-}"
+
+          echo "Target github branch: $branch_name"
+          echo "Read the Docs version slug: $version_slug"
+
+          for project in $changed_projects; do
+            echo "Triggering RTD build for $project"
+            curl -X POST \
+                 -H "Authorization: Token $RTD_TOKEN" \
+                 "https://readthedocs.com/api/v3/projects/advanced-micro-devices-monorepo-$project/versions/$version_slug/builds/"
+          done
