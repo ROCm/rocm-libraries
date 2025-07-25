@@ -39,7 +39,7 @@ namespace rocRoller
         bool alwaysWaitBeforeBranch      = false;
         bool alwaysWaitZeroBeforeBarrier = false;
 
-        bool preloadKernelArguments = true;
+        bool preloadKernelArguments = false;
 
         unsigned int maxACCVGPRs      = 256;
         unsigned int maxSGPRs         = 102;
