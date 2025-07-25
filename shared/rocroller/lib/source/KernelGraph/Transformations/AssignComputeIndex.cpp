@@ -467,7 +467,6 @@ namespace rocRoller
                 auto const maybeForLoop = findContainingOperation<ForLoopOp>(tag, kgraph);
                 auto fullStop  = [&](int tag) { return tag == increment; };
                 auto [required, path] = findRequiredCoordinates(target, direction, fullStop, kgraph);
-
                 auto maybeInForLoop = findContainingOperation<ForLoopOp>(tag, kgraph).has_value();
 
                 // Set required register coordinate
@@ -497,6 +496,7 @@ namespace rocRoller
                     coords.setCoordinate(regCoord, expr);
                 }
 
+                // Set other required coordinate
                 for(auto requiredTag : required)
                     if((requiredTag  != increment) && (!coords.hasCoordinate(requiredTag )))
                         coords.setCoordinate(requiredTag , L(0u));
