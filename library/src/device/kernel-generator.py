@@ -187,8 +187,6 @@ def generate_cpu_function_pool_main(num_files):
 def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
     """Generate function(s) to populate the kernel function pool."""
 
-    all_functions = functions + pp_functions
-
     function_map = Map('function_map')
     precisions = {
         'sp': 'rocfft_precision_single',
@@ -206,19 +204,72 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
         for _ in range(num_files)
     ]
 
-    # Cycles through each file per loop execution to distribute work amongst N files
-    curr_func, curr_pp_func = 0, 0
-    curr_func_offset = 0 if len(pp_functions) == 0 else len(precisions)
-    curr_file = 0
-    while curr_func < len(all_functions) - curr_func_offset:
-        f = all_functions[curr_func]
+    # Cycles through each file per loop execution to distribute regular kernels work amongst N files
+    curr_func, curr_file = 0, 0
+    while curr_func < len(functions):
+        f = functions[curr_func]
         length, precision, scheme, transpose = f.meta.length, f.meta.precision, f.meta.scheme, f.meta.transpose
 
-        if scheme == 'CS_3D_PP':
-            piece_contents[curr_file] += Assign(var_pp_kernel_1, FFTKernel(f))
-            f = all_functions[curr_func + curr_func_offset]
-            piece_contents[curr_file] += Assign(var_pp_kernel_2, FFTKernel(f))
+        if isinstance(length, (int, str)):
+            length = [length, 0]
+        piece_contents[curr_file] += Assign(var_kernel, FFTKernel(f))
+        key = Call(
+            name='FMKey',
+            arguments=ArgumentList(length[0], length[1], precisions[precision],
+                                   scheme, transpose or 'NONE',
+                                   'kernel.get_kernel_config()')).inline()
+        piece_contents[curr_file] += function_map.insert(
+            key, var_kernel, 'std::get<0>(def_keys)',
+            'std::get<0>(function_maps)', f.meta.lds_size_bytes)
 
+        curr_func = curr_func + 1
+        curr_file = (curr_file + 1) % num_files
+
+    # Partial-pass kernels are handled separately.
+    if len(pp_functions) > 0:
+        counter_f_pp_1 = 0
+        skip_to_next_iter = False
+        # Cycles through each file per loop execution to distribute partial-pass kernels work amongst N files
+        while True:
+            if counter_f_pp_1 >= len(pp_functions):
+                break
+            # get first pp kernel
+            f_pp_1 = pp_functions[counter_f_pp_1]
+
+            # PPFMKey entry needs two kernels with same length and precision, but different pp_current_dim
+            counter_f_pp_2 = counter_f_pp_1 + 1
+            if counter_f_pp_2 >= len(pp_functions):
+                break
+            # loop to get the second pp kernel
+            while counter_f_pp_2 < len(pp_functions):
+                f_pp_2 = pp_functions[counter_f_pp_2]
+                if (f_pp_1.meta.length == f_pp_2.meta.length
+                        and f_pp_1.meta.precision == f_pp_2.meta.precision
+                        and f_pp_1.meta.pp_current_dim !=
+                        f_pp_2.meta.pp_current_dim):
+                    break
+                if (f_pp_1.meta.length != f_pp_2.meta.length):
+                    # we hit a new kernel with different length
+                    # start next iteration looking for the next pair
+                    counter_f_pp_1 = counter_f_pp_2
+                    skip_to_next_iter = True
+                    break
+                counter_f_pp_2 = counter_f_pp_2 + 1
+
+            if skip_to_next_iter:
+                skip_to_next_iter = False
+                continue
+            # get second pp kernel
+            f_pp_2 = pp_functions[counter_f_pp_2]
+
+            piece_contents[curr_file] += Assign(var_pp_kernel_1,
+                                                FFTKernel(f_pp_1))
+            piece_contents[curr_file] += Assign(var_pp_kernel_2,
+                                                FFTKernel(f_pp_2))
+
+            length = f_pp_1.meta.length
+            precision = f_pp_1.meta.precision
+            scheme = f_pp_1.meta.scheme
             key = Call(name='PPFMKey',
                        arguments=ArgumentList(
                            length[0], length[1], length[2],
@@ -227,28 +278,10 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
                            'pp_kernel_2.get_kernel_config()')).inline()
             piece_contents[curr_file] += function_map.insert_pp(
                 key, var_pp_kernel_1, var_pp_kernel_2, 'std::get<1>(def_keys)',
-                'std::get<1>(function_maps)', f.meta.lds_size_bytes)
+                'std::get<1>(function_maps)', f_pp_1.meta.lds_size_bytes)
 
-            curr_pp_func = curr_pp_func + 1
-        else:
-            if isinstance(length, (int, str)):
-                length = [length, 0]
-            piece_contents[curr_file] += Assign(var_kernel, FFTKernel(f))
-            key = Call(name='FMKey',
-                       arguments=ArgumentList(
-                           length[0], length[1], precisions[precision], scheme,
-                           transpose or 'NONE',
-                           'kernel.get_kernel_config()')).inline()
-            piece_contents[curr_file] += function_map.insert(
-                key, var_kernel, 'std::get<0>(def_keys)',
-                'std::get<0>(function_maps)', f.meta.lds_size_bytes)
-
-        if curr_pp_func == len(precisions):
-            curr_func, curr_pp_func = curr_func + len(precisions) + 1, 0
-        else:
-            curr_func = curr_func + 1
-
-        curr_file = (curr_file + 1) % num_files
+            counter_f_pp_1 = counter_f_pp_1 + 1
+            curr_file = (curr_file + 1) % num_files
 
     # Assemble contents of each file to return in a list
     pieces = [None] * num_files
