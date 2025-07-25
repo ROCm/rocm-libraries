@@ -141,7 +141,7 @@ namespace rocRoller
 
         ConstraintStatus NoLDSTiles(const KernelGraph& graph)
         {
-	    TIMER(t, "Constraint::NoLDSTiles");
+            TIMER(t, "Constraint::NoLDSTiles");
 
             ConstraintStatus retval;
             for(auto tag : graph.coordinates.getNodes<MacroTile>())

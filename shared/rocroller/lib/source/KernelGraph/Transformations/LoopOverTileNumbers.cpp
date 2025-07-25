@@ -152,7 +152,7 @@ namespace rocRoller
         //
         KernelGraph LoopOverTileNumbers::apply(KernelGraph const& original)
         {
-	    TIMER(t, "KernelGraph::LoopOverTileNumbers");
+            TIMER(t, "KernelGraph::LoopOverTileNumbers");
 
             // Make sure we can find the top-for-loop location
             auto findTopLoopPredicate = [&](int tag) -> bool {

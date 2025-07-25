@@ -82,7 +82,7 @@ namespace rocRoller
 
         ConstraintStatus NoConstructDestructMT(const KernelGraph& k)
         {
-	    TIMER(t, "Constraint::NoConstructDestructMT");
+            TIMER(t, "Constraint::NoConstructDestructMT");
 
             ConstraintStatus retval;
             for(auto element : k.coordinates.getEdges<CoordinateTransformEdge>())

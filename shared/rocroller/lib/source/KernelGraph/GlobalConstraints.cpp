@@ -34,7 +34,7 @@ namespace rocRoller
     {
         ConstraintStatus NoDanglingMappings(const KernelGraph& k)
         {
-	    TIMER(t, "Constraint::NoDanglingMappings");
+            TIMER(t, "Constraint::NoDanglingMappings");
             ConstraintStatus retval;
             for(auto control : k.mapper.getControls())
             {
@@ -63,7 +63,7 @@ namespace rocRoller
 
         ConstraintStatus SingleControlRoot(const KernelGraph& k)
         {
-	    TIMER(t, "Constraint::SingleControlRoot");
+            TIMER(t, "Constraint::SingleControlRoot");
             ConstraintStatus retval;
 
             auto controlRoots = k.control.roots().to<std::vector>();
@@ -84,7 +84,7 @@ namespace rocRoller
 
         ConstraintStatus NoRedundantSetCoordinates(const KernelGraph& k)
         {
-	    TIMER(t, "Constraint::NoRedundantSetCoordinates");
+            TIMER(t, "Constraint::NoRedundantSetCoordinates");
             using namespace ControlGraph;
             using GD = rocRoller::Graph::Direction;
             ConstraintStatus retval;
@@ -154,7 +154,7 @@ namespace rocRoller
 
         ConstraintStatus WalkableControlGraph(KernelGraph const& k)
         {
-	    TIMER(t, "Constraint::WalkableControlGraph");
+            TIMER(t, "Constraint::WalkableControlGraph");
             WalkableControlGraphVisitor visitor(k);
             visitor.walk();
 

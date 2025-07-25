@@ -1289,7 +1289,6 @@ namespace rocRoller
                                             AssemblyKernelPtr                        kernel,
                                             std::optional<ControlFlowArgumentTracer> argTracer)
         {
-
             TIMER(t, "LowerFromKernelGraph::generate");
             auto graphPtr = std::make_shared<KernelGraph>(std::move(graph));
 

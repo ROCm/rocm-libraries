@@ -201,7 +201,7 @@ namespace rocRoller
                                         uint                             bitsPerElement,
                                         int                              wavefrontSize)
         {
-	    TIMER(t, "KernelGraph::AddTransposeLoadCT");
+            TIMER(t, "KernelGraph::AddTransposeLoadCT");
 
             switch(context->targetArchitecture().target().gfx)
             {

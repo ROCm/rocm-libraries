@@ -809,7 +809,7 @@ namespace rocRoller
 
         ConstraintStatus NoDanglingJammedNumbers(const KernelGraph& graph)
         {
-	    TIMER(t, "Constraint::NoDanglingJammedNumbers");
+            TIMER(t, "Constraint::NoDanglingJammedNumbers");
             using GD = rocRoller::Graph::Direction;
 
             ConstraintStatus retval;
