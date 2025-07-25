@@ -24,10 +24,10 @@
  *
  *******************************************************************************/
 
-#include "get_handle.hpp"
-#include "random.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
+#include <../test/get_handle.hpp>
+#include <../test/random.hpp>
+#include <../test/tensor_holder.hpp>
+#include <../test/verify.hpp>
 #include <gtest/gtest.h>
 #include <miopen/layernorm.hpp>
 #include <miopen/miopen.h>
@@ -42,7 +42,8 @@ void cpu_layernorm_forward(tensor<T> input,
                            tensor<T>& ref_rstd,
                            float eps,
                            int32_t dim,
-                           miopenNormMode_t mode)
+                           miopenNormMode_t mode,
+                           bool use_multithread = false)
 {
     auto layout   = input.desc.GetLayoutEnum();
     size_t stride = 1;
@@ -69,31 +70,34 @@ void cpu_layernorm_forward(tensor<T> input,
         inner_size *= dims[i];
     }
 
-    miopen::par_ford(outer_size)([&](int32_t o) {
+    size_t min_grain = use_multithread ? 8 : outer_size;
+    miopen::par_for(outer_size, min_grain, [&](int32_t o) {
         miopen::ford(stride)([&](int32_t s) {
-            float mean_v = 0;
-            float var_v  = 0;
+            double mean_v = 0.0;
+            double var_v  = 0.0;
 
             miopen::ford(inner_size)([&](int32_t i) {
-                float tmp = static_cast<float>(input[o * inner_size * stride + i * stride + s]);
+                double tmp = static_cast<double>(input[o * inner_size * stride + i * stride + s]);
                 mean_v += tmp;
                 var_v += tmp * tmp;
             });
 
-            mean_v       = mean_v / inner_size;
-            var_v        = var_v / inner_size - mean_v * mean_v;
-            float rstd_v = 1 / sqrt(var_v + eps);
+            mean_v        = mean_v / inner_size;
+            var_v         = var_v / inner_size - mean_v * mean_v;
+            double rstd_v = 1.0 / sqrt(var_v + eps);
 
             ref_mean[o * stride + s] = static_cast<T>(mean_v);
             ref_rstd[o * stride + s] = static_cast<T>(rstd_v);
 
             miopen::ford(inner_size)([&](int32_t i) {
-                float weight_v =
-                    (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<float>(weight[i]);
-                float bias_v =
-                    (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 0 : static_cast<float>(bias[i]);
+                double weight_v =
+                    (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1.0 : static_cast<float>(weight[i]);
+                double bias_v =
+                    (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 0.0 : static_cast<float>(bias[i]);
+
                 ref_output[o * inner_size * stride + i * stride + s] = static_cast<T>(
-                    (static_cast<float>(input[o * inner_size * stride + i * stride + s]) - mean_v) *
+                    (static_cast<double>(input[o * inner_size * stride + i * stride + s]) -
+                     mean_v) *
                         rstd_v * weight_v +
                     bias_v);
             });
@@ -109,7 +113,8 @@ void cpu_layernorm_backward(tensor<T> dy,
                             tensor<T> rstd,
                             tensor<T>& ref_dx,
                             int32_t dim,
-                            miopenNormMode_t mode)
+                            miopenNormMode_t mode,
+                            bool use_multithread = false)
 {
     auto layout   = dy.desc.GetLayoutEnum();
     size_t stride = 1;
@@ -135,37 +140,40 @@ void cpu_layernorm_backward(tensor<T> dy,
         inner_size *= dims[i];
     }
 
-    miopen::par_ford(outer_size)([&](int32_t o) {
+    size_t min_grain = use_multithread ? 8 : outer_size;
+    miopen::par_for(outer_size, min_grain, [&](int32_t o) {
         miopen::ford(stride)([&](int32_t s) {
-            float sum_dy_weight   = 0;
-            float sum_dy_weight_x = 0;
+            double sum_dy_weight   = 0.0;
+            double sum_dy_weight_x = 0.0;
 
             miopen::ford(inner_size)([&](int32_t i) {
-                float pweight =
-                    (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<float>(weight[i]);
-                float pdy = (dy.GetSize() != 0)
-                                ? static_cast<float>(dy[o * inner_size * stride + i * stride + s])
-                                : 0;
-                float px  = static_cast<float>(x[o * inner_size * stride + i * stride + s]);
+                double pweight =
+                    (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1.0 : static_cast<double>(weight[i]);
+                double pdy = (dy.GetSize() != 0)
+                                 ? static_cast<double>(dy[o * inner_size * stride + i * stride + s])
+                                 : 0.0;
+                double px  = static_cast<double>(x[o * inner_size * stride + i * stride + s]);
+
                 sum_dy_weight += pdy * pweight;
                 sum_dy_weight_x += pdy * px * pweight;
             });
 
-            float scale = 1.0f / static_cast<float>(inner_size);
-            float prstd = static_cast<float>(rstd[o * stride + s]);
-            float pmean = static_cast<float>(mean[o * stride + s]);
-            float a     = prstd * prstd * prstd * scale * (sum_dy_weight_x - sum_dy_weight * pmean);
-            float b     = prstd * sum_dy_weight * scale - a * pmean;
+            double scale = 1.0 / static_cast<double>(inner_size);
+            double prstd = static_cast<double>(rstd[o * stride + s]);
+            double pmean = static_cast<double>(mean[o * stride + s]);
+            double a = prstd * prstd * prstd * scale * (sum_dy_weight_x - sum_dy_weight * pmean);
+            double b = prstd * sum_dy_weight * scale - a * pmean;
 
             miopen::ford(inner_size)([&](int32_t i) {
-                float pweight =
-                    (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1 : static_cast<float>(weight[i]);
-                float pdy = (dy.GetSize() != 0)
-                                ? static_cast<float>(dy[o * inner_size * stride + i * stride + s])
-                                : 0;
+                double pweight =
+                    (mode == MIOPEN_ELEMENTWISE_AFFINE) ? 1.0 : static_cast<double>(weight[i]);
+                double pdy = (dy.GetSize() != 0)
+                                 ? static_cast<double>(dy[o * inner_size * stride + i * stride + s])
+                                 : 0.0;
+                double val = prstd * pdy * pweight -
+                             a * static_cast<double>(x[o * inner_size * stride + i * stride + s]) -
+                             b;
 
-                float val = prstd * pdy * pweight -
-                            a * static_cast<float>(x[o * inner_size * stride + i * stride + s]) - b;
                 ref_dx[o * inner_size * stride + i * stride + s] = static_cast<T>(val);
             });
         });
@@ -179,7 +187,8 @@ void cpu_layernorm_backward_weight_bias(tensor<T> dy,
                                         tensor<T> rstd,
                                         tensor<T>& ref_dw,
                                         tensor<T>& ref_db,
-                                        int32_t dim)
+                                        int32_t dim,
+                                        bool use_multithread = false)
 {
     auto layout   = dy.desc.GetLayoutEnum();
     size_t stride = 1;
@@ -205,18 +214,19 @@ void cpu_layernorm_backward_weight_bias(tensor<T> dy,
         inner_size *= dims[i];
     }
 
-    miopen::par_ford(inner_size)([&](int32_t i) {
-        float sum_dw = 0;
-        float sum_db = 0;
+    size_t min_grain = use_multithread ? 8 : inner_size;
+    miopen::par_for(inner_size, min_grain, [&](int32_t i) {
+        double sum_dw = 0.0;
+        double sum_db = 0.0;
 
         miopen::ford(stride)([&](int32_t s) {
             miopen::ford(outer_size)([&](int32_t o) {
-                float prstd = static_cast<float>(rstd[o * stride + s]);
-                float pmean = static_cast<float>(mean[o * stride + s]);
-                float pdy   = (dy.GetSize() != 0)
-                                  ? static_cast<float>(dy[o * inner_size * stride + i * stride + s])
-                                  : 0;
-                float px    = static_cast<float>(x[o * inner_size * stride + i * stride + s]);
+                double prstd = static_cast<double>(rstd[o * stride + s]);
+                double pmean = static_cast<double>(mean[o * stride + s]);
+                double pdy   = (dy.GetSize() != 0)
+                                   ? static_cast<double>(dy[o * inner_size * stride + i * stride + s])
+                                   : 0;
+                double px    = static_cast<double>(x[o * inner_size * stride + i * stride + s]);
 
                 sum_dw += pdy * (px - pmean) * prstd;
                 sum_db += pdy;
