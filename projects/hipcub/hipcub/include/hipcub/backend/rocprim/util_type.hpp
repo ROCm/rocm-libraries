@@ -960,7 +960,7 @@ struct is_fixed_size_random_access_range<T, void_t<decltype(std::declval<T&>()[0
     : ::std::true_type
 {};
 
-// TODO: for is_fixed_size_random_access_range we also need to support array span and extents after we can use lichipcxx.
+// TODO: for is_fixed_size_random_access_range we also need to support array span and extents after we can use libhipcxx.
 template<typename T>
 using is_fixed_size_random_access_range_t = typename is_fixed_size_random_access_range<T>::type;
 

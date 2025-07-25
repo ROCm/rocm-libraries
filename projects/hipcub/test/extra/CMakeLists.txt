@@ -20,9 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# CMake version, 3.18 or later is needed for the CUDA_STANDARD 17
-cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
-cmake_policy(VERSION 3.18...3.21)
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+cmake_policy(VERSION 3.16...3.21)
 
 # This project includes tests that should be run after
 # hipCUB is installed from package or using `make install`
@@ -43,7 +42,7 @@ include(VerifyCompiler)
 
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
-  set(CCCL_MINIMUM_VERSION 2.8.0)
+  set(CCCL_MINIMUM_VERSION 2.7.0)
   if(NOT DOWNLOAD_CUB)
     find_package(CUB ${CCCL_MINIMUM_VERSION} CONFIG)
     find_package(Thrust ${CCCL_MINIMUM_VERSION} CONFIG)
@@ -132,7 +131,7 @@ function(add_hipcub_test TEST_NAME TEST_SOURCES)
   add_executable(${TEST_TARGET} ${TEST_SOURCES})
 
   if(HIP_COMPILER STREQUAL "nvcc")
-    set_property(TARGET ${TEST_TARGET} PROPERTY CUDA_STANDARD 17)
+    set_property(TARGET ${TEST_TARGET} PROPERTY CUDA_STANDARD 14)
     set_source_files_properties(${TEST_SOURCES} PROPERTIES LANGUAGE CUDA)
     target_link_libraries(${TEST_TARGET} PRIVATE
                           hip::hipcub CUB::CUB Thrust::Thrust libcudacxx::libcudacxx)

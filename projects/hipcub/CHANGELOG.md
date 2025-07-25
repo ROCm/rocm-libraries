@@ -2,6 +2,15 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## hipCUB-4.1.0 for ROCm 7.1
+
+### Added
+* Exposed Thread-level reduction API `hipcub::ThreadReduce`.
+
+### Removed
+
+### Changed
+
 ## hipCUB-4.0.0 for ROCm 7.0
 
 ### Added

@@ -81,7 +81,7 @@ endif()
 
 # Get CUDA
 enable_language("CUDA")
-set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD 14)
 
 # Suppressing warnings
 set(HIP_NVCC_FLAGS " ${HIP_NVCC_FLAGS} -Wno-deprecated-gpu-targets -Xcompiler -Wno-return-type -Wno-deprecated-declarations ")

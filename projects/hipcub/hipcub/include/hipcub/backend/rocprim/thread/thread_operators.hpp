@@ -348,14 +348,14 @@ struct [[deprecated("SIMD intrinsics are currently not supported on HIP, use Min
 
 template<typename T>
 struct [[deprecated(
-    "SIMD intrinsics are currently not supported on HIP, use Min instead.")]] SimdMax
+    "SIMD intrinsics are currently not supported on HIP, use Max instead.")]] SimdMax
 {
     static_assert(false, "Unsupported specialization");
 };
 
 template<>
 struct [[deprecated(
-    "SIMD intrinsics are currently not supported on HIP, use Min instead.")]] SimdMax<int16_t>
+    "SIMD intrinsics are currently not supported on HIP, use Max instead.")]] SimdMax<int16_t>
 {
     using simd_type = int32_t;
 
@@ -369,7 +369,7 @@ struct [[deprecated(
 
 template<>
 struct [[deprecated(
-    "SIMD intrinsics are currently not supported on HIP, use Min instead.")]] SimdMax<uint16_t>
+    "SIMD intrinsics are currently not supported on HIP, use Max instead.")]] SimdMax<uint16_t>
 {
     using simd_type = uint32_t;
 
@@ -383,7 +383,7 @@ struct [[deprecated(
 
 template<>
 struct [[deprecated(
-    "SIMD intrinsics are currently not supported on HIP, use Min instead.")]] SimdMax<__half>
+    "SIMD intrinsics are currently not supported on HIP, use Max instead.")]] SimdMax<__half>
 {
     using simd_type = __half2;
 
@@ -396,7 +396,7 @@ struct [[deprecated(
 };
 
 template<>
-struct [[deprecated("SIMD intrinsics are currently not supported on HIP, use Min "
+struct [[deprecated("SIMD intrinsics are currently not supported on HIP, use Max "
                     "instead.")]] SimdMax<__hip_bfloat16>
 {
     using simd_type = __hip_bfloat162;
@@ -411,14 +411,14 @@ struct [[deprecated("SIMD intrinsics are currently not supported on HIP, use Min
 
 template<typename T>
 struct [[deprecated(
-    "SIMD intrinsics are currently not supported on HIP, use Min instead.")]] SimdSum
+    "SIMD intrinsics are currently not supported on HIP, use Sum instead.")]] SimdSum
 {
     static_assert(false, "Unsupported specialization");
 };
 
 template<>
 struct [[deprecated(
-    "SIMD intrinsics are currently not supported on HIP, use Min instead.")]] SimdSum<int16_t>
+    "SIMD intrinsics are currently not supported on HIP, use Sum instead.")]] SimdSum<int16_t>
 {
     using simd_type = int32_t;
 
@@ -432,7 +432,7 @@ struct [[deprecated(
 
 template<>
 struct [[deprecated(
-    "SIMD intrinsics are currently not supported on HIP, use Min instead.")]] SimdSum<uint16_t>
+    "SIMD intrinsics are currently not supported on HIP, use Sum instead.")]] SimdSum<uint16_t>
 {
     using simd_type = uint32_t;
 
@@ -446,7 +446,7 @@ struct [[deprecated(
 
 template<>
 struct [[deprecated(
-    "SIMD intrinsics are currently not supported on HIP, use Min instead.")]] SimdSum<__half>
+    "SIMD intrinsics are currently not supported on HIP, use Sum instead.")]] SimdSum<__half>
 {
     using simd_type = __half2;
 
@@ -459,7 +459,7 @@ struct [[deprecated(
 };
 
 template<>
-struct [[deprecated("SIMD intrinsics are currently not supported on HIP, use Min "
+struct [[deprecated("SIMD intrinsics are currently not supported on HIP, use Sum "
                     "instead.")]] SimdSum<__hip_bfloat16>
 {
     using simd_type = __hip_bfloat162;
@@ -472,18 +472,18 @@ struct [[deprecated("SIMD intrinsics are currently not supported on HIP, use Min
     }
 };
 
-// TODO: Mul is not avaliable in hipcub. We should wait for hip::std::multiplies in libhipcxx.
+// TODO: Mul is not available in hipcub. Use hip::std::multiplies from libhipcxx in the future.
 
 template<typename T>
-struct [[deprecated("Warning: SIMD intrinsics are currently not supported on HIP, So "
-                    "This Operator will multiply 2 input values directly")]] SimdMul
+struct [[deprecated("Warning: SIMD intrinsics are currently not supported on HIP, so "
+                    "this operator will multiply 2 input values directly")]] SimdMul
 {
     static_assert(false, "Unsupported specialization");
 };
 
 template<>
-struct [[deprecated("Warning: SIMD intrinsics are currently not supported on HIP, So "
-                    "This Operator will multiply 2 input values directly")]] SimdMul<int16_t>
+struct [[deprecated("Warning: SIMD intrinsics are currently not supported on HIP, so "
+                    "this operator will multiply 2 input values directly")]] SimdMul<int16_t>
 {
     using simd_type = int32_t;
 
@@ -496,8 +496,8 @@ struct [[deprecated("Warning: SIMD intrinsics are currently not supported on HIP
 };
 
 template<>
-struct [[deprecated("Warning: SIMD intrinsics are currently not supported on HIP, So "
-                    "This Operator will multiply 2 input values directly")]] SimdMul<uint16_t>
+struct [[deprecated("Warning: SIMD intrinsics are currently not supported on HIP, so "
+                    "this operator will multiply 2 input values directly")]] SimdMul<uint16_t>
 {
     using simd_type = uint32_t;
 
@@ -510,8 +510,8 @@ struct [[deprecated("Warning: SIMD intrinsics are currently not supported on HIP
 };
 
 template<>
-struct [[deprecated("Warning: SIMD intrinsics are currently not supported on HIP, So "
-                    "This Operator will multiply 2 input values directly")]] SimdMul<__half>
+struct [[deprecated("Warning: SIMD intrinsics are currently not supported on HIP, so "
+                    "this operator will multiply 2 input values directly")]] SimdMul<__half>
 {
     using simd_type = __half2;
 
@@ -524,8 +524,8 @@ struct [[deprecated("Warning: SIMD intrinsics are currently not supported on HIP
 };
 
 template<>
-struct [[deprecated("Warning: SIMD intrinsics are currently not supported on HIP, So "
-                    "This Operator will multiply 2 input values directly")]] SimdMul<__hip_bfloat16>
+struct [[deprecated("Warning: SIMD intrinsics are currently not supported on HIP, so "
+                    "this operator will multiply 2 input values directly")]] SimdMul<__hip_bfloat16>
 {
     using simd_type = __hip_bfloat162;
 
@@ -564,7 +564,7 @@ struct HipOperatorToSimdOperator<Sum, T>
     using simd_type = typename type::simd_type;
 };
 
-// TODO: Mul is not supported, so the conversion from hip Mul to Simd Mul is not supported here.
+// TODO: Mul is not available in hipcub. Use hip::std::multiplies from libhipcxx in the future.
 
 } // namespace internal
 

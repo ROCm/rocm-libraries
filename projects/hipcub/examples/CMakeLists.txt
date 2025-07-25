@@ -59,7 +59,7 @@ function(add_hipcub_example EXAMPLE_NAME EXAMPLE_SOURCES)
   )
 
   if(HIP_COMPILER STREQUAL "nvcc")
-    set_property(TARGET ${EXAMPLE_TARGET} PROPERTY CUDA_STANDARD 17)
+    set_property(TARGET ${EXAMPLE_TARGET} PROPERTY CUDA_STANDARD 14)
     set_source_files_properties(${EXAMPLE_SOURCES} PROPERTIES LANGUAGE CUDA)
     target_link_libraries(${EXAMPLE_TARGET}
       PRIVATE

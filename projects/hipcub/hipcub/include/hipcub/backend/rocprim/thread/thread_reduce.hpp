@@ -37,37 +37,29 @@ BEGIN_HIPCUB_NAMESPACE
 namespace internal
 {
 
-// template <
-//     int         LENGTH,
-//     typename    T,
-//     typename    ReductionOp,
-//     bool        NoPrefix = false>
-//     [[nodiscard]]
-// __device__ __forceinline__ T ThreadReduce(
-//     T*           input,
-//     ReductionOp reduction_op,
-//     T           prefix = T(0))
-// {
-//     T retval;
-//     if(NoPrefix)
-//         retval = input[0];
-//     else
-//         retval = prefix;
-
-//     #pragma unroll
-//     for (int i = 0 + NoPrefix; i < LENGTH; ++i)
-//         retval = reduction_op(retval, input[i]);
-
-//     return retval;
-// }
-
-template<typename AccumT, typename Input, typename ReductionOp>
+template<typename AccumType, typename InputType, typename ReductionOp, typename PrefixType>
 [[nodiscard]]
 __device__ __forceinline__
-AccumT ThreadReduceSequential(const Input& input, ReductionOp reduction_op)
+AccumType
+    ThreadReduceSequential(const InputType& input, ReductionOp reduction_op, PrefixType prefix)
 {
-    AccumT        retval = input[0];
-    constexpr int length = ::hipcub::detail::static_size_v<Input>();
+    AccumType     retval = static_cast<AccumType>(prefix);
+    constexpr int length = ::hipcub::detail::static_size_v<InputType>();
+#pragma unroll
+    for(int i = 0; i < length; ++i)
+    {
+        retval = reduction_op(retval, input[i]);
+    }
+    return retval;
+}
+
+template<typename AccumType, typename InputType, typename ReductionOp>
+[[nodiscard]]
+__device__ __forceinline__
+AccumType ThreadReduceSequential(const InputType& input, ReductionOp reduction_op)
+{
+    AccumType     retval = input[0];
+    constexpr int length = ::hipcub::detail::static_size_v<InputType>();
 #pragma unroll
     for(int i = 1; i < length; ++i)
     {
@@ -76,12 +68,14 @@ AccumT ThreadReduceSequential(const Input& input, ReductionOp reduction_op)
     return retval;
 }
 
-template<typename AccumT, typename Input, typename ReductionOp>
-[[nodiscard]]
+// This function is not used, it is just here for compatibility
+template<typename AccumType, typename InputType, typename ReductionOp>
+[[nodiscard]] [[deprecated("This function is an internal API, it's not recommended to use it "
+                           "directly.")]]
 __device__ __forceinline__
-AccumT ThreadReduceBinaryTree(const Input& input, ReductionOp reduction_op)
+AccumType ThreadReduceBinaryTree(const InputType& input, ReductionOp reduction_op)
 {
-    constexpr auto length = ::hipcub::detail::static_size_v<Input>();
+    constexpr auto length = ::hipcub::detail::static_size_v<InputType>();
 #pragma unroll
     for(int i = 1; i < length; i *= 2)
     {
@@ -94,12 +88,13 @@ AccumT ThreadReduceBinaryTree(const Input& input, ReductionOp reduction_op)
     return input[0];
 }
 
-template<typename AccumT, typename Input, typename ReductionOp>
-[[nodiscard]]
+template<typename AccumType, typename InputType, typename ReductionOp>
+[[nodiscard]] [[deprecated("This function is an internal API, it's not recommended to use it "
+                           "directly.")]]
 __device__ __forceinline__
-AccumT ThreadReduceTernaryTree(const Input& input, ReductionOp reduction_op)
+AccumType ThreadReduceTernaryTree(const InputType& input, ReductionOp reduction_op)
 {
-    constexpr auto length = ::hipcub::detail::static_size_v<Input>();
+    constexpr auto length = ::hipcub::detail::static_size_v<InputType>();
 #pragma unroll
     for(int i = 1; i < length; i *= 3)
     {
@@ -117,129 +112,81 @@ AccumT ThreadReduceTernaryTree(const Input& input, ReductionOp reduction_op)
 
 } // namespace internal
 
-// declare
-template<typename Input,
+template<typename InputType,
          typename ReductionOp,
-         typename ValueT = typename ::std::remove_cv<
-             typename ::std::remove_reference<decltype(::std::declval<Input>()[0])>::type>::type,
-         typename AccumT = ::rocprim::accumulator_t<ReductionOp, ValueT>>
+         typename ValueType = typename ::std::remove_cv<typename ::std::remove_reference<
+             decltype(::std::declval<InputType>()[0])>::type>::type,
+         typename AccumType = ::rocprim::accumulator_t<ReductionOp, ValueType>>
 [[nodiscard]]
 __device__ __forceinline__
-AccumT ThreadReduceNew([[maybe_unused]] const Input& input,
-                       [[maybe_unused]] ReductionOp  reduction_op)
+AccumType ThreadReduce(const InputType& input, ReductionOp reduction_op)
 {
-    static_assert(::hipcub::detail::is_fixed_size_random_access_range<Input>::value,
-                  "Input must support the subscript operator[] and have a compile-time size");
-    static_assert(std::is_invocable<ReductionOp, Input, Input>::value,
-                  "ReductionOp must be invocable with operator()(ValueT, ValueT)");
-    return ::hipcub::internal::ThreadReduceSequential<AccumT>(input, reduction_op);
+    static_assert(::hipcub::detail::is_fixed_size_random_access_range<InputType>::value,
+                  "InputType must support the subscript operator[] and have a compile-time size");
+    static_assert(std::is_invocable<ReductionOp, ValueType, ValueType>::value,
+                  "ReductionOp must be invocable with operator()(ValueType, ValueType)");
+    return ::hipcub::internal::ThreadReduceSequential<AccumType>(input, reduction_op);
 }
 
-template<typename Input,
+template<typename InputType,
          typename ReductionOp,
-         typename PrefixT,
-         typename ValueT = typename ::std::remove_cv<
-             typename ::std::remove_reference<decltype(::std::declval<Input>()[0])>::type>::type,
-         typename AccumT = ::rocprim::accumulator_t<ReductionOp, ValueT, PrefixT>>
+         typename PrefixType,
+         typename ValueType = typename ::std::remove_cv<typename ::std::remove_reference<
+             decltype(::std::declval<InputType>()[0])>::type>::type,
+         typename AccumType = ::rocprim::accumulator_t<ReductionOp, ValueType, PrefixType>>
 [[nodiscard]]
 __device__ __forceinline__
-AccumT ThreadReduceNew([[maybe_unused]] const Input& input,
-                       [[maybe_unused]] ReductionOp  reduction_op,
-                       [[maybe_unused]] PrefixT      prefix)
+AccumType ThreadReduce(const InputType& input, ReductionOp reduction_op, PrefixType prefix)
 {
-    static_assert(::hipcub::detail::is_fixed_size_random_access_range<Input>::value,
-                  "Input must support the subscript operator[] and have a compile-time size");
-    static_assert(std::is_invocable<ReductionOp, Input, Input>::value,
-                  "ReductionOp must be invocable with operator()(ValueT, ValueT)");
-    constexpr auto length = ::hipcub::detail::static_size_v<Input>();
-    return 0;
+    static_assert(::hipcub::detail::is_fixed_size_random_access_range<InputType>::value,
+                  "InputType must support the subscript operator[] and have a compile-time size");
+    static_assert(std::is_invocable<ReductionOp, ValueType, ValueType>::value,
+                  "ReductionOp must be invocable with operator()(ValueType, ValueType)");
+    constexpr auto length = ::hipcub::detail::static_size_v<InputType>();
+    return ::hipcub::internal::ThreadReduceSequential<AccumType>(input, reduction_op, prefix);
 }
 
 template<int Length,
          typename T,
          typename ReductionOp,
-         typename AccumT = ::rocprim::accumulator_t<ReductionOp, T>>
+         typename AccumType = ::rocprim::accumulator_t<ReductionOp, T>>
 [[nodiscard]]
 __device__ __forceinline__
-AccumT ThreadReduceNew([[maybe_unused]] const T* input, [[maybe_unused]] ReductionOp reduction_op)
+AccumType ThreadReduce(const T* input, ReductionOp reduction_op)
 {
     static_assert(Length > 0, "Length must be greater than 0");
     static_assert(std::is_invocable<ReductionOp, T, T>::value,
                   "ReductionOp must have the binary call operator: operator(V1, V2)");
-    return 0;
+    auto array = reinterpret_cast<const T(*)[Length]>(input);
+    return ::hipcub::ThreadReduce(*array, reduction_op);
 }
 
 template<int Length,
          typename T,
          typename ReductionOp,
-         typename PrefixT,
-         typename AccumT = ::rocprim::accumulator_t<ReductionOp, T, PrefixT>,
+         typename PrefixType,
+         typename AccumType = ::rocprim::accumulator_t<ReductionOp, T, PrefixType>,
          typename std::enable_if<(Length > 0), int>::type = 0>
 [[nodiscard]]
 __device__ __forceinline__
-AccumT ThreadReduceNew([[maybe_unused]] const T*    input,
-                       [[maybe_unused]] ReductionOp reduction_op,
-                       [[maybe_unused]] PrefixT     prefix)
+AccumType ThreadReduce(const T* input, ReductionOp reduction_op, PrefixType prefix)
 {
-    return 0;
+    static_assert(std::is_invocable<ReductionOp, T, T>::value,
+                  "ReductionOp must have the binary call operator: operator(V1, V2)");
+    auto array = reinterpret_cast<const T(*)[Length]>(input);
+    return ::hipcub::ThreadReduce(*array, reduction_op, prefix);
 }
 
 template<int Length,
          typename T,
          typename ReductionOp,
-         typename PrefixT,
+         typename PrefixType,
          typename std::enable_if<(Length == 0), int>::type = 0>
 [[nodiscard]]
 __device__ __forceinline__
-T ThreadReduceNew([[maybe_unused]] const T*, ReductionOp, [[maybe_unused]] PrefixT prefix)
+T ThreadReduce(const T*, ReductionOp, PrefixType prefix)
 {
     return prefix;
-}
-
-template <
-    int         LENGTH,
-    typename    T,
-    typename    ReductionOp,
-    bool        NoPrefix = false>
-__device__ __forceinline__ T ThreadReduce(
-    T*           input,
-    ReductionOp reduction_op,
-    T           prefix = T(0))
-{
-    T retval;
-    if(NoPrefix)
-        retval = input[0];
-    else
-        retval = prefix;
-
-    #pragma unroll
-    for (int i = 0 + NoPrefix; i < LENGTH; ++i)
-        retval = reduction_op(retval, input[i]);
-
-    return retval;
-}
-
-template <
-    int         LENGTH,
-    typename    T,
-    typename    ReductionOp>
-__device__ __forceinline__ T ThreadReduce(
-    T           (&input)[LENGTH],
-    ReductionOp reduction_op,
-    T           prefix)
-{
-    return ThreadReduce<LENGTH, false>((T*)input, reduction_op, prefix);
-}
-
-template <
-    int         LENGTH,
-    typename    T,
-    typename    ReductionOp>
-__device__ __forceinline__ T ThreadReduce(
-    T           (&input)[LENGTH],
-    ReductionOp reduction_op)
-{
-    return ThreadReduce<LENGTH, true>((T*)input, reduction_op);
 }
 
 END_HIPCUB_NAMESPACE

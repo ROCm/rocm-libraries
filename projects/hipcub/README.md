@@ -16,19 +16,19 @@ backend.
 ## Requirements
 
 * Git
-* CMake (3.18.4 or later)
+* CMake (3.16 or later)
 * For AMD GPUs:
   * AMD [ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/how-to/native-install/index.html) software (1.8.0 or later)
     * The [HIP-clang](https://github.com/ROCm/HIP/blob/master/INSTALL.md#hip-clang) compiler (you
       must, set this as the C++ compiler for ROCm)
   * The [rocPRIM](https://github.com/ROCm/rocPRIM) library
     * Automatically downloaded and built by the CMake script
-    * Requires CMake 3.18.4 or later
+    * Requires CMake 3.16.9 or later
 * For NVIDIA GPUs:
   * CUDA Toolkit
-  * CCCL library (>= 2.8.0)
+  * CCCL library (>= 2.7.0)
     * Automatically downloaded and built by the CMake script
-    * Requires CMake 3.18.4 or later
+    * Requires CMake 3.15.0 or later
 * Python 3.6 or higher (for HIP on Windows only; this is only required for install scripts)
 * Visual Studio 2019 with Clang support (HIP on Windows only)
 * Strawberry Perl (HIP on Windows only)
