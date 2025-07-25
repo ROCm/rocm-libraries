@@ -621,6 +621,17 @@ namespace rocRoller
                     concatenate("Assign dim(", dimTag, ") = ", assign.expression));
 
                 auto scope = m_context->getScopeManager();
+                if(assign.strideExpressionAttributes)
+                {
+                    co_yield Instruction::Comment("Assign stride expression");
+                    m_context->registerTagManager()->addExpression(
+                        dimTag,
+                        m_fastArith(assign.expression),
+                        *(assign.strideExpressionAttributes));
+                    scope->addRegister(dimTag);
+                }
+                else
+                {
                 scope->addRegister(dimTag);
 
                 auto deferred = expressionHasNoneDT(assign.expression)
@@ -665,15 +676,8 @@ namespace rocRoller
                         dest->setName(concatenate("DataFlowTag", dimTag));
                 }
 
-                // if (assign.regType == Register::Type::Scalar)
-                // {
-                //     std::cout << "dest register type is scalar at assign " << tag << std::endl;
-                //     co_yield Expression::generate(dest, makeScalar(assign.expression), m_context);
-                // }
-                // else 
-                {
-                    co_yield Expression::generate(dest, assign.expression, m_context);
-                }
+                co_yield Expression::generate(dest, assign.expression, m_context);
+
                 
 
                 if(deferred)
@@ -681,6 +685,7 @@ namespace rocRoller
                     m_context->registerTagManager()->addRegister(dimTag, dest);
                     if(dest->name().empty())
                         dest->setName(concatenate("DataFlowTag", dimTag));
+                }
                 }
             }
 
