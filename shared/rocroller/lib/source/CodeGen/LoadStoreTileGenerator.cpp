@@ -734,14 +734,14 @@ namespace rocRoller
                                                           toString(trLoadPairStride),
                                                           toString(trLoadPairStridePaddingBytes)));
 
-                tagger->addExpression(stride,
-                                      m_fastArith(toBytes(indexExpr) + indexExprPaddingBytes),
-                                      {ci.strideType,
-                                       unitStride,
-                                       elementBlockSize,
-                                       toBytes(elementBlockStride) + elementBlockStridePaddingBytes,
-                                       toBytes(trLoadPairStride) + trLoadPairStridePaddingBytes});
-                scope->addRegister(stride);
+                // tagger->addExpression(stride,
+                //                       m_fastArith(toBytes(indexExpr) + indexExprPaddingBytes),
+                //                       {ci.strideType,
+                //                        unitStride,
+                //                        elementBlockSize,
+                //                        toBytes(elementBlockStride) + elementBlockStridePaddingBytes,
+                //                        toBytes(trLoadPairStride) + trLoadPairStridePaddingBytes});
+                // scope->addRegister(stride);
             }
 
             // Create a buffer descriptor
