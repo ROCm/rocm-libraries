@@ -619,7 +619,6 @@ public:
     return thrust::raw_pointer_cast(m_ptr);
   }
 
-
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 deleter_type& get_deleter() noexcept
   {
     return m_deleter;
@@ -638,10 +637,40 @@ public:
   //==========================================================================
   // Modifiers
   //==========================================================================
-  
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 pointer release() noexcept
+  {
+    pointer temp = m_ptr;
+    m_ptr        = pointer();
+    return temp;
+  }
 
+  template <class Pp, class = EnableIfPointerConvertible<Pp>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void reset(Pp p) noexcept
+  {
+    pointer temp = m_ptr;
+    m_ptr        = p;
+    if (temp)
+    {
+      m_deleter(temp);
+    }
+  }
 
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void reset(std::nullptr_t = nullptr) noexcept
+  {
+    pointer temp = m_ptr;
+    m_ptr        = nullptr;
+    if (temp)
+    {
+      m_deleter(temp);
+    }
+  }
 
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 void swap(unique_ptr& u) noexcept
+  {
+    using std::swap;
+    swap(m_ptr, u.m_ptr);
+    swap(m_deleter, u.m_deleter);
+  }
 };
 
 template <class T, class D, std::enable_if_t<std::is_swappable_v<D>, void>>
