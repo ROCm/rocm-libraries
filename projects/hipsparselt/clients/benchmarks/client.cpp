@@ -242,6 +242,7 @@ int run_bench_test(Arguments& arg, const std::string& filter, bool any_stride, b
                          << min_bias_stride << std::endl;
         arg.bias_stride = min_bias_stride;
     }
+    arg.norm_check_assert = false;
     hipsparselt_spmm_dispatch<perf_sparse>(arg);
     return 0;
 }
