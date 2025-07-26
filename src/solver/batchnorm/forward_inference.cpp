@@ -221,4 +221,3 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
 } // namespace solver
 
 } // namespace miopen
-
