@@ -237,5 +237,72 @@ namespace rocRoller
             auto visitor = ConvertPropagationVisitor();
             return visitor.call(expr);
         }
+
+        struct MakeScalarVisitor
+        {
+            template <CUnary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                Expr cpy = expr;
+                cpy.arg  = call(expr.arg);
+                return std::make_shared<Expression>(cpy);
+            }
+
+            template <CBinary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                Expr cpy = expr;
+                cpy.lhs  = call(expr.lhs);
+                cpy.rhs  = call(expr.rhs);
+                return std::make_shared<Expression>(cpy);
+            }
+
+            ExpressionPtr operator()(ScaledMatrixMultiply const& expr) const
+            {
+                ScaledMatrixMultiply cpy = expr;
+                cpy.matA                 = call(expr.matA);
+                cpy.matB                 = call(expr.matB);
+                cpy.matC                 = call(expr.matC);
+                cpy.scaleA               = call(expr.scaleA);
+                cpy.scaleB               = call(expr.scaleB);
+                return std::make_shared<Expression>(cpy);
+            }
+
+            template <CTernary Expr>
+            ExpressionPtr operator()(Expr const& expr) const
+            {
+                Expr cpy = expr;
+                cpy.lhs  = call(expr.lhs);
+                cpy.r1hs = call(expr.r1hs);
+                cpy.r2hs = call(expr.r2hs);
+                return std::make_shared<Expression>(cpy);
+            }
+
+            template <CValue Value>
+            ExpressionPtr operator()(Value const& expr) const
+            {
+                return std::make_shared<Expression>(expr);
+            }
+
+            ExpressionPtr operator()(Register::ValuePtr const& expr) const
+            {
+                if(expr->regType() == Register::Type::Vector)
+                    return std::make_shared<Expression>(ToScalar{expr->expression()});
+
+                return expr->expression();
+            }
+
+            ExpressionPtr call(ExpressionPtr expr) const
+            {
+                AssertFatal(expr != nullptr, "Found nullptr in expression");
+                return std::visit(*this, *expr);
+            }
+        };
+
+        ExpressionPtr makeScalar(ExpressionPtr expr)
+        {
+            MakeScalarVisitor visitor;
+            return visitor.call(expr);
+        }
     }
 }

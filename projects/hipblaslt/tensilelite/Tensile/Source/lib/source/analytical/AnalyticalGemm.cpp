@@ -95,6 +95,7 @@ namespace TensileLite
                                           size_t          MI_K,
                                           size_t          element_size_A,
                                           size_t          element_size_B,
+                                          DataType        miDataType,
                                           bool            debug)
         {
 
@@ -102,8 +103,7 @@ namespace TensileLite
             size_t N_MI = compute_number_matrix_instructions(
                 hardware, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, debug);
             // Latency of a single MT_MxMT_NxMT_k tile is the latency of one MI multiplied by number of MI per MT_MxMT_NxMT_k.
-            size_t L_MI = hardware.get_MI_latency(
-                MI_M, MI_N, MI_K, std::max(element_size_A, element_size_B));
+            size_t L_MI = hardware.get_MI_latency(MI_M, MI_N, MI_K, miDataType);
 
             // size_t mt_arith = arithmetic_intensity(MT_M, MT_N, MT_K, 2);
             // printf("MT_M:%d MT_N:%d MT_K:%d arith:%d\n", MT_M, MT_N, MT_K, mt_arith);
@@ -450,6 +450,7 @@ namespace TensileLite
                                     size_t          element_size_A,
                                     size_t          element_size_B,
                                     size_t          element_size_out,
+                                    DataType        miDataType,
                                     size_t          mx_block_size,
                                     bool            debug)
         {
@@ -468,6 +469,7 @@ namespace TensileLite
                                                           MI_K,
                                                           element_size_A,
                                                           element_size_B,
+                                                          miDataType,
                                                           debug);
 
             double L_mem = compute_memory_latency(hardware,
@@ -716,6 +718,7 @@ namespace TensileLite
                                     size_t          element_size_A,
                                     size_t          element_size_B,
                                     size_t          element_size_out,
+                                    DataType        miDataType,
                                     size_t          mx_block_size,
                                     bool            debug)
         {
@@ -739,6 +742,7 @@ namespace TensileLite
                                                  element_size_A,
                                                  element_size_B,
                                                  element_size_out,
+                                                 miDataType,
                                                  mx_block_size,
                                                  debug);
 
@@ -765,10 +769,21 @@ namespace TensileLite
                                      size_t          element_size_A,
                                      size_t          element_size_B,
                                      size_t          element_size_out,
+                                     DataType        miDataType,
                                      int             WGM,
                                      size_t          mx_block_size,
                                      bool            debug)
         {
+            //Override dot2 instruction with vector lane widths
+            if(MI_N == 0 && MI_M == 0 && MI_K == 0)
+            {
+                // We only use Dot2 for NN layout where M < 3
+                if (M > 2 || transA || transB)
+                    return std::numeric_limits<double>::max();
+                MI_M = 1;
+                MI_N = 1;
+                MI_K = 64;
+            }
 
             //std::cout << "Split " << split << "\n";
             H_mem1
@@ -797,6 +812,7 @@ namespace TensileLite
                                                  element_size_A,
                                                  element_size_B,
                                                  element_size_out,
+                                                 miDataType,
                                                  mx_block_size,
                                                  debug);
 
@@ -832,6 +848,15 @@ namespace TensileLite
 
             if(enable_heuristics)
             {
+                if(MI_M == 1 && MI_N == 1 && MI_K == 64)
+                {
+                    // Dot2 kernels
+                    if(MT_M == M || MT_K == K)
+                    {
+                        total_latency = total_latency * 0.8;
+                    }
+                }
+
                 if(MT_M == 256 && MT_N == 256 && MT_K == 128 && (element_size_A == 8))
                 {
                     //The kernel for this is more optimized
@@ -931,6 +956,7 @@ namespace TensileLite
                                    size_t          element_size_A,
                                    size_t          element_size_B,
                                    size_t          element_size_out,
+                                   DataType        miDataType,
                                    int             WGM,
                                    double          H_mem1,
                                    bool            debug)
@@ -959,6 +985,7 @@ namespace TensileLite
                                                           element_size_A,
                                                           element_size_B,
                                                           element_size_out,
+                                                          miDataType,
                                                           WGM,
                                                           mx_block_size,
                                                           debug);

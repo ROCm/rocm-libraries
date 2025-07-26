@@ -828,4 +828,4 @@ hipSPARSE supports rocSPARSE and NVIDIA CUDA cuSPARSE as backends.
 
 hipSPARSE focuses on convenience and portability.
 If performance outweighs these factors, then it's best to use rocSPARSE itself.
-hipSPARSE can be found on `GitHub <https://github.com/ROCm/hipSPARSE/>`_.
+hipSPARSE can be found on `GitHub <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparse>`_.

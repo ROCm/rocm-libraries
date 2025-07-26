@@ -277,22 +277,6 @@ namespace rocRoller
                    >> shiftAmountExpr;
         }
 
-        // Power of Two division for signed 64 bit integers
-        template <>
-        ExpressionPtr powerOfTwoDivision(ExpressionPtr lhs, int64_t rhs)
-        {
-            int          shiftAmount        = std::countr_zero(static_cast<unsigned int>(rhs));
-            unsigned int signBits           = sizeof(int64_t) * 8 - 1;
-            unsigned int reverseShiftAmount = sizeof(int64_t) * 8 - shiftAmount;
-
-            auto shiftAmountExpr        = literal(shiftAmount);
-            auto signBitsExpr           = literal(signBits);
-            auto reverseShiftAmountExpr = literal(reverseShiftAmount);
-
-            return (lhs + logicalShiftR(lhs >> signBitsExpr, reverseShiftAmountExpr))
-                   >> shiftAmountExpr;
-        }
-
         template <typename T>
         ExpressionPtr powerOfTwoModulo(ExpressionPtr lhs, T rhs)
         {
