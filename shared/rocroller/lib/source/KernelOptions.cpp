@@ -32,8 +32,6 @@
 #include <rocRoller/Utilities/Utils.hpp>
 
 
-#include <rocRoller/Utilities/Logging.hpp>
-
 namespace rocRoller
 {
     static void increaseRegisterLimit(KernelOptionValues& values)
