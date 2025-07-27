@@ -45,7 +45,7 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
         endif()
     endif()
     target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_USE_ROCROLLER)
-    target_link_libraries(hipblaslt-clients-common PRIVATE roc::rocroller roc::mxDataGenerator)
+    target_link_libraries(hipblaslt-clients-common PRIVATE roc::mxDataGenerator)
     target_compile_features(hipblaslt-clients-common PRIVATE cxx_std_20)
 endif()
 
@@ -68,6 +68,10 @@ endif()
 
 add_subdirectory(common)
 add_subdirectory(bench)
+
+add_executable(client-api-overhead "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_api_overhead.cpp")
+target_link_libraries(client-api-overhead PRIVATE hipblaslt-clients-common hip::device)
+target_compile_definitions(client-api-overhead PRIVATE ROCBLASLT_INTERNAL_API )
 
 add_executable(hipblaslt-bench-groupedgemm-fixed-mk "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_groupedgemm_fixed_mk.cpp")
 target_link_libraries(hipblaslt-bench-groupedgemm-fixed-mk PRIVATE hipblaslt-clients-common hip::device)
@@ -99,6 +103,7 @@ target_include_directories(hipblaslt-sequence PRIVATE ${LLVM_INCLUDE_DIRS})
 if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     find_package(GTest REQUIRED)
     add_executable(hipblaslt-test)
+    target_compile_options(hipblaslt-test PRIVATE -mf16c) # do we really need to set this?
     if(rocm_smi_FOUND)
         target_link_libraries(hipblaslt-test PRIVATE rocm_smi64)
     endif()
@@ -113,11 +118,9 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         target_link_libraries(hipblaslt-test PRIVATE BLIS::BLIS) # necessary?
     endif()
     target_compile_definitions(hipblaslt-test PRIVATE GOOGLE_TEST)
-    # not getting any hits on HIPBLASLT_TEST
-    #target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_TEST)
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER) # should this be public on hipblaslt?
-        target_link_libraries(hipblaslt-test PRIVATE roc::rocroller)  # same
+        #target_link_libraries(hipblaslt-test PRIVATE roc::rocroller_interface)  # same
     endif()
     add_subdirectory(tests)
 endif()
