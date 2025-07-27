@@ -29,7 +29,7 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
     )
     target_compile_features(hipblaslt-rocroller PRIVATE cxx_std_20)
     set_target_properties(hipblaslt-rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    target_link_libraries(hipblaslt-rocroller PRIVATE hip::host roc::hipblas-common roc::rocroller)
+    target_link_libraries(hipblaslt-rocroller PRIVATE hip::host roc::hipblas-common roc::rocroller_interface)
     target_compile_definitions(hipblaslt-rocroller PRIVATE HIPBLASLT_USE_ROCROLLER)
     target_include_directories(hipblaslt-rocroller
         PRIVATE

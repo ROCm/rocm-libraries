@@ -46,6 +46,8 @@ target_link_libraries(tensilelite-tests
     PUBLIC
         tensilelite::tensilelite-host
         Boost::filesystem
+    PRIVATE
+        hip::device
 )
 
 gtest_discover_tests(tensilelite-tests WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} TIMEOUT 60)

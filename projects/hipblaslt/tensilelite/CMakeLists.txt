@@ -49,7 +49,7 @@ if(TENSILELITE_ENABLE_HOST OR HIPBLASLT_ENABLE_HOST)
     target_compile_definitions(tensilelite-host
         PUBLIC
             $<BUILD_INTERFACE:TENSILE_DEFAULT_SERIALIZATION>
-            __HIP_PLATFORM_AMD__
+            #__HIP_PLATFORM_AMD__
     )
 
     target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_USE_HIP>)
@@ -80,6 +80,7 @@ if(TENSILELITE_ENABLE_HOST OR HIPBLASLT_ENABLE_HOST)
     target_link_libraries(tensilelite-host 
         PUBLIC
             rocisa::rocisa-cpp
+        PRIVATE
             hip::device
     )
     add_subdirectory(src)

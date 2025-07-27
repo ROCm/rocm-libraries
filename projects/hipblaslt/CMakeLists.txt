@@ -2,6 +2,10 @@
 # SPDX-License-Identifier:  MIT
 
 cmake_minimum_required(VERSION 3.24.4)
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+#option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
+
 project(hipblaslt VERSION 1.0.0 LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -167,6 +171,8 @@ if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBRARIES_SUPERBUILD)
             #set(ROCROLLER_ENABLE_CLIENT OFF)
             set(BUILD_TESTING OFF)
             set(BUILD_CLIENTS OFF)
+            set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
+            set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
             include(FetchContent)
             FetchContent_Declare(
                 rocRoller
@@ -191,7 +197,6 @@ if(HIPBLASLT_ENABLE_MSGPACK)
     endif()
 endif()
 
-
 add_subdirectory(tensilelite)
 
 if(HIPBLASLT_ENABLE_HOST)
@@ -211,8 +216,8 @@ if(HIPBLASLT_ENABLE_HOST)
     target_link_libraries(hipblaslt
         PUBLIC
             roc::${hipblas_target}
-            hip::device
         PRIVATE
+            hip::device
             tensilelite::tensilelite-host
             ${CMAKE_DL_LIBS}
             ${rocTracer}
@@ -224,22 +229,19 @@ if(HIPBLASLT_ENABLE_HOST)
 
     target_compile_features(hipblaslt PUBLIC cxx_std_17) # I would like to make this configurable
 
-    target_compile_definitions(hipblaslt
-        PUBLIC
-            ROCM_USE_FLOAT16
-            __HIP_PLATFORM_AMD__
-    )
+    target_compile_definitions(hipblaslt PUBLIC ROCM_USE_FLOAT16)
 
     if(HIPBLASLT_ENABLE_HIPBLAS_DIRECT)
-        target_compile_definitions(hipblaslt PRIVATE LEGACY_HIPBLAS_DIRECT) # public header?
+        # This definition shows up in a public header
+        target_compile_definitions(hipblaslt PUBLIC LEGACY_HIPBLAS_DIRECT)
     endif()
 
     if(HIPBLASLT_ENABLE_LAZY_LOAD)
-        target_compile_definitions(hipblaslt PRIVATE ROCBLASLT_TENSILE_LAZY_LOAD) # public header?
+        target_compile_definitions(hipblaslt PRIVATE ROCBLASLT_TENSILE_LAZY_LOAD)
     endif()
 
     if(HIPBLASLT_ENABLE_MARKER)
-        target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_MARKER) # public header?
+        target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_ENABLE_MARKER)
     endif()
 
     target_include_directories(hipblaslt
@@ -296,6 +298,12 @@ if(HIPBLASLT_ENABLE_HOST)
         DEPENDS PACKAGE hip
         DEPENDS PACKAGE ${hipblas_target}
         NAMESPACE roc::
+    )
+
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt-config.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config.cmake"
+        COPYONLY
     )
 
     if( LEGACY_HIPBLAS_DIRECT )
