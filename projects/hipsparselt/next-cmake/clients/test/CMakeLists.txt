@@ -24,40 +24,30 @@ target_compile_definitions(
                            "__HIP_HCC_COMPAT_MODE__=1"
 )
 
-# TODO: -mf16c may not be required? What does this do?
 target_compile_options(hipsparselt-test PRIVATE -mf16c)
 
-# Link with GTest and BLAS
 target_link_libraries(
   hipsparselt-test PRIVATE hipsparselt-clients-common GTest::gtest GTest::gtest_main
 )
 hipsparselt_link_blas_libraries(hipsparselt-test)
 
-# Platform-specific linking for tests
 if(HIPSPARSELT_ENABLE_CUDA)
   target_link_libraries(hipsparselt-test PRIVATE -llapack -lcblas)
 else()
   target_link_libraries(hipsparselt-test PRIVATE lapack cblas)
 endif()
 
-# Additional libraries for tests
 if(NOT WIN32)
   target_link_libraries(hipsparselt-test PRIVATE -lm -lstdc++fs)
 
-  # Fortran runtime - detect based on compiler ID
   if(CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
     target_link_libraries(hipsparselt-test PRIVATE -lgfortran lapack)
   elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Flang")
     target_link_libraries(hipsparselt-test PRIVATE -lflang_rt.runtime lapack)
   else()
-    # Fallback to gfortran for most systems
     target_link_libraries(hipsparselt-test PRIVATE -lgfortran lapack)
   endif()
 endif()
-
-set_target_properties(
-  hipsparselt-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
-)
 
 set(hipsparselt_test_install_program
     "${_CMAKE_CURRENT_SOURCE_DIR}/../common/hipsparselt_gentest.py"

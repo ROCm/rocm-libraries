@@ -30,7 +30,3 @@ if(NOT WIN32)
     target_link_libraries(hipsparselt-bench PRIVATE -lgfortran -llapack)
   endif()
 endif()
-
-set_target_properties(
-  hipsparselt-bench PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
-)

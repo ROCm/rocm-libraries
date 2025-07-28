@@ -168,5 +168,5 @@ Options
 CMake Targets
 -------------
 
-* ``roc::rocblas``
+* ``roc::hipsparselt``
 

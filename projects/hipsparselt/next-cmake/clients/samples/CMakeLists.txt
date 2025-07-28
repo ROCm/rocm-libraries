@@ -35,8 +35,4 @@ foreach(sample_name ${SAMPLE_EXECUTABLES})
       ${sample_name} PRIVATE ${cusparselt_LIBRARY} CUDA::cudart CUDA::cuda_driver
     )
   endif()
-
-  set_target_properties(
-    ${sample_name} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
-  )
 endforeach()

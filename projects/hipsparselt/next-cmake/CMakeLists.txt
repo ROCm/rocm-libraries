@@ -68,7 +68,7 @@ option(HIPSPARSELT_ENABLE_VERBOSE "Output additional build information." OFF)
 set(HIPSPARSELT_HIPBLASLT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../hipblaslt/next-cmake"
     CACHE PATH "Path to hipblaslt directory."
 )
-set(HIPSPARSELT_COVERAGE_GTEST_FILTER "*quick*:*pre_checkin*:*ILP64*-*known_bug*"
+set(HIPSPARSELT_COVERAGE_GTEST_FILTER "*pre_checkin*"
     CACHE STRING "GTest filter for coverage tests."
 )
 
@@ -138,6 +138,7 @@ if(HIPSPARSELT_ENABLE_HIP)
     set(HIPBLASLT_ENABLE_DEVICE ON CACHE BOOL "" FORCE)
     set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
     # There is a conflict in the hipblaslt build system with `device_library_dir` 
+    # This is a temporary fix to allow the hipsparselt build to work with the hipblaslt build system
     set(TENSILELITE_BINARY_DIR "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
     set(HIPBLASLT_LIBLOGIC_PATH
         "${CMAKE_CURRENT_SOURCE_DIR}/../library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
@@ -266,7 +267,43 @@ rocm_create_package(
 
 # Coverage Setup
 # ============================================================================
-if(HIPSPARSELT_BUILD_COVERAGE)
-  target_compile_options(hipsparselt PRIVATE -fprofile-arcs -ftest-coverage)
-  target_link_libraries(hipsparselt PRIVATE --coverage -lgcov)
+if(HIPSPARSELT_BUILD_COVERAGE OR BUILD_CODE_COVERAGE)
+  message(STATUS "Configuring code coverage target")
+  target_compile_options(hipsparselt PRIVATE -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(hipsparselt PRIVATE -fprofile-instr-generate)
+
+  set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
+  set(coverage_test_arguments "--precompile=hipsparselt-test-precompile.db")
+  if(HIPSPARSELT_COVERAGE_GTEST_FILTER)
+    list(APPEND coverage_test_arguments "--gtest_filter=${HIPSPARSELT_COVERAGE_GTEST_FILTER}")
+  endif()
+
+  add_custom_target(
+    code_cov_tests
+    DEPENDS hipsparselt-test
+    COMMAND ${CMAKE_COMMAND} -E rm -rf "${coverage_dir}"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${coverage_dir}/profraw"
+    COMMAND
+      ${CMAKE_COMMAND} -E env
+      LLVM_PROFILE_FILE="${coverage_dir}/profraw/hipsparselt-coverage_%p.profraw"
+      $<TARGET_FILE:hipsparselt-test> ${coverage_test_arguments}
+    COMMENT "Running coverage with test command: $<TARGET_FILE:hipsparselt-test> ${coverage_test_arguments}")
+
+  find_program(LLVM_PROFDATA llvm-profdata HINTS llvm/bin REQUIRED)
+  find_program(LLVM_COV llvm-cov REQUIRED HINTS llvm/bin)
+
+  add_custom_target(
+    coverage
+    DEPENDS code_cov_tests
+    COMMAND
+      ${LLVM_PROFDATA} merge -sparse
+      "${coverage_dir}/profraw/hipsparselt-coverage_*.profraw" -o
+      "${coverage_dir}/hipsparselt.profdata"
+    COMMAND ${LLVM_COV} report -object $<TARGET_FILE:hipsparselt>
+            -instr-profile="${coverage_dir}/hipsparselt.profdata"
+    COMMAND
+      ${LLVM_COV} show -object $<TARGET_FILE:hipsparselt>
+      -instr-profile="${coverage_dir}/hipsparselt.profdata" -format=html
+      -output-dir="${coverage_dir}"
+    COMMENT "Generating coverage... report can be found in ${coverage_dir}/index.html")
 endif()
