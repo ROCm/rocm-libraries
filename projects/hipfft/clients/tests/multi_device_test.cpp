@@ -55,7 +55,9 @@ enum SplitType
     PENCIL_3D,
 };
 
-std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType> type)
+std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType> type,
+                                                  fft_auto_allocation            auto_alloc_setting
+                                                  = fft_auto_allocation_default)
 {
     int localDeviceCount = 0;
     (void)hipGetDeviceCount(&localDeviceCount);
@@ -82,7 +84,9 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
                                                   ioffset_range_zero,
                                                   ooffset_range_zero,
                                                   place_range,
-                                                  false);
+                                                  false,
+                                                  false,
+                                                  auto_alloc_setting);
 
     auto params_real = param_generator_real(test_prob,
                                             multi_gpu_sizes,
@@ -93,7 +97,9 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
                                             ioffset_range_zero,
                                             ooffset_range_zero,
                                             {fft_placement_notinplace},
-                                            false);
+                                            false,
+                                            false,
+                                            auto_alloc_setting);
 
     std::vector<fft_params> all_params;
 
@@ -185,7 +191,6 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
                 // in-place transforms require identical input/output layouts
                 if(p.placement == fft_placement_inplace && input_grid != output_grid)
                     continue;
-
                 all_params.push_back(std::move(p_dist));
             }
         }
@@ -230,4 +235,12 @@ INSTANTIATE_TEST_SUITE_P(multi_gpu_3d_pencils,
 INSTANTIATE_TEST_SUITE_P(multi_gpu,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_multi_gpu({})),
+                         accuracy_test::TestName);
+
+// Note: disabled for now due to implementation issues and
+// unimplemented features in hipFFT (to fix first)
+INSTANTIATE_TEST_SUITE_P(DISABLED_various_multi_gpu,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_multi_gpu({},
+                                                                       fft_auto_allocation_off)),
                          accuracy_test::TestName);
