@@ -50,6 +50,7 @@ const int MAX_BITS_WORKGROUPTILE_K     = 7;
 const int MAX_BITS_PREFETCH_IN_FLIGHT  = 4;
 const int REQUIRED_MULTIPLE_M_N        = 16;
 const int REQUIRED_MULTIPLE_K          = 32;
+const int SWIZZLE_BLOCK_SIZE           = 64;
 const int USE_WORKGROUP_MAPPING_K_SIZE = 4096;
 
 /**
@@ -628,6 +629,13 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(kernelType.typeB).elementBits;
     size_t elementSizeC_bits = rocRoller::DataTypeInfo::Get(kernelType.typeC).elementBits; 
 
+    size_t maxAB_bits = std::max(elementSizeA_bits, elementSizeB_bits);
+    TensileLite::analytical::DataType dataType = TensileLite::analytical::DataType::Float8;
+    if(maxAB_bits == 6)
+        dataType = TensileLite::analytical::DataType::Float6;
+    else if(maxAB_bits == 4)
+        dataType = TensileLite::analytical::DataType::Float4;
+
     const TensileLite::analytical::Hardware analaytical_hardware = TensileLite::analytical::Hardware::getHardwareForDevice(0);
 
     int WGM = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
@@ -642,8 +650,9 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
         analaytical_hardware,
         tile_list,
         elementSizeA_bits,
-        elementSizeA_bits,
+        elementSizeB_bits,
         elementSizeC_bits,
+        dataType,
         kernelType.scaleABlockRowSize * kernelType.scaleABlockColSize, //Handle A vs B block size.
         0.8,
         false,
@@ -653,6 +662,8 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     for(auto const& selected_tile : selected_tiles)
     {
         WorkGroupTileSize wgt{(int)std::get<1>(selected_tile), (int)std::get<2>(selected_tile), (int)std::get<3>(selected_tile)};
+        int unrollAmount = preferredUnrolling(kernelType.typeA, kernelType.typeB, wgt);
+        wgt.k /= unrollAmount;
 
         if((requestedAlgoCount == -1)
            || (prob.m % wgt.m == 0 && prob.n % wgt.n == 0 && prob.k % wgt.k == 0))
@@ -665,25 +676,22 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
                && wgt.m + wgt.n > 256)
                 continue;
 
-            params.push_back({wgt, 1, true});
+            // 6bit datatypes only work with power of 2 tile sizes
+            if((kernelType.typeA == rocRoller::DataType::FP6
+                || kernelType.typeA == rocRoller::DataType::BF6
+                || kernelType.typeB == rocRoller::DataType::FP6
+                || kernelType.typeB == rocRoller::DataType::BF6)
+               && (!std::has_single_bit(static_cast<uint>(wgt.m))
+                   || !std::has_single_bit(static_cast<uint>(wgt.n))))
+                continue;
 
-            // Other datatypes run out of registers when prefetchInFlight is too
-            // large.
-            // There is an error with smaller tile sizes and larger prefetchInFlight.
-            if(kernelType.typeA == rocRoller::DataType::FP4
-               && kernelType.typeB == rocRoller::DataType::FP4 && wgt.m > 32 && wgt.n > 32
-               && (prob.k % (wgt.k * 4) == 0))
+            params.push_back({wgt, 1, true});
+            while (unrollAmount > 1 && (prob.k % (wgt.k * unrollAmount) != 0))
             {
-                params.back().prefetchInFlight = 4;
+                unrollAmount--;
             }
-            else if(prob.k % (wgt.k * 2) == 0)
-            {
-                params.back().prefetchInFlight = 2;
-            }
-            else
-            {
-                params.back().prefetchInFlight = 1;
-            }
+
+            params.back().prefetchInFlight = unrollAmount;
 
             if (prob.k < USE_WORKGROUP_MAPPING_K_SIZE)
             {
@@ -693,6 +701,46 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     }
 
     return params;
+}
+
+std::pair<int, int> pickWorkgroupSize(std::shared_ptr<SolutionParameters> gemm)
+{
+    int x = 2;
+    int y = 2;
+
+    int requiredX = -1;
+    int requiredY = -1;
+
+    if(gemm->workgroupTile.m / gemm->machineInstruction.m == 1)
+        requiredX = 1;
+    if(gemm->workgroupTile.n / gemm->machineInstruction.n == 1)
+        requiredY = 1;
+
+    //Swizzle Scale only works with certain combinations of workgroup sizes
+    if(gemm->swizzleScale && (gemm->workgroupTile.m / SWIZZLE_BLOCK_SIZE) % x != 0)
+        requiredX = 1;
+    if(gemm->swizzleScale && (gemm->workgroupTile.n / SWIZZLE_BLOCK_SIZE) % y != 0)
+        requiredY = 1;
+
+    if(requiredX != -1 && requiredY == -1)
+    {
+        x = requiredX;
+        if (gemm->swizzleScale && (gemm->workgroupTile.n / SWIZZLE_BLOCK_SIZE) % 4 == 0)
+            y = 4;
+    }
+    else if (requiredX == -1 && requiredY != -1)
+    {
+        y = requiredY;
+        if (gemm->swizzleScale && (gemm->workgroupTile.m / SWIZZLE_BLOCK_SIZE) % 4 == 0)
+            x = 4;
+    }
+    else if (requiredX != -1 && requiredY != -1)
+    {
+        x = requiredX;
+        y = requiredY;
+    }
+
+    return {x * gemm->wavefrontSize, y};
 }
 
 /**
@@ -717,11 +765,6 @@ std::shared_ptr<SolutionParameters>
 
     gemm->machineInstruction = pickMI(gemm->kernelType.typeA, gemm->kernelType.typeB, gemm->workgroupTile);
 
-    if(gemm->workgroupTile.m / gemm->machineInstruction.m == 1)
-        gemm->workgroupSizeX = gemm->wavefrontSize;
-    if(gemm->workgroupTile.n / gemm->machineInstruction.n == 1)
-        gemm->workgroupSizeY = 1;
-
     if(solutionIndexParameters.prefetchInFlight == 1)
     {
         gemm->prefetch = false;
@@ -730,6 +773,27 @@ std::shared_ptr<SolutionParameters>
     {
         gemm->prefetchInFlight = solutionIndexParameters.prefetchInFlight;
     }
+
+    // Swizzle Scale only support in certain situations
+    // Swizzle Scale also runs out of registers with FP8
+    if(solutionIndexParameters.workgroupTile.m >= 128
+        && solutionIndexParameters.workgroupTile.n >= 128)
+    {
+        gemm->swizzleScale  = true;
+        gemm->loadLDSScaleA = false;
+        gemm->loadLDSScaleB = false;
+    }
+    else
+    {
+        gemm->swizzleScale  = false;
+        gemm->prefetchScale = false;
+        gemm->loadLDSScaleA = true;
+        gemm->loadLDSScaleB = true;
+    }
+
+    auto workgroupSize = pickWorkgroupSize(gemm);
+    gemm->workgroupSizeX = workgroupSize.first;
+    gemm->workgroupSizeY = workgroupSize.second;
 
     // Direct To LDS only supported in certain situations
     if(kernelType.typeA == rocRoller::DataType::FP6 || kernelType.typeA == rocRoller::DataType::BF6)
@@ -750,25 +814,8 @@ std::shared_ptr<SolutionParameters>
         gemm->prefetchLDSFactor = 2;
     }
 
-    // Swizzle Scale only support in certain situations
-    // Swizzle Scale also runs out of registers with FP8
-    if(solutionIndexParameters.workgroupTile.m >= 128
-       && solutionIndexParameters.workgroupTile.n >= 128)
-    {
-        gemm->swizzleScale  = true;
-        gemm->loadLDSScaleA = false;
-        gemm->loadLDSScaleB = false;
-    }
-    else
-    {
-        gemm->swizzleScale  = false;
-        gemm->prefetchScale = false;
-        gemm->loadLDSScaleA = true;
-        gemm->loadLDSScaleB = true;
-    }
-
     // LDS can only be used for scaling data with certain workgroup tile sizes
-    auto workgroupSize = gemm->workgroupSizeX * gemm->workgroupSizeY;
+    auto workgroupSizeTotal = gemm->workgroupSizeX * gemm->workgroupSizeY;
     auto numScaleElementsA = 0;
     if(gemm->kernelType.scaleABlockRowSize * gemm->kernelType.scaleABlockColSize != 0)
     {
@@ -783,12 +830,12 @@ std::shared_ptr<SolutionParameters>
           * (gemm->workgroupTile.k
              / (gemm->kernelType.scaleBBlockRowSize * gemm->kernelType.scaleBBlockColSize));
     }
-    if(numScaleElementsA % workgroupSize != 0)
+    if(numScaleElementsA % workgroupSizeTotal != 0)
     {
         gemm->loadLDSScaleA     = false;
         gemm->prefetchMixMemOps = false;
     }
-    if(numScaleElementsB % workgroupSize != 0)
+    if(numScaleElementsB % workgroupSizeTotal != 0)
     {
         gemm->loadLDSScaleB     = false;
         gemm->prefetchMixMemOps = false;
