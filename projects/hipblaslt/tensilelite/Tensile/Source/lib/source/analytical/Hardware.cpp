@@ -150,6 +150,9 @@ namespace TensileLite
                     // F4
                     {MatrixInstruction(32, 32, 64, DataType::Float4), 32}, // v_mfma_f32_32x32x64_f4
                     {MatrixInstruction(16, 16, 128, DataType::Float4), 16}, // v_mfma_f32_16x16x128_f4
+                    // DOT2
+                    {MatrixInstruction( 1,  1,  64, DataType::Half), 16}, // V_DOT2_F32_F16
+                    {MatrixInstruction( 1,  1,  64, DataType::BFloat16), 16}, // V_DOT2_F32_BF16
                 }}};
 
     } // namespace analytical
