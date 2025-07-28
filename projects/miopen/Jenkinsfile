@@ -551,6 +551,7 @@ pipeline {
                         NOMLIR_build_cmd = "CTEST_PARALLEL_LEVEL=4 MIOPEN_LOG_LEVEL=5 make -j\$(nproc) check"
                     }
                     steps{
+                        checkout scm
                         script {
                             withWorkingDir {
                                 utils.buildHipClangJobAndReboot( build_type: 'debug', setup_flags: NOMLIR_flags, build_cmd: NOMLIR_build_cmd, test_flags: ' --verbose ', build_install: true)
@@ -568,6 +569,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
+                        checkout scm
                         script {
                             withWorkingDir {
                                 utils.buildHipClangJobAndReboot( build_type: 'debug', setup_flags: "-DMIOPEN_USE_COMPOSABLEKERNEL=Off", make_targets: "", build_install: true)
@@ -585,6 +587,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
+                        checkout scm
                         script {
                             withWorkingDir {
                                 utils.buildHipClangJobAndReboot( setup_flags: "-DBUILD_SHARED_LIBS=Off", mlir_build: 'OFF', build_install: true)
@@ -606,6 +609,7 @@ pipeline {
                         execute_cmd = "bin/test_conv2d --disable-verification-cache"
                     }
                     steps{
+                        checkout scm
                         script {
                             withWorkingDir {
                                 utils.buildHipClangJobAndReboot(make_targets: make_targets, execute_cmd: execute_cmd, find_mode: "Normal", build_install: true)
@@ -627,6 +631,7 @@ pipeline {
                         execute_cmd = "MIOPEN_FIND_MODE=2 CTEST_PARALLEL_LEVEL=4 bin/test_conv2d --disable-verification-cache"
                     }
                     steps{
+                        checkout scm
                         script {
                             withWorkingDir {
                                 utils.buildHipClangJobAndReboot( make_targets: make_targets, execute_cmd: execute_cmd, build_install: true)
@@ -644,6 +649,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
+                        checkout scm
                         script {
                             withWorkingDir {
                                 utils.buildHipClangJobAndReboot(make_targets: Smoke_targets, setup_flags: "-DMIOPEN_USE_SQLITE_PERF_DB=On", build_install: true)
@@ -661,6 +667,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
+                        checkout scm
                         script {
                             withWorkingDir {
                                 utils.buildHipClangJobAndReboot(setup_flags: "-DMIOPEN_ENABLE_FIN_INTERFACE=On",
@@ -680,6 +687,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx908") }
                     steps{
+                        checkout scm
                         script {
                             withWorkingDir {
                                 utils.buildHipClangJobAndReboot(build_type: 'debug', make_targets: Smoke_targets, build_install: true)
@@ -697,6 +705,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx90a") }
                     steps{
+                        checkout scm
                         script {
                             withWorkingDir {
                                 utils.buildHipClangJobAndReboot(build_type: 'debug', make_targets: Smoke_targets, build_install: true)
@@ -714,6 +723,7 @@ pipeline {
                     }
                     agent{ label rocmnode("gfx942") }
                     steps{
+                        checkout scm
                         script {
                             withWorkingDir {
                                 utils.buildHipClangJobAndReboot(build_type: 'debug', make_targets: Smoke_targets, needs_reboot:false, build_install: true)
