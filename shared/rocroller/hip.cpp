@@ -1,6 +1,7 @@
 #include <cstdlib>
 #include <hip/hip_runtime.h>
 #include <iostream>
+#include <stdio.h>
 
 // Error-checking macro
 #define HIP_CHECK(cmd)                                                          \
@@ -14,29 +15,24 @@
         }                                                                       \
     }
 
-#define N 1024
-#define BLOCK_SIZE 256
-
-#ifndef STRIDE
-#define STRIDE 0
-#endif
-
-template <int stride = STRIDE>
+template <int counter = COUNTER, int instr = 32>
 __global__ void kernel()
 {
-    uint32_t const index = stride * threadIdx.x;
-    uint32_t       r;
+    uint32_t const index = counter * threadIdx.x;
 #pragma unroll
     for(int i = 0; i < 32; ++i)
     {
-        asm volatile("ds_read_b128 v[2:5], %0" : : "v"(index));
+        if constexpr(instr == 32)
+            asm volatile("ds_read_b32 v2, %0" : : "v"(index));
+        if constexpr(instr == 128)
+            asm volatile("ds_read_b128 v[2:5], %0" : : "v"(index));
     }
 }
 
 int main()
 {
-    dim3 threads(BLOCK_SIZE);
-    dim3 blocks(N / BLOCK_SIZE);
+    dim3 threads(64);
+    dim3 blocks(4);
     hipLaunchKernelGGL(kernel, blocks, threads, 0, 0);
 
     // Check for launch errors
