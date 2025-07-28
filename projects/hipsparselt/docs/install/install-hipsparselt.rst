@@ -54,21 +54,43 @@ Downloading hipSPARSELt
 --------------------------------------------------------------------------------------
 
 The hipSPARSELt source code is available from the
-`hipSPARSELt GitHub <https://github.com/ROCm/hipSPARSELt>`_.
+the `hipSPARSELt <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparselt>`_ directory
+of the `rocm-libraries <https://github.com/ROCm/rocm-libraries>`_ GitHub.
 
-Download the develop branch using these commands:
+Download the develop branch for hipSPARSELt and all projects in the rocm-libraries repository
+using these commands:
 
 .. code-block:: bash
 
-   git clone -b develop https://github.com/ROCm/hipSPARSELt.git
-   cd hipSPARSELt
+   git clone -b develop https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries/projects/hipsparselt
 
+To limit your local checkout to the hipSPARSELt project, configure ``sparse-checkout`` before cloning.
+This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.
+Use the following commands for a sparse checkout:
+
+.. code-block:: shell
+
+   git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries
+   git sparse-checkout init --cone
+   git sparse-checkout set projects/hipsparselt
+   git checkout develop # or use the branch you want to work with
+
+.. note::
+
+   To build ROCm 6.4 and older, use the hipSPARSELt repository at `<https://github.com/ROCm/hipSPARSELt>`_.
+   For more information, see the documentation associated with the release you want to build.
 
 Building hipSPARSELt using the install script
 ----------------------------------------------
 
 It's recommended to use the ``install.sh`` script to install hipSPARSELt.
 Here are the steps required to build different packages of the library, including the dependencies and clients.
+
+.. note::
+
+   You can run the ``install.sh`` script from the ``projects/hipsparselt`` directory.
 
 Using install.sh to build hipSPARSELt with dependencies
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -105,6 +127,8 @@ Building hipSPARSELt using individual make commands
 You can build hipSPARSELt using the following commands:
 
 .. note::
+
+   Run these commands from the ``projects/hipsparselt`` directory.
 
    CMake 3.16.8 or later is required to build hipSPARSELt.
 
@@ -154,10 +178,14 @@ Testing the hipSPARSELt installation
 
 After successfully compiling the library with the clients, you can test the hipSPARSELt installation by running an example:
 
+.. note::
+
+   Run these commands from the ``projects/hipsparselt`` directory.
+
 .. code-block:: bash
 
    # Navigate to clients binary directory
-   cd hipSPARSELt/build/release/clients/staging
+   cd build/release/clients/staging
 
    # Execute hipSPARSELt example
    ./example_spmm_strided_batched -m 32 -n 32 -k 32 --batch_count 1
@@ -170,7 +198,7 @@ To run the benchmarks, build hipSPARSELt with the ``-DBUILD_CLIENTS_BENCHMARKS=O
 .. code-block:: bash
 
    # Go to hipSPARSELt build directory
-   cd hipSPARSELt/build/release
+   cd build/release
 
    # Run benchmark, e.g.
    ./clients/staging/hipsparselt-bench -f spmm -i 200 -m 256 -n 256 -k 256
@@ -180,7 +208,7 @@ To run the unit tests, build hipSPARSELt with the ``-DBUILD_CLIENTS_TESTS=ON`` o
 .. code-block:: bash
 
    # Go to hipSPARSELt build directory
-   cd hipSPARSELt; cd build/release
+   cd build/release
 
    # Run all tests
    ./clients/staging/hipsparselt-test
