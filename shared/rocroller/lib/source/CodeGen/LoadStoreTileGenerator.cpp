@@ -553,18 +553,18 @@ namespace rocRoller
 
             auto scope = m_context->getScopeManager();
 
-            auto toBytes = [&](ExpressionPtr expr) -> ExpressionPtr {
-                uint numBits = DataTypeInfo::Get(ci.valueType).elementBits;
+            // auto toBytes = [&](ExpressionPtr expr) -> ExpressionPtr {
+            //     uint numBits = DataTypeInfo::Get(ci.valueType).elementBits;
 
-                // TODO: This would be a good place to add a GPU
-                // assert.  If numBits is not a multiple of 8, assert
-                // that (expr * numBits) is a multiple of 8.
-                Log::debug("  toBytes: {}: numBits {}", toString(ci.valueType), numBits);
+            //     // TODO: This would be a good place to add a GPU
+            //     // assert.  If numBits is not a multiple of 8, assert
+            //     // that (expr * numBits) is a multiple of 8.
+            //     Log::debug("  toBytes: {}: numBits {}", toString(ci.valueType), numBits);
 
-                if(numBits % 8u == 0)
-                    return expr * L(numBits / 8u);
-                return (expr * L(numBits)) / L(8u);
-            };
+            //     if(numBits % 8u == 0)
+            //         return expr * L(numBits / 8u);
+            //     return (expr * L(numBits)) / L(8u);
+            // };
 
             // Set the zero-coordinates to zero
             auto fullStop  = [&](int tag) { return tag == increment; };
