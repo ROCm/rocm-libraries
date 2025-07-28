@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,8 +35,161 @@
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 #include "rocsolver_run_specialized_kernels.hpp"
+#include <hip/hip_cooperative_groups.h>
 
 ROCSOLVER_BEGIN_NAMESPACE
+
+/*
+*   LARF kernel for the left side case. Each work group of NB_X threads
+*   operates on a column of matrix A. (m + NB_X / warpSize) * sizeof(T)
+*   bytes of LDS memory is required. Grid dimensions = dim3(1, n, batch count)
+*   and block dimensions = dim3(NB_X).
+*/
+template <int NB_X, typename T, typename I, typename U>
+ROCSOLVER_KERNEL void __launch_bounds__(NB_X) larf_left_kernel(const I m,
+                                                               const I n,
+                                                               U xx,
+                                                               const rocblas_stride shiftX,
+                                                               const I incX,
+                                                               const rocblas_stride strideX,
+                                                               const T* tauA,
+                                                               const rocblas_stride strideP,
+                                                               U AA,
+                                                               const rocblas_stride shiftA,
+                                                               const I lda,
+                                                               const rocblas_stride strideA)
+{
+    I bid = blockIdx.z;
+    I tx = threadIdx.x;
+    I col = blockIdx.y;
+
+    // select batch instance
+    T* x = load_ptr_batch<T>(xx, bid, shiftX, strideX);
+    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    const T* tau = tauA + bid * strideP;
+
+    A += col * size_t(lda);
+
+    I start = (incX > 0 ? 0 : (m - 1) * -incX);
+
+    T res = 0;
+
+    extern __shared__ double smem[];
+    T* sdata = reinterpret_cast<T*>(smem);
+    T* xs = sdata + (NB_X / warpSize);
+
+    for(I i = tx; i < m; i += NB_X)
+        xs[i] = x[start + i * size_t(incX)];
+
+    //
+    // GEMV
+    //
+    for(I i = tx; i < m; i += NB_X)
+        res += conj(A[i]) * xs[i];
+
+    // reduction
+    res += shift_left(res, 1);
+    res += shift_left(res, 2);
+    res += shift_left(res, 4);
+    res += shift_left(res, 8);
+    res += shift_left(res, 16);
+    if(warpSize > 32)
+        res += shift_left(res, 32);
+    if(tx % warpSize == 0)
+        sdata[tx / warpSize] = res;
+    __syncthreads();
+    if(tx == 0)
+    {
+        for(I k = 1; k < NB_X / warpSize; k++)
+            res += sdata[k];
+
+        sdata[0] = res;
+    }
+    __syncthreads();
+
+    //
+    // GER
+    //
+    res = -tau[0] * conj(sdata[0]);
+    for(I i = tx; i < m; i += NB_X)
+        A[i] += res * xs[i];
+}
+
+/*
+*   LARF kernel for the right side case. Each work group of NB_X threads
+*   operates on a row of matrix A. (n + NB_X / warpSize) * sizeof(T)
+*   bytes of LDS memory is required. Grid dimensions = dim3(1, m, batch count)
+*   and block dimensions = dim3(NB_X).
+*/
+template <int NB_X, typename T, typename I, typename U>
+ROCSOLVER_KERNEL void __launch_bounds__(NB_X) larf_right_kernel(const I m,
+                                                                const I n,
+                                                                U xx,
+                                                                const rocblas_stride shiftX,
+                                                                const I incX,
+                                                                const rocblas_stride strideX,
+                                                                const T* tauA,
+                                                                const rocblas_stride strideP,
+                                                                U AA,
+                                                                const rocblas_stride shiftA,
+                                                                const I lda,
+                                                                const rocblas_stride strideA)
+{
+    I bid = blockIdx.z;
+    I tx = threadIdx.x;
+    I row = blockIdx.y;
+
+    // select batch instance
+    T* x = load_ptr_batch<T>(xx, bid, shiftX, strideX);
+    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    const T* tau = tauA + bid * strideP;
+
+    A += row;
+
+    I start = (incX > 0 ? 0 : (n - 1) * -incX);
+
+    T res = 0;
+
+    extern __shared__ double smem[];
+    T* sdata = reinterpret_cast<T*>(smem);
+    T* xs = sdata + (NB_X / warpSize);
+
+    for(I j = tx; j < n; j += NB_X)
+        xs[j] = x[start + j * size_t(incX)];
+
+    //
+    // GEMV
+    //
+    for(I j = tx; j < n; j += NB_X)
+        res += A[j * size_t(lda)] * xs[j];
+
+    // reduction
+    res += shift_left(res, 1);
+    res += shift_left(res, 2);
+    res += shift_left(res, 4);
+    res += shift_left(res, 8);
+    res += shift_left(res, 16);
+    if(warpSize > 32)
+        res += shift_left(res, 32);
+    if(tx % warpSize == 0)
+        sdata[tx / warpSize] = res;
+    __syncthreads();
+    if(tx == 0)
+    {
+        for(I k = 1; k < NB_X / warpSize; k++)
+            res += sdata[k];
+
+        sdata[0] = res;
+    }
+    __syncthreads();
+
+    //
+    // GER
+    //
+    res = -tau[0] * sdata[0];
+    for(I j = tx; j < n; j += NB_X)
+        A[j * size_t(lda)] += res * conj(xs[j]);
+}
 
 template <bool BATCHED, typename T, typename I>
 void rocsolver_larf_getMemorySize(const rocblas_side side,
@@ -160,13 +313,45 @@ rocblas_status rocsolver_larf_template(rocblas_handle handle,
                               shiftA, lda, stridea, batch_count);
     }
 
+    // get device prop
+    int device;
+    HIP_CHECK(hipGetDevice(&device));
+    hipDeviceProp_t props;
+    HIP_CHECK(hipGetDeviceProperties(&props, device));
+
+    // determine side
+    bool leftside = (side == rocblas_side_left);
+
+    static constexpr int NB = 1024;
+    const int lds_size = leftside ? (m + (NB / props.warpSize)) * sizeof(T)
+                                  : (n + (NB / props.warpSize)) * sizeof(T);
+
+    if(lds_size <= props.sharedMemPerBlock)
+    {
+        // Launch larf kernel if tune parameters are met.
+        if(leftside && (n <= 1024 || m >= 2048))
+        {
+            ROCSOLVER_LAUNCH_KERNEL((larf_left_kernel<NB>), dim3(1, n, batch_count), dim3(NB),
+                                    lds_size, stream, m, n, x, shiftx, incx, stridex, alpha,
+                                    stridep, A, shiftA, lda, stridea);
+            return rocblas_status_success;
+        }
+        // TODO: investigate right side tuning.
+        else if(!leftside && (m <= 1024 || n >= 2048))
+        {
+            ROCSOLVER_LAUNCH_KERNEL((larf_right_kernel<NB>), dim3(1, m, batch_count), dim3(NB),
+                                    lds_size, stream, m, n, x, shiftx, incx, stridex, alpha,
+                                    stridep, A, shiftA, lda, stridea);
+            return rocblas_status_success;
+        }
+    }
+
     // everything must be executed with scalars on the device
     rocblas_pointer_mode old_mode;
     rocblas_get_pointer_mode(handle, &old_mode);
     rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
 
-    // determine side and order of H
-    bool leftside = (side == rocblas_side_left);
+    // determine order of H
     I order = m;
     rocblas_operation trans = rocblas_operation_none;
     if(leftside)
