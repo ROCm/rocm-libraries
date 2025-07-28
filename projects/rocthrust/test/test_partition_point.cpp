@@ -19,8 +19,8 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/partition.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
 TESTS_DEFINE(PartitionPointVectorTests, VectorSignedIntegerTestsParams);

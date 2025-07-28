@@ -17,8 +17,10 @@
 
 #include <thrust/sort.h>
 
-#include "test_real_assertions.hpp"
+#include <algorithm>
+
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
 TESTS_DEFINE(SortByKeyVariableTests, AllIntegerTestsParams);
