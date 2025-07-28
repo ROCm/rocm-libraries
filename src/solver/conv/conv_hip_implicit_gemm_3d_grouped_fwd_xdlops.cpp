@@ -39,10 +39,6 @@
 #include "ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp"
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
-
-#include <boost/any.hpp>
-#include <boost/range/adaptors.hpp>
-
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
 MIOPEN_DECLARE_ENV_VAR_UINT64(CK_CONV3D_IDX);
 
@@ -600,7 +596,6 @@ float ConvHipImplicitGemm3DGroupFwdXdlops::GetWti(const ExecutionContext&,
                                                   const miopen::conv::ProblemDescription& problem) const
 {
     decltype(auto) xDesc = problem.GetIn();
-    decltype(auto) conv  = problem.GetConv();
     decltype(auto) wDesc = problem.GetWeights();
 
     if (xDesc.GetType() == miopenHalf ||
