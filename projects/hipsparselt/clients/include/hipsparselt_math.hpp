@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include "hipsparselt_fp8.hpp"
 #include <cmath>
 #include <hip/hip_runtime.h>
 #include <hipsparselt/hipsparselt.h>
@@ -75,16 +76,18 @@ inline hip_bfloat16 negate(hip_bfloat16 x)
 #endif
 }
 
-#ifdef HIP_FP8_TYPE_OCP
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
 template <>
-inline __hip_fp8_e4m3 negate(__hip_fp8_e4m3 x)
+inline hipsparselt_fp8_e4m3 negate(hipsparselt_fp8_e4m3 x)
 {
-    return x.__x & 0xA0;
+    x.__x ^= 0x80;
+    return x;
 }
 
 template <>
-inline __hip_fp8_e5m2 negate(__hip_fp8_e5m2 x)
+inline hipsparselt_fp8_e5m2 negate(hipsparselt_fp8_e5m2 x)
 {
-    return x.__x & 0xA0;
+    x.__x ^= 0x80;
+    return x;
 }
 #endif
