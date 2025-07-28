@@ -10,6 +10,9 @@ except:
     print('CSafeLoader is not installed.')
     DEFAULT_YAML_LOADER = yaml.SafeLoader
 
+# store reference anchors
+anchors = {}
+
 def parse_general(loader: yaml.Loader):
     if loader.check_event(yaml.MappingStartEvent):
         return parse_mapping(loader)
@@ -17,13 +20,22 @@ def parse_general(loader: yaml.Loader):
         return parse_sequence(loader)
     elif loader.check_event(yaml.ScalarEvent):
         return parse_scalar(loader)
+    elif loader.check_event(yaml.AliasEvent):
+        return parse_alias(loader)
+
+def parse_alias(loader: yaml.Loader):
+    evt = loader.get_event()
+    return evt.anchor
 
 def parse_sequence(loader: yaml.Loader):
     ret = []
     #pop sequence start event
-    loader.get_event()
+    evt = loader.get_event()
     while not loader.check_event(yaml.SequenceEndEvent):
         ret.append(parse_general(loader))
+    # store the anchor value if the anchor will be used as an alias
+    if evt.anchor:
+        anchors[evt.anchor] = ret
     #pop sequence end event
     loader.get_event()
     return ret
@@ -32,12 +44,18 @@ def parse_mapping(loader: yaml.Loader):
     ret = {}
     k, v = None, None
     #pop mapping start event
-    loader.get_event()
+    evt = loader.get_event()
     while not loader.check_event(yaml.MappingEndEvent):
         if k is None:
             k = parse_scalar(loader)
         elif v is None:
             v = parse_general(loader)
+            if evt.anchor:
+                anchors[evt.anchor] = v
+            # if v is an alias replace with "anchors" value
+            if isinstance(v, str):
+                if v in anchors:
+                    v = anchors[v]
             ret[k] = v
             k, v = None, None
 

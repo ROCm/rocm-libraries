@@ -216,7 +216,3 @@ BenchmarkProblems:
         - BiasTypeArgs: ['s']
         - ActivationArgs:
           - [Enum: none]
-LibraryLogic:
-    ScheduleName: "aldebaran"
-    DeviceNames: ["Device 0050", "Device 0051", "Device 0052", "Device 0054", "Device 0062", "Device 7400", "Device 740c"]
-    ArchitectureName: "gfx90a"

@@ -252,6 +252,11 @@ namespace TensileLite
         return rocisa::toString(d);
     }
 
+    std::string TypeAbbrev(rocisa::DataType d)
+    {
+        return rocisa::TypeAbbrev(d);
+    }
+
     std::map<rocisa::DataType, DataTypeInfo>* DataTypeInfo::getData()
     {
         static std::map<rocisa::DataType, DataTypeInfo> data;

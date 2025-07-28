@@ -483,7 +483,15 @@ def dump_yaml(gpu_idx, gemm_group, yaml_file, m_sum, n_sum, batch_sum, k_sum, sa
     data["LibraryLogic"]["DeviceNames"] = DeviceNames
     data["LibraryLogic"]["ScheduleName"] = ScheduleName
     data["LibraryLogic"]["ArchitectureName"] = {"Architecture": ArchitectureName, "CUCount": CU}
-    data["LibraryLogic"]["LibraryType"] = LibraryType
+    if LibraryType == "FreeSize":
+        data["LibraryLogic"]["LibraryType"] = "FreeSize"
+        data["LibraryLogic"]["Library"]["distance"] = None
+    elif LibraryType == "Prediction":
+        data["LibraryLogic"]["LibraryType"] = "Prediction"
+        data["LibraryLogic"]["Library"]["distance"] = None
+    else:
+        data["LibraryLogic"]["LibraryType"] = "Matching"
+        data["LibraryLogic"]["Library"]["distance"] = LibraryType
     # Write the updated YAML file
     yaml_file = os.path.basename(yaml_file)
     slices = yaml_file.split('.')

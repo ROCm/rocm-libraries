@@ -34,6 +34,7 @@ from Tensile.Common.Architectures import gfxToIsa
 from Tensile.SolutionStructs import Solution, ProblemSizes
 from Tensile.SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
 from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
+from Tensile.Common.GlobalParameters import defaultSolution
 
 from typing import IO, NamedTuple, List, Dict, Optional
 from Tensile.SolutionStructs.Solution import BiasTypeArgs, ActivationArgs
@@ -511,7 +512,7 @@ def parseLibraryLogicData(
     if isinstance(data, List):
         # TODO: this can be removed when all logic files have dict format
         data = parseLibraryLogicList(data, srcFile)
-    elif isinstance(data, dict) and "LibraryLogicVersion" in data:
+    elif isinstance(data, dict) in data:
         libraryType = data["LibraryType"]
         if libraryType == "FreeSize":
             data["Library"] = {}
@@ -549,23 +550,23 @@ def parseLibraryLogicData(
     # unpack problemType
     problemType = ProblemType(data["ProblemType"], printIndexAssignmentInfo, srcFile=srcFile)
 
-    defaultSolutionLibLogic = data.get("DefaultSolution", Common.defaultSolution)
+    defaultSolutionLibLogic = data.get("DefaultSolution", defaultSolution)
 
     # unpack solution
-    def solutionStateToSolution(solutionState, cxxCompiler, isaInfoMap) -> Solution:
+    def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Solution:
 
         # If parameter not in yaml, fill with default values
         if "KernelLanguage" not in solutionState.keys():
-            solutionState["KernelLanguage"] = Common.defaultSolution["KernelLanguage"]
+            solutionState["KernelLanguage"] = defaultSolution["KernelLanguage"]
         if "CustomKernelName" not in solutionState.keys():
-            solutionState["CustomKernelName"] = Common.defaultSolution["CustomKernelName"]
+            solutionState["CustomKernelName"] = defaultSolution["CustomKernelName"]
 
-        solutionState["ProblemType"] = data["ProblemType"];
+        solutionState["ProblemType"] = data["ProblemType"]
 
         # Default parameter values in the library logic take priority over ones in Common.py
         for param, defVal in defaultSolutionLibLogic.items():
             if param == "SolutionIndex": continue
-            if Common.defaultSolution[param] != defVal:
+            if defaultSolution[param] != defVal:
                 solutionState[param] = defVal
 
         if solutionState["KernelLanguage"] == "Assembly":
@@ -641,7 +642,6 @@ def parseLibraryLogicList(data, srcFile="?"):
 
     rv = {}
 
-    rv["LibraryLogicVersion"] = "0.0.0"
     rv["MinimumRequiredVersion"] = data[0]["MinimumRequiredVersion"]
     rv["ScheduleName"] = data[1]
 
@@ -658,7 +658,7 @@ def parseLibraryLogicList(data, srcFile="?"):
     if len(data) > 12 and data[12]:
         rv["DefaultSolution"] = data[12]
     else:
-        rv["DefaultSolution"] = dict(sorted(Common.defaultSolution.items()))
+        rv["DefaultSolution"] = dict(sorted(defaultSolution.items()))
 
     rv["ProblemType"] = data[4]
     rv["Solutions"] = data[5]
@@ -765,11 +765,15 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
     data["ScheduleName"] = schedulePrefix
     # schedule architecture name and get CU count
     CUCount=getCUCount()
-    data.append({"ArchitectureName": architectureName, "CUCount": CUCount} if architectureName=="gfx942" and CUCount and CUCount!=304 else architectureName)
+
+    data["ArchitectureName"] = architectureName
+    if architectureName == "gfx942" and CUCount and CUCount != 304:
+        data["CUCount"] = CUCount
+
     # schedule device names
     data["DeviceNames"] = deviceNames
     # default solution (default values for tuning parameters)
-    data["DefaultSolution"] = Common.defaultSolution
+    data["DefaultSolution"] = defaultSolution
 
     # problem type
     problemTypeState = problemType.state
@@ -815,8 +819,8 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
     # so they are copied to the yaml files
     def removeDefaultVals(params):
         for k in list(params.keys()):
-            if k in Common.defaultSolution.keys():
-                if params[k] == Common.defaultSolution[k]:
+            if k in defaultSolution.keys():
+                if params[k] == defaultSolution[k]:
                     del params[k]
 
     # solutions
@@ -865,6 +869,14 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
         data["TileSelectionIndices"] = None
 
     data["PerfMetric"] = logicTuple[7]
-    data["LibraryType"] = libraryType
+    if libraryType == "FreeSize":
+        data["LibraryType"] = "FreeSize"
+        data["Library"]["distance"] = libraryType
+    elif libraryType == "Prediction":
+        data["LibraryType"] = "Prediction"
+        data["Library"]["distance"] = libraryType
+    else:
+        data["LibraryType"] = "Matching"
+        data["Library"]["distance"] = libraryType
 
     return data

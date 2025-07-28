@@ -77,8 +77,3 @@ BenchmarkProblems:
         - FactorDimArgs: [0, 1]
         - ActivationArgs:
           - [Enum: none]
-          
-LibraryLogic:
-    ScheduleName: "aquavanjaram"
-    DeviceNames: ["Device 0049", "Device 0050"]
-    ArchitectureName: "gfx942"

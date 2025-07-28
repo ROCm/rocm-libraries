@@ -82,65 +82,68 @@ def addKernel(solutionPool, solDict, solution):
     return solutionPool, solDict, index
 
 # update dependant parameters if StaggerU == 0
-def sanitizeSolutions(solList):
+def sanitizeSolutions(data):
+    solList = data["Solutions"]
     for sol in solList:
         if sol.get("StaggerU") == 0:
             sol["StaggerUMapping"] = 0
             sol["StaggerUStride"] = 0
             sol["_staggerStrideShift"] = 0
 
-from Tensile.Common.GlobalParameters import defaultSolution, defaultInternalSupportParams
+from Tensile.Common.GlobalParameters import defaultSolution
 from Tensile.Common import assignParameterWithDefault
 
 def reNameSolutions(data):
-    solList = data[5]
+    solList = data["Solutions"]
     for sol in solList:
         # Assign solution state from config, filling missing from the defaultSolution
         for key in defaultSolution:
             assignParameterWithDefault(sol, key, sol, defaultSolution)
-        sol["ProblemType"] = data[4]
+        sol["ProblemType"] = data["ProblemType"]
+        sol["GlobalSplitU"] = data["DefaultSolution"]["GlobalSplitU"]
         sol["SolutionNameMin"] = getSolutionNameMin(sol,splitGSU=False)
         sol["KernelNameMin"] = getKernelNameMin(sol,splitGSU=False)
         del sol["ProblemType"]
+        del sol["GlobalSplitU"]
 
 def removeUnusedSolutions(oriData, prefix=""):
-    origNumSolutions = len(oriData[5])
+    origNumSolutions = len(oriData["Solutions"])
 
-    kernelsInUse = [ index for _, [index, _] in oriData[7] ]
-    for i, solution in enumerate(oriData[5]):
+    kernelsInUse = [ index for _, [index, _] in oriData["ExactLogic"] ]
+    for i, solution in enumerate(oriData["Solutions"]):
         solutionIndex = solution["SolutionIndex"]
-        oriData[5][i]["__InUse__"] = True if solutionIndex in kernelsInUse else False
+        oriData["Solutions"][i]["__InUse__"] = True if solutionIndex in kernelsInUse else False
 
     # debug prints
-    for o in [o for o in oriData[5] if o["__InUse__"]==False]:
+    for o in [o for o in oriData["Solutions"] if o["__InUse__"]==False]:
         debug("{}Solution ({}) {} is unused".format(
             prefix,
             o["SolutionIndex"],
             o["SolutionNameMin"] if "SolutionNameMin" in o else "(SolutionName N/A)"))
 
     # filter out dangling kernels
-    oriData[5] = [ {k: v for k, v in o.items() if k != "__InUse__"}
-                    for o in oriData[5] if o["__InUse__"]==True ]
+    oriData["Solutions"] = [ {k: v for k, v in o.items() if k != "__InUse__"}
+                    for o in oriData["Solutions"] if o["__InUse__"]==True ]
 
     # reindex solutions
     idMap = {} # new = idMap[old]
-    for i, solution in enumerate(oriData[5]):
+    for i, solution in enumerate(oriData["Solutions"]):
         idMap[solution["SolutionIndex"]] = i
-        oriData[5][i]["SolutionIndex"] = i
-    for i, [size, [oldSolIndex, eff]] in enumerate(oriData[7]):
-        oriData[7][i] = [size, [idMap[oldSolIndex], eff]]
+        oriData["Solutions"][i]["SolutionIndex"] = i
+    for i, [size, [oldSolIndex, eff]] in enumerate(oriData["ExactLogic"]):
+        oriData["ExactLogic"][i] = [size, [idMap[oldSolIndex], eff]]
 
-    numInvalidRemoved = origNumSolutions - len(oriData[5])
+    numInvalidRemoved = origNumSolutions - len(oriData["Solutions"])
     return oriData, numInvalidRemoved
 
 def removeDuplicatedSolutions(oriData, prefix=""):
-    origNumSolutions = len(oriData[5])
+    origNumSolutions = len(oriData["Solutions"])
 
     solutionsName = {}
     solutions = []
     kernelsName = {}
 
-    for solution in oriData[5]:
+    for solution in oriData["Solutions"]:
         if solution["SolutionNameMin"] not in solutionsName:
             solutionsName[solution["SolutionNameMin"]] = len(solutionsName)
             solutions.append(solution)
@@ -150,25 +153,51 @@ def removeDuplicatedSolutions(oriData, prefix=""):
     for i, solution in enumerate(solutions):
         solution["SolutionIndex"] = i
 
-    for data in oriData[7]:
+    for data in oriData["ExactLogic"]:
         index = data[1][0]
-        data[1][0] = solutionsName[oriData[5][index]["SolutionNameMin"]]
+        data[1][0] = solutionsName[oriData["Solutions"][index]["SolutionNameMin"]]
 
-    oriData[5] = solutions
+    oriData["Solutions"] = solutions
     numRemoved = origNumSolutions - len(solutions)
     return oriData, numRemoved, len(solutions), len(kernelsName)
+
+
+from Tensile import LibraryIO
+from Tensile.Common.GlobalParameters import defaultSolution
+
+# for new format files this function can be discarded
+def convertToList(data, filename):
+    if type(data) == list:
+        rv = LibraryIO.parseLibraryLogicList(data, filename)
+
+        for kernel in rv["Solutions"]:
+            for k in list(kernel.keys()):
+                v = kernel[k]
+                if k == 'ProblemType':
+                    del kernel['ProblemType']
+                if k in defaultSolution.keys():
+                    if v == defaultSolution[k]:
+                        del kernel[k]
+
+        LibraryIO.writeYAML(filename, rv, explicit_start=False, explicit_end=False)
+        data = rv
+
+    return data
 
 from .CustomYamlLoader import load_yaml_stream
 
 def loadData(filename):
     data = load_yaml_stream(filename, yaml.CSafeLoader)
+    data = convertToList(data, filename)
+
     return [filename, data]
 
 def compareDestFolderToYaml(originalDir, incFile, incData):
     checkFolders = ["Equality", "GridBased"]
     # Parsing destination folder and yaml attribute
     destFolder = originalDir.rstrip('/').split('/')[-1]
-    incAttribute = incData[11] # the last item in yaml file
+
+    incAttribute = incData['LibraryType']
     if not incAttribute:
         sys.exit(f"[Error] Empty YAML attribute. Need to set Equality or GridBased in {incFile}.")
     # Check Equality and GradBased folders only
@@ -178,15 +207,15 @@ def compareDestFolderToYaml(originalDir, incFile, incData):
 
 def compareProblemType(oriData, incData):
     # ProblemType defined in originalFiles
-    oriData[4] = ProblemType(oriData[4],False)
-    problemTypeToEnum(oriData[4])
-    oriData[4] = oriData[4].state
-    oriProblemType = oriData[4]
+    oriData["ProblemType"] = ProblemType(oriData["ProblemType"],False)
+    problemTypeToEnum(oriData["ProblemType"])
+    oriData["ProblemType"] = oriData["ProblemType"].state
+    oriProblemType = oriData["ProblemType"]
 
-    incData[4] = ProblemType(incData[4],False)
-    problemTypeToEnum(incData[4])
-    incData[4] = incData[4].state
-    incProblemType = incData[4]
+    incData["ProblemType"] = ProblemType(incData["ProblemType"],False)
+    problemTypeToEnum(incData["ProblemType"])
+    incData["ProblemType"] = incData["ProblemType"].state
+    incProblemType = incData["ProblemType"]
 
     results = ""
     if oriProblemType != incProblemType:
@@ -208,6 +237,42 @@ def debug(*args, **kwargs):
     if verbosity < 2: return
     msg(*args, **kwargs)
 
+def syncDefaultParams(origData, incData, origDefaultValues, incDefaultValues):
+    # if orig and inc default values are the same, nothing to do
+    if origDefaultValues == incDefaultValues: return
+
+    # Parameters in solutions that need to be updated.
+    # These either had their default values changed, were newly added
+    # or are set to the default values (and can be removed)
+    # Assume incDefaultValues is more up-to-date
+    paramsToUpdate = []
+
+    for p,v in incDefaultValues.items():
+        if p not in origDefaultValues.keys() or origDefaultValues[p] != v:
+            paramsToUpdate.append(p)
+
+    for soln in origData["Solutions"]:
+        for p in paramsToUpdate:
+            # Was originally set to default but not anymore
+            if p in origDefaultValues.keys() and p not in soln.keys():
+                soln[p] = origDefaultValues[p]
+            # Remove any keys which are now considered default-init
+            elif p in soln.keys() and soln[p] == incDefaultValues[p]:
+                del soln[p]
+
+# Check each solution and remove any parameters set to default value
+# as well as CUCount which is part of Architecture
+def removeDefaultInitParams(data):
+    defaultSolution = data["DefaultSolution"]
+    defaultSolution["CUCount"] = None
+
+    for soln in data["Solutions"]:
+        solnParams = list(soln.keys())
+        for param in solnParams:
+            if param in defaultSolution.keys() and soln[param] == defaultSolution[param]:
+                del soln[param]
+    defaultSolution.pop("CUCount")
+
 def findSolutionWithIndex(solutionData, solIndex):
     # Check solution at the index corresponding to solIndex first
     if solIndex < len(solutionData) and solutionData[solIndex]["SolutionIndex"] == solIndex:
@@ -220,31 +285,31 @@ def findSolutionWithIndex(solutionData, solIndex):
 
 # returns merged logic data as list
 def mergeLogic(oriData, incData, forceMerge, noEff=False):
-    origNumSizes = len(oriData[7])
-    origNumSolutions = len(oriData[5])
+    origNumSizes = len(oriData["ExactLogic"])
+    origNumSolutions = len(oriData["Solutions"])
 
-    incData[7] = incData[7] or []
-    incNumSizes = len(incData[7])
-    incNumSolutions = len(incData[5])
+    incData["ExactLogic"] = incData["ExactLogic"] or []
+    incNumSizes = len(incData["ExactLogic"])
+    incNumSolutions = len(incData["Solutions"])
 
     verbose(origNumSizes, "sizes and", origNumSolutions, "solutions in base logic file")
     verbose(incNumSizes, "sizes and", incNumSolutions, "solutions in incremental logic file")
 
     # trim 8-tuple gemm size format to 4-tuple [m, n, b, k]
     # TODO future gemm size could include dictionary format so need robust preprocessing
-    [oriData[7], origNumSizes] = fixSizeInconsistencies(oriData[7], "base")
-    [incData[7], incNumSizes] = fixSizeInconsistencies(incData[7], "incremental")
+    [oriData["ExactLogic"], origNumSizes] = fixSizeInconsistencies(oriData["ExactLogic"], "base")
+    [incData["ExactLogic"], incNumSizes] = fixSizeInconsistencies(incData["ExactLogic"], "incremental")
 
     oriData, numOrigRemoved = removeUnusedSolutions(oriData, "Base logic file: ")
     incData, numIncRemoved = removeUnusedSolutions(incData, "Inc logic file: ")
 
-    solutionPool = deepcopy(oriData[5])
-    solDict = {sol["SolutionNameMin"]: sol for sol in oriData[5]}
-    solutionMap = deepcopy(oriData[7])
+    solutionPool = deepcopy(oriData["Solutions"])
+    solDict = {sol["SolutionNameMin"]: sol for sol in oriData["Solutions"]}
+    solutionMap = deepcopy(oriData["ExactLogic"])
 
-    origDict = {tuple(origSize): [i, origEff] for i, [origSize, [origIndex, origEff]] in enumerate(oriData[7])}
-    for incSize, [incIndex, incEff] in incData[7]:
-        incSolution = findSolutionWithIndex(incData[5], incIndex)
+    origDict = {tuple(origSize): [i, origEff] for i, [origSize, [origIndex, origEff]] in enumerate(oriData["ExactLogic"])}
+    for incSize, [incIndex, incEff] in incData["ExactLogic"]:
+        incSolution = findSolutionWithIndex(incData["Solutions"], incIndex)
 
         storeEff = incEff if noEff == False else 0.0
         try:
@@ -269,12 +334,12 @@ def mergeLogic(oriData, incData, forceMerge, noEff=False):
     verbose(numIncRemoved, "unused solutions removed from incremental logic file")
 
     mergedData = deepcopy(oriData)
-    mergedData[5] = solutionPool
-    mergedData[7] = solutionMap
+    mergedData["Solutions"] = solutionPool
+    mergedData["ExactLogic"] = solutionMap
     mergedData, numReplaced = removeUnusedSolutions(mergedData, "Merged data: ")
 
-    numSizesAdded = len(solutionMap) - len(oriData[7])
-    numSolutionsAdded = len(solutionPool) - len(oriData[5])
+    numSizesAdded = len(solutionMap) - len(oriData["ExactLogic"])
+    numSolutionsAdded = len(solutionPool) - len(oriData["Solutions"])
     numSolutionsRemoved = numReplaced + numOrigRemoved # incremental file not counted
 
     return [mergedData, numSizesAdded, numSolutionsAdded, numSolutionsRemoved]
@@ -324,8 +389,14 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
         # Terminate when ProblemType of originalFiles and incrementalFiles mismatch
         compareProblemType(oriData, incData)
 
-        sanitizeSolutions(oriData[5])
-        sanitizeSolutions(incData[5])
+        # Original library logic may not have default solution included yet (for now)
+        origDefaultValues = deepcopy(oriData["DefaultSolution"])
+        incDefaultValues = deepcopy(incData["DefaultSolution"])
+
+        syncDefaultParams(oriData, incData, origDefaultValues, incDefaultValues)
+
+        sanitizeSolutions(oriData)
+        sanitizeSolutions(incData)
 
         reNameSolutions(oriData)
         reNameSolutions(incData)
@@ -334,17 +405,26 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
         # since mergeLogic() takes that value very seriously so we reindex them here so it doesn't choke on duplicated SolutionIndex
         oriData, numRemoved, numSolutions, numKernels = removeDuplicatedSolutions(oriData)
         msg("Base logic file:", numRemoved, "duplicated solution(s) removed,",\
-            "sizes: %d, solutions: %d, kernels: %d"%(len(oriData[7]),numSolutions,numKernels))
+            "sizes: %d, solutions: %d, kernels: %d"%(len(oriData["ExactLogic"]),numSolutions,numKernels))
         incData, numRemoved, numSolutions, numKernels = removeDuplicatedSolutions(incData)
         msg("Inc logic file:", numRemoved, "duplicated solution(s) removed,",\
-            "sizes: %d, solutions: %d, kernels: %d"%(len(incData[7]),numSolutions,numKernels))
+            "sizes: %d, solutions: %d, kernels: %d"%(len(incData["ExactLogic"]),numSolutions,numKernels))
 
         mergedData, *stats = mergeLogic(oriData, incData, forceMerge, noEff)
-        mergedData[0] = {"MinimumRequiredVersion": "%s"%__version__}
+        mergedData["MinimumRequiredVersion"] = f"{__version__}"
+
+        # Replace base default solution with newer version
+        mergedData["DefaultSolution"] = incData["DefaultSolution"]
+
         msg(stats[0], "size(s) and", stats[1], "solution(s) added,", stats[2], "solution(s) removed.", \
-            len(mergedData[7]), "sizes and", len(mergedData[5]), "solutions")
-        with open(os.path.join(outputPath, basename), "w") as outFile:
-            yaml.safe_dump(mergedData,outFile,default_flow_style=None)
+            len(mergedData["ExactLogic"]), "sizes and", len(mergedData["Solutions"]), "solutions")
+
+        # final check of default init parameters, before writing to yaml
+        removeDefaultInitParams(mergedData)
+
+        # make sure same datatype to avoid longer output
+        mergedData["Library"]["table"] = mergedData["ExactLogic"]
+        LibraryIO.writeYAML(os.path.join(outputPath, basename), mergedData, explicit_start=False, explicit_end=False)
         msg("File written to", os.path.join(outputPath, basename))
         msg("------------------------------")
 
@@ -361,7 +441,7 @@ def main():
     originalDir = args.original_dir
     incrementalDir = args.incremental_dir
     outputPath = args.output_dir
-    global verbosity
+    # global verbosity
     verbosity = args.verbosity
     forceMerge = args.force_merge.lower()
     no_eff = args.no_eff
