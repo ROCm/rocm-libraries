@@ -20,8 +20,8 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/unique.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
 TESTS_DEFINE(UniqueByKeyTests, FullTestsParams);
@@ -551,6 +551,8 @@ struct Entry
 
 TEST(UniqueWithoutEqualityOperatorTests, TestUniqueByKey)
 {
+  SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
   using Key     = thrust::pair<std::int32_t, Entry>;
   const auto k1 = Key{1, {}};
   const auto k2 = Key{2, {}};
