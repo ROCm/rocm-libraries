@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -56,8 +56,12 @@ namespace
         Tc,
         TBias,
         std::enable_if_t<std::is_same<Ti, __half>{} || std::is_same<Ti, hip_bfloat16>{}
-                         || std::is_same<Ti, int8_t>{} || std::is_same<Ti, __hip_fp8_e4m3>{}
-                         || std::is_same<Ti, __hip_fp8_e5m2>{}>> : hipsparselt_test_valid
+                         || std::is_same<Ti, int8_t>{}
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
+			 || std::is_same<Ti, hipsparselt_fp8_e4m3>{}
+                         || std::is_same<Ti, hipsparselt_fp8_e5m2>{}
+#endif
+			 >> : hipsparselt_test_valid
     {
         void operator()(const Arguments& arg)
         {

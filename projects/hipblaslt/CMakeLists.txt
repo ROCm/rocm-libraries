@@ -422,6 +422,7 @@ if(BUILD_CODE_COVERAGE)
   target_compile_options(hipblaslt PRIVATE
     -fprofile-instr-generate
     -fcoverage-mapping
+    -fvisibility=default
   )
 
   target_link_options(hipblaslt PUBLIC

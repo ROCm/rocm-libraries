@@ -230,7 +230,14 @@ void testing_spmm_batched_coo(const Arguments& arg)
         {
             hcoo_row_ind[nnz_A * i + j] = hcoo_row_ind_temp[j];
             hcoo_col_ind[nnz_A * i + j] = hcoo_col_ind_temp[j];
-            hcoo_val[nnz_A * i + j]     = hcoo_val_temp[j];
+            if(arg.convert_to_int)
+            {
+                hcoo_val[nnz_A * i + j] = convertToInt<A>(hcoo_val_temp[j]);
+            }
+            else
+            {
+                hcoo_val[nnz_A * i + j] = hcoo_val_temp[j];
+            }
         }
     }
 
@@ -241,6 +248,14 @@ void testing_spmm_batched_coo(const Arguments& arg)
     // Initialize data on CPU
     rocsparse_init<B>(hB, batch_count_B * nnz_B, 1, 1);
     rocsparse_init<C>(hC_1, batch_count_C * nnz_C, 1, 1);
+
+    if(arg.convert_to_int)
+    {
+        for(I i = 0; i < batch_count_B * nnz_B; i++)
+        {
+            hB[i] = convertToInt<B>(hB[i]);
+        }
+    }
 
     host_vector<C> hC_2(hC_1);
     host_vector<C> hC_gold(hC_1);

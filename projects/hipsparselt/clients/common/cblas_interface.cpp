@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -765,22 +765,24 @@ void cblas_gemm<int8_t, hip_bfloat16, float>(hipsparseOrder_t     order,
         C[i] = static_cast<hip_bfloat16>(C_double[i]);
 }
 
+
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
 template <>
-void cblas_gemm<__hip_fp8_e4m3, float, float>(hipsparseOrder_t      order,
+void cblas_gemm<hipsparselt_fp8_e4m3, double, float>(hipsparseOrder_t      order,
                                               hipsparseOperation_t  transA,
                                               hipsparseOperation_t  transB,
                                               int64_t               m,
                                               int64_t               n,
                                               int64_t               k,
                                               float                 alpha,
-                                              const __hip_fp8_e4m3* A,
+                                              const hipsparselt_fp8_e4m3* A,
                                               int64_t               lda,
                                               int64_t               sizeA,
-                                              const __hip_fp8_e4m3* B,
+                                              const hipsparselt_fp8_e4m3* B,
                                               int64_t               ldb,
                                               int64_t               sizeB,
                                               float                 beta,
-                                              float*                C,
+                                              double*               C,
                                               int64_t               ldc,
                                               int64_t               sizeC,
                                               float*                alphaVec,
@@ -794,14 +796,11 @@ void cblas_gemm<__hip_fp8_e4m3, float, float>(hipsparseOrder_t      order,
 
     host_vector<double> A_double(sizeA);
     host_vector<double> B_double(sizeB);
-    host_vector<double> C_double(sizeC);
 
     for(size_t i = 0; i < sizeA; i++)
         A_double[i] = static_cast<double>(A[i]);
     for(size_t i = 0; i < sizeB; i++)
         B_double[i] = static_cast<double>(B[i]);
-    for(size_t i = 0; i < sizeC; i++)
-        C_double[i] = static_cast<double>(C[i]);
 
     if(alphaVec != nullptr)
     {
@@ -826,8 +825,8 @@ void cblas_gemm<__hip_fp8_e4m3, float, float>(hipsparseOrder_t      order,
             for(int j = 0; j < n; j++)
             {
                 size_t pos    = order == HIPSPARSE_ORDER_COL ? j * ldc + i : i * ldc + j;
-                C_double[pos] = T_double[pos] * static_cast<double>(alphaVec[i])
-                                + C_double[pos] * static_cast<double>(beta);
+                C[pos]        = T_double[pos] * static_cast<double>(alphaVec[i])
+                                + C[pos] * static_cast<double>(beta);
             }
         }
     }
@@ -846,30 +845,27 @@ void cblas_gemm<__hip_fp8_e4m3, float, float>(hipsparseOrder_t      order,
                     B_double,
                     ldb,
                     beta,
-                    C_double,
+                    C,
                     ldc);
     }
-
-    for(size_t i = 0; i < sizeC; i++)
-        C[i] = static_cast<float>(C_double[i]);
 }
 
 template <>
-void cblas_gemm<__hip_fp8_e5m2, float, float>(hipsparseOrder_t      order,
+void cblas_gemm<hipsparselt_fp8_e5m2, double, float>(hipsparseOrder_t      order,
                                               hipsparseOperation_t  transA,
                                               hipsparseOperation_t  transB,
                                               int64_t               m,
                                               int64_t               n,
                                               int64_t               k,
                                               float                 alpha,
-                                              const __hip_fp8_e5m2* A,
+                                              const hipsparselt_fp8_e5m2* A,
                                               int64_t               lda,
                                               int64_t               sizeA,
-                                              const __hip_fp8_e5m2* B,
+                                              const hipsparselt_fp8_e5m2* B,
                                               int64_t               ldb,
                                               int64_t               sizeB,
                                               float                 beta,
-                                              float*                C,
+                                              double*               C,
                                               int64_t               ldc,
                                               int64_t               sizeC,
                                               float*                alphaVec,
@@ -883,14 +879,11 @@ void cblas_gemm<__hip_fp8_e5m2, float, float>(hipsparseOrder_t      order,
 
     host_vector<double> A_double(sizeA);
     host_vector<double> B_double(sizeB);
-    host_vector<double> C_double(sizeC);
 
     for(size_t i = 0; i < sizeA; i++)
         A_double[i] = static_cast<double>(A[i]);
     for(size_t i = 0; i < sizeB; i++)
         B_double[i] = static_cast<double>(B[i]);
-    for(size_t i = 0; i < sizeC; i++)
-        C_double[i] = static_cast<double>(C[i]);
 
     if(alphaVec != nullptr)
     {
@@ -915,8 +908,8 @@ void cblas_gemm<__hip_fp8_e5m2, float, float>(hipsparseOrder_t      order,
             for(int j = 0; j < n; j++)
             {
                 size_t pos    = order == HIPSPARSE_ORDER_COL ? j * ldc + i : i * ldc + j;
-                C_double[pos] = T_double[pos] * static_cast<double>(alphaVec[i])
-                                + C_double[pos] * static_cast<double>(beta);
+                C[pos]        = T_double[pos] * static_cast<double>(alphaVec[i])
+                                + C[pos] * static_cast<double>(beta);
             }
         }
     }
@@ -935,10 +928,208 @@ void cblas_gemm<__hip_fp8_e5m2, float, float>(hipsparseOrder_t      order,
                     B_double,
                     ldb,
                     beta,
-                    C_double,
+                    C,
                     ldc);
     }
+}
+
+template <>
+void cblas_gemm<hipsparselt_fp8_e4m3, float, float>(hipsparseOrder_t      order,
+                                              hipsparseOperation_t  transA,
+                                              hipsparseOperation_t  transB,
+                                              int64_t               m,
+                                              int64_t               n,
+                                              int64_t               k,
+                                              float                 alpha,
+                                              const hipsparselt_fp8_e4m3* A,
+                                              int64_t               lda,
+                                              int64_t               sizeA,
+                                              const hipsparselt_fp8_e4m3* B,
+                                              int64_t               ldb,
+                                              int64_t               sizeB,
+                                              float                 beta,
+                                              float*                C,
+                                              int64_t               ldc,
+                                              int64_t               sizeC,
+                                              float*                alphaVec,
+                                              bool                  alt)
+{
+    host_vector<double> C_double(sizeC);
+    for(size_t i = 0; i < sizeC; i++)
+        C_double[i] = static_cast<double>(C[i]);
+
+    cblas_gemm<hipsparselt_fp8_e4m3, double, float>(order, transA, transB, m, n, k, alpha,
+                                                   A, lda, sizeA, B, ldb, sizeB, beta,
+                                                   C_double, ldc, sizeC, alphaVec, alt);
 
     for(size_t i = 0; i < sizeC; i++)
         C[i] = static_cast<float>(C_double[i]);
 }
+
+template <>
+void cblas_gemm<hipsparselt_fp8_e5m2, float, float>(hipsparseOrder_t      order,
+                                              hipsparseOperation_t  transA,
+                                              hipsparseOperation_t  transB,
+                                              int64_t               m,
+                                              int64_t               n,
+                                              int64_t               k,
+                                              float                 alpha,
+                                              const hipsparselt_fp8_e5m2* A,
+                                              int64_t               lda,
+                                              int64_t               sizeA,
+                                              const hipsparselt_fp8_e5m2* B,
+                                              int64_t               ldb,
+                                              int64_t               sizeB,
+                                              float                 beta,
+                                              float*                C,
+                                              int64_t               ldc,
+                                              int64_t               sizeC,
+                                              float*                alphaVec,
+                                              bool                  alt)
+{
+    host_vector<double> C_double(sizeC);
+    for(size_t i = 0; i < sizeC; i++)
+        C_double[i] = static_cast<double>(C[i]);
+
+    cblas_gemm<hipsparselt_fp8_e5m2, double, float>(order, transA, transB, m, n, k, alpha,
+                                                   A, lda, sizeA, B, ldb, sizeB, beta,
+                                                   C_double, ldc, sizeC, alphaVec, alt);
+
+    for(size_t i = 0; i < sizeC; i++)
+        C[i] = static_cast<float>(C_double[i]);
+}
+
+#ifdef __HIP_PLATFORM_NVIDIA__
+
+template <>
+void cblas_gemm<hipsparselt_fp8_e4m3, __half, float>(hipsparseOrder_t      order,
+                                              hipsparseOperation_t  transA,
+                                              hipsparseOperation_t  transB,
+                                              int64_t               m,
+                                              int64_t               n,
+                                              int64_t               k,
+                                              float                 alpha,
+                                              const hipsparselt_fp8_e4m3* A,
+                                              int64_t               lda,
+                                              int64_t               sizeA,
+                                              const hipsparselt_fp8_e4m3* B,
+                                              int64_t               ldb,
+                                              int64_t               sizeB,
+                                              float                 beta,
+                                              __half*                C,
+                                              int64_t               ldc,
+                                              int64_t               sizeC,
+                                              float*                alphaVec,
+                                              bool                  alt)
+{
+    host_vector<double> C_double(sizeC);
+    for(size_t i = 0; i < sizeC; i++)
+        C_double[i] = static_cast<double>(C[i]);
+
+    cblas_gemm<hipsparselt_fp8_e4m3, double, float>(order, transA, transB, m, n, k, alpha,
+                                                   A, lda, sizeA, B, ldb, sizeB, beta,
+                                                   C_double, ldc, sizeC, alphaVec, alt);
+
+    for(size_t i = 0; i < sizeC; i++)
+        C[i] = static_cast<__half>(C_double[i]);
+}
+
+template <>
+void cblas_gemm<hipsparselt_fp8_e4m3, hip_bfloat16, float>(hipsparseOrder_t      order,
+                                              hipsparseOperation_t  transA,
+                                              hipsparseOperation_t  transB,
+                                              int64_t               m,
+                                              int64_t               n,
+                                              int64_t               k,
+                                              float                 alpha,
+                                              const hipsparselt_fp8_e4m3* A,
+                                              int64_t               lda,
+                                              int64_t               sizeA,
+                                              const hipsparselt_fp8_e4m3* B,
+                                              int64_t               ldb,
+                                              int64_t               sizeB,
+                                              float                 beta,
+                                              hip_bfloat16*                C,
+                                              int64_t               ldc,
+                                              int64_t               sizeC,
+                                              float*                alphaVec,
+                                              bool                  alt)
+{
+    host_vector<double> C_double(sizeC);
+    for(size_t i = 0; i < sizeC; i++)
+        C_double[i] = static_cast<double>(C[i]);
+
+    cblas_gemm<hipsparselt_fp8_e4m3, double, float>(order, transA, transB, m, n, k, alpha,
+                                                   A, lda, sizeA, B, ldb, sizeB, beta,
+                                                   C_double, ldc, sizeC, alphaVec, alt);
+
+    for(size_t i = 0; i < sizeC; i++)
+        C[i] = static_cast<hip_bfloat16>(C_double[i]);
+}
+
+template <>
+void cblas_gemm<hipsparselt_fp8_e5m2, __half, float>(hipsparseOrder_t      order,
+                                              hipsparseOperation_t  transA,
+                                              hipsparseOperation_t  transB,
+                                              int64_t               m,
+                                              int64_t               n,
+                                              int64_t               k,
+                                              float                 alpha,
+                                              const hipsparselt_fp8_e5m2* A,
+                                              int64_t               lda,
+                                              int64_t               sizeA,
+                                              const hipsparselt_fp8_e5m2* B,
+                                              int64_t               ldb,
+                                              int64_t               sizeB,
+                                              float                 beta,
+                                              __half*                C,
+                                              int64_t               ldc,
+                                              int64_t               sizeC,
+                                              float*                alphaVec,
+                                              bool                  alt)
+{
+    host_vector<double> C_double(sizeC);
+    for(size_t i = 0; i < sizeC; i++)
+        C_double[i] = static_cast<double>(C[i]);
+
+    cblas_gemm<hipsparselt_fp8_e5m2, double, float>(order, transA, transB, m, n, k, alpha,
+                                                   A, lda, sizeA, B, ldb, sizeB, beta,
+                                                   C_double, ldc, sizeC, alphaVec, alt);
+
+    for(size_t i = 0; i < sizeC; i++)
+        C[i] = static_cast<__half>(C_double[i]);
+}
+template <>
+void cblas_gemm<hipsparselt_fp8_e5m2, hip_bfloat16, float>(hipsparseOrder_t      order,
+                                              hipsparseOperation_t  transA,
+                                              hipsparseOperation_t  transB,
+                                              int64_t               m,
+                                              int64_t               n,
+                                              int64_t               k,
+                                              float                 alpha,
+                                              const hipsparselt_fp8_e5m2* A,
+                                              int64_t               lda,
+                                              int64_t               sizeA,
+                                              const hipsparselt_fp8_e5m2* B,
+                                              int64_t               ldb,
+                                              int64_t               sizeB,
+                                              float                 beta,
+                                              hip_bfloat16*         C,
+                                              int64_t               ldc,
+                                              int64_t               sizeC,
+                                              float*                alphaVec,
+                                              bool                  alt)
+{
+    host_vector<double> C_double(sizeC);
+    for(size_t i = 0; i < sizeC; i++)
+        C_double[i] = static_cast<double>(C[i]);
+
+    cblas_gemm<hipsparselt_fp8_e5m2, double, float>(order, transA, transB, m, n, k, alpha,
+                                                   A, lda, sizeA, B, ldb, sizeB, beta,
+                                                   C_double, ldc, sizeC, alphaVec, alt);
+
+    for(size_t i = 0; i < sizeC; i++)
+        C[i] = static_cast<hip_bfloat16>(C_double[i]);
+}
+#endif
+#endif
