@@ -18,8 +18,8 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/sort.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
 TESTS_DEFINE(IsSortedUntilTests, FullTestsParams);
