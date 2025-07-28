@@ -11,7 +11,7 @@ target_include_directories(hipblaslt-clients-common
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../tensilelite>
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/include>
     PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite" # not sure about this
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite"
 )
 
 add_library(hipblaslt::hipblaslt-clients-common ALIAS hipblaslt-clients-common)
@@ -23,15 +23,13 @@ endif()
 target_link_libraries(hipblaslt-clients-common
     PUBLIC
         roc::hipblaslt
-        ${LAPACK_LIBRARIES} 
+        ${LAPACK_LIBRARIES}
         ${BLAS_LIBRARIES}
         ${CBLAS_LIBRARIES}
     PRIVATE
         hip::device
 )
 
-# grep doesn't return any hits
-# target_compile_definitions(hipblaslt-clients-common PRIVATE CLIENTS_NO_FORTRAN) # necessary?
 if(HIPBLASLT_ENABLE_ROCROLLER)
     if(NOT ROCM_LIBRARIES_SUPERBUILD)
         find_package(mxDataGenerator QUIET)
@@ -69,13 +67,14 @@ endif()
 add_subdirectory(common)
 add_subdirectory(bench)
 
-add_executable(client-api-overhead "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_api_overhead.cpp")
-target_link_libraries(client-api-overhead PRIVATE hipblaslt-clients-common hip::device)
-target_compile_definitions(client-api-overhead PRIVATE ROCBLASLT_INTERNAL_API )
+add_executable(hipblaslt-api-overhead "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_api_overhead.cpp")
+target_link_libraries(hipblaslt-api-overhead PRIVATE hipblaslt-clients-common hip::device)
+target_compile_definitions(hipblaslt-api-overhead PRIVATE ROCBLASLT_INTERNAL_API)
+target_include_directories(hipblaslt-api-overhead PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/samples/common")
 
 add_executable(hipblaslt-bench-groupedgemm-fixed-mk "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_groupedgemm_fixed_mk.cpp")
 target_link_libraries(hipblaslt-bench-groupedgemm-fixed-mk PRIVATE hipblaslt-clients-common hip::device)
-target_compile_definitions(hipblaslt-bench-groupedgemm-fixed-mk PRIVATE ROCBLASLT_INTERNAL_API )
+target_compile_definitions(hipblaslt-bench-groupedgemm-fixed-mk PRIVATE ROCBLASLT_INTERNAL_API)
 
 add_executable(hipblaslt-bench-extop-layernorm "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_extop_layernorm.cpp")
 target_link_libraries(hipblaslt-bench-extop-layernorm PRIVATE hipblaslt-clients-common hip::device)
@@ -83,15 +82,15 @@ target_compile_definitions(hipblaslt-bench-extop-layernorm PRIVATE ROCBLASLT_INT
 
 add_executable(hipblaslt-bench-extop-matrixtransform "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_extop_matrixtransform.cpp")
 target_link_libraries(hipblaslt-bench-extop-matrixtransform PRIVATE hipblaslt-clients-common hip::device)
-target_compile_definitions(hipblaslt-bench-extop-matrixtransform PRIVATE ROCBLASLT_INTERNAL_API )
+target_compile_definitions(hipblaslt-bench-extop-matrixtransform PRIVATE ROCBLASLT_INTERNAL_API)
 
 add_executable(hipblaslt-bench-extop-softmax "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_extop_softmax.cpp")
 target_link_libraries(hipblaslt-bench-extop-softmax PRIVATE hipblaslt-clients-common hip::device)
-target_compile_definitions(hipblaslt-bench-extop-softmax PRIVATE ROCBLASLT_INTERNAL_API )
+target_compile_definitions(hipblaslt-bench-extop-softmax PRIVATE ROCBLASLT_INTERNAL_API)
 
 add_executable(hipblaslt-bench-extop-amax "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_extop_amax.cpp")
 target_link_libraries(hipblaslt-bench-extop-amax PRIVATE hipblaslt-clients-common hip::device)
-target_compile_definitions(hipblaslt-bench-extop-amax PRIVATE ROCBLASLT_INTERNAL_API )
+target_compile_definitions(hipblaslt-bench-extop-amax PRIVATE ROCBLASLT_INTERNAL_API)
 
 find_package(LLVM REQUIRED)
 add_executable(hipblaslt-sequence "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_sequence.cpp")
@@ -114,12 +113,11 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
             OpenMP::OpenMP_CXX
     )
     if(HIPBLASLT_ENABLE_BLIS)
-        target_link_libraries(hipblaslt-test PRIVATE BLIS::BLIS) # necessary?
+        target_link_libraries(hipblaslt-test PRIVATE BLIS::BLIS)
     endif()
     target_compile_definitions(hipblaslt-test PRIVATE GOOGLE_TEST)
     if(HIPBLASLT_ENABLE_ROCROLLER)
-        target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER) # should this be public on hipblaslt?
-        #target_link_libraries(hipblaslt-test PRIVATE roc::rocroller_interface)  # same
+        target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER)
     endif()
     add_subdirectory(tests)
 endif()
