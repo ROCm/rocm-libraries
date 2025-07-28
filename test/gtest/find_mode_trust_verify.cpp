@@ -101,6 +101,8 @@ protected:
 
         auto conv_desc = test_case.conv.GetConv();
 
+        conv_desc.findMode.Set(miopen::FindMode::Values::TrustVerify);
+
         auto output_desc = conv_desc.GetForwardOutputTensor(
             input_tensor_desc, weights_tensor_desc, test_case.data_type);
 
@@ -160,6 +162,7 @@ protected:
 
         auto conv_sols = miopen::GetConvSolutions(ctx, problem, solutions);
         ASSERT_TRUE(conv_sols.size() == solutions.size());
+        ASSERT_TRUE(conv_sols.size() > 0);
 
         std::vector<miopen::Solution> eval_sols1, eval_sols2;
         eval_sols1 = miopen::EvaluateConvSolutions(ctx, problem, invoke_ctx, conv_sols, false);

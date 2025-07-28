@@ -307,7 +307,8 @@ std::vector<Solution> EvaluateConvSolutions(const ExecutionContext& ctx,
         std::vector<Solution> eval_sol = EvaluateInvokers(
             handle, conv_sols, algo, problem.MakeNetworkConfig(), invoke_ctx, is_optimal, false);
 
-        eval_sols.emplace_back(eval_sol.front());
+        if(!eval_sol.empty())
+            eval_sols.emplace_back(eval_sol.front());
     }
     if(model_result)
         std::reverse(eval_sols.begin(), eval_sols.end());
