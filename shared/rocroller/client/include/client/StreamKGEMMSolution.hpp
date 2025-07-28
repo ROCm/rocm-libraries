@@ -90,10 +90,11 @@ namespace rocRoller
 
                 CommandArguments commandArguments(CommandPtr               command,
                                                   ProblemParameters const& problemParams,
-                                                  RunParameters const&     runParams) const override
+                                                  RunParameters const&     runParams,
+						  BenchmarkParameters const& benchmarkParams) const override
                 {
                     auto commandArgs = DataParallelGEMMSolution::commandArguments(
-                        command, problemParams, runParams);
+                        command, problemParams, runParams, benchmarkParams);
 
                     commandArgs.setArgument(m_numWGsTag, ArgumentType::Value, runParams.numWGs);
 
@@ -103,14 +104,15 @@ namespace rocRoller
                 void validateRunParameters(CommandPtr               command,
                                            ProblemParameters const& problemParams,
                                            RunParameters const&     runParams,
+					   BenchmarkParameters const& benchmarkParams,
                                            CommandKernelPtr         commandKernel) override
                 {
                     DataParallelGEMMSolution::validateRunParameters(
-                        command, problemParams, runParams, commandKernel);
+                        command, problemParams, runParams, benchmarkParams, commandKernel);
 
                     // Determine the number of WGs on the device
                     hipDeviceProp_t deviceProperties;
-                    AssertFatal(hipGetDeviceProperties(&deviceProperties, runParams.device)
+                    AssertFatal(hipGetDeviceProperties(&deviceProperties, benchmarkParams.device)
                                 == (hipError_t)HIP_SUCCESS);
                     auto numWGs = deviceProperties.multiProcessorCount;
 

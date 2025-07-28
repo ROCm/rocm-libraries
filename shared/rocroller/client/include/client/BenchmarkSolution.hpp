@@ -35,6 +35,12 @@ namespace rocRoller
     namespace Client
     {
         struct RunParameters
+	{
+            int workgroupMappingValue;
+            int numWGs;
+	};
+
+        struct BenchmarkParameters
         {
             int device;
 
@@ -44,13 +50,12 @@ namespace rocRoller
 
             bool check;
             bool visualize;
-
-            int numWGs;
         };
 
         struct BenchmarkResults
         {
             RunParameters runParams;
+	    BenchmarkParameters benchmarkParams;
 
             size_t              kernelGenerate;
             size_t              kernelAssemble;

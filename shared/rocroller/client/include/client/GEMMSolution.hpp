@@ -55,7 +55,8 @@ namespace rocRoller
 
                 virtual CommandArguments commandArguments(CommandPtr,
                                                           ProblemParameters const& problemParams,
-                                                          RunParameters const& runParams) const = 0;
+                                                          RunParameters const& runParams,
+							  BenchmarkParameters const& benchmarkParams) const = 0;
 
                 virtual void setPredicates(CommandPtr, CommandKernelPtr, SolutionParameters const&)
                 {
@@ -83,9 +84,10 @@ namespace rocRoller
                 virtual void validateRunParameters(CommandPtr               command,
                                                    ProblemParameters const& problemParams,
                                                    RunParameters const&     runParams,
+						   BenchmarkParameters const& benchmarkParams,
                                                    CommandKernelPtr         commandKernel)
                 {
-                    auto commandArgs = this->commandArguments(command, problemParams, runParams);
+                    auto commandArgs = this->commandArguments(command, problemParams, runParams, benchmarkParams);
                     AssertFatal(commandKernel->matchesPredicates(commandArgs.runtimeArguments(),
                                                                  LogLevel::Error),
                                 "Invalid run parameters: all predicates must match.");

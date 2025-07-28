@@ -517,7 +517,8 @@ namespace rocRoller
 
                 CommandArguments commandArguments(CommandPtr               command,
                                                   ProblemParameters const& problemParams,
-                                                  RunParameters const&     runParams) const override
+                                                  RunParameters const&     runParams,
+						  BenchmarkParameters const& benchmarkParams) const override
                 {
                     CommandArguments commandArgs = command->createArguments();
 
