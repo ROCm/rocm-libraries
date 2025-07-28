@@ -15,10 +15,10 @@
         }                                                                       \
     }
 
-template <int counter = COUNTER, int instr = 32>
+template <int byte_stride = BYTE_STRIDE, int instr = INSTR_WIDTH>
 __global__ void kernel()
 {
-    uint32_t const index = counter * threadIdx.x;
+    uint32_t const index = byte_stride * threadIdx.x;
 #pragma unroll
     for(int i = 0; i < 32; ++i)
     {
@@ -32,7 +32,7 @@ __global__ void kernel()
 int main()
 {
     dim3 threads(64);
-    dim3 blocks(4);
+    dim3 blocks(8);
     hipLaunchKernelGGL(kernel, blocks, threads, 0, 0);
 
     // Check for launch errors
