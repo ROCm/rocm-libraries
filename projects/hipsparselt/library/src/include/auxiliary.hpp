@@ -123,7 +123,7 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
         return "bf16_r";
     case HIP_R_8I:
         return "i8_r";
-#if HIP_FP8_TYPE_OCP
+#if defined(HIP_FP8_TYPE_OCP) || defined(__HIP_PLATFORM_NVIDIA__)
     case HIP_R_8F_E4M3:
         return "f8_r";
     case HIP_R_8F_E5M2:
@@ -200,6 +200,15 @@ __host__ __device__ inline bool hipsparselt_isnan(__half arg)
 __host__ __device__ inline bool hipsparselt_isnan(__nv_bfloat16 arg)
 {
     return __hisnan(arg);
+}
+__host__ __device__ inline bool hipsparselt_isnan(__nv_fp8_e4m3 arg)
+{
+    return (static_cast<unsigned char>(arg) & 0x7f) == 0x7f;
+}
+
+__host__ __device__ inline bool hipsparselt_isnan(__nv_fp8_e5m2 arg)
+{
+    return (static_cast<unsigned char>(arg) & 0x7f) > 0x7c;
 }
 #endif
 

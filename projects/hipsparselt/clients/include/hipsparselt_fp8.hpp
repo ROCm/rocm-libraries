@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,39 +25,22 @@
  *******************************************************************************/
 
 #pragma once
-#include <bitset>
-#include <cmath>
-#include <iostream>
-#include <limits>
 
-inline float convert(int num, int mBits, int eBits, int eBias)
-{
-    if(num == 0b0)
-        return 0.0f;
+#include <hip/hip_runtime.h>
 
-    int expMask = eBits == 8 ? 0xff : 0b11111;
+#undef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
 
-    int expVal = ((expMask << mBits) & num) >> mBits;
+#ifdef __HIP_PLATFORM_AMD__
+#ifdef HIP_FP8_TYPE_OCP
+#define HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
+#define hipsparselt_fp8_e4m3 __hip_fp8_e4m3
+#define hipsparselt_fp8_e5m2 __hip_fp8_e5m2
+#endif
+#endif
 
-    float sign = (num >> (mBits + eBits)) ? -1 : 1;
-
-    float mantissa = expVal == 0 ? 0 : 1;
-
-    for(int i = 0; i < mBits; i++)
-        mantissa += std::pow(2, -(i + 1)) * ((num >> ((mBits - 1) - i)) & 0b1);
-
-    if(expVal == expMask)
-    {
-        if(mantissa != 1) //since mantissa will be at least one
-            return std::numeric_limits<float>::quiet_NaN();
-        else
-            return sign < 0 ? -std::numeric_limits<float>::infinity()
-                            : std::numeric_limits<float>::infinity();
-    }
-
-    expVal = expVal == 0 ? 1 - eBias : expVal - eBias;
-
-    float exp = std::pow(2, expVal);
-
-    return sign * exp * mantissa;
-}
+#ifdef __HIP_PLATFORM_NVIDIA__
+#include <cuda_fp8.h>
+#define HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
+#define hipsparselt_fp8_e4m3 __nv_fp8_e4m3
+#define hipsparselt_fp8_e5m2 __nv_fp8_e5m2
+#endif
