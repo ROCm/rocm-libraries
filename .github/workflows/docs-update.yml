@@ -51,13 +51,14 @@ jobs:
           echo "Detected changed projects:"
           echo "$project_names"
 
-          echo "changed_projects<<EOF" >> $GITHUB_ENV
-          echo "$project_names" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          echo "changed_projects<<EOF" >> $GITHUB_OUTPUT
+          echo "$project_names" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Trigger RTD build
+        if: steps.diff.outputs.changed_projects
         env: 
-          changed_projects: ${{ env.changed_projects }}
+          changed_projects: ${{ steps.diff.outputs.changed_projects }}
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
         run: |
           branch_name="${GITHUB_REF#refs/heads/}"
