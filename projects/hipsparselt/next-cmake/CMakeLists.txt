@@ -137,8 +137,8 @@ if(HIPSPARSELT_ENABLE_HIP)
     set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
     set(HIPBLASLT_ENABLE_DEVICE ON CACHE BOOL "" FORCE)
     set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
-    # This should not be different than the standard hipblaslt build directory
-    set(device_library_dir "${CMAKE_BINARY_DIR}/hipblaslt/Tensile/library")
+    # There is a conflict in the hipblaslt build system with `device_library_dir` 
+    set(TENSILELITE_BINARY_DIR "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
     set(HIPBLASLT_LIBLOGIC_PATH
         "${CMAKE_CURRENT_SOURCE_DIR}/../library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
         CACHE STRING "" FORCE
