@@ -1,78 +1,141 @@
+
 .. meta::
-  :description: How to compile rocThrust with different backends
-  :keywords: rocThrust, ROCm, cmake, CUDA, TBB, OpenMP, CPP
+   :description: How to compile rocThrust with different backends
+   :keywords: rocThrust, ROCm, cmake, CUDA, TBB, OpenMP, CPP
 
-*******************************************
-How to compile rocThrust with different backends
-*******************************************
+===========================================================
+How to Compile rocThrust with Different Backends
+===========================================================
 
-We will be using this example file ``binary_search_example.cpp`` to demonstrate how to compile for
-different rocThrust backends. This program will use ``thrust::binary_search`` to search for the range -10, 10
-within a source vector and prints the result.
+This guide demonstrates how to compile ``rocThrust`` using various host and device backends. We'll use the example file ``binary_search_example.cpp``, which utilizes ``thrust::binary_search`` to search for values in the range [-10, 10] within a source vector and prints the results.
 
-.. code:: c++
-  #include <iostream>
-  #include <numeric>
-  #include <thrust/binary_search.h>
-  #include <thrust/device_vector.h>
-  #include <thrust/host_vector.h>
+Example Code
+============
 
+.. code-block:: c++
 
+   #include <iostream>
+   #include <numeric>
+   #include <thrust/binary_search.h>
+   #include <thrust/device_vector.h>
+   #include <thrust/host_vector.h>
 
-  template <class T> inline void print_arr(T &arr) {
-    for (const auto &x : arr)
-      std::cout << x << " ";
-    std::cout << std::endl;
-  }
+   template <class T>
+   inline void print_arr(T &arr) {
+     for (const auto &x : arr)
+       std::cout << x << " ";
+     std::cout << std::endl;
+   }
 
-  int main() {
-    thrust::host_vector<int> h_src(11);
-    std::iota(h_src.begin(), h_src.end(), -5);
+   int main() {
+     thrust::host_vector<int> h_src(11);
+     std::iota(h_src.begin(), h_src.end(), -5);
 
-    thrust::host_vector<int> h_search(21);
-    std::iota(h_search.begin(), h_search.end(), -10);
+     thrust::host_vector<int> h_search(21);
+     std::iota(h_search.begin(), h_search.end(), -10);
 
-    thrust::device_vector<int> d_src = h_src;
-    thrust::device_vector<int> d_search = h_search;
-    thrust::device_vector<bool> d_output(h_search.size());
+     thrust::device_vector<int> d_src = h_src;
+     thrust::device_vector<int> d_search = h_search;
+     thrust::device_vector<bool> d_output(h_search.size());
 
-    thrust::binary_search(d_src.begin(), d_src.end(), d_search.begin(),
-                          d_search.end(), d_output.begin());
+     thrust::binary_search(d_src.begin(), d_src.end(), d_search.begin(),
+                           d_search.end(), d_output.begin());
 
-    thrust::host_vector<bool> h_output = d_output;
+     thrust::host_vector<bool> h_output = d_output;
 
-    std::cout << "Source Numbers:\n";
-    print_arr(h_src);
+     std::cout << "Source Numbers:\n";
+     print_arr(h_src);
 
-    std::cout << "Numbers to search:\n";
-    print_arr(h_search);
+     std::cout << "Numbers to Search:\n";
+     print_arr(h_search);
 
-    std::cout << "Output:\n";
-    print_arr(h_output);
-    return 0;
-  }
+     std::cout << "Output:\n";
+     print_arr(h_output);
 
-Host Side
-=========
-rocThrust supports ``CPP (default)``, ``OpenMP`` and ``TBB``. 
+     return 0;
+   }
 
-To compile for CPP:
-.. code::
-  hipcc ./binary_search_example.cpp -DTHRUST_HOST_SYSTEM=CPP -D__THRUST_HOST_SYSTEM_NAMESPACE=cpp
+Host Side Compilation
+=====================
 
-To compile for OpenMP:
-.. code::
-  hipcc -fopenmp ./binary_search_example.cpp -DTHRUST_HOST_SYSTEM=OMP -D__THRUST_HOST_SYSTEM_NAMESPACE=omp -D_OPENMP=202011
+rocThrust supports the following host backends:
 
-To compile for TBB:
-.. code::
-  hipcc ./binary_search_example.cpp -DTHRUST_HOST_SYSTEM=TBB -D__THRUST_HOST_SYSTEM_NAMESPACE=tbb -ltbb
+- ``CPP`` (default)
+- ``OpenMP``
+- ``TBB``
 
-To compile using cmake, you can use the same ``THRUST_HOST_SYSTEM`` and ``__THRUST_HOST_SYSTEM_NAMESPACE`` flags like so:
-.. code::
-  CXX=hipcc cmake -DTHRUST_HOST_SYSTEM=CPP -D__THRUST_HOST_SYSTEM_NAMESPACE=cpp ..
+To specify the host backend, set the CMake flags ``THRUST_HOST_SYSTEM`` and ``__THRUST_HOST_SYSTEM_NAMESPACE``.
 
-Device Side
-===========
-rocThrust supports ````
+Compile with hipcc
+-------------------
 
+**CPP:**
+
+.. code-block:: bash
+
+   hipcc binary_search_example.cpp -DTHRUST_HOST_SYSTEM=CPP -D__THRUST_HOST_SYSTEM_NAMESPACE=cpp
+
+**OpenMP:**
+
+.. code-block:: bash
+
+   hipcc -fopenmp binary_search_example.cpp -DTHRUST_HOST_SYSTEM=OMP -D__THRUST_HOST_SYSTEM_NAMESPACE=omp -D_OPENMP=202011
+
+**TBB:**
+
+.. code-block:: bash
+
+   hipcc binary_search_example.cpp -DTHRUST_HOST_SYSTEM=TBB -D__THRUST_HOST_SYSTEM_NAMESPACE=tbb -ltbb
+
+Compile with CMake
+-------------------
+
+.. code-block:: bash
+
+   CXX=hipcc cmake -DTHRUST_HOST_SYSTEM=CPP -D__THRUST_HOST_SYSTEM_NAMESPACE=cpp ..
+
+Device Side Compilation
+=======================
+
+rocThrust supports the following device backends:
+
+- ``CPP``
+- ``CUDA`` (default)
+- ``OpenMP``
+- ``TBB``
+
+To specify the device backend, set the CMake flags ``THRUST_DEVICE_SYSTEM`` and ``__THRUST_DEVICE_SYSTEM_NAMESPACE``.
+
+Compile with hipcc
+-------------------
+
+**CPP:**
+
+.. code-block:: bash
+
+   hipcc binary_search_example.cpp -DTHRUST_DEVICE_SYSTEM=CPP -D__THRUST_DEVICE_SYSTEM_NAMESPACE=cpp
+
+**CUDA:**
+
+.. code-block:: bash
+
+   hipcc binary_search_example.cpp -DTHRUST_DEVICE_SYSTEM=CUDA -D__THRUST_DEVICE_SYSTEM_NAMESPACE=cuda
+
+**OpenMP:**
+
+.. code-block:: bash
+
+   hipcc -fopenmp binary_search_example.cpp -DTHRUST_DEVICE_SYSTEM=OMP -D__THRUST_DEVICE_SYSTEM_NAMESPACE=omp -D_OPENMP=202011
+
+**TBB:**
+
+.. code-block:: bash
+
+   hipcc binary_search_example.cpp -DTHRUST_DEVICE_SYSTEM=TBB -D__THRUST_DEVICE_SYSTEM_NAMESPACE=tbb -ltbb
+
+Compile with CMake
+-------------------
+
+.. code-block:: bash
+
+   CXX=hipcc cmake -DTHRUST_DEVICE_SYSTEM=CPP -D__THRUST_DEVICE_SYSTEM_NAMESPACE=cpp ..
