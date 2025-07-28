@@ -23,24 +23,6 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-/*#include <miopen/config.h>
-#include "driver.hpp"
-#include "test.hpp"
-#include "verify.hpp"
-#include "workspace.hpp"
-#include "get_handle.hpp"
-#include "tensor_holder.hpp"
-#include "random.hpp"
-#include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
-#include <miopen/stringutils.hpp>
-#include <miopen/reducetensor.hpp>
-#include <random>
-#include <algorithm>
-#include <iterator>
-#include <limits>
-#include <iostream>
-#include <type_traits>*/
 
 #include "gtest_common.hpp"
 #include <tensor_util.hpp>
