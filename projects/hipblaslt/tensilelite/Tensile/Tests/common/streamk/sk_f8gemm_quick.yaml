@@ -80,6 +80,7 @@ BenchmarkProblems:
         - VectorWidthA: [1]
         - VectorWidthB: [1]
         - WaveSeparateGlobalReadB: [1]
+        - WorkGroupMapping: [-4, 1, 4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

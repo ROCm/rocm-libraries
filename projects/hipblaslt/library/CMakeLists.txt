@@ -229,9 +229,10 @@ rocm_install_targets(TARGETS hipblaslt
                      INCLUDE
                        ${CMAKE_BINARY_DIR}/include
 )
-install(
+rocm_install(
     DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/hipblaslt"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    FILES_MATCHING
     PATTERN "*.h"
     PATTERN "*.hpp"
 )
