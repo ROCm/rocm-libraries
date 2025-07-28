@@ -21,7 +21,7 @@
     {
       "name": "hipblas",
       "url": "ROCm/hipBLAS",
-      "branch": "develop",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true,
