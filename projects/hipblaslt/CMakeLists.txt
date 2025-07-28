@@ -3,10 +3,16 @@
 
 cmake_minimum_required(VERSION 3.24.4)
 
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-#option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
 
-project(hipblaslt VERSION 1.0.0 LANGUAGES CXX)
+if("${CMAKE_SOURCE_DIR}" STREQUAL "${PROJECT_SOURCE_DIR}")
+    set(HIPBLASLT_IS_SUBPROJECT FALSE)
+else()
+    set(HIPBLASLT_IS_SUBPROJECT TRUE)
+endif()
+
+option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
+
+project(hipblaslt VERSION 1.1.0 LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -21,7 +27,7 @@ include(hipblaslt_target_configure_sanitizers)
 include(tensilelite_supported_architectures)
 
 rocm_setup_version(VERSION ${PROJECT_VERSION})
-set(hipblaslt_SOVERSION 1.0)
+set(hipblaslt_SOVERSION 1.1)
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     if(WIN32)
@@ -479,18 +485,21 @@ if(HIPBLASLT_ENABLE_SAMPLES)
     )
     rocm_package_setup_client_component(samples)
 endif()
-# rocm_create_package makes decisions on what type of package to produce
-# based on BUILD_SHARED_LIBS. If we don't set this here we will only get
-# a dev package.
-set(BUILD_SHARED_LIBS ${HIPBLASLT_BUILD_SHARED_LIBS})
-set(HIPBLASLT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
-rocm_create_package(
-    NAME hipblaslt
-    DESCRIPTION "HIP library for GEMM operations with extended functionality"
-    MAINTAINER "hipBLASLt Maintainer <hipblaslt-maintainer@amd.com>"
-    LDCONFIG
-    LDCONFIG_DIR ${HIPBLASLT_CONFIG_DIR}
-)
+
+if(ROCM_LIBRARIES_SUPERBUILD OR NOT IS_SUBPROJECT)
+    # rocm_create_package makes decisions on what type of package to produce
+    # based on BUILD_SHARED_LIBS. If we don't set this here we will only get
+    # a dev package.
+    set(BUILD_SHARED_LIBS ${HIPBLASLT_BUILD_SHARED_LIBS})
+    set(HIPBLASLT_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
+    rocm_create_package(
+        NAME hipblaslt
+        DESCRIPTION "HIP library for GEMM operations with extended functionality"
+        MAINTAINER "hipBLASLt Maintainer <hipblaslt-maintainer@amd.com>"
+        LDCONFIG
+        LDCONFIG_DIR ${HIPBLASLT_CONFIG_DIR}
+    )
+endif()
 
 if(HIPBLASLT_ENABLE_COVERAGE)
     target_compile_options(hipblaslt PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
