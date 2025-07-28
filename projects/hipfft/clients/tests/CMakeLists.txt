@@ -32,6 +32,13 @@ else( )
     "Install path prefix, prepended onto install directories" )
 endif( )
 
+# Dependencies
+
+find_package( ROCmCMakeBuildTools REQUIRED CONFIG PATHS /opt/rocm )
+include(ROCMInstallTargets)
+list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../cmake )
+
+
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user
 # specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
@@ -42,12 +49,16 @@ endif()
 
 project( hipfft-clients-tests LANGUAGES CXX )
 
+find_package( hipfft REQUIRED CONFIG PATHS )
 
 find_package( Boost REQUIRED)
 
 set( Boost_USE_STATIC_LIBS OFF )
 
+
 find_package( FFTW 3.0 REQUIRED MODULE COMPONENTS FLOAT DOUBLE )
+
+set( BUILD_WITH_LIB "ROCM" CACHE STRING "Build ${PROJECT_NAME} with ROCM or CUDA libraries" )
 
 set( THREADS_PREFER_PTHREAD_FLAG ON )
 find_package( Threads REQUIRED )
@@ -84,7 +95,7 @@ if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
   if( WIN32 )
     find_package( HIP CONFIG REQUIRED )
   else()
-    find_package( HIP MODULE REQUIRED )
+    find_package( hip REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hip/ )
   endif()
 endif()
 
@@ -99,7 +110,12 @@ string( CONCAT TESTS_OUT_DIR "${PROJECT_BINARY_DIR}" ${TESTS_OUT_DIR} )
 
 option( BUILD_CLIENTS_TESTS_OPENMP "Build tests with OpenMP" ON )
 if( BUILD_CLIENTS_TESTS_OPENMP )
-  find_package(OpenMP REQUIRED)
+  # Attempt to find a config version, which provides openmp_LIB_DIR.
+  #find_package( OpenMP CONFIG PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
+  if( NOT OPENMP_FOUND OR NOT DEFINED ${openmp_LIB_DIR} )
+     # Fall-back to module mode.
+     find_package( OpenMP REQUIRED )
+  endif()
 endif()
 
 foreach( target ${TEST_TARGETS} )
@@ -162,8 +178,10 @@ foreach( target ${TEST_TARGETS} )
     if( BUILD_WITH_LIB STREQUAL "CUDA" )
       message( STATUS "OpenMP is not supported on CUDA, building tests without it" )
     else()
-      set_target_properties( ${target} PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
-      set_target_properties( ${target} PROPERTIES BUILD_RPATH "${HIP_CLANG_ROOT}/lib" )
+      if( DEFINED ${openmp_LIB_DIR} )
+        set_target_properties( ${target} PROPERTIES BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}" )
+        set_target_properties( ${target} PROPERTIES INSTALL_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}" )
+      endif()
       target_link_libraries( ${target} PRIVATE OpenMP::OpenMP_CXX )
     endif()
   endif()
@@ -182,6 +200,8 @@ foreach( target ${TEST_TARGETS} )
 
   rocm_install(TARGETS ${target} COMPONENT tests)
 endforeach()
+
+find_package( GTest 1.11.0 )
 
 if( GTEST_FOUND )
   target_include_directories( hipfft-test PRIVATE $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}> )
