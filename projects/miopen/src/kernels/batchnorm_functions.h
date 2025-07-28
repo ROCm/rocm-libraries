@@ -1,4 +1,3 @@
-
 #include "bfloat16_dev.hpp"
 
 #define PPCAT_NX(A, B) A##B
@@ -177,7 +176,8 @@
 #ifndef MIOPEN_USE_AMDGCN
 #if defined(__AMDGCN__) &&                           \
     !((defined(MIO_BN_GFX103X) && MIO_BN_GFX103X) || \
-      (defined(MIO_BN_GFX110X) && MIO_BN_GFX110X) || (defined(MIO_BN_GFX120X) && MIO_BN_GFX120X))
+      (defined(MIO_BN_GFX110X) && MIO_BN_GFX110X) || \
+      (defined(MIO_BN_GFX115X) && MIO_BN_GFX115X) || (defined(MIO_BN_GFX120X) && MIO_BN_GFX120X))
 #define MIOPEN_USE_AMDGCN 1
 #else
 #define MIOPEN_USE_AMDGCN 0
@@ -211,6 +211,10 @@
 
 #ifndef MIO_BN_GFX120X
 #define MIO_BN_GFX120X 0
+#endif
+
+#ifndef MIO_BN_GFX115X
+#define MIO_BN_GFX115X 0
 #endif
 
 #ifndef MIO_BN_VECTORIZE
