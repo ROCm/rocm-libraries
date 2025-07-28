@@ -45,6 +45,20 @@ constexpr size_t PowMax()
     return u;
 }
 
+// types of global transpositions
+enum class transpose_type
+{
+    pencil_to_pencil,
+    pencil_to_slab,
+    pencil_to_brick,
+    slab_to_pencil,
+    slab_to_slab,
+    slab_to_brick,
+    brick_to_pencil,
+    brick_to_slab,
+    brick_to_brick
+};
+
 // Generic function to check is pow of a given base number or not
 template <int base>
 static inline bool IsPow(size_t u)
@@ -104,6 +118,13 @@ struct rocfft_brick_t
 
     // compute offset of this brick, given the field's stride
     size_t offset_in_field(const std::vector<size_t>& fieldStride) const;
+
+    bool operator==(const rocfft_brick_t& other) const
+    {
+        return lower == other.lower && upper == other.upper && stride == other.stride
+               && location.comm_rank == other.location.comm_rank
+               && location.device == other.location.device;
+    }
 
     std::string str() const;
 };
@@ -187,7 +208,7 @@ struct rocfft_plan_t
     std::vector<size_t> outputLengths;
     size_t              batch = 1;
 
-    // intermediate splitting form multi-process transforms
+    // intermediate splitting for multi-process multi-dimensional transforms
     bool use_intermediate_slabs = false;
 
     rocfft_result_placement placement     = rocfft_placement_inplace;
@@ -331,9 +352,10 @@ private:
                          std::vector<BufferPtr>&    output,
                          const std::vector<size_t>& inputAntecedents,
                          std::vector<size_t>&       outputItems,
-                         size_t                     transposeNumber);
+                         size_t                     transposeNumber,
+                         MPI_Comm_wrapper_t&&       subcomm = MPI_Comm_wrapper_t{});
 
-    // global transpose implemented as an all-to-all communication.
+    // default global all-to-all transpose
     void GlobalTransposeA2A(size_t                     elem_size,
                             const rocfft_field_t&      inField,
                             const rocfft_field_t&      outField,
@@ -342,6 +364,17 @@ private:
                             const std::vector<size_t>& inputAntecedents,
                             std::vector<size_t>&       outputItems,
                             const std::string&         itemGroup);
+
+    // global transpose implemented as an all-to-all communication with sub-communicator optimization.
+    void GlobalTransposeA2ASubcomm(size_t                     elem_size,
+                                   const rocfft_field_t&      inField,
+                                   const rocfft_field_t&      outField,
+                                   std::vector<BufferPtr>&    input,
+                                   std::vector<BufferPtr>&    output,
+                                   const std::vector<size_t>& inputAntecedents,
+                                   std::vector<size_t>&       outputItems,
+                                   const std::string&         itemGroup,
+                                   MPI_Comm_wrapper_t&&       subcomm = MPI_Comm_wrapper_t{});
 
     // fallback case for global transpose that uses point-to-point
     // communications, for when all-to-all isn't possible.

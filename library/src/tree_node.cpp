@@ -904,99 +904,12 @@ void CommGather::Print(rocfft_ostream& os, const int indent) const
     }
 }
 
-#ifdef ROCFFT_MPI_ENABLE
-std::array<int, 3> CommAllToAll::rank_to_coords(int rank, const std::array<int, 3>& grid)
-{
-    int py = grid[1], pz = grid[2];
-    int z = rank % pz;
-    int y = (rank / pz) % py;
-    int x = rank / (pz * py);
-    return {x, y, z};
-}
-
-int CommAllToAll::calculate_color_for_subcomm(int                       rank,
-                                              const std::array<int, 3>& grid,
-                                              int                       split_dim)
-{
-    const auto [x, y, z] = rank_to_coords(rank, grid);
-
-    switch(split_dim)
-    {
-    case 0: // Transposing along X → group by YZ
-        return y * grid[2] + z;
-    case 1: // Transposing along Y → group by XZ
-        return x * grid[2] + z;
-    case 2: // Transposing along Z → group by XY
-        return x * grid[1] + y;
-    default:
-        throw std::runtime_error("Invalid split_dim");
-    }
-}
-
-int CommAllToAll::calculate_subcomm_size(const std::array<int, 3>& grid, int split_dim)
-{
-    return grid[split_dim];
-}
-
-bool CommAllToAll::can_form_subcommunicators(MPI_Comm                   global_comm,
-                                             const std::vector<size_t>& send_counts,
-                                             const std::vector<size_t>& recv_counts,
-                                             const std::array<int, 3>&  in_grid,
-                                             const std::array<int, 3>&  out_grid)
-{
-    // check if uniform counts
-    if(!std::all_of(
-           send_counts.begin(), send_counts.end(), [&](size_t c) { return c == send_counts[0]; }))
-        return false;
-    if(!std::all_of(
-           recv_counts.begin(), recv_counts.end(), [&](size_t c) { return c == recv_counts[0]; }))
-        return false;
-
-    // check communicator size matches grid product
-    int comm_size = 0;
-    MPI_Comm_size(global_comm, &comm_size);
-    int in_grid_size  = in_grid[0] * in_grid[1] * in_grid[2];
-    int out_grid_size = out_grid[0] * out_grid[1] * out_grid[2];
-    if(comm_size != in_grid_size || comm_size != out_grid_size)
-        return false;
-
-    // detect a single split dimension (the one that changes)
-    int split_dim = -1;
-    int changes   = 0;
-    for(int i = 0; i < 3; ++i)
-    {
-        if(in_grid[i] != out_grid[i])
-        {
-            split_dim = i;
-            ++changes;
-        }
-    }
-    if(changes != 1) // only support single-dimension (pencil) redistribution
-        return false;
-
-    // subcomm size is the value in in_grid[split_dim]
-    int subcomm_size = in_grid[split_dim];
-    if(comm_size % subcomm_size != 0)
-        return false;
-
-    return true;
-}
-#endif
-
 void CommAllToAll::ExecuteAsync(const rocfft_plan     plan,
                                 void*                 in_buffer[],
                                 void*                 out_buffer[],
                                 rocfft_execution_info info,
                                 size_t                multiPlanIdx)
 {
-    // check that we have as many elems in our count/offset buffers as
-    // we have ranks
-    const size_t num_ranks = plan->get_local_comm_size();
-    if(sendOffsets.size() != num_ranks || sendCounts.size() != num_ranks
-       || recvOffsets.size() != num_ranks || recvCounts.size() != num_ranks)
-        throw std::runtime_error(
-            "CommAllToAll: number of counts/offsets does not match number of ranks");
-
     if(LOG_PLAN_ENABLED())
     {
         log_plan("CommAllToAll: deciding between MPI_Ialltoall and MPI_Ialltoallv\n");
@@ -1004,35 +917,74 @@ void CommAllToAll::ExecuteAsync(const rocfft_plan     plan,
 
 #ifdef ROCFFT_MPI_ENABLE
 
-    const auto elem_size = element_size(precision, arrayType);
+    // check that we have as many elems in our count/offset buffers as
+    // we have ranks
+    size_t num_ranks    = -1;
+    int    subcomm_rank = -1;
+    if(subcomm)
+    {
+        int tmp_num_ranks = 0;
+        MPI_Comm_size(subcomm, &tmp_num_ranks);
+        assert(tmp_num_ranks >= 0);
+        num_ranks = static_cast<size_t>(tmp_num_ranks);
+        MPI_Comm_rank(subcomm, &subcomm_rank);
+    }
+    else
+    {
+        num_ranks = plan->get_local_comm_size();
+    }
 
+    if(sendOffsets.size() != num_ranks || sendCounts.size() != num_ranks
+       || recvOffsets.size() != num_ranks || recvCounts.size() != num_ranks)
+    {
+        throw std::runtime_error(
+            "CommAllToAll: number of counts/offsets does not match number of ranks");
+    }
+
+    int global_rank = local_comm_rank;
+
+    const auto  elem_size = element_size(precision, arrayType);
     MPI_Request request;
 
-    if(uniform_counts && use_subcomm)
+    if(subcomm)
     {
         if(LOG_PLAN_ENABLED())
-            log_plan("Using subcommunicator-based MPI_Ialltoall\n");
+            log_plan("Using MPI_Ialltoall with sub-communicators\n");
 
-        const int send_count_bytes = static_cast<int>(sendCounts[0] * elem_size);
+        // optimization with pencil sub-communicators
+        if(!uniform_counts)
+            throw std::runtime_error(
+                "CommAllToAll::ExecuteAsync: non-uniform counts in pencil subcomm!");
 
-        const auto mpiret = MPI_Ialltoall(sendBuf.get(in_buffer, out_buffer, local_comm_rank),
-                                          send_count_bytes,
-                                          MPI_CHAR,
-                                          recvBuf.get(in_buffer, out_buffer, local_comm_rank),
-                                          send_count_bytes,
-                                          MPI_CHAR,
-                                          subcomm,
-                                          &request);
+        void* send_ptr = sendBuf.get(in_buffer, out_buffer, local_comm_rank);
+        void* recv_ptr = recvBuf.get(in_buffer, out_buffer, local_comm_rank);
 
-        if(mpiret != MPI_SUCCESS)
+        if(!send_ptr || !recv_ptr)
+        {
+            throw std::runtime_error("Buffer pointer(s) are null!");
+        }
+
+        // in subcomm: sendCounts, recvCounts, etc are sized for num_ranks, indexed by subcomm_rank
+        size_t    elem_size        = element_size(precision, arrayType);
+        const int send_count_bytes = static_cast<int>(uniform_count_inside_subcomm * elem_size);
+
+        int ret = MPI_Ialltoall(sendBuf.get(in_buffer, out_buffer, local_comm_rank),
+                                send_count_bytes,
+                                MPI_CHAR,
+                                recvBuf.get(in_buffer, out_buffer, local_comm_rank),
+                                send_count_bytes,
+                                MPI_CHAR,
+                                subcomm,
+                                &request);
+
+        if(ret != MPI_SUCCESS)
         {
             char errmsg[MPI_MAX_ERROR_STRING];
             int  errlen = 0;
-            MPI_Error_string(mpiret, errmsg, &errlen);
-
+            MPI_Error_string(ret, errmsg, &errlen);
             comm_status   = COMM_MPI_ERROR;
-            error_message = "MPI_Ialltoall (subcomm) failed on rank "
-                            + std::to_string(local_comm_rank) + ": " + std::string(errmsg);
+            error_message = "MPI_Ialltoall (subcomm) failed on global rank "
+                            + std::to_string(global_rank) + ": " + std::string(errmsg);
             return;
         }
     }
@@ -1070,6 +1022,7 @@ void CommAllToAll::ExecuteAsync(const rocfft_plan     plan,
         if(LOG_PLAN_ENABLED())
             log_plan("Using MPI_Ialltoallv\n");
 
+        // non-uniform exchange case (default)
         const int local_comm_rank = plan->get_local_comm_rank();
 
         // MPI takes ints for everything, convert our size_t elements to int bytes

@@ -35,6 +35,13 @@ class MPI_Comm_wrapper_t
 public:
     MPI_Comm_wrapper_t() = default;
 
+    static MPI_Comm_wrapper_t from_raw(MPI_Comm raw_comm)
+    {
+        MPI_Comm_wrapper_t wrap;
+        wrap.mpi_comm = raw_comm;
+        return wrap;
+    }
+
     // conversion to unwrapped communicator for passing to MPI APIs
     operator MPI_Comm() const
     {
@@ -272,6 +279,23 @@ inline MPI_Datatype rocfft_type_to_mpi_type(rocfft_precision precision, rocfft_a
                                                 : type_to_mpi_type<double>();
     }
 }
+
+#else
+
+class MPI_Comm_wrapper_t
+{
+public:
+    MPI_Comm_wrapper_t() {}
+    static MPI_Comm_wrapper_t from_raw(int)
+    {
+        return MPI_Comm_wrapper_t{};
+    }
+    // allow conversion to bool (always false)
+    operator bool() const
+    {
+        return false;
+    }
+};
 
 #endif
 
