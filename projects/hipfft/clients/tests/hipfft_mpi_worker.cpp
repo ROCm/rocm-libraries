@@ -23,6 +23,9 @@
 #include "../../shared/mpi_worker.h"
 #include "../hipfft_params.h"
 
+// initialize static class member of hipfft_params
+std::vector<gpubuf> hipfft_params::externally_managed_workareas = std::vector<gpubuf>();
+
 int main(int argc, char* argv[])
 {
     return mpi_worker_main<std::array<hipfft_params, 1>, false>(
