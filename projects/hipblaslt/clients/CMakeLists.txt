@@ -103,7 +103,6 @@ target_include_directories(hipblaslt-sequence PRIVATE ${LLVM_INCLUDE_DIRS})
 if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     find_package(GTest REQUIRED)
     add_executable(hipblaslt-test)
-    target_compile_options(hipblaslt-test PRIVATE -mf16c) # do we really need to set this?
     if(rocm_smi_FOUND)
         target_link_libraries(hipblaslt-test PRIVATE rocm_smi64)
     endif()

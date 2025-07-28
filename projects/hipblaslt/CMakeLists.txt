@@ -504,6 +504,7 @@ if(HIPBLASLT_ENABLE_COVERAGE)
 
     target_compile_options(hipblaslt-test PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping -fvisibility=default)
     target_link_options(hipblaslt-test PRIVATE -fprofile-instr-generate)
+    target_compile_definitions(hipblaslt-test PRIVATE CODE_COVERAGE)
 
     set(coverage_dir "${CMAKE_CURRENT_BINARY_DIR}/coverage-report")
     add_custom_target(
