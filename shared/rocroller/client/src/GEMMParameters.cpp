@@ -32,9 +32,10 @@ namespace rocRoller
     {
         namespace GEMMClient
         {
-            std::string SolutionParameters::generateKernelName() const
+            std::string TypeParameters::kernelNamePart() const
             {
                 std::ostringstream rv;
+
                 rv << "GEMM_" << toString(transA) << toString(transB);
 
                 if(scaleA != rocRoller::Operations::ScaleMode::None)
@@ -63,6 +64,17 @@ namespace rocRoller
 
                 for(auto const& t : {typeC, typeD, typeAcc})
                     rv << "_" << t;
+
+                if(scaleSkipPermlane)
+                    rv << "_PRE_SW";
+
+                return rv.str();
+            }
+
+            std::string SolutionParameters::generateKernelName() const
+            {
+                std::ostringstream rv;
+                rv << types.kernelNamePart();
 
                 rv << "_MT";
                 rocRoller::streamJoin(rv, std::vector{macM, macN, macK}, "x");
@@ -143,12 +155,25 @@ namespace rocRoller
                 return s;
             }
 
-            std::ostream& operator<<(std::ostream& s, ProblemParameters const& x)
+            std::ostream& operator<<(std::ostream& s, TypeParameters const& x)
             {
-                s << "MxNxK:     " << x.m << "x" << x.n << "x" << x.k << std::endl;
                 s << "Type:      A:" << x.typeA << " B:" << x.typeB << " C:" << x.typeC
                   << " D:" << x.typeD << " ACC:" << x.typeAcc << std::endl;
                 s << "Transpose: " << toString(x.transA) << toString(x.transB) << std::endl;
+                s << "Scaling:   A:" << x.scaleA << "(" << x.scaleTypeA << ")";
+                s << " B:" << x.scaleB << "(" << x.scaleTypeB << ")";
+                if(x.scaleA == rocRoller::Operations::ScaleMode::Separate
+                   or x.scaleB == rocRoller::Operations::ScaleMode::Separate)
+                {
+                    s << " BlockSize:" << x.scaleBlockSize;
+                }
+                return s;
+            }
+
+            std::ostream& operator<<(std::ostream& s, ProblemParameters const& x)
+            {
+                s << "MxNxK:     " << x.m << "x" << x.n << "x" << x.k << std::endl;
+                s << x.types;
                 return s;
             }
 
@@ -166,13 +191,6 @@ namespace rocRoller
                 s << "Tiling:    " << x.macM << "x" << x.macN << "x" << x.macK << std::endl;
                 s << "MI:        " << x.waveM << "x" << x.waveN << "x" << x.waveK << "x" << x.waveB
                   << std::endl;
-                s << "Scaling:   A:" << x.scaleA << "(" << x.scaleTypeA << ")";
-                s << " B:" << x.scaleB << "(" << x.scaleTypeB << ")";
-                if(x.scaleA == rocRoller::Operations::ScaleMode::Separate
-                   or x.scaleB == rocRoller::Operations::ScaleMode::Separate)
-                {
-                    s << " BlockSize:" << x.scaleBlockSize;
-                }
                 s << std::endl;
                 s << "SwizzleScale:        " << x.swizzleScale << std::endl;
                 s << "LDS:       " << x.loadLDSA << x.loadLDSB << x.storeLDSD << std::endl;
@@ -202,9 +220,7 @@ namespace rocRoller
                     }
                 }
                 s << std::endl;
-                s << "Type:      A:" << x.typeA << " B:" << x.typeB << " C:" << x.typeC
-                  << " D:" << x.typeD << " ACC:" << x.typeAcc << std::endl;
-                s << "Transpose: " << toString(x.transA) << toString(x.transB) << std::endl;
+                s << x.types;
                 s << "Version:   " << x.version << std::endl;
                 return s;
             }

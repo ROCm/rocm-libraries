@@ -273,7 +273,9 @@ namespace rocRoller
             using iot = IOTraits<IO>;
             static void mapping(IO& io, KernelGraph::ControlGraph::ComputeIndex& op, Context&)
             {
+                static_assert(sizeof(op) == 16);
                 iot::mapRequired(io, "forward", op.forward);
+                iot::mapRequired(io, "isDirect2LDS", op.isDirect2LDS);
                 iot::mapRequired(io, "valueType", op.valueType);
                 iot::mapRequired(io, "offsetType", op.offsetType);
                 iot::mapRequired(io, "strideType", op.strideType);

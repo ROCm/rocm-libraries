@@ -22,7 +22,9 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/memory.h>
 
-#include "test_header.hpp"
+#include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(ForEachTests, SignedIntegerTestsParams)
 TESTS_DEFINE(ForEachVectorTests, FullTestsParams)

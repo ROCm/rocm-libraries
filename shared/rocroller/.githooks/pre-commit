@@ -35,7 +35,7 @@ export PATH=/opt/clang-format/bin:/usr/bin:/bin::/usr/local/sbin:/usr/local/bin:
 exec >&2
 
 # Do everything from top - level
-cd $(git rev-parse --show-toplevel)
+cd $(git rev-parse --show-toplevel)/shared/rocroller/
 
 if git rev-parse --verify HEAD >/dev/null 2>&1; then
     against=HEAD

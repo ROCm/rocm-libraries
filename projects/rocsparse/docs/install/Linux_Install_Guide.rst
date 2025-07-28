@@ -59,8 +59,8 @@ Building rocSPARSE from source also requires the following components and depend
 
 *  `git <https://git-scm.com/>`_
 *  `CMake <https://cmake.org/>`_ (Version 3.5 or later)
-*  `rocPRIM <https://github.com/ROCm/rocPRIM>`_
-*  `rocBLAS <https://github.com/ROCm/rocBLAS>`_ (Optional: for the library)
+*  `rocPRIM <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim>`_
+*  `rocBLAS <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_ (Optional: for the library)
 *  `GoogleTest <https://github.com/google/googletest>`_ (Optional: only required to build the clients)
 *  `Python <https://www.python.org/>`_
 *  `PyYAML <https://pypi.org/project/PyYAML/>`_
@@ -75,19 +75,48 @@ rocPRIM, such as 3.1.0, is not supported.
 Downloading rocSPARSE
 ----------------------
 
-The rocSPARSE source code is available from the `rocSPARSE GitHub <https://github.com/ROCm/rocSPARSE>`_.
-Download the develop branch using these commands:
+The rocSPARSE source code is available from the `rocSPARSE folder <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsparse>`_
+of the `rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries>`_.
+
+To limit your local checkout to only the rocSPARSE project, configure ``sparse-checkout`` before cloning.
+This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.
+Use the following commands for a sparse checkout:
+
+.. note::
+
+   To include the rocPRIM and rocBLAS dependencies, set the projects for the sparse checkout using
+   ``git sparse-checkout set projects/rocsparse projects/rocprim projects/rocblas``.
 
 .. code-block:: shell
 
-   git clone -b develop https://github.com/ROCm/rocSPARSE.git
-   cd rocSPARSE
+   git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries
+   git sparse-checkout init --cone
+   git sparse-checkout set projects/rocsparse
+   git checkout develop # or use the branch you want to work with
+
+To download the develop branch for all projects in rocm-libraries, use these commands. This process takes
+longer but is recommended for those working with a large number of libraries.
+
+.. code-block:: shell
+
+   git clone -b develop https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries/projects/rocsparse
+
+.. note::
+
+   To build ROCm 6.4.2 and earlier, use the rocSPARSE repository at `<https://github.com/ROCm/rocSPARSE>`_.
+   For more information, see the documentation associated with the release you want to build.
 
 Building rocSPARSE using the install script
 -------------------------------------------
 
 It's recommended to use the ``install.sh`` script to install rocSPARSE.
 Here are the steps required to build different packages of the library, including the dependencies and clients.
+
+.. note::
+
+   You can run the ``install.sh`` script from the ``projects/rocsparse`` directory.
 
 Using install.sh to build rocSPARSE with dependencies
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -129,6 +158,10 @@ The rocSPARSE library contains both host and device code, therefore, the HIP com
 must be specified during the CMake configuration process.
 
 You can build rocSPARSE using the following commands:
+
+.. note::
+
+   Run these commands from the ``projects/rocsparse`` directory.
 
 .. note::
 
@@ -192,7 +225,7 @@ after successfully compiling the library with the clients.
 .. code-block:: shell
 
       # Navigate to clients binary directory
-      cd rocSPARSE/build/release/clients/staging
+      cd build/release/clients/staging
 
       # Execute rocSPARSE example
       ./example_csrmv 1000

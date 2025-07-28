@@ -262,6 +262,9 @@ rocblas_Xtrsm + batched, strided_batched
 The ``trsm`` functions support the ``_64`` interface. Parameter ``m`` for left side, or ``n`` with right side, larger than ``int32_t`` max value are not currently supported.
 See the :ref:`ILP64 API` section.
 
+For more information on pre-allocated memory in the handle, see the
+:ref:`Device Memory Allocation <Device Memory Allocation Usage>`.
+
 .. doxygenfunction:: rocblas_strsm_batched
    :outline:
 .. doxygenfunction:: rocblas_dtrsm_batched
@@ -273,6 +276,9 @@ See the :ref:`ILP64 API` section.
 The ``trsm_batched`` functions support the ``_64`` interface. Parameter ``m`` for left side, or ``n`` with right side, larger than ``int32_t`` max value are not currently supported.
 See the :ref:`ILP64 API` section.
 
+For more information on pre-allocated memory in the handle, see the
+:ref:`Device Memory Allocation <Device Memory Allocation Usage>`.
+
 .. doxygenfunction:: rocblas_strsm_strided_batched
    :outline:
 .. doxygenfunction:: rocblas_dtrsm_strided_batched
@@ -283,6 +289,9 @@ See the :ref:`ILP64 API` section.
 
 The ``trsm_strided_batched`` functions support the ``_64`` interface. Parameter ``m`` for left side, or ``n`` with right side, larger than ``int32_t`` max value are not currently supported.
 See the :ref:`ILP64 API` section.
+
+For more information on pre-allocated memory in the handle, see the
+:ref:`Device Memory Allocation <Device Memory Allocation Usage>`.
 
 .. _rocblas_hemm:
 
@@ -404,4 +413,5 @@ rocblas_Xtrtri + batched, strided_batched
 .. doxygenfunction:: rocblas_strtri_strided_batched
    :outline:
 .. doxygenfunction:: rocblas_dtrtri_strided_batched
+
 

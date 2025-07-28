@@ -23,7 +23,8 @@
 #include <thrust/scatter.h>
 #include <thrust/sequence.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(ScatterTests, FullTestsParams);
 TESTS_DEFINE(ScatterPrimitiveTests, NumericalTestsParams);
