@@ -3,7 +3,6 @@
 
 cmake_minimum_required(VERSION 3.24.4)
 
-
 if("${CMAKE_SOURCE_DIR}" STREQUAL "${PROJECT_SOURCE_DIR}")
     set(HIPBLASLT_IS_SUBPROJECT FALSE)
 else()
@@ -58,14 +57,14 @@ if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
     option(HIPBLASLT_BUILD_SHARED_LIBS "Build the hipblaslt library as shared vs static" ON)
     option(HIPBLASLT_ENABLE_MSGPACK "Use msgpack for parsing configuration files." ON)
     option(HIPBLASLT_ENABLE_OPENMP "Use OpenMP to improve performance." ON)
-    option(HIPBLASLT_ENABLE_LLVM "Use msgpack for parsing configuration files." OFF)
+    option(HIPBLASLT_ENABLE_LLVM "Use llvm for parsing configuration files." OFF)
     option(HIPBLASLT_ENABLE_ROCROLLER "Use RocRoller library." ON)
-    option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." OFF)
+    option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." ON)
     option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
     cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
     option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
     option(TENSILELITE_BUILD_TESTING "Build tensilelite host library tests." OFF)
-    cmake_dependent_option(TENSILELITE_ENABLE_CLIENT "Use the marker library." ON "TENSILELITE_BUILD_TESTING" OFF)
+    cmake_dependent_option(TENSILELITE_ENABLE_CLIENT "Build client when building tests" ON "TENSILELITE_BUILD_TESTING" OFF)
 endif()
 
 if(HIPBLASLT_ENABLE_DEVICE)
@@ -170,11 +169,11 @@ endif()
 if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBRARIES_SUPERBUILD)
     find_package(rocroller QUIET)
     block()
-        option(YAML_CPP_INSTALL "" ON)
         if(NOT rocroller_FOUND)
             #set(ROCROLLER_ENABLE_FETCH ON)
             #set(ROCROLLER_BUILD_TESTING OFF)
             #set(ROCROLLER_ENABLE_CLIENT OFF)
+            option(YAML_CPP_INSTALL "" ON)
             set(BUILD_TESTING OFF)
             set(BUILD_CLIENTS OFF)
             set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--exclude-libs,ALL")
@@ -210,7 +209,7 @@ if(HIPBLASLT_ENABLE_HOST)
         add_library(hipblaslt SHARED)
     else()
         add_library(hipblaslt STATIC)
-        target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_STATIC_LIB) # check if this is in a public header
+        target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_STATIC_LIB)
     endif()
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_link_libraries(hipblaslt PRIVATE roc::rocroller)
@@ -233,8 +232,7 @@ if(HIPBLASLT_ENABLE_HOST)
         hipblaslt_target_configure_sanitizers(hipblaslt PRIVATE)
     endif()
 
-    target_compile_features(hipblaslt PUBLIC cxx_std_17) # I would like to make this configurable
-
+    target_compile_features(hipblaslt PUBLIC cxx_std_17)
     target_compile_definitions(hipblaslt PUBLIC ROCM_USE_FLOAT16)
 
     if(HIPBLASLT_ENABLE_HIPBLAS_DIRECT)
@@ -285,7 +283,7 @@ if(HIPBLASLT_ENABLE_HOST)
     install(
         FILES ${hipblaslt_public_headers}
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/hipblaslt"
-        COMPONENT hipBLASLt_Development
+        COMPONENT devel
     )
     # temporary workaround to avoid updating downstream components
     # TODO: remove the follow file install once rocblas is updated
@@ -294,7 +292,7 @@ if(HIPBLASLT_ENABLE_HOST)
             "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-export.h"
             "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-version.h"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
-        COMPONENT hipBLASLt_Development
+        COMPONENT devel
     )
 
     rocm_install_targets(TARGETS hipblaslt)
@@ -328,14 +326,17 @@ endif()
 
 if(HIPBLASLT_ENABLE_DEVICE)
     if(WIN32)
-        set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}hipblaslt/bin" CACHE PATH "path to tensile library")
+        # Put files used at runtime adjacent to '.dll's and '.exe's in bin/.
+        set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_BINDIR}/hipblaslt" CACHE PATH "path to tensile library")
     else()
+        # Put files used at runtime adjacent to shared libraries ('.so') in
+        # lib/, separate from executables (no extension) in bin/.
         set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipblaslt" CACHE PATH "path to tensile library")
     endif()
     rocm_install(
         DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/Tensile/library"
         DESTINATION ${HIPBLASLT_TENSILE_LIBRARY_DIR}
-        COMPONENT devel #may need to conditionally set this
+        COMPONENT devel
     )
 endif()
 
@@ -349,7 +350,6 @@ endif()
 include(ROCMCreatePackage)
 include(ROCMClients)
 
-#set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "\${CPACK_PACKAGING_INSTALL_PREFIX}" "\${CPACK_PACKAGING_INSTALL_PREFIX}/include" "\${CPACK_PACKAGING_INSTALL_PREFIX}/lib")
 if(NOT CLIENTS_OS)
     rocm_set_os_id(CLIENTS_OS)
     string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)
@@ -372,6 +372,7 @@ if(HIPBLASLT_ENABLE_CLIENT)
     rocm_install(
         TARGETS
             hipblaslt-bench
+            hipblaslt-api-overhead
             hipblaslt-bench-groupedgemm-fixed-mk
             hipblaslt-bench-extop-layernorm
             hipblaslt-bench-extop-matrixtransform
@@ -408,7 +409,6 @@ if(HIPBLASLT_ENABLE_CLIENT)
         rocm_read_os_release(CLIENTS_OS_VERSION VERSION_ID)
     endif()
 
-    rocm_package_setup_component(clients)
     rocm_package_setup_client_component(clients-common)
     rocm_package_setup_client_component(benchmarks
         DEPENDS
@@ -482,6 +482,15 @@ if(HIPBLASLT_ENABLE_SAMPLES)
         RUNTIME
         COMPONENT samples
         DESTINATION "${CMAKE_INSTALL_LIBEXECDIR}/hipblaslt-samples"
+    )
+    install(
+        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/clients/samples"
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/hipblaslt/samples
+        COMPONENT samples
+        FILES_MATCHING
+        PATTERN "*.cpp"
+        PATTERN "*.h"
+        PATTERN "CMakeLists.txt" EXCLUDE
     )
     rocm_package_setup_client_component(samples)
 endif()

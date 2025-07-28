@@ -96,15 +96,15 @@ target_sources(tensilelite-host
 if(HIPBLASLT_ENABLE_LLVM)
     target_sources(tensilelite-host
         PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/Loading.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/YAML.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/llvm/Loading.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/llvm/YAML.hpp"
     )
 endif()
 
 if(HIPBLASLT_ENABLE_MSGPACK)
     target_sources(tensilelite-host
         PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/Loading.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/MessagePack.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/msgpack/Loading.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/msgpack/MessagePack.hpp"
     )
 endif()
