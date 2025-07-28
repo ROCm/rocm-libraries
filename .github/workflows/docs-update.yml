@@ -22,6 +22,7 @@ on:
       - 'users/alexxu12/docs-demo' # for test
     paths:
       - 'projects/**'
+      - 'shared/**'
 
 jobs:
   trigger-rtd:
