@@ -45,11 +45,17 @@ if(HIPBLASLT_ENABLE_ROCROLLER)
     )
     target_compile_features(hipblaslt-rocroller PRIVATE cxx_std_20)
     set_target_properties(hipblaslt-rocroller PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    target_link_libraries(hipblaslt-rocroller PRIVATE hip::host roc::hipblas-common roc::rocroller)
+    target_link_libraries(hipblaslt-rocroller PRIVATE hip::host roc::hipblas-common roc::rocroller tensilelite::tensilelite-host)
     target_compile_definitions(hipblaslt-rocroller PRIVATE HIPBLASLT_USE_ROCROLLER)
     target_include_directories(hipblaslt-rocroller PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/include")
     target_include_directories(hipblaslt-rocroller PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/../include")
     target_include_directories(hipblaslt-rocroller PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/../../../../include")
     target_include_directories(hipblaslt-rocroller PRIVATE "${PROJECT_BINARY_DIR}/host-library/include")
     target_link_libraries(hipblaslt PRIVATE hipblaslt-rocroller)
+    set_source_files_properties(
+        "${_CMAKE_CURRENT_SOURCE_DIR}/rocroller_host.cpp"
+          PROPERTIES
+              LANGUAGE CXX
+              COMPILE_OPTIONS "-x;c++"
+    )
 endif()
