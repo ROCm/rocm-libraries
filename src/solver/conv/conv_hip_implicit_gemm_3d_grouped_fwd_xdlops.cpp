@@ -39,8 +39,12 @@
 #include "ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp"
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
+
+#include <boost/any.hpp>
+#include <boost/range/adaptors.hpp>
+
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
-MIOPEN_DECLARE_ENV_VAR_UINT64(CONV_IDX);
+MIOPEN_DECLARE_ENV_VAR_UINT64(CK_CONV3D_IDX);
 
 namespace miopen {
 namespace solver {
@@ -361,47 +365,54 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(const ProblemDescrip
             FillValidKernelsIDs<DeviceOpGFwdDefaultPtrs<DataType>, CKArgs<DataType>>(problem);
         break;
     }
-    index     = 0;
-    index=env::value(CONV_IDX);
-    if (index == 0 && valid_kernels.size() > 2)
+    index = 0;
+
+    //for  BF16 and FP16
+    index=env::value(CK_CONV3D_IDX);
+    if (index == 0 &&
+        problem.GetAlphaBetaCase() == DEFAULT)
     {
         int G               = ProblemInterpreter::GetGroupCountG(problem);
-        int N               = ProblemInterpreter::GetBatchN(problem);
         int K1              = ProblemInterpreter::GetOutputChannelK(problem);
-        int C1              = ProblemInterpreter::GetInputChannelC(problem);
-        int  C               = C1 / G; // Number of input Channel per group
         int K               = K1 / G; // Number of output Channel per group
-        int Hi              = ProblemInterpreter::GetInputHeightHi(problem);
-        int Wi              = ProblemInterpreter::GetInputWidthWi(problem);
-        int Ho              = ProblemInterpreter::GetOutputHeightHo(problem);
-        int Wo              = ProblemInterpreter::GetOutputWidthWo(problem);
-        int Y               = ProblemInterpreter::GetFilterHeightY(problem);
-        int X               = ProblemInterpreter::GetFilterWidthX(problem);
-        int Di              = ProblemInterpreter::GetInputDepthDi(problem);
-        int Do              = ProblemInterpreter::GetOutputDepthDo(problem);
-        int Z               = ProblemInterpreter::GetFilterDepthZ(problem);
-        index = 1;
-       // if (C>64)
         if (problem.GetInDataType() == miopenBFloat16)
         {
-            if (valid_kernels.size() > 31)
-                index = 30; // DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<256, 128, 128, 64
+            if (valid_kernels.size() > 30)
+            {
+                index = 30;
+                assert(valid_kernels[30] == "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
+                                            "<256, 128, 128, 64, Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, "
+                                            "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
+            }
             if (K < 64 && valid_kernels.size() > 38)
+            {
                 index = 38;
+                assert(valid_kernels[38] == "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
+                                            "<256, 64, 64, 64, Default, 32, 32, 1, 1, 8, 8, 8, 1, 1, "
+                                            "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
+            }
         }
         else if (problem.GetInDataType() == miopenHalf)
         {
-             if (valid_kernels.size() > 32)
-                index = 31; // DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3<256, 128, 128, 64
+             if (valid_kernels.size() > 31)
+             {
+                index = 31;
+                assert(valid_kernels[31] == "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
+                                            "<256, 128, 128, 64, Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, "
+                                            "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
+             }   
              if (K < 64 && valid_kernels.size() > 57)
+             {
                 index = 57;
+                assert(valid_kernels[57] == "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
+                                            "<64, 16, 16, 128, Default, 16, 16, 1, 1, 8, 8, 4, 1, 1, "
+                                            "BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v1>");
+             }
         }
+        
     }
     kernel_id = valid_kernels[index];
-    #if 0
-    std::cout <<"conv_idx:"<<index
-              << ",kernel:"<< kernel_id <<"\n";
-    #endif
+    MIOPEN_LOG_I2("index:" << index << " kernel_id:" << kernel_id);
 }
 
 template <typename DataType>
@@ -465,7 +476,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::SetNextValue(
     {
         HeuristicInit(problem);
         assert(!valid_kernels.empty());
-        if (index > 0)
+        if (index != 0)
         {
             index = 0;
             kernel_id = valid_kernels[index];
@@ -583,6 +594,37 @@ bool ConvHipImplicitGemm3DGroupFwdXdlops::IsApplicable(
     }
 #endif
     return false;
+}
+
+float ConvHipImplicitGemm3DGroupFwdXdlops::GetWti(const ExecutionContext&, 
+                                                  const miopen::conv::ProblemDescription& problem) const
+{
+    decltype(auto) xDesc = problem.GetIn();
+    decltype(auto) conv  = problem.GetConv();
+    decltype(auto) wDesc = problem.GetWeights();
+
+    if (xDesc.GetType() == miopenHalf ||
+        xDesc.GetType() == miopenBFloat16)
+    {
+        auto& in_c   = xDesc.GetLengths()[1];
+        auto& w_x    = wDesc.GetLengths()[2];
+        auto& w_y    = wDesc.GetLengths()[3];
+        auto& w_d    = wDesc.GetLengths()[4];
+        // For cases where the filter shape is not 1x1x1 and the input channel (in_c) is greater than 8,
+        // CK's implementation offers better performance.
+        if ((w_x == 1 && w_y == 1 && w_d == 1) == false)
+        {
+            if (in_c < 8)
+            {
+                return 0.00002; //force disable
+            }
+            else
+            {
+                return 1.0; //force enable
+            }
+        }
+    }
+    return 0.02f;
 }
 
 ConvSolution ConvHipImplicitGemm3DGroupFwdXdlops::GetSolution(
