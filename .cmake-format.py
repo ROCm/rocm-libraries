@@ -65,18 +65,6 @@ additional_commands = {
     }
 }
 
-parse = {
-    "additional_commands": additional_commands,
-    "override_spec": {
-        "rocm_install": {
-            "kwargs": {
-                "ARCHIVE": {"pargs": {"nargs": "*", "flags": []}},
-                "LIBRARY": {"pargs": {"nargs": "*", "flags": []}},
-                "RUNTIME": {"pargs": {"nargs": "*", "flags": []}}
-            }
-        }
-    }
-}
 
 format = {
     "line_width": 100,
