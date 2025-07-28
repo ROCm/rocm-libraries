@@ -27,6 +27,7 @@
 #include "../../common/utils_device_ptr.hpp"
 
 // required test headers
+#include "indirect_iterator.hpp"
 #include "test_seed.hpp"
 #include "test_utils.hpp"
 #include "test_utils_assertions.hpp"
@@ -54,18 +55,20 @@
 #include <vector>
 
 // Params for tests
-template<
-    class KeyType,
-    class ValueType = KeyType,
-    class CompareFunction = ::rocprim::less<KeyType>,
-    bool UseGraphs = false
->
+template<class KeyType,
+         class ValueType          = KeyType,
+         class CompareFunction    = ::rocprim::less<KeyType>,
+         bool UseGraphs           = false,
+         bool UseIndirectIterator = false,
+         class Config             = ::rocprim::default_config>
 struct DeviceSortParams
 {
-    using key_type = KeyType;
-    using value_type = ValueType;
-    using compare_function = CompareFunction;
-    static constexpr bool use_graphs = UseGraphs;
+    using key_type                              = KeyType;
+    using value_type                            = ValueType;
+    using compare_function                      = CompareFunction;
+    static constexpr bool use_graphs            = UseGraphs;
+    static constexpr bool use_indirect_iterator = UseIndirectIterator;
+    using config                                = Config;
 };
 
 // ---------------------------------------------------------
@@ -76,11 +79,13 @@ template<class Params>
 class RocprimDeviceSortTests : public ::testing::Test
 {
 public:
-    using key_type = typename Params::key_type;
-    using value_type = typename Params::value_type;
-    using compare_function = typename Params::compare_function;
-    const bool debug_synchronous = false;
-    bool use_graphs = Params::use_graphs;
+    using key_type                              = typename Params::key_type;
+    using value_type                            = typename Params::value_type;
+    using compare_function                      = typename Params::compare_function;
+    static constexpr bool debug_synchronous     = false;
+    static constexpr bool use_graphs            = Params::use_graphs;
+    static constexpr bool use_indirect_iterator = Params::use_indirect_iterator;
+    using config                                = typename Params::config;
 };
 
 using RocprimDeviceSortTestsParams = ::testing::Types<
@@ -88,11 +93,13 @@ using RocprimDeviceSortTestsParams = ::testing::Types<
     DeviceSortParams<signed char, common::custom_type<float, float, true>>,
     DeviceSortParams<int>,
     DeviceSortParams<common::custom_type<int, int, true>>,
+    DeviceSortParams<common::custom_type_copyable<char, double, true>>,
     DeviceSortParams<unsigned long>,
     DeviceSortParams<long long>,
     DeviceSortParams<float, double>,
     DeviceSortParams<int8_t, int8_t>,
     DeviceSortParams<uint8_t, uint8_t>,
+    DeviceSortParams<rocprim::uint128_t, rocprim::uint128_t>,
     DeviceSortParams<rocprim::half, rocprim::half, rocprim::less<rocprim::half>>,
     DeviceSortParams<rocprim::bfloat16, rocprim::bfloat16, rocprim::less<rocprim::bfloat16>>,
     DeviceSortParams<int, float, ::rocprim::greater<int>>,
@@ -102,12 +109,20 @@ using RocprimDeviceSortTestsParams = ::testing::Types<
                      common::custom_type<double, double, true>>,
     DeviceSortParams<int, test_utils::custom_float_type>,
     DeviceSortParams<test_utils::custom_test_array_type<int, 4>>,
+    // Test the algorithm with graphs
     DeviceSortParams<int, int, ::rocprim::less<int>, true>,
+    // Test the virtual shared memory
     DeviceSortParams<int, common::custom_huge_type<2048, float>>,
-    DeviceSortParams<common::custom_huge_type<2048, float>>>;
-
-static_assert(std::is_trivially_copyable<test_utils::custom_float_type>::value,
-              "Type must be trivially copyable to cover merge sort specialized kernel");
+    DeviceSortParams<common::custom_huge_type<2048, float>>,
+    // Test with iterators
+    DeviceSortParams<int, int, ::rocprim::less<int>, false, true>,
+    // Test with custom config
+    DeviceSortParams<int,
+                     int,
+                     ::rocprim::less<int>,
+                     false,
+                     false,
+                     rocprim::merge_sort_config<128, 64, 2, 128, 64, 2>>>;
 
 TYPED_TEST_SUITE(RocprimDeviceSortTests, RocprimDeviceSortTestsParams);
 
@@ -117,9 +132,17 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using key_type = typename TestFixture::key_type;
-    using compare_function = typename TestFixture::compare_function;
+    using key_type               = typename TestFixture::key_type;
+    using compare_function       = typename TestFixture::compare_function;
+    using config                 = typename TestFixture::config;
     const bool debug_synchronous = TestFixture::debug_synchronous;
+
+    hipStream_t stream = 0; // default
+    if(TestFixture::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     bool in_place = false;
 
@@ -130,13 +153,6 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
 
         for(size_t size : test_utils::get_sizes(seed_value))
         {
-            hipStream_t stream = 0; // default
-            if (TestFixture::use_graphs)
-            {
-                // Default stream does not support hipGraph stream capture, so create one
-                HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
-            }
-
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             in_place = !in_place;
@@ -168,16 +184,20 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
             std::vector<key_type> expected(input);
             std::stable_sort(expected.begin(), expected.end(), compare_op);
 
+            auto input_it
+                = test_utils::wrap_in_indirect_iterator<TestFixture::use_indirect_iterator>(
+                    d_input.get());
+
             // Get size of d_temp_storage
             size_t temp_storage_size_bytes;
-            HIP_CHECK(rocprim::merge_sort(nullptr,
-                                          temp_storage_size_bytes,
-                                          d_input.get(),
-                                          d_output.get(),
-                                          input.size(),
-                                          compare_op,
-                                          stream,
-                                          debug_synchronous));
+            HIP_CHECK(rocprim::merge_sort<config>(nullptr,
+                                                  temp_storage_size_bytes,
+                                                  input_it,
+                                                  d_output.get(),
+                                                  input.size(),
+                                                  compare_op,
+                                                  stream,
+                                                  debug_synchronous));
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
@@ -198,14 +218,14 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
             }
 
             // Run
-            HIP_CHECK(rocprim::merge_sort(d_temp_storage.get(),
-                                          temp_storage_size_bytes,
-                                          d_input.get(),
-                                          d_output.get(),
-                                          input.size(),
-                                          compare_op,
-                                          stream,
-                                          debug_synchronous));
+            HIP_CHECK(rocprim::merge_sort<config>(d_temp_storage.get(),
+                                                  temp_storage_size_bytes,
+                                                  input_it,
+                                                  d_output.get(),
+                                                  input.size(),
+                                                  compare_op,
+                                                  stream,
+                                                  debug_synchronous));
 
             if(TestFixture::use_graphs)
             {
@@ -220,13 +240,12 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
 
             // Check if output values are as expected
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
-
-            if (TestFixture::use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
-                HIP_CHECK(hipStreamDestroy(stream));
-            }
         }
+    }
+
+    if(TestFixture::use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
 
@@ -237,10 +256,18 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using key_type = typename TestFixture::key_type;
-    using value_type = typename TestFixture::value_type;
-    using compare_function = typename TestFixture::compare_function;
+    using key_type               = typename TestFixture::key_type;
+    using value_type             = typename TestFixture::value_type;
+    using compare_function       = typename TestFixture::compare_function;
+    using config                 = typename TestFixture::config;
     const bool debug_synchronous = TestFixture::debug_synchronous;
+
+    hipStream_t stream = 0; // default
+    if(TestFixture::use_graphs)
+    {
+        // Default stream does not support hipGraph stream capture, so create one
+        HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+    }
 
     bool in_place = false;
 
@@ -251,13 +278,6 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
         for(size_t size : test_utils::get_sizes(seed_value))
         {
-            hipStream_t stream = 0; // default
-            if (TestFixture::use_graphs)
-            {
-                // Default stream does not support hipGraph stream capture, so create one
-                HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
-            }
-
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             in_place = !in_place;
@@ -309,18 +329,26 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                              [compare_op](const key_value& a, const key_value& b)
                              { return compare_op(a.first, b.first); });
 
+            auto input_keys_it
+                = test_utils::wrap_in_indirect_iterator<TestFixture::use_indirect_iterator>(
+                    d_keys_input.get());
+
+            auto input_values_it
+                = test_utils::wrap_in_indirect_iterator<TestFixture::use_indirect_iterator>(
+                    d_values_input.get());
+
             // Get size of d_temp_storage
             size_t temp_storage_size_bytes;
-            HIP_CHECK(rocprim::merge_sort(nullptr,
-                                          temp_storage_size_bytes,
-                                          d_keys_input.get(),
-                                          d_keys_output.get(),
-                                          d_values_input.get(),
-                                          d_values_output.get(),
-                                          keys_input.size(),
-                                          compare_op,
-                                          stream,
-                                          debug_synchronous));
+            HIP_CHECK(rocprim::merge_sort<config>(nullptr,
+                                                  temp_storage_size_bytes,
+                                                  input_keys_it,
+                                                  d_keys_output.get(),
+                                                  d_values_input.get(),
+                                                  input_values_it,
+                                                  keys_input.size(),
+                                                  compare_op,
+                                                  stream,
+                                                  debug_synchronous));
 
             // temp_storage_size_bytes must be >0
             ASSERT_GT(temp_storage_size_bytes, 0);
@@ -341,16 +369,16 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             }
 
             // Run
-            HIP_CHECK(rocprim::merge_sort(d_temp_storage.get(),
-                                          temp_storage_size_bytes,
-                                          d_keys_input.get(),
-                                          d_keys_output.get(),
-                                          d_values_input.get(),
-                                          d_values_output.get(),
-                                          keys_input.size(),
-                                          compare_op,
-                                          stream,
-                                          debug_synchronous));
+            HIP_CHECK(rocprim::merge_sort<config>(d_temp_storage.get(),
+                                                  temp_storage_size_bytes,
+                                                  input_keys_it,
+                                                  d_keys_output.get(),
+                                                  input_values_it,
+                                                  d_values_output.get(),
+                                                  keys_input.size(),
+                                                  compare_op,
+                                                  stream,
+                                                  debug_synchronous));
 
             if(TestFixture::use_graphs)
             {
@@ -375,13 +403,12 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_key));
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(values_output, expected_value));
-
-            if (TestFixture::use_graphs)
-            {
-                gHelper.cleanupGraphHelper();
-                HIP_CHECK(hipStreamDestroy(stream));
-            }
         }
+    }
+
+    if(TestFixture::use_graphs)
+    {
+        HIP_CHECK(hipStreamDestroy(stream));
     }
 }
 

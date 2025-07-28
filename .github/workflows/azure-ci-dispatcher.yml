@@ -34,7 +34,7 @@ concurrency:
 jobs:
   dispatch-azure-ci:
     name: Trigger Azure CI
-    if: github.repository == 'ROCm/rocm-libraries'
+    if: github.repository == 'ROCm/rocm-libraries' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
     - name: Generate a token
@@ -273,8 +273,7 @@ jobs:
           success_run_ids=(${{ steps.rerun-failed.outputs.success_run_ids }})
           success_project_names=(${{ steps.rerun-failed.outputs.success_project_names }})
         else
-          echo "No run IDs or project names found, skipping summary check creation."
-          exit 0
+          echo "No run IDs or project names found, creating empty summary check."
         fi
 
         pr_number=${{ github.event.pull_request.number }}
@@ -286,6 +285,21 @@ jobs:
         summary="PR: [$PR_TITLE #$pr_number](${{ github.event.pull_request.html_url }})${newline}${newline}"
         summary+="HEAD: [$pr_head_sha](https://github.com/ROCm/rocm-libraries/commit/$pr_head_sha)${newline}${newline}"
         summary+="MERGE: [$pr_merge_sha](https://github.com/ROCm/rocm-libraries/commit/$pr_merge_sha)${newline}${newline}"
+
+        if [[ -z "${run_ids[*]}" && -z "${success_run_ids[*]}" ]]; then
+          summary+="### No Azure CI runs were started for this PR.${newline}${newline}"
+          gh_output=$(gh api repos/ROCm/rocm-libraries/check-runs \
+            -f "name=Azure CI Summary" \
+            -f "head_sha=$pr_head_sha" \
+            -f "status=completed" \
+            -f "conclusion=neutral" \
+            -f "output[title]=Azure CI Summary" \
+            -f "output[summary]=$summary")
+          echo "Created empty summary check with ID: $(echo "$gh_output" | jq -r '.id')"
+          echo "Summary check URL: https://github.com/ROCm/rocm-libraries/pull/561/checks?check_run_id=$(echo "$gh_output" | jq -r '.id')"
+          exit 0
+        fi
+
         summary+="### Pipelines triggered for this PR${newline}${newline}"
         summary+="| Project | Run ID | Status |${newline}"
         summary+="|--------------|--------|--------|${newline}"

@@ -127,14 +127,15 @@ namespace rocRoller::KernelGraph
                          int          buffer,
                          bool         forward,
                          DataType     valueType,
-                         DataType     offsetType = DataType::UInt64,
-                         DataType     strideType = DataType::UInt64)
+                         DataType     offsetType,
+                         DataType     strideType,
+                         bool         isDirect2LDS)
     {
         using CCI = Connections::ComputeIndex;
         using CCA = Connections::ComputeIndexArgument;
 
-        auto ci
-            = graph.control.addElement(ComputeIndex(forward, valueType, offsetType, strideType));
+        auto ci = graph.control.addElement(
+            ComputeIndex{forward, isDirect2LDS, valueType, offsetType, strideType});
 
         if(base > 0)
             graph.mapper.connect(ci, base, CCI{CCA::BASE});
@@ -379,7 +380,8 @@ namespace rocRoller::KernelGraph
                                              direction == Graph::Direction::Upstream,
                                              dtype,
                                              offsetDataType,
-                                             strideDataType));
+                                             strideDataType,
+                                             isDirect2LDS));
 
             // Add connections for register allocate, and so tracer
             // can determine correct lifetimes

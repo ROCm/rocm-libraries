@@ -385,8 +385,13 @@ namespace rocRoller
             {
                 if(direct2LDS)
                 {
-                    auto tmp = m_context->registerTagManager()->getRegister(offsetTag);
-                    co_yield generate(info.data, info.data->expression() + tmp->expression());
+                    auto tmp  = m_context->registerTagManager()->getRegister(offsetTag);
+                    auto expr = info.data->expression() + tmp->expression();
+
+                    if(info.data->regType() == Register::Type::Literal)
+                        info.data = nullptr;
+
+                    co_yield generate(info.data, expr);
                 }
                 else
                 {
@@ -476,6 +481,7 @@ namespace rocRoller
                 {
                     stride = Register::Value::Placeholder(
                         m_context, Register::Type::Vector, strideAttributes.dataType, 1);
+                    stride->setName("Stride");
                 }
                 else
                 {
@@ -579,10 +585,12 @@ namespace rocRoller
 
             // Compute an offset address if we don't have an
             // associated base address to inherit from
-            if(base < 0)
+            if(base < 0 && offset > 0)
             {
-                auto offsetReg
-                    = tagger->getRegister(offset, Register::Type::Vector, ci.offsetType, 1);
+                auto offsetType = Register::Type::Vector;
+                if(ci.isDirect2LDS)
+                    offsetType = Register::Type::Scalar;
+                auto offsetReg = tagger->getRegister(offset, offsetType, ci.offsetType, 1);
                 offsetReg->setName(concatenate("Offset", tag));
                 scope->addRegister(offset);
 
@@ -610,9 +618,12 @@ namespace rocRoller
                 co_yield Instruction::Comment(
                     fmt::format("  Offset({}): paddingBytes: {}", offset, toString(paddingBytes)));
 
-                co_yield generate(
-                    offsetReg,
-                    convert(offsetReg->variableType(), toBytes(indexExpr) + paddingBytes));
+                auto expr = toBytes(indexExpr) + paddingBytes;
+
+                if(ci.isDirect2LDS)
+                    expr = makeScalar(expr);
+
+                co_yield generate(offsetReg, convert(offsetReg->variableType(), expr));
                 offsetReg->setReadOnly();
             }
             else
@@ -789,10 +800,7 @@ namespace rocRoller
 
             if(setM0)
             {
-                auto tmp = Register::Value::Placeholder(
-                    m_context, Register::Type::Scalar, DataType::UInt32, 1);
-                co_yield generate(tmp, info.data->expression());
-                co_yield generate(m0, tmp->expression());
+                co_yield generate(m0, info.data->expression());
             }
             else
             {
@@ -805,6 +813,7 @@ namespace rocRoller
                 const auto offsetValue = getUnsignedInt(info.offset->getLiteralValue());
                 info.offset            = Register::Value::Placeholder(
                     m_context, Register::Type::Scalar, DataType::UInt32, 1);
+                info.offset->setName("Offset");
                 co_yield generate(info.offset, Expression::literal(offsetValue))
                     .map(AddComment(fmt::format("{} is not a supported value!", offsetValue)));
             }
@@ -1264,6 +1273,7 @@ namespace rocRoller
 
                 auto tmpl = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, varType, m * n, allocOptions);
+                tmpl->setName("tmpl");
 
                 if(kind == MemoryInstructions::MemoryKind::Buffer2LDS)
                 {
@@ -1350,8 +1360,6 @@ namespace rocRoller
 
             if(kind == MemoryInstructions::MemoryKind::Buffer2LDS)
             {
-                co_yield m_context->copier()->ensureType(
-                    info.data, info.data, Register::Type::Vector);
                 co_yield getOffset(
                     info, coords, tag, false /* preserveOffset */, true /* direct2LDS */);
 

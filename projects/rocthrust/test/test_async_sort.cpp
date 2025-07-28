@@ -21,7 +21,8 @@
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(AsyncSortTests, NumericalTestsParams);
 
