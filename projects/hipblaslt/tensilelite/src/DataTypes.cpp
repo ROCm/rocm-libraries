@@ -185,6 +185,11 @@ namespace TensileLite
         return rocisa::toString(d);
     }
 
+    std::string TypeAbbrev(rocisa::DataType d)
+    {
+        return rocisa::TypeAbbrev(d);
+    }
+
     std::map<rocisa::DataType, DataTypeInfo>* DataTypeInfo::getData()
     {
         static std::map<rocisa::DataType, DataTypeInfo> data;
@@ -293,9 +298,8 @@ namespace TensileLite
         return std::visit(
             [](const auto& cv) {
                 using T = std::decay_t<decltype(cv)>;
-                if constexpr(std::is_same_v<
-                                 T,
-                                 std::complex<float>> || std::is_same_v<T, std::complex<double>>)
+                if constexpr(std::is_same_v<T, std::complex<float>>
+                             || std::is_same_v<T, std::complex<double>>)
                     return "(" + std::to_string(cv.real()) + ", " + std::to_string(cv.imag()) + ")";
                 else
                     return std::to_string(cv);
