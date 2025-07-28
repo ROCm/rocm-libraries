@@ -156,7 +156,7 @@ Options
 *Tensile device libraries options*:
 
 * ``HIPSPARSELT_TENSILE_SUBDIR_PATH``: Path to Tensile subdirectory (default: ``${CMAKE_CURRENT_SOURCE_DIR}/../../Tensile``)
-* ``HIPSPARSELT_TENSILE_INSTALL_DIR``: Path to tensile library (default: ``${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/rocblas`` on Linux, ``${CPACK_PACKAGING_INSTALL_PREFIX}rocblas/bin`` on Windows)
+* ``HIPSPARSELT_TENSILE_INSTALL_DIR``: Path to tensile library (default: ``${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipsparselt`` on Linux, ``${CPACK_PACKAGING_INSTALL_PREFIX}hipsparselt/bin`` on Windows)
 
 *Client options*:
 

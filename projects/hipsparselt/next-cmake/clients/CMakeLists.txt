@@ -4,18 +4,14 @@ set(_CMAKE_CURRENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../clients")
 
 find_package(Threads REQUIRED)
 find_package(OpenMP REQUIRED)
-
-# Find BLAS libraries - need both BLAS implementation and cblas interface
 find_package(BLAS REQUIRED)
 find_package(cblas REQUIRED)
 find_package(LAPACK REQUIRED)
 
-# Optional BLIS support
 if(HIPSPARSELT_ENABLE_BLIS)
   find_package(BLIS QUIET)
 endif()
 
-# TODO: Fix these to be found in the source tree during build?
 configure_file(
   "${_CMAKE_CURRENT_SOURCE_DIR}/include/hipsparselt_common.yaml"
   "${CMAKE_CURRENT_BINARY_DIR}/staging/hipsparselt_common.yaml" COPYONLY
@@ -59,7 +55,6 @@ target_include_directories(
          $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}/../library/include>
          # Ideally, for the build interface, we can just look into the source tree
          $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
-         # TODO: This is a hack to allow the clients to find the headers during build
          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
@@ -81,7 +76,7 @@ if(TARGET OpenMP::OpenMP_CXX)
 endif()
 
 set_target_properties(
-  hipsparselt-clients-common PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+  hipsparselt-clients-common PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/staging"
 )
 
 # Add subdirectories

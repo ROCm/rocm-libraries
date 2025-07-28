@@ -133,31 +133,32 @@ if(HIPSPARSELT_ENABLE_HIP)
   endif()
 
   block(SCOPE_FOR VARIABLES)
-  set(HIPBLASLT_ENABLE_HOST OFF CACHE BOOL "" FORCE)
-  set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
-  set(HIPBLASLT_ENABLE_DEVICE ON CACHE BOOL "" FORCE)
-  set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
-  set(HIPBLASLT_LIBLOGIC_PATH
-      "${CMAKE_CURRENT_SOURCE_DIR}/../library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
-      CACHE STRING "" FORCE
-  )
-  set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.md"
-      CACHE FILEPATH "License file for package" FORCE
-  )
-
-  if(WIN32)
-    set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}hipsparselt/bin"
-        CACHE PATH "path to tensile library" FORCE
+    set(HIPBLASLT_ENABLE_HOST OFF CACHE BOOL "" FORCE)
+    set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
+    set(HIPBLASLT_ENABLE_DEVICE ON CACHE BOOL "" FORCE)
+    set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
+    # This should not be different than the standard hipblaslt build directory
+    set(device_library_dir "${CMAKE_BINARY_DIR}/hipblaslt/Tensile/library")
+    set(HIPBLASLT_LIBLOGIC_PATH
+        "${CMAKE_CURRENT_SOURCE_DIR}/../library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
+        CACHE STRING "" FORCE
     )
-  else()
-    set(HIPBLASLT_TENSILE_LIBRARY_DIR
-        "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipsparselt"
-        CACHE PATH "path to tensile library" FORCE
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.md"
+        CACHE FILEPATH "License file for package" FORCE
     )
-  endif()
 
-  # TODO: update the build output directory for hipblaslt/tensilelite
-  add_subdirectory("${HIPBLASLT_PATH}" hipblaslt-BUILD)
+    if(WIN32)
+      set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}hipsparselt/bin"
+          CACHE PATH "path to tensile library" FORCE
+      )
+    else()
+      set(HIPBLASLT_TENSILE_LIBRARY_DIR
+          "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipsparselt"
+          CACHE PATH "path to tensile library" FORCE
+      )
+    endif()
+
+    add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
   endblock()
 endif()
 
@@ -170,7 +171,6 @@ endif()
 # Packaging and installation
 # ============================================================================
 if(HIPSPARSELT_ENABLE_CLIENT)
-  # TODO: This should be included directly into rocm-cmake
   include(ROCmClientPackages)
   rocm_setup_client_components(clients clients-common)
 endif()

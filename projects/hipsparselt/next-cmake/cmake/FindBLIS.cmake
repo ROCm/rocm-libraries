@@ -14,7 +14,6 @@ if(PKG_CONFIG_FOUND)
     pkg_check_modules(PC_BLIS QUIET blis)
 endif()
 
-# Try to find BLIS header
 find_path(BLIS_INCLUDE_DIR
     NAMES blis.h
     HINTS ${PC_BLIS_INCLUDE_DIRS}
@@ -24,7 +23,6 @@ find_path(BLIS_INCLUDE_DIR
         /opt/blis/include
 )
 
-# Try to find BLIS library
 find_library(BLIS_LIBRARY
     NAMES blis
     HINTS ${PC_BLIS_LIBRARY_DIRS}
@@ -34,7 +32,6 @@ find_library(BLIS_LIBRARY
         /opt/blis/lib
 )
 
-# Handle standard find_package arguments
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(BLIS
     FOUND_VAR BLIS_FOUND
@@ -45,7 +42,6 @@ if(BLIS_FOUND)
     set(BLIS_LIBRARIES ${BLIS_LIBRARY})
     set(BLIS_INCLUDE_DIRS ${BLIS_INCLUDE_DIR})
     
-    # Create imported target
     if(NOT TARGET BLIS::blis)
         add_library(BLIS::blis UNKNOWN IMPORTED)
         set_target_properties(BLIS::blis PROPERTIES
@@ -55,5 +51,4 @@ if(BLIS_FOUND)
     endif()
 endif()
 
-# Mark cache variables as advanced
 mark_as_advanced(BLIS_INCLUDE_DIR BLIS_LIBRARY) 
