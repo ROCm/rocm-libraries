@@ -48,10 +48,10 @@ namespace rocRoller
 
         static AssemblerPtr Get();
 
-        void registerAssemblers()
-        {
-            ComponentRegistration::getInstance()->registerComponent();
-        }
+        // void registerAssemblers()
+        // {
+        //     ComponentRegistration::getInstance()->registerComponent();
+        // }
 
         virtual std::string name() const = 0;
 
