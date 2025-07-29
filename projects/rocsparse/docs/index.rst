@@ -17,7 +17,7 @@ rocSPARSE documentation
    
    For documentation and examples, see the `hipSPARSE documentation <https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/>`_.
    
-   This rocSPARSE documentation is maintained for reference purposes and to document any 
+   The rocSPARSE documentation is maintained for reference purposes and to document any 
    specialized functionality that may not be available in hipSPARSE.
 
 rocSPARSE is a library that provides basic linear algebra subroutines for sparse matrices and vectors.
