@@ -38,19 +38,18 @@ namespace rocRoller
                                           int const                         edge,
                                           int const                         node)
         {
-            return std::holds_alternative<ControlGraph::SetCoordinate>(graph.getNode(node))
-                   && (std::holds_alternative<ControlGraph::Initialize>(graph.getEdge(edge))
-                       || std::holds_alternative<ControlGraph::Body>(graph.getEdge(edge)));
+            return graph.get<ControlGraph::SetCoordinate>(node).has_value() &&
+	           (graph.get<ControlGraph::Initialize>(edge).has_value() ||
+		    graph.get<ControlGraph::Body>(edge).has_value());
         }
 
         static bool isParentForLoopOp(ControlGraph::ControlGraph const& graph,
                                       int const                         edge,
                                       int const                         node)
         {
-            return std::holds_alternative<ControlGraph::ForLoopOp>(graph.getNode(node))
-                   && (std::holds_alternative<ControlGraph::Body>(graph.getEdge(edge))
-                       || std::holds_alternative<ControlGraph::ForLoopIncrement>(
-                           graph.getEdge(edge)));
+            return graph.get<ControlGraph::ForLoopOp>(node).has_value() &&
+	           (graph.get<ControlGraph::ForLoopIncrement>(edge).has_value() ||
+		    graph.get<ControlGraph::Body>(edge).has_value());
         }
 
         static void buildControlStack(int                               tag,
@@ -120,7 +119,7 @@ namespace rocRoller
             if(not transformer.hasCoordinate(connections[0].coordinate))
             {
                 auto setCoordinate
-                    = std::get<ControlGraph::SetCoordinate>((kg.control.getNode(setCoordinateOp)));
+		    = kg.control.get<ControlGraph::SetCoordinate>(setCoordinateOp).value();
 
                 transformer.setCoordinate(connections[0].coordinate, setCoordinate.value);
             }
