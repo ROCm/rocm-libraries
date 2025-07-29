@@ -54,18 +54,27 @@ option(HIPBLASLT_ENABLE_ASAN "Build hipBLASLt with address sanitizer enabled." O
 option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
 
 if(HIPBLASLT_ENABLE_HOST OR TENSILELITE_ENABLE_HOST)
-    option(HIPBLASLT_BUILD_SHARED_LIBS "Build the hipblaslt library as shared vs static" ON)
     option(HIPBLASLT_ENABLE_MSGPACK "Use msgpack for parsing configuration files." ON)
     option(HIPBLASLT_ENABLE_OPENMP "Use OpenMP to improve performance." ON)
     option(HIPBLASLT_ENABLE_LLVM "Use llvm for parsing configuration files." OFF)
+endif()
+
+if(HIPBLASLT_ENABLE_HOST)
+    option(HIPBLASLT_BUILD_SHARED_LIBS "Build the hipblaslt library as shared vs static" ON)
     option(HIPBLASLT_ENABLE_ROCROLLER "Use RocRoller library." ON)
-    option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." ON)
     option(HIPBLASLT_ENABLE_LAZY_LOAD "Enable lazy loading of runtime code oject files to reduce ram usage." ON)
+    option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." ON)
     cmake_dependent_option(HIPBLASLT_ENABLE_MARKER "Use the marker library." ON "NOT WIN32" OFF)
     option(HIPBLASLT_ENABLE_HIPBLAS_DIRECT "Use the hipblas header directly." OFF)
     option(TENSILELITE_BUILD_TESTING "Build tensilelite host library tests." OFF)
     cmake_dependent_option(TENSILELITE_ENABLE_CLIENT "Build client when building tests" ON "TENSILELITE_BUILD_TESTING" OFF)
 endif()
+
+if(TENSILELITE_ENABLE_HOST)
+    option(TENSILELITE_BUILD_TESTING "Build tensilelite host library tests." OFF)
+    option(TENSILELITE_ENABLE_CLIENT "Build tensilelite-client" OFF)
+endif()
+
 
 if(HIPBLASLT_ENABLE_DEVICE)
     option(HIPBLASLT_BUNDLE_PYTHON_DEPS "Build python dependencies requied for device code generation." ON)
