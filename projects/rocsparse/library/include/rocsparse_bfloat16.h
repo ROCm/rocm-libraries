@@ -117,7 +117,7 @@ struct ROCSPARSE_EXPORT rocsparse_bfloat16
         return u.fp32;
     }
 
-    __host__ __device__ operator double() const
+    explicit __host__ __device__ operator double() const
     {
         union
         {
@@ -127,12 +127,12 @@ struct ROCSPARSE_EXPORT rocsparse_bfloat16
         return u.fp64;
     }
 
-    __host__ __device__ operator int32_t() const
+    explicit __host__ __device__ operator int32_t() const
     {
         return static_cast<int32_t>(static_cast<float>(data));
     }
 
-    __host__ __device__ operator int64_t() const
+    explicit __host__ __device__ operator int64_t() const
     {
         return static_cast<int64_t>(static_cast<float>(data));
     }

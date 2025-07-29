@@ -1641,7 +1641,7 @@ class GSUOn(GSU):
             rpv = bps / writer.states.bpr
             isGlc = True
             isSlc = True
-            isNT  = bool(kernel["NonTemporalD"] & 0x4)
+            isNT  = False #bool(kernel["NonTemporalD"] & 0x4)
             for elementIdx in range(0, len(batchElements)):
                 addrCalc = ss.elementAddr[elementIdx]
                 data = ss.elementData[elementIdx]
