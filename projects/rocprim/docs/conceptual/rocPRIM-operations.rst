@@ -58,9 +58,9 @@ The following tables provide a summary of the different types of operations and 
 |                        |                           |operations that find items in a                |
 |                        |                           |sequence that don't follow the sequence order. |
 +------------------------+---------------------------+-----------------------------------------------+
-|Reordering              |Sort                       |Sort operations are block-level and warp-level |
-|                        |                           |operations that reorder a sequence based on    |
-|                        |                           |item comparisons.                              |
+|Reordering              |Sort                       |Sort operations are device-level, block-level, |
+|                        |                           |and warp-level operations that reorder a       |
+|                        |                           |sequence based on item comparisons.            |
 |                        +---------------------------+-----------------------------------------------+
 |                        |Partial sort               |Partial sort is a device-level operation that  |
 |                        |                           |reorders a sequence by sorting it up to and    |
@@ -134,8 +134,8 @@ The following tables provide a summary of the different types of operations and 
 |                        |                           |operations that decode run length encoded      |
 |                        |                           |arrays of items.                               | 
 |                        +---------------------------+-----------------------------------------------+
-|                        |Kernel config              |Kernel config operations are device-level      |
-|                        |                           |operations that set the grid and block         |
+|                        |Kernel config              |Kernel config constructs are device-level      |
+|                        |                           |constructs that set the grid and block         |
 |                        |                           |dimensions as well as the algorithms to use for|
 |                        |                           |the store and load operations.                 |
 +------------------------+---------------------------+-----------------------------------------------+

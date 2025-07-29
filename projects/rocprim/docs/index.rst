@@ -28,6 +28,10 @@ The rocPRIM public repository is located at https://github.com/ROCmSoftwarePlatf
     * :doc:`rocPRIM operations <./conceptual/rocPRIM-operations>`
     * :doc:`rocPRIM performance tuning <./conceptual/rocPRIM-performance-tuning>`
     * :doc:`Block and stripe arrangements <./conceptual/rocPRIM-stripe-block>`
+
+  .. grid-item-card:: How-to
+
+    * :doc:`Use the SPIR-V target with rocPRIM <./how-to/rocPRIM-spir-v>`
    
   .. grid-item-card:: Reference
 

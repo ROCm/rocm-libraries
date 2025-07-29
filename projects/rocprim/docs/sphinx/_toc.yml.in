@@ -20,6 +20,11 @@ subtrees:
     - file: conceptual/rocPRIM-performance-tuning.rst
     - file: conceptual/rocPRIM-type-traits.rst
 
+- caption: How to
+  entries:
+    - file: how-to/rocPRIM-spir-v.rst
+      title: Use the SPIR-V target
+
 - caption: Reference
   entries:
     - file: reference/rocPRIM-glossary.rst

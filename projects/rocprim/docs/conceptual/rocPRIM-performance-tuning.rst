@@ -16,7 +16,7 @@ What we call *autotuning* is a method of generating the above-mentioned architec
 1. Configure the project for autotuning. Autotune is an extension on top of the regular benchmarking process and it is enabled with a CMake option ``BENCHMARK_CONFIG_TUNING``, which doubles as a C++ macro to determine whether autotuning is enabled.
 2. When the project is configured, a large amount of C++ benchmark files are generated with variation in parameters such as block size, items per thread, and method. The files are generated based on a template (``benchmark/benchmark_*.parallel.cpp.in``) and arguments defined in ``ConfigAutotuneSettings.cmake``. CMake will automatically detect when the input template changes and will reconfigure the required files as necessary.
 3. Compile results in one executable based on all generated files for an algorithm.
-4. Run the executable and gather the JSON output files. The generation of output files is triggered by the use of ``--benchmark_out_format=json --name_format json`` and ``--benchmark_out=<output_file_name>.json`` options when running the executable.
+4. Run the executable and gather the JSON output files. The generation of output files is triggered by the use of ``--benchmark_out=<output_file_name>.json`` when running the executable.
 5. Convert the benchmark results into a config with ``scripts/autotune/create_optimization.py``. This python script injects the optimal configurations into the templates in ``scripts/autotune/templates``.
 
   * The option ``--out_basedir`` can be used to place the output config(s) in a specific path, otherwise the config(s) will be placed in the current directory.
