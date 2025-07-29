@@ -108,6 +108,8 @@ struct Arguments
 
     int8_t norm_check;
     int8_t unit_check;
+    bool norm_check_assert;
+
     int8_t timing;
 
     char transA;
@@ -188,6 +190,7 @@ struct Arguments
     OPER(devices) SEP                \
     OPER(norm_check) SEP             \
     OPER(unit_check) SEP             \
+    OPER(norm_check_assert) SEP      \
     OPER(timing) SEP                 \
     OPER(transA) SEP                 \
     OPER(transB) SEP                 \

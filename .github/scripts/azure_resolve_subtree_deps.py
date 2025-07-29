@@ -102,6 +102,7 @@ def main(argv=None) -> None:
         "projects/rocblas": 302,
         "projects/rocsolver": 303,
         "projects/rocsparse": 314,
+        "projects/hipblas": 317,
         "projects/hipsparse": 315,
         "projects/hipsparselt": 309,
     }

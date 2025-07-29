@@ -142,4 +142,44 @@ Tests:
   category: pre_checkin
   function:
     - aux_auxiliary_func: *hpa_half_precision
+
+- name: aux_float8_func
+  category: pre_checkin
+  function:
+    - aux_float8_func: *hpa_half_precision
+
+- name: aux_hipblaslt_ext_op_func
+  category: pre_checkin
+  function:
+    - aux_hipblaslt_ext_op_func: *hpa_half_precision
+
+- name: aux_rocblaslt_utility_func
+  category: pre_checkin
+  function:
+    - aux_rocblaslt_utility_func: *hpa_half_precision
+
+- name: aux_status_func
+  category: pre_checkin
+  function:
+    - aux_status_func: *hpa_half_precision
+
+- name: aux_hipblaslt_func
+  category: pre_checkin
+  function:
+    - aux_hipblaslt_func: *hpa_half_precision
+
+- name: aux_tensile_host_func
+  category: pre_checkin
+  function:
+    - aux_tensile_host_func: *hpa_half_precision
+
+- name: aux_tuple_helper_equal_func
+  category: pre_checkin
+  function:
+    - aux_tuple_helper_equal_func: *hpa_half_precision
+
+- name: aux_rocblaslt_rocroller_host_func
+  category: pre_checkin
+  function:
+    - aux_rocblaslt_rocroller_host_func: *hpa_half_precision
 ...
