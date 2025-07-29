@@ -14,17 +14,17 @@ endif()
 
 configure_file(
   "${_CMAKE_CURRENT_SOURCE_DIR}/include/hipsparselt_common.yaml"
-  "${CMAKE_CURRENT_BINARY_DIR}/staging/hipsparselt_common.yaml" COPYONLY
+  "${CMAKE_CURRENT_BINARY_DIR}/hipsparselt_common.yaml" COPYONLY
 )
 
 configure_file(
   "${_CMAKE_CURRENT_SOURCE_DIR}/include/hipsparselt_template.yaml"
-  "${CMAKE_CURRENT_BINARY_DIR}/staging/hipsparselt_template.yaml" COPYONLY
+  "${CMAKE_CURRENT_BINARY_DIR}/hipsparselt_template.yaml" COPYONLY
 )
 
 configure_file(
   "${_CMAKE_CURRENT_SOURCE_DIR}/common/hipsparselt_gentest.py"
-  "${CMAKE_CURRENT_BINARY_DIR}/staging/hipsparselt_gentest.py" COPYONLY
+  "${CMAKE_CURRENT_BINARY_DIR}/hipsparselt_gentest.py" COPYONLY
 )
 
 add_library(hipsparselt-clients-common OBJECT)
@@ -74,10 +74,6 @@ target_link_libraries(hipsparselt-clients-common PRIVATE Threads::Threads PUBLIC
 if(TARGET OpenMP::OpenMP_CXX)
   target_link_libraries(hipsparselt-clients-common PUBLIC OpenMP::OpenMP_CXX)
 endif()
-
-set_target_properties(
-  hipsparselt-clients-common PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/staging"
-)
 
 # Add subdirectories
 # ============================================================================

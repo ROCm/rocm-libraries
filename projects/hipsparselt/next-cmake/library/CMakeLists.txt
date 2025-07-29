@@ -52,9 +52,6 @@ set_target_properties(
   PROPERTIES CXX_EXTENSIONS OFF
              VISIBILITY_INLINES_HIDDEN ON
              CXX_VISIBILITY_PRESET "hidden"
-             RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
-             LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
-             ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
 )
 
 target_include_directories(

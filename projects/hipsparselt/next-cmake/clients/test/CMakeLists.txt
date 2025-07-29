@@ -4,7 +4,6 @@ include(FetchGoogleTest)
 
 set(_CMAKE_CURRENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../clients/gtest")
 
-# Test source files
 set(TEST_SOURCES
     "${_CMAKE_CURRENT_SOURCE_DIR}/hipsparselt_gtest_main.cpp"
     "${_CMAKE_CURRENT_SOURCE_DIR}/hipsparselt_test.cpp"
@@ -14,7 +13,6 @@ set(TEST_SOURCES
     "${_CMAKE_CURRENT_SOURCE_DIR}/auxiliary_gtest.cpp"
 )
 
-# Test executable
 add_executable(hipsparselt-test ${TEST_SOURCES})
 
 target_compile_features(hipsparselt-test PRIVATE cxx_std_17)
@@ -52,7 +50,7 @@ endif()
 set(hipsparselt_test_install_program
     "${_CMAKE_CURRENT_SOURCE_DIR}/../common/hipsparselt_gentest.py"
 )
-set(hipsparselt_test_install_data_file "${PROJECT_BINARY_DIR}/staging/hipsparselt_gtest.data")
+set(hipsparselt_test_install_data_file "${CMAKE_CURRENT_BINARY_DIR}/hipsparselt_gtest.data")
 set(hipsparselt_test_install_yaml_files)
 list(
   APPEND
