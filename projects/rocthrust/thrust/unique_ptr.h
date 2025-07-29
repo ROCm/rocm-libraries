@@ -273,6 +273,12 @@ public:
       , m_deleter()
   {}
 
+  template <bool Dummy = true, class = EnableIfDeleterDefaultConstructible<Dummy>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(T* raw_p) noexcept
+      : m_ptr(device_pointer_cast(raw_p))
+      , m_deleter()
+  {}
+
   template <bool Dummy = true, class = EnableIfDeleterConstructible<LValRefType<Dummy>>>
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr(pointer p, LValRefType<Dummy> d) noexcept
       : m_ptr(p)
@@ -344,7 +350,7 @@ public:
   template <bool Dummy = true, class = EnableIfDeleterDefaultDelete<Dummy>>
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 T* get_raw() const noexcept
   {
-    return thrust::raw_pointer_cast(m_ptr);
+    return raw_pointer_cast(m_ptr);
   }
 
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 deleter_type& get_deleter() noexcept
@@ -500,12 +506,29 @@ public:
       , m_deleter()
   {}
 
+  template <bool Dummy = true,
+            class      = EnableIfDeleterDefaultConstructible<Dummy>,
+            class      = EnableIfPointerConvertible<device_ptr<T>>,
+            class      = EnableIfTriviallyDestructible<Dummy>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(T* raw_p) noexcept
+      : m_ptr(device_pointer_cast(raw_p))
+      , m_deleter()
+  {}
+
   template <class Pp,
             bool Dummy = true,
             class      = EnableIfDeleterDefaultConstructible<Dummy>,
             class      = EnableIfPointerConvertible<Pp>>
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(Pp p, size_t size) noexcept
       : m_ptr(p)
+      , m_deleter(size)
+  {}
+
+  template <bool Dummy = true,
+            class      = EnableIfDeleterDefaultConstructible<Dummy>,
+            class      = EnableIfPointerConvertible<device_ptr<T>>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(T* raw_p, size_t size) noexcept
+      : m_ptr(device_pointer_cast(raw_p))
       , m_deleter(size)
   {}
 
@@ -616,7 +639,7 @@ public:
 
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 T* get_raw() const noexcept
   {
-    return thrust::raw_pointer_cast(m_ptr);
+    return raw_pointer_cast(m_ptr);
   }
 
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 deleter_type& get_deleter() noexcept
