@@ -1103,7 +1103,7 @@ TYPED_TEST(HipcubBlockExchangeTests, StripedToBlockedOneParam)
     HIP_CHECK(hipSetDevice(device_id));
 
     using type        = typename TestFixture::params::type;
-    using output_type = typename TestFixture::params::output_type;
+    using output_type [[maybe_unused]] = typename TestFixture::params::output_type;
 
     constexpr size_t block_size       = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
@@ -1196,7 +1196,7 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToStripedOneParam)
     HIP_CHECK(hipSetDevice(device_id));
 
     using type        = typename TestFixture::params::type;
-    using output_type = typename TestFixture::params::output_type;
+    using output_type [[maybe_unused]] = typename TestFixture::params::output_type;
 
     constexpr size_t block_size       = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
@@ -1843,7 +1843,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedGuardedNoOutputParam)
         device_input,
         device_ranks);
 
-    type* host_output = new type[size];
+    [[maybe_unused]] type* host_output = new type[size];
     HIP_CHECK(hipMemcpy(host_input, device_input, sizeof(type) * size, hipMemcpyDeviceToHost));
 
     for(size_t i = 0; i < size; i++)
@@ -1877,7 +1877,9 @@ void scatter_to_stripped_flagged_no_output_param_kernel(T*    device_input,
         flags[i] = device_flags[offset + i];
     }
     hipcub::BlockExchange<T, block_size, items_per_thread> exchange;
-    exchange.ScatterToStripedFlagged(input, ranks, flags);
+    // Cub's overload ScatterToStripedFlagged(T (&items)[ITEMS_PER_THREAD], OffsetT (&ranks)[ITEMS_PER_THREAD],
+    //     ValidFlag (&is_valid)[ITEMS_PER_THREAD]) is broken, so here we have to call this 4-arg overload.
+    exchange.ScatterToStripedFlagged(input, input, ranks, flags);
 
     for(size_t i = 0; i < items_per_thread; i++)
     {

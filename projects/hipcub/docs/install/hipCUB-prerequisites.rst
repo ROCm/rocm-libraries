@@ -8,7 +8,7 @@ hipCUB prerequisites
 
 hipCUB has the following prerequisites on all platforms:
 
-* `CMake <https://cmake.org/>`_ version 3.16 or higher
+* `CMake <https://cmake.org/>`_ version 3.18 or higher
 
 On AMD GPUs:
 
@@ -21,9 +21,9 @@ amdclang++ is installed with ROCm. rocPRIM is automatically downloaded and insta
 On NVIDIA GPUs:
 
 * The CUDA Toolkit
-* CCCL library version 2.3.2 or later
+* CCCL library version 2.8.2 or later
 * CUB and Thrust
-* libcu++ version 2.2.0
+* libcu++ version 2.8.2
 
 The CCCL library is automatically downloaded and built by the CMake script. If libcu++ isn't found on the system, it will be downloaded from the CCCL repository.
 

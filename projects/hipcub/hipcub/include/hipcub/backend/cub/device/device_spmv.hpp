@@ -34,6 +34,7 @@
 #include "../../../util_deprecated.hpp"
 
 #include <cub/device/device_spmv.cuh> // IWYU pragma: export
+#include <cub/iterator/tex_obj_input_iterator.cuh> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 

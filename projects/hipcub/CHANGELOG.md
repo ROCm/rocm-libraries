@@ -2,6 +2,18 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## hipCUB-4.1.0 for ROCm 7.1
+
+### Added
+
+### Removed
+* Removed `TexRefInputIterator`, which was removed from CUB after CCCL's 2.6.0 release. This API should have already been removed, but somehow it remained and was not tested.
+
+### Changed
+* Changed `CUDA_STANDARD` for tests in `test/hipcub`, due to C++17 APIs such as `std::exclusive_scan` is used in some tests. Still use `CUDA_STANDARD 14` for `test/extra`.
+* Changed `CCCL_MINIMUM_VERSION` to `2.8.2` to align with CUB.
+* Changed `cmake_minimum_required` from `3.16` to `3.18`, in order to support `CUDA_STANDARD 17` as a valid value.
+
 ## hipCUB-4.0.0 for ROCm 7.0
 
 ### Added
