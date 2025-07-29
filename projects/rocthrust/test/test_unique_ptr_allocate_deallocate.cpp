@@ -254,3 +254,23 @@ TEST(UniquePtrAllocDeallocTests, TestUniquePtrDltrArray)
     hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
     ASSERT_EQ(st, hipErrorInvalidValue);
 }
+
+#if THRUST_CPP_DIALECT >= 2020
+TEST(UniquePtrAllocDeallocTests, TestMakeUniqueForOverwriteSingleInt)
+{
+    thrust::unique_ptr<int> p = thrust::make_unique_for_overwrite<int>();
+    *p = 5;
+    ASSERT_EQ(*p, 5);
+}
+
+TEST(UniquePtrAllocDeallocTests, TestMakeUniqueForOverwriteUnboundedArrayInt)
+{
+    thrust::unique_ptr<int[]> p = thrust::make_unique_for_overwrite<int[]>(3);
+    p[0] = 3;
+    p[1] = 4;
+    p[2] = 5;
+    ASSERT_EQ(p[0], 3);
+    ASSERT_EQ(p[1], 4);
+    ASSERT_EQ(p[2], 5);
+}
+#endif
