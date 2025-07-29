@@ -43,9 +43,9 @@ set(BLIS_PATH_4_0   "/opt/AMD/aocl/aocl-linux-aocc-4.0")
 # elseif(EXISTS "${CMAKE_CURRENT_BINARY_DIR}/../deps/blis/lib/libblis.a")
 #     set( BLIS_LIB ${CMAKE_CURRENT_BINARY_DIR}/../deps/blis/lib/libblis.a )
 #     set( BLIS_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/../deps/blis/include/blis )
-# elseif(EXISTS      "/usr/local/lib/libblis.a")
+# elseif(EXISTS      "")
 #     set( BLIS_LIB /usr/local/lib/libblis.a )
-#     set( BLIS_INCLUDE_DIR /usr/local/include/blis )
+#     set( BLIS_INCLUDE_DIR )
 # else()
 #     message(FATAL_ERROR "BLIS lib not found.")
 # endif()
@@ -55,9 +55,12 @@ find_path(BLIS_INCLUDE_DIR
     PATHS
         ${BLIS_ROOT}
         ENV BLIS_ROOT
-        ${BLIS_PATH_4_2_0}/include_ILP64
-        ${BLIS_PATH_4_1_0}/include_ILP64
-        ${BLIS_PATH_4_0}/include_ILP64
+        "${BLIS_PATH_4_2_0}/include_ILP64"
+        "${BLIS_PATH_4_1_0}/include_ILP64"
+        "${BLIS_PATH_4_0}/include_ILP64"
+        "${PROJECT_BINARY_DIR}/deps/blis/include/blis"
+        "${PROJECT_BINARY_DIR}/deps/amd-blis/include/ILP64"
+        "/usr/local/include/blis"
     # PATH_SUFFIXES include_ILP64
 )
 
@@ -69,6 +72,9 @@ find_library(BLIS_LIB
         ${BLIS_PATH_4_2_0}/lib_ILP64
         ${BLIS_PATH_4_1_0}/lib_ILP64
         ${BLIS_PATH_4_0}/lib_ILP64
+        "${PROJECT_BINARY_DIR}/deps/blis/include/blis"
+        "${PROJECT_BINARY_DIR}/deps/amd-blis/lib/ILP64"
+        "/usr/local/lib"
     # PATH_SUFFIXES lib lib_ILP64
 )
 
