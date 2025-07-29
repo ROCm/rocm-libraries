@@ -272,20 +272,20 @@ double get_time_us_sync_device(void)
 /*! \brief  CPU Timer(in microsecond): synchronize with given queue/stream and return wall time */
 double get_time_us_sync(hipStream_t stream)
 {
-    static int oldStreamSync = [&] {
+    static bool oldStreamSync = [&] {
         // set old mode if env variable is set
         const char* str_stream_sync
-            = getenv("ROCBLAS_BENCH_STREAM_SYNC"); // windows this is fine for static init
+            = getenv("ROCBLAS_BENCH_STREAM_SYNC"); // windows getenv is fine for static init
         if(str_stream_sync)
         {
-            return (strncmp(str_stream_sync, "1", 1) == 0 ? 1 : 0);
+            return (strncmp(str_stream_sync, "1", 1) == 0 ? true : false);
         }
-        return 0;
+        return false;
     }();
 
     if(oldStreamSync)
     {
-        hipStreamSynchronize(stream);
+        THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
 
         auto now = std::chrono::steady_clock::now();
         // now.time_since_epoch() is the duration since epoch
