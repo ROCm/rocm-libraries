@@ -69,12 +69,12 @@ Definitions:
 
   - &gemvt_row_vectorized_range
     # Specific sizes to trigger the gemvt_row_vectorized kernels (m <= n is required)
-    - { M:   128, N:   256, lda:   128, stride_a:    32768 } # z, m<=128
-    - { M:   512, N:  1024, lda:   512, stride_a:   524288 } # d, c, m<=512
+    - { M:   128, N:   256, lda:   1024, stride_a:    262144 } # z, m<=128
+    - { M:   512, N:  1024, lda:   2048, stride_a:   2097152 } # d, c, m<=512
     - { M:  1024, N:  2048, lda:  1024, stride_a:  2097152 } # s, m<=1024
     - { M:   256, N:   512, lda:   256, stride_a:   131072 } # z, m<=256
     - { M:  2048, N:  4096, lda:  2048, stride_a:  8388608 } # s, m<=2048
-    - { M:   512, N:   512, lda:   512, stride_a:   262144 } # d, c, m<=512
+    - { M:   512, N:   512, lda:   4096, stride_a:   2097152 } # d, c, m<=512
 
   - &incx_incy_range
     - { incx:   2, incy:   1, stride_scale: 1   }
@@ -659,8 +659,8 @@ Tests:
   precision: *single_double_precisions_complex_real
   transA: [ T, C ]
   matrix_size: *gemvt_row_vectorized_range
-  incx_incy: *incx_incy_range_small
-  alpha_beta: *alpha_beta_range_small
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
   batch_count: [ 123, 256 ]
   gpu_arch: ['90a', '942']
 
