@@ -40,7 +40,6 @@ namespace rocRoller
 
         KernelGraph InlineInits::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::InlineInits");
             auto graph = original;
 
             auto sequenceLeaves

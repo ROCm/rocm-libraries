@@ -779,8 +779,6 @@ namespace rocRoller
 
         KernelGraph LowerTensorContraction::apply(KernelGraph const& graph)
         {
-            TIMER(t, "KernelGraph::LowerTensorContraction");
-
             auto contractions = graph.control.getNodes<TensorContraction>().to<std::vector>();
             AssertFatal(contractions.size() <= 1,
                         "More than one TensorContraction not supported yet.");

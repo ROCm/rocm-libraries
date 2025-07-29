@@ -124,8 +124,6 @@ namespace rocRoller
 
         KernelGraph AddLDS::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::AddLDS");
-
             auto graph = original;
 
             auto visitor = AddLDSVisitor(m_params, m_context);

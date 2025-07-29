@@ -2033,7 +2033,6 @@ namespace rocRoller
 
         KernelGraph LowerTile::apply(KernelGraph const& graph)
         {
-            TIMER(t, "KernelGraph::LowerTile");
             auto visitor = LowerTileVisitor(m_params, m_context);
             return rewrite(graph, visitor);
         }

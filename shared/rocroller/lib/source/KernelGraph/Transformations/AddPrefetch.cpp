@@ -377,8 +377,6 @@ namespace rocRoller
 
         KernelGraph AddPrefetch::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::AddPrefetch");
-
             auto graph = original;
             removeRedundantBodyEdges(graph);
             removeRedundantNOPs(graph);

@@ -362,8 +362,6 @@ namespace rocRoller
 
         KernelGraph UpdateParameters::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::UpdateParameters");
-
             if(!m_params)
                 return original;
 
@@ -380,8 +378,6 @@ namespace rocRoller
 
         KernelGraph UpdateWavefrontParameters::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::UpdateWavefrontParameters");
-
             if(!m_params)
                 return original;
 
@@ -411,8 +407,6 @@ namespace rocRoller
 
         KernelGraph SetWorkitemCount::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::SetWorkitemCount");
-
             auto workgroupSize = m_context->kernel()->workgroupSize();
             auto workitemCount = std::array<ExpressionPtr, 3>{nullptr, nullptr, nullptr};
             auto workgroupTags = original.coordinates.getNodes<Workgroup>().to<std::vector>();

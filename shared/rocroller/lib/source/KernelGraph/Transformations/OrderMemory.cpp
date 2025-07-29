@@ -114,7 +114,6 @@ namespace rocRoller
          */
         KernelGraph OrderMemory::apply(KernelGraph const& k)
         {
-            TIMER(t, "KernelGraph::OrderMemory");
             rocRoller::Log::getLogger()->debug("KernelGraph::OrderMemory");
             auto newGraph = k;
             orderMemoryNodes(newGraph, allAmbiguousNodes(k), false);
