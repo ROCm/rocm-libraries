@@ -3,15 +3,15 @@
 
 cmake_minimum_required(VERSION 3.24.4)
 
+option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
+
+project(hipblaslt VERSION 1.1.0 LANGUAGES CXX)
+
 if("${CMAKE_SOURCE_DIR}" STREQUAL "${PROJECT_SOURCE_DIR}")
     set(HIPBLASLT_IS_SUBPROJECT FALSE)
 else()
     set(HIPBLASLT_IS_SUBPROJECT TRUE)
 endif()
-
-option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
-
-project(hipblaslt VERSION 1.1.0 LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -137,7 +137,7 @@ else()
 endif()
 if(HIPBLASLT_ENABLE_CLIENT)
     find_package(BLAS REQUIRED)
-    find_package(cblas REQUIRED)
+    #find_package(cblas REQUIRED)
     find_package(LAPACK REQUIRED)
 endif()
 if(HIPBLASLT_ENABLE_OPENMP)
@@ -508,7 +508,7 @@ if(HIPBLASLT_ENABLE_SAMPLES)
     rocm_package_setup_client_component(samples)
 endif()
 
-if(ROCM_LIBRARIES_SUPERBUILD OR NOT IS_SUBPROJECT)
+if(ROCM_LIBRARIES_SUPERBUILD OR NOT HIPBLASLT_IS_SUBPROJECT)
     # rocm_create_package makes decisions on what type of package to produce
     # based on BUILD_SHARED_LIBS. If we don't set this here we will only get
     # a dev package.
