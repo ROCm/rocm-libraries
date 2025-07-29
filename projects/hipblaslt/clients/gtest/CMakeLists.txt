@@ -89,6 +89,28 @@ target_compile_definitions( hipblaslt-test PRIVATE ROCM_USE_FLOAT16 HIPBLASLT_IN
 target_compile_options(hipblaslt-test PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_OPTIONS}>)
 # target_compile_options does not go to linker like CMAKE_CXX_FLAGS does, so manually add
 
+# We need to cover the inline functions in library when they are used in tests.
+# If we don't do this, the coverage instrumentation in libhipblaslt-d.so 
+# does not record execution because the functions are inlined and not compiled separately.
+if(BUILD_CODE_COVERAGE)
+  target_compile_options(hipblaslt-test PRIVATE
+    -fprofile-instr-generate
+    -fcoverage-mapping
+  )
+  target_include_directories( hipblaslt-test
+  PRIVATE
+    # internal rocblaslt headers
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/amd_detail>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/amd_detail/rocblaslt/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/amd_detail/rocblaslt/src/include>
+)
+  # When we are doing code coverage with GOOGLE_TEST flag,
+  # the std::cerr and std::cout are labeled as poison in hipblaslt/clients/include/utility.hpp.
+  # Thus, we use CODE_COVERAGE to ignore some code that is using std::cerr and std::cout.
+  target_compile_definitions( hipblaslt-test PRIVATE CODE_COVERAGE)
+  target_link_libraries( hipblaslt-test PRIVATE TensileHost)
+endif()
+
 if (BUILD_CUDA)
   target_link_libraries( hipblaslt-test PRIVATE -llapack -lcblas )
 else()
@@ -100,7 +122,7 @@ list( APPEND COMMON_LINK_LIBS "-lm -lstdc++fs")
 if (CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
   list( APPEND COMMON_LINK_LIBS "-lgfortran") # for lapack
 else()
-  list( APPEND COMMON_LINK_LIBS "-lflang -lflangrti") # for lapack
+  list( APPEND COMMON_LINK_LIBS "-lFortranRuntime -lFortranDecimal") # for lapack
 endif()
 
 #if (NOT WIN32)

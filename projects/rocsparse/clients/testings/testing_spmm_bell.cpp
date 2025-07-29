@@ -23,7 +23,7 @@
 
 #include "testing.hpp"
 
-template <typename I, typename T>
+template <typename I, typename A, typename B, typename C, typename T>
 void testing_spmm_bell_bad_arg(const Arguments& arg)
 {
     // Create rocsparse handle
@@ -69,10 +69,13 @@ void testing_spmm_bell_bad_arg(const Arguments& arg)
 #undef PARAMS
 }
 
-template <typename I, typename T>
+template <typename I, typename A, typename B, typename C, typename T>
 void testing_spmm_bell(const Arguments& arg)
 {
     rocsparse_indextype itype = get_indextype<I>();
+    rocsparse_datatype  atype = get_datatype<A>();
+    rocsparse_datatype  btype = get_datatype<B>();
+    rocsparse_datatype  ctype = get_datatype<C>();
     rocsparse_datatype  ttype = get_datatype<T>();
 
     I M         = arg.M;
@@ -106,9 +109,9 @@ void testing_spmm_bell(const Arguments& arg)
     CHECK_ROCSPARSE_ERROR(rocsparse_set_mat_index_base(descr, base));
     CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
-    rocsparse_matrix_factory<T, I, I> matrix_factory(arg);
+    rocsparse_matrix_factory<A, I, I> matrix_factory(arg);
 
-    host_ell_matrix<T, I> hA;
+    host_ell_matrix<A, I> hA;
     I                     hA_m = (trans_A == rocsparse_operation_none) ? M : K;
     I                     hA_n = (trans_A == rocsparse_operation_none) ? K : M;
     matrix_factory.init_ell(hA, hA_m, hA_n, base);
@@ -121,57 +124,58 @@ void testing_spmm_bell(const Arguments& arg)
     N = Nb * block_dim;
     K = Kb * block_dim;
 
-    host_dense_matrix<T> hB((trans_B == rocsparse_operation_none) ? K : N,
+    host_dense_matrix<B> hB((trans_B == rocsparse_operation_none) ? K : N,
                             (trans_B == rocsparse_operation_none) ? N : K);
     rocsparse_matrix_utils::init_exact(hB);
-    device_dense_matrix<T> dB(hB);
+    device_dense_matrix<B> dB(hB);
 
     //
     // C
     //
-    host_dense_matrix<T> hC(M, N);
+    host_dense_matrix<C> hC(M, N);
     rocsparse_matrix_utils::init_exact(hC);
-    device_dense_matrix<T> dC(hC);
+    device_dense_matrix<C> dC(hC);
 
-    device_ell_matrix<T, I> dA(hA);
-    host_dense_matrix<T>    hA_val(1, dA.width * Mb * block_dim * block_dim);
+    device_ell_matrix<A, I> dA(hA);
+    host_dense_matrix<A>    hA_val(1, dA.width * Mb * block_dim * block_dim);
     rocsparse_matrix_utils::init_exact(hA_val);
-    device_dense_matrix<T> dA_val(hA_val);
-    rocsparse_local_spmat  A(M,
-                            K,
-                            direction,
-                            block_dim,
-                            dA.width * block_dim,
-                            (I*)dA.ind,
-                            (T*)dA_val,
-                            itype,
-                            base,
-                            ttype);
+    device_dense_matrix<A> dA_val(hA_val);
+    rocsparse_local_spmat  mat_A(M,
+                                K,
+                                direction,
+                                block_dim,
+                                dA.width * block_dim,
+                                (I*)dA.ind,
+                                (A*)dA_val,
+                                itype,
+                                base,
+                                atype);
 
-    rocsparse_local_dnmat B(
+    rocsparse_local_dnmat mat_B(
         dB.m,
         dB.n,
         std::max(rocsparse_int(1), (order_B == rocsparse_order_column) ? dB.m : dB.n),
         dB,
-        ttype,
+        btype,
         order_B);
-    rocsparse_local_dnmat C(
+    rocsparse_local_dnmat mat_C(
         dC.m,
         dC.n,
         std::max(rocsparse_int(1), (order_C == rocsparse_order_column) ? dC.m : dC.n),
         dC,
-        ttype,
+        ctype,
         order_C);
+
     // Query SpMM buffer
     size_t buffer_size;
     CHECK_ROCSPARSE_ERROR(rocsparse_spmm(handle,
                                          trans_A,
                                          trans_B,
                                          h_alpha,
-                                         A,
-                                         B,
+                                         mat_A,
+                                         mat_B,
                                          h_beta,
-                                         C,
+                                         mat_C,
                                          ttype,
                                          alg,
                                          rocsparse_spmm_stage_buffer_size,
@@ -186,10 +190,10 @@ void testing_spmm_bell(const Arguments& arg)
                                          trans_A,
                                          trans_B,
                                          h_alpha,
-                                         A,
-                                         B,
+                                         mat_A,
+                                         mat_B,
                                          h_beta,
-                                         C,
+                                         mat_C,
                                          ttype,
                                          alg,
                                          rocsparse_spmm_stage_preprocess,
@@ -207,10 +211,10 @@ void testing_spmm_bell(const Arguments& arg)
                                                       trans_A,
                                                       trans_B,
                                                       h_alpha,
-                                                      A,
-                                                      B,
+                                                      mat_A,
+                                                      mat_B,
                                                       h_beta,
-                                                      C,
+                                                      mat_C,
                                                       ttype,
                                                       alg,
                                                       rocsparse_spmm_stage_compute,
@@ -223,7 +227,7 @@ void testing_spmm_bell(const Arguments& arg)
         }
 
         {
-            host_dense_matrix<T> hC_copy(hC);
+            host_dense_matrix<C> hC_copy(hC);
 
             //
             // Host calculation.
@@ -242,7 +246,7 @@ void testing_spmm_bell(const Arguments& arg)
 
             I* coo_row = new I[size_t(nnzb) * block_dim * block_dim];
             I* coo_col = new I[size_t(nnzb) * block_dim * block_dim];
-            T* coo_val = new T[size_t(nnzb) * block_dim * block_dim];
+            A* coo_val = new A[size_t(nnzb) * block_dim * block_dim];
 
             size_t at = 0;
             for(I ib = 0; ib < Mb; ++ib)
@@ -286,7 +290,7 @@ void testing_spmm_bell(const Arguments& arg)
                 }
             }
 
-            host_coomm<T, I, T, T, T>(M,
+            host_coomm<T, I, A, B, C>(M,
                                       N,
                                       K,
                                       nnzb * block_dim * block_dim,
@@ -324,10 +328,10 @@ void testing_spmm_bell(const Arguments& arg)
                                                           trans_A,
                                                           trans_B,
                                                           d_alpha,
-                                                          A,
-                                                          B,
+                                                          mat_A,
+                                                          mat_B,
                                                           d_beta,
-                                                          C,
+                                                          mat_C,
                                                           ttype,
                                                           alg,
                                                           rocsparse_spmm_stage_compute,
@@ -351,10 +355,10 @@ void testing_spmm_bell(const Arguments& arg)
                                                                       trans_A,
                                                                       trans_B,
                                                                       h_alpha,
-                                                                      A,
-                                                                      B,
+                                                                      mat_A,
+                                                                      mat_B,
                                                                       h_beta,
-                                                                      C,
+                                                                      mat_C,
                                                                       ttype,
                                                                       alg,
                                                                       rocsparse_spmm_stage_compute,
@@ -365,11 +369,12 @@ void testing_spmm_bell(const Arguments& arg)
             N, dA.nnz, (int64_t)dC.m * (int64_t)dC.n, *h_beta != static_cast<T>(0));
         double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);
 
-        double gbyte_count = csrmm_gbyte_count<T>(dA.m,
-                                                  dA.nnz,
-                                                  (int64_t)dB.m * (int64_t)dB.n,
-                                                  (int64_t)dC.m * (int64_t)dC.n,
-                                                  *h_beta != static_cast<T>(0));
+        double gbyte_count = bellmm_gbyte_count<A, B, C, I>(Mb,
+                                                            dA.width,
+                                                            block_dim,
+                                                            (int64_t)dB.m * (int64_t)dB.n,
+                                                            (int64_t)dC.m * (int64_t)dC.n,
+                                                            *h_beta != static_cast<T>(0));
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
 
         display_timing_info(display_key_t::M,
@@ -397,9 +402,14 @@ void testing_spmm_bell(const Arguments& arg)
     CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
 }
 
-#define INSTANTIATE(ITYPE, TTYPE)                                                \
-    template void testing_spmm_bell_bad_arg<ITYPE, TTYPE>(const Arguments& arg); \
-    template void testing_spmm_bell<ITYPE, TTYPE>(const Arguments& arg)
+#define INSTANTIATE(ITYPE, TTYPE)                                               \
+    template void testing_spmm_bell_bad_arg<ITYPE, TTYPE, TTYPE, TTYPE, TTYPE>( \
+        const Arguments& arg);                                                  \
+    template void testing_spmm_bell<ITYPE, TTYPE, TTYPE, TTYPE, TTYPE>(const Arguments& arg)
+#define INSTANTIATE_MIXED(ITYPE, ATYPE, XTYPE, YTYPE, TTYPE)                    \
+    template void testing_spmm_bell_bad_arg<ITYPE, ATYPE, XTYPE, YTYPE, TTYPE>( \
+        const Arguments& arg);                                                  \
+    template void testing_spmm_bell<ITYPE, ATYPE, XTYPE, YTYPE, TTYPE>(const Arguments& arg)
 
 INSTANTIATE(int32_t, float);
 INSTANTIATE(int32_t, double);
@@ -410,4 +420,11 @@ INSTANTIATE(int64_t, float);
 INSTANTIATE(int64_t, double);
 INSTANTIATE(int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex);
+
+INSTANTIATE_MIXED(int32_t, int8_t, int8_t, int32_t, int32_t);
+INSTANTIATE_MIXED(int64_t, int8_t, int8_t, int32_t, int32_t);
+INSTANTIATE_MIXED(int32_t, int8_t, int8_t, float, float);
+INSTANTIATE_MIXED(int64_t, int8_t, int8_t, float, float);
+INSTANTIATE_MIXED(int32_t, _Float16, _Float16, float, float);
+INSTANTIATE_MIXED(int64_t, _Float16, _Float16, float, float);
 void testing_spmm_bell_extra(const Arguments& arg) {}

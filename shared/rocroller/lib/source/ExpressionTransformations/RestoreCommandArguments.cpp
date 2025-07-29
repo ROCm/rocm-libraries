@@ -108,8 +108,10 @@ namespace rocRoller
 
             ExpressionPtr operator()(AssemblyKernelArgumentPtr const& expr) const
             {
-                AssertFatal(expr->expression);
-                return call(expr->expression);
+                if(expr->expression)
+                    return call(expr->expression);
+
+                return std::make_shared<Expression>(expr);
             }
 
             template <CValue Value>

@@ -74,7 +74,7 @@ enum fft_precision
     fft_precision_double,
 };
 
-// Used for CLI11 parsing of input gen enum
+// Used for CLI11 parsing of precision enum
 static bool lexical_cast(const std::string& word, fft_precision& precision)
 {
     if(word == "half")
@@ -85,6 +85,28 @@ static bool lexical_cast(const std::string& word, fft_precision& precision)
         precision = fft_precision_double;
     else
         throw std::runtime_error("Invalid precision specified");
+    return true;
+}
+
+enum fft_auto_allocation
+{
+    fft_auto_allocation_on,
+    fft_auto_allocation_off,
+    fft_auto_allocation_default
+};
+
+// Used for CLI11 parsing of auto-allocation enum
+static bool lexical_cast(const std::string& word, fft_auto_allocation& auto_allocation)
+{
+    if(word == "on")
+        auto_allocation = fft_auto_allocation_on;
+    else if(word == "off")
+        auto_allocation = fft_auto_allocation_off;
+    else if(word == "default")
+        auto_allocation = fft_auto_allocation_default;
+    else
+        throw std::runtime_error(
+            "Invalid auto-allocation behavior specified (choose \"on\", \"off\", or \"default\")");
     return true;
 }
 
@@ -491,7 +513,7 @@ public:
     fft_input_generator igen = fft_input_random_generator_host;
 #endif
 
-    size_t workbuffersize = 0;
+    fft_auto_allocation auto_allocate = fft_auto_allocation_default;
 
     enum fft_mp_lib
     {
@@ -1049,6 +1071,12 @@ public:
             ret += std::to_string(multiGPU);
         }
 
+        if(auto_allocate != fft_auto_allocation_default)
+        {
+            ret += "_autoallocation_";
+            ret += (auto_allocate == fft_auto_allocation_on ? "on" : "off");
+        }
+
         return ret;
     }
 
@@ -1207,6 +1235,13 @@ public:
         {
             ++pos;
             multiGPU = std::stoull(vals[pos++]);
+        }
+
+        auto_allocate = fft_auto_allocation_default; // default if unspecified
+        if(pos < vals.size() && vals[pos] == "autoallocation")
+        {
+            ++pos;
+            lexical_cast(vals[pos++], auto_allocate);
         }
     }
 
@@ -2257,7 +2292,18 @@ public:
     // Tests that hit this can't fit on the GPU and should be skipped.
     struct work_buffer_alloc_failure : public std::runtime_error
     {
-        work_buffer_alloc_failure(const std::string& s)
+        const size_t attempted_size;
+        work_buffer_alloc_failure(const std::string& s, size_t _attempted_size = 0)
+            : std::runtime_error(s)
+            , attempted_size(_attempted_size)
+        {
+        }
+    };
+
+    // Specific exception type for unimplemented feature(s).
+    struct unimplemented_exception : public std::runtime_error
+    {
+        unimplemented_exception(const std::string& s)
             : std::runtime_error(s)
         {
         }
@@ -2283,18 +2329,19 @@ public:
             throw std::runtime_error("Transform type not forward.");
         }
 
-        length    = params_forward.length;
-        istride   = params_forward.ostride;
-        ostride   = params_forward.istride;
-        nbatch    = params_forward.nbatch;
-        precision = params_forward.precision;
-        placement = params_forward.placement;
-        idist     = params_forward.odist;
-        odist     = params_forward.idist;
-        itype     = params_forward.otype;
-        otype     = params_forward.itype;
-        ioffset   = params_forward.ooffset;
-        ooffset   = params_forward.ioffset;
+        length        = params_forward.length;
+        istride       = params_forward.ostride;
+        ostride       = params_forward.istride;
+        nbatch        = params_forward.nbatch;
+        precision     = params_forward.precision;
+        placement     = params_forward.placement;
+        idist         = params_forward.odist;
+        odist         = params_forward.idist;
+        itype         = params_forward.otype;
+        otype         = params_forward.itype;
+        ioffset       = params_forward.ooffset;
+        ooffset       = params_forward.ioffset;
+        auto_allocate = params_forward.auto_allocate;
 
         run_callbacks = params_forward.run_callbacks;
         multiGPU      = params_forward.multiGPU;

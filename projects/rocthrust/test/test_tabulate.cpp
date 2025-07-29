@@ -21,7 +21,9 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/tabulate.h>
 
-#include "test_header.hpp"
+#include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(TabulateTests, FullTestsParams);
 TESTS_DEFINE(TabulatePrimitiveTests, NumericalTestsParams);

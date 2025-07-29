@@ -55,6 +55,8 @@ globalParameters["BuildDir"] = ""
 globalParameters["WorkingDir"] = {}
 globalParameters["WorkingDir"]["Bench"] = "0_Bench"
 globalParameters["WorkingDir"]["LogicYaml"] = "1_LogicYaml"
+globalParameters["WorkingDir"]["GridYaml"] = "2_GridYaml"
+globalParameters["MatchTablePath"] = "/library/src/amd_detail/rocblaslt/src/MatchTable.yaml"
 
 defaultBenchOptions = {"ProblemType": {
     "TransposeA": 0,
@@ -252,7 +254,9 @@ def findExact(config):
 
         filePath = os.path.abspath(globalParameters["WorkingDir"]["Bench"] + "/" + filename)
         with open(filePath, "w") as f:
-            subprocess.run(command, stdout=f)
+            env = os.environ.copy()
+            env["HIPBLASLT_BENCH_PRINT_COMMAND"] = "1"
+            subprocess.run(command, stdout=f, env=env)
 
 @dataclass
 class yamlListInfo:
@@ -264,7 +268,7 @@ class yamlListInfo:
     def __post_init__(self):
         self.problemSizes = []
 
-def fetchDataFromLogic(yamlFilePath, infoList):
+def fetchDataFromLogic(yamlFilePath, folderPath, infoList, logicType="Equality"):
     data = readYaml(yamlFilePath)
     # Skip exact yaml files
     libraryType = None
@@ -284,9 +288,12 @@ def fetchDataFromLogic(yamlFilePath, infoList):
     local2NewLocalTable = {}
     for info in infoList:
         solution = solutionList[info.localSolutionIndex]
-        if ((solution["GlobalSplitU"] == info.splitK) or (info.splitK == 0)) and (libraryType == "Equality"):
-            str1 += "Equality solution found for %s, skipping.\n"%solution["SolutionNameMin"]
-            continue
+        if logicType == "GridBased":
+            if solution["AssertFree0ElementMultiple"] != 1 or \
+               solution["AssertFree1ElementMultiple"] != 1 or \
+               solution["AssertSummationElementMultiple"] != 1:
+                str1 += "Skipping solution %s due to non-unit element multiples.\n"%solution["SolutionNameMin"]
+                continue
         gsu = solution["GlobalSplitU"] if info.splitK == 0 else info.splitK
         key = (info.localSolutionIndex, gsu)
         if key not in local2NewLocalTable:
@@ -310,15 +317,15 @@ def fetchDataFromLogic(yamlFilePath, infoList):
             exactLogicList.append([info.problemSizes, [local2NewLocalTable[key], info.tflops]])
     data[7] = exactLogicList
     data[8] = None
-    data[11] = "Equality"
+    data[11] = logicType
 
-    yamlFileName = os.path.abspath(globalParameters["WorkingDir"]["LogicYaml"] + "/" + os.path.basename(yamlFilePath))
+    yamlFileName = os.path.abspath(folderPath + "/" + os.path.basename(yamlFilePath))
     writeYAML(yamlFileName, data, explicit_start=False, explicit_end=False)
     return str1
 
 def CreateExact(config):
     print("Creating exact logic")
-    tableFile = globalParameters["BuildDir"] + "/library/MatchTable.yaml"
+    tableFile = globalParameters["BuildDir"] + globalParameters["MatchTablePath"]
     print("--Reading matching table: %s"%tableFile)
     tableData = readYaml(tableFile)
     print("--Reading bench files")
@@ -368,7 +375,7 @@ def CreateExact(config):
     pool = mp.Pool(8)
     jobs = []
     for yamlFilePath, infoList in yamlList.items():
-        job = pool.apply_async(fetchDataFromLogic, (yamlFilePath, infoList, ))
+        job = pool.apply_async(fetchDataFromLogic, (yamlFilePath, globalParameters["WorkingDir"]["LogicYaml"], infoList, ))
         jobs.append(job)
 
     logInfo = []
@@ -381,6 +388,196 @@ def CreateExact(config):
 
     pool.close()
     pool.join()
+
+def UpdateGrid(config):
+    # 1. Run heuristic with requested solutions 2 (in case there is one exact).
+    # 2. Find the heuristic 0 solution.
+    # 3. Get the size from the logic yaml.
+    # 4. Run the size with the exact solution index again to see if the perf is higher.
+    # 5. Replace the point if the perf is higher.
+    print("Updating grid logic")
+    tableFile = globalParameters["BuildDir"] + globalParameters["MatchTablePath"]
+    print("--Reading matching table: %s"%tableFile)
+    tableData = readYaml(tableFile)
+    print("--Reading bench files")
+    benchList = glob.glob(globalParameters["WorkingDir"]["Bench"] + "/result_*_*_*x*x*x*.txt")
+    yamlList = defaultdict(list)
+    for benchFile in benchList:
+        print(" --Found file %s"%benchFile)
+        perfData = []
+        with open(benchFile, "r") as f:
+            fList = f.readlines()
+            # Get command
+            for line in fList:
+                if "hipblaslt-bench" in line:
+                    benchCommand = line.split()
+                    break
+            # Get perf data
+            fList = fList[::-1]
+            for num, line in enumerate(fList):
+                if "Winner:" in line:
+                    perfData = fList[num-3:num]
+                    break
+
+        if len(perfData) != 3:
+            str1 = "Winner/ solution index not found in file %s"%(benchFile)
+            assert 0 and str1
+
+        solutionIndex = int(re.search(r'\d+', perfData[0]).group())
+
+        # replace hipblaslt-bench with execBenchPath
+        execBenchPath = globalParameters["BuildDir"] + "/clients/staging/hipblaslt-bench"
+        benchCommand[0] = execBenchPath
+        benchCommand.append("--print_kernel_info")
+
+        # Create another command with heuristic method
+        heuristicCommand = benchCommand.copy()
+        heuristicCommand[benchCommand.index("--algo_method") + 1] = "heuristic"
+        solution_index_pos = heuristicCommand.index("--solution_index")
+        heuristicCommand[solution_index_pos] = "--requested_solution"
+        heuristicCommand[solution_index_pos + 1] = "2"
+
+        print("  --Running heuristic.")
+        # Create heuristic filename by inserting "_heuristic" before ".txt"
+        heuristicFile = os.path.basename(benchFile).replace(".txt", "_heuristic.txt")
+        # run heuristic command
+        filePath = os.path.abspath(globalParameters["WorkingDir"]["GridYaml"] + "/" + heuristicFile)
+        with open(filePath, "w") as f:
+            env = os.environ.copy()
+            env["TENSILE_DB"] = "0x16"
+            subprocess.run(heuristicCommand, stdout=f, env=env)
+
+        m = int(benchCommand[benchCommand.index("-m") + 1])
+        n = int(benchCommand[benchCommand.index("-n") + 1])
+        b = int(benchCommand[benchCommand.index("--batch_count") + 1] if "--batch_count" in benchCommand else "1")
+        k = int(benchCommand[benchCommand.index("-k") + 1])
+
+        gridPoint = []
+        heuristicIndex = -1
+        with open(filePath, "r") as f:
+            fList = f.readlines()
+            for num, line in enumerate(fList):
+                if (not gridPoint) and "Best so far" in line:
+                    # Parse the line to extract the first four numbers
+                    numbers = line.split(':')[0].split(',')
+                    if len(numbers) >= 4:
+                        gridPoint = [int(x.strip()) for x in numbers[:4]]
+                if gridPoint and "Solution index selected:" in line:
+                    heuristicIndex = int(re.search(r'\d+', line).group())
+                    break
+
+        print("  --Grid point: %s"%gridPoint, "Heuristic solution index: %d"%heuristicIndex, "Exact solution index: %d"%solutionIndex)
+
+        # skip if gridPoint is empty
+        if not gridPoint:
+            print(" --No grid point found for file %s, skipping."%benchFile)
+            continue
+        if heuristicIndex == solutionIndex:
+            print(" --Heuristic solution index is the same as exact solution index, skipping.")
+            continue
+
+        # gridPoint may be [m, n, b, k]
+        # Remove lda, ldb, ldc, ldd from heuristicCommand if they exist
+        heuristicCommand = benchCommand.copy()
+        params_to_remove = ["--lda", "--ldb", "--ldc", "--ldd"]
+        for param in params_to_remove:
+            if param in heuristicCommand:
+                idx = heuristicCommand.index(param)
+                # Remove the parameter and its value
+                heuristicCommand.pop(idx)  # Remove parameter
+                heuristicCommand.pop(idx)  # Remove value
+
+        # gridPoint is [m, n, b, k]
+        heuristicCommand[heuristicCommand.index("-m") + 1] = str(gridPoint[0])
+        heuristicCommand[heuristicCommand.index("-n") + 1] = str(gridPoint[1])
+        heuristicCommand[heuristicCommand.index("--batch_count") + 1] = str(gridPoint[2])
+        heuristicCommand[heuristicCommand.index("-k") + 1] = str(gridPoint[3])
+
+        heuristicCommand[heuristicCommand.index("--solution_index") + 1] = str(solutionIndex)
+        gridHeuristicFile = os.path.basename(benchFile).replace(".txt", "_grid_heuristic_exact.txt")
+        gridFilePath = os.path.abspath(globalParameters["WorkingDir"]["GridYaml"] + "/" + gridHeuristicFile)
+        with open(gridFilePath, "w") as f:
+            subprocess.run(heuristicCommand, stdout=f)
+        # Read the new heuristic results
+        perfData = []
+        with open(gridFilePath, "r") as f:
+            fList = f.readlines()
+            for num, line in enumerate(fList):
+                if "transA" in line:
+                    perfData = fList[num:num+3]
+                    break
+
+        # Run heuristic command again with grid point
+        heuristicCommand[heuristicCommand.index("--solution_index") + 1] = str(heuristicIndex)
+        gridHeuristicFile = os.path.basename(benchFile).replace(".txt", "_grid_heuristic.txt")
+        gridFilePath = os.path.abspath(globalParameters["WorkingDir"]["GridYaml"] + "/" + gridHeuristicFile)
+        with open(gridFilePath, "w") as f:
+            subprocess.run(heuristicCommand, stdout=f)
+
+        # Read the new heuristic results
+        heuristicPerfData = []
+        with open(gridFilePath, "r") as f:
+            fList = f.readlines()
+            for num, line in enumerate(fList):
+                if "transA" in line:
+                    heuristicPerfData = fList[num:num+3]
+                    break
+
+        headers         = perfData[0].split(',')
+        values          = perfData[1].split(',')
+        heuristicValues = heuristicPerfData[1].split(',')
+        # Get heuristic perf results
+        heuristicTflops = float( heuristicValues[headers.index('hipblaslt-Gflops')] )
+        # Get exact perf results
+        tflops = float( values[headers.index('hipblaslt-Gflops')] )
+
+        improvement = (tflops - heuristicTflops) / heuristicTflops * 100.0
+        if improvement < 5:  # 5% improvement:
+            print(" --Exact solution is worse than heuristic solution, skipping. %s <= %s (%.2f%%)"%(tflops, heuristicTflops, improvement))
+            continue
+
+        print(" --Exact solution is better than heuristic solution, updating grid yaml. %s > %s (%.2f%%)"%(tflops, heuristicTflops, improvement))
+
+        # Get values
+        m   = int(values[headers.index('m')])
+        n   = int(values[headers.index('n')])
+        b   = int(values[headers.index('batch_count')])
+        k   = int(values[headers.index('k')])
+        lda = int(values[headers.index('lda')])
+        ldb = int(values[headers.index('ldb')])
+        ldc = int(values[headers.index('ldc')])
+        ldd = int(values[headers.index('ldd')])
+        splitK = int(values[headers.index('splitK')]) if 'splitK' in headers else 0
+
+        data = tableData[solutionIndex]
+        yamlFilePath           = data[0]
+        yamlLocalSolutionIndex = data[1]
+        yli = yamlListInfo()
+        yli.problemSizes = [m, n, b, k, lda, ldb, ldc, ldd]
+        yli.localSolutionIndex = yamlLocalSolutionIndex
+        yli.tflops = tflops
+        yli.splitK = splitK
+        yamlList[yamlFilePath].append(yli)
+
+    if yamlList:
+        pool = mp.Pool(8)
+        jobs = []
+        for yamlFilePath, infoList in yamlList.items():
+            job = pool.apply_async(fetchDataFromLogic, (yamlFilePath, globalParameters["WorkingDir"]["GridYaml"], infoList, "GridBased", ))
+            jobs.append(job)
+
+        logInfo = []
+        for job in tqdm(jobs, "Writing logic yaml files"):
+            str1 = job.get()
+            if str1:
+                logInfo.append(str1)
+        for infoStr in logInfo:
+            print("[Info] " + infoStr)
+
+        pool.close()
+        pool.join()
+    else:
+        print("No grid logic yaml files to update.")
 
 # script run from commandline
 if __name__ == "__main__":
@@ -398,6 +595,7 @@ if __name__ == "__main__":
     globalParameters["WorkingDir"]["RootDir"] = ensurePath(args.output_path)
     globalParameters["WorkingDir"]["Bench"] = ensurePath(os.path.abspath(globalParameters["WorkingDir"]["RootDir"] + "/" + globalParameters["WorkingDir"]["Bench"]))
     globalParameters["WorkingDir"]["LogicYaml"] = ensurePath(os.path.abspath(globalParameters["WorkingDir"]["RootDir"] + "/" + globalParameters["WorkingDir"]["LogicYaml"]))
+    globalParameters["WorkingDir"]["GridYaml"] = ensurePath(os.path.abspath(globalParameters["WorkingDir"]["RootDir"] + "/" + globalParameters["WorkingDir"]["GridYaml"]))
 
     configPaths = args.config_file
     config = readYaml(configPaths[0])
@@ -406,3 +604,5 @@ if __name__ == "__main__":
         findExact(config["Bench"])
     if "CreateLogic" in config:
         CreateExact(config["CreateLogic"])
+    if "UpdateGrid" in config:
+        UpdateGrid(config["UpdateGrid"])

@@ -47,14 +47,14 @@ def runCI =
     def compileCommand =
     {
         platform, project->
-
+        commonGroovy = load "${project.paths.project_src_prefix}/.jenkins/common.groovy"
         String mxDataGeneratorGitURL = params?.ROCROLLER_MXDATAGENERATOR_GIT_URL ?: baseParams?.ROCROLLER_MXDATAGENERATOR_GIT_URL
         String mxDataGeneratorGitTag = params?.ROCROLLER_MXDATAGENERATOR_GIT_TAG ?: baseParams?.ROCROLLER_MXDATAGENERATOR_GIT_TAG
-        runCompileCommand(platform, project, jobName, jobParams, mxDataGeneratorGitURL, mxDataGeneratorGitTag, false)
+        commonGroovy.runCompileCommand(platform, project, jobName, mxDataGeneratorGitURL, mxDataGeneratorGitTag, false, false, '', true, true)
     }
 
+    // change first null to compileCommand once pytest-cmake is available
     buildProject(prj, formatCheck, nodes.dockerArray, null, null, null, staticAnalysis)
-
 }
 
 def rocRollerGetBaseParameters() {

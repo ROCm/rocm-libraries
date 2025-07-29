@@ -45,7 +45,7 @@ function display_help()
   echo "    [--address-sanitizer] build with address sanitizer"
   echo "    [--codecoverage] build with code coverage profiling enabled"
   echo "    [--build_dir] Specify the name of the build folder"
-  echo "    [--enable-hipsparselt-marker] build with hipsparselt marker"
+  echo "    [--disable-hipsparselt-marker] build without hipsparselt marker"
   echo "    [--enable-tensile-marker] build with tensile marker"
   echo "    [--keep-build-tmp] do not remove the temporary build artifacts or build_tmp"
 }
@@ -332,7 +332,7 @@ build_tensile=true
 tensile_msgpack_backend=true
 build_dir_user=build
 tensile_no_lazy_library_loading=false
-enable_hipsparselt_marker=false
+disable_hipsparselt_marker=false
 enable_tensile_marker=false
 blis_dir=
 keep_build_tmp=false
@@ -348,7 +348,7 @@ fi
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,cuda,use-cuda,static,relocatable,codecoverage,relwithdebinfo,address-sanitizer,architecture:,cpu_ref_lib:,logic:,cov:,fork:,branch:,test_local_path:,use-custom-version:,build_dir:,enable-hipsparselt-marker,enable-tensile-marker,keep-build-tmp --options hicdgrkl:o:f:b:t:nu::a: -- "$@")
+  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,install,clients,dependencies,debug,cuda,use-cuda,static,relocatable,codecoverage,relwithdebinfo,address-sanitizer,architecture:,cpu_ref_lib:,logic:,cov:,fork:,branch:,test_local_path:,use-custom-version:,build_dir:,disable-hipsparselt-marker,enable-tensile-marker,keep-build-tmp --options hicdgrkl:o:f:b:t:nu::a: -- "$@")
 else
   echo "Need a new version of getopt"
   exit 1
@@ -448,9 +448,8 @@ while true; do
         --keep-build-tmp)
             keep_build_tmp=true
             shift ;;
-        --) shift ; break ;;
-        --enable-hipsparselt-marker)
-            enable_hipsparselt_marker=true
+        --disable-hipsparselt-marker)
+            disable_hipsparselt_marker=true
             shift ;;
         --enable-tensile-marker)
             enable_tensile_marker=true
@@ -681,8 +680,8 @@ pushd .
     tensile_opt="${tensile_opt} -DTensile_NO_LAZY_LIBRARY_LOADING=ON"
   fi
   
-  if [[ "${enable_hipsparselt_marker}" == true ]]; then
-    tensile_opt="${tensile_opt} -DHIPSPARSELT_ENABLE_MARKER=ON"
+  if [[ "${disable_hipsparselt_marker}" == true ]]; then
+    tensile_opt="${tensile_opt} -DHIPSPARSELT_ENABLE_MARKER=OFF"
   fi
 
   if [[ "${enable_tensile_marker}" == true ]]; then

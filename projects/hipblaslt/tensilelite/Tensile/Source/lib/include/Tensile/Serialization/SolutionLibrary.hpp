@@ -41,11 +41,10 @@
 
 #include <Tensile/Serialization/ExactLogicLibrary.hpp>
 #include <Tensile/Serialization/GranularitySelectionLibrary.hpp>
+#include <Tensile/Serialization/MLPClassificationLibrary.hpp>
 #include <Tensile/Serialization/MapLibrary.hpp>
 #include <Tensile/Serialization/MatchingLibrary.hpp>
 #include <Tensile/Serialization/PlaceholderLibrary.hpp>
-#include <Tensile/Serialization/MLPClassificationLibrary.hpp>
-
 
 namespace TensileLite
 {
@@ -163,8 +162,10 @@ namespace TensileLite
                         lib.solutions[s->index] = s;
 
                     auto ctx = static_cast<LibraryIOContext<MySolution>*>(iot::getContext(io));
-                    ctx->solutions      = &lib.solutions;
-                    ctx->solutionsGuard = &lib.solutionsGuard;
+                    ctx->solutions            = &lib.solutions;
+                    ctx->solutionsGuard       = &lib.solutionsGuard;
+                    ctx->loadedFiles          = &lib.loadedFiles;
+                    ctx->indexLoadedLibraries = (void*)&lib.indexLoadedLibraries;
                 }
 
                 std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> innerLibrary;

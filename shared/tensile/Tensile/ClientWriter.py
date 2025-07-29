@@ -22,7 +22,6 @@
 #
 ################################################################################
 
-from . import ClientExecutable
 from . import Common
 from . import LibraryIO
 from .Common import globalParameters, pushWorkingPath, popWorkingPath, tPrint, printExit, printWarning, ClientExecutionLock
@@ -146,7 +145,8 @@ def main( config ):
 ################################################################################
 def runNewClient(scriptPath, clientParametersPath, clientBuildDir=None):
 
-  clientExe = ClientExecutable.getClientExecutable(clientBuildDir)
+  clientExe = getClientExecutablePath()
+
   iniFile = "--config-file={}".format(clientParametersPath)
   args = [clientExe, iniFile]
 
@@ -211,7 +211,8 @@ def writeRunScript(path, forBenchmark, enableTileSelection, configPaths=None):
       configPaths.append(os.path.join(globalParameters["WorkingPath"], "../source/ClientParameters_Granularity.ini"))
 
   # create run.bat or run.sh which builds and runs
-  clientExe = ClientExecutable.getClientExecutable()
+  clientExe = getClientExecutablePath()
+
   runScriptName = os.path.join(path, "run.%s" % ("bat" if os.name == "nt" else "sh") )
   runScriptFile = open(runScriptName, "w")
   if os.name != "nt":
@@ -507,3 +508,14 @@ def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataF
 
     writeClientConfigIni(problemSizes, problemType, libraryRootPath, codeObjectFiles, dataFilePath, configFile)
 
+def getClientExecutablePath():
+  clientExe = globalParameters.get("PrebuiltClient")
+
+  if not os.path.isfile(clientExe):
+    raise FileNotFoundError(
+        f"Tensile client executable not found at '{clientExe}'.\n"
+        "Please ensure the client is built or provide a valid path using the --prebuilt-client flag.\n"
+        "To build, run: `invoke build-client` (you may need to `pip3 install invoke` first).\n"
+        "For custom cmake build instructions, please refer to the README in next-cmake."
+    )
+  return clientExe

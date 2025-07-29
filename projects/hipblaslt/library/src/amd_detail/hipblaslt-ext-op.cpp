@@ -216,8 +216,7 @@ namespace
 
             for(auto& adapter : adapters)
             {
-                //setup code object root only, ignore the error
-                err = adapter->initializeLazyLoading("", lib.getLibraryFolder());
+                adapter->codeObjectDir(lib.getLibraryFolder());
             }
         }
         catch(const std::runtime_error& e)

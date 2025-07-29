@@ -23,7 +23,6 @@
 ################################################################################
 
 from . import BenchmarkProblems
-from . import ClientExecutable
 from . import ClientWriter
 from . import LibraryIO
 from . import LibraryLogic
@@ -80,7 +79,7 @@ def parseCurrentLibrary(libPath, skipRK, sizePath):
 def runBenchmarking(solutions, problemSizes, outPath, update):
     # TODO some copy-pasting from BenchmarkProblems.benchmarkProblemType
     # could use a refactor to elimate duplicated code
-    ClientExecutable.getClientExecutable()
+    ClientWriter.getClientExecutablePath()
 
     shortName = "benchmark"
     benchmarkDir = os.path.join(outPath, shortName)

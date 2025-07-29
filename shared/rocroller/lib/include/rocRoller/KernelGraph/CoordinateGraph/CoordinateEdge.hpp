@@ -120,6 +120,28 @@ namespace rocRoller
             }
         };
 
+        struct Segment
+        {
+            int index = -1;
+
+            Segment() = default;
+
+            Segment(int const index)
+                : index(index)
+            {
+            }
+
+            std::string toString() const
+            {
+                return name();
+            }
+
+            std::string name() const
+            {
+                return "Segment";
+            }
+        };
+
         /**
          * Buffer - denotes SRD for MUBUF instructions
          */

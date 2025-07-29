@@ -62,6 +62,7 @@ set(VALID_BINS
 "TensileLogic"
 "TensileRetuneLibrary"
 "TensileUpdateLibrary"
+"TensileMergeLibrary"
 )
 
 # Find Python interpreter

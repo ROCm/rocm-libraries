@@ -457,5 +457,6 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_csr]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row, rocsparse_order_column]
+  convert_to_int: true
   filename: [mac_econ_fwd500,
              scircuit]

@@ -94,7 +94,7 @@ namespace rocsparse
             f1 = fk;
 #pragma unroll 4
             for(int s = 1; s < block_size; ++s)
-                f1 = f1 + __shfl(fk, local_i + s * block_size, 32);
+                f1 = f1 + rocsparse::shfl(fk, local_i + s * block_size, 32);
 
             f1 = beta * y[global_row] + alpha * f1;
             if(local_j == 0)
