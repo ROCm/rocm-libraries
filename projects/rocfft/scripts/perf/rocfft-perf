@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright (C) 2021 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -273,9 +273,22 @@ def generate_pts_dat(dat):
     rows = []
     for row_idx, sample in enumerate(dat.get_samples()):
         new_row = []
+
         token = sample[0]
-        transform_type, placeness, length, batch, precision = perflib.utils.parse_token(
-            token)
+
+        # sanity check
+        if not token or token.count('_') < 3:
+            print(f"Skipping malformed token on row {row_idx}: '{token}'")
+            continue
+
+        try:
+            transform_type, placeness, length, batch, precision, bricks, gpus, ranks = perflib.utils.parse_token(
+                token)
+        except Exception as e:
+            print(
+                f"Error parsing token on row {row_idx}: '{token}'\nException: {e}"
+            )
+            continue
 
         new_row.extend(input_params)
         new_row.insert(1, token)
@@ -287,6 +300,33 @@ def generate_pts_dat(dat):
         else:
             print("multi-batch data format; exiting abnormally")
             sys.exit(1)
+
+        # Multi-process and multi-gpu performance
+        ngpus_per_node = max(1, len(gpus))
+        nranks = max(1, len(ranks))
+
+        nnodes = max(1,
+                     (nranks + 1) / ngpus_per_node)  # assumes 1 gpu per rank
+
+        new_row.append(nranks)
+        new_row.append(ngpus_per_node)
+        new_row.append(nnodes)
+
+        # Input layout
+        input_split_type = perflib.utils.get_decomposition_type(
+            bricks['ifield'], label="ifield")
+        input_grid = perflib.utils.get_proc_grid(bricks['ifield'])
+        new_row.append(input_split_type)
+        new_row.extend(input_grid)
+
+        # Output layout
+        output_split_type = perflib.utils.get_decomposition_type(
+            bricks['ofield'], label="ofield")
+        output_grid = perflib.utils.get_proc_grid(bricks['ofield'])
+        new_row.append(output_split_type)
+        new_row.extend(output_grid)
+
+        # Statistics
         new_row.extend(
             mdat_df.loc[row_idx,
                         ['median_sample', 'median_low', 'median_high']].
@@ -314,10 +354,18 @@ def generate_pts_dat(dat):
         header.append('ylength')
     elif dimension == 3:
         header.extend(['ylength', 'zlength'])
+
+    header.append('nbatch')
+
+    # Multi-process headers
     header.extend([
-        'nbatch', 'median_sample', 'median_low', 'median_high', 'nsample',
-        'samples'
+        'nprocs', 'ngpus_per_node', 'nnodes', 'input_split_type', 'ingrid_x',
+        'ingrid_y', 'ingrid_z', 'output_split_type', 'outgrid_x', 'outgrid_y',
+        'outgrid_z'
     ])
+
+    header.extend(
+        ['median_sample', 'median_low', 'median_high', 'nsample', 'samples'])
 
     content = [header]
     content.extend(rows)
@@ -366,22 +414,24 @@ def command_post(arguments):
         docdir.mkdir(parents=True, exist_ok=True)
 
         import scipy.stats, numpy
-        
+
         runs = perflib.utils.by_dat(all_runs)
-        
+
         group_outdirs = []
         if arguments.ngroup == None:
             group_outdirs.append(outdirs)
         else:
-            totalgroups = (len(outdirs) + arguments.ngroup - 1) // arguments.ngroup
+            totalgroups = (len(outdirs) + arguments.ngroup -
+                           1) // arguments.ngroup
             for gidx in range(totalgroups):
-                group_outdirs.append(outdirs[gidx * arguments.ngroup :
-                                             (gidx + 1) * arguments.ngroup])
+                group_outdirs.append(
+                    outdirs[gidx * arguments.ngroup:(gidx + 1) *
+                            arguments.ngroup])
         #print(group_runs)
         #sys.exit(1)
 
         for gidx, group in enumerate(group_outdirs):
-        
+
             refdir, *otherdirs = group
 
             for dat_name, dat_runs in runs.items():
@@ -401,15 +451,16 @@ def command_post(arguments):
                         Avals = refdat.samples[token].times
                         Bvals = otherdat.samples[token].times
                         if arguments.measure == "median":
-                            speedup = statistics.median(Avals) / statistics.median(
-                                Bvals)
+                            speedup = statistics.median(
+                                Avals) / statistics.median(Bvals)
                         elif arguments.measure == "mean":
                             speedup = numpy.mean(Avals) / numpy.mean(Bvals)
                         low, high = perflib.analysis.ratio_confidence_interval(
                             Avals, Bvals)
                         pval = -1
                         if arguments.method == 'moods':
-                            _, pval, _, _ = scipy.stats.median_test(Avals, Bvals)
+                            _, pval, _, _ = scipy.stats.median_test(
+                                Avals, Bvals)
                         elif arguments.method == 'ttest':
                             _, pval = scipy.stats.ttest_ind(Avals, Bvals)
                         elif arguments.method == 'mwu':
@@ -418,9 +469,11 @@ def command_post(arguments):
                             print("unsupported statistical method")
                             sys.exit(1)
 
-                        speedups.append([sample.token, speedup, low, high, pval])
+                        speedups.append(
+                            [sample.token, speedup, low, high, pval])
 
-                    path = docdir / ('group_' + str(gidx) + '-' + dat_name + '.sdat')
+                    path = docdir / ('group_' + str(gidx) + '-' + dat_name +
+                                     '.sdat')
                     perflib.utils.write_tsv(path,
                                             speedups,
                                             meta=refdat.meta,
@@ -879,7 +932,7 @@ def main():
         p.add_argument('--ngroup',
                        type=int,
                        help="size of comparison subgroup")
-        
+
     for p in [
             post_parser, pdf_parser, test_parser, autoperf_parser, html_parser
     ]:
