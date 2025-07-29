@@ -24,6 +24,8 @@
           "HIPBLASLT_ENABLE_HOST": "OFF",
           "HIPBLASLT_ENABLE_MSGPACK": "ON",
           "HIPBLASLT_ENABLE_LLVM": "ON",
+          "TENSILELITE_ENABLE_CLIENT": "ON",
+          "TENSILELITE_BUILD_TESTING": "OFF",
           "TENSILELITE_ENABLE_AUTOBUILD": "ON"
         }
       },
