@@ -29,10 +29,29 @@
 
 namespace rocsparse_clients
 {
+    // Helper class to redirect streams
+    class stream_redirector
+    {
+    private:
+        std::streambuf*    m_old_cout_buf{};
+        std::streambuf*    m_old_cerr_buf{};
+        std::ostringstream m_stream;
+
+    public:
+        void redirect();
+
+        void restore();
+
+        std::ostringstream& get_stream();
+
+        void clear();
+    };
 
     class configurable_event_listener : public testing::TestEventListener
     {
-        testing::TestEventListener* eventListener;
+    private:
+        stream_redirector           m_redirector;
+        testing::TestEventListener* m_eventListener;
 
     public:
         bool showTestCases; // Show the names of each test case.
@@ -40,6 +59,7 @@ namespace rocsparse_clients
         bool showSuccesses; // Show each success.
         bool showInlineFailures; // Show each failure as it occurs.
         bool showEnvironment; // Show the setup of the global environment.
+        bool redirectOutput; // Redirect output to a stringstream.
 
         explicit configurable_event_listener(testing::TestEventListener* theEventListener);
 
@@ -70,63 +90,6 @@ namespace rocsparse_clients
         void OnTestIterationEnd(const testing::UnitTest& unit_test, int iteration) override;
 
         void OnTestProgramEnd(const testing::UnitTest& unit_test) override;
-    };
-
-    // Helper class to redirect streams
-    class stream_redirector
-    {
-    private:
-        std::streambuf*    m_old_cout_buf{};
-        std::streambuf*    m_old_cerr_buf{};
-        std::ostringstream m_stream;
-
-    public:
-        void redirect();
-
-        void restore();
-
-        std::ostringstream& get_stream();
-
-        void clear();
-    };
-
-    // Custom test listener to handle output redirection
-    class output_redirect_listener : public testing::TestEventListener
-    {
-    private:
-        stream_redirector             m_redirector;
-        ::testing::TestEventListener* m_default_listener{};
-
-    public:
-        explicit output_redirect_listener(::testing::TestEventListener* listener);
-
-        ~output_redirect_listener() override;
-
-        void OnTestProgramStart(const ::testing::UnitTest& unit_test) override;
-
-        void OnTestIterationStart(const ::testing::UnitTest& unit_test, int iteration) override;
-
-        void OnEnvironmentsSetUpStart(const ::testing::UnitTest& unit_test) override;
-
-        void OnEnvironmentsSetUpEnd(const ::testing::UnitTest& unit_test) override;
-
-        void OnTestCaseStart(const ::testing::TestCase& test_case) override;
-
-        void OnTestStart(const ::testing::TestInfo& test_info) override;
-
-        void OnTestPartResult(const ::testing::TestPartResult& test_part_result) override;
-
-        void OnTestEnd(const ::testing::TestInfo& test_info) override;
-
-        void OnTestCaseEnd(const ::testing::TestCase& test_case) override;
-
-        void OnEnvironmentsTearDownStart(const ::testing::UnitTest& unit_test) override;
-
-        void OnEnvironmentsTearDownEnd(const ::testing::UnitTest& unit_test) override;
-
-        void OnTestIterationEnd(const ::testing::UnitTest& unit_test, int iteration) override;
-
-        void OnTestProgramEnd(const ::testing::UnitTest& unit_test) override;
     };
 
 } // namespace rocsparse_clients
