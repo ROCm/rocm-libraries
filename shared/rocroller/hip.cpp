@@ -32,7 +32,7 @@ __global__ void kernel()
 int main()
 {
     dim3 threads(64);
-    dim3 blocks(8);
+    dim3 blocks(1);
     hipLaunchKernelGGL(kernel, blocks, threads, 0, 0);
 
     // Check for launch errors

@@ -11,7 +11,12 @@ def parse_csv_file(file_path: Path):
     with open(file_path, newline="") as f:
         lines = list(csv.DictReader(f))
         ds_only = [line for line in lines if "ds_" in line["Instruction"]]
-        return ds_only[-1]["Latency"]
+
+        ds_only = ds_only[1:-1]
+
+        idles = [e["Idle"] for e in ds_only]
+
+        return (min(idles), max(idles))
 
 
 def parse_csvs_in_directory(directory):
@@ -26,8 +31,8 @@ def parse_csvs_in_directory(directory):
     for csv_file in csv_files:
         stride_to_latency[int(csv_file.stem)] = parse_csv_file(csv_file)
 
-    for k, v in sorted(stride_to_latency.items()):
-        print(f"{k:>5} {v:>5}")
+    for k, (hitcount, latency) in sorted(stride_to_latency.items()):
+        print(f"{k:>5} {hitcount:>5} {latency:>5}")
 
 
 def main():
