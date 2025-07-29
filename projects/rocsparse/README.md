@@ -7,7 +7,7 @@
 > 
 > For documentation and examples, see the [hipSPARSE documentation](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 > 
-> This rocSPARSE repository is maintained for reference purposes and to document any specialized functionality that may not be available in hipSPARSE.
+> This rocSPARSE repository is maintained for reference purposes and to document any specialized functionality that might not be available in hipSPARSE.
 
 rocSPARSE exposes a common interface that provides Basic Linear Algebra Subroutines (BLAS) for
 sparse computation. It's implemented on top of AMD
