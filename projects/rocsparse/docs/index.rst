@@ -11,7 +11,7 @@ rocSPARSE documentation
 .. important::
    **hipSPARSE is the recommended library for development**
    
-   For new development projects, we strongly recommend using **hipSPARSE** instead of rocSPARSE. 
+   For new development projects, **hipSPARSE** is recommended instead of rocSPARSE. 
    hipSPARSE provides a comprehensive, portable interface that supports multiple backends 
    (including rocSPARSE and cuSPARSE) and is the preferred library for sparse matrix operations.
    
