@@ -3201,10 +3201,10 @@ namespace GEMMDriverTest
         switch(typeAB)
         {
         case DataType::FP8:
-            basicGEMM<FP8, FP8, float>(problem, true);
+            basicGEMM<FP8, FP8, float>(problem);
             break;
         case DataType::BF8:
-            basicGEMM<BF8, BF8, float>(problem, true);
+            basicGEMM<BF8, BF8, float>(problem);
             modifiers = "cbsz:0b001 blgp:0b001";
             break;
         case DataType::FP6:
@@ -3214,7 +3214,7 @@ namespace GEMMDriverTest
             GTEST_SKIP() << "Test not yet supported for BF6" << std::endl;
             break;
         case DataType::FP4:
-            basicGEMM<FP4, FP4, float>(problem, true);
+            basicGEMM<FP4, FP4, float>(problem);
             modifiers = "cbsz:0b100 blgp:0b100";
             break;
         default:
