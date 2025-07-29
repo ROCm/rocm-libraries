@@ -788,6 +788,17 @@ public:
         }
     }
 
+    bool is_inverse() const
+    {
+        return transform_type == fft_transform_type_complex_inverse
+               || transform_type == fft_transform_type_real_inverse;
+    }
+
+    bool is_forward() const
+    {
+        return !is_inverse();
+    }
+
     // Convert to string for output.
     std::string str(const std::string& separator = ", ") const
     {
@@ -2224,10 +2235,12 @@ public:
         }
     }
 
-    virtual fft_status set_callbacks(void* load_cb_host,
-                                     void* load_cb_data,
-                                     void* store_cb_host,
-                                     void* store_cb_data)
+    virtual fft_status set_callbacks(void*  load_cb_host,
+                                     void*  load_cb_data,
+                                     void*  store_cb_host,
+                                     void*  store_cb_data,
+                                     size_t load_cb_shared_mem_bytes,
+                                     size_t store_cb_shared_mem_bytes)
     {
         return fft_status_success;
     }
@@ -2298,6 +2311,7 @@ public:
         ooffset   = params_forward.ioffset;
 
         run_callbacks = params_forward.run_callbacks;
+        multiGPU      = params_forward.multiGPU;
 
         check_output_strides = params_forward.check_output_strides;
 
