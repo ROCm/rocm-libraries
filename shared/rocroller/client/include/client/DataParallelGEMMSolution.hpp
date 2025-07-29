@@ -216,16 +216,6 @@ namespace rocRoller
                         = command->addOperation(Operations::Tensor(2, typeD, {(size_t)1})); // D
                     command->addOperation(Operations::T_Store_Tiled(m_tagD, m_tagTensorD));
 
-                    //if(solutionParams.workgroupMapping.first != -1)
-                    //{
-                    //    m_tagWGM = command->allocateTag();
-                    //    command->allocateArgument(DataType::Int32,
-                    //                              m_tagWGM,
-                    //                              ArgumentType::Value,
-                    //                              DataDirection::ReadOnly,
-                    //                              rocRoller::WGM);
-                    //}
-
                     if(solutionParams.workgroupMappingDim != -1)
                     {
                         m_tagWGM = command->allocateTag();

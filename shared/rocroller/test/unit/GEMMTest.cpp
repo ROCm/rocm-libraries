@@ -471,15 +471,6 @@ namespace GEMMDriverTest
             }
 
             Operations::OperationTag tagWGM;
-            //if(gemm.workgroupMapping.first != -1)
-            //{
-            //    tagWGM      = command->allocateTag();
-            //    auto wgmArg = command->allocateArgument(DataType::Int32,
-            //                                            tagWGM,
-            //                                            ArgumentType::Value,
-            //                                            DataDirection::ReadOnly,
-            //                                            rocRoller::WGM);
-            //}
             if(gemm.workgroupMappingDim != -1)
             {
                 tagWGM      = command->allocateTag();
@@ -701,13 +692,9 @@ namespace GEMMDriverTest
             auto deviceScratch = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
             commandArgs.setArgument(tagScratch, ArgumentType::Value, deviceScratch.get());
 
-            //if(gemm.workgroupMapping.first != -1)
-            //{
-            //    commandArgs.setArgument(tagWGM, ArgumentType::Value, gemm.workgroupMapping.second);
-            //}
             if(gemm.workgroupMappingDim != -1)
             {
-                commandArgs.setArgument(tagWGM, ArgumentType::Value, gemm.workgroupMappingSize);
+                commandArgs.setArgument(tagWGM, ArgumentType::Value, gemm.workgroupMappingValue);
             }
 
             // Host result
@@ -1036,9 +1023,8 @@ namespace GEMMDriverTest
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
-        //gemm.workgroupMapping = {0, 6};
         gemm.workgroupMappingDim  = 0;
-        gemm.workgroupMappingSize = 6;
+        gemm.workgroupMappingValue = 6;
         basicGEMM<float>(gemm);
     }
 
@@ -1047,9 +1033,8 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         REQUIRE_ARCH_CAP(GPUCapability::HasXCC);
         GEMMProblem gemm;
-        //gemm.workgroupMapping  = {0, 6};
         gemm.workgroupMappingDim  = 0;
-        gemm.workgroupMappingSize = 6;
+        gemm.workgroupMappingValue = 6;
         gemm.workgroupRemapXCC    = true;
         basicGEMM<float>(gemm);
     }

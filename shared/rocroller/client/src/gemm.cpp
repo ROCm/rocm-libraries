@@ -954,7 +954,6 @@ int main(int argc, const char* argv[])
 
         .workgroupSizeX = 128,
         .workgroupSizeY = 2,
-        //.workgroupMapping       = {-1, -1},
         .workgroupMappingDim    = -1,
         .workgroupMappingValue   = -1,
         .workgroupRemapXCC      = false,
