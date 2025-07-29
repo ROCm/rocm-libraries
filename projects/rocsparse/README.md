@@ -5,7 +5,7 @@
 > For new development projects, we strongly recommend using **[hipSPARSE](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparse)** instead of rocSPARSE. 
 > hipSPARSE provides a comprehensive, portable interface that supports multiple backends (including rocSPARSE and cuSPARSE) and is the preferred library for sparse matrix operations.
 > 
-> For documentation and examples, please refer to the [hipSPARSE documentation](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
+> For documentation and examples, see the [hipSPARSE documentation](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 > 
 > This rocSPARSE repository is maintained for reference purposes and to document any specialized functionality that may not be available in hipSPARSE.
 
