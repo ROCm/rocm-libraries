@@ -326,6 +326,58 @@ TEST(UniquePtrGeneralTests, TestUniquePtrPointerCtorArray)
     }
 }
 
+TEST(UniquePtrGeneralTests, TestUniquePtrRawPointerCtor)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // Single object, default deleter
+    {
+        thrust::device_ptr<int> dev_p = thrust::device_malloc<int>(1);
+        *dev_p = 33;
+
+        int* raw_p = thrust::raw_pointer_cast(dev_p);
+        thrust::unique_ptr<int> p(raw_p);
+        ASSERT_EQ(p.get_raw(), raw_p);
+        ASSERT_EQ(*p, 33);
+    }
+
+    // Array, default deleter
+    {
+        thrust::device_ptr<int> dev_p = thrust::device_malloc<int>(10);
+        for(int i = 0; i < 5; ++i)
+        {
+            dev_p[i] = i * 10;
+        }
+
+        int* raw_p = thrust::raw_pointer_cast(dev_p);
+
+        thrust::unique_ptr<int[]> p(raw_p);
+        ASSERT_EQ(p.get_raw(), raw_p);
+        for(int i = 0; i < 5; ++i)
+        {
+            ASSERT_EQ(p[i], i * 10);
+        }
+    }
+
+    // Array with size
+    {
+        thrust::device_ptr<int> dev_p = thrust::device_malloc<int>(7);
+        for(int i = 0; i < 7; ++i)
+        {
+            dev_p[i] = i + 100;
+        }
+
+        int* raw_p = thrust::raw_pointer_cast(dev_p);
+
+        thrust::unique_ptr<int[]> p(raw_p, 7);
+        ASSERT_EQ(p.get_raw(), raw_p);
+        for(int i = 0; i < 7; ++i)
+        {
+            ASSERT_EQ(p[i], i + 100);
+        }
+    }
+}
+
 // Thrust-specific test for checking if the object destruction is correct.
 TEST(UniquePtrGeneralTests, TestUniquePtrDtorNullptr)
 {
