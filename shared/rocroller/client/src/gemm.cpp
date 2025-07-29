@@ -230,7 +230,7 @@ namespace rocRoller::Client::GEMMClient
 
         commandKernel->loadKernel();
 
-        auto commandArgs = gemm->commandArguments(command, problemParams, runParams, benchmarkParams);
+        auto commandArgs = gemm->commandArguments(command, problemParams, runParams);
 
         auto [aTag, bTag, cTag, dTag] = gemm->getABCDTags();
         commandArgs.setArgument(aTag, ArgumentType::Value, (A*)deviceA.get());
@@ -620,6 +620,7 @@ namespace rocRoller::Client::GEMMClient
             yamlPath.replace_extension(".yaml");
 
             solution            = Serialization::readYAMLFile<SolutionParameters>(yamlPath);
+
             architecture.target = solution.architecture;
             if(solution.version != rocRoller::Version::Git())
             {
@@ -1155,7 +1156,7 @@ int main(int argc, const char* argv[])
                    "Workgroup mapping dimension (-1, 0, 1). Default: -1")
         ->check(CLI::IsMember({-1, 0, 1}));
     app.add_option("--workgroupMappingValue",
-                   solution.workgroupMappingValue,
+                   runParams.workgroupMappingValue,
                    "Workgroup mapping value. Default: -1")
         ->check(CLI::Range(-1, -1) | CLI::PositiveNumber);
 
@@ -1354,17 +1355,18 @@ int main(int argc, const char* argv[])
             yamlPath = std::filesystem::path{io.loadCOPath};
         yamlPath.replace_extension(".yaml");
 
-        //std::optional<int> workgroupMappingSize;
-        //if(app.count("--workgroupMappingSize") > 0)
-        //    workgroupMappingSize = solution.workgroupMappingSize;
-
+        //
+	// YAML file does not have the workgroupMappingValue used to generate the kernel.
+	// Instead, the workgroupMappingValue specified by users in benchmarking will be used.
+	//
         solution = Serialization::readYAMLFile<rocRoller::Client::GEMMClient::SolutionParameters>(
             yamlPath);
 
-        //if(workgroupMappingSize.has_value())
-        //    solution.workgroupMappingSize = workgroupMappingSize.value();
+	//
+	// Fill in the workgroupMappingValue specified by users (-1 if not specified)
+	//
+	solution.workgroupMappingValue = runParams.workgroupMappingValue;
 
-        std::cout << "This is solution : " << solution << "\n";
         overwriteTypesFromSolution(types, solution);
     }
 
@@ -1402,6 +1404,7 @@ int main(int argc, const char* argv[])
 
     // TODO: Reevaluate the relationship between problem and solution params.
     problem.workgroupMapping = {solution.workgroupMappingDim, solution.workgroupMappingValue};
+
 
     benchmarkParams.check = !noCheckResult;
 

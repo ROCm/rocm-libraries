@@ -90,11 +90,10 @@ namespace rocRoller
 
                 CommandArguments commandArguments(CommandPtr               command,
                                                   ProblemParameters const& problemParams,
-                                                  RunParameters const&     runParams,
-						  BenchmarkParameters const& benchmarkParams) const override
+                                                  RunParameters const&     runParams) const override
                 {
                     auto commandArgs = DataParallelGEMMSolution::commandArguments(
-                        command, problemParams, runParams, benchmarkParams);
+                        command, problemParams, runParams);
 
                     commandArgs.setArgument(m_numWGsTag, ArgumentType::Value, runParams.numWGs);
 

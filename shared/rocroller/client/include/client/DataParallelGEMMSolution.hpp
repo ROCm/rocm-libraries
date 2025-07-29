@@ -517,8 +517,7 @@ namespace rocRoller
 
                 CommandArguments commandArguments(CommandPtr               command,
                                                   ProblemParameters const& problemParams,
-                                                  RunParameters const&     runParams,
-						  BenchmarkParameters const& benchmarkParams) const override
+                                                  RunParameters const&     runParams) const override
                 {
                     CommandArguments commandArgs = command->createArguments();
 
@@ -553,19 +552,20 @@ namespace rocRoller
 
                     if(problemParams.workgroupMapping.first != -1)
                     {
-                        auto const dim  = problemParams.workgroupMapping.first;
-                        auto const size = problemParams.workgroupMapping.second;
+                        auto const workgroupMappingDim  = problemParams.workgroupMapping.first;
+                        auto const workgroupMappingValue = problemParams.workgroupMapping.second;
 
                         AssertFatal(
-                            dim == 0 || dim == 1,
-                            "Only 0 (M) or 1 (N) are supported dimensions for workgroup mapping.",
-                            ShowValue(dim));
+                            workgroupMappingDim == 0 || workgroupMappingDim == 1,
+                            "Only 0 (M) or 1 (N) are supported dimensions for workgroup mapping dim.",
+                            ShowValue(workgroupMappingDim));
 
-                        AssertFatal(size > 0,
-                                    "Workgroup mapping size must be a positive non-zero integer.",
-                                    ShowValue(size));
+                        AssertFatal(workgroupMappingValue > 0,
+                                    "Workgroup mapping value must be a positive integer "
+				    "when work group dimension is specified.",
+                                    ShowValue(workgroupMappingValue));
 
-                        commandArgs.setArgument(m_tagWGM, ArgumentType::Value, size);
+                        commandArgs.setArgument(m_tagWGM, ArgumentType::Value, workgroupMappingValue);
                     }
 
                     return commandArgs;
