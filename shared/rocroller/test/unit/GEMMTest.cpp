@@ -92,7 +92,7 @@ namespace GEMMDriverTest
                   typename TD  = TC,
                   typename ACC = float>
         void basicGEMM(const GEMMProblem&      gemm,
-                       bool                    debuggable  = false,
+                       bool                    debuggable  = true,
                        bool                    setIdentity = false,
                        int                     numIters    = 1,
                        bool                    notSetC     = false,
