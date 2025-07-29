@@ -4,8 +4,8 @@
 cmake_minimum_required(VERSION 3.25.0)
 project(device-library VERSION 0.0.1 LANGUAGES CXX ASM)
 
-set(HIPBLASLT_DEVICE_LIBRARY_PATH "${hipblaslt_BINARY_DIR}/Tensile/library" CACHE STRING "Path to output the device gemm libraries.")
-file(MAKE_DIRECTORY "${HIPBLASLT_DEVICE_LIBRARY_PATH}")
+set(HIPBLASLT_TENSILE_LIBPATH "${hipblaslt_BINARY_DIR}/Tensile" CACHE STRING "Path to output the device gemm libraries.")
+file(MAKE_DIRECTORY "${HIPBLASLT_TENSILE_LIBPATH}")
 
 list(JOIN GPU_TARGETS "$<SEMICOLON>" TENSILE_GPU_TARGETS_SEMI_ESCAPED)
 
@@ -45,13 +45,13 @@ set(TENSILE_CREATE_LIBRARY_COMMAND
     ${HIPBLASLT_PYTHON_COMMAND} -m Tensile.TensileCreateLibrary
     ${TENSILE_BUILD_OPTS}
     ${HIPBLASLT_LIBLOGIC_PATH}
-    "${HIPBLASLT_DEVICE_LIBRARY_PATH}"
+    "${HIPBLASLT_TENSILE_LIBPATH}"
     HIP
 )
 
 add_custom_command(
     OUTPUT "${output_stamp}"
-    COMMENT "Building device libraries to ${HIPBLASLT_DEVICE_LIBRARY_PATH} ..."
+    COMMENT "Building device libraries to ${HIPBLASLT_TENSILE_LIBPATH} ..."
     COMMAND ${TENSILE_CREATE_LIBRARY_COMMAND}
     COMMAND ${CMAKE_COMMAND} -E touch "${output_stamp}"
     DEPENDS  ${HIPBLASLT_PYTHON_DEPS}

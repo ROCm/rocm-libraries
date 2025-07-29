@@ -64,7 +64,7 @@ foreach(arch IN LISTS archs)
         DEPENDS extop-obj-${arch}
         OUTPUT "${output_code_object_file}"
         COMMAND ${CMAKE_CXX_COMPILER};-target;amdgcn-amdhsa;-Xlinker;$<TARGET_OBJECTS:extop-obj-${arch}>;-o;${output_code_object_file}
-        COMMAND ${CMAKE_COMMAND} -E copy "${output_code_object_file}" "${HIPBLASLT_DEVICE_LIBRARY_PATH}"
+        COMMAND ${CMAKE_COMMAND} -E copy "${output_code_object_file}" "${HIPBLASLT_TENSILE_LIBPATH}"
         COMMENT "Creating extop_${arch}"
         COMMAND_EXPAND_LISTS
     )
@@ -75,7 +75,7 @@ foreach(arch IN LISTS archs)
             "${output_code_object_file}"
             ${HIPBLASLT_PYTHON_DEPS}
         COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/ExtOpCreateLibrary.py" --src=${CMAKE_CURRENT_BINARY_DIR} --co=${output_code_object_file} --output=${output_dir} --arch=${arch}
-        COMMAND ${CMAKE_COMMAND} -E copy "${output_dir}/hipblasltExtOpLibrary.dat" "${HIPBLASLT_DEVICE_LIBRARY_PATH}"
+        COMMAND ${CMAKE_COMMAND} -E copy "${output_dir}/hipblasltExtOpLibrary.dat" "${HIPBLASLT_TENSILE_LIBPATH}"
         COMMENT "Creating hipblasltExtOpLibrary.dat for ${arch}"
     )
 endforeach()

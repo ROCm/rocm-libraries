@@ -137,7 +137,7 @@ else()
 endif()
 if(HIPBLASLT_ENABLE_CLIENT)
     find_package(BLAS REQUIRED)
-    #find_package(cblas REQUIRED)
+    #find_package(cblas REQUIRED) # is this actually required
     find_package(LAPACK REQUIRED)
 endif()
 if(HIPBLASLT_ENABLE_OPENMP)
