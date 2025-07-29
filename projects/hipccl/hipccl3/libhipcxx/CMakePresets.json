@@ -144,7 +144,6 @@
       "inherits": "libcudacxx-base",
       "cacheVariables": {
         "LIBHIPCXX_TEST_WITH_HIPRTC": true,
-        "LIBHIPCXX_ENABLE_HIPRTC_WORKAROUND": false,
         "CMAKE_HIP_ARCHITECTURES": "gfx90a;gfx942;gfx1030;gfx1100;gfx1101;gfx1200;gfx1201"
       }
     },

@@ -53,14 +53,6 @@ GpuProg nvrtc_build_prog(const std::string& testCu, const ArchConfig& config, co
   std::vector<const char*> optList;
   // NOTE(HIPRTC): -fgpu-rdc is required to generate LLVM IR
   optList.emplace_back("-fgpu-rdc");
-  // NOTE(HIPRTC): hiprtc-no-builtin-header and __HIPCC_RTC__ are required to avoid redefinition errors
-  #if defined(LIBHIPCXX_ENABLE_HIPRTC_WORKAROUND)
-  optList.emplace_back("--hiprtc-no-builtin-header");
-  optList.emplace_back("-D__HIPCC_RTC__");
-  // NOTE(HIPRTC): Remove std includes to be on safe side.
-  optList.emplace_back("-nostdinc++");
-  optList.emplace_back("-DLIBHIPCXX_ENABLE_HIPRTC_WORKAROUND");
-  #endif
   // Be careful with lifetimes here
   std::for_each(argList.begin(), argList.end(), [&](const auto& it) {
     optList.emplace_back(it.c_str());

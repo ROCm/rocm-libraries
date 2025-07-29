@@ -25,8 +25,3 @@ add_executable(libcudacxx.nvrtcc hiprtcc.cpp)
 set_target_properties(libcudacxx.nvrtcc PROPERTIES OUTPUT_NAME hiprtcc)
 target_link_libraries(libcudacxx.nvrtcc hiprtc hip::host)
 target_compile_features(libcudacxx.nvrtcc PRIVATE cxx_std_17)
-# NOTE(HIPRTC): This is a workaround before 
-# we are sure the header is available during hiprtc compilation.
-target_compile_definitions(libcudacxx.nvrtcc PRIVATE
-  $<$<BOOL:${LIBHIPCXX_ENABLE_HIPRTC_WORKAROUND}>:LIBHIPCXX_ENABLE_HIPRTC_WORKAROUND>
-)

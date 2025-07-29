@@ -48,10 +48,6 @@ include(ROCMInstallTargets)
 # include(ROCMHeaderWrapper)
 # include(ROCMCheckTargetIds)
 # include(ROCMClients)
-option(LIBHIPCXX_ENABLE_HIPRTC_WORKAROUND
-  "Test libhip++ with runtime compilation by including hiprtc_runtime header explicitly and related hiprtc compiler flags. 
-  We should eventually remove this workaround."
-  OFF)
 option(libhipcxx_ENABLE_INSTALL_RULES "Enable installation of libcu++" ${LIBCUDACXX_TOPLEVEL_PROJECT})
 if (libhipcxx_ENABLE_INSTALL_RULES)
   include(cmake/libhipcxxInstallRules.cmake)
