@@ -1,65 +1,107 @@
-# Documentation ownership
-**/*.md @ROCm/rocm-documentation
-**/*.rst @ROCm/rocm-documentation
-**/.readthedocs.yaml @ROCm/rocm-documentation
-**/docs/ @ROCm/rocm-documentation
-**/library/include/ @ROCm/rocm-documentation
+# Generic Ownership (broadest rules first)
+**/next-cmake/                                      @ROCm/rocm-math-lib-build-infra
 
 # CI ownership
-/.azuredevops/ @ROCm/external-ci
+/.azuredevops/                                      @ROCm/external-ci
+/.github/                                           @ROCm/rocm-libraries-reviewers
+
+# Global documentation ownership
+/**/*.md                                            @ROCm/rocm-documentation
+/**/*.rst                                           @ROCm/rocm-documentation
+**/.readthedocs.yaml                                @ROCm/rocm-documentation
+**/docs/                                            @ROCm/rocm-documentation
+**/library/include/                                 @ROCm/rocm-documentation
 
 # Project-specific ownership
-/projects/miopen/* @BrianHarrisonAMD @BradPepersAMD @adickin-amd @JonathanLichtnerAMD
-/projects/composablekernel/* @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @tenpercent @ThomasNing @coderfeli
-/projects/composablekernel/*.md @ROCm/rocm-documentation @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @ThomasNing @coderfeli
-/projects/composablekernel/*.rst @ROCm/rocm-documentation @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @ThomasNing @coderfeli
-/projects/composablekernel/.readthedocs.yaml @ROCm/rocm-documentation @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @ThomasNing @coderfeli
-/projects/composablekernel/docs/ @ROCm/rocm-documentation @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @ThomasNing @coderfeli
-/projects/composablekernel/library/include/ @ROCm/rocm-documentation @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @ThomasNing @coderfeli
-/projects/hipblas-common/* @bnemanich @daineAMD @TorreZuk
-/projects/hipblas-common/*.md @ROCm/rocm-documentation @bnemanich @daineAMD @TorreZuk
-/projects/hipblas-common/*.rst @ROCm/rocm-documentation @bnemanich @daineAMD @TorreZuk
-/projects/hipblas/* @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
-/projects/hipblas/*.md @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
-/projects/hipblas/*.rst @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
-/projects/hipblas/.readthedocs.yaml @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
-/projects/hipblas/docs/ @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
-/projects/hipblas/library/include/* @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
-/projects/hipblaslt/* @jichangjichang @KKyang @vin-huang @imcarsonliao @hcman2 @Serge45 @Jinp800125 @TonyYHsieh @solaslin @aazz44ss
-/projects/hipblaslt/*.md @ROCm/rocm-documentation @jichangjichang @KKyang @vin-huang @imcarsonliao @hcman2 @Serge45 @Jinp800125 @TonyYHsieh @solaslin @aazz44ss
-/projects/hipblaslt/*.rst @ROCm/rocm-documentation @jichangjichang @KKyang @vin-huang @imcarsonliao @hcman2 @Serge45 @Jinp800125 @TonyYHsieh @solaslin @aazz44ss
-/projects/hipblaslt/.readthedocs.yaml @ROCm/rocm-documentation @jichangjichang @KKyang @vin-huang @imcarsonliao @hcman2 @Serge45 @Jinp800125 @TonyYHsieh @solaslin @aazz44ss
-/projects/hipblaslt/docs/ @ROCm/rocm-documentation @jichangjichang @KKyang @vin-huang @imcarsonliao @hcman2 @Serge45 @Jinp800125 @TonyYHsieh @solaslin @aazz44ss
-/projects/hipcub/* @stanleytsang-amd @umfranzw @RobsonRLemos @lawruble13
-/projects/hipfft/* @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
-/projects/hipfft/library/include/ @ROCm/rocm-documentation @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
-/projects/hiprand/* @stanleytsang-amd @umfranzw @RobsonRLemos @lawruble13
-/projects/hiprand/library/include/ @ROCm/rocm-documentation @stanleytsang-amd @umfranzw @RobsonRLemos @lawruble13
-/projects/hipsolver/* @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd
-/projects/hipsolver/*.md @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd
-/projects/hipsolver/*.rst @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd
-/projects/hipsolver/.readthedocs.yaml @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd
-/projects/hipsolver/docs/ @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd
-/projects/hipsolver/library/include/ @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd
-/projects/hipsparse/* @ntrost57 @YvanMokwinski @jsandham
-/projects/hipsparselt/* @vin-huang @jichangjichang @hcman2 @imcarsonliao @Jay0521 @alex391a
-/projects/hipsparselt/library/include/ @ROCm/rocm-documentation @vin-huang @jichangjichang @hcman2 @imcarsonliao @Jay0521 @alex391a
-/projects/rocblas/* @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd @yoichiyoshida @babakpst
-/projects/rocblas/*.md @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
-/projects/rocblas/*.rst @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
-/projects/rocblas/.readthedocs.yaml @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
-/projects/rocblas/docs/ @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
-/projects/rocblas/library/include/* @ROCm/rocm-documentation @amcamd @TorreZuk @mahmoodw @daineAMD @bragadeesh @NaveenElumalaiAMD @rkamd
-/projects/rocfft/* @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
-/projects/rocfft/library/include/ @ROCm/rocm-documentation @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
-/projects/rocprim/* @stanleytsang-amd @umfranzw @RobsonRLemos @lawruble13
-/projects/rocrand/* @stanleytsang-amd @umfranzw @RobsonRLemos @lawruble13
-/projects/rocrand/library/include/ @ROCm/rocm-documentation @stanleytsang-amd @umfranzw @RobsonRLemos @lawruble13
-/projects/rocsolver/* @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
-/projects/rocsolver/*.md @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
-/projects/rocsolver/*.rst @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
-/projects/rocsolver/docs/ @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
-/projects/rocsolver/library/include/ @ROCm/rocm-documentation @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
-/projects/rocsparse/* @ntrost57 @YvanMokwinski @jsandham @kliegeois
-/projects/rocthrust/* @stanleytsang-amd @umfranzw @RobsonRLemos @lawruble13
-/shared/tensile/* @babakpst @yoichiyoshida @bragadeesh @AlexBrownAMD @nakajee
+/projects/composablekernel/                         @illsilin @carlushuang @qianfengz @aosewski @poyenc @geyyer @bartekxk @andriy-ca @afagaj @asleepzzz @tenpercent @ThomasNing @coderfeli
+/projects/hipblas/                                  @ROCm/hipblas-reviewers
+/projects/hipblas-common/                           @ROCm/hipblas-common-reviewers
+/projects/hipblaslt/                                @ROCm/hipblaslt-reviewers
+/projects/hipcub/                                   @ROCm/prims-rands-reviewers
+/projects/hipfft/                                   @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
+/projects/hiprand/                                  @ROCm/prims-rands-reviewers
+/projects/hipsolver/                                @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd
+/projects/hipsparse/                                @ntrost57 @YvanMokwinski @jsandham
+/projects/hipsparselt/                              @ROCm/hipsparselt-reviewers
+/projects/miopen/                                   @ROCm/miopen-reviewers
+/projects/rocblas/                                  @ROCm/rocblas-reviewers
+/projects/rocfft/                                   @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
+/projects/rocprim/                                  @ROCm/prims-rands-reviewers
+/projects/rocrand/                                  @ROCm/prims-rands-reviewers
+/projects/rocsolver/                                @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
+/projects/rocsparse/                                @ntrost57 @YvanMokwinski @jsandham @kliegeois
+/projects/rocthrust/                                @ROCm/prims-rands-reviewers
+/shared/mxdatagenerator/                            @ROCm/rocroller-developers
+/shared/rocroller/                                  @ROCm/rocroller-developers
+/shared/tensile/                                    @ROCm/tensile-reviewers
+
+# Next CMake-specific ownership
+/projects/hipblas-common/**/CMakeLists.txt          @ROCm/rocm-math-lib-build-infra
+
+# Documentation-specific ownership by project
+/projects/hipblas/**/*.md                           @ROCm/hipblas-reviewers @ROCm/hipblas-docs-reviewers
+/projects/hipblas/**/*.rst                          @ROCm/hipblas-reviewers @ROCm/hipblas-docs-reviewers
+/projects/hipblas/**/.readthedocs.yaml              @ROCm/hipblas-reviewers @ROCm/hipblas-docs-reviewers
+/projects/hipblas/docs/                             @ROCm/hipblas-reviewers @ROCm/hipblas-docs-reviewers
+/projects/hipblas/library/include/                  @ROCm/hipblas-reviewers @ROCm/hipblas-docs-reviewers
+
+/projects/hipblas-common/**/*.md                    @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
+/projects/hipblas-common/**/*.rst                   @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
+/projects/hipblas-common/**/.readthedocs.yaml       @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
+/projects/hipblas-common/docs/                      @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
+/projects/hipblas-common/library/include/           @ROCm/hipblas-common-reviewers @ROCm/hipblas-common-docs-reviewers
+
+/projects/hipblaslt/**/*.md                         @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
+/projects/hipblaslt/**/*.rst                        @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
+/projects/hipblaslt/**/.readthedocs.yaml            @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
+/projects/hipblaslt/docs/                           @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
+/projects/hipblaslt/library/include/                @ROCm/hipblaslt-reviewers @ROCm/hipblaslt-docs-reviewers
+
+/projects/hipcub/**/*.md                            @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/hipcub/**/*.rst                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/hipcub/**/.readthedocs.yaml               @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/hipcub/docs/                              @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+
+/projects/hiprand/**/*.md                           @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/hiprand/**/*.rst                          @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/hiprand/**/.readthedocs.yaml              @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/hiprand/docs/                             @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/hiprand/library/include/                  @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+
+/projects/hipsparselt/**/*.md                       @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
+/projects/hipsparselt/**/*.rst                      @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
+/projects/hipsparselt/**/.readthedocs.yaml          @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
+/projects/hipsparselt/docs/                         @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
+/projects/hipsparselt/library/include/              @ROCm/hipsparselt-reviewers @ROCm/hipsparselt-docs-reviewers
+
+/projects/miopen/**/*.md                            @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
+/projects/miopen/**/*.rst                           @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
+/projects/miopen/**/.readthedocs.yaml               @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
+/projects/miopen/docs/                              @ROCm/miopen-reviewers @ROCm/miopen-docs-reviewers
+
+/projects/rocblas/**/*.md                           @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
+/projects/rocblas/**/*.rst                          @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
+/projects/rocblas/**/.readthedocs.yaml              @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
+/projects/rocblas/docs/                             @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
+/projects/rocblas/library/include/                  @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
+
+/projects/rocprim/**/*.md                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/rocprim/**/*.rst                          @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/rocprim/**/.readthedocs.yaml              @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/rocprim/docs/                             @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+
+/projects/rocrand/**/*.md                           @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/rocrand/**/*.rst                          @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/rocrand/**/.readthedocs.yaml              @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/rocrand/docs/                             @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+/projects/rocrand/library/include/                  @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
+
+/projects/rocthrust/**/*.md                         @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/rocthrust/**/*.rst                        @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/rocthrust/**/.readthedocs.yaml            @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+/projects/rocthrust/docs/                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
+
+/shared/tensile/**/*.md                             @ROCm/tensile-reviewers @ROCm/tensile-docs-reviewers
+/shared/tensile/**/*.rst                            @ROCm/tensile-reviewers @ROCm/tensile-docs-reviewers
+/shared/tensile/**/.readthedocs.yaml                @ROCm/tensile-reviewers @ROCm/tensile-docs-reviewers
+/shared/tensile/docs/                               @ROCm/tensile-reviewers @ROCm/tensile-docs-reviewers

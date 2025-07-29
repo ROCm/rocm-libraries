@@ -45,15 +45,21 @@ def read_file_into_set(file_path):
 
 
 def resolve_dependencies(projects, dependencies):
-    """Resolves projects to be run by checking dependencies."""
+    """Resolves projects to be run by checking all levels of dependencies."""
+    def has_dependency(project, projects_set):
+        """Recursively checks if a project has any dependencies in the projects_set."""
+        if project not in dependencies:
+            return False
+        for dependency in dependencies[project]:
+            if dependency in projects_set or has_dependency(dependency, projects_set):
+                return True
+        return False
+
     projects_to_run = set(projects)
 
     for project in projects:
-        if project in dependencies:
-            for dependency in dependencies[project]:
-                if dependency in projects:
-                    # Skip project if its dependency is present
-                    projects_to_run.discard(project)
+        if has_dependency(project, projects_to_run):
+            projects_to_run.discard(project)
 
     return projects_to_run
 
@@ -73,12 +79,13 @@ def main(argv=None) -> None:
         "projects/hipblas-common": {},
         "projects/hipblaslt": {"projects/hipblas-common"},
         "projects/rocblas": {"projects/hipblaslt"},
-        "projects/rocsolver": {"projects/rocprim", "projects/hipblaslt"},
-        "projects/rocsparse": {"projects/rocprim", "projects/hipblaslt"},
+        "projects/rocsolver": {"projects/rocprim", "projects/rocblas"},
+        "projects/rocsparse": {"projects/rocprim", "projects/rocblas"},
         "projects/hipblas": {"projects/rocsolver"},
         "projects/hipsolver": {"projects/rocsolver", "projects/rocsparse"},
-        "projects/hipSPARSE": {"projects/rocsparse"},
-        "projects/MIOpen": {"projects/rocrand", "projects/hipblas"}
+        "projects/hipsparse": {"projects/rocsparse"},
+        "projects/hipsparselt": {"projects/hipsparse"},
+        "projects/miopen": {"projects/rocrand", "projects/hipblas"}
     }
     # Azure pipeline IDs for each project, to be populated as projects are enabled
     definition_ids = {
@@ -94,6 +101,10 @@ def main(argv=None) -> None:
         "projects/hipblaslt": 301,
         "projects/rocblas": 302,
         "projects/rocsolver": 303,
+        "projects/rocsparse": 314,
+        "projects/hipblas": 317,
+        "projects/hipsparse": 315,
+        "projects/hipsparselt": 309,
     }
 
     args = parse_arguments(argv)
