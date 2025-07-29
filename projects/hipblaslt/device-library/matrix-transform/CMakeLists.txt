@@ -27,7 +27,7 @@ string(REGEX MATCHALL "gfx[a-z0-9]+" archs "${GPU_TARGETS}")
 list(REMOVE_DUPLICATES archs)
 list(JOIN archs "," archs)
 
-set(output_library "${device_library_dir}/hipblasltTransform.hsaco")
+set(output_library "${HIPBLASLT_DEVICE_LIBRARY_PATH}/hipblasltTransform.hsaco")
 set(matrix_transform_cpp "${CMAKE_CURRENT_SOURCE_DIR}/matrix_transform.cpp")
 
 add_custom_command(
@@ -38,5 +38,5 @@ add_custom_command(
 
 add_custom_target(matrix-transform-cp ALL
     DEPENDS ${output_library}
-    COMMAND ${CMAKE_COMMAND} -E copy "${output_library}" "${device_library_dir}"
+    COMMAND ${CMAKE_COMMAND} -E copy "${output_library}" "${HIPBLASLT_DEVICE_LIBRARY_PATH}"
 )
