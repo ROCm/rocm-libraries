@@ -172,7 +172,24 @@ rocm_install(FILES "${CMAKE_SOURCE_DIR}/library/src/rocsparse.f90"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/rocsparse"
 )
 
-execute_process(COMMAND ${CMAKE_COMMAND} -E copy_directory ${PROJECT_SOURCE_DIR}/library/include ${PROJECT_BINARY_DIR}/include/rocsparse)
+# Get all header files from the source include directory
+file(GLOB_RECURSE ROCSPARSE_SOURCE_HEADERS "${PROJECT_SOURCE_DIR}/library/include/*")
+
+# Create custom command to copy headers with proper dependencies
+add_custom_command(
+  OUTPUT ${PROJECT_BINARY_DIR}/include/rocsparse/.header_stamp
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${PROJECT_SOURCE_DIR}/library/include ${PROJECT_BINARY_DIR}/include/rocsparse
+  COMMAND ${CMAKE_COMMAND} -E touch ${PROJECT_BINARY_DIR}/include/rocsparse/.header_stamp
+  DEPENDS ${ROCSPARSE_SOURCE_HEADERS}
+  COMMENT "Copying rocSPARSE headers to build directory"
+)
+
+# Create custom target for header copying
+add_custom_target(rocsparse_headers DEPENDS ${PROJECT_BINARY_DIR}/include/rocsparse/.header_stamp)
+
+# Make the library depend on the headers
+add_dependencies(rocsparse rocsparse_headers)
+
 # Install targets
 rocm_install_targets(TARGETS rocsparse
                      INCLUDE

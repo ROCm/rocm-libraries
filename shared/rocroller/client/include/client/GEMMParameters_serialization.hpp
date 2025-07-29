@@ -86,13 +86,10 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "K", params.k);
             iot::mapRequired(io, "alpha", params.alpha);
             iot::mapRequired(io, "beta", params.beta);
-            iot::mapRequired(io, "beta", params.beta);
             iot::mapRequired(io, "types", params.types);
-            iot::mapRequired(io, "scaleValueA", params.scaleValueA);
-            iot::mapRequired(io, "scaleValueB", params.scaleValueB);
+            iot::mapRequired(io, "scaleValue_A", params.scaleValueA);
+            iot::mapRequired(io, "scaleValue_B", params.scaleValueB);
             iot::mapRequired(io, "workgroupMapping", params.workgroupMapping);
-
-            flatMap(io, params.types);
         }
 
         static void
@@ -110,6 +107,7 @@ namespace rocRoller::Serialization
 
         static void mapping(IO& io, Client::GEMMClient::Result& result)
         {
+            iot::mapRequired(io, "resultType", result.benchmarkResults.resultType);
             iot::mapRequired(io, "device", result.benchmarkResults.runParams.device);
 
             flatMap(io, result.problemParams);
@@ -173,10 +171,10 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "scheduler", params.scheduler);
             iot::mapRequired(io, "matchMemoryAccess", params.matchMemoryAccess);
 
-            flatMap(io, params.types);
+            iot::mapRequired(io, "types", params.types);
 
-            iot::mapRequired(io, "loadScaleLDS_A", params.loadLDSScaleA);
-            iot::mapRequired(io, "loadScaleLDS_B", params.loadLDSScaleB);
+            iot::mapRequired(io, "loadLDSScale_A", params.loadLDSScaleA);
+            iot::mapRequired(io, "loadLDSScale_B", params.loadLDSScaleB);
             iot::mapRequired(io, "swizzleScale", params.swizzleScale);
             iot::mapRequired(io, "prefetchScale", params.prefetchScale);
 
