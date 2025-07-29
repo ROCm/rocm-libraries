@@ -29,9 +29,9 @@
       "inherits": "default-release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "BUILD_CLIENTS_TESTS": "ON",
-        "BUILD_CLIENTS_BENCHMARKS": "ON",
-        "BUILD_CLIENTS_SAMPLES": "ON"
+        "HIPSPARSELT_BUILD_TESTING": "ON",
+        "HIPSPARSELT_ENABLE_BENCHMARKS": "ON",
+        "HIPSPARSELT_ENABLE_SAMPLES": "ON"
       }
     },
     {
@@ -40,8 +40,17 @@
       "description": "Build with all client applications for testing",
       "inherits": "debug",
       "cacheVariables": {
-        "HIPSPARSELT_ENABLE_CLIENTS": "ON",
-        "HIPSPARSELT_ENABLE_CUDA": "OFF",
+        "HIPSPARSELT_ENABLE_CLIENT": "ON",
+        "GPU_TARGETS": "all"
+      }
+    },
+    {
+      "name": "coverage",
+      "displayName": "Coverage Build",
+      "description": "Build with coverage enabled",
+      "inherits": "debug",
+      "cacheVariables": {
+        "HIPSPARSELT_BUILD_COVERAGE": "ON",
         "GPU_TARGETS": "all"
       }
     },
