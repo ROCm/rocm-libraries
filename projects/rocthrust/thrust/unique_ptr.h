@@ -844,4 +844,25 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique(size_t
 template <class T, class... Args, class = typename thrust::detail::enable_if<thrust::detail::is_bounded_array<T>::value>::type>
 THRUST_HOST void make_unique(Args&&...) = delete;
 
+#if THRUST_STD_VER >= 20
+
+template <class T, class = typename thrust::detail::enable_if<thrust::detail::not_<std::is_array<T>>::value>::type>
+THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique_for_overwrite()
+{
+  return unique_ptr<T>(thrust::device_malloc<T>(1));
+}
+
+template <class T, class = typename thrust::detail::enable_if<thrust::detail::is_unbounded_array<T>::value>::type>
+THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique_for_overwrite(size_t n)
+{
+  using U                 = typename std::remove_extent<T>::type;
+
+  return unique_ptr<T>(thrust::device_malloc<U>(n), n);
+}
+
+template <class T, class... Args, class = typename thrust::detail::enable_if<thrust::detail::is_bounded_array<T>::value>::type>
+THRUST_HOST void make_unique_for_overwrite(Args&&...) = delete;
+
+#endif
+
 THRUST_NAMESPACE_END
