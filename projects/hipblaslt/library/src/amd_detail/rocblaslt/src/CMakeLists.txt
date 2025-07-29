@@ -13,13 +13,11 @@ target_sources(hipblaslt
         "${CMAKE_CURRENT_SOURCE_DIR}/utility.cpp"
 )
 
-if(HIPBLASLT_ENABLE_DEVICE)
-    target_sources(hipblaslt
-        PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt_transform.cpp"
-    )
-    target_include_directories(hipblaslt PRIVATE "${PROJECT_SOURCE_DIR}/device-library")
-endif()
+target_sources(hipblaslt
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocblaslt_transform.cpp"
+)
+target_include_directories(hipblaslt PRIVATE "${PROJECT_SOURCE_DIR}/device-library")
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
     add_library(hipblaslt-rocroller OBJECT)
