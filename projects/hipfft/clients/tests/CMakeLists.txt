@@ -49,7 +49,9 @@ endif()
 
 project( hipfft-clients-tests LANGUAGES CXX )
 
-find_package( hipfft REQUIRED CONFIG PATHS )
+if( NOT HIPFFT_BUILD_SCOPE )
+  find_package( hipfft REQUIRED CONFIG PATHS )
+endif()
 
 find_package( Boost REQUIRED)
 
