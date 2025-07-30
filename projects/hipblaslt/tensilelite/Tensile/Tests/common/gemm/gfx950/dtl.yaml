@@ -52,6 +52,7 @@ BenchmarkProblems:
         - PrefetchGlobalRead: [1,2]
         - PrefetchLocalRead: [1]
         - GlobalReadVectorWidthA: [1, 4]
+        - GlobalReadVectorWidthB: [1, 4]
         - LocalReadVectorWidth: [1, 4]
         - ScheduleIterAlg: [3]
         - TransposeLDS: [1] #0,1
