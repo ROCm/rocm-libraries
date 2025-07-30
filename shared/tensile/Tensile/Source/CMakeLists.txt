@@ -50,11 +50,15 @@ if(CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang
     endif()
 endif()
 
-if(CMAKE_CXX_COMPILER STREQUAL "hipcc")
-  set(TENSILE_GPU_ARCHS gfx803 gfx900 gfx906:xnack- gfx908:xnack- gfx90a:xnack- gfx1010 gfx1011 gfx1012 gfx1030 gfx1031 gfx1032 gfx1034 gfx1035 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 CACHE STRING "GPU architectures")
+include(TensileSupportedArchitectures)
+set(GPU_TARGETS "" CACHE STRING "AMD GFX targets to cross-compile")
+
+if(NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all")
+    tensile_get_base_architectures(GPU_TARGETS)
 else()
-  set(TENSILE_GPU_ARCHS gfx803 gfx900 gfx906 gfx908 gfx90a gfx1010 gfx1011 gfx1012 gfx1030 gfx1031 gfx1032 gfx1034 gfx1035 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 CACHE STRING "GPU architectures")
+    tensile_validate_gpu_targets("${GPU_TARGETS}")
 endif()
+message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 
 include(CMakeDependentOption)
 CMAKE_DEPENDENT_OPTION(TENSILE_BUILD_CLIENT "Build the benchmarking client" ON
