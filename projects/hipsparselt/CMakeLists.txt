@@ -422,9 +422,6 @@ if(BUILD_CODE_COVERAGE)
   set(LLVM_COV_COMMON_ARGS
     -object ./library/libhipsparselt.so
     -instr-profile=./coverage_test.profdata
-    --ignore-filename-regex=/opt/.*
-    --ignore-filename-regex=/usr/.*
-    --ignore-filename-regex=.*/Tensile/.*
     --ignore-filename-regex=.*/build/.*
   )
 
