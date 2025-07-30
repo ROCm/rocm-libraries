@@ -314,5 +314,6 @@ TEST(HipcubGridTests, GridQueue)
 
         HIP_CHECK(hipFree(device_output));
         HIP_CHECK(hipFree(device_output_reductions));
+        HIP_CHECK(hipFree(queue_allocations));
     }
 }
