@@ -41,6 +41,13 @@
     } \
 }
 
+#ifdef __HIP_PLATFORM_NVCC__
+    #include <cuda/std/cmath>
+    #define POWF(...) cuda::std::powf(__VA_ARGS__)
+#else
+    #define POWF(...) std::powf(__VA_ARGS__)
+#endif
+
 #ifdef _MSC_VER
 inline bool is_environment_variable_set_to_1(const char* name)
 {

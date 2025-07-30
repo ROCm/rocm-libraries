@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 #include <stdio.h>
 
+#include "../test_common.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <numeric>
@@ -189,11 +191,11 @@ TEST(Mt19937OctoEngineTest, uniform_dis_test)
 
     double actual_mean
         = std::accumulate(output.begin(), output.end(), (double)0) / static_cast<double>(output.size());
-    double actual_std_dev = std::accumulate(output.begin(),
-                                            output.end(),
-                                            (double)0,
-                                            [=](double acc, double x)
-                                            { return acc + std::powf(x - actual_mean, 2); });
+    double actual_std_dev
+        = std::accumulate(output.begin(),
+                          output.end(),
+                          (double)0,
+                          [=](double acc, double x) { return acc + POWF(x - actual_mean, 2); });
     actual_std_dev        = std::sqrt(actual_std_dev / static_cast<double>(output.size() - 1));
 
     double expected_mean    = 0.5;
