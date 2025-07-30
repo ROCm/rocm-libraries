@@ -105,6 +105,7 @@ def main(argv=None) -> None:
         "projects/hipblas": 317,
         "projects/hipsparse": 315,
         "projects/hipsparselt": 309,
+        "projects/miopen": 320
     }
 
     args = parse_arguments(argv)
