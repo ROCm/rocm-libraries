@@ -1,39 +1,45 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.25.0)
-project(device-library VERSION 0.0.0 LANGUAGES CXX ASM)
+set(TENSILELITE_BUILD_PARALLEL_LEVEL "" CACHE STRING "Number of CPU cores to use for building device libraries (will use nproc if unset).")
+set(TENSILELITE_KEEP_BUILD_TMP OFF CACHE STRING "Keep temporary build directory for device libraries (turning this ON  bloat the build size).")
+set(TENSILELITE_LIBLOGIC_PATH "" CACHE STRING "Path to library logic files (will use 'library' if unset).")
+set(TENSILELITE_LIBRARY_FORMAT "" CACHE STRING "Format of master solution library files (msgpack or yaml).")
+set(TENSILELITE_ASM_DEBUG "" CACHE STRING "Keep debug information for built code objects.")
+set(TENSILELITE_LOGIC_FILTER "" CACHE STRING "Cutomsized logic filter, default is *, i.e. all logics.")
+set(TENSILELITE_NO_COMPRESS "" CACHE STRING "Do not compress device code object files.")
+set(TENSILELITE_EXPERIMENTAL "" CACHE STRING "Process experimental logic files.")
 
 set(HIPBLASLT_TENSILE_LIBPATH "${hipblaslt_BINARY_DIR}/Tensile" CACHE STRING "Path to output the device gemm libraries.")
 file(MAKE_DIRECTORY "${HIPBLASLT_TENSILE_LIBPATH}/library")
 
-list(JOIN GPU_TARGETS "$<SEMICOLON>" TENSILE_GPU_TARGETS_SEMI_ESCAPED)
+list(JOIN GPU_TARGETS "$<SEMICOLON>" TENSILELITE_GPU_TARGETS_SEMI_ESCAPED)
 
-set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--architecture=${TENSILE_GPU_TARGETS_SEMI_ESCAPED}")
-set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--cxx-compiler=${CMAKE_CXX_COMPILER}")
+set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--architecture=${TENSILELITE_GPU_TARGETS_SEMI_ESCAPED}")
+set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--cxx-compiler=${CMAKE_CXX_COMPILER}")
 if(HIPBLASLT_ENABLE_ASAN)
-    set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--address-sanitizer")
+    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--address-sanitizer")
 endif()
-if(HIPBLASLT_DEVICE_JOBS)
-    set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--jobs=${HIPBLASLT_DEVICE_JOBS}")
+if(TENSILELITE_BUILD_PARALLEL_LEVEL)
+    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--jobs=${TENSILELITE_BUILD_PARALLEL_LEVEL}")
 endif()
-if(HIPBLASLT_KEEP_BUILD_TMP)
-    set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--keep-build-tmp")
+if(TENSILELITE_KEEP_BUILD_TMP)
+    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--keep-build-tmp")
 endif()
-if(HIPBLASLT_ASM_DEBUG)
-    set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--asm-debug")
+if(TENSILELITE_ASM_DEBUG)
+    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--asm-debug")
 endif()
-if(HIPBLASLT_LIBRARY_FORMAT)
-    set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--library-format=${HIPBLASLT_LIBRARY_FORMAT}")
+if(TENSILELITE_LIBRARY_FORMAT)
+    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--library-format=${TENSILELITE_LIBRARY_FORMAT}")
 endif()
-if(HIPBLASLT_LOGIC_FITLER)
-    set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--library-format=${HIPBLASLT_LOGIC_FITLER}")
+if(TENSILELITE_LOGIC_FITLER)
+    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--library-format=${TENSILELITE_LOGIC_FITLER}")
 endif()
-if(HIPBLASLT_NO_COMPRESS)
-    set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--no-compress")
+if(TENSILELITE_NO_COMPRESS)
+    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--no-compress")
 endif()
-if(HIPBLASLT_EXPERIMENTAL)
-    set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--experimental")
+if(TENSILELITE_EXPERIMENTAL)
+    set(TENSILELITE_BUILD_OPTS ${TENSILELITE_BUILD_OPTS} "--experimental")
 endif()
 
 if(NOT HIPBLASLT_LIBLOGIC_PATH)
@@ -43,7 +49,7 @@ endif()
 set(output_stamp "${CMAKE_CURRENT_BINARY_DIR}/Tensile.stamp")
 set(TENSILE_CREATE_LIBRARY_COMMAND
     ${HIPBLASLT_PYTHON_COMMAND} -m Tensile.TensileCreateLibrary
-    ${TENSILE_BUILD_OPTS}
+    ${TENSILELITE_BUILD_OPTS}
     ${HIPBLASLT_LIBLOGIC_PATH}
     "${HIPBLASLT_TENSILE_LIBPATH}"
     HIP

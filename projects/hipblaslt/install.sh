@@ -769,7 +769,7 @@ pushd .
     fi
     # tensile_opt="${tensile_opt} -DTensile_CODE_OBJECT_VERSION=${tensile_cov}"
     if [[ ${tensile_threads} != $(nproc) ]]; then
-      tensile_opt="${tensile_opt} -DHIPBLASLT_DEVICE_JOBS=${tensile_threads}"
+      tensile_opt="${tensile_opt} -DTENSILELITE_BUILD_PARALLEL_LEVEL=${tensile_threads}"
     fi
   fi
 
@@ -778,17 +778,17 @@ pushd .
   fi
 
   if [[ "${tensile_msgpack_backend}" == true ]]; then
-    tensile_opt="${tensile_opt} -DHIPBLASLT_LIBRARY_FORMAT=msgpack"
+    tensile_opt="${tensile_opt} -DTENSILELITE_LIBRARY_FORMAT=msgpack"
   else
-    tensile_opt="${tensile_opt} -DHIPBLASLT_LIBRARY_FORMAT=yaml"
+    tensile_opt="${tensile_opt} -DTENSILELITE_LIBRARY_FORMAT=yaml"
   fi
 
   if [[ "${build_release}" == false ]]; then
-    tensile_opt="${tensile_opt} -DHIPBLASLT_ASM_DEBUG=ON"
+    tensile_opt="${tensile_opt} -DTENSILELITE_ASM_DEBUG=ON"
   fi
 
   if ! [[ "${logic_filter}" == "" ]]; then
-    tensile_opt="${tensile_opt} -DHIPBLASLT_LOGIC_FILTER=${logic_filter}"
+    tensile_opt="${tensile_opt} -DTENSILELITE_LOGIC_FILTER=${logic_filter}"
   fi
 
   if [[ "${enable_gprof}" == true ]]; then
@@ -800,15 +800,15 @@ pushd .
   fi
 
   if [[ "${keep_build_tmp}" == true ]]; then
-    tensile_opt="${tensile_opt} -DHIPBLASLT_KEEP_BUILD_TMP=ON"
+    tensile_opt="${tensile_opt} -DTENSILELITE_KEEP_BUILD_TMP=ON"
   fi
 
   if [[ "${no_compress}" == true ]]; then
-    tensile_opt="${tensile_opt} -DHIPBLASLT_NO_COMPRESS=ON"
+    tensile_opt="${tensile_opt} -DTENSILELITE_NO_COMPRESS=ON"
   fi
 
   if [[ "${experimental}" == true ]]; then
-    tensile_opt="${tensile_opt} -DHIPBLASLT_EXPERIMENTAL=ON"
+    tensile_opt="${tensile_opt} -DTENSILELITE_EXPERIMENTAL=ON"
   fi
 
   if [[ "${disable_hipblaslt_marker}" == true ]]; then

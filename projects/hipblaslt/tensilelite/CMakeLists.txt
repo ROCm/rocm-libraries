@@ -1,16 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-cmake_minimum_required(VERSION 3.24.4)
-project(tensilelite LANGUAGES CXX)
-
-option(TENSILELITE_ENABLE_AUTOBUILD "Build the tensilelite host library tests." ON)
-option(HIPBLASLT_ENABLE_HOST "Build hipBLASLt host library." OFF)
-option(TENSILELITE_ENABLE_HOST "Build the tensilelite host library." OFF)
-option(HIPBLASLT_ENABLE_MSGPACK "Use msgpack for parsing configuration files." ON)
-option(HIPBLASLT_ENABLE_OPENMP "Use OpenMP to improve performance." ON)
-option(HIPBLASLT_ENABLE_LLVM "Use msgpack for parsing configuration files." OFF)
-
 add_subdirectory(rocisa)
 
 if(TENSILELITE_ENABLE_AUTOBUILD)
@@ -18,17 +8,7 @@ if(TENSILELITE_ENABLE_AUTOBUILD)
     include(tensilelite_auto_build)
 endif()
 
-if(TENSILELITE_ENABLE_HOST OR HIPBLASLT_ENABLE_HOST)
-    if(HIPBLASLT_ENABLE_OPENMP)
-        find_package(OpenMP REQUIRED)
-    endif()
-
-    if(HIPBLASLT_ENABLE_LLVM)
-        find_package(LLVM REQUIRED)
-    endif()
-
-    find_package(hip REQUIRED)
-
+if(TENSILELITE_ENABLE_HOST)
     add_library(tensilelite-host OBJECT)
     add_library(tensilelite::tensilelite-host ALIAS tensilelite-host)
 
@@ -50,17 +30,10 @@ if(TENSILELITE_ENABLE_HOST OR HIPBLASLT_ENABLE_HOST)
     endif()
 
     if(HIPBLASLT_ENABLE_MSGPACK)
-        # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
-        # Prefer 6.x (msgpack-cxx)
-        find_package(msgpack-cxx CONFIG)
         if(msgpack-cxx_FOUND)
-            message(STATUS "Found msgpack-cxx (>=6.x)")
             target_link_libraries(tensilelite-host PRIVATE msgpack-cxx)
         else()
-            # TODO: set minimum version requied for *-cxx library
-            find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
             target_link_libraries(tensilelite-host PRIVATE msgpackc-cxx)
-            message(STATUS "Found msgpack (<=5.x)")
         endif()
         target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_MSGPACK>) # make TENSILELITE_MSGPACK
     endif()
@@ -79,6 +52,7 @@ if(TENSILELITE_ENABLE_HOST OR HIPBLASLT_ENABLE_HOST)
         PRIVATE
             hip::device
     )
+
     add_subdirectory(src)
     add_subdirectory(include)
 
