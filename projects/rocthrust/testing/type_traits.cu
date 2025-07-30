@@ -28,10 +28,16 @@
 
 #include <unittest/unittest.h>
 
-#include _THRUST_STD_INCLUDE(complex)
+#if defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
+// This header pulls in an unsuppressable warning on GCC 6
+#  include _THRUST_STD_INCLUDE(complex)
+#endif // defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
 #include _THRUST_STD_INCLUDE(tuple)
-#include _THRUST_STD_INCLUDE(type_traits)
 #include _THRUST_STD_INCLUDE(utility)
+
+#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#  include <type_traits>
+#endif
 
 void TestIsContiguousIterator()
 {
@@ -202,12 +208,15 @@ void TestTriviallyRelocatable()
   static_assert(thrust::is_trivially_relocatable<thrust::pair<int, thrust::complex<float>>>::value, "");
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::pair<int, _THRUST_STD::complex<float>>>::value, "");
   static_assert(thrust::is_trivially_relocatable<thrust::tuple<int, thrust::complex<float>, char>>::value, "");
-  static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<int, _THRUST_STD::complex<float>, char>>::value, "");
+  static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<int, _THRUST_STD::complex<float>, char>>::value,
+                "");
 #endif // defined(THRUST_GCC_VERSION) && THRUST_GCC_VERSION >= 70000
-  // static_assert(thrust::is_trivially_relocatable<
-  //                 _THRUST_STD::tuple<thrust::pair<int, thrust::tuple<int, _THRUST_STD::tuple<>>>,
-  //                              thrust::tuple<_THRUST_STD::pair<int, thrust::tuple<>>, int>>>::value,
-  //               "");
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+  static_assert(thrust::is_trivially_relocatable<
+                  _THRUST_STD::tuple<thrust::pair<int, thrust::tuple<int, _THRUST_STD::tuple<>>>,
+                                     thrust::tuple<_THRUST_STD::pair<int, thrust::tuple<>>, int>>>::value,
+                "");
+#endif
 
   static_assert(!thrust::is_trivially_relocatable<thrust::pair<int, std::string>>::value, "");
   static_assert(!thrust::is_trivially_relocatable<_THRUST_STD::pair<int, std::string>>::value, "");
@@ -216,9 +225,13 @@ void TestTriviallyRelocatable()
 
   // test propagation of relocatability through pair and tuple
   static_assert(thrust::is_trivially_relocatable<NonTriviallyCopyable>::value, "");
-  // static_assert(thrust::is_trivially_relocatable<thrust::pair<NonTriviallyCopyable, int>>::value, "");
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+  static_assert(thrust::is_trivially_relocatable<thrust::pair<NonTriviallyCopyable, int>>::value, "");
+#endif
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::pair<NonTriviallyCopyable, int>>::value, "");
-  // static_assert(thrust::is_trivially_relocatable<thrust::tuple<NonTriviallyCopyable>>::value, "");
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+  static_assert(thrust::is_trivially_relocatable<thrust::tuple<NonTriviallyCopyable>>::value, "");
+#endif
   static_assert(thrust::is_trivially_relocatable<_THRUST_STD::tuple<NonTriviallyCopyable>>::value, "");
 };
 DECLARE_UNITTEST(TestTriviallyRelocatable);

@@ -30,9 +30,9 @@
 
 #  include <unittest/unittest.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <iterator>
-#endif
+#  if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#    include <iterator>
+#  endif
 
 using namespace unittest;
 

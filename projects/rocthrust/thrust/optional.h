@@ -47,7 +47,9 @@
 #include <thrust/swap.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
+// clang-format off
 #  include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
+// clang-format on
 #endif
 
 #define THRUST_OPTIONAL_VERSION_MAJOR 0
@@ -217,7 +219,8 @@ using get_map_return = optional<fixup_void<invoke_result_t<F, U>>>;
 template <class F, class = void, class... U>
 struct returns_void_impl;
 template <class F, class... U>
-struct returns_void_impl<F, _THRUST_STD::void_t<invoke_result_t<F, U...>>, U...> : std::is_void<invoke_result_t<F, U...>>
+struct returns_void_impl<F, _THRUST_STD::void_t<invoke_result_t<F, U...>>, U...>
+    : std::is_void<invoke_result_t<F, U...>>
 {};
 template <class F, class... U>
 using returns_void = returns_void_impl<F, void, U...>;
@@ -582,7 +585,8 @@ struct optional_copy_assign_base<T, false> : optional_move_base<T>
 };
 
 template <class T,
-          bool = _THRUST_STD::is_trivially_destructible<T>::value && _THRUST_STD::is_trivially_move_constructible<T>::value
+          bool = _THRUST_STD::is_trivially_destructible<T>::value
+              && _THRUST_STD::is_trivially_move_constructible<T>::value
               && _THRUST_STD::is_trivially_move_assignable<T>::value>
 struct optional_move_assign_base : optional_copy_assign_base<T>
 {

@@ -20,8 +20,8 @@
 #include <thrust/sort.h>
 #include <thrust/unique.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
@@ -121,7 +121,8 @@ TYPED_TEST(MergeKeyValueTestsClass, TestMergeKeyValue)
       else
       {
         // TODO(bgruber): remove next line in C++17 and pass compare_function{} directly to stable_sort
-        using C = _THRUST_STD::conditional_t<_THRUST_STD::is_void<compare_function>::value, thrust::less<T>, compare_function>;
+        using C =
+          _THRUST_STD::conditional_t<_THRUST_STD::is_void<compare_function>::value, thrust::less<T>, compare_function>;
         thrust::stable_sort(h_a.begin(), h_a.end(), C{});
         thrust::stable_sort(h_b.begin(), h_b.end(), C{});
       }

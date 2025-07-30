@@ -80,13 +80,13 @@ struct category_to_traversal
     // check for host system
     : eval_if<
         _THRUST_STD::disjunction<_THRUST_STD::is_convertible<Category, thrust::input_host_iterator_tag>,
-                                _THRUST_STD::is_convertible<Category, thrust::output_host_iterator_tag>>::value,
+                                 _THRUST_STD::is_convertible<Category, thrust::output_host_iterator_tag>>::value,
 
         host_system_category_to_traversal<Category>,
 
         // check for device system
         eval_if<_THRUST_STD::disjunction<_THRUST_STD::is_convertible<Category, thrust::input_device_iterator_tag>,
-                                        _THRUST_STD::is_convertible<Category, thrust::output_device_iterator_tag>>::value,
+                                         _THRUST_STD::is_convertible<Category, thrust::output_device_iterator_tag>>::value,
 
                 device_system_category_to_traversal<Category>,
 

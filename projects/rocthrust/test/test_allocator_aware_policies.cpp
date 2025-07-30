@@ -76,11 +76,12 @@ struct TestAllocatorAttachment
   template <typename ExpectedResource, typename T>
   static void assert_npa_correct(T)
   {
-    ASSERT_EQ((_THRUST_STD::is_same<T,
-                                    typename PolicyInfo::template apply_base_second<
-                                      thrust::detail::execute_with_allocator,
-                                      thrust::mr::allocator<thrust::detail::max_align_t, ExpectedResource>>::type>::value),
-              true);
+    ASSERT_EQ(
+      (_THRUST_STD::is_same<T,
+                            typename PolicyInfo::template apply_base_second<
+                              thrust::detail::execute_with_allocator,
+                              thrust::mr::allocator<thrust::detail::max_align_t, ExpectedResource>>::type>::value),
+      true);
   }
 
   template <typename Policy>

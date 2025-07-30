@@ -22,7 +22,9 @@
 #endif // no system header
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
+// clang-format off
 #  include _THRUST_STD_INCLUDE(__functional/address_stability.h)
+// clang-format on
 #else
 #  include <functional>
 #  include <type_traits>
@@ -42,7 +44,7 @@ using ::cuda::proclaims_copyable_arguments;
 #  else
 using ::hip::proclaim_copyable_arguments;
 using ::hip::proclaims_copyable_arguments;
-#endif
+#  endif
 #  define THRUST_MARK_CAN_COPY_ARGUMENTS(functor)                                              \
     /*we know what plus<T> etc. does if T is not a type that could have a weird operatorX() */ \
     template <typename T>                                                                      \

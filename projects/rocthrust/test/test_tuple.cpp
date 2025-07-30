@@ -19,8 +19,8 @@
 #include <thrust/swap.h>
 #include <thrust/tuple.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD

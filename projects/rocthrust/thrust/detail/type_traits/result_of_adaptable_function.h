@@ -28,7 +28,9 @@
 #include <thrust/detail/type_traits.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
+// clang-format off
 #  include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
+// clang-format on
 #endif
 
 #include <type_traits>

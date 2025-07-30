@@ -589,9 +589,11 @@ struct TestComplexPowerFunctions
       ASSERT_ALMOST_EQUAL(thrust::pow(a_thrust, b_thrust), std::pow(a_std, b_std));
       static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust, b_thrust))>::value, "");
       ASSERT_ALMOST_EQUAL(thrust::pow(a_thrust, b_thrust.real()), std::pow(a_std, b_std.real()));
-      static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust, b_thrust.real()))>::value, "");
+      static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust, b_thrust.real()))>::value,
+                    "");
       ASSERT_ALMOST_EQUAL(thrust::pow(a_thrust.real(), b_thrust), std::pow(a_std.real(), b_std));
-      static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust.real(), b_thrust))>::value, "");
+      static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust.real(), b_thrust))>::value,
+                    "");
 
       ASSERT_ALMOST_EQUAL(thrust::pow(a_thrust, 4), std::pow(a_std, 4));
       static_assert(_THRUST_STD::is_same<thrust::complex<T>, decltype(thrust::pow(a_thrust, 4))>::value, "");
@@ -614,21 +616,23 @@ struct TestComplexPowerFunctions
       const std::complex<T0> b_std(data[2], data[3]);
 
       ASSERT_ALMOST_EQUAL(thrust::pow(a_thrust, b_thrust), std::pow(a_std, b_std));
-      static_assert(_THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust, b_thrust))>::value, "");
+      static_assert(_THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust, b_thrust))>::value,
+                    "");
       ASSERT_ALMOST_EQUAL(thrust::pow(b_thrust, a_thrust), std::pow(b_std, a_std));
-      static_assert(_THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust, a_thrust))>::value, "");
+      static_assert(_THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust, a_thrust))>::value,
+                    "");
       ASSERT_ALMOST_EQUAL(thrust::pow(a_thrust, b_thrust.real()), std::pow(a_std, b_std.real()));
-      static_assert(_THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust, b_thrust.real()))>::value,
-                    "");
+      static_assert(
+        _THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust, b_thrust.real()))>::value, "");
       ASSERT_ALMOST_EQUAL(thrust::pow(b_thrust, a_thrust.real()), std::pow(b_std, a_std.real()));
-      static_assert(_THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust, a_thrust.real()))>::value,
-                    "");
+      static_assert(
+        _THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust, a_thrust.real()))>::value, "");
       ASSERT_ALMOST_EQUAL(thrust::pow(a_thrust.real(), b_thrust), std::pow(a_std.real(), b_std));
-      static_assert(_THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust.real(), b_thrust))>::value,
-                    "");
+      static_assert(
+        _THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(a_thrust.real(), b_thrust))>::value, "");
       ASSERT_ALMOST_EQUAL(thrust::pow(b_thrust.real(), a_thrust), std::pow(b_std.real(), a_std));
-      static_assert(_THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust.real(), a_thrust))>::value,
-                    "");
+      static_assert(
+        _THRUST_STD::is_same<thrust::complex<promoted>, decltype(thrust::pow(b_thrust.real(), a_thrust))>::value, "");
     }
   }
 };

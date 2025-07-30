@@ -40,13 +40,13 @@ namespace detail
 template <typename T>
 struct is_host_iterator_category
     : _THRUST_STD::disjunction<_THRUST_STD::is_convertible<T, thrust::input_host_iterator_tag>,
-                              _THRUST_STD::is_convertible<T, thrust::output_host_iterator_tag>>
+                               _THRUST_STD::is_convertible<T, thrust::output_host_iterator_tag>>
 {}; // end is_host_iterator_category
 
 template <typename T>
 struct is_device_iterator_category
     : _THRUST_STD::disjunction<_THRUST_STD::is_convertible<T, thrust::input_device_iterator_tag>,
-                              _THRUST_STD::is_convertible<T, thrust::output_device_iterator_tag>>
+                               _THRUST_STD::is_convertible<T, thrust::output_device_iterator_tag>>
 {}; // end is_device_iterator_category
 
 template <typename T>

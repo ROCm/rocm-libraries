@@ -50,7 +50,8 @@ TEST(AddressStabilityTests, TestAddressStabilityLibcuxx)
   static_assert(!proclaims_copyable_arguments<_THRUST_STD::plus<>>::value, "");
 
   // libcu++ function objects with unknown types and opt-in
-  static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(_THRUST_STD::plus<addable>{}))>::value, "");
+  static_assert(
+    proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(_THRUST_STD::plus<addable>{}))>::value, "");
   static_assert(proclaims_copyable_arguments<decltype(proclaim_copyable_arguments(_THRUST_STD::plus<>{}))>::value, "");
 }
 

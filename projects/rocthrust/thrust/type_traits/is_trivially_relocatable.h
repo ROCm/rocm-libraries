@@ -37,9 +37,11 @@
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
+// clang-format off
 #  include _THRUST_STD_INCLUDE(__fwd/pair.h)
 #  include _THRUST_STD_INCLUDE(__fwd/tuple.h)
 #  include _THRUST_STD_INCLUDE(__type_traits/conjunction.h)
+// clang-format on
 #endif
 
 #include <type_traits>

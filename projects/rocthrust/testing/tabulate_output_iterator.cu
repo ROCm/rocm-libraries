@@ -106,8 +106,8 @@ void TestTabulateOutputIterator()
 
   // Use operator type that supports the targeted system
   using op_t = typename _THRUST_STD::conditional<(_THRUST_STD::is_same<space, thrust::host_system_tag>::value),
-                                           host_write_first_op<it_t>,
-                                           device_write_first_op<it_t>>::type;
+                                                 host_write_first_op<it_t>,
+                                                 device_write_first_op<it_t>>::type;
 
   // Construct tabulate_output_iterator
   op_t op{output.begin()};

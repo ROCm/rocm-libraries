@@ -16,7 +16,9 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 
+// clang-format off
 #  include _THRUST_STD_INCLUDE(__cccl/rtti.h)
+// clang-format on
 
 #  ifdef _CCCL_NO_RTTI
 #    define THRUST_NO_RTTI

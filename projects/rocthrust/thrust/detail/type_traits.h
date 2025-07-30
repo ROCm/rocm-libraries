@@ -235,7 +235,8 @@ template <typename T1, typename T2>
 struct promoted_numerical_type<
   T1,
   T2,
-  typename _THRUST_STD::enable_if<_And<typename _THRUST_STD::is_floating_point<T1>::type, typename _THRUST_STD::is_floating_point<T2>::type>::value>::type>
+  typename _THRUST_STD::enable_if<_And<typename _THRUST_STD::is_floating_point<T1>::type,
+                                       typename _THRUST_STD::is_floating_point<T2>::type>::value>::type>
 {
   using type = typename ::thrust::detail::larger_type<T1, T2>::type;
 };
@@ -244,7 +245,8 @@ template <typename T1, typename T2>
 struct promoted_numerical_type<
   T1,
   T2,
-  typename _THRUST_STD::enable_if<_And<typename is_integral<T1>::type, typename _THRUST_STD::is_floating_point<T2>::type>::value>::type>
+  typename _THRUST_STD::enable_if<
+    _And<typename is_integral<T1>::type, typename _THRUST_STD::is_floating_point<T2>::type>::value>::type>
 {
   using type = T2;
 };
@@ -253,7 +255,8 @@ template <typename T1, typename T2>
 struct promoted_numerical_type<
   T1,
   T2,
-  typename _THRUST_STD::enable_if<_And<typename _THRUST_STD::is_floating_point<T1>::type, typename is_integral<T2>::type>::value>::type>
+  typename _THRUST_STD::enable_if<
+    _And<typename _THRUST_STD::is_floating_point<T1>::type, typename is_integral<T2>::type>::value>::type>
 {
   using type = T1;
 };
