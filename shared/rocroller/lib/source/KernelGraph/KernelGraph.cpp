@@ -98,10 +98,10 @@ namespace rocRoller
                             concatenate(transformString, " PreCheck: \n", check.explanation));
             }
 
-            KernelGraph newGraph = [&] () {
-		TIMER(t, "KernelGraph::Transformation::" + transformation->name());
-		return transformation->apply(*this);
-	    }();
+            KernelGraph newGraph = [&]() {
+                TIMER(t, "KernelGraph::Transformation::" + transformation->name());
+                return transformation->apply(*this);
+            }();
 
             bool drawMappings = Settings::getInstance()->get(Settings::LogGraphMapperConnections);
 
