@@ -15,9 +15,6 @@ set(VALID_BINS
 "TensileMergeLibrary"
 )
 
-# Find Python interpreter
-find_package(Python COMPONENTS Interpreter REQUIRED)
-
 # Set common variables
 set(TENSILE_BIN_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/bin")
 string(REGEX REPLACE ";" " " tensilelite_python_command "${HIPBLASLT_PYTHON_COMMAND}")
