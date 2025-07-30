@@ -55,4 +55,5 @@ void cblas_gemm(hipsparseOrder_t       order,
                 int64_t                ldc,
                 int64_t                sizeC,
                 Tc*                    alphaVec,
+                int32_t                dim = 0,
                 bool                   alt = false);

@@ -150,7 +150,10 @@ namespace
                 {
                     name << "_avs";
                 }
-
+                if(arg.factor_dim != 0)
+                {
+                    name << "_fd" << arg.factor_dim;
+                }
                 name << '_' << (char)std::toupper(arg.transA) << (char)std::toupper(arg.transB);
 
                 name << '_' << arg.M << '_' << arg.N << '_' << arg.K << '_' << arg.alpha << '_'

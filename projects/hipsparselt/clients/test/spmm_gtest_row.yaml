@@ -749,4 +749,21 @@ Tests:
   orderB: [R]
   orderC: [R]
   orderD: [R]
+
+- name: spmm_factor_dim
+  category: quick
+  function:
+    spmm: *real_precisions_2b
+  matrix_size:
+    - { M:  32, N:  64, K:  32 }
+  transA_transB: *transA_transB_range
+  alpha_beta: *deepbench_alpha_beta_range
+  bias_vector: [true]
+  sparse_b: [true, false]
+  alpha_vector_scaling: [true]
+  factor_dim: [0, 1]
+  orderA: [R]
+  orderB: [R]
+  orderC: [R]
+  orderD: [R]
 ...

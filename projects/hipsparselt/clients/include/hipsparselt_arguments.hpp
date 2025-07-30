@@ -134,6 +134,8 @@ struct Arguments
 
     bool alpha_vector_scaling;
 
+    int32_t factor_dim;
+
     char orderA;
     char orderB;
     char orderC;
@@ -207,6 +209,7 @@ struct Arguments
     OPER(sparse_b) SEP               \
     OPER(func_version) SEP           \
     OPER(alpha_vector_scaling) SEP   \
+    OPER(factor_dim) SEP             \
     OPER(orderA) SEP                 \
     OPER(orderB) SEP                 \
     OPER(orderC) SEP                 \

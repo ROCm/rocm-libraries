@@ -520,6 +520,10 @@ try
          bool_switch(&arg.alpha_vector_scaling)->default_value(false),
          "Apply alpha vector scaling")
 
+        ("factor_dim",
+         value<int32_t>(&arg.factor_dim)->default_value(0),
+         "Alpha vector scaling dimension: 0 = row (same row uses same alpha/bias), 1 = col (same col uses same alpha/bias)")
+
         ("help,h", "produces this help message")
 
         ("version", "Prints the version number");

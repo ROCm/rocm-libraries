@@ -108,6 +108,7 @@ struct RocsparseltContractionProblem
     int64_t                     bias_stride;
     hipDataType                 bias_type;
     bool                        alpha_vector_scaling;
+    int                         factor_dim;
 
     void*  workspace;
     size_t workspaceSize;
@@ -152,6 +153,7 @@ struct RocsparseltContractionProblem
                                   int64_t                     bias_stride,
                                   hipDataType                 bias_type,
                                   bool                        alpha_vector_scaling,
+                                  int                         factor_dim,
                                   void*                       workspace,
                                   size_t                      workspaceSize,
                                   hipStream_t*                streams,
@@ -200,6 +202,7 @@ struct RocsparseltContractionProblem
         , bias_stride(bias_stride)
         , bias_type(bias_type)
         , alpha_vector_scaling(alpha_vector_scaling)
+        , factor_dim(factor_dim)
         , workspace(workspace)
         , workspaceSize(workspaceSize)
         , streams(streams)
@@ -249,6 +252,7 @@ struct RocsparseltContractionProblem
                                   int64_t                     bias_stride,
                                   hipDataType                 bias_type,
                                   bool                        alpha_vector_scaling,
+                                  int                         factor_dim,
                                   void*                       workspace,
                                   size_t                      workspaceSize,
                                   hipStream_t*                streams,
@@ -297,6 +301,7 @@ struct RocsparseltContractionProblem
         , bias_stride(bias_stride)
         , bias_type(bias_type)
         , alpha_vector_scaling(alpha_vector_scaling)
+        , factor_dim(factor_dim)
         , workspace(workspace)
         , workspaceSize(workspaceSize)
         , streams(streams)
@@ -347,6 +352,7 @@ struct RocsparseltContractionProblem
                                   int64_t                     bias_stride,
                                   hipDataType                 bias_type,
                                   bool                        alpha_vector_scaling,
+                                  int                         factor_dim,
                                   void*                       workspace,
                                   size_t                      workspaceSize,
                                   hipStream_t*                streams,
@@ -395,6 +401,7 @@ struct RocsparseltContractionProblem
         , bias_stride(bias_stride)
         , bias_type(bias_type)
         , alpha_vector_scaling(alpha_vector_scaling)
+        , factor_dim(factor_dim)
         , workspace(workspace)
         , workspaceSize(workspaceSize)
         , streams(streams)

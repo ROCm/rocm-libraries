@@ -156,6 +156,7 @@ Arguments:
   - sparse_b: c_bool
   - func_version: c_int32
   - alpha_vector_scaling: c_bool
+  - factor_dim: c_int32
   - orderA: c_char
   - orderB: c_char
   - orderC: c_char
@@ -241,6 +242,7 @@ Defaults:
   sparse_b: false
   func_version: 1
   alpha_vector_scaling: false
+  factor_dim: 0
   orderA: C
   orderB: C
   orderC: C

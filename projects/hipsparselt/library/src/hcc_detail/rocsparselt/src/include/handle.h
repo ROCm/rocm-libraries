@@ -198,6 +198,7 @@ struct _rocsparselt_matmul_descr
         , bias_stride(rhs.bias_stride)
         , bias_type(rhs.bias_type)
         , alpha_vector_scaling(rhs.alpha_vector_scaling)
+        , factor_dim(rhs.factor_dim)
         , m(rhs.m)
         , n(rhs.n)
         , k(rhs.k)
@@ -263,6 +264,7 @@ struct _rocsparselt_matmul_descr
     int64_t     bias_stride                       = 0;
     hipDataType bias_type;
     int         alpha_vector_scaling = 0;
+    int         factor_dim           = 0;
     int64_t     m                    = 0;
     int64_t     n                    = 0;
     int64_t     k                    = 0;

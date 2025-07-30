@@ -400,29 +400,31 @@ namespace
 
         assert((useBias == useScaleAlphaVec) || (useBias == 0 || useScaleAlphaVec == 0));
 
-        int guessedFactorDim = (prob.order == rocsparselt_order_row) ? 2 : 1;
+        int factorDim = prob.factor_dim;
+        if(prob.order == rocsparselt_order_row)
+            factorDim = factorDim == 0 ? 1 : 0;
+        size_t factorContentLength = factorDim ? d.sizes()[1] : d.sizes()[0];
+        int effectiveFactorDim = factorDim + 1;
+
         // set bias mode
         if(prob.bias_vector != nullptr || useBias > 0)
         {
-            tensileProblem.setUseBias(useBias > 0 ? useBias : guessedFactorDim);
+            tensileProblem.setUseBias(useBias > 0 ? useBias : effectiveFactorDim);
             tensileProblem.setBias(hipDataType_to_tensile_type(prob.bias_type),
-                                   prob.order == rocsparselt_order_row ? d.sizes()[1]
-                                                                       : d.sizes()[0],
+                                   factorContentLength,
                                    prob.bias_stride,
                                    false,
                                    TensileLite::ContractionProblemGemm::TENSOR::D,
-                                   prob.order == rocsparselt_order_row);
+                                   factorDim);
         }
 
         if(prob.alpha_vector_scaling || useScaleAlphaVec > 0)
         {
-
             tensileProblem.setUseScaleAlphaVec(useScaleAlphaVec > 0 ? useScaleAlphaVec
-                                                                    : guessedFactorDim);
+                                                                    : effectiveFactorDim);
             tensileProblem.setScaleAlphaVec(Tensile_Tc,
-                                            prob.order == rocsparselt_order_row ? d.sizes()[1]
-                                                                                : d.sizes()[0],
-                                            prob.order == rocsparselt_order_row);
+                                            factorContentLength,
+                                            factorDim);
         }
         return tensileProblem;
     }
@@ -1028,7 +1030,15 @@ rocsparselt_status getBestSolutions(const RocsparseltContractionProblem<Ti, To, 
     }
 
     hardware          = TensileLite::hip::GetDevice(prob.handle->device);
-    auto tensile_prob = ConstructTensileProblem(prob);
+
+    int effectiveFactorDim = prob.factor_dim;
+    if(prob.order == rocsparselt_order_row)
+        effectiveFactorDim = prob.factor_dim == 0 ? 1 : 0;
+    effectiveFactorDim++;
+    int biasDim = prob.bias_vector == nullptr ? 0 : effectiveFactorDim;
+    int alphaDim = prob.alpha_vector_scaling ? effectiveFactorDim : 0;
+
+    auto tensile_prob = ConstructTensileProblem(prob, biasDim, alphaDim);
 
     // auto handle = prob.handle;
     auto solutions = library->findTopSolutions(tensile_prob, *hardware, requestConfigs);
@@ -1046,17 +1056,22 @@ rocsparselt_status getBestSolutions(const RocsparseltContractionProblem<Ti, To, 
     {
         log_info(prob.handle, __func__, "No solution founds, try to find alternative solutions");
 
-        for(int useBias = tensile_prob.useBias(); useBias < 4; useBias++)
+        for(int useBias = biasDim; useBias < 4; useBias++)
         {
-            for(int useScaleAlphaVec = tensile_prob.useScaleAlphaVec(); useScaleAlphaVec < 4;
+            if(!(useBias == 0 || useBias == effectiveFactorDim || useBias == 3))
+                continue; // useBias = (0, 1, 3) or (0, 2, 3)
+
+            for(int useScaleAlphaVec = alphaDim; useScaleAlphaVec < 4;
                 useScaleAlphaVec++)
             {
+                if(!(useScaleAlphaVec == 0 || useScaleAlphaVec == effectiveFactorDim || useScaleAlphaVec == 3))
+                    continue; // useScaleAlphaVec = (0, 1, 3) or (0, 2, 3)
+
+                if(useBias == biasDim && useScaleAlphaVec == alphaDim)
+                    continue; // already try in the first time.
+
                 if(useBias != 0 && useScaleAlphaVec != 0 && useScaleAlphaVec != useBias)
                     continue; //useBias and useScaleAlphaVec must in the same dimension.
-
-                if(useBias == tensile_prob.useBias()
-                   && useScaleAlphaVec == tensile_prob.useScaleAlphaVec())
-                    continue; // already try in the first time.
 
                 findAlternativeSolution(useBias, useScaleAlphaVec);
                 if(*foundConfigs != 0)

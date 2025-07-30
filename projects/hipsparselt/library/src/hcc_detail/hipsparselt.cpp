@@ -192,6 +192,8 @@ rocsparselt_matmul_descr_attribute_
         return rocsparselt_matmul_activation_tanh_beta;
     case HIPSPARSELT_MATMUL_BIAS_TYPE:
         return rocsparselt_matmul_bias_type;
+    case HIPSPARSELT_MATMUL_FACTOR_DIM:
+        return rocsparselt_matmul_factor_dim;
     default:
         throw HIPSPARSE_STATUS_NOT_SUPPORTED;
     }

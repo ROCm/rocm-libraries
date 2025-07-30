@@ -42,8 +42,9 @@
 #include <hipsparselt/hipsparselt.h>
 #include <omp.h>
 
+//dim0 = same ROW# use the same bias, dim1 = same COL# use the same bias
 template <typename T, typename Tb = T, typename To = T, hipsparseOrder_t order>
-void bias(int64_t m, int64_t n, int64_t ld, T* src, To* dest, Tb* bias)
+void bias(int64_t m, int64_t n, int64_t ld, T* src, To* dest, Tb* bias, int32_t dim=0)
 {
     using TAccum = float;
 
@@ -58,24 +59,44 @@ void bias(int64_t m, int64_t n, int64_t ld, T* src, To* dest, Tb* bias)
     To (*saturate)(TAccum val);
     saturate = std::is_same<int8_t, To>() ? saturate_i8 : saturate_o;
 
-    for(int64_t i = 0; i < m; i++)
+    auto bias_ = [&](int64_t i, int64_t j, Tb bias)
     {
-        Tb _bias = *(bias + i);
-#pragma omp parallel for
+        int64_t pos;
+        if constexpr(order == HIPSPARSE_ORDER_COL)
+            pos = j * ld + i;
+        else
+            pos = i * ld + j;
+        TAccum src_Taccum;
+        if constexpr(std::is_same<T, TAccum>())
+            src_Taccum = *(src + pos);
+        else
+            src_Taccum = static_cast<TAccum>(*(src + pos));
+
+        *(dest + pos) = saturate(src_Taccum + static_cast<TAccum>(bias));
+    };
+
+    if(dim == 0)
+    {
+        for(int64_t i = 0; i < m; i++)
+        {
+            Tb _bias = *(bias + i);
+    #pragma omp parallel for
+            for(int64_t j = 0; j < n; j++)
+            {
+                bias_(i, j, _bias);
+            }
+        }
+    }
+    else
+    {
         for(int64_t j = 0; j < n; j++)
         {
-            int64_t pos;
-            if constexpr(order == HIPSPARSE_ORDER_COL)
-                pos = j * ld + i;
-            else
-                pos = i * ld + j;
-            TAccum src_Taccum;
-            if constexpr(std::is_same<T, TAccum>())
-                src_Taccum = *(src + pos);
-            else
-                src_Taccum = static_cast<TAccum>(*(src + pos));
-
-            *(dest + pos) = saturate(src_Taccum + static_cast<TAccum>(_bias));
+            Tb _bias = *(bias + j);
+    #pragma omp parallel for
+            for(int64_t i = 0; i < m; i++)
+            {
+                bias_(i, j, _bias);
+            }
         }
     }
 }
@@ -306,7 +327,11 @@ void testing_spmm(const Arguments& arg)
     int64_t        stride_d           = do_strided_batched              ? arg.stride_d
                                         : orderD == HIPSPARSE_ORDER_COL ? ldd * N
                                                                         : ldc * M;
-    int64_t bias_stride = do_strided_batched ? arg.bias_stride == -1 ? M : arg.bias_stride : 0;
+    int64_t bias_length = M;
+    if(arg.factor_dim == 1)
+        bias_length = N;
+
+    int64_t bias_stride = do_strided_batched ? arg.bias_stride == -1 ? bias_length : arg.bias_stride : 0;
 
     hipDataType bias_type = arg.bias_type;
 
@@ -532,14 +557,14 @@ void testing_spmm(const Arguments& arg)
     hipsparselt_seedrand();
 
     const size_t size_bias
-        = arg.bias_vector ? (bias_stride == 0 ? M : bias_stride * num_batches) : 0;
+        = arg.bias_vector ? (bias_stride == 0 ? bias_length : bias_stride * num_batches) : 0;
 
     device_vector<TBias> dBias(size_bias, 1, HMM);
     CHECK_DEVICE_ALLOCATION(dBias.memcheck());
     host_vector<TBias> hBias(size_bias);
     if(arg.bias_vector)
     {
-        hipsparselt_init<TBias>(hBias, M, 1, M, bias_stride, num_batches);
+        hipsparselt_init<TBias>(hBias, bias_length, 1, bias_length, bias_stride, num_batches);
         CHECK_HIP_ERROR(dBias.transfer_from(hBias));
         void* _dBias = dBias;
         EXPECT_HIPSPARSE_STATUS(
@@ -558,14 +583,14 @@ void testing_spmm(const Arguments& arg)
 #endif
     }
 
-    const size_t size_alpha_vec = arg.alpha_vector_scaling ? M : 0;
+    const size_t size_alpha_vec = arg.alpha_vector_scaling ? bias_length : 0;
 
     device_vector<Talpha> dAlpahVector(size_alpha_vec, 1, HMM);
     CHECK_DEVICE_ALLOCATION(dAlpahVector.memcheck());
     host_vector<Talpha> hAlpahVector(size_alpha_vec);
     if(arg.alpha_vector_scaling)
     {
-        hipsparselt_init<Talpha>(hAlpahVector, M, 1, M, size_alpha_vec, 1);
+        hipsparselt_init<Talpha>(hAlpahVector, bias_length, 1, bias_length, size_alpha_vec, 1);
         CHECK_HIP_ERROR(dAlpahVector.transfer_from(hAlpahVector));
         int alpha_vector_scaling = 1;
         EXPECT_HIPSPARSE_STATUS(
@@ -577,6 +602,11 @@ void testing_spmm(const Arguments& arg)
             HIPSPARSE_STATUS_SUCCESS);
         h_alpha = static_cast<Talpha>(1);
     }
+
+    EXPECT_HIPSPARSE_STATUS(
+        hipsparseLtMatmulDescSetAttribute(
+            handle, matmul, HIPSPARSELT_MATMUL_FACTOR_DIM, &arg.factor_dim, sizeof(int32_t)),
+        HIPSPARSE_STATUS_SUCCESS);
 
     hipsparselt_local_matmul_alg_selection alg_sel(handle, matmul, HIPSPARSELT_MATMUL_ALG_DEFAULT);
 
@@ -850,8 +880,9 @@ void testing_spmm(const Arguments& arg)
 
 #define activation_param \
     tM, tN, ldd, hD_gold_act + pos, hD_gold + pos, arg.activation_arg1, arg.activation_arg2
-#define bias_act_param M, N, ldd, hD_gold_act + pos, hD_gold_act + pos, hBias + bias_stride* i
-#define bias_param M, N, ldd, hD_gold_act + pos, hD_gold + pos, hBias + bias_stride* i
+
+#define bias_act_param M, N, ldd, hD_gold_act + pos, hD_gold_act + pos, hBias + bias_stride* i, arg.factor_dim
+#define bias_param M, N, ldd, hD_gold_act + pos, hD_gold + pos, hBias + bias_stride* i, arg.factor_dim
 
         for(int i = 0; i < num_batches; i++)
         {
@@ -876,6 +907,7 @@ void testing_spmm(const Arguments& arg)
                                                ldd,
                                                tSizeD,
                                                arg.alpha_vector_scaling ? hAlpahVector : (float*)nullptr,
+                                               arg.factor_dim,
                                                false);
 
                 auto pos = stride_d * i;
@@ -947,6 +979,7 @@ void testing_spmm(const Arguments& arg)
                                            ldd,
                                            tSizeD,
                                            arg.alpha_vector_scaling ? hAlpahVector : (float*)nullptr,
+                                           arg.factor_dim,
                                            false);
         }
 #undef activation_param
@@ -987,9 +1020,9 @@ void testing_spmm(const Arguments& arg)
         print_strided_batched("B", &hB_[0], B_row_r, B_col_r, num_batches, 1, ldb, stride_b);
         print_strided_batched("C", &hC[0], C_row_r, C_col_r, num_batches, 1, ldc, stride_c);
         if(arg.bias_vector)
-            print_strided_batched("bias", &hBias[0], M, 1, num_batches, 1, M, bias_stride);
+            print_strided_batched("bias", &hBias[0], bias_length, 1, num_batches, 1, bias_length, bias_stride);
         if(arg.alpha_vector_scaling)
-            print_strided_batched("alpha_vec", &hAlpahVector[0], M, 1, 1, 1, M, M);
+            print_strided_batched("alpha_vec", &hAlpahVector[0], bias_length, 1, 1, 1, bias_length, bias_length);
         print_strided_batched("hD_gold", &hD_gold[0], tM, tN, num_batches, 1, ldd, stride_d);
         print_strided_batched("hD1", &hD_1[0], tM, tN, num_batches, 1, ldd, stride_d);
 #endif
@@ -1423,6 +1456,7 @@ void testing_aux_plan_assign(const Arguments& arg)
                                                          ldd,
                                                          ldd * N,
                                                          nullptr,
+                                                         0,
                                                          false);
 
                           auto pos = stride_d * i;
@@ -1448,6 +1482,7 @@ void testing_aux_plan_assign(const Arguments& arg)
                                                      ldd,
                                                      ldd * N,
                                                      nullptr,
+                                                     0,
                                                      false);
                   }
 #undef activation_param

@@ -15,6 +15,10 @@ Definitions:
     - { alpha: -2.0, beta: -3.0 }
     - { alpha:  0.0, beta:  1.0 }
 
+  - &deepbench_alpha_beta_range
+    - { alpha: 1, beta: 0 }
+    - { alpha: 1, beta: 1 }
+
   - &alpha_beta_range_small
     - { alpha: 2, alphai: 2, beta: -1.0, betai: 2.0 }
 
@@ -222,4 +226,19 @@ Tests:
   activation_type: clippedrelu
   activation_arg1 : [-1.0, 0.0, 0.5]
   activation_arg2 : [-1.0, 0.0, 0.5, 1.0, 3.0]
+
+- name: spmm_strided_batched_small_factor_dim
+  category: quick
+  function:
+    spmm_strided_batched: *real_precisions_1b
+  matrix_size:
+    - { M: 16, N: 32, K: 32 }
+  alpha_beta: *deepbench_alpha_beta_range
+  transA_transB: *transA_transB_range
+  batch_count: [ 3 ]
+  bias_vector: [true]
+  bias_stride: [0, -1, 256]
+  sparse_b: [ true, false]
+  alpha_vector_scaling: [true]
+  factor_dim: [0, 1]
 ...

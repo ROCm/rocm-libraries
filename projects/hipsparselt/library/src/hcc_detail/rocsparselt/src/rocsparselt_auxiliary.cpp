@@ -906,20 +906,23 @@ rocsparselt_status
             }
             case rocsparselt_matmul_bias_stride:
             {
-                assign_data(&_matmulDescr->bias_stride);
-                if(_matmulDescr->bias_stride != 0
-                   && _matmulDescr->bias_stride < _matmulDescr->matrix_D->m)
+                int64_t bias_stride = 0;
+                assign_data(&bias_stride);
+                if(bias_stride != 0 && (bias_stride < _matmulDescr->matrix_D->m && bias_stride < _matmulDescr->matrix_D->n))
                 {
-                    hipsparselt_cerr << "The bias stride must be 0 or at least the number of rows "
+                    hipsparselt_cerr << "The bias stride must be 0 or at least the number of rows/cols "
                                         "of the output matrix (D) ("
                                      << _matmulDescr->matrix_D->m
-                                     << "), current: " << _matmulDescr->bias_stride << std::endl;
+                                     << " x "
+                                     << _matmulDescr->matrix_D->n
+                                     << "), current: " << bias_stride << std::endl;
                     log_error(_handle,
                               __func__,
-                              "The bias stride must be 0 or at least the number of rows of the "
+                              "The bias stride must be 0 or at least the number of rows/cols of the "
                               "output matrix (D)");
                     return rocsparselt_status_invalid_value;
                 }
+                _matmulDescr->bias_stride = bias_stride;
                 break;
             }
             case rocsparselt_matmul_bias_type:
@@ -930,6 +933,20 @@ rocsparselt_status
             case rocsparselt_matmul_alpha_vector_scaling:
             {
                 assign_data(&_matmulDescr->alpha_vector_scaling);
+                break;
+            }
+            case rocsparselt_matmul_factor_dim:
+            {
+                int32_t factor_dim = 0;
+                assign_data(&factor_dim);
+                if(factor_dim != 0 and factor_dim != 1)
+                {
+                    log_error(_handle,
+                              __func__,
+                              "The factor dim must be 0 or 1");
+                    return rocsparselt_status_invalid_value;
+                }
+                _matmulDescr->factor_dim = factor_dim;
                 break;
             }
             default:
@@ -1074,6 +1091,11 @@ rocsparselt_status
             case rocsparselt_matmul_alpha_vector_scaling:
             {
                 retrive_data(_matmulDescr->alpha_vector_scaling);
+                break;
+            }
+            case rocsparselt_matmul_factor_dim:
+            {
+                retrive_data(_matmulDescr->factor_dim);
                 break;
             }
             default:
@@ -1537,6 +1559,23 @@ rocsparselt_status
                              << std::endl;
             log_error(_handle, __func__, "number of batches of matrics A,B,C,D must be the same");
             return rocsparselt_status_invalid_size;
+        }
+
+        // Validate bias_stride against factor_dim now that all attributes are finalized.
+        if(_matmulDescr->bias_pointer != nullptr && _matmulDescr->bias_stride != 0)
+        {
+            int64_t bias_length = _matmulDescr->factor_dim == 1
+                                    ? _matmulDescr->matrix_D->n
+                                    : _matmulDescr->matrix_D->m;
+            if(_matmulDescr->bias_stride < bias_length)
+            {
+                hipsparselt_cerr << "bias_stride (" << _matmulDescr->bias_stride
+                                << ") must be 0 or >= bias_length (" << bias_length
+                                << ") for factor_dim=" << _matmulDescr->factor_dim << std::endl;
+                log_error(_handle, __func__,
+                        "bias_stride must be 0 or >= bias_length for the given factor_dim");
+                return rocsparselt_status_invalid_value;
+            }
         }
 
         auto                     _plan = reinterpret_cast<_rocsparselt_matmul_plan*>(plan);

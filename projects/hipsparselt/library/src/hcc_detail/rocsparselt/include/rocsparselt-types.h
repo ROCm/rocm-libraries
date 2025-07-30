@@ -293,6 +293,9 @@ typedef enum rocsparselt_matmul_descr_attribute_
     rocsparselt_matmul_activation_tanh_beta
     = 15, /**< Beta value of the Tanh activation function. */
     rocsparselt_matmul_bias_type = 16, /**< Precision of bias >*/
+    rocsparselt_matmul_sparse_mat_pointer = 17, /**< Pointer to the pruned sparse matrix. */
+    rocsparselt_matmul_factor_dim
+    = 18, /**< Dimension for alpha vector scaling: 0 = row vector, 1 = col vector */
     rocsparselt_matmul_activation_none, /**< activation function is disabled. */
 } rocsparselt_matmul_descr_attribute;
 
