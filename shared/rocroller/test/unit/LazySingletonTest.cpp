@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2025 AMD ROCm(TM) Software
+ * Copyright 2024-2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,24 +24,19 @@
  *
  *******************************************************************************/
 
-#pragma once
+#include <iostream>
+#include <rocRoller/Utilities/TestSingleton.hpp>
 
-#include <rocRoller/Utilities/Component_Impl.hpp>
-#include <rocRoller/Utilities/LazySingleton.hpp>
+#include "SimpleFixture.hpp"
 
-namespace rocRoller
+namespace rocRollerTest
 {
-    /**
-     * @brief ComponentRegistration class is derived from LazySingleton class and
-     * handles registration of all component bases.
-     */
-    class ComponentRegistration : public rocRoller::LazySingleton<ComponentRegistration>
+    class LazySingletonTest : public SimpleFixture
     {
-    public:
-        template <typename Component>
-        void registerComponent()
-        {
-            bool someBool = rocRoller::Component::RegisterComponentImpl<Component>();
-        }
     };
+
+    TEST_F(LazySingletonTest, Basic)
+    {
+        rocRoller::TestSingleton<int>::getInstance()->print(1);
+    }
 }

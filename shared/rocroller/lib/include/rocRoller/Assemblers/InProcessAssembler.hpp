@@ -46,11 +46,6 @@ namespace rocRoller
 
         std::string name() const override;
 
-        void registerComponent()
-        {
-            ComponentRegistration::getInstance()->registerComponent<InProcessAssembler>();
-        }
-
         /**
          * @brief Assemble a string of machine code. The resulting object code will be returned
          * as a vector of charaters.

@@ -32,7 +32,6 @@
 #include <rocRoller/Assemblers/InProcessAssembler.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/Utilities/Component.hpp>
-#include <rocRoller/Utilities/ComponentRegistration.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
 // Helper macro to check for amd_comgr errors
