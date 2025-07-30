@@ -84,11 +84,11 @@ namespace rocRoller
             {
                 m_kernel->startCodeGeneration();
 
-		// TODO: Remove this when RemoveSetCoordinate transformation is enabled
-		//       as RemoveSetCoordinate will build all transformers.
-		//
-		if(m_graph->getAllTransformers().empty())
-		    m_graph->buildAllTransformers();
+                // TODO: Remove this when RemoveSetCoordinate transformation is enabled
+                //       as RemoveSetCoordinate will build all transformers.
+                //
+                if(m_graph->getAllTransformers().empty())
+                    m_graph->buildAllTransformers();
 
                 //
                 // Rebind the transducer and coordinate graph to the ones in m_graph
