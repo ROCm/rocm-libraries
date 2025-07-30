@@ -20,7 +20,7 @@ __global__ void kernel()
 {
     uint32_t const index = byte_stride * threadIdx.x;
 #pragma unroll
-    for(int i = 0; i < 32; ++i)
+    for(int i = 0; i < 3000; ++i)
     {
         if constexpr(instr == 32)
             asm volatile("ds_read_b32 v2, %0" : : "v"(index));
@@ -31,7 +31,7 @@ __global__ void kernel()
 
 int main()
 {
-    dim3 threads(64);
+    dim3 threads(256);
     dim3 blocks(1);
     hipLaunchKernelGGL(kernel, blocks, threads, 0, 0);
 
