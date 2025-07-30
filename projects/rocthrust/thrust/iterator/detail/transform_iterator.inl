@@ -46,7 +46,7 @@ private:
   // FIXME(bgruber): the next line should be correct, but thrust::identity<T> lies and advertises a ::return_type of T,
   // while its operator() returns const T& (which __invoke_of correctly detects), which causes transform_iterator to
   // crash (or cause UB) during dereferencing. Check the test `thrust.test.dereference` for the OMP and TBB backends.
-  // using wrapped_func_ret_t = ::cuda::std::__invoke_of<UnaryFunc, iterator_value_t<Iterator>>;
+  // using wrapped_func_ret_t = _THRUST_STD::__invoke_of<UnaryFunc, iterator_value_t<Iterator>>;
   using wrapped_func_ret_t = result_of_adaptable_function<UnaryFunc(iterator_value_t<Iterator>)>;
 
   // By default, dereferencing the iterator yields the same as the function.

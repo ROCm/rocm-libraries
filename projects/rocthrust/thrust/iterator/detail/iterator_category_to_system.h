@@ -55,13 +55,13 @@ struct iterator_category_to_system
     // convertible to host iterator?
     : eval_if<
         _THRUST_STD::disjunction<_THRUST_STD::is_convertible<Category, thrust::input_host_iterator_tag>,
-                                _THRUST_STD::is_convertible<Category, thrust::output_host_iterator_tag>>::value,
+                                 _THRUST_STD::is_convertible<Category, thrust::output_host_iterator_tag>>::value,
 
         detail::identity_<thrust::host_system_tag>,
 
         // convertible to device iterator?
         eval_if<_THRUST_STD::disjunction<_THRUST_STD::is_convertible<Category, thrust::input_device_iterator_tag>,
-                                        _THRUST_STD::is_convertible<Category, thrust::output_device_iterator_tag>>::value,
+                                         _THRUST_STD::is_convertible<Category, thrust::output_device_iterator_tag>>::value,
 
                 detail::identity_<thrust::device_system_tag>,
 

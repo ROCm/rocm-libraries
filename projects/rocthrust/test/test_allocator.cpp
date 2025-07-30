@@ -243,10 +243,11 @@ TEST(AllocatorTests, TestAllocatorTraitsRebind)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  ASSERT_EQ((_THRUST_STD::is_same<typename thrust::detail::allocator_traits<
-                              thrust::device_malloc_allocator<int>>::template rebind_traits<float>::other,
-                            typename thrust::detail::allocator_traits<thrust::device_malloc_allocator<float>>>::value),
-            true);
+  ASSERT_EQ(
+    (_THRUST_STD::is_same<typename thrust::detail::allocator_traits<
+                            thrust::device_malloc_allocator<int>>::template rebind_traits<float>::other,
+                          typename thrust::detail::allocator_traits<thrust::device_malloc_allocator<float>>>::value),
+    true);
 
   ASSERT_EQ(
     (_THRUST_STD::is_same<
@@ -265,10 +266,10 @@ TEST(AllocatorTests, TestAllocatorTraitsRebindCpp11)
       thrust::device_malloc_allocator<float>>::value),
     true);
 
-  ASSERT_EQ(
-    (_THRUST_STD::is_same<typename thrust::detail::allocator_traits<my_minimal_allocator<int>>::template rebind_alloc<float>,
-                    my_minimal_allocator<float>>::value),
-    true);
+  ASSERT_EQ((_THRUST_STD::is_same<
+              typename thrust::detail::allocator_traits<my_minimal_allocator<int>>::template rebind_alloc<float>,
+              my_minimal_allocator<float>>::value),
+            true);
 
   ASSERT_EQ(
     (_THRUST_STD::is_same<
@@ -276,8 +277,8 @@ TEST(AllocatorTests, TestAllocatorTraitsRebindCpp11)
       typename thrust::detail::allocator_traits<thrust::device_malloc_allocator<float>>>::value),
     true);
 
-  ASSERT_EQ(
-    (_THRUST_STD::is_same<typename thrust::detail::allocator_traits<my_minimal_allocator<int>>::template rebind_traits<float>,
-                    typename thrust::detail::allocator_traits<my_minimal_allocator<float>>>::value),
-    true);
+  ASSERT_EQ((_THRUST_STD::is_same<
+              typename thrust::detail::allocator_traits<my_minimal_allocator<int>>::template rebind_traits<float>,
+              typename thrust::detail::allocator_traits<my_minimal_allocator<float>>>::value),
+            true);
 }

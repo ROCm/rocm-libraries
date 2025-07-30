@@ -24,8 +24,8 @@
 
 #include _THRUST_STD_INCLUDE(type_traits)
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
 using ZipIteratorTests32BitParams = ::testing::Types<Params<int>, Params<unsigned int>, Params<float>>;

@@ -43,7 +43,7 @@ THRUST_NAMESPACE_BEGIN
 /*! \brief Utility trait that maps a sequence of any types to the type void.
  */
 template <typename...>
-struct THRUST_DEPRECATED_BECAUSE("Use ::cuda::std::void_t") voider
+struct THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::void_t") voider
 {
   /*! \brief The resulting type (always void). */
   using type = void;
@@ -52,7 +52,7 @@ struct THRUST_DEPRECATED_BECAUSE("Use ::cuda::std::void_t") voider
 /*! \brief Utility alias that maps a sequence of types to the type void.
  */
 template <typename... Ts>
-using void_t THRUST_DEPRECATED_BECAUSE("Use ::cuda::std::void_t") = void;
+using void_t THRUST_DEPRECATED_BECAUSE("Use _THRUST_STD::void_t") = void;
 
 /*! \} // type traits
  */

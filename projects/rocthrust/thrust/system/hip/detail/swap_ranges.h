@@ -72,7 +72,7 @@ struct swap_f
   template <class Size>
   void THRUST_HIP_DEVICE_FUNCTION operator()(Size idx)
   {
-    // TODO(bgruber): this should probably use ::cuda::std::iter_swap(items1 + idx, items2 + idx);
+    // TODO(bgruber): this should probably use _THRUST_STD::iter_swap(items1 + idx, items2 + idx);
     value1_type item1 = items1[idx];
     value2_type item2 = items2[idx];
     // XXX thrust::swap is buggy

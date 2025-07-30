@@ -34,18 +34,17 @@
 #include <thrust/detail/functional/address_stability.h>
 #include <thrust/detail/type_traits.h>
 
+#include _THRUST_STD_INCLUDE(functional)
+
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #    include <cuda/functional>
 #  else
 #    include <hip/functional>
-#endif
-#  include _THRUST_STD_INCLUDE(functional)
+#  endif
 #else
 #  include <utility>
 #endif
-
-#include <functional>
 
 /*! \cond
  */
@@ -62,7 +61,7 @@ using ::hip::minimum;
 #  endif
 using identity = _THRUST_STD::__identity;
 #else
-// cuda::maximum
+// cuda::maximum or hip::maximum
 template <typename T = void>
 struct maximum
 {
@@ -86,7 +85,7 @@ struct maximum<void>
   }
 };
 
-// cuda::minimum
+// cuda::minimum or hip::minimum
 template <typename T = void>
 struct minimum
 {
@@ -110,7 +109,7 @@ struct minimum<void>
   }
 };
 
-// cuda::std::__identity
+// _THRUST_STD::__identity
 struct identity
 {
   template <typename T>

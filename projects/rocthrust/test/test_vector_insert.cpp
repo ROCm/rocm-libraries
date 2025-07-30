@@ -18,8 +18,8 @@
 #include <thrust/device_malloc_allocator.h>
 #include <thrust/sequence.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD

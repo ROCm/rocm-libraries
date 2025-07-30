@@ -55,7 +55,7 @@ namespace detail
 namespace sequential
 {
 
-// TODO(bgruber): we should make this an alias of cuda::std::iter_swap
+// TODO(bgruber): we should make this an alias of _THRUST_STD::iter_swap
 THRUST_EXEC_CHECK_DISABLE
 template <typename ForwardIterator1, typename ForwardIterator2>
 THRUST_HOST_DEVICE void iter_swap(ForwardIterator1 iter1, ForwardIterator2 iter2)

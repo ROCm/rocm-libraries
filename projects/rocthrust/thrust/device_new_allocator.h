@@ -162,11 +162,8 @@ public:
    */
   THRUST_HOST_DEVICE inline size_type max_size() const
   {
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
+    // Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
     return _THRUST_STD::numeric_limits<size_type>::max THRUST_PREVENT_MACRO_SUBSTITUTION() / sizeof(T);
-#else // Use rocprim::numeric_limits if thrust/detail/type_traits.h uses rocprim::arithmetic
-    return ::std::numeric_limits<size_type>::max THRUST_PREVENT_MACRO_SUBSTITUTION() / sizeof(T);
-#endif
   } // end max_size()
 
   /*! Compares against another \p device_malloc_allocator for equality.

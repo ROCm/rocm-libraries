@@ -53,6 +53,8 @@ THRUST_NAMESPACE_BEGIN
 struct null_type
 {};
 
+#ifndef THRUST_DOXYGEN_INVOKED
+
 THRUST_HOST_DEVICE inline bool operator==(const null_type&, const null_type&)
 {
   return true;
@@ -82,6 +84,8 @@ THRUST_HOST_DEVICE inline bool operator>(const null_type&, const null_type&)
 {
   return false;
 }
+
+#endif
 
 THRUST_NAMESPACE_END
 

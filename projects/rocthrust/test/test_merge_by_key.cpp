@@ -234,7 +234,8 @@ TYPED_TEST(MergeByKeyTestsClass, TestMergeByKey)
         else
         {
           // TODO(bgruber): remove next line in C++17 and pass compare_function{} directly to stable_sort
-          using C = _THRUST_STD::conditional_t<_THRUST_STD::is_void<compare_function>::value, thrust::less<T>, compare_function>;
+          using C =
+            _THRUST_STD::conditional_t<_THRUST_STD::is_void<compare_function>::value, thrust::less<T>, compare_function>;
           thrust::stable_sort(h_a_keys.begin(), h_a_keys.end(), C{});
           thrust::stable_sort(h_b_keys.begin(), h_b_keys.end(), C{});
         }

@@ -114,8 +114,8 @@ THRUST_NAMESPACE_END
     template <typename Result, typename Arg>                                                                           \
     struct impl<true, Result(Arg)>                                                                                     \
     {                                                                                                                  \
-      static _THRUST_STD::add_lvalue_reference_t<derived_type> test_me;                                                 \
-      static _THRUST_STD::add_lvalue_reference_t<Arg> arg;                                                              \
+      static _THRUST_STD::add_lvalue_reference_t<derived_type> test_me;                                                \
+      static _THRUST_STD::add_lvalue_reference_t<Arg> arg;                                                             \
                                                                                                                        \
       static const bool value =                                                                                        \
         sizeof(return_value_check<T, Result>::deduce(                                                                  \
@@ -126,9 +126,9 @@ THRUST_NAMESPACE_END
     template <typename Result, typename Arg1, typename Arg2>                                                           \
     struct impl<true, Result(Arg1, Arg2)>                                                                              \
     {                                                                                                                  \
-      static _THRUST_STD::add_lvalue_reference_t<derived_type> test_me;                                                 \
-      static _THRUST_STD::add_lvalue_reference_t<Arg1> arg1;                                                            \
-      static _THRUST_STD::add_lvalue_reference_t<Arg2> arg2;                                                            \
+      static _THRUST_STD::add_lvalue_reference_t<derived_type> test_me;                                                \
+      static _THRUST_STD::add_lvalue_reference_t<Arg1> arg1;                                                           \
+      static _THRUST_STD::add_lvalue_reference_t<Arg2> arg2;                                                           \
                                                                                                                        \
       static const bool value =                                                                                        \
         sizeof(return_value_check<T, Result>::deduce(                                                                  \
@@ -139,10 +139,10 @@ THRUST_NAMESPACE_END
     template <typename Result, typename Arg1, typename Arg2, typename Arg3>                                            \
     struct impl<true, Result(Arg1, Arg2, Arg3)>                                                                        \
     {                                                                                                                  \
-      static _THRUST_STD::add_lvalue_reference_t<derived_type> test_me;                                                 \
-      static _THRUST_STD::add_lvalue_reference_t<Arg1> arg1;                                                            \
-      static _THRUST_STD::add_lvalue_reference_t<Arg2> arg2;                                                            \
-      static _THRUST_STD::add_lvalue_reference_t<Arg3> arg3;                                                            \
+      static _THRUST_STD::add_lvalue_reference_t<derived_type> test_me;                                                \
+      static _THRUST_STD::add_lvalue_reference_t<Arg1> arg1;                                                           \
+      static _THRUST_STD::add_lvalue_reference_t<Arg2> arg2;                                                           \
+      static _THRUST_STD::add_lvalue_reference_t<Arg3> arg3;                                                           \
                                                                                                                        \
       static const bool value =                                                                                        \
         sizeof(return_value_check<T, Result>::deduce((test_me.member_function_name(arg1, arg2, arg3),                  \
@@ -153,11 +153,11 @@ THRUST_NAMESPACE_END
     template <typename Result, typename Arg1, typename Arg2, typename Arg3, typename Arg4>                             \
     struct impl<true, Result(Arg1, Arg2, Arg3, Arg4)>                                                                  \
     {                                                                                                                  \
-      static _THRUST_STD::add_lvalue_reference_t<derived_type> test_me;                                                 \
-      static _THRUST_STD::add_lvalue_reference_t<Arg1> arg1;                                                            \
-      static _THRUST_STD::add_lvalue_reference_t<Arg2> arg2;                                                            \
-      static _THRUST_STD::add_lvalue_reference_t<Arg3> arg3;                                                            \
-      static _THRUST_STD::add_lvalue_reference_t<Arg4> arg4;                                                            \
+      static _THRUST_STD::add_lvalue_reference_t<derived_type> test_me;                                                \
+      static _THRUST_STD::add_lvalue_reference_t<Arg1> arg1;                                                           \
+      static _THRUST_STD::add_lvalue_reference_t<Arg2> arg2;                                                           \
+      static _THRUST_STD::add_lvalue_reference_t<Arg3> arg3;                                                           \
+      static _THRUST_STD::add_lvalue_reference_t<Arg4> arg4;                                                           \
                                                                                                                        \
       static const bool value =                                                                                        \
         sizeof(return_value_check<T, Result>::deduce((test_me.member_function_name(arg1, arg2, arg3, arg4),            \

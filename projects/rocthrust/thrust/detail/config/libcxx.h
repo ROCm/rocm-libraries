@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <thrust/detail/config/config.h>
+
 // This is a utility file that helps managing which
 // 'std' implementation we're using. The provided
 // macros are for internal use only and may change
@@ -57,8 +59,8 @@
 // If not using GPU backend or GPU vendor's STD is not
 // found, use fallback.
 #ifndef _THRUST_HAS_DEVICE_SYSTEM_STD
-#  define _THRUST_STD_INCLUDE(LIB) <LIB>
-#  define _THRUST_STD              ::std
+#  define _THRUST_STD_INCLUDE(LIB)      <LIB>
+#  define _THRUST_STD                   ::std
 #  define _THRUST_HAS_DEVICE_SYSTEM_STD 0
 #  define _THRUST_STD_NAMESPACE_BEGIN \
     namespace std                     \

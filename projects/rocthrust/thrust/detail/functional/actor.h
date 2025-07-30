@@ -40,8 +40,8 @@
 #include <thrust/detail/type_traits/result_of_adaptable_function.h>
 #include <thrust/tuple.h>
 
-#  include _THRUST_STD_INCLUDE(type_traits)
-#  include _THRUST_STD_INCLUDE(utility)
+#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(utility)
 
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <tuple>

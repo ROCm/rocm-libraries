@@ -93,9 +93,10 @@ struct pointer_base
 {
   // void pointers should have no element type
   // note that we remove_cv from the Element type to get the value_type
-  using value_type = typename thrust::detail::eval_if<_THRUST_STD::is_void<typename thrust::remove_cvref<Element>::type>::value,
-                                                      thrust::detail::identity_<void>,
-                                                      _THRUST_STD::remove_cv<Element>>::type;
+  using value_type =
+    typename thrust::detail::eval_if<_THRUST_STD::is_void<typename thrust::remove_cvref<Element>::type>::value,
+                                     thrust::detail::identity_<void>,
+                                     _THRUST_STD::remove_cv<Element>>::type;
 
   // if no Derived type is given, just use pointer
   using derived_type =

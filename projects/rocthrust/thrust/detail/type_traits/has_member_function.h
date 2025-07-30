@@ -33,18 +33,18 @@
 #  include <type_traits>
 #endif
 
-#define __THRUST_DEFINE_HAS_MEMBER_FUNCTION(trait_name, member_function_name)                                           \
-  template <typename T, typename Signature, typename = void>                                                            \
-  struct trait_name : thrust::false_type                                                                                \
-  {};                                                                                                                   \
-                                                                                                                        \
-  template <typename T, typename ResultT, typename... Args>                                                             \
-  struct trait_name<                                                                                                    \
-    T,                                                                                                                  \
-    ResultT(Args...),                                                                                                   \
-    _THRUST_STD::enable_if_t<                                                                                            \
-      _THRUST_STD::is_same<ResultT, void>::value                                                                         \
-      || _THRUST_STD::is_convertible<ResultT,                                                                            \
-                                    decltype(std::declval<T>().member_function_name(std::declval<Args>()...))>::value>> \
-      : thrust::true_type                                                                                               \
+#define __THRUST_DEFINE_HAS_MEMBER_FUNCTION(trait_name, member_function_name)                                       \
+  template <typename T, typename Signature, typename = void>                                                        \
+  struct trait_name : thrust::false_type                                                                            \
+  {};                                                                                                               \
+                                                                                                                    \
+  template <typename T, typename ResultT, typename... Args>                                                         \
+  struct trait_name<                                                                                                \
+    T,                                                                                                              \
+    ResultT(Args...),                                                                                               \
+    _THRUST_STD::enable_if_t<                                                                                       \
+      _THRUST_STD::is_same<ResultT, void>::value                                                                    \
+      || _THRUST_STD::                                                                                              \
+        is_convertible<ResultT, decltype(std::declval<T>().member_function_name(std::declval<Args>()...))>::value>> \
+      : thrust::true_type                                                                                           \
   {};

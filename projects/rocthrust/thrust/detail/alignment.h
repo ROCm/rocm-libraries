@@ -33,9 +33,9 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/cmath>
+#    include <cuda/cmath>
 #  else
-#  include <hip/cmath>
+#    include <hip/cmath>
 #  endif
 #endif
 
