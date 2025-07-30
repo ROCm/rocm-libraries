@@ -119,8 +119,8 @@ namespace rocRoller
             void lock(Dependency dep, int streamId);
             void unlock(Dependency dep, int streamId);
 
-            std::map<int, std::stack<Dependency>> m_stack;
-            std::map<Dependency, int>             m_stream;
+            std::map<int, std::stack<Dependency>> m_streamToStack;
+            std::map<Dependency, int>             m_depToStream;
             std::unordered_multiset<Dependency>   m_locks;
             std::optional<int>                    m_nonPreemptibleStream;
 

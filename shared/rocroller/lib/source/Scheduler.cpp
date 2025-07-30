@@ -135,18 +135,18 @@ namespace rocRoller
 
             // Can a stream acquire the same lock (single resource, just the top) multiple times? yes
             // VCC -> SCC -> SCC -> SCC
-            if(m_stream.contains(dep))
+            if(m_depToStream.contains(dep))
             {
                 AssertFatal(
-                    topDep == dep && m_stream.at(dep) == streamId,
+                    topDep == dep && m_depToStream.at(dep) == streamId,
                     "Only the same stream can acquire the top dependency lock multiple times.",
                     ShowValue(dep),
-                    ShowValue(m_stream[dep]),
+                    ShowValue(m_depToStream[dep]),
                     ShowValue(streamId));
             }
 
-            m_stack[streamId].push(dep);
-            m_stream[dep] = streamId;
+            m_streamToStack[streamId].push(dep);
+            m_depToStream[dep] = streamId;
             m_locks.insert(dep);
 
             if(isNonPreemptibleDependency(dep))
@@ -156,8 +156,8 @@ namespace rocRoller
         void LockState::unlock(Dependency dep, int streamId)
         {
             AssertFatal(streamId >= 0);
-            AssertFatal(m_stack.contains(streamId));
-            AssertFatal(m_stack[streamId].size() > 0);
+            AssertFatal(m_streamToStack.contains(streamId));
+            AssertFatal(m_streamToStack[streamId].size() > 0);
             AssertFatal(dep != Dependency::Count);
 
             // LIFO
@@ -170,14 +170,14 @@ namespace rocRoller
             }
 
             {
-                auto iter = m_stream.find(dep);
-                AssertFatal(iter != m_stream.end() && iter->second == streamId,
+                auto iter = m_depToStream.find(dep);
+                AssertFatal(iter != m_depToStream.end() && iter->second == streamId,
                             ShowValue(dep),
                             ShowValue(streamId));
             }
 
             // pop the stack top
-            m_stack[streamId].pop();
+            m_streamToStack[streamId].pop();
 
             // erase one instance of dep from the multiset.
             // if that's the last instance, then erase its streamID mapping.
@@ -187,7 +187,7 @@ namespace rocRoller
                 m_locks.erase(iter);
 
                 if(!m_locks.contains(dep))
-                    m_stream.erase(dep);
+                    m_depToStream.erase(dep);
             }
 
             // update m_nonPreemptibleStream state if needed
@@ -197,7 +197,7 @@ namespace rocRoller
             auto tempDep = getTopDependency(streamId);
             while(tempDep != Dependency::None)
             {
-                if(m_stream.contains(tempDep) && m_stream.at(tempDep) == streamId
+                if(m_depToStream.contains(tempDep) && m_depToStream.at(tempDep) == streamId
                    && isNonPreemptibleDependency(tempDep))
                 {
                     m_nonPreemptibleStream = streamId;
@@ -221,7 +221,7 @@ namespace rocRoller
                         ShowValue(topDep),
                         ShowValue(dep));
 
-            if(m_stack.empty())
+            if(m_streamToStack.empty())
                 return true;
 
             // if the stream itself is non-preemptible,
@@ -242,7 +242,7 @@ namespace rocRoller
             // if the dependency is already locked and is being
             // scheduled by the same stream again, it's schedulable.
             if(m_locks.contains(dep))
-                return m_stream.at(dep) == streamId;
+                return m_depToStream.at(dep) == streamId;
 
             // If the given stream tries to acquire a non-preemptible lock
             // and another stream currently holds a higher-ranked preemptible lock,
@@ -305,7 +305,7 @@ namespace rocRoller
 
         bool LockState::isLocked(Dependency dep, int streamId) const
         {
-            return m_stream.contains(dep) && m_stream.at(dep) == streamId;
+            return m_depToStream.contains(dep) && m_depToStream.at(dep) == streamId;
         }
 
         void LockState::lockCheck(Instruction const& instruction, int streamId) const
@@ -334,16 +334,16 @@ namespace rocRoller
 
         Dependency LockState::getTopDependency(int streamId) const
         {
-            if(m_stack.contains(streamId) && !(m_stack.at(streamId).empty()))
-                return m_stack.at(streamId).top();
+            if(m_streamToStack.contains(streamId) && !(m_streamToStack.at(streamId).empty()))
+                return m_streamToStack.at(streamId).top();
 
             return Dependency::None;
         }
 
         int LockState::getLockDepth(int streamId) const
         {
-            if(m_stack.contains(streamId))
-                return m_stack.at(streamId).size();
+            if(m_streamToStack.contains(streamId))
+                return m_streamToStack.at(streamId).size();
 
             return 0;
         }
