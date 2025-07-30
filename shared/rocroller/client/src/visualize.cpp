@@ -27,11 +27,14 @@
 #include <msgpack.hpp>
 
 #include <algorithm>
+#include <set>
 
 #include "client/GraphInspector.hpp"
 #include "client/visualize.hpp"
 
 #include <rocRoller/Utilities/Settings.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
+#include <rocRoller/KernelGraph/Transforms/LoadPacked_detail.hpp>
 
 namespace rocRoller
 {
@@ -482,10 +485,41 @@ namespace rocRoller
             std::ofstream vfile(filename);
 
             GraphInspector gi(command, commandKernel, commandArgs);
-            gi.inventExecutionCoordinates();
+            // gi.inventExecutionCoordinates();
+
+            std::cout << "Coords" << std::endl;
 
             auto coords = gi.coords();
 
+            int tensorAScale = gi.findTensor(4);
+
+            // auto xform = rocRoller::KernelGraph::LoadPackedDetail::getFakeTransformerForControlNode(tensorAScale);
+
+            auto [coords_, paths] = rocRoller::KernelGraph::findAllRequiredCoordinates(tensorAScale, *gi.graph());
+
+            std::set<int> reqCoords(coords_.begin(), coords_.end());
+
+            for(auto c: reqCoords)
+            {
+                rocRoller::KernelGraph::CoordinateGraph::Transformer tx(&gi.graph()->coordinates);
+                for(auto c2: reqCoords)
+                {
+                    tx.setCoordinate(c2, Expression::literal(0));
+                }
+
+                auto offsets0 = tx.reverse({c});
+                auto offset0 = getUnsignedInt(evaluate(offsets0.at(0)));
+
+                tx.setCoordinate(c, Expression::literal(1));
+
+                auto offsets1 = tx.reverse({c});
+                auto offset1 = getUnsignedInt(evaluate(offsets1.at(0)));
+
+                Log::info("Offset of {}: {}", c, offset1 - offset0);
+
+            }
+
+            #if 0
             int tensorA = gi.findTensor(0);
             int tensorB = gi.findTensor(2);
             int tensorC = gi.findTensor(4);
@@ -522,6 +556,7 @@ namespace rocRoller
                 vfile << " {" << std::get<0>(tup) << ", " << std::get<1>(tup) << "}";
             }
             vfile << std::endl;
+            #endif
         }
 
     }

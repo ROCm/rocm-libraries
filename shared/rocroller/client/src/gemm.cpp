@@ -47,6 +47,7 @@
 #include "client/DataParallelGEMMSolution.hpp"
 #include "client/GEMMParameters.hpp"
 #include "client/GEMMParameters_serialization.hpp"
+#include "client/PreSwizzle.hpp"
 #include "client/StreamKGEMMSolution.hpp"
 
 #include <CLI/CLI.hpp>
@@ -194,6 +195,14 @@ namespace rocRoller::Client::GEMMClient
                       -1.f,
                       1.f,
                       static_cast<uint>(scaleBlockSize));
+
+            if(problemParams.types.scaleSkipPermlane && false)
+            {
+                auto scaleValue = floatToScale(DataType::E8M0, .0625f);
+                std::cerr << "Scale Value: " << (int)scaleValue << std::endl;
+                std::ranges::fill(hostScaleA, scaleValue);
+                std::ranges::fill(hostScaleB, scaleValue);
+            }
         }
         else
         {
@@ -218,11 +227,100 @@ namespace rocRoller::Client::GEMMClient
                     ShowValue(problemParams.types.scaleB));
         if(problemParams.types.scaleA == Operations::ScaleMode::Separate)
         {
-            deviceScaleA = make_shared_device(hostScaleA);
+            if(problemParams.types.scaleSkipPermlane)
+            {
+                #if 1
+                auto tmpScaleA = preSwizzle16x16x128(hostScaleA, descA, problemParams);
+                deviceScaleA   = make_shared_device(tmpScaleA);
+
+                #elif 0
+                size_t miK = 4;
+                size_t waveK = 4;
+                size_t factor = waveK / miK;
+                size_t nLanes = 16;
+                auto descTmp = descA.withNormalizedDimensions();
+                std::vector<size_t> srcSizes = {miK, factor, nLanes, descTmp.size(0)/waveK, 16*4, descTmp.size(1)};
+                TensorDescriptor src(descA.dataType(), srcSizes);
+                auto dst = TensorDescriptor::ShuffledNoPadding(descA.dataType(), srcSizes, {4,1,2,3,0,5});
+                AssertFatal(src.totalAllocatedElements() == dst.totalAllocatedElements())
+
+                auto tmpScaleA = shuffleDims(hostScaleA, dst, src);
+                deviceScaleA   = make_shared_device(tmpScaleA);
+
+
+                #else
+                auto desc = descA.withNormalizedDimensions();
+                std::cerr << ShowValue(desc.sizes()) << ShowValue(desc.strides());
+                auto aScaleSizes = desc.sizes();
+                aScaleSizes[0] /= 32;
+                auto aScaleStrides = desc.strides();
+                aScaleStrides[1] /= 32;
+                TensorDescriptor aScaleDesc(DataType::E8M0, std::move(aScaleSizes), std::move(aScaleStrides));
+                std::cerr << ShowValue(aScaleDesc.sizes()) << ShowValue(aScaleDesc.strides());
+
+                auto tmpScaleA = preSwizzle16x16x128(hostScaleA, aScaleDesc, 0, 1);
+                deviceScaleA   = make_shared_device(tmpScaleA);
+
+                auto ordered = iota(0ul, hostScaleA.size()).to<std::vector>();
+                auto reordered = preSwizzle16x16x128(ordered, aScaleDesc, 0, 1);
+
+                {
+                    std::ofstream file("scaleAOrder.txt");
+                    file << writeTensor(reordered, aScaleDesc);
+                }
+
+                {
+                    auto const& [dst, src] = view_64x4(aScaleDesc, 0, 1);
+                    std::ofstream file("scaleAInputTensor.txt");
+                    file << writeTensor(ordered, dst);
+                }
+                #endif
+            }
+            else
+            {
+                deviceScaleA = make_shared_device(hostScaleA);
+            }
         }
         if(problemParams.types.scaleB == Operations::ScaleMode::Separate)
         {
-            deviceScaleB = make_shared_device(hostScaleB);
+            if(problemParams.types.scaleSkipPermlane)
+            {
+                #if 1
+
+                auto tmpScaleB = preSwizzle16x16x128(hostScaleB, descB, problemParams);
+                deviceScaleB   = make_shared_device(tmpScaleB);
+
+                #elif 0
+                size_t miK = 4;
+                size_t waveK = 4;
+                size_t factor = waveK / miK;
+                size_t nLanes = 16;
+                auto descTmp = descB.withNormalizedDimensions();
+                std::vector<size_t> srcSizes = {miK, factor, nLanes, descTmp.size(0)/waveK, 16*4, descTmp.size(1)};
+                TensorDescriptor src(descB.dataType(), srcSizes);
+                auto dst = TensorDescriptor::ShuffledNoPadding(descB.dataType(), srcSizes, {4,1,2,3,0,5});
+                AssertFatal(src.totalAllocatedElements() == dst.totalAllocatedElements());
+
+                auto tmpScaleB = shuffleDims(hostScaleB, dst, src);
+                deviceScaleB   = make_shared_device(tmpScaleB);
+                #else
+                auto desc = descB.withNormalizedDimensions();
+                std::cerr << ShowValue(desc.sizes()) << ShowValue(desc.strides());
+                auto bScaleSizes = desc.sizes();
+                bScaleSizes[0] /= 32;
+                auto bScaleStrides = desc.strides();
+                bScaleStrides[1] /= 32;
+                TensorDescriptor bScaleDesc(DataType::E8M0, std::move(bScaleSizes), std::move(bScaleStrides));
+                std::cerr << ShowValue(bScaleDesc.sizes()) << ShowValue(bScaleDesc.strides());
+
+                auto tmpScaleB = preSwizzle16x16x128(hostScaleB, bScaleDesc, 0, 1);
+                deviceScaleB   = make_shared_device(tmpScaleB);
+                #endif
+            }
+            else
+            {
+                deviceScaleB = make_shared_device(hostScaleB);
+            }
         }
 
         std::cout << "Generating launch parameters and runtime arguments..." << std::endl;
@@ -295,10 +393,10 @@ namespace rocRoller::Client::GEMMClient
             }
         }
 
-        if(runParams.visualize)
-        {
-            Client::visualize(command, *commandKernel, commandArgs);
-        }
+        // if(runParams.visualize)
+        // {
+        //     Client::visualize(command, *commandKernel, commandArgs);
+        // }
 
         std::cout << std::endl;
         std::cout << "Problem:" << std::endl;
@@ -359,6 +457,10 @@ namespace rocRoller::Client::GEMMClient
             result.correct = correct;
             result.rnorm   = rnorm;
         }
+
+        // {
+        //     Client::visualize(command, *commandKernel, commandArgs);
+        // }
 
         return result;
     }

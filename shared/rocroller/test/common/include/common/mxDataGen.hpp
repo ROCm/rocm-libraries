@@ -94,12 +94,12 @@ namespace rocRoller
 
     template <typename rrDT>
     DGen::DataGenerator<typename rrDT2DGenDT<rrDT>::type>
-        getDataGenerator(TensorDescriptor& desc,
-                         const float       min,
-                         const float       max,
-                         const uint32_t    seed,
-                         const index_t     blockScaling = 1,
-                         const DataPattern pattern      = Bounded)
+        getDataGenerator(TensorDescriptor const& desc,
+                         const float             min,
+                         const float             max,
+                         const uint32_t          seed,
+                         const index_t           blockScaling = 1,
+                         const DataPattern       pattern      = Bounded)
     {
         auto sizes   = desc.sizes();
         auto strides = desc.strides();
@@ -123,8 +123,8 @@ namespace rocRoller
 
         std::vector<uint8_t> dataByte = dgen.getDataBytes();
 
-        if constexpr(std::is_same_v<rrDT,
-                                    FP6> || std::is_same_v<rrDT, BF6> || std::is_same_v<rrDT, FP4>)
+        if constexpr(std::is_same_v<rrDT, FP6> || std::is_same_v<rrDT, BF6>
+                     || std::is_same_v<rrDT, FP4>)
         {
 
             return reinterpret_cast<std::vector<UDT>&>(dataByte);
@@ -146,9 +146,8 @@ namespace rocRoller
             }
         }
 
-        if constexpr(std::is_same_v<
-                         rrDT,
-                         float> || std::is_same_v<rrDT, Half> || std::is_same_v<rrDT, BFloat16>)
+        if constexpr(std::is_same_v<rrDT, float> || std::is_same_v<rrDT, Half>
+                     || std::is_same_v<rrDT, BFloat16>)
         {
             std::vector<rrDT>& rrData = reinterpret_cast<std::vector<rrDT>&>(dataByte);
             return rrData;
@@ -177,11 +176,11 @@ namespace rocRoller
     template <typename TA, typename TB, typename TC>
     void DGenInput(const uint32_t        seed,
                    std::vector<TA>&      hostA,
-                   TensorDescriptor&     descA,
+                   TensorDescriptor const&     descA,
                    std::vector<TB>&      hostB,
-                   TensorDescriptor&     descB,
+                   TensorDescriptor const&     descB,
                    std::vector<TC>&      hostC,
-                   TensorDescriptor&     descC,
+                   TensorDescriptor const&     descC,
                    std::vector<uint8_t>& hostScaleA,
                    std::vector<uint8_t>& hostScaleB,
                    bool                  hasScaleA      = false,
