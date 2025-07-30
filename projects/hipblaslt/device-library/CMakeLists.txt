@@ -70,7 +70,7 @@ add_custom_command(
 
 block(SCOPE_FOR VARIABLES)
     list(JOIN TENSILE_CREATE_LIBRARY_COMMAND " " FORMATTED_TCL)
-    message(VERBOSE "Device lib build command: ${FORMATTED_TCL}")
+    message(STATUS "Device lib build command: ${FORMATTED_TCL}")
 endblock()
 
 add_custom_target(tensilelite-device-libraries ALL
