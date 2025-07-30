@@ -368,6 +368,7 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(const ProblemDescrip
         // Check if valid_kernels[index] equals kernel_id.
         if(index < valid_kernels.size() && valid_kernels[index] == kernel_id)
             return index;
+
         // Linear search for kernel_id in valid_kernels.
         auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_id);
         if(it != valid_kernels.end())
@@ -378,7 +379,7 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(const ProblemDescrip
         return 0;
     };
 
-    // for  BF16 and FP16
+    // for BF16 and FP16
     index = env::value(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE);
     if(index == 0 && problem.GetInChannels() > 8 && problem.GetGroupCount() == 1 &&
        problem.GetAlphaBetaCase() == DEFAULT)
@@ -615,6 +616,7 @@ float ConvHipImplicitGemm3DGroupFwdXdlops::GetWti(
 
     if(xDesc.GetType() == miopenHalf || xDesc.GetType() == miopenBFloat16)
     {
+        auto& in_n = xDesc.GetLengths()[0];
         auto& in_c = xDesc.GetLengths()[1];
         auto& w_x  = wDesc.GetLengths()[2];
         auto& w_y  = wDesc.GetLengths()[3];
@@ -623,7 +625,7 @@ float ConvHipImplicitGemm3DGroupFwdXdlops::GetWti(
         // than 8, CK's implementation offers better performance.
         if((w_x == 1 && w_y == 1 && w_d == 1) == false)
         {
-            if(in_c < 8)
+            if(in_c < 8 && in_n < 4)
             {
                 return 0.00002; // force disable
             }
