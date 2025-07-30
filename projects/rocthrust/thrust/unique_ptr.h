@@ -8,6 +8,7 @@
 #include <thrust/for_each.h>
 #include <thrust/device_reference.h>
 
+#include <compare>
 #include <functional>
 #include <type_traits>
 #include <utility>
@@ -430,6 +431,15 @@ operator>=(const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
   return !(x < y);
 }
 
+#if THRUST_STD_VER >= 20
+template <class T1, class D1, class T2, class D2>
+THRUST_HOST inline auto operator<=> (const unique_ptr<T1, D1>& x, const unique_ptr<T2, D2>& y)
+{
+  // TODO: once thrust::device_ptr supports three_way_comparison, we should be using that
+  return std::compare_three_way()(x.get_raw(), y.get_raw()); 
+}
+#endif
+
 template <class T, class D>
 THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool
 operator==(const unique_ptr<T, D>& x, std::nullptr_t) noexcept
@@ -507,6 +517,15 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 bool operator>=(std::nullptr_t, 
 {
   return !(y < nullptr);
 }
+
+#if THRUST_STD_VER >= 20
+template <class T, class D>
+THRUST_HOST inline auto operator<=> (const unique_ptr<T, D>& x, std::nullptr_t)
+{
+  // TODO: once thrust::device_ptr supports three_way_comparison, we should be using that
+  return std::compare_three_way()(x.get_raw(), static_cast<T*>(nullptr));
+}
+#endif
 
 //==============================================================================
 // Make unique
