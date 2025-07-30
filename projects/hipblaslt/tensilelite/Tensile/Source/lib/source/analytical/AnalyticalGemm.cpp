@@ -498,9 +498,6 @@ namespace TensileLite
             // 3) Prologue: 2.2× memory latency
             double L_prologue = 1.5 * L_mem;
 
-
-
-
             // 4) Epilogue: writes from all active CUs with limited bandwidth
             size_t active_cu       = compute_active_CU(hardware, M, N, batch, MT_M, MT_N);
             double epilogue_limite = 1;
@@ -846,9 +843,6 @@ namespace TensileLite
                     || (MT_N > N && MT_N != MI_N && edge_waste_n > 0.5) || (MT_K > K && !(MT_K<= MI_K)))
                    )
                 {
-                    
-
-
                     hardware.log_debug("Edge Waste Invalidated","True");
                     if(Hardware::is_debug_enabled())
                     {
