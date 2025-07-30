@@ -2,10 +2,10 @@
 # SPDX-License-Identifier:  MIT
 
 cmake_minimum_required(VERSION 3.25.0)
-project(device-library VERSION 0.0.1 LANGUAGES CXX ASM)
+project(device-library VERSION 0.0.0 LANGUAGES CXX ASM)
 
 set(HIPBLASLT_TENSILE_LIBPATH "${hipblaslt_BINARY_DIR}/Tensile" CACHE STRING "Path to output the device gemm libraries.")
-file(MAKE_DIRECTORY "${HIPBLASLT_TENSILE_LIBPATH}")
+file(MAKE_DIRECTORY "${HIPBLASLT_TENSILE_LIBPATH}/library")
 
 list(JOIN GPU_TARGETS "$<SEMICOLON>" TENSILE_GPU_TARGETS_SEMI_ESCAPED)
 

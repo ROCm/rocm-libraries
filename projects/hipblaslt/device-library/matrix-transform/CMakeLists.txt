@@ -38,5 +38,5 @@ add_custom_command(
 
 add_custom_target(matrix-transform-cp ALL
     DEPENDS ${output_library}
-    COMMAND ${CMAKE_COMMAND} -E copy "${output_library}" "${HIPBLASLT_TENSILE_LIBPATH}"
+    COMMAND ${CMAKE_COMMAND} -E copy "${output_library}" "${HIPBLASLT_TENSILE_LIBPATH}/library"
 )
