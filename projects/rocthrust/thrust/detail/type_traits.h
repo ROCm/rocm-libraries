@@ -171,6 +171,12 @@ struct identity_
   using type = T;
 }; // end identity
 
+template <class Tp, bool>
+struct dependent_type
+{
+  using type = Tp;
+}; // end dependent_type
+
 template <bool, typename T>
 struct lazy_enable_if
 {};
