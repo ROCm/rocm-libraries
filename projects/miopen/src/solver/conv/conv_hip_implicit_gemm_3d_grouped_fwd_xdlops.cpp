@@ -40,7 +40,7 @@
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
-MIOPEN_DECLARE_ENV_VAR_UINT64(CK_CONV3D_IDX);
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE);
 
 namespace miopen {
 namespace solver {
@@ -363,8 +363,26 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(const ProblemDescrip
     }
     index = 0;
 
+    auto find_kernel = [&valid_kernels = std::as_const(valid_kernels)](
+        const std::size_t& index,
+        const std::string& kernel_id) -> std::size_t
+    {
+        // Check if valid_kernels[index] equals kernel_id.
+        if (index < valid_kernels.size() && valid_kernels[index] == kernel_id)
+            return index;
+
+        // Linear search for kernel_id in valid_kernels.
+        auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_id);
+        if (it != valid_kernels.end())
+            return static_cast<std::size_t>(it - valid_kernels.begin());
+
+        // Not found: return 0
+        MIOPEN_LOG_E("Not found :" << kernel_id);
+        return 0;
+    };
+
     // for  BF16 and FP16
-    index = env::value(CK_CONV3D_IDX);
+    index = env::value(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE);
     if(index == 0 && problem.GetAlphaBetaCase() == DEFAULT)
     {
         int G  = ProblemInterpreter::GetGroupCountG(problem);
@@ -372,45 +390,40 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(const ProblemDescrip
         int K  = K1 / G; // Number of output Channel per group
         if(problem.GetInDataType() == miopenBFloat16)
         {
-            if(valid_kernels.size() > 30)
+            if(K < 64)
             {
-                index = 30;
-                assert(valid_kernels[30] ==
-                       "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
-                       "<256, 128, 128, 64, Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, "
-                       "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
+                index = find_kernel(38,
+                            "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
+                            "<256, 64, 64, 64, Default, 32, 32, 1, 1, 8, 8, 8, 1, 1, "
+                            "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
             }
-            if(K < 64 && valid_kernels.size() > 38)
+            else
             {
-                index = 38;
-                assert(valid_kernels[38] ==
-                       "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
-                       "<256, 64, 64, 64, Default, 32, 32, 1, 1, 8, 8, 8, 1, 1, "
-                       "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
+                 index = find_kernel(30,
+                            "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
+                            "<256, 128, 128, 64, Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, "
+                            "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
             }
         }
         else if(problem.GetInDataType() == miopenHalf)
         {
-            if(valid_kernels.size() > 31)
+            if(K < 64)
             {
-                index = 31;
-                assert(valid_kernels[31] ==
-                       "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
-                       "<256, 128, 128, 64, Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, "
-                       "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
+                index = find_kernel(57,
+                            "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
+                            "<64, 16, 16, 128, Default, 16, 16, 1, 1, 8, 8, 4, 1, 1, "
+                            "BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v1>");
             }
-            if(K < 64 && valid_kernels.size() > 57)
+            else
             {
-                index = 57;
-                assert(valid_kernels[57] ==
-                       "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
-                       "<64, 16, 16, 128, Default, 16, 16, 1, 1, 8, 8, 4, 1, 1, "
-                       "BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v1>");
+                index = find_kernel(31,
+                            "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
+                            "<256, 128, 128, 64, Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, "
+                            "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
             }
         }
     }
     kernel_id = valid_kernels[index];
-    MIOPEN_LOG_I2("index:" << index << " kernel_id:" << kernel_id);
 }
 
 template <typename DataType>
