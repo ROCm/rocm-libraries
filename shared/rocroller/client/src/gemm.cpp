@@ -1285,6 +1285,10 @@ int main(int argc, const char* argv[])
     benchmark->add_option(
         "--load", loadPath, "Load solution from code-object (.co) or assembly (.s) file.");
 
+    std::string loadRunParamsPath;
+    benchmark->add_option(
+        "--loadRunParams", loadRunParamsPath, "Load run parameters from YAML file.");
+
     //
     // info sub-command
     //
@@ -1342,6 +1346,17 @@ int main(int argc, const char* argv[])
         {
             Throw<FatalError>("Extension not supported.  Can not load solution from ", loadPath);
         }
+    }
+
+    if(!loadRunParamsPath.empty())
+    {
+	auto path = std::filesystem::path(loadRunParamsPath);
+        path.replace_extension(".yaml");
+
+        //
+	// Load RunParameters from a specified YAML file
+	//
+	runParams = Serialization::readYAMLFile<rocRoller::Client::RunParameters>(path);
     }
 
     if(!io.loadAsmPath.empty() || !io.loadCOPath.empty())
