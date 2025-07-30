@@ -1,4 +1,5 @@
 #include <Tensile/analytical/Hardware.hpp>
+#include <Tensile/analytical/StreamK.hpp>
 #include <Tensile/analytical/Utils.hpp>
 
 #include <pybind11/pybind11.h>
@@ -13,6 +14,20 @@ PYBIND11_MODULE(origami, m)
     pybind11::enum_<Hardware::Architecture>(m, "Architecture")
         .value("gfx942", Hardware::Architecture::gfx942)
         .value("gfx950", Hardware::Architecture::gfx950)
+        .export_values();
+
+    pybind11::enum_<Origami::DataType>(m, "DataType")
+        .value("f32", Origami::DataType::Float)
+        .value("f64", Origami::DataType::Double)
+        .value("f16", Origami::DataType::Half)
+        .value("i32", Origami::DataType::Int32)
+        .value("bf16", Origami::DataType::BFloat16)
+        .value("i8", Origami::DataType::Int8)
+        .value("xf32", Origami::DataType::XFloat32)
+        .value("f8", Origami::DataType::Float8)
+        .value("bf8", Origami::DataType::BFloat8)
+        .value("f6", Origami::DataType::Float6)
+        .value("f4", Origami::DataType::Float4)
         .export_values();
 
     pybind11::class_<Hardware>(m, "Hardware")
@@ -45,10 +60,11 @@ PYBIND11_MODULE(origami, m)
           &Hardware::getHardwareForDevice,
           "This gets a hardware object for a device.");
 
+    m.def("datatype_to_bits", &Origami::dataTypeToBits, "Return the number of bits in a datatype");
     m.def("select_best_macro_tile_size",
           &Origami::select_best_macro_tile_size,
           "Get best macro tile sizes.");
-    m.def("select_best_grid_size", &Origami::select_best_grid_size, "Select Best Grid Size");
+    m.def("select_streamk_grid", &Origami::streamk::select_streamk_grid, "Select Best StreamK Grid Size");
     m.def("compute_total_latency", &Origami::compute_total_latency, "compute_total_latency");
     m.def("select_best_wgm", &Origami::select_best_wgm, "Get best workgroup mapping.");
 }

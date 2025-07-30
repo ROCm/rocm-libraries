@@ -3025,42 +3025,7 @@ namespace TensileLite
         {
             return pAMDGPU->skFixedGrid;
         }
-
-        // Dynamically pick the minimum between the cuCount or number of tiles.
-        else if(pAMDGPU->skDynamicGrid == 1)
-        {
-            return min(cuCount, tiles);
-        }
-
-        // Dynamically pick the minimum between the cuCount or number of tiles,
-        // and scale down really large sizes to use fewer CUs for power/energy savings.
-        else if(pAMDGPU->skDynamicGrid == 2)
-        {
-            size_t skGrid = cuCount;
-            if(tiles > skGrid)
-            {
-                for(size_t i = 1; i <= 32; i *= 2)
-                {
-                    size_t tilesPerCU  = CeilDivide(i * tiles, cuCount);
-                    size_t reducedGrid = CeilDivide(i * tiles, tilesPerCU);
-                    float  utilization = ((float)reducedGrid) / ((float)cuCount);
-                    if(utilization > 0.75f)
-                    {
-                        if(utilization < 1.0f)
-                            skGrid = reducedGrid;
-                        break;
-                    }
-                }
-            }
-
-            return min(skGrid, tiles);
-        }
-
-        // Dynamically predict the best grid-size by weighing the cost of the fix-up
-        // step and the cost of processing MAC-loop instructions. When the cost of fix-up
-        // is the bottleneck, use smaller grid size.
-        // Architecture dependent.
-        else if(pAMDGPU->skDynamicGrid == 3)
+        else if (pAMDGPU->skDynamicGrid > 0)
         {
             size_t x     = 1;
             size_t y     = 1;
@@ -3077,140 +3042,32 @@ namespace TensileLite
             {
                 batch *= problem.batchSize(i);
             }
-
-            return analytical::streamk::best_predicted_grid_size(sizeMapping.macroTile.x,
-                                                                 sizeMapping.macroTile.y,
-                                                                 sizeMapping.depthU,
-                                                                 x,
-                                                                 y,
-                                                                 z,
-                                                                 batch,
-                                                                 1,
-                                                                 cuCount);
-        }
-        // Fix Stream-K algorithm to function like a Data-parallel schedule
-        // where grid size is equal to the number of output tiles.
-        else if(pAMDGPU->skDynamicGrid == 4)
-        {
-            size_t x     = 1;
-            size_t y     = 1;
-            size_t batch = 1;
-            for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
-            {
-                x *= problem.freeSizeA(i);
-            }
-            for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
-            {
-                y *= problem.freeSizeB(i);
-            }
-            for(size_t i = 0; i < problem.batchIndices().size(); ++i)
-            {
-                batch *= problem.batchSize(i);
-            }
-
-            return analytical::streamk::number_of_output_tiles(
-                sizeMapping.macroTile.x, sizeMapping.macroTile.y, x, y, batch);
-        }
-        else if(pAMDGPU->skDynamicGrid == 5)
-        {
-            hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-            size_t                x         = 1;
-
-            size_t y     = 1;
-            size_t batch = 1;
-            for(size_t i = 0; i < problem.freeIndicesA().size(); i++)
-            {
-                x *= problem.freeSizeA(i);
-            }
-            for(size_t i = 0; i < problem.freeIndicesB().size(); i++)
-            {
-                y *= problem.freeSizeB(i);
-            }
-            for(size_t i = 0; i < problem.batchIndices().size(); ++i)
-            {
-                batch *= problem.batchSize(i);
-            }
-            size_t elementSizeA_bits
-                = problem.a().elementBytes() * 8; // TODO update for A/B different types
-            size_t elementSizeB_bits
-                = problem.b().elementBytes() * 8; // TODO update for A/B different types
-            size_t elementSizeC_bits
-                = problem.c().elementBytes() * 8; // TODO update for A/B different types
             analytical::DataType miDataType = static_cast<analytical::DataType>(problem.computeInputType());
-            return analytical::select_best_grid_size(x,
-                                                     y,
-                                                     z,
-                                                     batch,
-                                                     problem.transA(),
-                                                     problem.transB(),
-                                                     *(hipAMDGPU->analyticalHardware),
-                                                     sizeMapping.macroTile.x,
-                                                     sizeMapping.macroTile.y,
-                                                     sizeMapping.depthU,
-                                                     sizeMapping.matrixInstruction[0],
-                                                     sizeMapping.matrixInstruction[1],
-                                                     sizeMapping.matrixInstruction[2],
-                                                     elementSizeA_bits,
-                                                     elementSizeB_bits,
-                                                     elementSizeC_bits,
-                                                     miDataType,
-                                                     0,
-                                                     0.0,
-                                                     false,
-                                                     sizeMapping.workGroupMapping,
-                                                     10);
-        }
-        else if(pAMDGPU->skDynamicGrid == 6)
-        {
-            auto itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
-            size_t skGrid = tiles; // Fallback if no good fractional tile is found
-            // More tiles than CUs
-            // Distribute tiles evenly across maximum number of CUs
-            // Split remaining tiles as evenly as possible for better caching
-            if(tiles > cuCount)
-            {
-                size_t virtCUCount = cuCount;
-                if (sizeMapping.CUOccupancy > 1)
-                    virtCUCount *= sizeMapping.CUOccupancy;
-                // const std::vector<double> tileFractions = {0.0, 1.0/8.0, 1.0/5.0, 1.0/4.0, 1.0/3.0, 1.0/2.0, 1.0};
-                // const std::vector<double> tileFractions = {0.0, 1.0/2.0, 1.0/8.0, 1.0/5.0, 1.0/4.0, 1.0/3.0, 1.0};
-                const std::vector<double> tileFractions = {0.0, 1.0/2.0, 1.0/8.0, 1.0/5.0, 1.0/4.0, 1.0/3.0};
-                size_t minEvenTiles = tiles / virtCUCount;
-                for(double frac: tileFractions)
-                {
-                    size_t fracGrid = (size_t)((tiles / (minEvenTiles + frac)) + 0.5);
-                    // Check if higher occupancy would cause excessive workspace requirements (set current limit to 128MB)
-                    if((tiles % fracGrid != 0) && (partialTileSize(fracGrid) > 128*1024*1024))
-                        continue;
-                    if(fracGrid <= virtCUCount)
-                    {
-                        skGrid = fracGrid;
-                        break;
-                    }
-                }
-            }
-            // Fewer tiles than CUs
-            // Split tiles evenly in k-dimension
-            // Attempt to maximize CU utilization, up to a peak number of splits
-            // Max splitting is currently constant, but should be dependant on K dimension
-            else if (tiles < cuCount)
-            {
-                const std::vector<int> tileFractions = {8, 6, 4, 3, 2, 1};
-                for(int frac: tileFractions)
-                {
-                    size_t splitGrid = tiles * frac;
-                    size_t itersPerCU = itersPerTile / frac;
-                    if(splitGrid <= cuCount && itersPerCU >= 8)
-                    {
-                        skGrid = splitGrid;
-                        break;
-                    }
-                }
-            }
+            hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
-            if (tiles % skGrid != 0 && partialTileSize(skGrid) > problem.workspaceSize())
-                skGrid = tiles;
-            return skGrid;
+
+            return analytical::streamk::select_streamk_grid(x,
+                                    y,
+                                    z,
+                                    batch,
+                                    problem.transA(),
+                                    problem.transB(),
+                                    problem.a().elementBytes() * 8,
+                                    problem.b().elementBytes() * 8,
+                                    problem.c().elementBytes() * 8,
+                                    miDataType,
+                                    problem.workspaceSize(),
+                                    sizeMapping.macroTile.x,
+                                    sizeMapping.macroTile.y,
+                                    sizeMapping.depthU,
+                                    sizeMapping.matrixInstruction[0],
+                                    sizeMapping.matrixInstruction[1],
+                                    sizeMapping.matrixInstruction[2],
+                                    sizeMapping.workGroupMapping,
+                                    sizeMapping.workspaceSizePerElemC,
+                                    sizeMapping.CUOccupancy,
+                                    *(hipAMDGPU->analyticalHardware),
+                                    pAMDGPU->skDynamicGrid);
         }
         // Limit the CUs Stream-K is launched on either max or the specified,
         // whichever is minimum.
