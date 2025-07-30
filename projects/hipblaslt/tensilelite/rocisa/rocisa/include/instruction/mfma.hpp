@@ -219,7 +219,7 @@ namespace rocisa
             return formatWithComment(kStr);
         }
 
-        int getIssueLatency() const
+        int getIssueLatency() const override
         {
             auto dataType = instTypeToDataType(instType);
             auto [issueLatency, miLatency]
@@ -337,7 +337,7 @@ namespace rocisa
             return formatWithComment(kStr);
         }
 
-        int getIssueLatency() const
+        int getIssueLatency() const override
         {
             auto dataType = instTypeToDataType(instType);
             auto [issueLatency, miLatency]
