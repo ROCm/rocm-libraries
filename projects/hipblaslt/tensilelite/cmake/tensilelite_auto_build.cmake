@@ -20,7 +20,7 @@ find_package(Python COMPONENTS Interpreter REQUIRED)
 
 # Set common variables
 set(TENSILE_BIN_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/bin")
-set(PYTHONPATH "${PROJECT_BINARY_DIR}/rocisa/lib")
+string(REGEX REPLACE ";" " " tensilelite_python_command "${HIPBLASLT_PYTHON_COMMAND}")
 
 if(DEFINED DEVELOP_MODE)
     include(ProcessorCount)
@@ -32,7 +32,7 @@ if(DEFINED DEVELOP_MODE)
             file(WRITE "${PROJECT_BINARY_DIR}/${SCRIPT_NAME}"
                  "@echo off\n"
                  "${CMAKE_BUILD_COMMAND}\n"
-                 "PYTHONPATH=${PYTHONPATH} ${Python_EXECUTABLE} ${TENSILE_BIN_ROOT}/${BIN} %*\n"
+                 "${tensiltelite_python_command} ${TENSILE_BIN_ROOT}/${BIN} %*\n"
                  "pause\n"
             )
         else()
@@ -43,9 +43,9 @@ if(DEFINED DEVELOP_MODE)
                  "${CMAKE_BUILD_COMMAND}\n"
                  "if [[ \"$\{DEBUGPY_ENABLE:-\}\" == \"1\" ]]; then\n"
                  "    echo \"===DEBUGPY_READY===\"\n"
-                 "    PYTHONPATH=${PYTHONPATH} ${Python_EXECUTABLE} -m debugpy --listen 0.0.0.0:5678 --wait-for-client ${TENSILE_BIN_ROOT}/${BIN} \"$@\"\n"
+                 "    ${tensilelite_python_command} -m debugpy --listen 0.0.0.0:5678 --wait-for-client ${TENSILE_BIN_ROOT}/${BIN} \"$@\"\n"
                  "else\n"
-                 "    PYTHONPATH=${PYTHONPATH} ${Python_EXECUTABLE} ${TENSILE_BIN_ROOT}/${BIN} \"$@\"\n"
+                "    ${tensilelite_python_command} ${TENSILE_BIN_ROOT}/${BIN} \"$@\"\n"
                  "fi\n"
             )
             execute_process(COMMAND chmod +x "${PROJECT_BINARY_DIR}/${BIN}.sh")
@@ -80,7 +80,7 @@ else()
     # Ensure the Python script runs after the build
     add_custom_target(RunPythonScript
         ALL
-        COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH=${PYTHONPATH} -- ${Python_EXECUTABLE} ${TENSILE_BIN_ROOT}/${TENSILE_BIN} ${BIN_ARGS_LIST}
+        COMMAND ${tensilelite_python_command} ${TENSILE_BIN_ROOT}/${TENSILE_BIN} ${BIN_ARGS_LIST}
         COMMENT "Running Python script ${TENSILE_BIN} ${BIN_ARGS_LIST}"
         VERBATIM
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
