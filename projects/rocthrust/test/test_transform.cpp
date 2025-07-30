@@ -24,8 +24,8 @@
 #include <thrust/tuple.h>
 #include <thrust/universal_vector.h>
 
-#include "test_real_assertions.hpp"
 #include "test_param_fixtures.hpp"
+#include "test_real_assertions.hpp"
 #include "test_utils.hpp"
 
 // There is a unfortunate miscompilation of the gcc-11 vectorizer leading to OOB writes
