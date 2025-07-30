@@ -368,24 +368,22 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(const ProblemDescrip
         // Check if valid_kernels[index] equals kernel_id.
         if(index < valid_kernels.size() && valid_kernels[index] == kernel_id)
             return index;
-
         // Linear search for kernel_id in valid_kernels.
         auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_id);
         if(it != valid_kernels.end())
             return static_cast<std::size_t>(it - valid_kernels.begin());
 
         // Not found: return 0
-        MIOPEN_LOG_E("Not found :" << kernel_id);
+        MIOPEN_LOG_E("Not found :" << index << "-" << kernel_id);
         return 0;
     };
 
     // for  BF16 and FP16
     index = env::value(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE);
-    if(index == 0 && problem.GetAlphaBetaCase() == DEFAULT)
+    if(index == 0 && problem.GetInChannels() > 8 && problem.GetGroupCount() == 1 &&
+       problem.GetAlphaBetaCase() == DEFAULT)
     {
-        int G  = ProblemInterpreter::GetGroupCountG(problem);
-        int K1 = ProblemInterpreter::GetOutputChannelK(problem);
-        int K  = K1 / G; // Number of output Channel per group
+        int K = problem.GetOutChannels();
         if(problem.GetInDataType() == miopenBFloat16)
         {
             if(K < 64)

@@ -342,6 +342,8 @@ private:
               typename ProblemDescription>
     void RunSolverImpl(const ConvTensorsType& tensors, const ProblemDescription& problem)
     {
+        std::stringstream str_buffer;
+        std::streambuf* old_stream_buf = std::cerr.rdbuf(str_buffer.rdbuf());
 
         std::cout << conv_config << std::endl;
         auto&& handle = get_handle();
@@ -373,6 +375,10 @@ private:
         const auto invoker = handle.PrepareInvoker(*sol.invoker_factory, sol.construction_params);
         (invoker)(handle, invoke_params);
         handle.Finish();
+
+        std::string str = str_buffer.str();
+        std::cerr.rdbuf(old_stream_buf);
+        EXPECT_TRUE(str.empty()) << str;
     }
 
     template <typename FwdSolver, typename BwdSolver, typename WrwSolver>
