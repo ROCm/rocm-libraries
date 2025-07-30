@@ -354,8 +354,8 @@ inline hipError_t get_device_from_stream(const hipStream_t stream, int& device_i
 {
     static constexpr hipStream_t default_stream = 0;
 
-    // hipStreamLegacy is supported in HIP >= 6.1.0
-#if (HIP_VERSION_MAJOR >= 6 && HIP_VERSION_MINOR >= 1)
+    // hipStreamLegacy is supported in HIP >= 6.2.0
+#if (HIP_VERSION_MAJOR >= 6 && HIP_VERSION_MINOR >= 2)
     const bool is_legacy_stream = (stream == hipStreamLegacy);
 #else
     const bool is_legacy_stream = false;
