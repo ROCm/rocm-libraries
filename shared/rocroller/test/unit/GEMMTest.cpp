@@ -508,13 +508,9 @@ namespace GEMMDriverTest
             params->transposeMemoryAccess.set(LayoutType::MATRIX_A, gemm.transA == "T");
             params->transposeMemoryAccess.set(LayoutType::MATRIX_B, gemm.transB == "T");
 
-            //if(gemm.workgroupMapping.first != -1)
-            //{
-            //    params->workgroupMapping = {gemm.workgroupMapping.first, nullptr};
-            //}
             if(gemm.workgroupMappingDim != -1)
             {
-                params->workgroupMapping = {gemm.workgroupMappingDim, nullptr};
+                params->workgroupMappingDim = gemm.workgroupMappingDim;
             }
 
             if(gemm.workgroupRemapXCC)
