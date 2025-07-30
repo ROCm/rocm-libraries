@@ -90,7 +90,7 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "types", params.types);
             iot::mapRequired(io, "scaleValueA", params.scaleValueA);
             iot::mapRequired(io, "scaleValueB", params.scaleValueB);
-            iot::mapRequired(io, "workgroupMapping", params.workgroupMapping);
+            iot::mapRequired(io, "workgroupMappingDim", params.workgroupMappingDim);
 
             flatMap(io, params.types);
         }

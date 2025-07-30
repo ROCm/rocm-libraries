@@ -100,7 +100,7 @@ namespace rocRoller
                 // When scaleA/B is ScaleMode::SingleScale
                 float scaleValueA, scaleValueB;
 
-                std::pair<int, int> workgroupMapping;
+                int workgroupMappingDim;
             };
 
             /**
@@ -126,7 +126,6 @@ namespace rocRoller
                 int workgroupSizeY = 1;
 
                 int  workgroupMappingDim    = -1;
-                int  workgroupMappingValue   = -1;
                 bool workgroupRemapXCC      = false;
                 int  workgroupRemapXCCValue = -1;
 

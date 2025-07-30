@@ -526,10 +526,10 @@ namespace rocRoller
                         fromString<DataType>(problemParams.types.typeD), {M, N}, "N");
                     setCommandTensorArg(commandArgs, m_tagTensorD, descD, (float*)nullptr);
 
-                    if(problemParams.workgroupMapping.first != -1)
+                    if(problemParams.workgroupMappingDim != -1)
                     {
-                        auto const workgroupMappingDim  = problemParams.workgroupMapping.first;
-                        auto const workgroupMappingValue = problemParams.workgroupMapping.second;
+                        auto const workgroupMappingDim  = problemParams.workgroupMappingDim;
+                        auto const workgroupMappingValue = runParams.workgroupMappingValue;
 
                         AssertFatal(
                             workgroupMappingDim == 0 || workgroupMappingDim == 1,

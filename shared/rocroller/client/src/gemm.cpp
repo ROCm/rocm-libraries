@@ -955,7 +955,6 @@ int main(int argc, const char* argv[])
         .workgroupSizeX = 128,
         .workgroupSizeY = 2,
         .workgroupMappingDim    = -1,
-        .workgroupMappingValue   = -1,
         .workgroupRemapXCC      = false,
         .workgroupRemapXCCValue = -1,
 
@@ -1361,11 +1360,6 @@ int main(int argc, const char* argv[])
         solution = Serialization::readYAMLFile<rocRoller::Client::GEMMClient::SolutionParameters>(
             yamlPath);
 
-	//
-	// Fill in the workgroupMappingValue specified by users (-1 if not specified)
-	//
-	solution.workgroupMappingValue = runParams.workgroupMappingValue;
-
         overwriteTypesFromSolution(types, solution);
     }
 
@@ -1402,7 +1396,7 @@ int main(int argc, const char* argv[])
     solution.types = types;
 
     // TODO: Reevaluate the relationship between problem and solution params.
-    problem.workgroupMapping = {solution.workgroupMappingDim, solution.workgroupMappingValue};
+    problem.workgroupMappingDim = solution.workgroupMappingDim;
 
 
     benchmarkParams.check = !noCheckResult;

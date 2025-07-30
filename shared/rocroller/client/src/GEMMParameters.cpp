@@ -203,7 +203,6 @@ namespace rocRoller
                 if(x.workgroupMappingDim != -1)
                 {
                     s << "WG Mapping Dim: " << x.workgroupMappingDim << std::endl;
-                    s << "WG Mapping Value: " << x.workgroupMappingValue << std::endl;
                 }
 
                 s << "WG XCC Remap: " << x.workgroupRemapXCC;
