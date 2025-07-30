@@ -37,7 +37,7 @@ cmake_dependent_option(ROCROLLER_ENABLE_SLOW_TESTS "Disable slow running tests."
 option(ROCROLLER_EMBED_ARCH_DEF "Embed msgpack architecture data in library." ON)
 option(ROCROLLER_BUILD_SHARED_LIBS "Build rocRoller as a shared library." ON)
 option(ROCROLLER_ENABLE_FETCH "Enable fetch content for dependencies if find_package fails." OFF)
-option(ROCROLLER_ENABLE_LLD "Build rocroller functionality requiring LLD" ON)
+option(ROCROLLER_ENABLE_LLD "Build rocroller functionality requiring LLD" OFF)
 option(ROCROLLER_ENABLE_TIMERS "Enable rocRoller timer code." OFF)
 option(ROCROLLER_ENABLE_CPPCHECK "Enable cppcheck." OFF)
 option(ROCROLLER_ENABLE_ASAN "Enable addresss sanitizers." OFF)
