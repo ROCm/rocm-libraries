@@ -181,6 +181,9 @@ void iterator_test_function(IteratorType d_itr, std::vector<T> &h_reference)
     ASSERT_TRUE(d_itr == h_itrs[1]);
 
     HIP_CHECK(g_allocator.DeviceFree(device_output));
+    HIP_CHECK(hipFree(d_itrs));
+    free(h_itrs);
+
 }
 
 TYPED_TEST_SUITE(HipcubIteratorTests, HipcubIteratorTestsParams);
@@ -404,6 +407,9 @@ TYPED_TEST(HipcubIteratorTests, TestTexObj)
 
         iterator_test_function<IteratorType, T>(d_obj_itr, h_reference);
 
+        HIP_CHECK(d_obj_itr.UnbindTexture());
+        HIP_CHECK(d_obj_itr2.UnbindTexture());
+
         HIP_CHECK(g_allocator.DeviceFree(d_data));
         HIP_CHECK(g_allocator.DeviceFree(d_dummy));
     }
@@ -478,6 +484,9 @@ TYPED_TEST(HipcubIteratorTests, TestTexRef)
 
         iterator_test_function<IteratorType, T>(d_ref_itr, h_reference);
 
+        HIP_CHECK(d_ref_itr.UnbindTexture());
+        HIP_CHECK(d_ref_itr2.UnbindTexture());
+
         HIP_CHECK(g_allocator.DeviceFree(d_data));
         HIP_CHECK(g_allocator.DeviceFree(d_dummy));
     }
@@ -541,6 +550,8 @@ TYPED_TEST(HipcubIteratorTests, TestTexTransform)
         iterator_test_function<
             hipcub::TransformInputIterator<T, TransformOp<T>, TextureIteratorType>,
             T>(xform_itr, h_reference);
+
+        HIP_CHECK(d_tex_itr.UnbindTexture());
 
         HIP_CHECK(g_allocator.DeviceFree(d_data));
     }
