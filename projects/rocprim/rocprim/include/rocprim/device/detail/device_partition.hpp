@@ -916,7 +916,8 @@ template<select_method SelectMethod,
          class Key,
          class Value,
          class FlagType,
-         class OffsetType>
+         class OffsetType,
+         class BlockIdWrapper>
 struct partition_kernel_impl_
 {
 
@@ -936,7 +937,7 @@ struct partition_kernel_impl_
     using block_scan_offset_type
         = ::rocprim::block_scan<OffsetType, block_size, params.block_scan_method>;
     using block_discontinuity_key_type = ::rocprim::block_discontinuity<Key, block_size>;
-    using ordered_block_id = ::rocprim::detail::ordered_block_id<uint32_t>;
+    using ordered_block_id = BlockIdWrapper;
 
     // Memory required for 2-phase scatter
     using exchange_keys_storage_type   = Key[items_per_block];
