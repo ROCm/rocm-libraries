@@ -69,13 +69,24 @@ jobs:
           echo "Target github branch: $branch_name"
           echo "Read the Docs version slug: $version_slug"
 
-          for project in $changed_projects; do
-            echo "Triggering RTD build for $project"
-            response=$(curl -f -s -X POST \
+          # List of project slugs on RTD
+          project_list=$( curl
                  -H "Authorization: Token $RTD_TOKEN" \
-                 "https://readthedocs.com/api/v3/projects/advanced-micro-devices-monorepo-$project/versions/$version_slug/builds/") || {
-                 echo "Failed to trigger RTD build for $project. Response: $response"
-                 exit 1
-            }
-            echo "Successfully triggered RTD build for $project. Response: $response"
+                 "https://app.readthedocs.com/api/v3/projects/?expand=advanced-micro-devices&limit=300" \
+                 | jq -r '.results[].slug'
+          )
+
+          for project in $changed_projects; do
+            slug="advanced-micro-devices-monorepo-$project" # Remove monorepo keyword when using on live docs later
+            if echo "project_list" | grep -Fxq "$slug"; then
+              echo "Triggering RTD build for $project"
+              response=$(curl -f -s -X POST \
+                  -H "Authorization: Token $RTD_TOKEN" \
+                  "https://readthedocs.com/api/v3/projects/$slug/versions/$version_slug/builds/") || {
+                  echo "Failed to trigger RTD build for $project. Response: $response"
+                  exit 1
+              }
+              echo "Successfully triggered RTD build for $project. Response: $response"
+            else
+              echo "Skipping $project - Does not exist on Read the Docs"
           done
