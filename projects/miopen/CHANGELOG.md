@@ -25,7 +25,6 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * Fixed a segmentation fault when user specifies workspace smaller than what is required
 * Fixed a layout calculation logic error that returned incorrect results and enabled less restrictive layout selection
 * Fixed memory access faults in misa kernels due to out-of-bounds memory usage
-* Fixed incorrect stride calculation in misa solvers
 * Fixed performance drop on gfx950 due to transpose kernel use
 * Fixed memory access fault caused by not allocating enough workspace
 * Fixed a name typo that caused kernel mismatches and long startup times
