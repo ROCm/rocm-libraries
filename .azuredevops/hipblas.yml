@@ -17,6 +17,16 @@ resources:
     endpoint: ROCm
     name: ROCm/ROCm
     ref: ${{ parameters.pipelinesRepoRef }}
+  - repository: mivisionx_repo
+    type: github
+    endpoint: ROCm
+    name: ROCm/MIVisionX
+    ref: ${{ parameters.mivisionxRepoRef }}
+  - repository: amdmigraphx_repo
+    type: github
+    endpoint: ROCm
+    name: ROCm/AMDMIGraphX
+    ref: ${{ parameters.amdmigraphxRepoRef }}
 
 trigger:
   batch: true
