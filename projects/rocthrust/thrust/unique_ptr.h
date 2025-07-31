@@ -639,6 +639,8 @@ public:
     return m_ptr;
   }
 
+  template <bool Dummy = true,
+            class      = EnableIfDeleterDefaultDelete<Dummy>>
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 T* get_raw() const noexcept
   {
     return raw_pointer_cast(m_ptr);
