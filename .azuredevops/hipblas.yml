@@ -6,6 +6,12 @@ parameters:
 - name: pipelinesRepoRef
   type: string
   default: refs/heads/develop
+- name: mivisionxRepoRef
+  type: string
+  default: refs/heads/develop
+- name: amdmigraphxRepoRef
+  type: string
+  default: refs/heads/develop
 - name: triggerDownstreamJobs
   type: boolean
   default: true
