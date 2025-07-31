@@ -116,7 +116,8 @@ class GEMMSolution:
 
     workgroup_size_x: int = 64 * 2
     workgroup_size_y: int = 2
-    workgroupMapping: tuple[int, int] = (-1, -1)
+    workgroupMappingDim: int = -1
+    workgroupMappingValue: int = -1
     workgroupRemapXCC: bool = False
     workgroupRemapXCCValue: int = -1
 
