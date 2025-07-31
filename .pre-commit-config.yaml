@@ -1,5 +1,9 @@
 exclude: |
-  third_party/
+    third_party/
+    build/
+    build-.*/
+    _build/
+    projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
