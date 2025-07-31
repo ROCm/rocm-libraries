@@ -534,7 +534,6 @@ namespace rocRoller::KernelGraph
 
     KernelGraph Simplify::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::Simplify");
         auto graph = original;
         removeRedundantSequenceEdges(graph);
         removeRedundantBodyEdges(graph);
