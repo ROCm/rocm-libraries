@@ -29,7 +29,7 @@
 
 static void set_params(const fft_precision precision, fft_params& param)
 {
-    std::vector<size_t> blengths = {16777216};
+    std::vector<size_t> blengths = {131072};
 
     std::vector<size_t> unit_strides = {1};
 
