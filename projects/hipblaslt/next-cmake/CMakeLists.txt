@@ -268,6 +268,7 @@ if(TENSILELITE_ENABLE_HOST OR HIPBLASLT_ENABLE_HOST)
     target_link_libraries(tensilelite-host 
         PUBLIC
             rocisa::rocisa-cpp
+        PRIVATE
             hip::device
     )
 
@@ -291,8 +292,8 @@ if(HIPBLASLT_ENABLE_HOST)
     target_link_libraries(hipblaslt
         PUBLIC
             roc::${hipblas_target}
-            hip::device
         PRIVATE
+            hip::device
             tensilelite-host
             ${CMAKE_DL_LIBS}
             ${rocTracer}
@@ -384,6 +385,12 @@ if(HIPBLASLT_ENABLE_HOST)
         DEPENDS PACKAGE hip
         DEPENDS PACKAGE ${hipblas_target}
         NAMESPACE roc::
+    )
+
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt-config.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config.cmake"
+        COPYONLY
     )
 
     if( LEGACY_HIPBLAS_DIRECT )

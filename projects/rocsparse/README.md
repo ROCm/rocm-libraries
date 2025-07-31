@@ -1,5 +1,14 @@
 # rocSPARSE
 
+> **⚠️ Important: hipSPARSE is the recommended library for development**
+> 
+> For new development projects, **[hipSPARSE](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparse)** is recommended instead of rocSPARSE. 
+> hipSPARSE provides a comprehensive, portable interface that supports multiple backends (including rocSPARSE and cuSPARSE) and is the preferred library for sparse matrix operations.
+> 
+> For documentation and examples, see the [hipSPARSE documentation](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
+> 
+> This rocSPARSE repository is maintained for reference purposes and to document any specialized functionality that might not be available in hipSPARSE.
+
 rocSPARSE exposes a common interface that provides Basic Linear Algebra Subroutines (BLAS) for
 sparse computation. It's implemented on top of AMD
 [ROCm](https://github.com/ROCm/ROCm) runtime and toolchains. rocSPARSE is
