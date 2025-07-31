@@ -172,13 +172,10 @@ void precompile_test_kernels(const std::string& precompile_file)
                 continue;
 
             // only care about accuracy tests
-            if(name.find("vs_fftw/") != std::string::npos)
+            const auto pos = name.find("vs_fftw/");
+            if(pos != std::string::npos)
             {
-                // [possible TODO] move above check to nesting loop's scope as a
-                // check on the test suite's name (i.e., if it includes "accuracy_test").
-                // That would allow other (hypothetical) accuracy test instances than
-                // "vs_fftw/" to be considered as well...
-                name.erase(0, 8);
+                name.erase(0, pos + 8);
 
                 // change batch to 1, so we don't waste time creating
                 // multiple plans that differ only by batch
@@ -201,7 +198,7 @@ void precompile_test_kernels(const std::string& precompile_file)
     std::mt19937       dist(dev());
     std::shuffle(tokens.begin(), tokens.end(), dist);
     auto precompile_begin = std::chrono::steady_clock::now();
-    std::cout << "precompiling " << tokens.size() << " FFT plans...\n";
+    std::cout << "precompiling kernels for " << tokens.size() << " tokens...\n";
 
     for(auto&& t : tokens)
         tokenQueue.push(std::move(t));
@@ -224,6 +221,13 @@ void precompile_test_kernels(const std::string& precompile_file)
                     params.from_token(token);
                     params.validate();
                     params.create_plan();
+                    if(params.is_forward())
+                    {
+                        hipfft_params inverse_params;
+                        inverse_params.inverse_from_forward(params);
+                        inverse_params.validate();
+                        inverse_params.create_plan();
+                    }
                 }
                 catch(fft_params::work_buffer_alloc_failure&)
                 {
