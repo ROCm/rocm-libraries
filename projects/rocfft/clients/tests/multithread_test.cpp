@@ -23,6 +23,7 @@
 #include "../../shared/hip_object_wrapper.h"
 #include "../../shared/rocfft_against_fftw.h"
 #include "../../shared/rocfft_params.h"
+#include "../../shared/params_gen.h"
 #include "rocfft/rocfft.h"
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -30,6 +31,7 @@
 #include <random>
 #include <thread>
 #include <vector>
+
 
 // normalize results of an inverse transform, so it can be directly
 // compared to the original data before the forward transform
@@ -322,30 +324,72 @@ static void multistream_transform(size_t N, size_t dim, size_t num_streams)
 // fitting into e.g. 8 GB of GPU memory
 TEST(DISABLED_rocfft_UnitTest, simple_multithread_1D)
 {
+    if(hash_prob(random_seed,
+                 ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+    
     multithread_transform(1048576, 1, 64);
 }
 
 TEST(DISABLED_rocfft_UnitTest, simple_multithread_2D)
 {
+    if(hash_prob(random_seed,
+                 ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+    
     multithread_transform(1024, 2, 64);
 }
 
 TEST(DISABLED_rocfft_UnitTest, simple_multithread_3D)
 {
+    if(hash_prob(random_seed,
+                 ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+    
     multithread_transform(128, 3, 40);
 }
 
 TEST(rocfft_UnitTest, simple_multistream_1D)
 {
+    if(hash_prob(random_seed,
+                 ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+    
     multistream_transform(1048576, 1, 32);
 }
 
 TEST(rocfft_UnitTest, simple_multistream_2D)
 {
+    if(hash_prob(random_seed,
+                 ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+    
     multistream_transform(1024, 2, 32);
 }
 
 TEST(rocfft_UnitTest, simple_multistream_3D)
 {
+    if(hash_prob(random_seed,
+                 ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+    
     multistream_transform(128, 3, 32);
 }
