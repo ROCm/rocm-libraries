@@ -20,7 +20,8 @@ for (( i=0; i<=8; i++ )); do
 
         rm $ROCPROF_DIR/ -rf
 
-        HSA_CU_MASK=0 rocprofv3 --att -i input.json -d $ROCPROF_DIR/ --att-perfcounter-ctrl 3 --att-perfcounters "SQ_LDS_BANK_CONFLICT SQ_LDS_ADDR_CONFLICT SQ_LDS_MEM_VIOLATIONS" -- ./$EXE 2> /dev/null
+        # ~/repos/rocprofiler-sdk-build/bin/rocprofv3 -i input.json -d $ROCPROF_DIR/ -- ./$EXE 2> /dev/null
+        ~/repos/rocprofiler-sdk-build/bin/rocprofv3 --att -d $ROCPROF_DIR/ -- ./$EXE 2> /dev/null
         { output="$(cat $ROCPROF_DIR/stats_ui_output_agent_*_dispatch_1.csv)"; } > /dev/null 2>&1
 
         len=${#output}
