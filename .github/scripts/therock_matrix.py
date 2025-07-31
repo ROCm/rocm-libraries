@@ -24,6 +24,6 @@ project_map = {
     "composablekernel": {
         "cmake_options": "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON -DTHEROCK_ENABLE_MIOPEN=ON -DTHEROCK_ENABLE_ALL=OFF",
         "project_to_test": "miopen",
-        "subtree_checkout": "projects/composablekernel\nprojects/rocrand\nprojects/hiprand\nshared/mxdatagenerator\nprojects/hipblas-common",
+        "subtree_checkout": "projects/composablekernel\nprojects/rocrand\nprojects/hiprand\nshared/mxdatagenerator\nprojects/hipblas-common\nprojects/rocroller",
     }
 }
