@@ -35,6 +35,13 @@ class MPI_Comm_wrapper_t
 public:
     MPI_Comm_wrapper_t() = default;
 
+    static MPI_Comm_wrapper_t from_raw(MPI_Comm raw_comm)
+    {
+        MPI_Comm_wrapper_t wrap;
+        wrap.mpi_comm = raw_comm;
+        return wrap;
+    }
+
     // conversion to unwrapped communicator for passing to MPI APIs
     operator MPI_Comm() const
     {
@@ -82,6 +89,20 @@ public:
         {
             throw std::runtime_error("failed to duplicate MPI communicator");
         }
+    }
+
+    // split communicator
+    void split(MPI_Comm parent_comm, int color, int key)
+    {
+        free(); // clean old communicator (if any)
+
+        // now create new communicator from parent_comm
+        if(parent_comm == MPI_COMM_NULL)
+            throw std::runtime_error("MPI_Comm_split: parent communicator is MPI_COMM_NULL");
+
+        int mpi_result = MPI_Comm_split(parent_comm, color, key, &mpi_comm);
+        if(mpi_result != MPI_SUCCESS || mpi_comm == MPI_COMM_NULL)
+            throw std::runtime_error("MPI_Comm_split failed");
     }
 
     // check if communicator has been initialized
@@ -258,6 +279,23 @@ inline MPI_Datatype rocfft_type_to_mpi_type(rocfft_precision precision, rocfft_a
                                                 : type_to_mpi_type<double>();
     }
 }
+
+#else
+
+class MPI_Comm_wrapper_t
+{
+public:
+    MPI_Comm_wrapper_t() {}
+    static MPI_Comm_wrapper_t from_raw(int)
+    {
+        return MPI_Comm_wrapper_t{};
+    }
+    // allow conversion to bool (always false)
+    operator bool() const
+    {
+        return false;
+    }
+};
 
 #endif
 
