@@ -252,7 +252,6 @@ namespace rocRoller
 
         KernelGraph LowerLinearLoop::apply(KernelGraph const& k)
         {
-            TIMER(t, "KernelGraph::lowerLinearLoop");
             auto visitor = LoopDistributeVisitor(m_context, m_loopSize);
             return rewrite(k, visitor);
         }
