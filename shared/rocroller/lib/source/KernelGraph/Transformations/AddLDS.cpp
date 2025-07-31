@@ -124,8 +124,6 @@ namespace rocRoller
 
         KernelGraph AddLDS::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::AddLDS");
-
             auto graph = original;
 
             auto visitor = AddLDSVisitor(m_params, m_context);
@@ -141,6 +139,8 @@ namespace rocRoller
 
         ConstraintStatus NoLDSTiles(const KernelGraph& graph)
         {
+            TIMER(t, "Constraint::NoLDSTiles");
+
             ConstraintStatus retval;
             for(auto tag : graph.coordinates.getNodes<MacroTile>())
             {
