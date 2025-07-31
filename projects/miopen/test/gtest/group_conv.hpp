@@ -342,6 +342,7 @@ private:
               typename ProblemDescription>
     void RunSolverImpl(const ConvTensorsType& tensors, const ProblemDescription& problem)
     {
+
         std::cout << conv_config << std::endl;
         auto&& handle = get_handle();
 
