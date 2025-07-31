@@ -4,12 +4,6 @@ import argparse
 import origami
 import math
 
-def stringToDatatype(s):
-    if s in origami.DataType.__members__:
-        return origami.DataType.__members__[s]
-    else:
-        raise ValueError("Unknown type:" + s)
-
 def parseArguments():
     parser = argparse.ArgumentParser(description="Test StreamK Grid Selection.")
     parser.add_argument("-m", type=int, default=8192, help="Problem M dimension")
@@ -56,7 +50,7 @@ def parseArguments():
     args = parser.parse_args()
 
     if args.type_compute is None:
-        if origami.datatype_to_bits(stringToDatatype(args.type_a)) > origami.datatype_to_bits(stringToDatatype(args.type_b)):
+        if origami.datatype_to_bits(origami.string_to_datatype(args.type_a)) > origami.datatype_to_bits(origami.string_to_datatype(args.type_b)):
             args.type_compute = args.type_a
         else:
             args.type_compute = args.type_b
@@ -79,10 +73,10 @@ def main():
         args.batch,
         args.trans_a,
         args.trans_b,
-        origami.datatype_to_bits(stringToDatatype(args.type_a)),
-        origami.datatype_to_bits(stringToDatatype(args.type_b)),
-        origami.datatype_to_bits(stringToDatatype(args.type_d)),
-        stringToDatatype(args.type_compute),
+        origami.datatype_to_bits(origami.string_to_datatype(args.type_a)),
+        origami.datatype_to_bits(origami.string_to_datatype(args.type_b)),
+        origami.datatype_to_bits(origami.string_to_datatype(args.type_d)),
+        origami.string_to_datatype(args.type_compute),
         args.workspace_size,
         args.mt_m,
         args.mt_n,
@@ -91,7 +85,7 @@ def main():
         args.mi_n,  # MI_N
         args.mi_k,  # MI_K
         args.wgm,
-        origami.datatype_to_bits(stringToDatatype(args.type_acc)) // 8,
+        origami.datatype_to_bits(origami.string_to_datatype(args.type_acc)) // 8,
         args.occupancy,
         hardware,
         args.dynamic_grid_version        

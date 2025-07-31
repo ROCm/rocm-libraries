@@ -3,12 +3,6 @@
 import argparse
 import origami
 
-def stringToDatatype(s):
-    if s in origami.DataType.__members__:
-        return origami.DataType.__members__[s]
-    else:
-        raise ValueError("Unknown type:" + s)
-
 def parseArguments():
     parser = argparse.ArgumentParser(description="""Test Origami.""")
     parser.add_argument("-m", type=int, default=8192)
@@ -232,10 +226,10 @@ def main():
             args.trans_b,
             hardware,
             tile_list,
-            origami.datatype_to_bits(stringToDatatype(args.type_a)),
-            origami.datatype_to_bits(stringToDatatype(args.type_b)),
-            origami.datatype_to_bits(stringToDatatype(args.type_d)),
-            stringToDatatype(args.type_compute),
+            origami.datatype_to_bits(origami.string_to_datatype(args.type_a)),
+            origami.datatype_to_bits(origami.string_to_datatype(args.type_b)),
+            origami.datatype_to_bits(origami.string_to_datatype(args.type_d)),
+            origami.string_to_datatype(args.type_compute),
             args.scale_block_size,
             0.8,
             args.debug,

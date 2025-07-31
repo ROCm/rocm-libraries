@@ -17,17 +17,19 @@ PYBIND11_MODULE(origami, m)
         .export_values();
 
     pybind11::enum_<Origami::DataType>(m, "DataType")
-        .value("f32", Origami::DataType::Float)
-        .value("f64", Origami::DataType::Double)
-        .value("f16", Origami::DataType::Half)
-        .value("i32", Origami::DataType::Int32)
-        .value("bf16", Origami::DataType::BFloat16)
-        .value("i8", Origami::DataType::Int8)
-        .value("xf32", Origami::DataType::XFloat32)
-        .value("f8", Origami::DataType::Float8)
-        .value("bf8", Origami::DataType::BFloat8)
-        .value("f6", Origami::DataType::Float6)
-        .value("f4", Origami::DataType::Float4)
+        .value("Float", Origami::DataType::Float)
+        .value("ComplexFloat", Origami::DataType::ComplexFloat)
+        .value("ComplexDouble", Origami::DataType::ComplexDouble)
+        .value("Double", Origami::DataType::Double)
+        .value("Half", Origami::DataType::Half)
+        .value("Int32", Origami::DataType::Int32)
+        .value("BFloat16", Origami::DataType::BFloat16)
+        .value("Int8", Origami::DataType::Int8)
+        .value("XFloat32", Origami::DataType::XFloat32)
+        .value("Float8", Origami::DataType::Float8)
+        .value("BFloat8", Origami::DataType::BFloat8)
+        .value("Float6", Origami::DataType::Float6)
+        .value("Float4", Origami::DataType::Float4)
         .export_values();
 
     pybind11::class_<Hardware>(m, "Hardware")
@@ -61,6 +63,7 @@ PYBIND11_MODULE(origami, m)
           "This gets a hardware object for a device.");
 
     m.def("datatype_to_bits", &Origami::dataTypeToBits, "Return the number of bits in a datatype");
+    m.def("string_to_datatype", &Origami::stringToDatatype, "Convert a string representation of a datatype into DataType enum");
     m.def("select_best_macro_tile_size",
           &Origami::select_best_macro_tile_size,
           "Get best macro tile sizes.");
