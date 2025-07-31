@@ -30,19 +30,6 @@
 #undef ROCRAND_DETAIL_BM_NOT_IN_STATE
 #include <rocrand/rocrand_normal.h>
 
-#define HIP_CHECK(cmd)                                                                         \
-    do                                                                                         \
-    {                                                                                          \
-        auto error = (cmd);                                                                    \
-        if(error != hipSuccess)                                                                \
-        {                                                                                      \
-            std::cerr << "Encountered HIP error (" << hipGetErrorString(error) << ") at line " \
-                      << __LINE__ << " in file " << __FILE__ << "\n";                          \
-            exit(-1);                                                                          \
-        }                                                                                      \
-    }                                                                                          \
-    while(0)
-
 #define ROCRAND_CHECK(cmd)                                                                \
     do                                                                                    \
     {                                                                                     \
