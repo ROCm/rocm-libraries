@@ -9,8 +9,6 @@ jobs:
     steps:
       - name: Checkout Monorepo
         uses: actions/checkout@v4
-        with:
-          ref:${{ github.ref_name }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
