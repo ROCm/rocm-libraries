@@ -616,11 +616,9 @@ float ConvHipImplicitGemm3DGroupFwdXdlops::GetWti(
 
     if(xDesc.GetType() == miopenHalf || xDesc.GetType() == miopenBFloat16)
     {
-        auto& in_n = xDesc.GetLengths()[0];
-        auto& in_c = xDesc.GetLengths()[1];
-        auto& w_x  = wDesc.GetLengths()[2];
-        auto& w_y  = wDesc.GetLengths()[3];
-        auto& w_d  = wDesc.GetLengths()[4];
+        std::size_t in_n, in_c, w_x, w_y, w_d;
+        std::tie(in_n, in_c)    = tie_pick<0, 1>()(xDesc.GetLengths());
+        std::tie(w_x, w_y, w_d) = tie_pick<2, 3, 4>()(wDesc.GetLengths());
         // For cases where the filter shape is not 1x1x1 and the input channel (in_c) is greater
         // than 8, CK's implementation offers better performance.
         if((w_x == 1 && w_y == 1 && w_d == 1) == false)
