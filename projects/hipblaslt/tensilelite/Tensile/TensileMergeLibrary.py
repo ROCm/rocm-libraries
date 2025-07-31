@@ -89,9 +89,15 @@ def sanitizeSolutions(solList):
             sol["StaggerUStride"] = 0
             sol["_staggerStrideShift"] = 0
 
+from Tensile.Common.GlobalParameters import defaultSolution, defaultInternalSupportParams
+from Tensile.Common import assignParameterWithDefault
+
 def reNameSolutions(data):
     solList = data[5]
     for sol in solList:
+        # Assign solution state from config, filling missing from the defaultSolution
+        for key in defaultSolution:
+            assignParameterWithDefault(sol, key, sol, defaultSolution)
         sol["ProblemType"] = data[4]
         sol["SolutionNameMin"] = getSolutionNameMin(sol,splitGSU=False)
         sol["KernelNameMin"] = getKernelNameMin(sol,splitGSU=False)
