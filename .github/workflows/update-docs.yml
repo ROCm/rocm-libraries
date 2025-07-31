@@ -23,7 +23,7 @@ on:
     paths:
 #      - 'projects/**'
 #      - 'shared/**'
-      - 'projects/composablekernel'
+      - 'projects/miopen'
       - 'projects/hipblas'
 
 jobs:
@@ -58,7 +58,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Trigger RTD build
-        if: steps.diff.outputs.changed_projects != ""
+        if: steps.diff.outputs.changed_projects
         env: 
           changed_projects: ${{ steps.diff.outputs.changed_projects }}
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
@@ -70,7 +70,7 @@ jobs:
           echo "Read the Docs version slug: $version_slug"
 
           # List of project slugs on RTD
-          project_list=$( curl
+          project_list=$( curl \
                  -H "Authorization: Token $RTD_TOKEN" \
                  "https://app.readthedocs.com/api/v3/projects/?expand=advanced-micro-devices&limit=300" \
                  | jq -r '.results[].slug'
@@ -78,7 +78,7 @@ jobs:
 
           for project in $changed_projects; do
             slug="advanced-micro-devices-monorepo-$project" # Remove monorepo keyword when using on live docs later
-            if echo "project_list" | grep -Fxq "$slug"; then
+            if echo "$project_list" | grep -Fxq "$slug"; then
               echo "Triggering RTD build for $project"
               response=$(curl -f -s -X POST \
                   -H "Authorization: Token $RTD_TOKEN" \
@@ -89,4 +89,5 @@ jobs:
               echo "Successfully triggered RTD build for $project. Response: $response"
             else
               echo "Skipping $project - Does not exist on Read the Docs"
+            fi
           done
