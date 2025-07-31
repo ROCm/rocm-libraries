@@ -6,7 +6,8 @@ subtree_to_project_map = {
     "projects/rocthrust": "prim",
     "projects/hipcub": "prim",
     "projects/rocrand": "rand",
-    "projects/hiprand": "rand"
+    "projects/hiprand": "rand",
+    "projects/composablekernel": "composablekernel"
 }
 
 project_map = {
@@ -20,4 +21,9 @@ project_map = {
         "project_to_test": "rocrand, hiprand",
         "subtree_checkout": "projects/rocrand\nprojects/hiprand",
     },
+    "composablekernel": {
+        "cmake_options": "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON -DTHEROCK_ENABLE_ALL=OFF",
+        "project_to_test": "miopen",
+        "subtree_checkout": "projects/composablekernel",
+    }
 }
