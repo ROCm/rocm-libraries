@@ -461,7 +461,9 @@ namespace rocRoller
                 auto direction = ci.forward ? Graph::Direction::Upstream : Graph::Direction::Downstream;
 
                 // 1. Set register coordinates
-                Transformer xform(&kgraph.coordinates);
+                // Transformer xform(&kgraph.coordinates);
+                auto xform = kgraph.getTransformer(tag);
+
                 auto const maybeForLoop = findContainingOperation<ForLoopOp>(tag, kgraph);
                 auto fullStop  = [&](int tag) { return tag == increment; };
                 auto [required, path] = findRequiredCoordinates(target, direction, fullStop, kgraph);
