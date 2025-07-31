@@ -523,9 +523,8 @@ template<
     class InputIterator,
     class OutputIterator,
     class UniqueCountOutputIterator,
-    class EqualityOp = ::rocprim::equal_to<typename std::iterator_traits<InputIterator>::value_type,
+    class EqualityOp = ::rocprim::equal_to<typename std::iterator_traits<InputIterator>::value_type>,
     bool  UsingOrderedBlockId = false>
->
 inline
 hipError_t unique(void * temporary_storage,
                   size_t& storage_size,

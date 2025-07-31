@@ -232,7 +232,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
     {
         return result;
     }
-    
+
     using block_id_wrapper_type = block_id_wrapper<uint32_t, UsingOrderedBlockId>;
 
     typename block_id_wrapper_type::id_type* block_id_pool = nullptr;    
@@ -273,6 +273,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
     virtual_shared_memory_size *= number_of_blocks;
     
     // temporary storage partition
+
     result = detail::temp_storage::partition(
         temporary_storage,
         storage_size,
@@ -284,18 +285,19 @@ inline hipError_t partition_impl(void*                       temporary_storage,
             // They have the same base type, so there is no padding between the types.
             detail::temp_storage::ptr_aligned_array(&selected_count, selected_count_size),
             detail::temp_storage::ptr_aligned_array(&prev_selected_count, selected_count_size),
-            detail::temp_storage::ptr_aligned_array(&block_id_pool, 1),
+            detail::temp_storage::ptr_aligned_array(&block_id_pool, block_id_wrapper_type::get_storage_size()),
             // vsmem
             detail::temp_storage::make_partition(&vsmem,
                                                  virtual_shared_memory_size,
                                                  cache_line_size)));
+
     if(result != hipSuccess || temporary_storage == nullptr)
     {
         return result;
     }
 
-    auto block_id = detail::ordered_block_id<unsigned int>::create(block_id_pool);
-    
+    auto block_id = block_id_wrapper_type::create(block_id_pool);
+
     // Start point for time measurements
     std::chrono::steady_clock::time_point start;
 
@@ -387,10 +389,13 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                                                     current_number_of_blocks,
                                                     start);
 
-        result = hipMemsetAsync(block_id_pool, 0, sizeof(unsigned int), stream);
-        if (result != hipSuccess)
+        if (UsingOrderedBlockId)
         {
-            return result;
+            result = hipMemsetAsync(block_id_pool, 0, sizeof(unsigned int), stream);
+            if (result != hipSuccess)
+            {
+                return result;
+            }
         }
         
         if(debug_synchronous) start = std::chrono::steady_clock::now();
