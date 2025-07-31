@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include "rocRoller/Utilities/LazySingleton.hpp"
 #include <concepts>
 #include <functional>
 #include <iostream>
@@ -184,7 +185,7 @@ namespace rocRoller
         };
 
         template <ComponentBase Base>
-        class ComponentFactory : public ComponentFactoryBase
+        class ComponentFactory : public ComponentFactoryBase, LazySingleton<Base>
         {
         public:
             using Argument = typename Base::Argument;
@@ -212,6 +213,9 @@ namespace rocRoller
             bool registerComponent(std::string const& name,
                                    Matcher<Base>      matcher,
                                    Builder<Base>      builder);
+
+            template <Component Comp>
+            void registerImplementations();
 
             template <typename T>
             void emptyCache(T&& arg);

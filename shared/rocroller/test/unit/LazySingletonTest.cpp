@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <gtest/gtest.h>
 #include <iostream>
 #include <rocRoller/Utilities/TestSingleton.hpp>
 
@@ -37,6 +38,10 @@ namespace rocRollerTest
 
     TEST_F(LazySingletonTest, Basic)
     {
-        rocRoller::TestSingleton<int>::getInstance()->print(1);
+        rocRoller::TestSingleton<int>::getInstance()->storeVal(99);
+        EXPECT_EQ(1, rocRoller::TestSingleton<int>::getInstance()->dontDoAnything(1));
+        EXPECT_EQ("true",
+                  rocRoller::TestSingleton<std::string>::getInstance()->dontDoAnything("true"));
+        EXPECT_EQ(99, rocRoller::TestSingleton<int>::getInstance()->getVal());
     }
 }

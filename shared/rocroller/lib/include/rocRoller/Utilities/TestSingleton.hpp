@@ -36,6 +36,23 @@ namespace rocRoller
     class TestSingleton : public LazySingleton<TestSingleton<T>>
     {
     public:
+        T val;
+
+        void storeVal(T value)
+        {
+            val = value;
+        }
+
+        T getVal()
+        {
+            return val;
+        }
+
+        T dontDoAnything(T value)
+        {
+            return value;
+        }
+
         void print(T value)
         {
             std::cout << "Value is: " << value << std::endl;
