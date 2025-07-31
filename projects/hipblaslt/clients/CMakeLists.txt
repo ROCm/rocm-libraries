@@ -18,6 +18,8 @@ add_library(hipblaslt::hipblaslt-clients-common ALIAS hipblaslt-clients-common)
 
 if(HIPBLASLT_ENABLE_BLIS)
     target_link_libraries(hipblaslt-clients-common PRIVATE BLIS::BLIS)
+else()
+    target_link_libraries(hipblaslt-clients-common PUBLIC ${BLAS_LIBRARIES})
 endif()
 
 target_link_libraries(hipblaslt-clients-common
@@ -25,11 +27,10 @@ target_link_libraries(hipblaslt-clients-common
         roc::hipblaslt
         OpenMP::OpenMP_CXX
         ${LAPACK_LIBRARIES}
-        ${BLAS_LIBRARIES}
-        ${CBLAS_LIBRARIES}
     PRIVATE
         hip::device
 )
+
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
     if(NOT ROCM_LIBRARIES_SUPERBUILD)
@@ -113,9 +114,6 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
             GTest::gtest
             OpenMP::OpenMP_CXX
     )
-    if(HIPBLASLT_ENABLE_BLIS)
-        target_link_libraries(hipblaslt-test PRIVATE BLIS::BLIS)
-    endif()
     target_compile_definitions(hipblaslt-test PRIVATE GOOGLE_TEST)
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER)
