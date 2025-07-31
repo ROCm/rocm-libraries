@@ -12,17 +12,19 @@
 #
 # This ensures live documentation is synchronized with the latest change.
 
-name: Trigger documentation build on Read the Docs
+name: RTD Docs Synchronization
 
 on:
   push:
     branches:
       - 'develop'
-      - 'docs/**'
-      - 'users/alexxu12/docs-demo' # for test
+#      - 'docs/**'
+      - 'docs/test'
     paths:
-      - 'projects/**'
-      - 'shared/**'
+#      - 'projects/**'
+#      - 'shared/**'
+      - 'projects/composablekernel'
+      - 'projects/hipblas'
 
 jobs:
   trigger-rtd:
