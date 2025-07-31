@@ -41,6 +41,9 @@ TEST(RocprimTupleTests, HostApply)
     // Check if basic apply works
     ASSERT_EQ(rocprim::apply(f_sum, rocprim::make_tuple(int{1}, int{2}, int{3})), 6);
 
+    // And also check with mixed types
+    ASSERT_EQ(rocprim::apply(f_sum, rocprim::make_tuple(double{1.0}, float{2.0}, int{3})), 6);
+
     // Check if values passed can be passed by reference
     auto tuple_a = rocprim::make_tuple(1, 2);
     ASSERT_TRUE(rocprim::apply([](auto&&... v)
