@@ -13,7 +13,7 @@ def runCI =
 {
     nodeDetails, jobName->
 
-    def prj  = new rocProject('rocFFT-internal', 'multigpu')
+    def prj  = new rocProject('rocFFT', 'multigpu')
 
     prj.defaults.ccache = true
     prj.timeout.compile = 600
