@@ -167,7 +167,7 @@ endif()
 
 if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBRARIES_SUPERBUILD)
     find_package(rocroller QUIET)
-    block()
+    block(SCOPE_FOR VARIABLES)
         if(NOT rocroller_FOUND)
             #set(ROCROLLER_ENABLE_FETCH ON)
             #set(ROCROLLER_BUILD_TESTING OFF)
