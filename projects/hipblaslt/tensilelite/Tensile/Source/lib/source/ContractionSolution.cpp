@@ -690,14 +690,6 @@ namespace TensileLite
                 args.append("beta_2", inputs.beta, problem.betaType());
         }
 
-        if(sizeMapping.persistentKernel != 0 || sizeMapping.streamK != 0)
-        {
-            uint32_t magicShift;
-            args.template append<uint32_t>("magicNumberProblemNumGroupTiles0",
-                                           magicNumber(2, problemNumGroupTiles.x, &magicShift));
-            args.template append<uint32_t>("magicShiftProblemNumGroupTiles0", magicShift);
-        }
-
         if(sizeMapping.streamK != 0)
         {
             // SK doesn't care gsu
@@ -714,25 +706,9 @@ namespace TensileLite
             // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
             auto     itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
             auto     totalIters   = tiles * itersPerTile;
-            uint32_t magicNumberItersPerTile;
-            uint32_t magicShiftItersPerTile;
-            magicNumberItersPerTile = magicNumber(2, itersPerTile, &magicShiftItersPerTile);
-
             args.template append<uint32_t>("itersPerTile", itersPerTile);
-            args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
-            args.template append<uint32_t>("magicShiftItersPerTile", magicShiftItersPerTile);
-
-            uint32_t numGroupTiles0x1 = problemNumGroupTiles.x * problemNumGroupTiles.y;
-            uint32_t magicNumProblemNumGroupTiles0By1;
-            uint32_t magicShiftProblemNumGroupTiles0By1;
-            magicNumProblemNumGroupTiles0By1
-                = magicNumber(2, numGroupTiles0x1, &magicShiftProblemNumGroupTiles0By1);
-            args.template append<uint32_t>("magicNumProblemNumGroupTiles0By1",
-                                           magicNumProblemNumGroupTiles0By1);
-            args.template append<uint32_t>("magicShiftProblemNumGroupTiles0By1",
-                                           magicShiftProblemNumGroupTiles0By1);
-
             args.template append<uint32_t>("totalIters", totalIters);
+            
             if(sizeMapping.streamK == 1) // Basic SK
             {
                 uint32_t itersPerWave = CeilDivide(totalIters, numWorkGroups.x);
@@ -766,9 +742,12 @@ namespace TensileLite
                 uint32_t skItersPerWG = skTiles * itersPerTile / skGrid;
                 uint32_t skExtraIters = skTiles * itersPerTile % (skGrid);
 
+                // Pack skGrid and skTiles into a single uint32_t such that the upper 16 bits
+                // represent skGrid and the lower 16 bits represent skTiles
+                uint32_t skGridAndTiles = (skGrid <<16) | (skTiles & 0xFFFF);
+
                 args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
-                args.template append<uint32_t>("skGrid", skGrid);
-                args.template append<uint32_t>("skTiles", skTiles);
+                args.template append<uint32_t>("skGridAndTiles", skGridAndTiles);
                 args.template append<uint32_t>("skExtraIters", skExtraIters);
             }
         }
@@ -950,11 +929,18 @@ namespace TensileLite
     inline void ContractionSolution::calculateAutoGSU(Problem const&  problem,
                                                       Hardware const* hardware) const
     {
-        // autoGSU is already calculated
-        if(autoGSU != 0)
+        if(problem.groupedGemm())
         {
+            autoGSU = 1;
             return;
         }
+
+        // Temporal remove until the cache mechanism is fixed
+        // autoGSU is already calculated
+        // if(autoGSU != 0)
+        // {
+        //     return;
+        // }
 
         // original GSU is not -1
         if(sizeMapping.globalSplitU != -1)
@@ -981,7 +967,6 @@ namespace TensileLite
         // WorkspaceCheck
         if(autoGSU > 1)
         {
-#define MAX_GSU_WORKSPACE_SIZE 128 * 1024 * 1024
             int    elemC    = sizeMapping.workspaceSizePerElemC * autoGSU;
             int    elemBias = sizeMapping.workspaceSizePerElemBias * autoGSU;
             size_t rs       = 0;
@@ -1000,34 +985,37 @@ namespace TensileLite
                     rs += N * elemBias;
                 }
             }
-            autoGSU = min(autoGSU,
-                          (MAX_GSU_WORKSPACE_SIZE - rs) / sizeMapping.workspaceSizePerElemC
-                              / problem.d().totalLogicalElements());
+
+            size_t tiles = problem.getNumTiles(sizeMapping, 1) * B;
+            size_t tileSize = sizeMapping.macroTile.x * sizeMapping.macroTile.y * sizeMapping.workspaceSizePerElemC;
+            size_t bufSize = tiles * tileSize;
+
             if(problem.groupedGemm())
             {
                 assert(problem.workspaceSizeGroupedGemm() <= problem.workspaceSize());
                 autoGSU = min(autoGSU,
                               (problem.workspaceSizeGroupedGemm() - rs)
-                                  / sizeMapping.workspaceSizePerElemC
-                                  / problem.d().totalLogicalElements());
+                                  / bufSize);
             }
             else
                 autoGSU = min(autoGSU,
-                              (problem.workspaceSize() - rs) / sizeMapping.workspaceSizePerElemC
-                                  / problem.d().totalLogicalElements());
+                              (problem.workspaceSize() - rs) / bufSize);
         }
 
         // WorkgroupNumberCheck
 #define MAX_WORKGROUP_NUMBER 16777216
-        autoGSU = min(autoGSU,
-                      MAX_WORKGROUP_NUMBER / std::ceil(static_cast<float>(M) / MT0)
-                          / std::ceil(static_cast<float>(N) / MT1) / B);
+        if(autoGSU > 1)
+            autoGSU = min(autoGSU,
+                        MAX_WORKGROUP_NUMBER / std::ceil(static_cast<float>(M) / MT0)
+                            / std::ceil(static_cast<float>(N) / MT1) / B);
 
         // GlobalSplitUCheckMinK
         if(autoGSU > 1)
-        {
-            autoGSU = min(autoGSU, (uint32_t)std::ceil(K / MT2));
-        }
+            autoGSU = min(autoGSU, std::ceil(static_cast<float>(K) / MT2));
+
+        // SynchronizerSizeCheck
+        if(autoGSU > 1)
+            autoGSU = min(autoGSU, 409600/(sizeMapping.synchronizerSizePerWG * problem.getNumTiles(sizeMapping, 1) * B));
 
         // avoid gsu < 1
         autoGSU = max(autoGSU, 1);
@@ -1120,10 +1108,14 @@ namespace TensileLite
             uint32_t       staggerUMapping = (sizeMapping.staggerUMapping << 13);
             uint32_t       staggerUShift   = staggerMask1 & ((sizeMapping.staggerStrideShift) << 8);
             uint32_t       staggerU        = mask8 & sizeMapping.staggerU;
+            if(Debug::Instance().disableStaggerU())
+                staggerU = 0;
             staggerU                       = staggerU | staggerUShift;
             staggerU                       = staggerU | staggerUMapping;
             internalArg0                   = internalArg0 | (staggerU << 16);
         }
+        else if(T_Debug && Debug::Instance().disableStaggerU())
+            std::cout << "solution doesn't support configurable staggerU" << std::endl;
 
         args.template append<uint32_t>("internalArgs", internalArg0);
 
@@ -3123,6 +3115,7 @@ namespace TensileLite
                 = problem.b().elementBytes() * 8; // TODO update for A/B different types
             size_t elementSizeC_bits
                 = problem.c().elementBytes() * 8; // TODO update for A/B different types
+            analytical::DataType miDataType = static_cast<analytical::DataType>(problem.computeInputType());
             return analytical::select_best_grid_size(x,
                                                      y,
                                                      z,
@@ -3139,6 +3132,7 @@ namespace TensileLite
                                                      elementSizeA_bits,
                                                      elementSizeB_bits,
                                                      elementSizeC_bits,
+                                                     miDataType,
                                                      0,
                                                      0.0,
                                                      false,

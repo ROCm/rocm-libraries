@@ -19,7 +19,9 @@
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 
-#include "test_header.hpp"
+#include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 

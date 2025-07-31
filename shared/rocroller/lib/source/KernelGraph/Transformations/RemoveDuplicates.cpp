@@ -396,6 +396,7 @@ namespace rocRoller
                                         int                      tag,
                                         std::vector<int>&        result)
         {
+            // cppcheck-suppress internalAstError
             auto traverse = [&]<typename EdgeType>() {
                 for(auto child : graph.control.getOutputNodeIndices<EdgeType>(tag))
                 {
@@ -441,8 +442,6 @@ namespace rocRoller
 
         KernelGraph RemoveDuplicates::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::RemoveDuplicates");
-
             auto colouring = colourByUnrollValue(original);
             auto graph     = original;
             removeRedundantSequenceEdges(graph);

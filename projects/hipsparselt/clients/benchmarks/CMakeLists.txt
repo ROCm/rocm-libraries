@@ -81,7 +81,7 @@ if (NOT WIN32)
   if (CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
     list( APPEND COMMON_LINK_LIBS "-lgfortran") # for lapack
   else()
-    list( APPEND COMMON_LINK_LIBS "-lflang_rt.runtime") # for lapack
+    list( APPEND COMMON_LINK_LIBS "-lFortranRuntime -lFortranDecimal") # for lapack
   endif()
 else()
   list( APPEND COMMON_LINK_LIBS "libomp")

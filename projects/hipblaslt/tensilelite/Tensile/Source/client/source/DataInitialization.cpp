@@ -1180,9 +1180,9 @@ namespace TensileLite
                     else if(m_curBoundsCheck == BoundsCheckMode::GuardPageFront
                             || m_curBoundsCheck == BoundsCheckMode::GuardPageBack)
                     {
-                        unsigned int roundUpSize = pageSize / dataTypeSize;
+                        size_t roundUpSize = pageSize / dataTypeSize;
                         p->second.maxElements
-                            = RoundUpToMultiple<unsigned int>(p->second.maxElements, roundUpSize);
+                            = RoundUpToMultiple<size_t>(p->second.maxElements, roundUpSize);
                         // No bias page guard
                     }
                     ++p;

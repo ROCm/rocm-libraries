@@ -40,8 +40,11 @@ trigger:
 
 pr: none
 
-jobs:
+stages:
+- stage: hipcub
+  jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/hipCUB.yml@pipelines_repo
     parameters:
       sparseCheckoutDir: projects/hipcub
       triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
+- template: templates/report-summary-check-wrapper.yml

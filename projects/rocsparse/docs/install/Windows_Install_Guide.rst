@@ -31,7 +31,7 @@ Add the SDK installation location to your ``CMAKE_PREFIX_PATH``.
 
 .. code-block:: shell
 
-   -DCMAKE_PREFIX_PATH="C:\Program Files\AMD\ROCm\5.5"
+   -DCMAKE_PREFIX_PATH="C:\Program Files\AMD\ROCm\7.0"
 
 In your ``CMakeLists.txt`` file, use these lines:
 
@@ -65,8 +65,8 @@ Building rocSPARSE from source also requires the following components and depend
 
 *  `git <https://git-scm.com/>`_
 *  `CMake <https://cmake.org/>`_ (Version 3.5 or later)
-*  `rocPRIM <https://github.com/ROCm/rocPRIM>`_
-*  `rocBLAS <https://github.com/ROCm/rocBLAS>`_ (Optional: for the library)
+*  `rocPRIM <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim>`_
+*  `rocBLAS <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_ (Optional: for the library)
 *  `vcpkg <https://github.com/Microsoft/vcpkg.git>`_
 *  `GoogleTest <https://github.com/google/googletest>`_ (Optional: only required to build the clients)
 *  `Python <https://www.python.org/>`_
@@ -83,7 +83,8 @@ Downloading rocSPARSE
 ----------------------
 
 The rocSPARSE source code for Windows, which is the same as for Linux, is available
-at the `rocSPARSE GitHub <https://github.com/ROCm/rocSPARSE>`_.
+from the `rocSPARSE folder <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsparse>`_
+of the `rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries>`_.
 The ROCm HIP SDK version might be shown in the default installation path, but
 you can run the HIP SDK compiler from the ``bin/`` folder to display the version using this command:
 
@@ -96,15 +97,40 @@ For example, the HIP version might be ``5.4.22880-135e1ab4``.
 This corresponds to major release ``5``, minor release ``4``, patch ``22880``, and build identifier ``135e1ab4``.
 The rocSPARSE GitHub includes branches with names like ``release/rocm-rel-major.minor``,
 where major and minor have the same meaning as the HIP version.
-For example, use the following command to download rocSPARSE:
+
+To limit your local checkout to only the rocSPARSE project, configure ``sparse-checkout`` before cloning.
+This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.
+Use the following commands for a sparse checkout:
+
+.. note::
+
+   To include the rocPRIM and rocBLAS dependencies, set the projects for the sparse checkout using
+   ``git sparse-checkout set projects/rocsparse projects/rocprim projects/rocblas``.
 
 .. code-block:: shell
 
-   git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocSPARSE.git
-   cd rocSPARSE
+   git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries
+   git sparse-checkout init --cone
+   git sparse-checkout set projects/rocsparse
+   git checkout release/rocm-rel-x.y  # or use the branch you want to work with
 
 Replace ``x.y`` in the above command with the version of HIP SDK installed on your machine.
-For example, if you have HIP 5.5 installed, use ``-b release/rocm-rel-5.5``.
+For example, if you have HIP 7.0 installed, use ``-b release/rocm-rel-7.0``.
+
+To download all projects in rocm-libraries, use these commands. This process takes
+longer but is recommended for those working with a large number of libraries.
+
+.. code-block:: shell
+
+   git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries/projects/rocsparse
+
+.. note::
+
+   To build ROCm 6.4.2 and earlier, use the rocSPARSE repository at `<https://github.com/ROCm/rocSPARSE>`_.
+   For more information, see the documentation associated with the release you want to build.
+
 Add the SDK tools to your path with an entry like the following:
 
 .. code-block:: shell
@@ -127,6 +153,10 @@ Building the library from source
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The following table lists the common ways to use ``rmake.py`` to build the rocSPARSE library only.
+
+.. note::
+
+   You can run ``rmake.py`` from the ``projects\rocsparse`` directory.
 
 .. csv-table::
    :header: "Command","Description"

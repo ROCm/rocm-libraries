@@ -105,7 +105,6 @@ endif( )
 set( hipblas_test_common
   ../common/utility.cpp
   ../common/cblas_interface.cpp
-  ../common/clients_common.cpp
   ../common/norm.cpp
   ../common/unit.cpp
   ../common/near.cpp

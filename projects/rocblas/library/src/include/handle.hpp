@@ -95,6 +95,7 @@ enum class Processor : int
     gfx1100 = 1100,
     gfx1101 = 1101,
     gfx1102 = 1102,
+    gfx1150 = 1150,
     gfx1151 = 1151,
     gfx1200 = 1200,
     gfx1201 = 1201
@@ -338,6 +339,21 @@ public:
 #endif
 
         return status;
+    }
+
+    /**
+     * @brief Checks if the hipBLASLt feature is explicitly enabled by the user.
+     *
+     * This method determines whether the hipBLASLt feature is forced on by
+     * checking the value of the `hipblasltEnvVar` environment variable.
+     *
+     * @return true if the `hipblasltEnvVar` is set to 1, indicating that the
+     *         feature is explicitly enabled by the user; false otherwise.
+     */
+    bool isHipBLASLtForcedOn()
+    {
+        // Only true if the user has set the environment variable on
+        return hipblasltEnvVar == 1;
     }
 
     inline int getDefaultDeviceMemorySize()

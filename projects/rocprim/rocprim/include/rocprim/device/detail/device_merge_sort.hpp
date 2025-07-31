@@ -230,7 +230,7 @@ struct block_permute_values_impl<Value,
                                  ItemsPerThread,
                                  std::enable_if_t<(std::is_trivially_copyable<Value>::value
                                                    && !rocprim::is_floating_point<Value>::value
-                                                   && !std::is_integral<Value>::value)>>
+                                                   && !rocprim::is_integral<Value>::value)>>
 {
     static constexpr unsigned int items_per_block = ItemsPerThread * BlockSize;
 

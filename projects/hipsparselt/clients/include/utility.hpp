@@ -34,6 +34,7 @@
 #include <string>
 #include <type_traits>
 #include <vector>
+#include <stdlib.h>
 
 /*!\file
  * \brief provide common utilities
@@ -638,3 +639,35 @@ inline hipsparseStatus_t expected_hipsparse_status_of_matrix_stride(
     else
         return HIPSPARSE_STATUS_INVALID_VALUE;
 }
+
+class Logger
+{
+
+public:
+    Logger(int log_level)
+    {
+        this->log_level = log_level;
+        this->pre_log_level = -1;
+        if(this->log_level)
+        {
+            char* str_layer_mode;
+            if((str_layer_mode = getenv("HIPSPARSELT_LOG_LEVEL")) != NULL)
+            {
+                this->pre_log_level = atoi(str_layer_mode);
+            }
+            setenv("HIPSPARSELT_LOG_LEVEL", std::to_string(this->log_level).c_str(), 1);
+        }
+    }
+    ~Logger()
+    {
+        if(this->log_level)
+        {
+            if(this->pre_log_level == -1)
+                unsetenv("HIPSPARSELT_LOG_LEVEL");
+            else 
+                setenv("HIPSPARSELT_LOG_LEVEL", std::to_string(this->pre_log_level).c_str(), 1);
+        }
+    }
+    int log_level;
+    int pre_log_level;
+};
