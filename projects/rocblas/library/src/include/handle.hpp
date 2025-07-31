@@ -341,6 +341,21 @@ public:
         return status;
     }
 
+    /**
+     * @brief Checks if the hipBLASLt feature is explicitly enabled by the user.
+     *
+     * This method determines whether the hipBLASLt feature is forced on by
+     * checking the value of the `hipblasltEnvVar` environment variable.
+     *
+     * @return true if the `hipblasltEnvVar` is set to 1, indicating that the
+     *         feature is explicitly enabled by the user; false otherwise.
+     */
+    bool isHipBLASLtForcedOn()
+    {
+        // Only true if the user has set the environment variable on
+        return hipblasltEnvVar == 1;
+    }
+
     inline int getDefaultDeviceMemorySize()
     {
 

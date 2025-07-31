@@ -120,10 +120,10 @@ class LocalReadVALU(LocalRead):
                             dbgVgpr = "v[%s]"%dbgVgprList[0]
 
                         # localReadCode.addInst("s_waitcnt lgkmcnt(0)", "CheckValue1 wait for LDS read")
-                        localReadCode.add(SWaitCnt(lgkmcnt=0, comment="CheckValue1 wait for lds read"))
-                        if writer.archCaps["SeparateVscnt"]:
+                        localReadCode.add(SWaitCnt(dscnt=0, comment="CheckValue1 wait for lds read"))
+                        if writer.asmCaps["SeparateVscnt"]:
                             # localReadCode.addInst( "s_waitcnt_vscnt", -2, "0", "")
-                            localReadCode.add(SWaitCnt(vmcnt=0, vscnt=0))
+                            localReadCode.add(SWaitCnt(vlcnt=0, vscnt=0))
 
                         if kernel["ProblemType"]["DataType"].isHalf():
                             localReadCode.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(0x3c003c00), comment="CheckValue1: FP16")) # packed 1s
@@ -709,7 +709,7 @@ class LocalReadMFMA(LocalRead):
                                     dbgVgprList = (dbgVgprList[1].split("]")[0]).split(':')
                                     dbgVgpr = "v[%s]"%dbgVgprList[0]
     
-                                localReadCode.add(SWaitCnt(lgkmcnt=0, vscnt=0, comment="CheckValue1 wait for LDS read"))
+                                localReadCode.add(SWaitCnt(dscnt=0, vscnt=0, comment="CheckValue1 wait for LDS read"))
     
                                 if kernel["ProblemType"]["DataType"].isHalf():
                                     hexValue = hex(0x3c003c00)     # packed 1s

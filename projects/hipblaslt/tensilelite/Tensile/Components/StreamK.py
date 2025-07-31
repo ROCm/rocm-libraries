@@ -309,7 +309,7 @@ class StreamK(Component):
             module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sCtaIdx), shiftHex=log2(4), comment="flag offset based on CTA index"))
             module.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="get flag"))
 
-            module.add(SWaitCnt(lgkmcnt=0, comment="wait for flag load"))
+            module.add(SWaitCnt(kmcnt=0, comment="wait for flag load"))
             if kernel["DebugStreamK"] & 2 == 0:
                 module.add(SCmpEQU32(src0=sgpr(tmpSgpr+2), src1=1, comment="check if ready"))
                 module.add(SCBranchSCC0(labelName=skFixupLabel.getLabelName(), comment="if flag not set, wait and check again"))
@@ -612,7 +612,7 @@ class StreamK(Component):
             #     kStr += PreLoopVmcntCaseStr
 
             # Set flag
-            module.add(SWaitCnt(vmcnt=0, comment="wait for data store"))
+            module.add(SWaitCnt(vscnt=0, comment="wait for data store"))
             module.add(SBarrier(comment="store all data before setting flag"))
             module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr("StreamKIdx"), shiftHex=log2(4), comment="flag offset based on CTA index"))
             with writer.allocTmpSgpr(1) as flagSgprRes:
@@ -624,7 +624,7 @@ class StreamK(Component):
                 module.add(SMovB32(dst=sgpr(flagSgpr), src=1, comment="flag data"))
                 module.add(SStoreB32(src=sgpr(flagSgpr), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="set flag"))
                 module.add(skipFlagSet)
-            module.add(SWaitCnt(lgkmcnt=0, comment="wait for flag")) # TODO just for testing
+            module.add(SWaitCnt(kmcnt=0, comment="wait for flag")) # TODO just for testing
 
         module.add(SBranch(labelName=endLabel.getLabelName(), comment="jump to end"))
 
@@ -673,9 +673,7 @@ class StreamK(Component):
         # across all the store loop iters.
         if writer.db["ConservativeWaitCnt"] & 0x10:
             module.add(SBarrier("debug"))
-            module.add(SWaitCnt(vmcnt=0, comment="ConservativeWaitCnt"))
-            if writer.states.archCaps["SeparateVscnt"]:
-                module.add(SWaitCnt(vscnt=0, comment="writes"))
+            module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="ConservativeWaitCnt"))
             module.add(SBarrier("debug"))
         if not edge and writer.db["ForceEdgeStores"]>=2:
             module.add(writer.getBomb()) # should not get here
@@ -1117,9 +1115,7 @@ class StreamK(Component):
         # across all the store loop iters.
         if writer.db["ConservativeWaitCnt"] & 0x10:
             module.add(SBarrier("debug"))
-            module.add(SWaitCnt(vmcnt=0, comment="ConservativeWaitCnt"))
-            if writer.states.archCaps["SeparateVscnt"]:
-                module.add(SWaitCnt(vscnt=0, comment="writes"))
+            module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="ConservativeWaitCnt"))
             module.add(SBarrier("debug"))
         if not edge and writer.db["ForceEdgeStores"]>=2:
             module.add(writer.getBomb()) # should not get here
@@ -1209,9 +1205,7 @@ class StreamK(Component):
         ########################################
         # wait for batched load
         if not interleaveStoreVmcnt: # beta and
-            module.add(SWaitCnt(vmcnt=0, comment="wait C"))
-            if writer.states.archCaps["SeparateVscnt"]:
-                module.add(SWaitCnt(vscnt=0, comment="writes"))
+            module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="wait C"))
 
             # PreLoop LWVmcnt: When a vmcnt(cnt) is inserted here, means the GlobalLoad for PAP is finished
             # So the preLoopVmcntDict value is meaningless since we no longer need to wait in next PreLoop
@@ -1268,20 +1262,20 @@ class StreamK(Component):
             # for example assuming we can have two elements and can use pk_mul
             # here:
             if interleaveStoreVmcnt: # beta and
-                if writer.states.archCaps["SeparateVscnt"]:
-                    vmcnt = loadsIssued - elementIdx - 1
-                    vmComment = "{} = {} - {} - 1".format(vmcnt, loadsIssued, elementIdx)
+                vlcnt = loadsIssued - elementIdx - 1
+                # we are waiting for loads to finish, so no need to wait for stores if counted separately
+                if writer.states.asmCaps["SeparateVscnt"] or writer.states.asmCaps["SeparateVMcnt"]:
+                    vscnt = -1
+                    vmComment = "{} = {} - {} - 1".format(vlcnt, loadsIssued, elementIdx)
                 else:
                     waitStoreCnt = storesIssued if not kernel["GroupLoadStore"] else 0
-                    vmcnt = loadsIssued - elementIdx + waitStoreCnt - 1
-                    vmComment = "{} = {} - {} + {} - 1".format(vmcnt, loadsIssued, elementIdx, waitStoreCnt)
+                    vscnt = waitStoreCnt
+                    vmComment = "{} = {} - {} + {} - 1".format(vlcnt, loadsIssued, elementIdx, waitStoreCnt)
 
-                maxVmcnt = writer.states.asmCaps["MaxVmcnt"]
-                vmcnt = min(vmcnt, maxVmcnt)
                 #print "wmvcnt=", vmcnt
                 module.addSpaceLine()
                 # if not atomicAddC:
-                module.add(SWaitCnt(vmcnt=vmcnt, comment="wait C (interleaved) {}".format(vmComment)))
+                module.add(SWaitCnt(vlcnt=vlcnt, vscnt=vscnt, comment="wait C (interleaved) {}".format(vmComment)))
 
                 # PreLoop LWVmcnt: When a vmcnt(cnt) is inserted here, means the GlobalLoad for PAP is finished
                 # So the preLoopVmcntDict value is meaningless since we no longer need to wait in next PreLoop
@@ -1462,7 +1456,7 @@ class StreamK(Component):
 
         if writer.db["ConservativeWaitCnt"] & 0x40:
             module.add(SBarrier("debug"))
-            module.add(SWaitCnt(vmcnt=0, vscnt=0, comment="ConservativeWaitCnt"))
+            module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="ConservativeWaitCnt"))
             module.add(SBarrier("debug"))
         ########################################
         # End Not Atomic

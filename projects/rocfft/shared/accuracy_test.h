@@ -853,7 +853,8 @@ inline void fft_vs_reference_impl(Tparams& params, bool round_trip)
     if(fftw_compare && last_cpu_fft_data.length == params.length
        && last_cpu_fft_data.transform_type == params.transform_type
        && last_cpu_fft_data.run_callbacks == params.run_callbacks
-       && last_cpu_fft_data.scale_factor == params.scale_factor)
+       && last_cpu_fft_data.scale_factor == params.scale_factor
+       && last_cpu_fft_data.precision >= params.precision)
     {
         if(last_cpu_fft_data.nbatch >= params.nbatch)
         {
