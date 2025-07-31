@@ -112,7 +112,8 @@ jobs:
           du -h -d 1 TheRock/build/artifacts
           echo "CCache Stats:"
           echo "-------------"
-          ccache -s
+          ccache -s -v
+          tail -v -n +1 .ccache/compiler_check_cache/* > TheRock/build/logs/ccache_compiler_check_cache.log
 
       - name: Configure AWS Credentials
         if: always()
