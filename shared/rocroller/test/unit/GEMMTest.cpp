@@ -92,7 +92,7 @@ namespace GEMMDriverTest
                   typename TD  = TC,
                   typename ACC = float>
         void basicGEMM(const GEMMProblem&      gemm,
-                       bool                    debuggable  = true,
+                       bool                    debuggable  = false,
                        bool                    setIdentity = false,
                        int                     numIters    = 1,
                        bool                    notSetC     = false,
@@ -817,7 +817,7 @@ namespace GEMMDriverTest
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
 
-                if(debuggable && !res.ok)
+                if(!res.ok)
                 {
                     const auto asmFileName = commandKernel.getKernelName() + ".s";
                     const auto logFileName = commandKernel.getKernelName() + ".log";
