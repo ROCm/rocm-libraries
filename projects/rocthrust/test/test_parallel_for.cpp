@@ -19,7 +19,8 @@
 #include <thrust/execution_policy.h>
 #include <thrust/memory.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 #if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
 #  define PARALLEL_FOR thrust::hip_rocprim::parallel_for

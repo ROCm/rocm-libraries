@@ -87,7 +87,7 @@ def runTestCommand (platform, project)
                 pushd build
                 echo Using `nproc` threads for testing.
                 OMP_NUM_THREADS=8 ctest -j ${numThreads} --output-on-failure ${testExclude}
-                export ROCROLLER_BUILD_DIR=`pwd`
+                export ROCROLLER_BUILD_DIR="\$(pwd)"
                 popd
                 scripts/rrperf generate --suite generate_gfx950 --arch gfx950
             """
@@ -213,10 +213,12 @@ def runBuildDocsCommand(platform, project)
     }
 }
 
-def runPerformanceCommand (platform, project)
+def runPerformanceCommand (platform, project, mxDataGeneratorGitURL, mxDataGeneratorGitTag)
 {
     String masterURL = env.CHANGE_ID ? env.JOB_URL.replace("PR-${env.CHANGE_ID}", env.CHANGE_TARGET) : env.JOB_URL
 
+    mxDataGeneratorGitURL = mxDataGeneratorGitURL?.trim() ?: "";
+    mxDataGeneratorGitTag = mxDataGeneratorGitTag?.trim() ?: "";
 
     withSSH(platform){
         sshBlock ->
@@ -237,6 +239,8 @@ def runPerformanceCommand (platform, project)
             if (masterCompare)
             {
                 masterCompareCommand = """
+                    export ROCROLLER_MXDATAGENERATOR_GIT_URL=${mxDataGeneratorGitURL}
+                    export ROCROLLER_MXDATAGENERATOR_GIT_TAG=${mxDataGeneratorGitTag}
                     ./scripts/rrperf autoperf \\
                         --suite ${rrperfSuite} \\
                         --clonedir "./performance_build_${platform.gpu}" \\
@@ -256,6 +260,8 @@ def runPerformanceCommand (platform, project)
             else
             {
                 masterCompareCommand = """
+                    export ROCROLLER_MXDATAGENERATOR_GIT_URL=${mxDataGeneratorGitURL}
+                    export ROCROLLER_MXDATAGENERATOR_GIT_TAG=${mxDataGeneratorGitTag}
                     mkdir -p performance_build_${platform.gpu}
                     ./scripts/rrperf autoperf \\
                         --suite ${rrperfSuite} \\
@@ -302,7 +308,8 @@ def runPerformanceCommand (platform, project)
                         ${sshBlock}
 
                         #Run Performance Test
-                        export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:${project.paths.project_build_prefix}/build/
+                        export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH}:${project.paths.project_build_prefix}/build/"
+                        export ROCROLLER_BUILD_DIR="\$(pwd)/build"
 
                         ${masterCompareCommand}
 
@@ -365,7 +372,8 @@ def runPerformanceCommand (platform, project)
                         unzip archive.zip
 
                         #Run Performance Test
-                        export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:${project.paths.project_build_prefix}/build/
+                        export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH}:${project.paths.project_build_prefix}/build/"
+                        export ROCROLLER_BUILD_DIR="\$(pwd)/build"
                         ./scripts/rrperf run \\
                             --suite ${rrperfSuite} \\
                             --rundir "./performance_${platform.gpu}"
@@ -441,9 +449,12 @@ def runPerformanceCommand (platform, project)
     }
 }
 
-def runCodeQLCompileCommand (platform, project, jobName)
+def runCodeQLCompileCommand (platform, project, jobName, mxDataGeneratorGitURL, mxDataGeneratorGitTag)
 {
     project.paths.construct_build_prefix()
+
+    mxDataGeneratorGitURL = mxDataGeneratorGitURL?.trim() ?: "";
+    mxDataGeneratorGitTag = mxDataGeneratorGitTag?.trim() ?: "";
 
     withSSH(platform) {
         sshBlock ->
@@ -453,6 +464,8 @@ def runCodeQLCompileCommand (platform, project, jobName)
 
                     ${sshBlock}
 
+                    export ROCROLLER_MXDATAGENERATOR_GIT_URL=${mxDataGeneratorGitURL}
+                    export ROCROLLER_MXDATAGENERATOR_GIT_TAG=${mxDataGeneratorGitTag}
                     ./codeql/setup_codeql
                     ./codeql/create_database
                     """

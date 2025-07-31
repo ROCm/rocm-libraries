@@ -55,6 +55,29 @@ namespace rocRoller
 
             std::string toString(TransposeType trans);
 
+            struct TypeParameters
+            {
+                std::string typeA   = "float";
+                std::string typeB   = "float";
+                std::string typeC   = "float";
+                std::string typeD   = "float";
+                std::string typeAcc = "float";
+
+                Client::GEMMClient::TransposeType transA = Client::GEMMClient::TransposeType::N;
+                Client::GEMMClient::TransposeType transB = Client::GEMMClient::TransposeType::N;
+
+                Operations::ScaleMode scaleA     = Operations::ScaleMode::None;
+                DataType              scaleTypeA = DataType::None;
+                Operations::ScaleMode scaleB     = Operations::ScaleMode::None;
+                DataType              scaleTypeB = DataType::None;
+
+                int scaleBlockSize = -1;
+
+                bool scaleSkipPermlane = false;
+
+                std::string kernelNamePart() const;
+            };
+
             /**
              * @brief Parameters of a GEMM problem
              *  D = alpha * A * B + beta * C
@@ -72,24 +95,10 @@ namespace rocRoller
                 float  alpha;
                 float  beta;
 
-                std::string typeA;
-                std::string typeB;
-                std::string typeC;
-                std::string typeD;
-                std::string typeAcc;
-
-                TransposeType transA;
-                TransposeType transB;
-
-                Operations::ScaleMode scaleA;
-                DataType              scaleTypeA;
-                Operations::ScaleMode scaleB;
-                DataType              scaleTypeB;
+                TypeParameters types;
 
                 // When scaleA/B is ScaleMode::SingleScale
                 float scaleValueA, scaleValueB;
-
-                int scaleBlockSize;
 
                 std::pair<int, int> workgroupMapping;
             };
@@ -121,21 +130,7 @@ namespace rocRoller
                 int                 workgroupRemapXCCValue = -1;
 
                 // Datatype of inputs and outputs
-                std::string typeA;
-                std::string typeB;
-                std::string typeC;
-                std::string typeD;
-                std::string typeAcc;
-
-                TransposeType transA;
-                TransposeType transB;
-
-                Operations::ScaleMode scaleA;
-                DataType              scaleTypeA;
-                Operations::ScaleMode scaleB;
-                DataType              scaleTypeB;
-
-                int scaleBlockSize;
+                TypeParameters types;
 
                 bool loadLDSScaleA = false;
                 bool loadLDSScaleB = false;
@@ -179,9 +174,10 @@ namespace rocRoller
                 rocRoller::Client::BenchmarkResults benchmarkResults;
             };
 
-            std::ostream& operator<<(std::ostream&, TransposeType const&);
-            std::ostream& operator<<(std::ostream&, ProblemParameters const&);
-            std::ostream& operator<<(std::ostream&, SolutionParameters const&);
+            std::ostream& operator<<(std::ostream& s, TransposeType const& x);
+            std::ostream& operator<<(std::ostream& s, TypeParameters const& x);
+            std::ostream& operator<<(std::ostream& s, ProblemParameters const& x);
+            std::ostream& operator<<(std::ostream& s, SolutionParameters const& x);
         }
     }
 }

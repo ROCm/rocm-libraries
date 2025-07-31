@@ -37,10 +37,16 @@ The following sections explain how to use the ``install.sh`` script, including t
 Building the library dependencies and library
 ---------------------------------------------
 
-The root of the hipBLASLt `GitHub repository <https://github.com/ROCm/hipBLASLt>`_ contains the ``install.sh`` Bash script for building and installing hipBLASLt with a single command.
+The root of the `hipblaslt folder <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblaslt>`_
+in the `rocm-libraries <https://github.com/ROCm/rocm-libraries>`_ GitHub repository contains the ``install.sh`` Bash script for building and installing hipBLASLt with a single command.
 It includes several options and hard-coded configuration items that can be specified through invoking CMake directly,
 but it's a great way to get started quickly and can serve as an example showing how to build and install hipBLASLt.
 A few commands in the script require ``sudo`` access, which might prompt you for a password.
+
+.. note::
+
+   To build ROCm 6.4 and older, use the hipBLASLt repository at `<https://github.com/ROCm/hipBLASLt>`_.
+   Select the documentation associated with the release you want to build.
 
 Some typical examples showing how to use ``install.sh`` to build the library dependencies and library are
 listed in the table below:
@@ -106,7 +112,7 @@ Building the library manually
 
 Before building hipBLASLt manually, ensure the following dependencies are installed on your system:
 
-*  The `hipBLAS-common <https://github.com/ROCm/hipBLAS-common>`_ header files.
+*  The `hipBLAS-common <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas-common>`_ header files.
 *  The `ROC-tracer (ROC-TX) <https://github.com/ROCm/roctracer>`_ library (this is typically pre-installed).
 
 Building hipBLASLt

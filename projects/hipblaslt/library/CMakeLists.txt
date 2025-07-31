@@ -187,7 +187,7 @@ if(HIPBLASLT_USE_ROCROLLER)
   FetchContent_Declare(
     rocRoller
     GIT_REPOSITORY https://github.com/ROCm/rocRoller.git
-    GIT_TAG a9cbf901489a27a530a699d1d6a6b765a9c02426
+    GIT_TAG 3977711d349bf52fee2c2966eec37824709e2c49
   )
   FetchContent_MakeAvailable(rocRoller)
   target_link_libraries(hipblaslt PRIVATE rocroller_interface)
@@ -229,17 +229,21 @@ rocm_install_targets(TARGETS hipblaslt
                      INCLUDE
                        ${CMAKE_BINARY_DIR}/include
 )
-install(
+rocm_install(
     DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/hipblaslt"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    FILES_MATCHING
     PATTERN "*.h"
     PATTERN "*.hpp"
 )
 
 if ( NOT BUILD_CUDA )
     if (WIN32)
-      set( HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}hipblaslt/bin" CACHE PATH "path to tensile library" )
+      # Put files used at runtime adjacent to '.dll's and '.exe's in bin/.
+      set( HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_BINDIR}/hipblaslt" CACHE PATH "path to tensile library" )
     else()
+      # Put files used at runtime adjacent to shared libraries ('.so') in
+      # lib/, separate from executables (no extension) in bin/.
       set( HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipblaslt" CACHE PATH "path to tensile library" )
     endif()
 # For ASAN package, Tensile library files are not required

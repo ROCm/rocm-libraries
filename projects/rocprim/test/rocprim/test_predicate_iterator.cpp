@@ -67,6 +67,139 @@ struct set_to
     }
 };
 
+// Params for tests
+template<class InputType>
+struct RocprimPredicateIteratorParams
+{
+    using input_type = InputType;
+};
+
+template<class Params>
+class RocprimPredicateIteratorTests : public ::testing::Test
+{
+public:
+    using input_type             = typename Params::input_type;
+    const bool debug_synchronous = false;
+};
+
+using RocprimPredicateIteratorTestsParams
+    = ::testing::Types<RocprimPredicateIteratorParams<int>,
+                       RocprimPredicateIteratorParams<unsigned int>,
+                       RocprimPredicateIteratorParams<unsigned long>>;
+
+TYPED_TEST_SUITE(RocprimPredicateIteratorTests, RocprimPredicateIteratorTestsParams);
+
+TYPED_TEST(RocprimPredicateIteratorTests, Basic)
+{
+    int device_id = test_common_utils::obtain_device_from_ctest();
+    SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
+    HIP_CHECK(hipSetDevice(device_id));
+
+    using T        = typename TestFixture::input_type;
+    using Iterator = rocprim::predicate_iterator<T*, T*, is_odd>;
+    using Proxy    = typename Iterator::value_type;
+
+    for(size_t seed_index = 0; seed_index < number_of_runs; ++seed_index)
+    {
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
+        SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
+
+        std::vector<T> input = test_utils::get_random_data_wrapped<T>(10, 1, 100, seed_value);
+
+        std::vector<T> flags = input; // using input itself to apply is_odd
+
+        Iterator begin = rocprim::make_predicate_iterator(input.data(), flags.data(), is_odd{});
+        Iterator mid   = begin + 5;
+        Iterator end   = begin + 10;
+
+        // Pre-increment
+        Iterator it = begin;
+        ++it;
+        ASSERT_EQ(static_cast<T>(*it), input[1] % 2 ? input[1] : T{});
+
+        // Post-increment
+        Iterator post = it++;
+        ASSERT_EQ(static_cast<T>(*post), input[1] % 2 ? input[1] : T{});
+        ASSERT_EQ(static_cast<T>(*it), input[2] % 2 ? input[2] : T{});
+
+        // Pre-decrement
+        it = begin + 2;
+        --it;
+        ASSERT_EQ(static_cast<T>(*it), input[1] % 2 ? input[1] : T{});
+
+        // Post-decrement
+        Iterator post_dec = it--;
+        ASSERT_EQ(static_cast<T>(*post_dec), input[1] % 2 ? input[1] : T{});
+        ASSERT_EQ(static_cast<T>(*it), input[0] % 2 ? input[0] : T{});
+
+        // operator+
+        Iterator plus_it = begin + 3;
+        ASSERT_EQ(static_cast<T>(*plus_it), input[3] % 2 ? input[3] : T{});
+        Iterator plus_i_rev = 3 + begin;
+        ASSERT_EQ(static_cast<T>(*plus_i_rev), input[3] % 2 ? input[3] : T{});
+
+        // operator-
+        Iterator minus_it = end - 3;
+        ASSERT_EQ(static_cast<T>(*minus_it), input[7] % 2 ? input[7] : T{});
+
+        // compound assignment +=
+        Iterator a = begin;
+        a += 4;
+        ASSERT_EQ(static_cast<T>(*a), input[4] % 2 ? input[4] : T{});
+
+        // compound assignment -=
+        a -= 2;
+        ASSERT_EQ(static_cast<T>(*a), input[2] % 2 ? input[2] : T{});
+
+        // Subtraction of iterators (distance)
+        ASSERT_EQ(end - begin, 10);
+        ASSERT_EQ(mid - begin, 5);
+        ASSERT_EQ(begin - mid, -5);
+
+        // Indexing operator[]
+        for(int i = 0; i < 10; ++i)
+        {
+            Proxy proxy    = begin[i];
+            T     expected = input[i] % 2 ? input[i] : T{};
+            ASSERT_EQ(static_cast<T>(proxy), expected);
+        }
+
+        // Comparisons
+        ASSERT_TRUE(begin == begin);
+        ASSERT_TRUE(begin != end);
+        ASSERT_TRUE(begin < end);
+        ASSERT_TRUE(end > begin);
+        ASSERT_TRUE(begin <= begin);
+        ASSERT_TRUE(begin <= end);
+        ASSERT_TRUE(end >= begin);
+        ASSERT_TRUE(end >= end);
+
+        // Arrow operator (returns proxy, which we can test through conversion)
+        Proxy p = *begin;
+        ASSERT_EQ(static_cast<T>(p), input[0] % 2 ? input[0] : T{});
+
+        // Assignment via proxy: only odd-indexed data should be modified
+        for(int i = 0; i < 10; ++i)
+        {
+            begin[i] = T{999};
+        }
+
+        for(int i = 0; i < 10; ++i)
+        {
+            if(input[i] % 2)
+            {
+                ASSERT_EQ(input[i], T{999});
+            }
+
+            else
+            {
+                ASSERT_NE(input[i], T{999});
+            }
+        }
+    }
+}
+
 TEST(RocprimPredicateIteratorTests, TypeTraits)
 {
     using value_type = int;

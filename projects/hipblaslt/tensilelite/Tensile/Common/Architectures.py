@@ -21,10 +21,14 @@
 ################################################################################
 
 import re
+import collections
+
+from pathlib import Path
 from subprocess import run, PIPE
-from typing import List, Optional
+from typing import List, Optional, Set, Tuple, Union, NamedTuple, Dict
 
 from .Types import IsaVersion
+from .Utilities import print2
 
 import rocisa
 
@@ -93,6 +97,48 @@ SUPPORTED_ISA = [
     IsaVersion(12, 0, 1),
 ]
 
+SUPPORTED_ARCH_DEVICE_IDS = {
+    "id=74a0": "gfx942",
+    "id=74a1": "gfx942",
+    "id=74a2": "gfx942",
+    "id=74a3": "gfx942",
+    "id=74a5": "gfx942",
+    "id=74a9": "gfx942",
+    "id=75a0": "gfx950",
+    "id=75a2": "gfx950",
+    "id=75a3": "gfx950",
+    # This dictionary should be extended to add device ID-based
+    # filtering support for other architectures.
+}
+
+SUPPORTED_ARCH_CU_COUNTS = {
+    "cu=20": "gfx942",
+    "cu=38": "gfx942",
+    "cu=64": "gfx942",
+    "cu=80": "gfx942",
+    "cu=96": "gfx942",
+    "cu=228": "gfx942",
+    "cu=304": "gfx942",
+    # This dictionary should be extended to add CU count-based
+    # filtering support for other architectures.
+}
+
+ARCH_DEVICE_ID_FALLBACKS = {
+    "id=75a2": ["id=75a0"],
+    "id=75a3": ["id=75a0"],
+}
+
+# Here, `None` refers to an unspecified CU count.
+ARCH_CU_COUNT_FALLBACKS = {
+    "cu=20": None,
+    "cu=38": None,
+    "cu=64": None,
+    "cu=80": None,
+    "cu=96": None,
+    "cu=228": None,
+    "cu=304": None,
+}
+
 
 def isaToGfx(arch: IsaVersion) -> str:
     """Converts an ISA version to a gfx architecture name.
@@ -133,9 +179,6 @@ def gfxToIsa(name: str) -> Optional[IsaVersion]:
     ipart = ipart[:-1]
     major = int(ipart)
     return IsaVersion(major, minor, step)
-
-def isaToGfx(arch: IsaVersion) -> str:
-    return rocisa.isaToGfx(arch)
 
 
 def gfxToSwCodename(gfxName: str) -> Optional[str]:
@@ -216,3 +259,274 @@ def detectGlobalCurrentISA(deviceId: int, enumerator: str):
     if not isinstance(result, IsaVersion):
         raise Exception("Failed to detect currect ISA")
     return result
+
+
+class ArchInfo(NamedTuple):
+    Name: str
+    Gfx: str
+    DeviceIds: Optional[Set[str]]
+    CUCount: Optional[str] = None
+
+
+class LogicFileError(Exception):
+    def __init__(self, message="Expected line is either not present or is malformed"):
+        self.message = message
+        super().__init__(self.message)
+
+
+def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
+    """
+    Extracts architecture predicate information from a given logic file.
+
+    The file is expected to have the following format:
+    - Line 0: Minimum required version (e.g., "- {MinimumRequiredVersion: 4.33.0}")
+    - Line 1: Code name of the architecture (e.g., "- aquavanjaram")
+    - Line 2: GFX name of the architecture or a map with variant details (e.g., "- gfx950" or "- {Architecture: gfx950, CUCount: 256}")
+    - Line 3: Device IDs (e.g., "- [Device 1234, Device 5678]")
+
+    Args:
+        file: Path to a logic file.
+    Returns:
+        ArchInfo: An object containing the extracted architecture predicates.
+    Raises:
+        LogicFileError: If the file does not match the expected format.
+    """
+
+    def l0(line: str):
+        if not re.match(r"- \{MinimumRequiredVersion", line):
+            raise LogicFileError(
+                f"Expected minimum required version:\n  line: {line}  file: {file}"
+            )
+
+    def l1(line: str):
+        return line[2:].strip()
+
+    def l2(line: str):
+        match1 = re.match(r"- \{Architecture: (\w+), CUCount: (\d+)\}", line)
+        match2 = re.match(r"- gfx(\w+)", line)
+        if match1:
+            architecture, cu_count = match1.groups()
+            return architecture, f"cu={cu_count}"
+        elif match2:
+            return line[2:].strip(), None
+        else:
+            raise LogicFileError(
+                f"Expected architecture and CU count, or only an archiecture: line: {line}"
+            )
+
+    def l3(line: str):
+        if re.match(r"- \[Device", line):
+            devIds = re.findall(r"Device (\w+)", line)
+            return set(f"id={id}" for id in devIds)
+        else:
+            raise LogicFileError(f"No device IDs found: line: {line}")
+
+    with open(file, "r") as f:
+        l0(f.readline())
+        name = l1(f.readline())
+        gfx, cu = l2(f.readline())
+        deviceIds = l3(f.readline())
+
+    try:
+        for id in deviceIds:
+            _verifyPredicate(id, gfx)
+    except ValueError as e:
+        raise LogicFileError(f"Invalid device ID found while parsing {file}: {e}")
+
+    return ArchInfo(Name=name, Gfx=gfx, DeviceIds=deviceIds, CUCount=cu)
+
+
+def _verifyPredicate(predicateSpec: str, gfx: str) -> str:
+    """
+    Verifies that a predicate specification is valid.
+
+    Args:
+        predicateSpec: A string representing a predicate specification.
+        gfx: GFX architecture to validate device ID against.
+
+    Returns:
+        The validated predicate specification.
+    Raises:
+        ValueError: If the predicate specification is invalid or if device ID doesn't match GFX architecture.
+    """
+    msgPrefix = f"Invalid predicate: {predicateSpec}"
+    key, _, val = predicateSpec.partition("=")
+    if key == "id":
+        if predicateSpec not in SUPPORTED_ARCH_DEVICE_IDS:
+            raise ValueError(f"{msgPrefix}: device ID not supported")
+        if gfx and SUPPORTED_ARCH_DEVICE_IDS[predicateSpec] != gfx:
+            raise ValueError(f"{msgPrefix}: device ID is not associated with {gfx}")
+    elif key == "cu":
+        if predicateSpec not in SUPPORTED_ARCH_CU_COUNTS:
+            raise ValueError(f"{msgPrefix}: CU count not supported")
+        if gfx and SUPPORTED_ARCH_CU_COUNTS[predicateSpec] != gfx:
+            raise ValueError(f"{msgPrefix}: CU count is not associated with {gfx}")
+    else:
+        raise ValueError(f"{msgPrefix}: only device ID and CU count-based predicates are currently supported")
+    return predicateSpec
+
+
+def splitArchsFromPredicates(archSpecs: List[str]) -> Tuple[List[str], Optional[Dict[str, List[str]]]]:
+    """
+    Splits a list of architecture specifications into architectures and their predicates.
+    
+    Example inputs:
+        ["gfx942"]  # No predicates
+        ["gfx942[id=74a0,id=74a1]"]  # With device IDs
+        ["gfx942[cu=80,cu=96]"]  # With CU counts
+        ["gfx942[id=74a0,cu=80]"]  # With both
+
+    Args:
+        archSpecs: List of architecture specifications, optionally with predicates in square brackets
+
+    Returns:
+        Tuple of:
+        - List of architecture names
+        - Dictionary mapping architectures to their predicates (or None if no predicates)
+    """
+    # Match predicates in square brackets, e.g., [id=74a0,cu=80]
+    pattern = re.compile(r"\[(.*?)\]")
+    
+    architectures = set()
+    predicateMap = collections.defaultdict(list)
+
+    for spec in archSpecs:
+        spec = spec.strip()
+        arch = spec  # Default to full spec if no predicates
+        
+        match = re.search(pattern, spec)
+        if match:
+            arch = spec[:match.start()].strip()
+            predicates = [p.strip().lower() for p in match.group(1).split(",")]
+            predicateMap[arch].extend(_verifyPredicate(p, arch) for p in predicates)
+
+        if arch not in architectureMap:
+            raise ValueError(f"Architecture {spec} not supported")
+            
+        architectures.add(arch)
+
+    return list(architectures), predicateMap or None
+
+
+def _addVariantMap(
+    gfxPredicateMap: Dict[str, Set[Tuple[Path, str]]], spec: str, path: Path, fname: str
+) -> bool:
+    """
+    Adds a logic file to a predicate map.
+
+    Args:
+        gfxPredicateMap: Nested dict mapping architectures to their predicate sets
+        spec: Predicate specification
+        path: Path to the logic file
+        fname: Filename of the logic file
+    Returns:
+        True if the logic file was added to the predicate map, False otherwise
+    """
+    if fname not in {x for _, x in gfxPredicateMap[spec]}:
+        gfxPredicateMap[spec].add((path, fname))
+        return True
+    return False
+
+
+def _populateVariantMap(
+    predicateMap: Dict[str, Dict[str, Set[Tuple[Path, str]]]],
+    targetLogicFile: Path,
+    fallbackKey: str,
+):
+    """
+    Populates a predicate map with logic files, handling both exact matches and fallbacks.
+    
+    For each logic file:
+    1. First tries to match against specific predicates (device IDs, CU counts)
+    2. If matched to any specific predicate, removes from fallbacks
+    3. If no specific matches, tries to add to fallbacks based on fallback rules
+    
+    Args:
+        predicateMap: Nested dict mapping architectures to their predicate sets
+        targetLogicFile: Logic file to process
+        fallbackKey: Key used to store fallback matches
+    """
+    file = Path(targetLogicFile)
+    path, fname = file.parent, file.name
+
+    archinfo = _extractArchInfo(file)
+    if archinfo.Gfx not in predicateMap:
+        return
+
+    gfxPredicateMap = predicateMap[archinfo.Gfx]
+    requestedDevIds = {x for x in gfxPredicateMap if x.startswith("id=")}
+    requestedCUs = {x for x in gfxPredicateMap if x.startswith("cu=")}
+
+    fallbackDevIds = {
+        fallbackId
+        for v in requestedDevIds
+        if v in ARCH_DEVICE_ID_FALLBACKS
+        for fallbackId in ARCH_DEVICE_ID_FALLBACKS[v]
+    }
+    fallbackCUs = {ARCH_CU_COUNT_FALLBACKS[v] for v in requestedCUs if v in ARCH_CU_COUNT_FALLBACKS}
+
+    isCuFallback = not requestedCUs or archinfo.CUCount in fallbackCUs
+    isDevIdFallback = not requestedDevIds or (
+        archinfo.DeviceIds and any(fallbackId in archinfo.DeviceIds for fallbackId in fallbackDevIds)
+    )
+
+    if isCuFallback and isDevIdFallback:
+        # If the file name is not already in a requested predicate, then add it to the fallback set
+        if all(
+            fname not in {nm for _, nm in gfxPredicateMap[spec]}
+            for spec in gfxPredicateMap
+            if spec != fallbackKey
+        ):
+            gfxPredicateMap[fallbackKey].add((path, fname))
+    else:
+        removeFallbacks = []
+        for spec in gfxPredicateMap:
+            if spec != fallbackKey:  # Don't try to add to fallback set here
+                if "id" in spec and archinfo.DeviceIds:
+                    removeFallbacks.extend(
+                        _addVariantMap(gfxPredicateMap, spec, path, fname)
+                        for id in archinfo.DeviceIds
+                        if id == spec
+                    )
+                if "cu" in spec and archinfo.CUCount:
+                    removeFallbacks.append(
+                        _addVariantMap(gfxPredicateMap, spec, path, fname)
+                        if archinfo.CUCount == spec
+                        else False
+                    )
+
+        if removeFallbacks and any(removeFallbacks):
+            gfxPredicateMap[fallbackKey] = {
+                x for x in gfxPredicateMap[fallbackKey] if x[1] != fname
+            }
+
+
+def filterLogicFilesByPredicates(
+    logicFiles: List[str], variants: Dict[str, Dict[str, Set[Tuple[Path, str]]]]
+) -> List[str]:
+    """
+    Filters logic files based on the requested predicates.
+
+    Args:
+        logicFiles: List of logic file paths
+        variants: Dictionary mapping architectures to their predicate sets
+
+    Returns:
+        List of logic file paths that match the requested predicates
+    """
+    fallbackKey = "fallback"
+    # A `spec` here is a variant specification passed via the command line, e.g., "cu=64"
+    # This is how the code differentiates variants of the same gfx, as well as "fallback" files
+    variantMap = {gfx: {spec: set() for spec in specs} for gfx, specs in variants.items()}
+    for file in variantMap.values():
+        file[fallbackKey] = set()
+
+    for logicFile in logicFiles:
+        _populateVariantMap(variantMap, Path(logicFile), fallbackKey)
+
+    return [
+        str(p / file)
+        for gfxPredicateMap in variantMap.values()
+        for files in gfxPredicateMap.values()
+        for p, file in files
+    ]

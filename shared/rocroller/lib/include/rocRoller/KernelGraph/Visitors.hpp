@@ -66,6 +66,14 @@ namespace rocRoller
         inline KernelGraph rewriteDimensions(KernelGraph const& k, T& visitor)
         {
             KernelGraph graph = k;
+            for(auto const& tag : k.coordinates.getNodes())
+            {
+                auto x = k.coordinates.getNode(tag);
+                auto y
+                    = std::visit([&](auto&& arg) { return visitor.visitDimension(tag, arg); }, x);
+                graph.coordinates.setElement(tag, y);
+            }
+
             if constexpr(CCoordinateEdgeVisitor<T>)
             {
                 for(auto const& tag : k.coordinates.getEdges())
@@ -77,14 +85,6 @@ namespace rocRoller
                     auto newEdge = std::visit(visB, edge);
                     graph.coordinates.setElement(tag, newEdge);
                 }
-            }
-
-            for(auto const& tag : k.coordinates.getNodes())
-            {
-                auto x = k.coordinates.getNode(tag);
-                auto y
-                    = std::visit([&](auto&& arg) { return visitor.visitDimension(tag, arg); }, x);
-                graph.coordinates.setElement(tag, y);
             }
 
             for(auto const& tag : k.control.getNodes())
