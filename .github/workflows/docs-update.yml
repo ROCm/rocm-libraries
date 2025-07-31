@@ -69,7 +69,11 @@ jobs:
 
           for project in $changed_projects; do
             echo "Triggering RTD build for $project"
-            curl -X POST \
+            response=$(curl -f -s -X POST \
                  -H "Authorization: Token $RTD_TOKEN" \
-                 "https://readthedocs.com/api/v3/projects/advanced-micro-devices-monorepo-$project/versions/$version_slug/builds/"
+                 "https://readthedocs.com/api/v3/projects/advanced-micro-devices-monorepo-$project/versions/$version_slug/builds/") || {
+                 echo "Failed to trigger RTD build for $project. Response: $response"
+                 exit 1
+            }
+            echo "Successfully triggered RTD build for $project. Response: $response"
           done
