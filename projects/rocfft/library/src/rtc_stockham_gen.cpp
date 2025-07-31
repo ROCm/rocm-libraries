@@ -407,8 +407,8 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
 
         if(ppType != PPT_NONE)
             all_factors.insert(all_factors.end(),
-                               params_pp.factors_off_dim.begin(),
-                               params_pp.factors_off_dim.end());
+                               params_pp.pp_factors_curr.begin(),
+                               params_pp.pp_factors_curr.end());
     }
 
     // generated functions default to forward in-place interleaved.

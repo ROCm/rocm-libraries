@@ -167,7 +167,15 @@ const static std::vector<size_t> inner_batch_3D_batch_range = {3, 2, 1};
 // partial pass test problems
 //-----------------------------------------------------------------------
 //-----------------------------------------------------------------------
-const static std::vector<std::vector<size_t>> partial_pass_adhoc_3D       = {{64, 64, 64}};
-const static std::vector<size_t>              partial_pass_batch_range_3D = {1, 5, 10, 20, 50};
+const static std::vector<std::vector<size_t>> partial_pass_adhoc_3D = {
+    {64, 64, 128},
+    {64, 64, 64},
+    {64, 64, 52},
+    {60, 60, 60},
+    {32, 32, 128},
+    {32, 32, 64},
+    {64, 32, 128},
+};
+const static std::vector<size_t> partial_pass_batch_range_3D = {1, 5, 10, 20, 50};
 
 #endif // ACCURACY_TESTS_RANGE_H
