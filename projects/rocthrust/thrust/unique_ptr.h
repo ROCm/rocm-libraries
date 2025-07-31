@@ -273,7 +273,9 @@ public:
       , m_deleter()
   {}
 
-  template <bool Dummy = true, class = EnableIfDeleterDefaultConstructible<Dummy>>
+  template <bool Dummy = true,
+            class      = EnableIfDeleterDefaultConstructible<Dummy>,
+            class      = EnableIfDeleterDefaultDelete<Dummy>>
   THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(T* raw_p) noexcept
       : m_ptr(device_pointer_cast(raw_p))
       , m_deleter()
@@ -440,8 +442,10 @@ private:
   template <bool Dummy>
   using BadRValRefType = typename thrust::detail::dependent_type<DeleterSFINAE, Dummy>::type::bad_rval_ref_type;
 
-  template <bool Dummy,
-            class Deleter = typename thrust::detail::dependent_type<typename thrust::detail::identity_<deleter_type>::type, Dummy>::type>
+  template <
+    bool Dummy,
+    class Deleter =
+      typename thrust::detail::dependent_type<typename thrust::detail::identity_<deleter_type>::type, Dummy>::type>
   using EnableIfDeleterDefaultConstructible = typename thrust::detail::enable_if<
     thrust::detail::and_<std::is_default_constructible<Deleter>,
                          thrust::detail::not_<thrust::detail::is_pointer<Deleter>>>::value>::type;
@@ -454,12 +458,14 @@ private:
   using EnableIfPointerConvertible = typename thrust::detail::enable_if<thrust::detail::is_same<Pp, pointer>::value>::type;
 
   template <bool Dummy,
-            class Tp = typename thrust::detail::dependent_type<typename thrust::detail::identity_<element_type>::type, Dummy>::type>
+            class Tp = typename thrust::detail::dependent_type<typename thrust::detail::identity_<element_type>::type,
+                                                               Dummy>::type>
   using EnableIfTriviallyDestructible =
     typename thrust::detail::enable_if<std::is_trivially_destructible<Tp>::value>::type;
 
   template <bool Dummy,
-            class Tp = typename thrust::detail::dependent_type<typename thrust::detail::identity_<element_type>::type, Dummy>::type>
+            class Tp = typename thrust::detail::dependent_type<typename thrust::detail::identity_<element_type>::type,
+                                                               Dummy>::type>
   using EnableIfNotTriviallyDestructible =
     typename thrust::detail::enable_if<thrust::detail::not_<std::is_trivially_destructible<Tp>>::value>::type;
 
@@ -479,6 +485,12 @@ private:
   template <class E>
   using EnableIfDeleterAssignable =
     typename thrust::detail::enable_if<thrust::detail::is_assignable<D&, E&&>::value>::type;
+
+  template <
+    bool Dummy,
+    class Deleter =
+      typename thrust::detail::dependent_type<typename thrust::detail::identity_<deleter_type>::type, Dummy>::type>
+  using EnableIfDeleterDefaultDelete = typename thrust::detail::enable_if<std::is_same<Deleter, default_delete<T[]>>::value>::type;
 
 public:
   //==========================================================================
@@ -506,11 +518,13 @@ public:
       , m_deleter()
   {}
 
-  template <bool Dummy = true,
+  template <class Pp,
+            bool Dummy = true,
             class      = EnableIfDeleterDefaultConstructible<Dummy>,
             class      = EnableIfPointerConvertible<device_ptr<T>>,
-            class      = EnableIfTriviallyDestructible<Dummy>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(T* raw_p) noexcept
+            class      = EnableIfTriviallyDestructible<Dummy>,
+            class      = EnableIfDeleterDefaultDelete<Dummy>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(Pp* raw_p) noexcept
       : m_ptr(device_pointer_cast(raw_p))
       , m_deleter()
   {}
@@ -524,10 +538,12 @@ public:
       , m_deleter(size)
   {}
 
-  template <bool Dummy = true,
+  template <class Pp,
+            bool Dummy = true,
             class      = EnableIfDeleterDefaultConstructible<Dummy>,
-            class      = EnableIfPointerConvertible<device_ptr<T>>>
-  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(T* raw_p, size_t size) noexcept
+            class      = EnableIfPointerConvertible<device_ptr<T>>,
+            class      = EnableIfDeleterDefaultDelete<Dummy>>
+  THRUST_HOST THRUST_CONSTEXPR_SINCE_CXX23 explicit unique_ptr(Pp* raw_p, size_t size) noexcept
       : m_ptr(device_pointer_cast(raw_p))
       , m_deleter(size)
   {}
@@ -855,7 +871,9 @@ THRUST_HOST inline THRUST_CONSTEXPR_SINCE_CXX23 unique_ptr<T> make_unique(size_t
   return unique_ptr<T>(thrust::device_new<U>(n), n);
 }
 
-template <class T, class... Args, class = typename thrust::detail::enable_if<thrust::detail::is_bounded_array<T>::value>::type>
+template <class T,
+          class... Args,
+          class = typename thrust::detail::enable_if<thrust::detail::is_bounded_array<T>::value>::type>
 THRUST_HOST void make_unique(Args&&...) = delete;
 
 #if THRUST_STD_VER >= 20
