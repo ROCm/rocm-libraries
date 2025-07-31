@@ -23,6 +23,7 @@ endif()
 target_link_libraries(hipblaslt-clients-common
     PUBLIC
         roc::hipblaslt
+        OpenMP::OpenMP_CXX
         ${LAPACK_LIBRARIES}
         ${BLAS_LIBRARIES}
         ${CBLAS_LIBRARIES}
