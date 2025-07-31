@@ -32,7 +32,8 @@
 #include "../../../config.hpp"
 
 #include <hip/hip_runtime.h>
-#include <rocprim/device/device_transform.hpp>
+
+#include <cub/device/device_transform.cuh>  // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -53,7 +54,7 @@ struct DeviceTransform
                                                                         output,
                                                                         num_items,
                                                                         transform_op,
-                                                                        stream = nullptr));
+                                                                        stream));
     }
 
     template<typename... RandomAccessIteratorsIn,
@@ -70,11 +71,12 @@ struct DeviceTransform
                                 hipStream_t                            stream = nullptr)
     {
         return hipCUDAErrorTohipError(::cub::DeviceTransform::Transform(d_temp_storage,
-                                                                        temp_storage_bytes inputs,
+                                                                        temp_storage_bytes,
+                                                                        inputs,
                                                                         output,
                                                                         num_items,
                                                                         transform_op,
-                                                                        stream = nullptr));
+                                                                        stream));
     }
 
     template<typename RandomAccessIteratorIn,
@@ -92,7 +94,7 @@ struct DeviceTransform
                                                                         output,
                                                                         num_items,
                                                                         transform_op,
-                                                                        stream = nullptr));
+                                                                        stream));
     }
 
     template<typename RandomAccessIteratorIn,
@@ -115,7 +117,7 @@ struct DeviceTransform
                                                                         output,
                                                                         num_items,
                                                                         transform_op,
-                                                                        stream = nullptr));
+                                                                        stream));
     }
 
     template<typename... RandomAccessIteratorsIn,
@@ -135,7 +137,7 @@ struct DeviceTransform
                                                                      output,
                                                                      num_items,
                                                                      transform_op,
-                                                                     stream = nullptr));
+                                                                     stream));
     }
 
     template<typename... RandomAccessIteratorsIn,
@@ -159,7 +161,7 @@ struct DeviceTransform
                                                                      output,
                                                                      num_items,
                                                                      transform_op,
-                                                                     stream = nullptr));
+                                                                     stream));
     }
 
     template<typename RandomAccessIteratorIn,
@@ -178,7 +180,7 @@ struct DeviceTransform
                                                                      output,
                                                                      num_items,
                                                                      transform_op,
-                                                                     stream = nullptr));
+                                                                     stream));
     }
 
     template<typename RandomAccessIteratorIn,
@@ -201,7 +203,7 @@ struct DeviceTransform
                                                                      output,
                                                                      num_items,
                                                                      transform_op,
-                                                                     stream = nullptr));
+                                                                     stream));
     }
 };
 
