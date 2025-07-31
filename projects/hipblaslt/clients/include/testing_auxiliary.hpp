@@ -1366,6 +1366,158 @@ void testing_aux_matmul_alg_null_matmul(const Arguments& arg)
     CHECK_HIP_ERROR(hipStreamDestroy(stream));
 }
 
+void testing_aux_matmul_bad_ws_size(const Arguments& arg)
+{
+    using InTypeA   = hipblasLtHalf;
+    using InTypeB   = hipblasLtHalf;
+    using OutType   = hipblasLtHalf;
+    using AlphaType = hipblasLtFloat;
+    using BetaType  = hipblasLtFloat;
+
+    hipStream_t        stream;
+    hipblasLtHandle_t  handle;
+    hipblasOperation_t trans_a     = HIPBLAS_OP_N;
+    hipblasOperation_t trans_b     = HIPBLAS_OP_N;
+    int64_t            m           = 2048;
+    int64_t            n           = 2048;
+    int64_t            k           = 2048;
+    int64_t            batch_count = 1;
+    float              alpha       = arg.alpha;
+    float              beta        = arg.beta;
+    void*              d_a;
+    void*              d_b;
+    void*              d_c;
+    void*              d_d;
+    void*              a;
+    void*              b;
+    void*              c;
+    void*              d;
+
+    CHECK_HIP_ERROR(hipStreamCreate(&stream));
+    CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&handle));
+    CHECK_HIP_ERROR(hipMalloc(&d_a, m * k * batch_count * sizeof(InTypeA)));
+    CHECK_HIP_ERROR(hipMalloc(&d_b, n * k * batch_count * sizeof(InTypeB)));
+    CHECK_HIP_ERROR(hipMalloc(&d_c, m * n * batch_count * sizeof(OutType)));
+    CHECK_HIP_ERROR(hipMalloc(&d_d, m * n * batch_count * sizeof(OutType)));
+    CHECK_HIP_ERROR(hipHostMalloc(&a, m * k * batch_count * sizeof(InTypeA)));
+    CHECK_HIP_ERROR(hipHostMalloc(&b, n * k * batch_count * sizeof(InTypeB)));
+    CHECK_HIP_ERROR(hipHostMalloc(&c, m * n * batch_count * sizeof(OutType)));
+    CHECK_HIP_ERROR(hipHostMalloc(&d, m * n * batch_count * sizeof(OutType)));
+
+    CHECK_HIP_ERROR(hipMemcpyAsync(
+        d_a, a, m * k * batch_count * sizeof(InTypeA), hipMemcpyHostToDevice, stream));
+    CHECK_HIP_ERROR(hipMemcpyAsync(
+        d_b, b, n * k * batch_count * sizeof(InTypeB), hipMemcpyHostToDevice, stream));
+    CHECK_HIP_ERROR(hipMemcpyAsync(
+        d_c, c, m * n * batch_count * sizeof(OutType), hipMemcpyHostToDevice, stream));
+
+    hipblasLtMatrixLayout_t matA, matB, matC, matD;
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matA, arg.a_type, m, k, m));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matB, arg.a_type, k, n, k));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matC, arg.a_type, m, n, m));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutCreate(&matD, arg.a_type, m, n, m));
+
+    hipblasLtMatmulDesc_t matmul;
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(&matmul, arg.compute_type, arg.scale_type));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+        matmul, HIPBLASLT_MATMUL_DESC_TRANSA, &trans_a, sizeof(int32_t)));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
+        matmul, HIPBLASLT_MATMUL_DESC_TRANSB, &trans_b, sizeof(int32_t)));
+
+    hipblasLtMatmulPreference_t pref;
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceCreate(&pref));
+    size_t                     max_workspace_size = 128 * 1024 * 1024;
+    EXPECT_HIPBLAS_STATUS(
+        hipblasLtMatmulPreferenceSetAttribute(pref,
+                                              HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+                                              &max_workspace_size,
+                                              sizeof(max_workspace_size)),
+        HIPBLAS_STATUS_SUCCESS);
+    const int                        request_solutions = 1000;
+    hipblasLtMatmulHeuristicResult_t heuristicResult[request_solutions];
+    int                              returnedAlgoCount = 0;
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                          matmul,
+                                                          matA,
+                                                          matB,
+                                                          matC,
+                                                          matD,
+                                                          pref,
+                                                          request_solutions,
+                                                          heuristicResult,
+                                                          &returnedAlgoCount));
+
+    bool found_solution_require_ws = false;
+    int ws_solution_index = 0;
+    //Find first solution that needs workspace
+    for(int i = 0; i < returnedAlgoCount; i++)
+    {
+        if(heuristicResult[i].workspaceSize > 0)
+        {
+            found_solution_require_ws= true;
+            ws_solution_index = i;
+            break;
+        }
+    }
+    if(found_solution_require_ws)
+    {
+        //Test: ws is not enough
+        void*              d_ws;
+        CHECK_HIP_ERROR(hipMalloc(&d_ws,heuristicResult[ws_solution_index].workspaceSize));
+        //set enought ws size
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
+                                              matmul,
+                                              &alpha,
+                                              d_a,
+                                              matA,
+                                              d_b,
+                                              matB,
+                                              &beta,
+                                              d_c,
+                                              matC,
+                                              d_d,
+                                              matD,
+                                              &heuristicResult[ws_solution_index].algo,
+                                              d_ws,
+                                              heuristicResult[ws_solution_index].workspaceSize,
+                                              stream),HIPBLAS_STATUS_SUCCESS);
+        //set not enought ws size
+        int less_ws_size = max(0, heuristicResult[ws_solution_index].workspaceSize - 128);
+        EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
+                                              matmul,
+                                              &alpha,
+                                              d_a,
+                                              matA,
+                                              d_b,
+                                              matB,
+                                              &beta,
+                                              d_c,
+                                              matC,
+                                              d_d,
+                                              matD,
+                                              &heuristicResult[ws_solution_index].algo,
+                                              d_ws,
+                                              less_ws_size,
+                                              stream),HIPBLAS_STATUS_INVALID_VALUE);
+        CHECK_HIP_ERROR(hipFree(d_ws));
+    }
+
+    CHECK_HIP_ERROR(hipFree(a));
+    CHECK_HIP_ERROR(hipFree(b));
+    CHECK_HIP_ERROR(hipFree(c));
+    CHECK_HIP_ERROR(hipFree(d));
+    CHECK_HIP_ERROR(hipFree(d_a));
+    CHECK_HIP_ERROR(hipFree(d_b));
+    CHECK_HIP_ERROR(hipFree(d_c));
+    CHECK_HIP_ERROR(hipFree(d_d));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matA));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matB));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matC));
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matD));
+    CHECK_HIPBLASLT_ERROR(hipblasLtDestroy(handle));
+    CHECK_HIP_ERROR(hipStreamDestroy(stream));
+}
 void testing_aux_matmul_pref_init_bad_arg(const Arguments& arg)
 {
     hipblasLtMatmulPreference_t pref;
