@@ -185,7 +185,7 @@ namespace rocRoller
         };
 
         template <ComponentBase Base>
-        class ComponentFactory : public ComponentFactoryBase, LazySingleton<Base>
+        class ComponentFactory : public ComponentFactoryBase, LazySingleton<ComponentFactory<Base>>
         {
         public:
             using Argument = typename Base::Argument;

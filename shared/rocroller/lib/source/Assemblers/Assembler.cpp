@@ -26,7 +26,6 @@
 
 #include <rocRoller/Assemblers/Assembler.hpp>
 #include <rocRoller/Utilities/Component.hpp>
-#include <rocRoller/Utilities/ComponentCopy.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
 
