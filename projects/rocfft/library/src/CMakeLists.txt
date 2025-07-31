@@ -548,15 +548,6 @@ set_target_properties( rocfft PROPERTIES CXX_VISIBILITY_PRESET "hidden" VISIBILI
 
 generate_export_header( rocfft EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/rocfft/rocfft-export.h )
 
-if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_wrap_header_file(
-    rocfft-version.h rocfft-export.h
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS ${CMAKE_INSTALL_INCLUDEDIR} rocfft/${CMAKE_INSTALL_INCLUDEDIR}
-    ORIGINAL_FILES ${PROJECT_BINARY_DIR}/include/rocfft/rocfft-version.h
-  )
-endif( )
-
 # Following Boost conventions of prefixing 'lib' on static built libraries, across all platforms
 if( NOT BUILD_SHARED_LIBS )
   set_target_properties( rocfft PROPERTIES PREFIX "lib" )
@@ -611,11 +602,3 @@ rocm_export_targets(
     ${static_depends}
   NAMESPACE roc::
   )
-
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_install(
-    DIRECTORY
-       "${PROJECT_BINARY_DIR}/rocfft"
-        DESTINATION "." )
-  message( STATUS "Backward Compatible Sym Link Created for include directories" )
-endif()
