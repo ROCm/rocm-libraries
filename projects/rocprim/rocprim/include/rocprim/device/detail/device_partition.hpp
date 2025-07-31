@@ -1034,8 +1034,6 @@ struct partition_kernel_impl_
         const auto flat_block_id = block_id.get(flat_block_thread_id, storage.block_id);
         ::rocprim::syncthreads(); // sync threads to reuse shared memory
         
-        // const auto flat_block_id = ::rocprim::detail::block_id<0>();
-
         const auto         block_offset = flat_block_id * items_per_block;
         const unsigned int valid_in_global_last_block
             = total_size - prev_processed - items_per_block * (number_of_blocks - 1);
