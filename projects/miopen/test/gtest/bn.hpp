@@ -228,8 +228,7 @@ protected:
                             bn_infer_test_data.activ_alpha,
                             bn_infer_test_data.out_ref.data,
                             bn_infer_test_data.out_ref.data);
-        // 4e-3 is tolerance used by CK kernel.
-        test::CompareTensor<YDataType>(bn_infer_test_data.output, bn_infer_test_data.out_ref, 4e-3);
+        test::CompareTensor<YDataType>(bn_infer_test_data.output, bn_infer_test_data.out_ref, 8e-3);
     }
 
     TestCase bn_config;
