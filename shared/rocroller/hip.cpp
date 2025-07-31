@@ -19,13 +19,21 @@ template <int byte_stride = BYTE_STRIDE, int instr = INSTR_WIDTH>
 __global__ void kernel()
 {
     uint32_t const index = byte_stride * threadIdx.x;
-#pragma unroll
-    for(int i = 0; i < 3000; ++i)
+
+    for(int i = 0; i < 1000; ++i)
     {
-        if constexpr(instr == 32)
-            asm volatile("ds_read_b32 v2, %0" : : "v"(index));
-        if constexpr(instr == 128)
-            asm volatile("ds_read_b128 v[2:5], %0" : : "v"(index));
+#pragma unroll
+        for(int i = 0; i < 32; ++i)
+        {
+            if constexpr(instr == 32)
+                asm volatile("ds_read_b32 v2, %0" : : "v"(index));
+            if constexpr(instr == 128)
+                asm volatile("ds_read_b128 v[2:5], %0" : : "v"(index));
+            if constexpr(false)
+            {
+                asm volatile("s_waitcnt lgkmcnt(0)");
+            }
+        }
     }
 }
 

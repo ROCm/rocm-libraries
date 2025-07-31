@@ -10,7 +10,7 @@ rm $DIR -r; mkdir $DIR
 
 ROCPROF_DIR=rocprof_$INSTR_WIDTH
 
-for (( i=0; i<=512; i++ )); do
+for (( i=0; i<=8; i++ )); do
     EXE="prog_${i}_${INSTR_WIDTH}".out
 
     hipcc ../hip.cpp -DBYTE_STRIDE="$i" -DINSTR_WIDTH=$INSTR_WIDTH -O3 -o ./$EXE
@@ -20,14 +20,13 @@ for (( i=0; i<=512; i++ )); do
 
         rm $ROCPROF_DIR/ -rf
 
-        HSA_CU_MASK=0 rocprofv3 --att -i input.json -d $ROCPROF_DIR/ -- ./$EXE 2> /dev/null
+        HSA_CU_MASK=0 rocprofv3 --att -i input.json -d $ROCPROF_DIR/ --att-perfcounter-ctrl 3 --att-perfcounters "SQ_LDS_BANK_CONFLICT SQ_LDS_ADDR_CONFLICT SQ_LDS_MEM_VIOLATIONS" -- ./$EXE 2> /dev/null
         { output="$(cat $ROCPROF_DIR/stats_ui_output_agent_*_dispatch_1.csv)"; } > /dev/null 2>&1
-
 
         len=${#output}
 
         if (( len > CHAR_LIMIT )); then
-            echo "$output" > "$DIR/$i.csv"
+            mv $ROCPROF_DIR/ $DIR/$i/
             break
         fi
     done
