@@ -128,6 +128,11 @@ namespace rocRoller
          */
         AssertOpKind assertOpKind = AssertOpKind::NoOp;
 
+        /**
+         * Enable/Disable the RemoveSetCoordinate transformation
+         */
+        bool removeSetCoordinate = false;
+
         std::string toString() const;
     };
 

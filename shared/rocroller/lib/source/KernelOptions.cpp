@@ -137,7 +137,7 @@ namespace rocRoller
 
     std::string toString(KernelOptionValues const& values)
     {
-        static_assert(sizeof(KernelOptionValues) == 68,
+        static_assert(sizeof(KernelOptionValues) == 72,
                       "Edit the toString() function when adding a kernel option!");
 
         std::string rv = "Kernel Options:\n";
@@ -172,6 +172,7 @@ namespace rocRoller
         ShowOption(enableFullDivision);
         ShowOption(scaleSkipPermlane);
         ShowString(assertOpKind);
+        ShowOption(removeSetCoordinate);
 
 #undef Show
 #undef ShowOption

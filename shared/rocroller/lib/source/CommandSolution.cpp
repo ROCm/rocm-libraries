@@ -430,11 +430,15 @@ namespace rocRoller
             std::make_shared<KernelGraph::UpdateWavefrontParameters>(m_commandParameters));
         transforms.push_back(std::make_shared<KernelGraph::LoadPacked>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::AddConvert>());
+
         //
-        // TODO: Enable this transformation when SGPR issue gets resolved
+        // TODO: Turn on this transformation by default when SGPR issue gets resolved
         //
-        //transforms.push_back(std::make_shared<KernelGraph::RemoveSetCoordinate>());
-        //transforms.push_back(std::make_shared<KernelGraph::Simplify>());
+        if(m_context->kernelOptions()->removeSetCoordinate)
+        {
+            transforms.push_back(std::make_shared<KernelGraph::RemoveSetCoordinate>());
+            transforms.push_back(std::make_shared<KernelGraph::Simplify>());
+        }
         transforms.push_back(std::make_shared<KernelGraph::NopExtraScopes>());
         transforms.push_back(std::make_shared<KernelGraph::AddDeallocateDataFlow>());
         transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
