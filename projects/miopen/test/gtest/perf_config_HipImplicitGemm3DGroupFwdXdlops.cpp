@@ -66,18 +66,18 @@ protected:
     }
 };
 
-using PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BF16 =
+using GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16 =
     PerfConfig_HipImplicitGemm3DGroupFwdXdlops<miopenBFloat16>;
-using PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16 =
+using GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16 =
     PerfConfig_HipImplicitGemm3DGroupFwdXdlops<miopenHalf>;
 
-TEST_P(PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BF16, All) { TestConfigs(); }
-TEST_P(PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16, All) { TestConfigs(); }
+TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16, All) { TestConfigs(); }
+TEST_P(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16, All) { TestConfigs(); }
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BF16,
+                         GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16,
                          testing::ValuesIn(GetPerfConfigTestCases(miopenBFloat16, "gfx942")));
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16,
+                         GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16,
                          testing::ValuesIn(GetPerfConfigTestCases(miopenHalf, "gfx942")));
