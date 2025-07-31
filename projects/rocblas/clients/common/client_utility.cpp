@@ -301,9 +301,9 @@ double get_time_us_sync(hipStream_t stream)
         static thread_local hipEvent_t stop{nullptr};
         if(!start)
         {
-            THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
             THROW_IF_HIP_ERROR(hipEventCreate(&start));
             THROW_IF_HIP_ERROR(hipEventCreate(&stop));
+            THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
             THROW_IF_HIP_ERROR(hipEventRecord(start, stream));
 
             return 0.0;
