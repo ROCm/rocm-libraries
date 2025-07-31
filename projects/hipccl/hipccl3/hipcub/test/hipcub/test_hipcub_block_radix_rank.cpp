@@ -38,6 +38,7 @@
 #include "hipcub/util_type.hpp"
 
 #include <bitset>
+#include <numeric>
 
 template<class Key,
          unsigned int BlockSize,
