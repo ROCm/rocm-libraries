@@ -26,11 +26,9 @@ project(device-library VERSION 0.0.1 LANGUAGES CXX ASM)
 
 set(TENSILELITE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite)
 
-# Underscores are used to delimit architectures when tensile libraries are built via CMake
-# to avoid complications related to how semicolons are interpreted as list separators
-list(JOIN GPU_TARGETS "_" TENSILE_GPU_TARGETS_UNDERSCORE_DELIMITED)
+list(JOIN GPU_TARGETS "$<SEMICOLON>" TENSILE_GPU_TARGETS_SEMI_ESCAPED)
 
-set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--architecture=${TENSILE_GPU_TARGETS_UNDERSCORE_DELIMITED}")
+set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--architecture=${TENSILE_GPU_TARGETS_SEMI_ESCAPED}")
 set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--cxx-compiler=${CMAKE_CXX_COMPILER}")
 if(HIPBLASLT_ENABLE_ASAN)
     set(TENSILE_BUILD_OPTS ${TENSILE_BUILD_OPTS} "--address-sanitizer")
@@ -61,12 +59,7 @@ if(NOT HIPBLASLT_LIBLOGIC_PATH)
     set(HIPBLASLT_LIBLOGIC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../library")
 endif()
 
-if(NOT TENSILELITE_BINARY_DIR)
-    set(output_dir "${hipblaslt_BINARY_DIR}/Tensile")
-else()
-    set(output_dir "${TENSILELITE_BINARY_DIR}")
-endif()
-
+set(output_dir "${hipblaslt_BINARY_DIR}/Tensile")
 set(output_stamp "${CMAKE_CURRENT_BINARY_DIR}/Tensile.stamp")
 set(TENSILE_CREATE_LIBRARY_COMMAND
     ${HIPBLASLT_PYTHON_COMMAND} -m Tensile.TensileCreateLibrary
