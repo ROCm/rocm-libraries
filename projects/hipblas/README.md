@@ -44,7 +44,7 @@ cmake -DBUILD_DOCS=ON ...
     git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
     cd rocm-libraries
     git sparse-checkout init --cone
-    git sparse-checkout set projects/hipblas # add projects/rocsolver and projects/rocblas to include dependencies
+    git sparse-checkout set projects/hipblas # add projects/rocsolver projects/rocblas projects/hipblas-common to include dependencies
     git checkout develop # or use the branch you want to work with
     ```
 
@@ -56,7 +56,7 @@ cmake -DBUILD_DOCS=ON ...
     # Clone rocm-libraries, including hipBLAS, using Git
     git clone https://github.com/ROCm/rocm-libraries.git
 
-    # Go to rocSPARSE directory
+    # Go to hipBLAS directory
     cd rocm-libraries/projects/hipblas
     ```
 

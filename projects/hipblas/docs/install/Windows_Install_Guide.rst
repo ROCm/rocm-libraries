@@ -78,14 +78,14 @@ Use the following commands for a sparse checkout:
 .. note::
 
    To include the hipBLAS dependencies, set the projects for the sparse checkout using
-   ``git sparse-checkout set projects/hipblas projects/rocsolver projects/rocblas``.
+   ``git sparse-checkout set projects/hipblas projects/rocsolver projects/rocblas projects/hipblas-common``.
 
 .. code-block:: shell
 
    git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
    cd rocm-libraries
    git sparse-checkout init --cone
-   git sparse-checkout set projects/hipblas # add projects/rocsolver and projects/rocblas to include dependencies
+   git sparse-checkout set projects/hipblas # add projects/rocsolver projects/rocblas, projects/hipblas-common to include dependencies
    git checkout develop # or use the branch you want to work with
 
 .. note::
