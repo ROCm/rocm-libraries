@@ -205,6 +205,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                                         node.GetCallbackType(enable_callbacks),
                                         node.fuseBlue,
                                         ppType,
+                                        pp_params,
                                         node.loadOps,
                                         node.storeOps);
     };
