@@ -58,10 +58,8 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         transforms_per_block *= max_factor_pp;
         workgroup_size *= max_factor_pp;
 
-        pp_factors_curr_prod = std::accumulate(
-            factors_pp_curr.begin(), factors_pp_curr.end(), 1, std::multiplies<unsigned int>());
-        pp_factors_other_prod = std::accumulate(
-            factors_pp_other.begin(), factors_pp_other.end(), 1, std::multiplies<unsigned int>());
+        pp_factors_curr_prod  = product(factors_pp_curr.begin(), factors_pp_curr.end());
+        pp_factors_other_prod = product(factors_pp_other.begin(), factors_pp_other.end());
 
         switch(params.off_dim)
         {
