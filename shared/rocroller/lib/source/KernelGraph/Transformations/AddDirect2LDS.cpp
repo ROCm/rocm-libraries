@@ -152,8 +152,6 @@ namespace rocRoller
          */
         KernelGraph AddDirect2LDS::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::AddDirect2LDS");
-
             auto kgraph = original;
 
             Log::debug("  AddDirect2LDS control graph transform.");

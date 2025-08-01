@@ -134,7 +134,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
 endif()
 
 # Benchmark dependencies
-if(BUILD_BENCHMARKS)
+if(BUILD_BENCHMARK)
   set(BENCHMARK_VERSION 1.9.0)
   if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
     # Google Benchmark (https://github.com/google/benchmark.git)

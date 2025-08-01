@@ -97,6 +97,18 @@ if(BUILD_CODE_COVERAGE)
     -fprofile-instr-generate
     -fcoverage-mapping
   )
+  target_include_directories( hipblaslt-test
+  PRIVATE
+    # internal rocblaslt headers
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/amd_detail>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/amd_detail/rocblaslt/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/amd_detail/rocblaslt/src/include>
+)
+  # When we are doing code coverage with GOOGLE_TEST flag,
+  # the std::cerr and std::cout are labeled as poison in hipblaslt/clients/include/utility.hpp.
+  # Thus, we use CODE_COVERAGE to ignore some code that is using std::cerr and std::cout.
+  target_compile_definitions( hipblaslt-test PRIVATE CODE_COVERAGE)
+  target_link_libraries( hipblaslt-test PRIVATE TensileHost)
 endif()
 
 if (BUILD_CUDA)
