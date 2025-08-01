@@ -1,4 +1,4 @@
-# Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,9 @@ from typing import Dict, List
 from functools import reduce
 
 import sys
+
+import re
+from collections import defaultdict
 
 #
 # Join shortcuts
@@ -266,6 +269,61 @@ def find_slower_faster(outdirs, method, multitest, significance, ncompare,
     return slower, faster, new_significance
 
 
+# Decomposition types for multi-process rocFFT
+SPLIT_TYPES = {
+    (True, True, False): "SLOW_INOUT",
+    (True, False, False): "SLOW_IN",
+    (False, True, False): "SLOW_OUT",
+    (True, False, True): "SLOW_IN_FAST_OUT",
+    (True, True, True): "PENCIL_3D"
+}
+
+
+def get_split_dims(bricks):
+    coords = list(zip(*(b['lower'] for b in bricks)))
+    return [len(set(dim_vals)) > 1 for dim_vals in coords]  # X, Y, Z
+
+
+def get_decomposition_type(bricks, label="unknown"):
+    if not bricks:
+        return "UNKNOWN"
+
+    split_x, split_y, split_z = get_split_dims(bricks)
+
+    # Handle full 3D block case
+    if split_x and split_y and split_z:
+        return "PENCIL_3D"
+
+    if label == "ifield":
+        key = (split_x, False, False)
+    elif label == "ofield":
+        key = (False, split_z, split_x)
+    else:
+        return "UNKNOWN"
+
+    return SPLIT_TYPES.get(key, "UNKNOWN")
+
+
+def get_proc_grid(bricks):
+    if not bricks:
+        return (1, 1, 1)
+    lowers = [b['lower'] for b in bricks]
+    grid_dims = []
+    for i in range(3):  # X, Y, Z
+        unique_coords = sorted(set(coord[i] for coord in lowers))
+        grid_dims.append(len(unique_coords))
+    return tuple(grid_dims)
+
+
+def print_mgpu_data_layout(bricks):
+    print("Layout per device/rank:")
+    for b in bricks:
+        rank_str = f"{b['rank']}" if b['rank'] is not None else "N/A"
+        print(
+            f"  Rank {rank_str:<3} | Dev {b['dev']:<2} | Lower {b['lower']} Upper {b['upper']}"
+        )
+
+
 #
 # DAT files
 #
@@ -346,11 +404,11 @@ def parse_token(token):
     transform_type = ("forward" if words[1] == "forward" else
                       "backward") + "_" + words[0]
 
-    lendidx = -1
     for idx in range(len(words)):
         if words[idx] == "len":
             lenidx = idx
             break
+
     for idx in range(lenidx + 1, len(words)):
         if words[idx].isnumeric():
             length.append(int(words[idx]))
@@ -373,7 +431,37 @@ def parse_token(token):
         else:
             break
 
-    return transform_type, placeness, length, batch, precision
+    bricks = defaultdict(list)
+    ranks = set()
+    gpus = set()
+    current_field = None
+
+    # Regex to get brick indices
+    pattern = r"(?:(ifield|ofield)_)?brick_lower_([0-9_]+)_upper_([0-9_]+)_stride_[0-9_]+_(?:rank_(\d+)_)?dev_(\d+)"
+    matches = re.findall(pattern, token)
+
+    for field_type, lower_str, upper_str, rank_str, dev_str in matches:
+        if field_type:
+            current_field = field_type
+
+        lower = tuple(map(int, lower_str.split('_')))
+        upper = tuple(map(int, upper_str.split('_')))
+        dev = int(dev_str)
+        rank = int(rank_str) if rank_str else None
+
+        gpus.add(dev)
+        if rank is not None:
+            ranks.add(rank)
+
+        bricks[current_field].append({
+            'dev': dev,
+            'rank': rank,
+            'lower': lower[1:],  # skip batch dimension
+            'upper': upper[1:]
+        })
+
+    return transform_type, placeness, length, batch, precision, bricks, sorted(
+        gpus), sorted(ranks)
 
 
 def read_dat(fname):

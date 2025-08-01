@@ -707,19 +707,17 @@ void common_inst(nb::module_ m_common)
         });
 
     nb::class_<rocisa::SWaitCnt, rocisa::CompositeInstruction>(m_common, "SWaitCnt")
-        .def(nb::init<int, int, int, int, int, int, int, const std::string&, bool>(),
-             nb::arg("lgkmcnt")  = -1,
-             nb::arg("vmcnt")    = -1,
+        .def(nb::init<int, int, int, int, const std::string&, bool>(),
+             nb::arg("vlcnt")    = -1,
              nb::arg("vscnt")    = -1,
              nb::arg("dscnt")    = -1,
              nb::arg("kmcnt")    = -1,
-             nb::arg("loadcnt")  = -1,
-             nb::arg("storecnt") = -1,
              nb::arg("comment")  = "",
              nb::arg("waitAll")  = false)
-        .def_rw("lgkmcnt", &rocisa::SWaitCnt::lgkmcnt)
-        .def_rw("vmcnt", &rocisa::SWaitCnt::vmcnt)
+        .def_rw("vlcnt", &rocisa::SWaitCnt::vlcnt)
         .def_rw("vscnt", &rocisa::SWaitCnt::vscnt)
+        .def_rw("dscnt", &rocisa::SWaitCnt::dscnt)
+        .def_rw("kmcnt", &rocisa::SWaitCnt::kmcnt)
         .def_rw("comment", &rocisa::SWaitCnt::comment)
         .def("__deepcopy__",
              [](const rocisa::SWaitCnt& self, nb::dict&) { return new rocisa::SWaitCnt(self); });
