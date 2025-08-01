@@ -170,11 +170,11 @@ namespace rocRoller::Client
     //     }
 
     template <typename T>
-    inline std::vector<T> preSwizzle16x16x128(std::vector<T> const&   input,
-                                              TensorDescriptor const& desc,
-                                              GEMMClient::ProblemParameters const& problemParams)
+    inline std::vector<T> preSwizzle(std::vector<T> const&        input,
+                                     TensorDescriptor const&      desc,
+                                     std::array<size_t, 3> const& tile)
     {
-        auto blockSize = 32;//solutionParams.types.scaleBlockSize;
+        auto blockSize = 32;
 
         auto descTmp = desc.withNormalizedDimensions();
         descTmp = TensorDescriptor(desc.dataType(), {descTmp.size(0) / blockSize, descTmp.size(1)});
@@ -183,15 +183,18 @@ namespace rocRoller::Client
                     ShowValue(descTmp),
                     ShowValue(input.size()));
 
-        size_t scaleMIK = 4;//solutionParams.waveK / blockSize;
-        // size_t scaleMIK = 2;//solutionParams.waveK / blockSize;
-        size_t waveK  = 4;
-        size_t factor = waveK / scaleMIK;
-        size_t nLanes = 16;
-        // size_t nLanes = 4;
+        // AssertFatal(problemParams.types.scaleShuffleTile.has_value());
+        auto [tileM, tileK, subTileK] = tile;
 
-        std::vector<size_t> srcSizes
-            = {scaleMIK, factor, nLanes, descTmp.size(0) / (scaleMIK), scaleMIK, descTmp.size(1) / (nLanes * scaleMIK)};
+        size_t instPerTileK  = tileK / subTileK;
+        size_t instKPerTileM = tileM / subTileK;
+
+        std::vector<size_t> srcSizes = {subTileK,
+                                        instPerTileK,
+                                        descTmp.size(0) / (tileK),
+                                        instKPerTileM,
+                                        subTileK,
+                                        descTmp.size(1) / (tileM)};
 
         TensorDescriptor src(descTmp.dataType(), srcSizes);
 
@@ -208,10 +211,9 @@ namespace rocRoller::Client
 
         AssertFatal(src.totalAllocatedElements() == dst.totalAllocatedElements());
 
-
         {
-            auto tmp = iota<int>(0, input.size()).template to<std::vector>();
-            auto tmp2 = shuffleDims(tmp, dst, src);
+            auto          tmp  = iota<int>(0, input.size()).template to<std::vector>();
+            auto          tmp2 = shuffleDims(tmp, dst, src);
             std::ofstream file("tensor.txt");
             file << writeTensor(tmp2, descTmp);
         }

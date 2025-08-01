@@ -196,13 +196,13 @@ namespace rocRoller::Client::GEMMClient
                       1.f,
                       static_cast<uint>(scaleBlockSize));
 
-            if(problemParams.types.scaleSkipPermlane && false)
-            {
-                auto scaleValue = floatToScale(DataType::E8M0, .0625f);
-                std::cerr << "Scale Value: " << (int)scaleValue << std::endl;
-                std::ranges::fill(hostScaleA, scaleValue);
-                std::ranges::fill(hostScaleB, scaleValue);
-            }
+            // if(problemParams.types.scaleSkipPermlane && false)
+            // {
+            //     auto scaleValue = floatToScale(DataType::E8M0, .0625f);
+            //     std::cerr << "Scale Value: " << (int)scaleValue << std::endl;
+            //     std::ranges::fill(hostScaleA, scaleValue);
+            //     std::ranges::fill(hostScaleB, scaleValue);
+            // }
         }
         else
         {
@@ -227,54 +227,12 @@ namespace rocRoller::Client::GEMMClient
                     ShowValue(problemParams.types.scaleB));
         if(problemParams.types.scaleA == Operations::ScaleMode::Separate)
         {
-            if(problemParams.types.scaleSkipPermlane)
+            if(problemParams.types.scaleSkipPermlaneA)
             {
-                #if 1
-                auto tmpScaleA = preSwizzle16x16x128(hostScaleA, descA, problemParams);
-                deviceScaleA   = make_shared_device(tmpScaleA);
-
-                #elif 0
-                size_t miK = 4;
-                size_t waveK = 4;
-                size_t factor = waveK / miK;
-                size_t nLanes = 16;
-                auto descTmp = descA.withNormalizedDimensions();
-                std::vector<size_t> srcSizes = {miK, factor, nLanes, descTmp.size(0)/waveK, 16*4, descTmp.size(1)};
-                TensorDescriptor src(descA.dataType(), srcSizes);
-                auto dst = TensorDescriptor::ShuffledNoPadding(descA.dataType(), srcSizes, {4,1,2,3,0,5});
-                AssertFatal(src.totalAllocatedElements() == dst.totalAllocatedElements())
-
-                auto tmpScaleA = shuffleDims(hostScaleA, dst, src);
-                deviceScaleA   = make_shared_device(tmpScaleA);
-
-
-                #else
-                auto desc = descA.withNormalizedDimensions();
-                std::cerr << ShowValue(desc.sizes()) << ShowValue(desc.strides());
-                auto aScaleSizes = desc.sizes();
-                aScaleSizes[0] /= 32;
-                auto aScaleStrides = desc.strides();
-                aScaleStrides[1] /= 32;
-                TensorDescriptor aScaleDesc(DataType::E8M0, std::move(aScaleSizes), std::move(aScaleStrides));
-                std::cerr << ShowValue(aScaleDesc.sizes()) << ShowValue(aScaleDesc.strides());
-
-                auto tmpScaleA = preSwizzle16x16x128(hostScaleA, aScaleDesc, 0, 1);
-                deviceScaleA   = make_shared_device(tmpScaleA);
-
-                auto ordered = iota(0ul, hostScaleA.size()).to<std::vector>();
-                auto reordered = preSwizzle16x16x128(ordered, aScaleDesc, 0, 1);
-
-                {
-                    std::ofstream file("scaleAOrder.txt");
-                    file << writeTensor(reordered, aScaleDesc);
-                }
-
-                {
-                    auto const& [dst, src] = view_64x4(aScaleDesc, 0, 1);
-                    std::ofstream file("scaleAInputTensor.txt");
-                    file << writeTensor(ordered, dst);
-                }
-                #endif
+                AssertFatal(problemParams.types.scaleShuffleTileA.has_value());
+                auto tmpScaleA
+                    = preSwizzle(hostScaleA, descA, *problemParams.types.scaleShuffleTileA);
+                deviceScaleA = make_shared_device(tmpScaleA);
             }
             else
             {
@@ -283,39 +241,12 @@ namespace rocRoller::Client::GEMMClient
         }
         if(problemParams.types.scaleB == Operations::ScaleMode::Separate)
         {
-            if(problemParams.types.scaleSkipPermlane)
+            if(problemParams.types.scaleSkipPermlaneB)
             {
-                #if 1
-
-                auto tmpScaleB = preSwizzle16x16x128(hostScaleB, descB, problemParams);
-                deviceScaleB   = make_shared_device(tmpScaleB);
-
-                #elif 0
-                size_t miK = 4;
-                size_t waveK = 4;
-                size_t factor = waveK / miK;
-                size_t nLanes = 16;
-                auto descTmp = descB.withNormalizedDimensions();
-                std::vector<size_t> srcSizes = {miK, factor, nLanes, descTmp.size(0)/waveK, 16*4, descTmp.size(1)};
-                TensorDescriptor src(descB.dataType(), srcSizes);
-                auto dst = TensorDescriptor::ShuffledNoPadding(descB.dataType(), srcSizes, {4,1,2,3,0,5});
-                AssertFatal(src.totalAllocatedElements() == dst.totalAllocatedElements());
-
-                auto tmpScaleB = shuffleDims(hostScaleB, dst, src);
-                deviceScaleB   = make_shared_device(tmpScaleB);
-                #else
-                auto desc = descB.withNormalizedDimensions();
-                std::cerr << ShowValue(desc.sizes()) << ShowValue(desc.strides());
-                auto bScaleSizes = desc.sizes();
-                bScaleSizes[0] /= 32;
-                auto bScaleStrides = desc.strides();
-                bScaleStrides[1] /= 32;
-                TensorDescriptor bScaleDesc(DataType::E8M0, std::move(bScaleSizes), std::move(bScaleStrides));
-                std::cerr << ShowValue(bScaleDesc.sizes()) << ShowValue(bScaleDesc.strides());
-
-                auto tmpScaleB = preSwizzle16x16x128(hostScaleB, bScaleDesc, 0, 1);
-                deviceScaleB   = make_shared_device(tmpScaleB);
-                #endif
+                AssertFatal(problemParams.types.scaleShuffleTileB.has_value());
+                auto tmpScaleB
+                    = preSwizzle(hostScaleB, descB, *problemParams.types.scaleShuffleTileB);
+                deviceScaleB = make_shared_device(tmpScaleB);
             }
             else
             {
@@ -734,7 +665,7 @@ namespace rocRoller::Client::GEMMClient
         auto context
             = Context::ForTarget(arch,
                                  solution.generateKernelName(),
-                                 {{.scaleSkipPermlane = solution.types.scaleSkipPermlane}});
+                                 {{.scaleSkipPermlane = solution.types.scaleSkipPermlaneA}});
 
         bool willRunOnGPU = doValidate || doBenchmark;
         if(willRunOnGPU)
@@ -1246,8 +1177,11 @@ int main(int argc, const char* argv[])
     app.add_option("--scaleBlockSize",
                    types.scaleBlockSize,
                    "Set MX scaling block size for A and B. (default: 32)");
-    app.add_option("--scaleSkipPermlane",
-                   types.scaleSkipPermlane,
+    app.add_option("--scaleSkipPermlaneA",
+                   types.scaleSkipPermlaneA,
+                   "Experimental: Skip Permlane instructions for scale data for performance.");
+    app.add_option("--scaleSkipPermlaneB",
+                   types.scaleSkipPermlaneB,
                    "Experimental: Skip Permlane instructions for scale data for performance.");
 
     //
@@ -1498,15 +1432,11 @@ int main(int argc, const char* argv[])
         AssertFatal(arch.HasCapability(GPUCapability::HasBlockScaling32),
                     fmt::format("Architecture {} does not support block scaling.",
                                 arch.target().toString()));
-        types.scaleBlockSize         = arch.GetCapability(GPUCapability::DefaultScaleBlockSize);
-        problem.types.scaleBlockSize = types.scaleBlockSize;
+        types.scaleBlockSize = arch.GetCapability(GPUCapability::DefaultScaleBlockSize);
     }
 
     AssertFatal((types.typeAcc == "float") || (types.typeAcc == "half")
                 || (types.typeAcc == "bf16"));
-
-    problem.types  = types;
-    solution.types = types;
 
     // TODO: Reevaluate the relationship between problem and solution params.
     problem.workgroupMapping = solution.workgroupMapping;
@@ -1519,8 +1449,8 @@ int main(int argc, const char* argv[])
     // Set default MI sizes
     if(arch.HasCapability(GPUCapability::HasMFMA))
     {
-        if(solution.types.typeA == "float" && solution.types.typeB == "float"
-           && solution.types.typeC == "float" && solution.types.typeD == "float")
+        if(types.typeA == "float" && types.typeB == "float" && types.typeC == "float"
+           && types.typeD == "float")
         {
             if(solution.waveM == -1)
                 solution.waveM = 32;
@@ -1531,7 +1461,7 @@ int main(int argc, const char* argv[])
             if(solution.waveB == -1)
                 solution.waveB = 1;
         }
-        else if(solution.types.typeA == "half" && solution.types.typeB == "half")
+        else if(types.typeA == "half" && types.typeB == "half")
         {
             if(solution.waveM == -1)
                 solution.waveM = 32;
@@ -1542,7 +1472,7 @@ int main(int argc, const char* argv[])
             if(solution.waveB == -1)
                 solution.waveB = 1;
         }
-        else if(solution.types.typeA == "bf16" && solution.types.typeB == "bf16")
+        else if(types.typeA == "bf16" && types.typeB == "bf16")
         {
             if(solution.waveM == -1)
                 solution.waveM = 16;
@@ -1553,8 +1483,8 @@ int main(int argc, const char* argv[])
             if(solution.waveB == -1)
                 solution.waveB = 1;
         }
-        else if((solution.types.typeA == "fp8" && solution.types.typeB == "fp8")
-                || (solution.types.typeA == "bf8" && solution.types.typeB == "bf8"))
+        else if((types.typeA == "fp8" && types.typeB == "fp8")
+                || (types.typeA == "bf8" && types.typeB == "bf8"))
         {
             if(solution.waveM == -1)
                 solution.waveM = 16;
@@ -1570,12 +1500,12 @@ int main(int argc, const char* argv[])
     {
         if(arch.target().isRDNA4GPU())
         {
-            if((solution.types.typeA == "half" && solution.types.typeB == "half")
-               || (solution.types.typeA == "bf16" && solution.types.typeB == "bf16")
-               || (solution.types.typeA == "fp8" && solution.types.typeB == "fp8")
-               || (solution.types.typeA == "bf8" && solution.types.typeB == "bf8")
-               || (solution.types.typeA == "bf8" && solution.types.typeB == "fp8")
-               || (solution.types.typeA == "fp8" && solution.types.typeB == "bf8"))
+            if((types.typeA == "half" && types.typeB == "half")
+               || (types.typeA == "bf16" && types.typeB == "bf16")
+               || (types.typeA == "fp8" && types.typeB == "fp8")
+               || (types.typeA == "bf8" && types.typeB == "bf8")
+               || (types.typeA == "bf8" && types.typeB == "fp8")
+               || (types.typeA == "fp8" && types.typeB == "bf8"))
             {
                 if(solution.waveM == -1)
                     solution.waveM = 16;
@@ -1591,24 +1521,24 @@ int main(int argc, const char* argv[])
                 // Override default settings for the `example` and `generate` subcommands.
                 if(example->parsed() || generate->parsed())
                 {
-                    solution.types.typeA = "half";
-                    solution.types.typeB = "half";
-                    solution.types.typeC = "half";
-                    solution.types.typeD = "half";
-                    solution.waveM       = 16;
-                    solution.waveN       = 16;
-                    solution.waveK       = 16;
-                    solution.waveB       = 1;
+                    types.typeA    = "half";
+                    types.typeB    = "half";
+                    types.typeC    = "half";
+                    types.typeD    = "half";
+                    solution.waveM = 16;
+                    solution.waveN = 16;
+                    solution.waveK = 16;
+                    solution.waveB = 1;
                 }
                 else
                 {
                     Throw<FatalError>("Unsupported MI on: ",
                                       arch.target().toString(),
-                                      ShowValue(solution.types.typeA),
-                                      ShowValue(solution.types.typeB),
-                                      ShowValue(solution.types.typeC),
-                                      ShowValue(solution.types.typeD),
-                                      ShowValue(solution.types.typeAcc));
+                                      ShowValue(types.typeA),
+                                      ShowValue(types.typeB),
+                                      ShowValue(types.typeC),
+                                      ShowValue(types.typeD),
+                                      ShowValue(types.typeAcc));
                 }
             }
             // TODO Support prefetch on gfx12
@@ -1624,6 +1554,43 @@ int main(int argc, const char* argv[])
         Throw<FatalError>("Unsupported arch for GEMM client: ", arch.target().toString());
     }
 
+    if(types.scaleSkipPermlaneA)
+    {
+        AssertFatal(types.transA == Client::GEMMClient::TransposeType::T,
+                    ShowValue(types));
+        AssertFatal(types.scaleA == Operations::ScaleMode::Separate,
+                    ShowValue(types));
+
+        size_t kSubtile = solution.waveK / types.scaleBlockSize;
+
+        AssertFatal(kSubtile == 2 || kSubtile == 4,
+                    ShowValue(kSubtile),
+                    ShowValue(solution.waveK),
+                    ShowValue(types.scaleBlockSize));
+
+        types.scaleShuffleTileA = {64, 4, kSubtile};
+    }
+
+    if(types.scaleSkipPermlaneB)
+    {
+        AssertFatal(types.transB == Client::GEMMClient::TransposeType::N,
+                    ShowValue(types));
+        AssertFatal(types.scaleB == Operations::ScaleMode::Separate,
+                    ShowValue(types));
+
+        size_t kSubtile = solution.waveK / types.scaleBlockSize;
+
+        AssertFatal(kSubtile == 2 || kSubtile == 4,
+                    ShowValue(kSubtile),
+                    ShowValue(solution.waveK),
+                    ShowValue(types.scaleBlockSize));
+
+        types.scaleShuffleTileB = {64, 4, kSubtile};
+    }
+
+    problem.types  = types;
+    solution.types = types;
+
     // Set default prefetchMixMemOps
     if(prefetchMixMemOpsFlag->count() == 0)
     {
@@ -1632,10 +1599,10 @@ int main(int argc, const char* argv[])
         if(solution.prefetchLDSFactor != 0)
             solution.prefetchMixMemOps = true;
 
-        if(solution.types.scaleB == Operations::ScaleMode::Separate && !solution.loadLDSScaleB)
+        if(types.scaleB == Operations::ScaleMode::Separate && !solution.loadLDSScaleB)
             solution.prefetchMixMemOps = false;
 
-        if(solution.types.scaleA == Operations::ScaleMode::Separate && !solution.loadLDSScaleA)
+        if(types.scaleA == Operations::ScaleMode::Separate && !solution.loadLDSScaleA)
             solution.prefetchMixMemOps = false;
 
         // TODO: enable (prefetchMixMemOps == true && prefetchLDSFactor == 2 && direct2LDSA/B = true)

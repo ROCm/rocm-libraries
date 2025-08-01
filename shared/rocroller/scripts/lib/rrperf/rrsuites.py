@@ -1461,7 +1461,8 @@ def add_wgm(mapping, suite):
 
 def addSkipPermlane(suite: List[GEMMRun], value=True):
     for run in suite:
-        run.scaleSkipPermlane = value
+        run.scaleSkipPermlaneA = value
+        run.scaleSkipPermlaneB = value
         yield run
 
 
@@ -1530,6 +1531,11 @@ def fp4_target_d2lds_mi32x32x64_pf4x1_wgm():
     yield from add_wgm((0, 2), fp4_target_d2lds_mi32x32x64_pf4x1())
 
 
+def fp4_32_yesno():
+    yield from fp4_target_d2lds_mi32x32x64_pf4x1_wgm()
+    yield from addSkipPermlane(fp4_target_d2lds_mi32x32x64_pf4x1_wgm())
+
+
 def fp4_target_d2lds_mi32x32x64_pf4x1_both():
     yield from fp4_target_d2lds_mi32x32x64_pf4x1()
     yield from fp4_target_d2lds_mi32x32x64_pf4x1_wgm()
@@ -1540,6 +1546,9 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
         M=4096,
         N=4096,
         K=32768,
+        # M=1024,
+        # N=1024,
+        # K=8192,
         beta=0.0,
         mac_m=256,
         mac_n=256,
@@ -1599,12 +1608,15 @@ def does_this_fail():
         N=4096,
         K=32768,
         beta=0.0,
-        mac_m=64,
-        mac_n=64,
+        mac_m=256,
+        mac_n=256,
         mac_k=128,
         wave_m=16,
         wave_n=16,
         wave_k=128,
+        # wave_m=32,
+        # wave_n=32,
+        # wave_k=64,
         wave_b=1,
         workgroup_size_x=128,
         workgroup_size_y=2,
@@ -1621,6 +1633,7 @@ def does_this_fail():
         prefetchScale=False,
         swizzleScale=False,
         prefetchMixMemOps=True,
+        scaleSkipPermlane=True,
         betaInFma=True,
         scheduler="Priority",
         match_memory_access=True,
@@ -1628,8 +1641,8 @@ def does_this_fail():
         trans_B="N",
         type_A="fp4",
         type_B="fp4",
-        type_C="half",
-        type_D="half",
+        type_C="float",
+        type_D="float",
         type_acc="float",
         numOuter=1,
         numWarmUp=1000,
@@ -1701,13 +1714,21 @@ def fp4_kernels_wgm():
 
 
 def fp4_16x16x128_scale_options():
-    yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
+    # yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
     yield from addSkipPermlane(fp4_target_d2lds_mi16x16x128_pf4x1_wgm())
+
+def fp4_32x32x64_scale_options():
+    # yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
+    yield from addSkipPermlane(fp4_target_d2lds_mi32x32x64_pf4x1_wgm())
 
 
 def fp4_kernels():
     yield from fp4_kernels_no_wgm()
     yield from fp4_kernels_wgm()
+
+
+def fp4_permlane():
+    yield from addSkipPermlane(fp4_kernels())
 
 
 def fp4_target_sweep_wgms():
