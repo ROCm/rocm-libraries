@@ -195,7 +195,6 @@ namespace rocRoller::Client::GEMMClient
                       -1.f,
                       1.f,
                       static_cast<uint>(scaleBlockSize));
-
         }
         else
         {
@@ -223,9 +222,18 @@ namespace rocRoller::Client::GEMMClient
             if(problemParams.types.scaleSkipPermlane)
             {
                 AssertFatal(problemParams.types.scaleShuffleTileA.has_value());
-                auto tmpScaleA
-                    = preSwizzle(hostScaleA, descA, *problemParams.types.scaleShuffleTileA);
-                deviceScaleA = make_shared_device(tmpScaleA);
+
+                auto descScaleA = descA.withNormalizedDimensions();
+                {
+                    auto sizes = descScaleA.sizes();
+                    sizes[0] /= problemParams.types.scaleBlockSize;
+                    descScaleA = TensorDescriptor(descScaleA.dataType(), std::move(sizes));
+                }
+
+                auto tmpScaleA = preSwizzle(hostScaleA,
+                                            descScaleA,
+                                            *problemParams.types.scaleShuffleTileA);
+                deviceScaleA   = make_shared_device(tmpScaleA);
             }
             else
             {
@@ -237,9 +245,18 @@ namespace rocRoller::Client::GEMMClient
             if(problemParams.types.scaleSkipPermlane)
             {
                 AssertFatal(problemParams.types.scaleShuffleTileB.has_value());
-                auto tmpScaleB
-                    = preSwizzle(hostScaleB, descB, *problemParams.types.scaleShuffleTileB);
-                deviceScaleB = make_shared_device(tmpScaleB);
+
+                auto descScaleB = descB.withNormalizedDimensions();
+                {
+                    auto sizes = descScaleB.sizes();
+                    sizes[0] /= problemParams.types.scaleBlockSize;
+                    descScaleB = TensorDescriptor(descScaleB.dataType(), std::move(sizes));
+                }
+
+                auto tmpScaleB = preSwizzle(hostScaleB,
+                                            descScaleB,
+                                            *problemParams.types.scaleShuffleTileB);
+                deviceScaleB   = make_shared_device(tmpScaleB);
             }
             else
             {
@@ -1546,10 +1563,8 @@ int main(int argc, const char* argv[])
 
     if(types.scaleSkipPermlane)
     {
-        AssertFatal(types.transA == Client::GEMMClient::TransposeType::T,
-                    ShowValue(types));
-        AssertFatal(types.scaleA == Operations::ScaleMode::Separate,
-                    ShowValue(types));
+        AssertFatal(types.transA == Client::GEMMClient::TransposeType::T, ShowValue(types));
+        AssertFatal(types.scaleA == Operations::ScaleMode::Separate, ShowValue(types));
 
         size_t kSubtile = solution.waveK / types.scaleBlockSize;
 
@@ -1563,10 +1578,8 @@ int main(int argc, const char* argv[])
 
     if(types.scaleSkipPermlane)
     {
-        AssertFatal(types.transB == Client::GEMMClient::TransposeType::N,
-                    ShowValue(types));
-        AssertFatal(types.scaleB == Operations::ScaleMode::Separate,
-                    ShowValue(types));
+        AssertFatal(types.transB == Client::GEMMClient::TransposeType::N, ShowValue(types));
+        AssertFatal(types.scaleB == Operations::ScaleMode::Separate, ShowValue(types));
 
         size_t kSubtile = solution.waveK / types.scaleBlockSize;
 
