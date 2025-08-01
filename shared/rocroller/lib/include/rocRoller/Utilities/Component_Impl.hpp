@@ -26,8 +26,6 @@
 
 #pragma once
 
-#include "rocRoller/Scheduling/PriorityScheduler.hpp"
-#include "rocRoller/Scheduling/RoundRobinScheduler.hpp"
 #include <rocRoller/Utilities/Component.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
@@ -214,13 +212,6 @@ namespace rocRoller
 
             return true;
         }
-
-        // template <Component Comp>
-        // void ComponentFactory<Scheduling::Scheduler>::registerImplementations()
-        // {
-        //     registerComponent<Scheduling::PriorityScheduler>();
-        //     registerComponent<Scheduling::RoundRobinScheduler>();
-        // }
 
         template <ComponentBase Base>
         template <typename T>

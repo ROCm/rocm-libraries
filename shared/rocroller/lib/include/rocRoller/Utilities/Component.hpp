@@ -214,7 +214,6 @@ namespace rocRoller
                                    Matcher<Base>      matcher,
                                    Builder<Base>      builder);
 
-            template <Component Comp>
             void registerImplementations();
 
             template <typename T>

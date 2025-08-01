@@ -24,6 +24,8 @@
  *
  *******************************************************************************/
 
+#include "rocRoller/Assemblers/InProcessAssembler.hpp"
+#include "rocRoller/Assemblers/SubprocessAssembler.hpp"
 #include <rocRoller/Assemblers/Assembler.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 #include <rocRoller/Utilities/Error.hpp>
@@ -34,6 +36,13 @@ namespace rocRoller
     // Expands to:
     RegisterComponentBase(Assembler);
     // const std::string Assembler::Basename = "Assembler"
+
+    template <>
+    void Component::ComponentFactory<Assembler>::registerImplementations()
+    {
+        Component::ComponentFactory<Assembler>::registerComponent<InProcessAssembler>();
+        Component::ComponentFactory<Assembler>::registerComponent<SubprocessAssembler>();
+    }
 
     std::string toString(AssemblerType t)
     {
