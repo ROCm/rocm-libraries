@@ -48,17 +48,10 @@
 
 namespace test_utils {
 
-#if ROCPRIM_HAS_INT128_SUPPORT
 template<class T>
 using is_int128 = std::is_same<rocprim::int128_t, typename std::remove_cv<T>::type>;
 template<class T>
 using is_uint128 = std::is_same<rocprim::uint128_t, typename std::remove_cv<T>::type>;
-#else
-template<class T>
-using is_int128 = std::false_type;
-template<class T>
-using is_uint128 = std::false_type;
-#endif // ROCPRIM_HAS_INT128_SUPPORT
 
 template<class T>
 using is_double_custom_type = std::is_same<typename std::remove_cv<T>::type, common::custom_type<double,double,1>>;
