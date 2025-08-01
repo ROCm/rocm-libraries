@@ -29,7 +29,7 @@ def runCI =
 {
     nodeDetails, jobName->
 
-    def prj  = new rocProject('rocFFT-internal', 'StaticAnalysis')
+    def prj  = new rocProject('rocFFT', 'StaticAnalysis')
     prj.libraryDependencies = ['rocRAND','hipRAND']
 
     // Define test architectures, optional rocm version argument is available

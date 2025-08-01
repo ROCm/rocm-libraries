@@ -27,12 +27,15 @@
 #pragma once
 
 #include <chrono>
+#include <filesystem>
 #include <map>
 #include <memory>
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
+
+namespace fs = std::filesystem;
 
 namespace TensileLite
 {
@@ -104,20 +107,13 @@ namespace TensileLite
 
         bool initLibraryMapping(const std::string& tensileLibPath)
         {
-            libraryDirectory    = tensileLibPath;
-            size_t directoryPos = tensileLibPath.rfind('/');
-            if(directoryPos != std::string::npos)
-                libraryDirectory.resize(directoryPos + 1);
-            else
-                libraryDirectory = '.';
-
-            //Extract file extension
-            size_t periodPos = tensileLibPath.rfind('.');
-            suffix           = tensileLibPath.substr(periodPos);
+            fs::path path(tensileLibPath);
+            libraryDirectory = path.parent_path().string();
+            suffix           = path.extension().string();
+            path             = fs::path(libraryDirectory) / "TensileLiteLibrary_lazy_Mapping.dat";
 
             // libraryMapping
-            libraryMapping
-                = LoadLibraryMapping(libraryDirectory + "/TensileLiteLibrary_lazy_Mapping.dat");
+            libraryMapping = LoadLibraryMapping(path.string());
             if(libraryMapping.empty())
             {
                 std::cout << "No library mapping found in " << libraryDirectory << std::endl;
@@ -143,9 +139,11 @@ namespace TensileLite
                     std::cout << "Loading library for index " << index
                               << " from file: " << filePrefix << std::endl;
 
-                std::string path       = (libraryDirectory + "/" + filePrefix + suffix).c_str();
-                auto        newLibrary = LoadLibraryFile<MyProblem, MySolution>(path);
-                auto        mLibrary
+                fs::path path(libraryDirectory);
+                path = path / (filePrefix + suffix);
+
+                auto newLibrary = LoadLibraryFile<MyProblem, MySolution>(path.string());
+                auto mLibrary
                     = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
 
                 using std::begin;
