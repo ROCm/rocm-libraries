@@ -242,7 +242,7 @@ struct radix_sort_onesweep_config_base
 
 struct reduce_config_params
 {
-    kernel_config_params   reduce_config;
+    kernel_config_params   kernel_config;
     block_reduce_algorithm block_reduce_method;
 };
 
