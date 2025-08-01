@@ -21,13 +21,17 @@ some project specific options. As such, users are advised to refer to the CMake 
 general usage questions. Below are some examples to get started. For details on all configuration
 options see the options section.
 
-Full build of |project_name|
+Full build on fresh clone |rocm-libraries|
 -----------------------
 
    .. code-block:: cmake
       :linenos:
 
-      cd projects/hipsparselt/next-cmake
+      cd projects/hipblas-common
+      cmake --preset default-release
+      cmake --build _build --target install
+
+      cd ../hipsparselt/next-cmake
       # configure
       cmake -B build                                       \
             -S .                                           \
@@ -150,5 +154,3 @@ CMake Targets
 * ``example_prune_strip`` - Sample executable (when HIPSPARSELT_ENABLE_SAMPLES=ON)
 * ``example_compress`` - Sample executable (when HIPSPARSELT_ENABLE_SAMPLES=ON)
 * ``coverage`` - Code coverage target (when HIPSPARSELT_BUILD_COVERAGE=ON)
-
-
