@@ -484,15 +484,15 @@ namespace rocRoller
                         auto parentCoord = coord;
                         // if the coordinate if ForLoop, it might be a duplicate,
                         // use the parent coordinate instead
-                        if (kgraph.coordinates.get<ForLoop>(coord))
-                        {
-                                auto maybeParentForLoop = only(kgraph.coordinates.getInputNodeIndices(coord, rocRoller::KernelGraph::CoordinateGraph::isEdge<DataFlow>));
-                                if(maybeParentForLoop)
-                                {
-                                    parentCoord = *maybeParentForLoop;
-                                }
+                        // if (kgraph.coordinates.get<ForLoop>(coord))
+                        // {
+                        //         auto maybeParentForLoop = only(kgraph.coordinates.getInputNodeIndices(coord, rocRoller::KernelGraph::CoordinateGraph::isEdge<DataFlow>));
+                        //         if(maybeParentForLoop)
+                        //         {
+                        //             parentCoord = *maybeParentForLoop;
+                        //         }
      
-                        }
+                        // }
 
                         auto registerType = Register::Type::Vector;
                         auto coordDF
@@ -503,7 +503,8 @@ namespace rocRoller
                 }
                 for(auto const& [coord, expr] : regCoords)
                 {
-                    xform.setCoordinate(coord, expr);
+                    if (!xform.hasCoordinate(coord))
+                        xform.setCoordinate(coord, expr);
                 }
 
                 // 2. Set remaining coordinates 
