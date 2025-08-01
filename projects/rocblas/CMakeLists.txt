@@ -22,6 +22,7 @@
 
 cmake_minimum_required( VERSION 3.16.8 )
 
+# library build requires newer CMake version to build
 if( NOT SKIP_LIBRARY )
   cmake_minimum_required( VERSION 3.24.4 )
 endif()
