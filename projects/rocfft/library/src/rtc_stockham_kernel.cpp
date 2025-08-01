@@ -20,6 +20,7 @@
 
 #include <optional>
 
+#include "../../shared/arithmetic.h"
 #include "../../shared/array_predicate.h"
 #include "function_pool.h"
 #include "kernel_launch.h"
@@ -36,13 +37,13 @@ static StockhamPartialPassParams get_partial_pass_params(const TreeNode&  node,
     {
         StockhamPartialPassParams pp_params;
 
-        pp_params.off_dim         = node.ppOffDim;
-        pp_params.current_dim     = node.ppCurrDim;
-        pp_params.pp_factors_curr = std::vector<unsigned int>(
-            kernel.pp_params.pp_factors_curr.begin(), kernel.pp_params.pp_factors_curr.end());
-        pp_params.pp_factors_other = std::vector<unsigned int>(
-            kernel.pp_params.pp_factors_other.begin(), kernel.pp_params.pp_factors_other.end());
-        pp_params.parent_length = std::vector<unsigned int>(node.length.begin(), node.length.end());
+        pp_params.off_dim     = node.ppOffDim;
+        pp_params.current_dim = node.ppCurrDim;
+        pp_params.pp_factors_curr.assign(kernel.pp_params.pp_factors_curr.begin(),
+                                         kernel.pp_params.pp_factors_curr.end());
+        pp_params.pp_factors_other.assign(kernel.pp_params.pp_factors_other.begin(),
+                                          kernel.pp_params.pp_factors_other.end());
+        pp_params.parent_length.assign(node.length.begin(), node.length.end());
 
         return pp_params;
     }
@@ -258,16 +259,12 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
         kargs.append_ptr(data.node->twiddles_large);
     if(data.node->scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
     {
-        auto kernel                = data.node->GetKernel();
-        auto pp_params             = get_partial_pass_params(*data.node, kernel);
-        auto pp_factors_curr_prod  = std::accumulate(pp_params.pp_factors_curr.begin(),
-                                                    pp_params.pp_factors_curr.end(),
-                                                    1,
-                                                    std::multiplies<unsigned int>());
-        auto pp_factors_other_prod = std::accumulate(pp_params.pp_factors_other.begin(),
-                                                     pp_params.pp_factors_other.end(),
-                                                     1,
-                                                     std::multiplies<unsigned int>());
+        auto kernel    = data.node->GetKernel();
+        auto pp_params = get_partial_pass_params(*data.node, kernel);
+        auto pp_factors_curr_prod
+            = product(pp_params.pp_factors_curr.begin(), pp_params.pp_factors_curr.end());
+        auto pp_factors_other_prod
+            = product(pp_params.pp_factors_other.begin(), pp_params.pp_factors_other.end());
 
         kargs.append_unsigned_int(data.node->length[1] * data.node->length[2]);
         kargs.append_unsigned_int(data.node->length[0] * data.node->length[1]

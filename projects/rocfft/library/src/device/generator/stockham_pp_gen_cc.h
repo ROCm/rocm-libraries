@@ -58,10 +58,8 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         transforms_per_block *= max_factor_pp;
         workgroup_size *= max_factor_pp;
 
-        pp_factors_curr_prod = std::accumulate(
-            factors_pp_curr.begin(), factors_pp_curr.end(), 1, std::multiplies<unsigned int>());
-        pp_factors_other_prod = std::accumulate(
-            factors_pp_other.begin(), factors_pp_other.end(), 1, std::multiplies<unsigned int>());
+        pp_factors_curr_prod  = product(factors_pp_curr.begin(), factors_pp_curr.end());
+        pp_factors_other_prod = product(factors_pp_other.begin(), factors_pp_other.end());
 
         switch(params.off_dim)
         {
@@ -70,7 +68,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                 "StockhamPartialPassKernelCC:: partial-passes along x not currently supported");
             break;
         case 1:
-            num_blocks_per_batch = ((params.parent_length[1]) - 1) / transforms_per_block + 1;
+            num_blocks_per_batch = (params.parent_length[1] - 1) / transforms_per_block + 1;
             num_blocks_per_batch *= params.parent_length[2];
             break;
         case 2:
@@ -179,7 +177,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         StatementList work;
 
         for(unsigned int w = 0; w < width; ++w)
-            work += Assign(lds_complex[offset_lds + ((hr * width + w) * stride_lds)],
+            work += Assign(lds_complex[offset_lds + (hr * width + w) * stride_lds],
                            R[hr * width + w]);
 
         return work;
@@ -220,7 +218,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         for(unsigned int w = 0; w < width; ++w)
             work += Assign(R[hr * width + w],
-                           lds_complex[offset_lds + ((hr * width + w) * stride_lds)]);
+                           lds_complex[offset_lds + (hr * width + w) * stride_lds]);
 
         return work;
     }
@@ -737,9 +735,8 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         stmts += Declaration{stride_lds_pp, Literal{1}};
 
         unsigned int width  = factors_pp_curr[0];
-        float        height = static_cast<float>(length) / width / threads_per_transform;
-        stmts += Declaration{offset_lds_pp,
-                             thread_id * Literal{width * static_cast<unsigned int>(height)}};
+        unsigned int height = length / width / threads_per_transform;
+        stmts += Declaration{offset_lds_pp, thread_id * Literal{width * height}};
 
         auto pre_post_lds_tmpl = device_lds_reg_inout_device_call_templates();
         auto pre_post_lds_args = device_lds_reg_inout_pp_device_call_arguments();
@@ -753,20 +750,20 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         for(unsigned int npass = 0; npass < factors_pp_curr.size(); ++npass)
         {
-            unsigned int width  = factors_pp_curr[npass];
-            unsigned int height = static_cast<float>(length) / width / threads_per_transform;
+            unsigned int pass_width = factors_pp_curr[npass];
+            unsigned int pass_height
+                = static_cast<float>(length) / pass_width / threads_per_transform;
 
             auto butterfly = std::mem_fn(&StockhamKernel::butterfly_generator);
             stmts += add_work(std::bind(butterfly, this, _1, _2, _3, _4, _5),
-                              width,
-                              height,
+                              pass_width,
+                              pass_height,
                               ThreadGuardMode::NO_GUARD);
         }
 
         width  = factors_pp_curr.back();
-        height = static_cast<float>(length) / width / threads_per_transform;
-        stmts += Assign{offset_lds_pp,
-                        thread_id * Literal{width * static_cast<unsigned int>(height)}};
+        height = length / width / threads_per_transform;
+        stmts += Assign{offset_lds_pp, thread_id * Literal{width * height}};
 
         StatementList postStore;
         postStore
