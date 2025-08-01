@@ -31,4 +31,4 @@ pr:
   drafts: false
 
 jobs:
-  - template: ${{ variables.CI_COMPONENT_PATH }}/hipBLAS-common.yml@pipelines_repo
+  - template: ${{ variables.CI_COMPONENT_PATH }}/libs-common.yml@pipelines_repo

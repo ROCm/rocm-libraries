@@ -26,8 +26,5 @@ if(NOT ROCmCMakeBuildTools_FOUND)
 endif()
 
 include(ROCMSetupVersion)
-include(ROCMClients)
-include(ROCMCreatePackage)
 include(ROCMInstallTargets)
 include(ROCMPackageConfigHelpers)
-include(ROCMCheckTargetIds)

@@ -6,7 +6,7 @@ project(libs-common VERSION 1.2.0 LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-include(dependencies)
+include(FetchROCmCMake)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 

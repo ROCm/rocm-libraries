@@ -21,17 +21,14 @@ some project specific options. As such, users are advised to refer to the CMake 
 general usage questions. Below are some examples to get started. For details on all configuration
 options see the options section.
 
-Full build on fresh clone |rocm-libraries|
------------------------
+Build on fresh clone of `rocm-libraries <https://github.com/ROCm/rocm-libraries>`_
+--------------------------------------------------------------------------------
 
    .. code-block:: cmake
       :linenos:
 
-      cd projects/hipblas-common
-      cmake --preset default-release
-      cmake --build _build --target install
+      cd projects/hipsparselt/next-cmake
 
-      cd ../hipsparselt/next-cmake
       # configure
       cmake -B build                                       \
             -S .                                           \
@@ -40,6 +37,7 @@ Full build on fresh clone |rocm-libraries|
             -D CMAKE_BUILD_TYPE=Release                    \
             -D CMAKE_PREFIX_PATH=/opt/rocm                 \
             -D GPU_TARGETS=gfx1201
+
       # build
       cmake --build build --parallel 32
 
@@ -47,17 +45,6 @@ Full build on fresh clone |rocm-libraries|
       **For Developers**
 
       View debugging info by adding ``--log-level=VERBOSE`` to the configure command.
-
-List available presets
-----------------------
-
-   .. code-block:: cmake
-
-      cd projects/hipsparselt/next-cmake
-      cmake --list-presets
-
-.. note::
-      Built executables are placed in the ``_build`` directory by default when using presets.
 
 Release build
 -------------
@@ -69,6 +56,10 @@ Release build
 
       # build
       cmake --build _build --parallel 32 --verbose
+
+.. note::
+
+      Built executables are placed in the ``_build`` directory by default when using presets.
 
 Debug build for development
 ---------------------------
@@ -105,6 +96,14 @@ Build with CUDA support
 .. tip::
 
       Make sure that `HIP_PLATFORM="nvidia"` is set in the environment when building with CUDA.
+
+List available presets
+----------------------
+
+   .. code-block:: cmake
+
+      cd projects/hipsparselt/next-cmake
+      cmake --list-presets
 
 Options
 -------
@@ -144,10 +143,16 @@ Options
 * ``HIPSPARSELT_HIPBLASLT_PATH``: Path to hipblaslt directory (default: ``${CMAKE_CURRENT_SOURCE_DIR}/../../hipblaslt/next-cmake``)
 * ``HIPSPARSELT_COVERAGE_GTEST_FILTER``: GTest filter for coverage tests (default: ``*pre_checkin*``)
 
+^^^^^^^^^^^^^
 CMake Targets
--------------
+^^^^^^^^^^^^^
+
+*Libraries*:
 
 * ``roc::hipsparselt`` - Main library target
+
+*Executables*:
+
 * ``hipsparselt-test`` - Test executable (when HIPSPARSELT_BUILD_TESTING=ON)
 * ``hipsparselt-bench`` - Benchmark executable (when HIPSPARSELT_ENABLE_BENCHMARKS=ON)
 * ``example_spmm_strided_batched`` - Sample executable (when HIPSPARSELT_ENABLE_SAMPLES=ON)
