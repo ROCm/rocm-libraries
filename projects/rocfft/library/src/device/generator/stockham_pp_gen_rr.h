@@ -234,7 +234,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
         for(unsigned int w = 0; w < width; ++w)
             work += Assign(R[hr * width + w],
-                           lds_complex[offset_lds + ((hr * width + w) * stride_lds)]);
+                           lds_complex[offset_lds + (hr * width + w) * stride_lds]);
 
         return work;
     }
@@ -295,7 +295,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
         StatementList work;
 
         for(unsigned int w = 0; w < width; ++w)
-            work += Assign(lds_complex[offset_lds + ((hr * width + w) * stride_lds)],
+            work += Assign(lds_complex[offset_lds + (hr * width + w) * stride_lds],
                            R[hr * width + w]);
 
         return work;

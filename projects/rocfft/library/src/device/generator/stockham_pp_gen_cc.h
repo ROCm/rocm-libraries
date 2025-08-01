@@ -68,7 +68,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                 "StockhamPartialPassKernelCC:: partial-passes along x not currently supported");
             break;
         case 1:
-            num_blocks_per_batch = ((params.parent_length[1]) - 1) / transforms_per_block + 1;
+            num_blocks_per_batch = (params.parent_length[1] - 1) / transforms_per_block + 1;
             num_blocks_per_batch *= params.parent_length[2];
             break;
         case 2:
@@ -177,7 +177,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         StatementList work;
 
         for(unsigned int w = 0; w < width; ++w)
-            work += Assign(lds_complex[offset_lds + ((hr * width + w) * stride_lds)],
+            work += Assign(lds_complex[offset_lds + (hr * width + w) * stride_lds],
                            R[hr * width + w]);
 
         return work;
@@ -218,7 +218,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         for(unsigned int w = 0; w < width; ++w)
             work += Assign(R[hr * width + w],
-                           lds_complex[offset_lds + ((hr * width + w) * stride_lds)]);
+                           lds_complex[offset_lds + (hr * width + w) * stride_lds]);
 
         return work;
     }
@@ -751,13 +751,14 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         for(unsigned int npass = 0; npass < factors_pp_curr.size(); ++npass)
         {
-            unsigned int width  = factors_pp_curr[npass];
-            unsigned int height = static_cast<float>(length) / width / threads_per_transform;
+            unsigned int pass_width = factors_pp_curr[npass];
+            unsigned int pass_height
+                = static_cast<float>(length) / pass_width / threads_per_transform;
 
             auto butterfly = std::mem_fn(&StockhamKernel::butterfly_generator);
             stmts += add_work(std::bind(butterfly, this, _1, _2, _3, _4, _5),
-                              width,
-                              height,
+                              pass_width,
+                              pass_height,
                               ThreadGuardMode::NO_GUARD);
         }
 
