@@ -22,6 +22,9 @@
 
 cmake_minimum_required( VERSION 3.16.8 )
 
+if( NOT SKIP_LIBRARY )
+  cmake_minimum_required( VERSION 3.24.4 )
+endif()
 
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
