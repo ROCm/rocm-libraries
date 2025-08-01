@@ -683,7 +683,9 @@ namespace rocRoller
                         [](Operations::Nop const& op) -> TensorAndTranspose {
                             return {Operations::OperationTag(), {}};
                         },
-                        [](auto const& op) -> TensorAndTranspose { return {op.getTag(), {}}; }};
+                        [](auto const& op) -> TensorAndTranspose {
+                            return {op.getTag(), {}};
+                        }};
 
                     auto [scaleTensor, scaleTranspose]
                         = std::visit(getTensorAndTranspose, *scaleInputOp);

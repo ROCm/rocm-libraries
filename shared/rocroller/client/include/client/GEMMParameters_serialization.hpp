@@ -68,19 +68,6 @@ namespace rocRoller::Serialization
 
             iot::mapOptional(io, "scaleShuffleTileA", params.scaleShuffleTileA);
             iot::mapOptional(io, "scaleShuffleTileB", params.scaleShuffleTileB);
-
-            // if(iot::outputting(io))
-            // {
-            //     if(params.scaleShuffleTileA.has_value())
-            //         iot::mapRequired(io, "scaleShuffleTileA", *params.scaleShuffleTileA);
-
-            //     if(params.scaleShuffleTileB.has_value())
-            //         iot::mapRequired(io, "scaleShuffleTileB", *params.scaleShuffleTileB);
-            // }
-            // else
-            // {
-            //     iot::mapOp
-            // }
         }
 
         static void mapping(IO& io, Client::GEMMClient::TypeParameters& params, EmptyContext& ctx)

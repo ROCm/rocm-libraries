@@ -62,9 +62,9 @@ namespace rocRoller
      */
     template <typename CoordIter, typename SizeIter>
     bool IncrementCoord(CoordIter coordBegin,
-                               CoordIter coordEnd,
-                               SizeIter  sizeBegin,
-                               SizeIter  sizeEnd);
+                        CoordIter coordEnd,
+                        SizeIter  sizeBegin,
+                        SizeIter  sizeEnd);
 
     /*
      * Describes a tensor including dimensions, memory layout, and data type.
@@ -116,13 +116,20 @@ namespace rocRoller
                          std::string const&    transpose,
                          size_t                offset = 0);
 
-        static TensorDescriptor ShuffledNoPadding(DataType t, std::vector<size_t> sizes, std::vector<size_t> dimOrder);
+        static TensorDescriptor
+            ShuffledNoPadding(DataType t, std::vector<size_t> sizes, std::vector<size_t> dimOrder);
 
-        static TensorDescriptor ShuffledNoPadding(DataType t, std::initializer_list<size_t> sizes, std::vector<size_t> dimOrder);
+        static TensorDescriptor ShuffledNoPadding(DataType                      t,
+                                                  std::initializer_list<size_t> sizes,
+                                                  std::vector<size_t>           dimOrder);
 
-        static TensorDescriptor ShuffledNoPadding(DataType t, std::vector<size_t> sizes, std::initializer_list<size_t> dimOrder);
+        static TensorDescriptor ShuffledNoPadding(DataType                      t,
+                                                  std::vector<size_t>           sizes,
+                                                  std::initializer_list<size_t> dimOrder);
 
-        static TensorDescriptor ShuffledNoPadding(DataType t, std::initializer_list<size_t> sizes, std::initializer_list<size_t> dimOrder);
+        static TensorDescriptor ShuffledNoPadding(DataType                      t,
+                                                  std::initializer_list<size_t> sizes,
+                                                  std::initializer_list<size_t> dimOrder);
 
         inline void calculate();
 
@@ -151,7 +158,6 @@ namespace rocRoller
          * unpadded). May be negative if stride is less than size
          */
         int64_t dimensionPadding(size_t dim) const;
-
 
         /**
          * Collapses dimensions in the interval [begin, end).
@@ -194,8 +200,8 @@ namespace rocRoller
         friend std::ostream& operator<<(std::ostream& stream, const TensorDescriptor& t);
 
         static inline const size_t UseDefaultStride = -1;
-    private:
 
+    private:
         std::vector<size_t> m_sizes;
         std::vector<size_t> m_strides;
         size_t              m_offset = 0;

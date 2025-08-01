@@ -61,7 +61,7 @@ namespace rocRoller
             }
 
             template <typename T>
-            void mapOptional(const char* key, std::optional<T> & obj)
+            void mapOptional(const char* key, std::optional<T>& obj)
             {
                 if(obj.has_value())
                     mapRequired(key, *obj);
@@ -327,7 +327,7 @@ namespace rocRoller
             }
 
             template <typename T>
-            void mapOptional(const char* key, std::optional<T> & obj)
+            void mapOptional(const char* key, std::optional<T>& obj)
             {
                 auto subnode = (*node)[key];
                 if(subnode)

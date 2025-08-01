@@ -123,8 +123,8 @@ namespace rocRoller
 
         std::vector<uint8_t> dataByte = dgen.getDataBytes();
 
-        if constexpr(std::is_same_v<rrDT, FP6> || std::is_same_v<rrDT, BF6>
-                     || std::is_same_v<rrDT, FP4>)
+        if constexpr(std::is_same_v<rrDT,
+                                    FP6> || std::is_same_v<rrDT, BF6> || std::is_same_v<rrDT, FP4>)
         {
 
             return reinterpret_cast<std::vector<UDT>&>(dataByte);
@@ -146,8 +146,9 @@ namespace rocRoller
             }
         }
 
-        if constexpr(std::is_same_v<rrDT, float> || std::is_same_v<rrDT, Half>
-                     || std::is_same_v<rrDT, BFloat16>)
+        if constexpr(std::is_same_v<
+                         rrDT,
+                         float> || std::is_same_v<rrDT, Half> || std::is_same_v<rrDT, BFloat16>)
         {
             std::vector<rrDT>& rrData = reinterpret_cast<std::vector<rrDT>&>(dataByte);
             return rrData;
@@ -174,20 +175,20 @@ namespace rocRoller
     }
 
     template <typename TA, typename TB, typename TC>
-    void DGenInput(const uint32_t        seed,
-                   std::vector<TA>&      hostA,
-                   TensorDescriptor const&     descA,
-                   std::vector<TB>&      hostB,
-                   TensorDescriptor const&     descB,
-                   std::vector<TC>&      hostC,
-                   TensorDescriptor const&     descC,
-                   std::vector<uint8_t>& hostScaleA,
-                   std::vector<uint8_t>& hostScaleB,
-                   bool                  hasScaleA      = false,
-                   bool                  hasScaleB      = false,
-                   float                 min            = -1.f,
-                   float                 max            = 1.f,
-                   const uint            scaleBlockSize = 32
+    void DGenInput(const uint32_t          seed,
+                   std::vector<TA>&        hostA,
+                   TensorDescriptor const& descA,
+                   std::vector<TB>&        hostB,
+                   TensorDescriptor const& descB,
+                   std::vector<TC>&        hostC,
+                   TensorDescriptor const& descC,
+                   std::vector<uint8_t>&   hostScaleA,
+                   std::vector<uint8_t>&   hostScaleB,
+                   bool                    hasScaleA      = false,
+                   bool                    hasScaleB      = false,
+                   float                   min            = -1.f,
+                   float                   max            = 1.f,
+                   const uint              scaleBlockSize = 32
 
     )
     {

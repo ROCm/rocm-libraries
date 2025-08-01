@@ -132,16 +132,20 @@ namespace rocRoller
                             unitStrides(solutionParams.types.transA)));
                         m_tagLoadScaleA   = command->addOperation(
                             rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleA.value()));
-                        
+
                         auto scaleInputA = m_tagLoadScaleA;
 
                         if(solutionParams.types.scaleSkipPermlane)
                         {
                             AssertFatal(solutionParams.types.scaleShuffleTileA.has_value());
 
-                            std::vector<size_t> tile(solutionParams.types.scaleShuffleTileA->begin(), solutionParams.types.scaleShuffleTileA->end());
+                            std::vector<size_t> tile(
+                                solutionParams.types.scaleShuffleTileA->begin(),
+                                solutionParams.types.scaleShuffleTileA->end());
 
-                            scaleInputA = command->addOperation(rocRoller::Operations::SubTileTranspose(*m_tagLoadScaleA, std::move(tile)));
+                            scaleInputA
+                                = command->addOperation(rocRoller::Operations::SubTileTranspose(
+                                    *m_tagLoadScaleA, std::move(tile)));
                         }
 
                         m_tagBlockScaleA = mulInputA
@@ -177,9 +181,13 @@ namespace rocRoller
                         {
                             AssertFatal(solutionParams.types.scaleShuffleTileB.has_value());
 
-                            std::vector<size_t> tile(solutionParams.types.scaleShuffleTileB->begin(), solutionParams.types.scaleShuffleTileB->end());
+                            std::vector<size_t> tile(
+                                solutionParams.types.scaleShuffleTileB->begin(),
+                                solutionParams.types.scaleShuffleTileB->end());
 
-                            scaleInputB = command->addOperation(rocRoller::Operations::SubTileTranspose(*m_tagLoadScaleB, std::move(tile)));
+                            scaleInputB
+                                = command->addOperation(rocRoller::Operations::SubTileTranspose(
+                                    *m_tagLoadScaleB, std::move(tile)));
                         }
 
                         m_tagBlockScaleB = mulInputB

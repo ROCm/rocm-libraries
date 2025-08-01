@@ -322,7 +322,7 @@ TEST_CASE("ShuffleDims is reversible", "[utils][tensor-descriptor]")
 
             auto dst = TensorDescriptor::ShuffledNoPadding(DataType::Int32, sizes, order);
 
-            auto numNonUnitSizes = std::ranges::count_if(sizes, [](auto x){ return x > 1; });
+            auto numNonUnitSizes = std::ranges::count_if(sizes, [](auto x) { return x > 1; });
 
             CAPTURE(src.strides());
             CAPTURE(dst.strides());

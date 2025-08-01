@@ -639,7 +639,7 @@ namespace rocRoller
 
         inline void AllocateArguments::operator()(BlockScale& blockScale) {}
 
-        inline void AllocateArguments::operator()(SubTileTranspose& ) {}
+        inline void AllocateArguments::operator()(SubTileTranspose&) {}
 
         inline void AllocateArguments::operator()(T_Load_Linear& load) {}
 
@@ -683,12 +683,14 @@ namespace rocRoller
             return {rocRoller::DataType::None};
         }
 
-        inline rocRoller::VariableType rocRoller::Operations::VariableTypeVisitor::operator()(BlockScale&)
+        inline rocRoller::VariableType
+            rocRoller::Operations::VariableTypeVisitor::operator()(BlockScale&)
         {
             return {rocRoller::DataType::None};
         }
 
-        inline rocRoller::VariableType rocRoller::Operations::VariableTypeVisitor::operator()(SubTileTranspose&)
+        inline rocRoller::VariableType
+            rocRoller::Operations::VariableTypeVisitor::operator()(SubTileTranspose&)
         {
             return {rocRoller::DataType::None};
         }

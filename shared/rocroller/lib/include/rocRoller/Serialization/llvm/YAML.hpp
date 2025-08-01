@@ -80,8 +80,8 @@ namespace llvm
         };
 
         template <typename T>
-            requires(sn::has_SequenceTraits<T, IO>::value)
-        struct SequenceTraits<T> : public FlowBase<sn::SequenceTraits<T, IO>>
+        requires(sn::has_SequenceTraits<T, IO>::value) struct SequenceTraits<T>
+            : public FlowBase<sn::SequenceTraits<T, IO>>
         {
             static size_t size(IO& io, T& seq)
             {
@@ -95,8 +95,7 @@ namespace llvm
         };
 
         template <typename T>
-            requires(sn::has_EnumTraits<T, IO>::value)
-        struct ScalarEnumerationTraits<T>
+        requires(sn::has_EnumTraits<T, IO>::value) struct ScalarEnumerationTraits<T>
         {
             static void enumeration(IO& io, T& value)
             {
@@ -105,8 +104,7 @@ namespace llvm
         };
 
         template <typename T, typename Context>
-            requires(sn::has_MappingTraits<T, IO>::value)
-        struct MappingContextTraits<T, Context>
+        requires(sn::has_MappingTraits<T, IO>::value) struct MappingContextTraits<T, Context>
         {
             static void mapping(IO& io, T& obj, Context& ctx)
             {
@@ -115,13 +113,14 @@ namespace llvm
         };
 
         template <typename T, typename Context>
-        concept HasContextMappingTraits = requires(IO& io, T& obj, Context& ctx) {
-            { MappingContextTraits<T, Context>::mapping(io, obj, ctx) };
+        concept HasContextMappingTraits = requires(IO& io, T& obj, Context& ctx)
+        {
+            {MappingContextTraits<T, Context>::mapping(io, obj, ctx)};
         };
 
         template <typename T>
-            requires(sn::has_EmptyMappingTraits<T, IO>::value)
-        struct MappingTraits<T> : public FlowBase<sn::MappingTraits<T, IO, EmptyContext>>
+        requires(sn::has_EmptyMappingTraits<T, IO>::value) struct MappingTraits<T>
+            : public FlowBase<sn::MappingTraits<T, IO, EmptyContext>>
         {
             static void mapping(IO& io, T& obj)
             {
@@ -130,13 +129,13 @@ namespace llvm
         };
 
         template <typename T>
-        concept HasEmptyMappingTraits = requires(IO& io, T& obj) {
-            { MappingTraits<T>::mapping(io, obj) };
+        concept HasEmptyMappingTraits = requires(IO& io, T& obj)
+        {
+            {MappingTraits<T>::mapping(io, obj)};
         };
 
         template <typename T>
-            requires(sn::has_CustomMappingTraits<T, IO>::value)
-        struct CustomMappingTraits<T>
+        requires(sn::has_CustomMappingTraits<T, IO>::value) struct CustomMappingTraits<T>
         {
             using Impl = sn::CustomMappingTraits<T, IO>;
 
@@ -210,9 +209,7 @@ namespace rocRoller
                 {
                     // TODO: FIXME
                     obj = T();
-                    io.mapOptional(key, *obj)
-                    if(obj == T())
-                        obj.reset();
+                    io.mapOptional(key, *obj) if(obj == T()) obj.reset();
                 }
             }
 
@@ -234,9 +231,7 @@ namespace rocRoller
                 {
                     // TODO: FIXME
                     obj = T();
-                    io.mapOptional(key, *obj, ctx)
-                    if(obj == T())
-                        obj.reset();
+                    io.mapOptional(key, *obj, ctx) if(obj == T()) obj.reset();
                 }
             }
 
@@ -366,16 +361,15 @@ namespace llvm
          * Add serialization for small floating point types. Defer to built-in fp32 serialization with conversion.
          */
         template <typename T>
-            requires(rocRoller::CIsAnyOf<T,
-                                         rocRoller::Half,
-                                         rocRoller::BFloat16,
-                                         rocRoller::FP8,
-                                         rocRoller::BF8,
-                                         rocRoller::FP6,
-                                         rocRoller::BF6,
-                                         rocRoller::FP4,
-                                         rocRoller::E8M0>)
-        struct ScalarTraits<T>
+        requires(rocRoller::CIsAnyOf<T,
+                                     rocRoller::Half,
+                                     rocRoller::BFloat16,
+                                     rocRoller::FP8,
+                                     rocRoller::BF8,
+                                     rocRoller::FP6,
+                                     rocRoller::BF6,
+                                     rocRoller::FP4,
+                                     rocRoller::E8M0>) struct ScalarTraits<T>
         {
             static void output(const T& value, void* ctx, llvm::raw_ostream& out)
             {

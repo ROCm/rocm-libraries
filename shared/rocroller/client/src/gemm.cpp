@@ -230,10 +230,9 @@ namespace rocRoller::Client::GEMMClient
                     descScaleA = TensorDescriptor(descScaleA.dataType(), std::move(sizes));
                 }
 
-                auto tmpScaleA = preSwizzle(hostScaleA,
-                                            descScaleA,
-                                            *problemParams.types.scaleShuffleTileA);
-                deviceScaleA   = make_shared_device(tmpScaleA);
+                auto tmpScaleA
+                    = preSwizzle(hostScaleA, descScaleA, *problemParams.types.scaleShuffleTileA);
+                deviceScaleA = make_shared_device(tmpScaleA);
             }
             else
             {
@@ -253,10 +252,9 @@ namespace rocRoller::Client::GEMMClient
                     descScaleB = TensorDescriptor(descScaleB.dataType(), std::move(sizes));
                 }
 
-                auto tmpScaleB = preSwizzle(hostScaleB,
-                                            descScaleB,
-                                            *problemParams.types.scaleShuffleTileB);
-                deviceScaleB   = make_shared_device(tmpScaleB);
+                auto tmpScaleB
+                    = preSwizzle(hostScaleB, descScaleB, *problemParams.types.scaleShuffleTileB);
+                deviceScaleB = make_shared_device(tmpScaleB);
             }
             else
             {
@@ -334,10 +332,10 @@ namespace rocRoller::Client::GEMMClient
             }
         }
 
-        // if(runParams.visualize)
-        // {
-        //     Client::visualize(command, *commandKernel, commandArgs);
-        // }
+        if(runParams.visualize)
+        {
+            Client::visualize(command, *commandKernel, commandArgs);
+        }
 
         std::cout << std::endl;
         std::cout << "Problem:" << std::endl;
@@ -398,10 +396,6 @@ namespace rocRoller::Client::GEMMClient
             result.correct = correct;
             result.rnorm   = rnorm;
         }
-
-        // {
-        //     Client::visualize(command, *commandKernel, commandArgs);
-        // }
 
         return result;
     }
