@@ -73,7 +73,6 @@ jobs:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
           token: ${{ steps.generate-token.outputs.token }}
-          ref: ${{ github.ref }}
 
       - name: Set up Python
         if: steps.pr-check.outputs.skip != 'true'
@@ -114,7 +113,6 @@ jobs:
             ${{ steps.detect.outputs.subtrees }}
           token: ${{ steps.generate-token.outputs.token }}
           fetch-depth: 0
-          ref: ${{ github.ref }}
 
       - name: Generate and apply patches
         if: steps.detect.outputs.subtrees
@@ -125,4 +123,5 @@ jobs:
             --repo "${{ github.repository }}" \
             --pr "${{ steps.pr-check.outputs.pr }}" \
             --subtrees "${{ steps.detect.outputs.subtrees }}" \
-            --config ".github/repos-config.json"
+            --config ".github/repos-config.json" \
+            --debug

@@ -10,9 +10,6 @@ on:
       - synchronize
       - reopened
       - ready_for_review
-    paths-ignore:
-      - "docs/**"
-      - "*.md"
   workflow_dispatch:
     inputs:
       projects:
@@ -33,26 +30,15 @@ concurrency:
 jobs:
   setup:
     name: "Setup"
-    # TODO(geomin12): Enable TheRock CI for forked PRs
-    if: ${{ !github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-24.04
     outputs:
       projects: ${{ steps.projects.outputs.projects }}
     steps:
-      - name: Generate a token
-        id: generate-token
-        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
-          token: ${{ steps.generate-token.outputs.token }}
 
       # # will be needed for `patch_monorepo.py` but necessary now
       # - name: Checkout TheRock Repository
@@ -82,7 +68,7 @@ jobs:
         id: detect
         if: github.event_name == 'pull_request'
         env:
-          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python .github/scripts/pr_detect_changed_subtrees.py \
             --repo "${{ github.repository }}" \
@@ -94,6 +80,8 @@ jobs:
         env:
           SUBTREES: ${{ steps.detect.outputs.subtrees }}
           PROJECTS: ${{ inputs.projects }}
+          # TODO(geomin12): #590 Enable TheRock CI for forked PRs
+          IS_FORKED_PR: ${{ github.event.pull_request.head.repo.fork == true }}
         run: |
           python .github/scripts/therock_configure_ci.py
 
@@ -132,3 +120,24 @@ jobs:
       cmake_options: ${{ matrix.projects.cmake_options }}
       project_to_test: ${{ matrix.projects.project_to_test }}
       subtree_checkout: ${{ matrix.projects.subtree_checkout }}
+
+  therock_ci_summary:
+    name: TheRock CI Summary
+    if: always()
+    needs:
+      - setup
+      - therock-ci-linux
+      - therock-ci-windows
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Output failed jobs
+        run: |
+          echo '${{ toJson(needs) }}'
+          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+            | jq --raw-output \
+            'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
+          )"
+          if [[ "${FAILED_JOBS}" != "" ]]; then
+            echo "The following jobs failed: ${FAILED_JOBS}"
+            exit 1
+          fi
