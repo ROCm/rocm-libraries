@@ -196,13 +196,6 @@ namespace rocRoller::Client::GEMMClient
                       1.f,
                       static_cast<uint>(scaleBlockSize));
 
-            // if(problemParams.types.scaleSkipPermlane && false)
-            // {
-            //     auto scaleValue = floatToScale(DataType::E8M0, .0625f);
-            //     std::cerr << "Scale Value: " << (int)scaleValue << std::endl;
-            //     std::ranges::fill(hostScaleA, scaleValue);
-            //     std::ranges::fill(hostScaleB, scaleValue);
-            // }
         }
         else
         {
@@ -227,7 +220,7 @@ namespace rocRoller::Client::GEMMClient
                     ShowValue(problemParams.types.scaleB));
         if(problemParams.types.scaleA == Operations::ScaleMode::Separate)
         {
-            if(problemParams.types.scaleSkipPermlaneA)
+            if(problemParams.types.scaleSkipPermlane)
             {
                 AssertFatal(problemParams.types.scaleShuffleTileA.has_value());
                 auto tmpScaleA
@@ -241,7 +234,7 @@ namespace rocRoller::Client::GEMMClient
         }
         if(problemParams.types.scaleB == Operations::ScaleMode::Separate)
         {
-            if(problemParams.types.scaleSkipPermlaneB)
+            if(problemParams.types.scaleSkipPermlane)
             {
                 AssertFatal(problemParams.types.scaleShuffleTileB.has_value());
                 auto tmpScaleB
@@ -665,7 +658,7 @@ namespace rocRoller::Client::GEMMClient
         auto context
             = Context::ForTarget(arch,
                                  solution.generateKernelName(),
-                                 {{.scaleSkipPermlane = solution.types.scaleSkipPermlaneA}});
+                                 {{.scaleSkipPermlane = solution.types.scaleSkipPermlane}});
 
         bool willRunOnGPU = doValidate || doBenchmark;
         if(willRunOnGPU)
@@ -1177,11 +1170,8 @@ int main(int argc, const char* argv[])
     app.add_option("--scaleBlockSize",
                    types.scaleBlockSize,
                    "Set MX scaling block size for A and B. (default: 32)");
-    app.add_option("--scaleSkipPermlaneA",
-                   types.scaleSkipPermlaneA,
-                   "Experimental: Skip Permlane instructions for scale data for performance.");
-    app.add_option("--scaleSkipPermlaneB",
-                   types.scaleSkipPermlaneB,
+    app.add_option("--scaleSkipPermlane",
+                   types.scaleSkipPermlane,
                    "Experimental: Skip Permlane instructions for scale data for performance.");
 
     //
@@ -1554,7 +1544,7 @@ int main(int argc, const char* argv[])
         Throw<FatalError>("Unsupported arch for GEMM client: ", arch.target().toString());
     }
 
-    if(types.scaleSkipPermlaneA)
+    if(types.scaleSkipPermlane)
     {
         AssertFatal(types.transA == Client::GEMMClient::TransposeType::T,
                     ShowValue(types));
@@ -1571,7 +1561,7 @@ int main(int argc, const char* argv[])
         types.scaleShuffleTileA = {64, 4, kSubtile};
     }
 
-    if(types.scaleSkipPermlaneB)
+    if(types.scaleSkipPermlane)
     {
         AssertFatal(types.transB == Client::GEMMClient::TransposeType::N,
                     ShowValue(types));

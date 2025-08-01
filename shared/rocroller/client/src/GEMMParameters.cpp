@@ -65,13 +65,9 @@ namespace rocRoller
                 for(auto const& t : {typeC, typeD, typeAcc})
                     rv << "_" << t;
 
-                if(scaleSkipPermlaneA || scaleSkipPermlaneB)
+                if(scaleSkipPermlane)
                 {
-                    rv << "_PreSW";
-                    if(scaleSkipPermlaneA)
-                        rv << "A";
-                    if(scaleSkipPermlaneB)
-                        rv << "B";
+                    rv << "_PreSW_AB";
                 }
 
                 return rv.str();

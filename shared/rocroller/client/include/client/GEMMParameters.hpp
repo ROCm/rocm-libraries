@@ -73,8 +73,7 @@ namespace rocRoller
 
                 int scaleBlockSize = -1;
 
-                bool scaleSkipPermlaneA = false;
-                bool scaleSkipPermlaneB = false;
+                bool scaleSkipPermlane = false;
                 
                 // Order: M/N, K tile, K subtile
                 std::optional<std::array<size_t, 3>> scaleShuffleTileA;

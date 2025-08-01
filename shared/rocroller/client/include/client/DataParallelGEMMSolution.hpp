@@ -135,7 +135,7 @@ namespace rocRoller
                         
                         auto scaleInputA = m_tagLoadScaleA;
 
-                        if(solutionParams.types.scaleSkipPermlaneA)
+                        if(solutionParams.types.scaleSkipPermlane)
                         {
                             AssertFatal(solutionParams.types.scaleShuffleTileA.has_value());
 
@@ -173,7 +173,7 @@ namespace rocRoller
 
                         auto scaleInputB = m_tagLoadScaleB;
 
-                        if(solutionParams.types.scaleSkipPermlaneB)
+                        if(solutionParams.types.scaleSkipPermlane)
                         {
                             AssertFatal(solutionParams.types.scaleShuffleTileB.has_value());
 
