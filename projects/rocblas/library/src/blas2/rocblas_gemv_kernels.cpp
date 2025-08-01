@@ -444,7 +444,6 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
     {
         // transpose
         static constexpr bool CONJ = false;
-
         if(!i64_incs && m <= 64 && batch_count > 8) // few rows, e.g. qmcpack
         {
             // number of columns on the y-dim of the grid
@@ -506,6 +505,66 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                                       incy,
                                       stridey);
             }
+        }
+        else if(!i64_incs
+                && ((is_gfx90a && (m <= n)
+                     && ((is_complex_double && m <= 128) || (is_float && m <= 1024)
+                         || ((is_double || is_complex_float) && m <= 512)))
+                    || (is_gfx942 && (m <= n)
+                        && ((is_complex_double && m <= 256) || (is_float && m <= 2048)
+                            || ((is_double || is_complex_float) && m <= 512)))))
+        {
+#define gemvt_row_vectorized_KARGS(alpha_, beta_)                                              \
+    gemvt_grid, gemvt_threads, 0, rocblas_stream, m, n, alpha_, stride_alpha, A, offseta, lda, \
+        strideA, x, shiftx, incx, stridex, beta_, stride_beta, y, shifty, incy, stridey,       \
+        batch_count
+
+            if constexpr(is_float)
+            {
+                const int TILE_DIM_X = 16;
+                const int TILE_DIM_Y = 64;
+                dim3      gemvt_threads(TILE_DIM_X, TILE_DIM_Y);
+                dim3      gemvt_grid((n - 1) / TILE_DIM_Y + 1, 1, batches);
+                if(handle->pointer_mode == rocblas_pointer_mode_device)
+                    ROCBLAS_LAUNCH_KERNEL(
+                        (rocblas_gemvt_row_vectorized_kernel<CONJ, TILE_DIM_X, TILE_DIM_Y>),
+                        gemvt_row_vectorized_KARGS(alpha, beta));
+                else
+                    ROCBLAS_LAUNCH_KERNEL(
+                        (rocblas_gemvt_row_vectorized_kernel<CONJ, TILE_DIM_X, TILE_DIM_Y>),
+                        gemvt_row_vectorized_KARGS(*alpha, *beta));
+            }
+            else if constexpr(is_double || is_complex_float)
+            {
+                const int TILE_DIM_X = 16;
+                const int TILE_DIM_Y = 32;
+                dim3      gemvt_threads(TILE_DIM_X, TILE_DIM_Y);
+                dim3      gemvt_grid((n - 1) / TILE_DIM_Y + 1, 1, batches);
+                if(handle->pointer_mode == rocblas_pointer_mode_device)
+                    ROCBLAS_LAUNCH_KERNEL(
+                        (rocblas_gemvt_row_vectorized_kernel<CONJ, TILE_DIM_X, TILE_DIM_Y>),
+                        gemvt_row_vectorized_KARGS(alpha, beta));
+                else
+                    ROCBLAS_LAUNCH_KERNEL(
+                        (rocblas_gemvt_row_vectorized_kernel<CONJ, TILE_DIM_X, TILE_DIM_Y>),
+                        gemvt_row_vectorized_KARGS(*alpha, *beta));
+            }
+            else if constexpr(is_complex_double)
+            {
+                const int TILE_DIM_X = 16;
+                const int TILE_DIM_Y = 8;
+                dim3      gemvt_threads(TILE_DIM_X, TILE_DIM_Y);
+                dim3      gemvt_grid((n - 1) / TILE_DIM_Y + 1, 1, batches);
+                if(handle->pointer_mode == rocblas_pointer_mode_device)
+                    ROCBLAS_LAUNCH_KERNEL(
+                        (rocblas_gemvt_row_vectorized_kernel<CONJ, TILE_DIM_X, TILE_DIM_Y>),
+                        gemvt_row_vectorized_KARGS(alpha, beta));
+                else
+                    ROCBLAS_LAUNCH_KERNEL(
+                        (rocblas_gemvt_row_vectorized_kernel<CONJ, TILE_DIM_X, TILE_DIM_Y>),
+                        gemvt_row_vectorized_KARGS(*alpha, *beta));
+            }
+#undef gemvt_row_vectorized_KARGS
         }
         else if(workspace && rocblas_gemvt_skinny_n<Ti>(transA, m, n))
         {
@@ -700,7 +759,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                                           gemvt_KARGS(*alpha, *beta));
             }
         }
-        //Using kernel code with shared memory reduction for single precision as well as for other precisions when m or n is less than 6000 and for complex double in gfx1030.
+        //Using kernel code with shared memory reduction for single precision as well as for other precisions when m or n is less than gemvt_threshold and for complex double in gfx1030.
         else if(!i64_incs
                 && ((is_float || m < gemvt_threshold || n < gemvt_threshold)
                     || (is_arch_10_or_11_or_12 && is_complex_double)))
@@ -823,6 +882,66 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                                       incy,
                                       stridey);
             }
+        }
+        else if(!i64_incs
+                && ((is_gfx90a
+                     && ((is_complex_double && m <= 128) || (is_float && m <= 1024)
+                         || ((is_double || is_complex_float) && m <= 512)))
+                    || (is_gfx942
+                        && ((is_complex_double && m <= 1024) || (is_float && m <= 2048) || is_double
+                            || is_complex_float))))
+        {
+#define gemvt_row_vectorized_KARGS(alpha_, beta_)                                              \
+    gemvt_grid, gemvt_threads, 0, rocblas_stream, m, n, alpha_, stride_alpha, A, offseta, lda, \
+        strideA, x, shiftx, incx, stridex, beta_, stride_beta, y, shifty, incy, stridey,       \
+        batch_count
+
+            if constexpr(is_float)
+            {
+                const int TILE_DIM_X = 16;
+                const int TILE_DIM_Y = 64;
+                dim3      gemvt_threads(TILE_DIM_X, TILE_DIM_Y);
+                dim3      gemvt_grid((n - 1) / TILE_DIM_Y + 1, 1, batches);
+                if(handle->pointer_mode == rocblas_pointer_mode_device)
+                    ROCBLAS_LAUNCH_KERNEL(
+                        (rocblas_gemvt_row_vectorized_kernel<CONJ, TILE_DIM_X, TILE_DIM_Y>),
+                        gemvt_row_vectorized_KARGS(alpha, beta));
+                else
+                    ROCBLAS_LAUNCH_KERNEL(
+                        (rocblas_gemvt_row_vectorized_kernel<CONJ, TILE_DIM_X, TILE_DIM_Y>),
+                        gemvt_row_vectorized_KARGS(*alpha, *beta));
+            }
+            else if constexpr(is_double || is_complex_float)
+            {
+                const int TILE_DIM_X = 16;
+                const int TILE_DIM_Y = 32;
+                dim3      gemvt_threads(TILE_DIM_X, TILE_DIM_Y);
+                dim3      gemvt_grid((n - 1) / TILE_DIM_Y + 1, 1, batches);
+                if(handle->pointer_mode == rocblas_pointer_mode_device)
+                    ROCBLAS_LAUNCH_KERNEL(
+                        (rocblas_gemvt_row_vectorized_kernel<CONJ, TILE_DIM_X, TILE_DIM_Y>),
+                        gemvt_row_vectorized_KARGS(alpha, beta));
+                else
+                    ROCBLAS_LAUNCH_KERNEL(
+                        (rocblas_gemvt_row_vectorized_kernel<CONJ, TILE_DIM_X, TILE_DIM_Y>),
+                        gemvt_row_vectorized_KARGS(*alpha, *beta));
+            }
+            else if constexpr(is_complex_double)
+            {
+                const int TILE_DIM_X = 16;
+                const int TILE_DIM_Y = 8;
+                dim3      gemvt_threads(TILE_DIM_X, TILE_DIM_Y);
+                dim3      gemvt_grid((n - 1) / TILE_DIM_Y + 1, 1, batches);
+                if(handle->pointer_mode == rocblas_pointer_mode_device)
+                    ROCBLAS_LAUNCH_KERNEL(
+                        (rocblas_gemvt_row_vectorized_kernel<CONJ, TILE_DIM_X, TILE_DIM_Y>),
+                        gemvt_row_vectorized_KARGS(alpha, beta));
+                else
+                    ROCBLAS_LAUNCH_KERNEL(
+                        (rocblas_gemvt_row_vectorized_kernel<CONJ, TILE_DIM_X, TILE_DIM_Y>),
+                        gemvt_row_vectorized_KARGS(*alpha, *beta));
+            }
+#undef gemvt_row_vectorized_KARGS
         }
         else if(workspace && rocblas_gemvt_skinny_n<Ti>(transA, m, n))
         {
@@ -979,8 +1098,8 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
     gemvt_grid, gemvt_threads, 0, rocblas_stream, m, n, alpha_, stride_alpha, A, offseta, lda, \
         strideA, x, shiftx, incx, stridex, beta_, stride_beta, y, shifty, incy, stridey,       \
         batch_count
-        //Using kernel code with shared memory reduction for single precision and all other precision when m or n is less than 6000.
-        else if(!i64_incs && (is_float || m < 6000 || n < 6000))
+        //Using kernel code with shared memory reduction for single precision and all other precision when m or n is less than gemvt_threshold.
+        else if(!i64_incs && (is_float || m < gemvt_threshold || n < gemvt_threshold))
         {
             //Number of threads per block
             static constexpr int NB = 256;
