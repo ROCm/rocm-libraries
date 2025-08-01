@@ -28,6 +28,7 @@
 #include <rocRoller/KernelGraph/Transforms/LowerTensorContraction.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Operations/Operations.hpp>
 
@@ -458,6 +459,29 @@ namespace rocRoller
 
             auto scaleModeA = getScaleMode(info.loadAScale);
             auto scaleModeB = getScaleMode(info.loadBScale);
+
+            {
+                auto expectedSkipValue = false;
+
+                auto contraction = graph.control.get<TensorContraction>(tag).value();
+
+                if(!contraction.scalePreShuffledTileA.empty())
+                {
+                    AssertFatal(scaleModeB == Operations::ScaleMode::Separate,
+                                "Pre-swizzled inputs must be for both A and B or neither.",
+                                ShowValue(scaleModeB));
+
+                    AssertFatal(!contraction.scalePreShuffledTileB.empty(),
+                                "Pre-swizzled inputs must be for both A and B or neither.",
+                                ShowValue(contraction.scalePreShuffledTileB));
+
+                    expectedSkipValue = true;
+                }
+
+                AssertFatal(context->kernelOptions()->scaleSkipPermlane == expectedSkipValue,
+                            ShowValue(context->kernelOptions()->scaleSkipPermlane),
+                            ShowValue(expectedSkipValue));
+            }
 
             auto accumulationCoordSize = getAccumulationLoopSize(graph, a, info.userA);
 

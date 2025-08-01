@@ -118,8 +118,8 @@ namespace rocRoller
 
         /**
          * Skip generation of permlane instructions when loading scale data.
-         * This is experimental and will cause the validation to fail, but will
-         * show better performance.
+         * This is experimental and requires that the input be specifically
+         * modified, but will show better performance.
          */
         bool scaleSkipPermlane = false;
 

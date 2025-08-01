@@ -122,7 +122,7 @@ namespace rocRoller
          *
          * @ingroup KernelGraph
          */
-        KernelGraph translate(CommandPtr);
+        KernelGraph translate(CommandPtr, CommandParametersPtr params = nullptr);
 
         /**
          * Generate assembly from a KernelGraph.

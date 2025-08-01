@@ -48,7 +48,7 @@ namespace rocRoller
         {
             Nop() {}
             template <typename... Args>
-            Nop(Args&&... i)
+            explicit Nop(Args&&... i)
             {
             }
 
