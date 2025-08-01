@@ -198,11 +198,15 @@ endif()
 message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
 
 # Find rocprim package
-find_package(rocprim 4.0.0 REQUIRED)
+if(NOT ROCM_LIBRARIES_SUPERBUILD)
+  find_package(rocprim REQUIRED)
+endif()
 
 # Find rocblas package
-if (BUILD_WITH_ROCBLAS)
-  find_package(rocblas 4.1.0 QUIET)
+if(BUILD_WITH_ROCBLAS)
+  if(NOT ROCM_LIBRARIES_SUPERBUILD)
+    find_package(rocblas 4.1.0 QUIET)
+  endif()
 else()
   message("-- Build rocSPARSE with rocBLAS is disabled")
 endif()
