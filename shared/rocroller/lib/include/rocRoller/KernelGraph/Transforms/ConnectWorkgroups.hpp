@@ -44,7 +44,7 @@ namespace rocRoller
         public:
             ConnectWorkgroups(ContextPtr context,
 		    std::optional<int> workgroupMappingDim, std::optional<int> workgroupRemapXCC,
-	    Expression::ExpressionPtr worgroupMappingValue = nullptr);
+	    Expression::ExpressionPtr workgroupMappingValue = nullptr);
 
             KernelGraph apply(KernelGraph const& original) override;
             std::string name() const override

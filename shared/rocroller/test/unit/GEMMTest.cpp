@@ -2447,7 +2447,8 @@ namespace GEMMDriverTest
         gemm.swizzleScale  = true;
         gemm.prefetchScale = true;
 
-        gemm.workgroupMapping = {0, 2};
+        gemm.workgroupMappingDim = 0;
+        gemm.workgroupMappingValue = 2;
 
         gemm.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
@@ -2503,7 +2504,8 @@ namespace GEMMDriverTest
         gemm.swizzleScale  = true;
         gemm.prefetchScale = true;
 
-        gemm.workgroupMapping = {0, 2};
+        gemm.workgroupMappingDim = 0;
+        gemm.workgroupMappingValue = 2;
 
         gemm.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);

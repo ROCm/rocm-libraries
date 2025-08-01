@@ -405,7 +405,6 @@ namespace rocRoller
             auto kgraph = original;
             auto info   = getTileSizeInfo(original);
 
-            //if(m_params->workgroupMapping)
 	    if(m_workgroupMappingDim.has_value())
             {
 		connectWorkgroupsWithMapping(info, kgraph, m_workgroupMappingDim.value(), m_workgroupMappingValue);
