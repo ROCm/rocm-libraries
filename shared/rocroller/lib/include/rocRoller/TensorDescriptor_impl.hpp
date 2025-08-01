@@ -241,45 +241,6 @@ namespace rocRoller
         return ShuffledNoPadding(t, std::move(theSizes), std::move(theDimOrder));
     }
 
-    // void calculate()
-    // {
-    //     if(m_strides.size() < m_sizes.size())
-    //     {
-    //         m_strides.resize(m_sizes.size(), UseDefaultStride);
-    //         if(m_strides[0] == UseDefaultStride)
-    //         {
-    //             m_strides[0] = 1;
-    //         }
-    //     }
-
-    //     // Calculate total number of logical elements and update strides
-    //     if(not m_sizes.empty())
-    //     {
-    //         m_totalLogicalElements = m_sizes[0];
-    //     }
-    //     for(int i = 1; i < m_sizes.size(); i++)
-    //     {
-    //         m_totalLogicalElements *= m_sizes[i];
-    //         if(m_strides[i] == UseDefaultStride)
-    //         {
-    //             m_strides[i] = m_strides[i - 1] * m_sizes[i - 1];
-    //         }
-    //     }
-
-    //     // Calculate total number of allocated elements
-    //     if(not m_sizes.empty())
-    //     {
-    //         m_totalAllocatedElements = 1;
-    //         for(size_t i = 0; i < m_sizes.size(); i++)
-    //             m_totalAllocatedElements += m_strides[i] * (m_sizes[i] - 1);
-    //     }
-    //     else
-    //     {
-    //         m_totalAllocatedElements = m_totalLogicalElements;
-    //     }
-    //     m_totalAllocatedElements += m_offset;
-    // }
-
     inline void TensorDescriptor::calculate()
     {
         if(m_sizes.empty())
@@ -312,13 +273,6 @@ namespace rocRoller
             m_totalAllocatedElements += m_strides[i] * (m_sizes[i] - 1);
 
         m_totalAllocatedElements += m_offset;
-
-        // if(Debug::Instance().printTensorInfo())
-        // {
-        //     std::cout << "TensorDescriptor:calculate  " << *this
-        //               << "totalLogicalElements=" << m_totalLogicalElements
-        //               << " totalAllocatedElem=" << m_totalAllocatedElements << "\n";
-        // }
     }
 
     inline const size_t TensorDescriptor::size(size_t index) const
@@ -555,27 +509,11 @@ namespace rocRoller
         AssertFatal(dst.dimensions() > 1, ShowValue(dst.dimensions()));
         AssertFatal(dst.sizes() == src.sizes(), ShowValue(dst.sizes()), ShowValue(src.sizes()));
         AssertFatal(dst.dataType() == src.dataType());
-        // AssertFatal(TypeInfo<T>::Var == dst.dataType());
 
         auto const& sizes = dst.sizes();
 
         std::vector<T> rv(input.size());
 
-#if 0
-        auto count = CoordCount(sizes.begin(), sizes.end());
-        // #pragma omp parallel for
-        for(size_t coordNum = 0; coordNum < count; coordNum++)
-        {
-            std::vector<size_t> coord(dst.dimensions(), 0);
-            CoordNumbered(coordNum, coord.begin(), coord.end(), sizes.begin(), sizes.end());
-
-            auto dstIdx = dst.index(coord);
-            auto srcIdx = src.index(coord);
-
-            rv.at(dstIdx) = input.at(srcIdx);
-        }
-
-#else
         auto count = CoordCount(sizes.begin(), std::prev(sizes.end()));
 #pragma omp parallel for
         for(size_t coordNum = 0; coordNum < count; coordNum++)
@@ -595,7 +533,6 @@ namespace rocRoller
                 rv.at(dstIdx) = input.at(srcIdx);
             }
         }
-#endif
 
         return rv;
     }

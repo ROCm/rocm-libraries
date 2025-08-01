@@ -32,38 +32,8 @@
 
 #include <rocRoller/TensorDescriptor.hpp>
 
-// #include <Tensile/Comparison.hpp>
-// #include <Tensile/Debug.hpp>
-// #include <Tensile/Utils.hpp>
-
 namespace rocRoller
 {
-    // const size_t TensorDescriptor::UseDefaultStride = static_cast<size_t>(-1);
-
-    // bool TensorDescriptor::operator==(const TensorDescriptor& rhs) const
-    // {
-    //     return m_dataType == rhs.m_dataType && m_sizes == rhs.m_sizes && m_strides == rhs.m_strides
-    //            && m_offset == rhs.m_offset;
-    // }
-
-    // bool TensorDescriptor::operator!=(const TensorDescriptor& rhs) const
-    // {
-    //     return !(*this == rhs);
-    // }
-
-    // void TensorDescriptor::appendDim(size_t size)
-    // {
-    //     appendDim(size, m_totalAllocatedElements);
-    // }
-
-    // void TensorDescriptor::appendDim(size_t size, size_t stride)
-    // {
-    //     m_sizes.push_back(size);
-    //     m_strides.push_back(stride);
-
-    //     calculate();
-    // }
-
     int64_t TensorDescriptor::dimensionPadding(size_t dim) const
     {
         AssertFatal(dim < dimensions(), ShowValue(dim), ShowValue(dimensions()));
@@ -98,25 +68,9 @@ namespace rocRoller
         calculate();
     }
 
-    // std::string TensorDescriptor::ToString() const
-    // {
-    //     std::ostringstream result;
-
-    //     result << dimensions() << "-tensor<" << dataType() << ">"
-    //            << "( sizes(";
-    //     streamJoin(result, m_sizes, ", ");
-
-    //     result << "), strides(";
-    //     streamJoin(result, m_strides, ", ");
-
-    //     result << "), offset(" << m_offset << "))";
-
-    //     return result.str();
-    // }
-
     std::ostream& operator<<(std::ostream& stream, const TensorDescriptor& t)
     {
         return stream << t.toString();
     }
 
-} // namespace Tensile
+}
