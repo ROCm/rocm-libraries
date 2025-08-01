@@ -1,5 +1,14 @@
 # rocSPARSE
 
+> **⚠️ Important: hipSPARSE is the recommended library for development**
+> 
+> For new development projects, **[hipSPARSE](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparse)** is recommended instead of rocSPARSE. 
+> hipSPARSE provides a comprehensive, portable interface that supports multiple backends (including rocSPARSE and cuSPARSE) and is the preferred library for sparse matrix operations.
+> 
+> For documentation and examples, see the [hipSPARSE documentation](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
+> 
+> This rocSPARSE repository is maintained for reference purposes and to document any specialized functionality that might not be available in hipSPARSE.
+
 rocSPARSE exposes a common interface that provides Basic Linear Algebra Subroutines (BLAS) for
 sparse computation. It's implemented on top of AMD
 [ROCm](https://github.com/ROCm/ROCm) runtime and toolchains. rocSPARSE is
@@ -38,14 +47,36 @@ Optional:
 
 ## Build and install
 
-1. Build rocSPARSE using the `install.sh` script.
+1. Checkout the rocSPARSE code using either a sparse checkout or a full clone of the rocm-libraries repository.
+
+   To limit your local checkout to only the rocSPARSE project, configure ``sparse-checkout`` before cloning.
+   This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.
+   Use the following commands for a sparse checkout:
 
     ```bash
-    # Clone rocSPARSE using git
-    git clone https://github.com/ROCm/rocSPARSE.git
+
+    git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
+    cd rocm-libraries
+    git sparse-checkout init --cone
+    git sparse-checkout set projects/rocsparse # add projects/rocprim and projects/rocblas to include dependencies
+    git checkout develop # or use the branch you want to work with
+    ```
+
+   To clone the entire rocm-libraries repository, use the following commands. This process takes more time,
+   but is recommended if you want to work with a large number of libraries.
+
+    ```bash
+
+    # Clone rocm-libraries, including rocSPARSE, using Git
+    git clone https://github.com/ROCm/rocm-libraries.git
 
     # Go to rocSPARSE directory
-    cd rocSPARSE
+    cd rocm-libraries/projects/rocsparse
+    ```
+
+2. Build rocSPARSE using the `install.sh` script.
+
+    ```bash
 
     # Run install.sh script
     # Command line options:
@@ -57,14 +88,15 @@ Optional:
     ./install.sh -dci
     ```
 
-2. Compile rocSPARSE (all compiler specifications are automatically determined).
+3. Compile rocSPARSE (all compiler specifications are automatically determined).
 
     ```bash
-    # Clone rocSPARSE using git
-    git clone https://github.com/ROCm/rocSPARSE.git
+
+    # Clone rocm-libraries, including rocSPARSE, using Git
+    git clone https://github.com/ROCm/rocm-libraries.git
 
     # Go to rocSPARSE directory, create and go to the build directory
-    cd rocSPARSE; mkdir -p build/release; cd build/release
+    cd rocm-libraries/projects/rocsparse; mkdir -p build/release; cd build/release
 
     # Configure rocSPARSE
     # Build options:
@@ -88,7 +120,7 @@ To run unit tests, you must build rocSPARSE with `-DBUILD_CLIENTS_TESTS=ON`.
 
 ```bash
 # Go to rocSPARSE build directory
-cd rocSPARSE; cd build/release
+cd rocm-libraries/projects/rocsparse; cd build/release
 
 # Run all tests
 ./clients/staging/rocsparse-test
@@ -98,7 +130,7 @@ To run benchmarks, you must build rocSPARSE with `-DBUILD_CLIENTS_BENCHMARKS=ON`
 
 ```bash
 # Go to rocSPARSE build directory
-cd rocSPARSE/build/release
+cd rocm-libraries/projects/rocsparse/build/release
 
 # Run benchmark, e.g.
 ./clients/staging/rocsparse-bench -f hybmv --laplacian-dim 2000 -i 200
@@ -106,8 +138,8 @@ cd rocSPARSE/build/release
 
 ## Issues
 
-To submit an issue, a bug, or a feature request, use the GitHub
-[issue tracker](https://github.com/ROCm/rocSPARSE/issues).
+To submit an issue, a bug, or a feature request, use the rocm-libraries GitHub
+[issue tracker](https://github.com/ROCm/rocm-libraries/issues).
 
 ## License
 

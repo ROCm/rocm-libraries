@@ -362,8 +362,6 @@ namespace rocRoller
 
         KernelGraph UpdateParameters::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::UpdateParameters");
-
             if(!m_params)
                 return original;
 
@@ -380,8 +378,6 @@ namespace rocRoller
 
         KernelGraph UpdateWavefrontParameters::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::UpdateWavefrontParameters");
-
             if(!m_params)
                 return original;
 

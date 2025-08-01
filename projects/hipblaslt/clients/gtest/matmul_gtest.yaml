@@ -1685,7 +1685,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
-  gpu_arch: '942'
+  gpu_arch: '9(42|50)'
 
 - name: matmul_gemm_double
   category: pre_checkin
@@ -2046,7 +2046,27 @@ Tests:
   initialization: trig_float
   unit_check: 0
   norm_check: 1
-  requested_solution_num: -1
+  gpu_arch: '950'
+
+- name: matmul_mx_all_kernels
+  category: nightly
+  function:
+    matmul:
+    - { a_type: f8_r, b_type: f8_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f8_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+    - { a_type: f6_r, b_type: f6_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
+  M: [3072]
+  N: [3072]
+  K: [16384]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: 10
   gpu_arch: '950'
 
 - name: matmul_mx_solution_index

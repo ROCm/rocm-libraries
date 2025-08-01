@@ -422,7 +422,12 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
                         for ob in range(0, OutBlocksInMI):
                             label  = ob + OutBlocksInMI * (bm + matrixInstBCoal * tt)
                             target = ob + OutBlocksInMI * (bm + matrixInstBCoal * miWaveGroupCoal * tt)
-                            module.add(VCmpEQU32(dst=VCC(), src0=vgpr(mbReg), src1=hex(target)))
+                            if target > 64:
+                                src1 = sgpr(tmpSgprInfo.idx)
+                                module.add(SMovB32(dst=src1, src=hex(target), comment="large mb"))
+                            else:
+                                src1 = hex(target)
+                            module.add(VCmpEQU32(dst=VCC(), src0=vgpr(mbReg), src1=src1))
                             module.add(SCBranchVCCNZ(labelName=MBblockLabels[r-1][label].getLabelName(), comment="branch to shift d%u r%u mb%u" % (tP["idx"], r, label)))
 
             for r in range(1, glvw):
@@ -697,7 +702,7 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
                                                 module.add(DSBPermuteB32(dst=vgpr(movRegId), src0=vgpr(permuteIndexReg), src1=vgpr(movRegId), ds=ds, comment="permute edge values"))
 
                                 if needWait:
-                                    module.add(SWaitCnt(lgkmcnt=0, comment="wait for swizzle operation"))
+                                    module.add(SWaitCnt(dscnt=0, comment="wait for swizzle operation"))
 
                                 if not skip:
                                     module.add(SMovB32(dst=sgpr(tmpSgpr), src=dstThreadId, comment="which thread need to shfit in this block"))
