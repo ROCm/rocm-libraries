@@ -735,9 +735,8 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         stmts += Declaration{stride_lds_pp, Literal{1}};
 
         unsigned int width  = factors_pp_curr[0];
-        float        height = static_cast<float>(length) / width / threads_per_transform;
-        stmts += Declaration{offset_lds_pp,
-                             thread_id * Literal{width * static_cast<unsigned int>(height)}};
+        unsigned int height = length / width / threads_per_transform;
+        stmts += Declaration{offset_lds_pp, thread_id * Literal{width * height}};
 
         auto pre_post_lds_tmpl = device_lds_reg_inout_device_call_templates();
         auto pre_post_lds_args = device_lds_reg_inout_pp_device_call_arguments();
@@ -763,9 +762,8 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         }
 
         width  = factors_pp_curr.back();
-        height = static_cast<float>(length) / width / threads_per_transform;
-        stmts += Assign{offset_lds_pp,
-                        thread_id * Literal{width * static_cast<unsigned int>(height)}};
+        height = length / width / threads_per_transform;
+        stmts += Assign{offset_lds_pp, thread_id * Literal{width * height}};
 
         StatementList postStore;
         postStore
