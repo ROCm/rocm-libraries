@@ -35,7 +35,7 @@ cmake -DBUILD_DOCS=ON ...
 
 1. Checkout the hipBLAS code using either a sparse checkout or a full clone of the rocm-libraries repository.
 
-   To limit your local checkout to only the rocSPARSE project, configure ``sparse-checkout`` before cloning.
+   To limit your local checkout to only the hipBLAS project, configure ``sparse-checkout`` before cloning.
    This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.
    Use the following commands for a sparse checkout:
 
