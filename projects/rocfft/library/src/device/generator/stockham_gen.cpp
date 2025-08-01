@@ -21,6 +21,7 @@
 #include <functional>
 using namespace std::placeholders;
 
+#include "../../../../shared/arithmetic.h"
 #include "../../../../shared/precision_type.h"
 #include "generator.h"
 #include "stockham_gen.h"
@@ -550,8 +551,7 @@ void validate_pp_length(const StockhamPartialPassParams& pp_params,
                         const std::vector<unsigned int>& factors)
 
 {
-    unsigned int length_curr
-        = std::accumulate(factors.begin(), factors.end(), 1, std::multiplies<unsigned int>());
+    unsigned int length_curr = product(factors.begin(), factors.end());
 
     auto curr_dim = pp_params.current_dim;
     if(length_curr != pp_params.parent_length[curr_dim])
@@ -568,8 +568,7 @@ void validate_pp_off_dim_length(const StockhamPartialPassParams& pp_params_1,
                            pp_params_2.pp_factors_curr.begin(),
                            pp_params_2.pp_factors_curr.end());
 
-    unsigned int length_off_dim = std::accumulate(
-        off_factors_all.begin(), off_factors_all.end(), 1, std::multiplies<unsigned int>());
+    unsigned int length_off_dim = product(off_factors_all.begin(), off_factors_all.end());
 
     if(pp_params_1.parent_length[pp_params_1.off_dim]
        != pp_params_2.parent_length[pp_params_2.off_dim])
@@ -597,10 +596,8 @@ void validate_pp_grid_params(const StockhamPartialPassParams& params_1,
                                 ? specs_1.workgroup_size / specs_1.threads_per_transform
                                 : specs_2.workgroup_size / specs_2.threads_per_transform;
 
-            unsigned int prod_factors_off_dim = std::accumulate(params_1.pp_factors_curr.begin(),
-                                                                params_1.pp_factors_curr.end(),
-                                                                1,
-                                                                std::multiplies<unsigned int>());
+            auto prod_factors_off_dim
+                = product(params_1.pp_factors_curr.begin(), params_1.pp_factors_curr.end());
             if(tpb_sbrr != prod_factors_off_dim)
             {
                 throw std::runtime_error("CS_KERNEL_STOCKHAM_PP requires transform-per-block "

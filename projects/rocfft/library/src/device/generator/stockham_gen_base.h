@@ -518,8 +518,9 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
         Expression guard_expr = Expression{Literal{"true"}};
 
-        auto effective_length  = work_length ? *work_length : length;
-        auto thread_guard_cond = (effective_length / width) * (guard_factor ? *guard_factor : 1);
+        const auto effective_length = work_length ? *work_length : length;
+        const auto thread_guard_cond
+            = (effective_length / width) * (guard_factor ? *guard_factor : 1);
 
         // do thread gurad when guard_by_if or guard_by_arg
         if(guard != ThreadGuardMode::NO_GUARD)
