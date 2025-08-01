@@ -127,11 +127,6 @@ namespace PermLanesTest
         kgraph                     = kgraph.transform(updateWavefrontParams);
         kgraph                     = kgraph.transform(std::make_shared<LoadPacked>(context));
 
-        {
-            std::ofstream file("permlaneGraph.dot");
-            file << kgraph.toDOT(true);
-        }
-
         context->schedule(k->preamble());
         context->schedule(k->prolog());
         context->schedule(rocRoller::KernelGraph::generate(kgraph, context->kernel()));
@@ -195,20 +190,6 @@ namespace PermLanesTest
         }
         // clang-format on
 
-        // [rr/critical]   nWaves =  4
-        // [rr/critical]   miK    =  4
-        // [rr/critical]   factor =  1
-        // [rr/critical]   nLanes = 16
-        // [rr/critical]   factor =  1
-        // [rr/critical]   miK    =  4
-
-        Log::critical(ShowValue(nWaves));
-        Log::critical(ShowValue(miK));
-        Log::critical(ShowValue(factor));
-        Log::critical(ShowValue(nLanes));
-        Log::critical(ShowValue(factor));
-        Log::critical(ShowValue(miK));
-
         std::vector<size_t> sizes = {static_cast<size_t>(miK),
                                      static_cast<size_t>(factor),
                                      static_cast<size_t>(nLanes),
@@ -217,16 +198,6 @@ namespace PermLanesTest
                                      static_cast<size_t>(nWaves)};
 
         auto order = {4, 1, 2, 3, 0, 5};
-
-        // std::vector<size_t> strides(sizes.size());
-        // {
-        //     size_t stride = 1;
-        //     for(auto idx : order)
-        //     {
-        //         strides.at(idx) = stride;
-        //         stride *= sizes.at(idx);
-        //     }
-        // }
 
         TensorDescriptor src(DataType::E8M0, sizes);
         auto dst = TensorDescriptor::ShuffledNoPadding(DataType::E8M0, sizes, {4, 1, 2, 3, 0, 5});

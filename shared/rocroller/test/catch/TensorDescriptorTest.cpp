@@ -25,8 +25,6 @@
  *******************************************************************************/
 
 #include <catch2/catch_test_macros.hpp>
-// #include <catch2/catch_template_test_macros.hpp>
-// #include <catch2/matchers/catch_matchers_string.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/generators/catch_generators_adapters.hpp>
 #include <catch2/generators/catch_generators_random.hpp>
@@ -35,8 +33,6 @@
 #include <rocRoller/TensorDescriptor.hpp>
 
 #include <rocRoller/Utilities/Random.hpp>
-
-using namespace rocRoller;
 
 #include <cstddef>
 
@@ -303,22 +299,6 @@ TEST_CASE("ShuffleDims is reversible", "[utils][tensor-descriptor]")
                     indices.erase(next(indices.begin(), idx));
                 }
             }
-
-            // std::vector<size_t> strides(dims);
-            // {
-            //     size_t stride = 1;
-            //     for(auto idx : order)
-            //     {
-            //         REQUIRE(idx < dims);
-            //         strides.at(idx) = stride;
-            //         stride *= sizes.at(idx);
-            //     }
-
-            //     for(auto s : strides)
-            //         REQUIRE(s != 0);
-            // }
-
-            // Log::critical("{}: {}", ShowValue(sizes), ShowValue(strides));
 
             auto dst = TensorDescriptor::ShuffledNoPadding(DataType::Int32, sizes, order);
 
