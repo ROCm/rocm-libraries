@@ -25,30 +25,31 @@
 
 rocsparse_clients::configurable_event_listener::configurable_event_listener(
     testing::TestEventListener* theEventListener)
-    : eventListener(theEventListener)
+    : m_eventListener(theEventListener)
     , showTestCases(true)
     , showTestNames(true)
     , showSuccesses(true)
     , showInlineFailures(true)
     , showEnvironment(true)
+    , redirectOutput(true)
 {
 }
 
 rocsparse_clients::configurable_event_listener::~configurable_event_listener()
 {
-    delete eventListener;
+    delete m_eventListener;
 }
 
 void rocsparse_clients::configurable_event_listener::OnTestProgramStart(
     const testing::UnitTest& unit_test)
 {
-    eventListener->OnTestProgramStart(unit_test);
+    m_eventListener->OnTestProgramStart(unit_test);
 }
 
 void rocsparse_clients::configurable_event_listener::OnTestIterationStart(
     const testing::UnitTest& unit_test, int iteration)
 {
-    eventListener->OnTestIterationStart(unit_test, iteration);
+    m_eventListener->OnTestIterationStart(unit_test, iteration);
 }
 
 void rocsparse_clients::configurable_event_listener::OnEnvironmentsSetUpStart(
@@ -56,7 +57,7 @@ void rocsparse_clients::configurable_event_listener::OnEnvironmentsSetUpStart(
 {
     if(showEnvironment)
     {
-        eventListener->OnEnvironmentsSetUpStart(unit_test);
+        m_eventListener->OnEnvironmentsSetUpStart(unit_test);
     }
 }
 
@@ -65,7 +66,7 @@ void rocsparse_clients::configurable_event_listener::OnEnvironmentsSetUpEnd(
 {
     if(showEnvironment)
     {
-        eventListener->OnEnvironmentsSetUpEnd(unit_test);
+        m_eventListener->OnEnvironmentsSetUpEnd(unit_test);
     }
 }
 
@@ -74,29 +75,53 @@ void rocsparse_clients::configurable_event_listener::OnTestCaseStart(
 {
     if(showTestCases)
     {
-        eventListener->OnTestCaseStart(test_case);
+        m_eventListener->OnTestCaseStart(test_case);
     }
 }
 
 void rocsparse_clients::configurable_event_listener::OnTestStart(const testing::TestInfo& test_info)
 {
+    if(redirectOutput)
+    {
+        // Clear and redirect streams before each test
+        this->m_redirector.clear();
+        this->m_redirector.redirect();
+    }
+
     if(showTestNames)
     {
-        eventListener->OnTestStart(test_info);
+        m_eventListener->OnTestStart(test_info);
     }
 }
 
 void rocsparse_clients::configurable_event_listener::OnTestPartResult(
     const testing::TestPartResult& result)
 {
-    eventListener->OnTestPartResult(result);
+    m_eventListener->OnTestPartResult(result);
 }
 
 void rocsparse_clients::configurable_event_listener::OnTestEnd(const testing::TestInfo& test_info)
 {
+    if(redirectOutput)
+    {
+        // Restore streams after test
+        this->m_redirector.restore();
+
+        // Check if test failed
+        if(test_info.result()->Failed())
+        {
+            const std::string content = this->m_redirector.get_stream().str();
+
+            if(!content.empty())
+            {
+                std::cerr << content << std::endl;
+            }
+        }
+    }
+
     if(test_info.result()->Failed() ? showInlineFailures : showSuccesses)
     {
-        eventListener->OnTestEnd(test_info);
+        m_eventListener->OnTestEnd(test_info);
     }
 }
 
@@ -105,7 +130,7 @@ void rocsparse_clients::configurable_event_listener::OnTestCaseEnd(
 {
     if(showTestCases)
     {
-        eventListener->OnTestCaseEnd(test_case);
+        m_eventListener->OnTestCaseEnd(test_case);
     }
 }
 
@@ -114,7 +139,7 @@ void rocsparse_clients::configurable_event_listener::OnEnvironmentsTearDownStart
 {
     if(showEnvironment)
     {
-        eventListener->OnEnvironmentsTearDownStart(unit_test);
+        m_eventListener->OnEnvironmentsTearDownStart(unit_test);
     }
 }
 
@@ -123,20 +148,20 @@ void rocsparse_clients::configurable_event_listener::OnEnvironmentsTearDownEnd(
 {
     if(showEnvironment)
     {
-        eventListener->OnEnvironmentsTearDownEnd(unit_test);
+        m_eventListener->OnEnvironmentsTearDownEnd(unit_test);
     }
 }
 
 void rocsparse_clients::configurable_event_listener::OnTestIterationEnd(
     const testing::UnitTest& unit_test, int iteration)
 {
-    eventListener->OnTestIterationEnd(unit_test, iteration);
+    m_eventListener->OnTestIterationEnd(unit_test, iteration);
 }
 
 void rocsparse_clients::configurable_event_listener::OnTestProgramEnd(
     const testing::UnitTest& unit_test)
 {
-    eventListener->OnTestProgramEnd(unit_test);
+    m_eventListener->OnTestProgramEnd(unit_test);
 }
 
 void rocsparse_clients::stream_redirector::redirect()
@@ -165,108 +190,4 @@ std::ostringstream& rocsparse_clients::stream_redirector::get_stream()
 void rocsparse_clients::stream_redirector::clear()
 {
     this->m_stream.clear();
-}
-
-rocsparse_clients::output_redirect_listener::output_redirect_listener(
-    ::testing::TestEventListener* listener)
-    : m_default_listener(listener)
-{
-}
-
-rocsparse_clients::output_redirect_listener::~output_redirect_listener()
-{
-    delete this->m_default_listener;
-}
-
-void rocsparse_clients::output_redirect_listener::OnTestProgramStart(
-    const ::testing::UnitTest& unit_test)
-{
-    this->m_default_listener->OnTestProgramStart(unit_test);
-}
-
-void rocsparse_clients::output_redirect_listener::OnTestIterationStart(
-    const ::testing::UnitTest& unit_test, int iteration)
-{
-    this->m_default_listener->OnTestIterationStart(unit_test, iteration);
-}
-
-void rocsparse_clients::output_redirect_listener::OnEnvironmentsSetUpStart(
-    const ::testing::UnitTest& unit_test)
-{
-    this->m_default_listener->OnEnvironmentsSetUpStart(unit_test);
-}
-
-void rocsparse_clients::output_redirect_listener::OnEnvironmentsSetUpEnd(
-    const ::testing::UnitTest& unit_test)
-{
-    this->m_default_listener->OnEnvironmentsSetUpEnd(unit_test);
-}
-
-void rocsparse_clients::output_redirect_listener::OnTestCaseStart(
-    const ::testing::TestCase& test_case)
-{
-    this->m_default_listener->OnTestCaseStart(test_case);
-}
-
-void rocsparse_clients::output_redirect_listener::OnTestStart(const ::testing::TestInfo& test_info)
-{
-    // Clear and redirect streams before each test
-    this->m_redirector.clear();
-    this->m_redirector.redirect();
-    this->m_default_listener->OnTestStart(test_info);
-}
-
-void rocsparse_clients::output_redirect_listener::OnTestPartResult(
-    const ::testing::TestPartResult& test_part_result)
-{
-    this->m_default_listener->OnTestPartResult(test_part_result);
-}
-
-void rocsparse_clients::output_redirect_listener::OnTestEnd(const ::testing::TestInfo& test_info)
-{
-    // Restore streams after test
-    this->m_redirector.restore();
-
-    // Check if test failed
-    if(test_info.result()->Failed())
-    {
-        const std::string content = this->m_redirector.get_stream().str();
-
-        if(!content.empty())
-        {
-            std::cerr << content << std::endl;
-        }
-    }
-
-    this->m_default_listener->OnTestEnd(test_info);
-}
-
-void rocsparse_clients::output_redirect_listener::OnTestCaseEnd(
-    const ::testing::TestCase& test_case)
-{
-    this->m_default_listener->OnTestCaseEnd(test_case);
-}
-
-void rocsparse_clients::output_redirect_listener::OnEnvironmentsTearDownStart(
-    const ::testing::UnitTest& unit_test)
-{
-    this->m_default_listener->OnEnvironmentsTearDownStart(unit_test);
-}
-
-void rocsparse_clients::output_redirect_listener::OnEnvironmentsTearDownEnd(
-    const ::testing::UnitTest& unit_test)
-{
-    this->m_default_listener->OnEnvironmentsTearDownEnd(unit_test);
-}
-
-void rocsparse_clients::output_redirect_listener::OnTestIterationEnd(
-    const ::testing::UnitTest& unit_test, int iteration)
-{
-    this->m_default_listener->OnTestIterationEnd(unit_test, iteration);
-}
-
-void rocsparse_clients::output_redirect_listener::OnTestProgramEnd(
-    const ::testing::UnitTest& unit_test)
-{
-    this->m_default_listener->OnTestProgramEnd(unit_test);
 }
