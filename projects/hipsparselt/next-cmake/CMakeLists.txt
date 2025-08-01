@@ -65,7 +65,7 @@ option(HIPSPARSELT_ENABLE_MARKER "Enable rocTracer marker support." OFF)
 option(HIPSPARSELT_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
 option(HIPSPARSELT_ENABLE_VERBOSE "Output additional build information." OFF)
 
-set(HIPSPARSELT_HIPBLASLT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../hipblaslt/next-cmake"
+set(HIPSPARSELT_HIPBLASLT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../hipblaslt"
     CACHE PATH "Path to hipblaslt directory."
 )
 set(HIPSPARSELT_COVERAGE_GTEST_FILTER "*pre_checkin*"
@@ -137,9 +137,7 @@ if(HIPSPARSELT_ENABLE_HIP)
     set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
     set(HIPBLASLT_ENABLE_DEVICE ON CACHE BOOL "" FORCE)
     set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
-    # There is a conflict in the hipblaslt build system with `device_library_dir` 
-    # This is a temporary fix to allow the hipsparselt build to work with the hipblaslt build system
-    set(TENSILELITE_BINARY_DIR "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
+    set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
     set(HIPBLASLT_LIBLOGIC_PATH
         "${CMAKE_CURRENT_SOURCE_DIR}/../library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
         CACHE STRING "" FORCE
@@ -289,8 +287,13 @@ if(HIPSPARSELT_BUILD_COVERAGE OR BUILD_CODE_COVERAGE)
       $<TARGET_FILE:hipsparselt-test> ${coverage_test_arguments}
     COMMENT "Running coverage with test command: $<TARGET_FILE:hipsparselt-test> ${coverage_test_arguments}")
 
-  find_program(LLVM_PROFDATA llvm-profdata HINTS llvm/bin REQUIRED)
-  find_program(LLVM_COV llvm-cov REQUIRED HINTS llvm/bin)
+  set(_llvm_tool_hints)
+  foreach(_prefix IN LISTS CMAKE_PREFIX_PATH)
+    list(APPEND _llvm_tool_hints "${_prefix}/lib/llvm/bin")
+  endforeach()
+
+  find_program(LLVM_PROFDATA llvm-profdata HINTS ${_llvm_tool_hints} REQUIRED)
+  find_program(LLVM_COV llvm-cov HINTS ${_llvm_tool_hints} REQUIRED)
 
   add_custom_target(
     coverage
