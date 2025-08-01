@@ -392,23 +392,19 @@ void sort_key_kernel(key_type* device_keys_output, unsigned int start_bit, unsig
     StoreOp<BlockSize, ItemsPerThread, Striped>{}(keys, device_keys_output);
 }
 
-template<class T, class U>
-void assert_eq(T a, U b, size_t index)
-{
-    // GTest's ASSERT_EQ prints the values if the test fails. On Windows, GTest doesn't currently provide overloads for
-    // printing 128 bit types, resulting in linker errors.
-    // Check if we're testing with 128 bit types. If so, test using bools so GTest doesn't try to print them on failure.
-    if(test_utils::is_int128<T>::value || test_utils::is_uint128<T>::value
-       || test_utils::is_int128<U>::value || test_utils::is_uint128<U>::value)
-    {
-        const bool values_equal = (a == b);
-        ASSERT_EQ(values_equal, true) << "at index: " << index;
-    }
-    else
-    {
-        ASSERT_EQ(a, b) << "at index: " << index;
-    }
-}
+// GTest's ASSERT_EQ prints the values if the test fails. On Windows, GTest doesn't currently provide overloads for
+// printing 128 bit types, resulting in linker errors.
+// Check if we're testing with 128 bit types. If so, test using bools so GTest doesn't try to print them on failure.
+#define ASSERT_EQ_128BIT_WORKAROUND(output, expected, index, type)                  \
+    if(test_utils::is_int128<type>::value || test_utils::is_uint128<type>::value)   \
+    {                                                                               \
+        const bool values_equal = (output == expected);                             \
+        ASSERT_EQ(values_equal, true) << "at index: " << index;                     \
+    }                                                                               \
+    else                                                                            \
+    {                                                                               \
+        ASSERT_EQ(output, expected) << "at index: " << index;                       \
+    }    
 
 TYPED_TEST(HipcubBlockRadixSort, SortKeys)
 {
@@ -492,9 +488,10 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeys)
         // Verifying results
         for(size_t i = 0; i < size; i++)
         {
-            assert_eq(test_utils::convert_to_native(keys_output[i]),
-                      test_utils::convert_to_native(expected[i]),
-                      i);
+            ASSERT_EQ_128BIT_WORKAROUND(test_utils::convert_to_native(keys_output[i]), 
+                                        test_utils::convert_to_native(expected[i]), 
+                                        i, 
+                                        key_type);
         }
 
         HIP_CHECK(hipFree(device_keys_output));
@@ -654,12 +651,15 @@ TYPED_TEST(HipcubBlockRadixSort, SortKeysValues)
 
         for(size_t i = 0; i < size; i++)
         {
-            assert_eq(test_utils::convert_to_native(keys_output[i]),
-                      test_utils::convert_to_native(expected[i].first),
-                      i);
-            assert_eq(test_utils::convert_to_native(values_output[i]),
-                      test_utils::convert_to_native(expected[i].second),
-                      i);
+            ASSERT_EQ_128BIT_WORKAROUND(test_utils::convert_to_native(keys_output[i]), 
+                                        test_utils::convert_to_native(expected[i].first), 
+                                        i, 
+                                        key_type);   
+                                        
+            ASSERT_EQ_128BIT_WORKAROUND(test_utils::convert_to_native(values_output[i]), 
+                                        test_utils::convert_to_native(expected[i].second), 
+                                        i, 
+                                        value_type);                    
         }
 
         HIP_CHECK(hipFree(device_keys_output));
