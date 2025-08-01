@@ -33,6 +33,7 @@ project_map = {
         projects/rocrand
         projects/hiprand
         shared/mxdatagenerator
-        shared/rocroller""",
+        shared/rocroller
+        shared/tensile""",
     }
 }
