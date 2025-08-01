@@ -65,6 +65,7 @@ namespace rocRoller
 
         ConstraintStatus NoAmbiguousNodes(const KernelGraph& k)
         {
+            TIMER(t, "Constraint::NoAmbiguousNodes");
             ConstraintStatus retval;
             std::set<int>    searchNodes;
             auto             ambiguousNodes = allAmbiguousNodes(k);
@@ -94,6 +95,7 @@ namespace rocRoller
 
         ConstraintStatus NoBadBodyEdges(const KernelGraph& graph)
         {
+            TIMER(t, "Constraint::NoBadBodyEdges");
             ConstraintStatus retval;
             try
             {
@@ -112,7 +114,6 @@ namespace rocRoller
          */
         KernelGraph OrderMemory::apply(KernelGraph const& k)
         {
-            TIMER(t, "KernelGraph::OrderMemory");
             rocRoller::Log::getLogger()->debug("KernelGraph::OrderMemory");
             auto newGraph = k;
             orderMemoryNodes(newGraph, allAmbiguousNodes(k), false);

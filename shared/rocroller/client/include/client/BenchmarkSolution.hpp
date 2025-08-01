@@ -54,6 +54,7 @@ namespace rocRoller
 
         struct BenchmarkResults
         {
+            std::string   resultType{"GEMM"};
             RunParameters runParams;
 	    BenchmarkParameters benchmarkParams;
 

@@ -30,7 +30,7 @@ to query for the storage buffer size, for example, :cpp:func:`rocsparse_scsrsv_b
 Library source code organization
 ================================
 
-This section discusses the structure of the rocSPARSE library in the `rocSPARSE GitHub repository <https://github.com/ROCm/rocSPARSE>`_.
+This section discusses the structure of the rocSPARSE library in the `rocSPARSE GitHub repository <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsparse>`_.
 
 The library/include directory
 -----------------------------

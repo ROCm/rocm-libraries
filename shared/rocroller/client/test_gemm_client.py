@@ -257,24 +257,25 @@ prefetchLDSFactor: 0
 prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
-trans_A: N
-trans_B: N
-type_A: float
-type_B: float
-type_C: float
-type_D: float
-type_acc: float
+types:
+  trans_A: N
+  trans_B: N
+  type_A: float
+  type_B: float
+  type_C: float
+  type_D: float
+  type_acc: float
+  scale_A: None
+  scaleType_A: None
+  scale_B: None
+  scaleType_B: None
+  scaleBlockSize: 0
+  scaleSkipPermlane: false
 streamK: false
 streamKTwoTile: false
 matchMemoryAccess: true
-scale_A: None
-scaleType_A: None
-scale_B: None
-scaleType_B: None
-scaleBlockSize: 0
-scaleSkipPermlane: false
-loadScaleLDS_A: false
-loadScaleLDS_B: false
+loadLDSScale_A: false
+loadLDSScale_B: false
 swizzleScale: false
 prefetchScale: false
 ...
@@ -313,21 +314,22 @@ prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
 matchMemoryAccess: true
-trans_A: N
-trans_B: N
-type_A: half
-type_B: half
-type_C: half
-type_D: half
-type_acc: float
-scale_A: None
-scaleType_A: None
-scale_B: None
-scaleType_B: None
-scaleBlockSize: 0
-scaleSkipPermlane: false
-loadScaleLDS_A: false
-loadScaleLDS_B: false
+types:
+  trans_A: N
+  trans_B: N
+  type_A: half
+  type_B: half
+  type_C: half
+  type_D: half
+  type_acc: float
+  scale_A: None
+  scaleType_A: None
+  scale_B: None
+  scaleType_B: None
+  scaleBlockSize: 0
+  scaleSkipPermlane: false
+loadLDSScale_A: false
+loadLDSScale_B: false
 swizzleScale: false
 prefetchScale: false
 streamK: false
@@ -367,21 +369,22 @@ prefetchMixMemOps: false
 betaInFma: true
 scheduler: Priority
 matchMemoryAccess: true
-trans_A: N
-trans_B: N
-type_A: half
-type_B: half
-type_C: half
-type_D: half
-type_acc: float
-scale_A: None
-scaleType_A: None
-scale_B: None
-scaleType_B: None
-scaleBlockSize: 0
-scaleSkipPermlane: false
-loadScaleLDS_A: false
-loadScaleLDS_B: false
+types:
+  trans_A: N
+  trans_B: N
+  type_A: half
+  type_B: half
+  type_C: half
+  type_D: half
+  type_acc: float
+  scale_A: None
+  scaleType_A: None
+  scale_B: None
+  scaleType_B: None
+  scaleBlockSize: 0
+  scaleSkipPermlane: false
+loadLDSScale_A: false
+loadLDSScale_B: false
 swizzleScale: false
 prefetchScale: false
 streamK: false

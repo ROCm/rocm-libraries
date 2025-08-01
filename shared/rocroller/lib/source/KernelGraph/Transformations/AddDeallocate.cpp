@@ -61,9 +61,7 @@ namespace rocRoller::KernelGraph
             if(not maybeForLoop)
                 return;
 
-            std::vector<int> dependenciesVec(lastRWOps.begin(), lastRWOps.end());
-            std::sort(dependenciesVec.begin(), dependenciesVec.end(), compare);
-            auto lastDependency = dependenciesVec.back();
+            auto lastDependency = std::ranges::max(lastRWOps, compare);
 
             auto downstreamBarriers = filter(original.control.isElemType<Barrier>(),
                                              original.control.depthFirstVisit(lastDependency))
@@ -75,8 +73,7 @@ namespace rocRoller::KernelGraph
                 return;
             }
 
-            std::sort(downstreamBarriers.begin(), downstreamBarriers.end(), compare);
-            dependencies.insert(downstreamBarriers.front());
+            dependencies.insert(std::ranges::min(downstreamBarriers, compare));
         }
 
         std::set<int> getContainingForLoops(std::set<int> controls, KernelGraph const& graph)
@@ -397,7 +394,6 @@ namespace rocRoller::KernelGraph
 
     KernelGraph AddDeallocateDataFlow::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::addDeallocateDataFlow");
         rocRoller::Log::getLogger()->debug("KernelGraph::addDeallocateDataFlow()");
 
         auto graph = original;
@@ -411,7 +407,6 @@ namespace rocRoller::KernelGraph
 
     KernelGraph AddDeallocateArguments::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::addDeallocateArguments");
         rocRoller::Log::getLogger()->debug("KernelGraph::addDeallocate()");
 
         auto graph  = original;
@@ -426,7 +421,6 @@ namespace rocRoller::KernelGraph
 
     KernelGraph MergeAdjacentDeallocates::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::mergeAdjacentDeallocates");
         rocRoller::Log::getLogger()->debug("KernelGraph::mergeAdjacentDeallocates()");
 
         auto graph = original;

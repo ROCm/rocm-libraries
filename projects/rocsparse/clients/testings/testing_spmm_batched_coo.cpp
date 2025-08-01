@@ -230,7 +230,14 @@ void testing_spmm_batched_coo(const Arguments& arg)
         {
             hcoo_row_ind[nnz_A * i + j] = hcoo_row_ind_temp[j];
             hcoo_col_ind[nnz_A * i + j] = hcoo_col_ind_temp[j];
-            hcoo_val[nnz_A * i + j]     = hcoo_val_temp[j];
+            if(arg.convert_to_int)
+            {
+                hcoo_val[nnz_A * i + j] = convertToInt<A>(hcoo_val_temp[j]);
+            }
+            else
+            {
+                hcoo_val[nnz_A * i + j] = hcoo_val_temp[j];
+            }
         }
     }
 
@@ -241,6 +248,14 @@ void testing_spmm_batched_coo(const Arguments& arg)
     // Initialize data on CPU
     rocsparse_init<B>(hB, batch_count_B * nnz_B, 1, 1);
     rocsparse_init<C>(hC_1, batch_count_C * nnz_C, 1, 1);
+
+    if(arg.convert_to_int)
+    {
+        for(I i = 0; i < batch_count_B * nnz_B; i++)
+        {
+            hB[i] = convertToInt<B>(hB[i]);
+        }
+    }
 
     host_vector<C> hC_2(hC_1);
     host_vector<C> hC_gold(hC_1);
@@ -402,14 +417,14 @@ void testing_spmm_batched_coo(const Arguments& arg)
               * spmm_gflop_count(N, nnz_A, (int64_t)C_m * (int64_t)C_n, hbeta != static_cast<T>(0));
         double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);
 
-        double gbyte_count = coomm_batched_gbyte_count<T>(A_m,
-                                                          nnz_A,
-                                                          (int64_t)B_m * (int64_t)B_n,
-                                                          (int64_t)C_m * (int64_t)C_n,
-                                                          batch_count_A,
-                                                          batch_count_B,
-                                                          batch_count_C,
-                                                          hbeta != static_cast<T>(0));
+        double gbyte_count = coomm_batched_gbyte_count<A, B, C>(A_m,
+                                                                nnz_A,
+                                                                (int64_t)B_m * (int64_t)B_n,
+                                                                (int64_t)C_m * (int64_t)C_n,
+                                                                batch_count_A,
+                                                                batch_count_B,
+                                                                batch_count_C,
+                                                                hbeta != static_cast<T>(0));
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
 
         display_timing_info(display_key_t::M,
