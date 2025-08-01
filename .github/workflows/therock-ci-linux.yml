@@ -72,6 +72,12 @@ jobs:
         run: |
           ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-math-libs
 
+      - name: Patch monorepo
+        run: |
+          python TheRock/build_tools/patch_rocm_libraries.py \
+            --repo ${{ github.workspace }} \
+            --projects rocBLAS hipBLASLt hipBLAS
+
       - name: Install python deps
         run: |
           pip install -r TheRock/requirements.txt
