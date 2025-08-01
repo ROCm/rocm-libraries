@@ -389,12 +389,14 @@ namespace rocRoller
             }
         }
 
-        ConnectWorkgroups::ConnectWorkgroups(ContextPtr context, std::optional<int> workgroupMappingDim,
-	      std::optional<int> workgroupRemapXCC, Expression::ExpressionPtr workgroupMappingValue)
-            : m_context(context),
-	      m_workgroupMappingDim(workgroupMappingDim),
-	      m_workgroupRemapXCC(workgroupRemapXCC),
-	      m_workgroupMappingValue(workgroupMappingValue)
+        ConnectWorkgroups::ConnectWorkgroups(ContextPtr                context,
+                                             std::optional<int>        workgroupMappingDim,
+                                             std::optional<int>        workgroupRemapXCC,
+                                             Expression::ExpressionPtr workgroupMappingValue)
+            : m_context(context)
+            , m_workgroupMappingDim(workgroupMappingDim)
+            , m_workgroupRemapXCC(workgroupRemapXCC)
+            , m_workgroupMappingValue(workgroupMappingValue)
         {
         }
 
@@ -405,9 +407,10 @@ namespace rocRoller
             auto kgraph = original;
             auto info   = getTileSizeInfo(original);
 
-	    if(m_workgroupMappingDim.has_value())
+            if(m_workgroupMappingDim.has_value())
             {
-		connectWorkgroupsWithMapping(info, kgraph, m_workgroupMappingDim.value(), m_workgroupMappingValue);
+                connectWorkgroupsWithMapping(
+                    info, kgraph, m_workgroupMappingDim.value(), m_workgroupMappingValue);
             }
             else
             {

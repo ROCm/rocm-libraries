@@ -528,20 +528,21 @@ namespace rocRoller
 
                     if(problemParams.workgroupMappingDim != -1)
                     {
-                        auto const workgroupMappingDim  = problemParams.workgroupMappingDim;
+                        auto const workgroupMappingDim   = problemParams.workgroupMappingDim;
                         auto const workgroupMappingValue = runParams.workgroupMappingValue;
 
-                        AssertFatal(
-                            workgroupMappingDim == 0 || workgroupMappingDim == 1,
-                            "Only 0 (M) or 1 (N) are supported dimensions for workgroup mapping dim.",
-                            ShowValue(workgroupMappingDim));
+                        AssertFatal(workgroupMappingDim == 0 || workgroupMappingDim == 1,
+                                    "Only 0 (M) or 1 (N) are supported dimensions for workgroup "
+                                    "mapping dim.",
+                                    ShowValue(workgroupMappingDim));
 
                         AssertFatal(workgroupMappingValue > 0,
                                     "Workgroup mapping value must be a positive integer "
-				    "when work group dimension is specified.",
+                                    "when work group dimension is specified.",
                                     ShowValue(workgroupMappingValue));
 
-                        commandArgs.setArgument(m_tagWGM, ArgumentType::Value, workgroupMappingValue);
+                        commandArgs.setArgument(
+                            m_tagWGM, ArgumentType::Value, workgroupMappingValue);
                     }
 
                     return commandArgs;

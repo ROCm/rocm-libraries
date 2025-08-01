@@ -100,11 +100,11 @@ namespace rocRoller
                     return commandArgs;
                 }
 
-                void validateRunParameters(CommandPtr               command,
-                                           ProblemParameters const& problemParams,
-                                           RunParameters const&     runParams,
-					   BenchmarkParameters const& benchmarkParams,
-                                           CommandKernelPtr         commandKernel) override
+                void validateRunParameters(CommandPtr                 command,
+                                           ProblemParameters const&   problemParams,
+                                           RunParameters const&       runParams,
+                                           BenchmarkParameters const& benchmarkParams,
+                                           CommandKernelPtr           commandKernel) override
                 {
                     DataParallelGEMMSolution::validateRunParameters(
                         command, problemParams, runParams, benchmarkParams, commandKernel);

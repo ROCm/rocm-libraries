@@ -35,10 +35,10 @@ namespace rocRoller
     namespace Client
     {
         struct RunParameters
-	{
+        {
             int workgroupMappingValue;
             int numWGs;
-	};
+        };
 
         struct BenchmarkParameters
         {
@@ -54,9 +54,9 @@ namespace rocRoller
 
         struct BenchmarkResults
         {
-            std::string   resultType{"GEMM"};
-            RunParameters runParams;
-	    BenchmarkParameters benchmarkParams;
+            std::string         resultType{"GEMM"};
+            RunParameters       runParams;
+            BenchmarkParameters benchmarkParams;
 
             size_t              kernelGenerate;
             size_t              kernelAssemble;

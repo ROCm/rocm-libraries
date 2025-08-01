@@ -132,13 +132,13 @@ namespace rocRoller::Client::GEMMClient
 
     // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
     template <typename A, typename B, typename C, typename D>
-    Client::BenchmarkResults GEMM(CommandPtr               command,
-                                  CommandKernelPtr         commandKernel,
-                                  GEMMSolutionPtr          gemm,
-                                  ProblemParameters const& problemParams,
-                                  RunParameters const&     runParams,
-				  BenchmarkParameters const& benchmarkParams,
-                                  GPUArchitecture const&   arch)
+    Client::BenchmarkResults GEMM(CommandPtr                 command,
+                                  CommandKernelPtr           commandKernel,
+                                  GEMMSolutionPtr            gemm,
+                                  ProblemParameters const&   problemParams,
+                                  RunParameters const&       runParams,
+                                  BenchmarkParameters const& benchmarkParams,
+                                  GPUArchitecture const&     arch)
     {
         using namespace rocRoller::Client;
         using namespace rocRoller::Client::GEMMClient;
@@ -280,7 +280,8 @@ namespace rocRoller::Client::GEMMClient
             hostScaleB = {scaleValue};
         }
 
-        gemm->validateRunParameters(command, problemParams, runParams, benchmarkParams, commandKernel);
+        gemm->validateRunParameters(
+            command, problemParams, runParams, benchmarkParams, commandKernel);
 
         auto runtimeArgs = commandArgs.runtimeArguments();
 
@@ -308,7 +309,7 @@ namespace rocRoller::Client::GEMMClient
         std::cout << "Launching GPU kernel(s)..." << std::endl;
 
         BenchmarkResults result;
-        result.runParams = runParams;
+        result.runParams       = runParams;
         result.benchmarkParams = benchmarkParams;
 
         // Benchmark runs
@@ -366,88 +367,123 @@ namespace rocRoller::Client::GEMMClient
     }
 
     template <typename A, typename C, typename D>
-    Client::BenchmarkResults GEMMMixed(CommandPtr               command,
-                                       CommandKernelPtr         commandKernel,
-                                       GEMMSolutionPtr          gemm,
-                                       ProblemParameters const& problemParams,
-                                       RunParameters const&     runParams,
-                                       BenchmarkParameters const&    benchmarkParams,
-                                       GPUArchitecture const&   arch,
-                                       auto                     typeB)
+    Client::BenchmarkResults GEMMMixed(CommandPtr                 command,
+                                       CommandKernelPtr           commandKernel,
+                                       GEMMSolutionPtr            gemm,
+                                       ProblemParameters const&   problemParams,
+                                       RunParameters const&       runParams,
+                                       BenchmarkParameters const& benchmarkParams,
+                                       GPUArchitecture const&     arch,
+                                       auto                       typeB)
     {
         if(typeB == "fp8")
         {
-            return GEMM<A, FP8, C, D>(command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
+            return GEMM<A, FP8, C, D>(
+                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
         }
         else if(typeB == "bf8")
         {
-            return GEMM<A, BF8, C, D>(command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
+            return GEMM<A, BF8, C, D>(
+                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
         }
         else if(typeB == "fp6")
         {
-            return GEMM<A, FP6, C, D>(command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
+            return GEMM<A, FP6, C, D>(
+                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
         }
         else if(typeB == "bf6")
         {
-            return GEMM<A, BF6, C, D>(command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
+            return GEMM<A, BF6, C, D>(
+                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
         }
         else if(typeB == "fp4")
         {
-            return GEMM<A, FP4, C, D>(command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
+            return GEMM<A, FP4, C, D>(
+                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
         }
         else
             Throw<FatalError>("Invalid type for Mixed GEMM.");
     }
 
     template <typename C, typename D>
-    Client::BenchmarkResults GEMMMixed(CommandPtr               command,
-                                       CommandKernelPtr         commandKernel,
-                                       GEMMSolutionPtr          gemm,
-                                       ProblemParameters const& problemParams,
-                                       RunParameters const&     runParams,
-                                       BenchmarkParameters const&     benchmarkParams,
-                                       GPUArchitecture const&   arch,
-                                       auto                     typeA,
-                                       auto                     typeB)
+    Client::BenchmarkResults GEMMMixed(CommandPtr                 command,
+                                       CommandKernelPtr           commandKernel,
+                                       GEMMSolutionPtr            gemm,
+                                       ProblemParameters const&   problemParams,
+                                       RunParameters const&       runParams,
+                                       BenchmarkParameters const& benchmarkParams,
+                                       GPUArchitecture const&     arch,
+                                       auto                       typeA,
+                                       auto                       typeB)
     {
         if(typeA == "fp8")
         {
-            return GEMMMixed<FP8, C, D>(
-                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch, typeB);
+            return GEMMMixed<FP8, C, D>(command,
+                                        commandKernel,
+                                        gemm,
+                                        problemParams,
+                                        runParams,
+                                        benchmarkParams,
+                                        arch,
+                                        typeB);
         }
         else if(typeA == "bf8")
         {
-            return GEMMMixed<BF8, C, D>(
-                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch, typeB);
+            return GEMMMixed<BF8, C, D>(command,
+                                        commandKernel,
+                                        gemm,
+                                        problemParams,
+                                        runParams,
+                                        benchmarkParams,
+                                        arch,
+                                        typeB);
         }
         else if(typeA == "fp6")
         {
-            return GEMMMixed<FP6, C, D>(
-                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch, typeB);
+            return GEMMMixed<FP6, C, D>(command,
+                                        commandKernel,
+                                        gemm,
+                                        problemParams,
+                                        runParams,
+                                        benchmarkParams,
+                                        arch,
+                                        typeB);
         }
         else if(typeA == "bf6")
         {
-            return GEMMMixed<BF6, C, D>(
-                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch, typeB);
+            return GEMMMixed<BF6, C, D>(command,
+                                        commandKernel,
+                                        gemm,
+                                        problemParams,
+                                        runParams,
+                                        benchmarkParams,
+                                        arch,
+                                        typeB);
         }
         else if(typeA == "fp4")
         {
-            return GEMMMixed<FP4, C, D>(
-                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch, typeB);
+            return GEMMMixed<FP4, C, D>(command,
+                                        commandKernel,
+                                        gemm,
+                                        problemParams,
+                                        runParams,
+                                        benchmarkParams,
+                                        arch,
+                                        typeB);
         }
         else
             Throw<FatalError>("Invalid type for Mixed GEMM.");
     }
 
     template <typename AB>
-    Client::BenchmarkResults GEMMUniform(CommandPtr               command,
-                                         CommandKernelPtr         commandKernel,
-                                         GEMMSolutionPtr          gemm,
-                                         ProblemParameters const& problemParams,
-                                         RunParameters const&     runParams,
-					 BenchmarkParameters const&     benchmarkParams,
-                                         GPUArchitecture const&   arch,
-                                         auto                     typeCD)
+    Client::BenchmarkResults GEMMUniform(CommandPtr                 command,
+                                         CommandKernelPtr           commandKernel,
+                                         GEMMSolutionPtr            gemm,
+                                         ProblemParameters const&   problemParams,
+                                         RunParameters const&       runParams,
+                                         BenchmarkParameters const& benchmarkParams,
+                                         GPUArchitecture const&     arch,
+                                         auto                       typeCD)
     {
         if(typeCD == "float")
         {
@@ -467,55 +503,103 @@ namespace rocRoller::Client::GEMMClient
         Throw<FatalError>("Invalid CD type for uniform GEMM.");
     }
 
-    Client::BenchmarkResults GEMMUniform(CommandPtr               command,
-                                         CommandKernelPtr         commandKernel,
-                                         GEMMSolutionPtr          gemm,
-                                         ProblemParameters const& problemParams,
-                                         RunParameters const&     runParams,
-					 BenchmarkParameters const&     benchmarkParams,
-                                         GPUArchitecture const&   arch,
-                                         auto                     typeAB,
-                                         auto                     typeCD)
+    Client::BenchmarkResults GEMMUniform(CommandPtr                 command,
+                                         CommandKernelPtr           commandKernel,
+                                         GEMMSolutionPtr            gemm,
+                                         ProblemParameters const&   problemParams,
+                                         RunParameters const&       runParams,
+                                         BenchmarkParameters const& benchmarkParams,
+                                         GPUArchitecture const&     arch,
+                                         auto                       typeAB,
+                                         auto                       typeCD)
     {
         if(typeAB == "float")
         {
-            return GEMMUniform<float>(
-                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch, typeCD);
+            return GEMMUniform<float>(command,
+                                      commandKernel,
+                                      gemm,
+                                      problemParams,
+                                      runParams,
+                                      benchmarkParams,
+                                      arch,
+                                      typeCD);
         }
         if(typeAB == "half")
         {
-            return GEMMUniform<Half>(
-                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch, typeCD);
+            return GEMMUniform<Half>(command,
+                                     commandKernel,
+                                     gemm,
+                                     problemParams,
+                                     runParams,
+                                     benchmarkParams,
+                                     arch,
+                                     typeCD);
         }
         if(typeAB == "bf16")
         {
-            return GEMMUniform<BFloat16>(
-                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch, typeCD);
+            return GEMMUniform<BFloat16>(command,
+                                         commandKernel,
+                                         gemm,
+                                         problemParams,
+                                         runParams,
+                                         benchmarkParams,
+                                         arch,
+                                         typeCD);
         }
         if(typeAB == "fp8")
         {
-            return GEMMUniform<FP8>(
-                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch, typeCD);
+            return GEMMUniform<FP8>(command,
+                                    commandKernel,
+                                    gemm,
+                                    problemParams,
+                                    runParams,
+                                    benchmarkParams,
+                                    arch,
+                                    typeCD);
         }
         if(typeAB == "bf8")
         {
-            return GEMMUniform<BF8>(
-                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch, typeCD);
+            return GEMMUniform<BF8>(command,
+                                    commandKernel,
+                                    gemm,
+                                    problemParams,
+                                    runParams,
+                                    benchmarkParams,
+                                    arch,
+                                    typeCD);
         }
         if(typeAB == "fp6")
         {
-            return GEMMUniform<FP6>(
-                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch, typeCD);
+            return GEMMUniform<FP6>(command,
+                                    commandKernel,
+                                    gemm,
+                                    problemParams,
+                                    runParams,
+                                    benchmarkParams,
+                                    arch,
+                                    typeCD);
         }
         if(typeAB == "bf6")
         {
-            return GEMMUniform<BF6>(
-                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch, typeCD);
+            return GEMMUniform<BF6>(command,
+                                    commandKernel,
+                                    gemm,
+                                    problemParams,
+                                    runParams,
+                                    benchmarkParams,
+                                    arch,
+                                    typeCD);
         }
         if(typeAB == "fp4")
         {
-            return GEMMUniform<FP4>(
-                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch, typeCD);
+            return GEMMUniform<FP4>(command,
+                                    commandKernel,
+                                    gemm,
+                                    problemParams,
+                                    runParams,
+                                    benchmarkParams,
+                                    arch,
+                                    typeCD);
         }
         Throw<FatalError>("Invalid AB type for uniform GEMM.");
     }
@@ -583,7 +667,7 @@ namespace rocRoller::Client::GEMMClient
                    ProblemParameters      problem,
                    TypeParameters         types,
                    RunParameters          run,
-		   BenchmarkParameters    benchmark,
+                   BenchmarkParameters    benchmark,
                    IOParameters           io)
     {
         GEMMSolutionPtr  gemm;
@@ -619,7 +703,7 @@ namespace rocRoller::Client::GEMMClient
             auto yamlPath = std::filesystem::path{io.loadAsmPath};
             yamlPath.replace_extension(".yaml");
 
-            solution            = Serialization::readYAMLFile<SolutionParameters>(yamlPath);
+            solution = Serialization::readYAMLFile<SolutionParameters>(yamlPath);
 
             architecture.target = solution.architecture;
             if(solution.version != rocRoller::Version::Git())
@@ -696,20 +780,20 @@ namespace rocRoller::Client::GEMMClient
                 std::filesystem::path codeObjectPath{basePath};
                 codeObjectPath.replace_extension(".co");
 
-		{
-		    //
-		    // Output RunParameters into a YAML file
-		    //
-		    std::filesystem::path yamlRunParams{basePath};
-		    auto stem = yamlRunParams.stem();
-		    std::filesystem::path yamlRunParamsPath = stem.string() + "_runParameters.yaml";
-		    if(!std::filesystem::exists(yamlRunParamsPath))
-		    {
-			std::ofstream file(yamlRunParamsPath);
-			Serialization::writeYAML(file, run);
-			std::cout << "Wrote: " << yamlRunParamsPath.string() << std::endl;
-		    }
-		}
+                {
+                    //
+                    // Output RunParameters into a YAML file
+                    //
+                    std::filesystem::path yamlRunParams{basePath};
+                    auto                  stem              = yamlRunParams.stem();
+                    std::filesystem::path yamlRunParamsPath = stem.string() + "_runParameters.yaml";
+                    if(!std::filesystem::exists(yamlRunParamsPath))
+                    {
+                        std::ofstream file(yamlRunParamsPath);
+                        Serialization::writeYAML(file, run);
+                        std::cout << "Wrote: " << yamlRunParamsPath.string() << std::endl;
+                    }
+                }
 
                 std::filesystem::path yamlPath{basePath};
                 yamlPath.replace_extension(".yaml");
@@ -799,15 +883,22 @@ namespace rocRoller::Client::GEMMClient
 
             Client::GEMMClient::Result result;
 
-            result.problemParams              = problem;
-            result.solutionParams             = solution;
-            result.benchmarkResults.runParams = run;
+            result.problemParams                    = problem;
+            result.solutionParams                   = solution;
+            result.benchmarkResults.runParams       = run;
             result.benchmarkResults.benchmarkParams = benchmark;
 
             if(types.typeA == types.typeB && types.typeC == types.typeD)
             {
-                result.benchmarkResults = GEMMUniform(
-                    command, commandKernel, gemm, problem, run, benchmark, arch, types.typeA, types.typeC);
+                result.benchmarkResults = GEMMUniform(command,
+                                                      commandKernel,
+                                                      gemm,
+                                                      problem,
+                                                      run,
+                                                      benchmark,
+                                                      arch,
+                                                      types.typeA,
+                                                      types.typeC);
             }
             else if((problem.types.typeA != problem.types.typeB) && isF8F6F4(problem.types.typeA)
                     && isF8F6F4(problem.types.typeB))
@@ -817,7 +908,7 @@ namespace rocRoller::Client::GEMMClient
                                                                   gemm,
                                                                   problem,
                                                                   run,
-								  benchmark,
+                                                                  benchmark,
                                                                   arch,
                                                                   problem.types.typeA,
                                                                   problem.types.typeB);
@@ -952,8 +1043,8 @@ int main(int argc, const char* argv[])
         .waveK = -1,
         .waveB = -1,
 
-        .workgroupSizeX = 128,
-        .workgroupSizeY = 2,
+        .workgroupSizeX         = 128,
+        .workgroupSizeY         = 2,
         .workgroupMappingDim    = -1,
         .workgroupRemapXCC      = false,
         .workgroupRemapXCCValue = -1,
@@ -1012,8 +1103,8 @@ int main(int argc, const char* argv[])
     rocRoller::Client::GEMMClient::TypeParameters types;
 
     rocRoller::Client::RunParameters runParams{
-	.workgroupMappingValue = -1,
-        .numWGs    = 0,
+        .workgroupMappingValue = -1,
+        .numWGs                = 0,
     };
 
     rocRoller::Client::BenchmarkParameters benchmarkParams{
@@ -1235,8 +1326,9 @@ int main(int argc, const char* argv[])
         "Overwrite types to: --type_A=half --type_B=half --type_C=half --type_D=half "
         "--type_acc=float.");
 
-    app.add_flag(
-        "--visualize", benchmarkParams.visualize, "Dump out volumes describing memory access patterns.");
+    app.add_flag("--visualize",
+                 benchmarkParams.visualize,
+                 "Dump out volumes describing memory access patterns.");
 
     app.add_flag("--no-check", noCheckResult, "Do not verify GEMM results against OpenBLAS.");
 
@@ -1312,8 +1404,9 @@ int main(int argc, const char* argv[])
     CLI11_PARSE(app, argc, argv);
 
     if(architectureName.empty())
-        architecture.target
-            = GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch(benchmarkParams.device).target();
+        architecture.target = GPUArchitectureLibrary::getInstance()
+                                  ->GetDefaultHipDeviceArch(benchmarkParams.device)
+                                  .target();
     else
         architecture.target = GPUArchitectureTarget::fromString(architectureName);
 
@@ -1350,13 +1443,13 @@ int main(int argc, const char* argv[])
 
     if(!loadRunParamsPath.empty())
     {
-	auto path = std::filesystem::path(loadRunParamsPath);
+        auto path = std::filesystem::path(loadRunParamsPath);
         path.replace_extension(".yaml");
 
         //
-	// Load RunParameters from a specified YAML file
-	//
-	runParams = Serialization::readYAMLFile<rocRoller::Client::RunParameters>(path);
+        // Load RunParameters from a specified YAML file
+        //
+        runParams = Serialization::readYAMLFile<rocRoller::Client::RunParameters>(path);
     }
 
     if(!io.loadAsmPath.empty() || !io.loadCOPath.empty())
@@ -1369,9 +1462,9 @@ int main(int argc, const char* argv[])
         yamlPath.replace_extension(".yaml");
 
         //
-	// YAML file does not have the workgroupMappingValue used to generate the kernel.
-	// Instead, the workgroupMappingValue specified by users in benchmarking will be used.
-	//
+        // YAML file does not have the workgroupMappingValue used to generate the kernel.
+        // Instead, the workgroupMappingValue specified by users in benchmarking will be used.
+        //
         solution = Serialization::readYAMLFile<rocRoller::Client::GEMMClient::SolutionParameters>(
             yamlPath);
 
@@ -1412,7 +1505,6 @@ int main(int argc, const char* argv[])
 
     // TODO: Reevaluate the relationship between problem and solution params.
     problem.workgroupMappingDim = solution.workgroupMappingDim;
-
 
     benchmarkParams.check = !noCheckResult;
 
@@ -1575,6 +1667,6 @@ int main(int argc, const char* argv[])
                                                      problem,
                                                      types,
                                                      runParams,
-						     benchmarkParams,
+                                                     benchmarkParams,
                                                      io);
 }

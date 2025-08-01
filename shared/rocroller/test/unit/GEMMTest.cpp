@@ -1019,7 +1019,7 @@ namespace GEMMDriverTest
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
-        gemm.workgroupMappingDim  = 0;
+        gemm.workgroupMappingDim   = 0;
         gemm.workgroupMappingValue = 6;
         basicGEMM<float>(gemm);
     }
@@ -1029,9 +1029,9 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         REQUIRE_ARCH_CAP(GPUCapability::HasXCC);
         GEMMProblem gemm;
-        gemm.workgroupMappingDim  = 0;
+        gemm.workgroupMappingDim   = 0;
         gemm.workgroupMappingValue = 6;
-        gemm.workgroupRemapXCC    = true;
+        gemm.workgroupRemapXCC     = true;
         basicGEMM<float>(gemm);
     }
 
@@ -2447,7 +2447,7 @@ namespace GEMMDriverTest
         gemm.swizzleScale  = true;
         gemm.prefetchScale = true;
 
-        gemm.workgroupMappingDim = 0;
+        gemm.workgroupMappingDim   = 0;
         gemm.workgroupMappingValue = 2;
 
         gemm.scaleBlockSize
@@ -2504,7 +2504,7 @@ namespace GEMMDriverTest
         gemm.swizzleScale  = true;
         gemm.prefetchScale = true;
 
-        gemm.workgroupMappingDim = 0;
+        gemm.workgroupMappingDim   = 0;
         gemm.workgroupMappingValue = 2;
 
         gemm.scaleBlockSize

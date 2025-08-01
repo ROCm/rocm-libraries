@@ -146,8 +146,7 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "numWGs", params.numWGs);
         }
 
-        static void
-            mapping(IO& io, Client::RunParameters& params, EmptyContext& ctx)
+        static void mapping(IO& io, Client::RunParameters& params, EmptyContext& ctx)
         {
             mapping(io, params);
         }

@@ -96,9 +96,9 @@ struct GEMMProblem
     bool loadLDSScaleA = false;
     bool loadLDSScaleB = false;
 
-    int  workgroupMappingDim  = -1;
+    int  workgroupMappingDim   = -1;
     int  workgroupMappingValue = -1;
-    bool workgroupRemapXCC    = false;
+    bool workgroupRemapXCC     = false;
 
     rocRoller::Operations::ScaleMode scaleAMode = rocRoller::Operations::ScaleMode::None;
     rocRoller::Operations::ScaleMode scaleBMode = rocRoller::Operations::ScaleMode::None;
