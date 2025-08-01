@@ -235,7 +235,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
 
     using block_id_wrapper_type = block_id_wrapper<uint32_t, UsingOrderedBlockId>;
 
-    typename block_id_wrapper_type::id_type* block_id_pool = nullptr;    
+    typename block_id_wrapper_type::id_type* block_id_pool = nullptr;
 
     bool use_sleep;
     ROCPRIM_RETURN_ON_ERROR(is_sleep_scan_state_used(stream, use_sleep));
@@ -271,7 +271,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                                                                         block_id_wrapper_type>();
     }
     virtual_shared_memory_size *= number_of_blocks;
-    
+
     // temporary storage partition
 
     result = detail::temp_storage::partition(
@@ -397,7 +397,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                 return result;
             }
         }
-        
+
         if(debug_synchronous) start = std::chrono::steady_clock::now();
 
         with_scan_state(
@@ -468,6 +468,9 @@ inline hipError_t partition_impl(void*                       temporary_storage,
 /// \tparam SelectedCountOutputIterator random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
 /// \tparam Predicate type of the selection predicate.
+/// \tparam UsingOrderedBlockId If true, uses an atomic counter to assign block id instead of natural
+/// blockIdx-based ordering.  Can increase performance on MI3xx architectures when using streams. The
+/// default is false.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When a null
 /// pointer is passed, the required allocation size (in bytes) is written to
@@ -618,6 +621,9 @@ inline hipError_t partition_two_way(void*                       temporary_storag
 /// can be a simple pointer type
 /// \tparam SelectedCountOutputIterator random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
+/// \tparam UsingOrderedBlockId If true, uses an atomic counter to assign block id instead of natural
+/// blockIdx-based ordering.  Can increase performance on MI3xx architectures when using streams. The
+/// default is false.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -753,6 +759,9 @@ inline hipError_t partition_two_way(void*                       temporary_storag
 /// a simple pointer type.
 /// \tparam SelectedCountOutputIterator random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
+/// \tparam UsingOrderedBlockId If true, uses an atomic counter to assign block id instead of natural
+/// blockIdx-based ordering.  Can increase performance on MI3xx architectures when using streams. The
+/// default is false.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -838,7 +847,7 @@ hipError_t partition(void * temporary_storage,
 
     return detail::partition_impl<detail::partition_subalgo::partition_flag,
                                   UsingOrderedBlockId,
-                                  Config, 
+                                  Config,
                                   offset_type>(temporary_storage,
                                                storage_size,
                                                input,
@@ -875,6 +884,9 @@ hipError_t partition(void * temporary_storage,
 /// \tparam SelectedCountOutputIterator random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
 /// \tparam UnaryPredicate type of a unary selection predicate.
+/// \tparam UsingOrderedBlockId If true, uses an atomic counter to assign block id instead of natural
+/// blockIdx-based ordering.  Can increase performance on MI3xx architectures when using streams. The
+/// default is false.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -1026,6 +1038,9 @@ hipError_t partition(void * temporary_storage,
 /// value. It can be a simple pointer type.
 /// \tparam FirstUnaryPredicate type of the first unary selection predicate.
 /// \tparam SecondUnaryPredicate type of the second unary selection predicate.
+/// \tparam UsingOrderedBlockId If true, uses an atomic counter to assign block id instead of natural
+/// blockIdx-based ordering.  Can increase performance on MI3xx architectures when using streams. The
+/// default is false.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
