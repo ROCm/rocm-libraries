@@ -33,7 +33,7 @@
 
 #include <hip/hip_runtime.h>
 
-#include <cub/device/device_transform.cuh>  // IWYU pragma: export
+#include <cub/device/device_transform.cuh> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -50,11 +50,8 @@ struct DeviceTransform
                                 TransformOp                            transform_op,
                                 hipStream_t                            stream = nullptr)
     {
-        return hipCUDAErrorTohipError(::cub::DeviceTransform::Transform(inputs,
-                                                                        output,
-                                                                        num_items,
-                                                                        transform_op,
-                                                                        stream));
+        return hipCUDAErrorTohipError(
+            ::cub::DeviceTransform::Transform(inputs, output, num_items, transform_op, stream));
     }
 
     template<typename... RandomAccessIteratorsIn,
@@ -90,11 +87,8 @@ struct DeviceTransform
                                 TransformOp             transform_op,
                                 hipStream_t             stream = nullptr)
     {
-        return hipCUDAErrorTohipError(::cub::DeviceTransform::Transform(input,
-                                                                        output,
-                                                                        num_items,
-                                                                        transform_op,
-                                                                        stream));
+        return hipCUDAErrorTohipError(
+            ::cub::DeviceTransform::Transform(input, output, num_items, transform_op, stream));
     }
 
     template<typename RandomAccessIteratorIn,
