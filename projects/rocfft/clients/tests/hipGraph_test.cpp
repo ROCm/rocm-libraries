@@ -22,16 +22,15 @@
 #include "../../shared/arithmetic.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/hip_object_wrapper.h"
+#include "../../shared/params_gen.h"
 #include "../../shared/rocfft_against_fftw.h"
 #include "../../shared/rocfft_params.h"
-#include "../../shared/params_gen.h"
 #include "rocfft/rocfft.h"
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
 #include <random>
 #include <vector>
-
 
 static const unsigned int KERNEL_THREADS = 64;
 
@@ -273,13 +272,12 @@ static void compare_data(const std::vector<rocfft_complex<float>>& original_host
 
 TEST(rocfft_UnitTest, hipGraph_execution)
 {
-    if(hash_prob(random_seed,
-                 ::testing::UnitTest::GetInstance()->current_test_info()->name())
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
        > unittest_prob)
     {
         GTEST_SKIP();
     }
-    
+
     hipGraph_t     graph      = nullptr;
     hipGraphExec_t graph_exec = nullptr;
 
