@@ -99,6 +99,23 @@ struct default_delete<T[], typename thrust::detail::enable_if<std::is_trivially_
   }
 };
 
+namespace detail
+{
+
+template <class T, class D, class = void>
+struct pointer_detector
+{
+  using type = thrust::device_ptr<T>;
+};
+
+template <class T, class D>
+struct pointer_detector<T, D, std::void_t<typename D::pointer>>
+{
+  using type = typename D::pointer;
+};
+
+}
+
 template <class Deleter>
 struct unique_ptr_deleter_sfinae
 {
@@ -131,7 +148,7 @@ template <class T, class D = default_delete<T>>
 class unique_ptr
 {
 public:
-  using pointer      = typename D::pointer;
+  using pointer      = typename thrust::detail::pointer_detector<T, D>::type;
   using element_type = T;
   using deleter_type = D;
 
