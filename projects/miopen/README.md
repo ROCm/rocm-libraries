@@ -2,7 +2,7 @@
 
 MIOpen is AMD's library for high-performance machine learning primitives.
 
-You can find sources and binaries in our [MIOpen folder](https://github.com/ROCm/rocm-libraries/tree/develop/projects/miopen)
+You can find sources and binaries in the [MIOpen folder](https://github.com/ROCm/rocm-libraries/tree/develop/projects/miopen)
 of the [rocm-libraries GitHub](https://github.com/ROCm/rocm-libraries) repository.
 
 > [!NOTE]
