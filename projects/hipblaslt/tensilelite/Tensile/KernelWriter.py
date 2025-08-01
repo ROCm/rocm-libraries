@@ -586,6 +586,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     iterCode = Module()
     globalReadCode       = deepcopy(self.codes.perIterGlobalRead[iteration])
+    print("makeSubIterSchedule: iteration=", iteration)
+    print("globalReadCode=", globalReadCode)
     localWriteCodeCounts = self.codes.perIterLocalWrite[iteration][0]
     localWriteCode       = self.codes.perIterLocalWrite[iteration][1]
     isBarrier            = kernel["LoopIters"] - self.states.numItersPLR
@@ -1285,8 +1287,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
                 skipLocalWriteWaitcnt += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
               if not localReadItemsThisLoop:
                 self.states.perIterLocalWriteCanSkip[iteration] += countLocalWrite(writeItem) + countDSStoreB256(writeItem)
+          print(" i =",i ,"numMfmaPerIter = ",numMfmaPerIter)
           if kernel["D_U_iseqMI_K"] and (writeItems and i == (numMfmaPerIter - 1)):
             # if D_U_iseqMI_K, we need to schedule all localWrite in last mfma
+            print("D_U_iseqMI_K: schedule all localWrite in last mfma")
+            while globalReadCode.itemsSize():
+              loadModule = globalReadCode.popFirstItem()
+              print("D_U_iseqMI_K: schedule globalRead %s"%(loadModule))
+              iterCode.add(loadModule)
             while writeItems:      
               writeItem = writeItems.pop(0)
               iterCode.add(writeItem)
