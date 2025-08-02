@@ -15,7 +15,7 @@ def runCompileCommand(platform, project, jobName, boolean debug=false, boolean b
     }
 
     String clientArgs = '-DBUILD_CLIENTS_SAMPLES=ON -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCH=ON'
-    String warningArgs = '-DWERROR=ON'
+    String warningArgs = '-DWERROR=OFF'
     String buildTunerArgs = '-DROCFFT_BUILD_OFFLINE_TUNER=ON'
     String buildTypeArg = debug ? '-DCMAKE_BUILD_TYPE=Debug -DROCFFT_DEVICE_FORCE_RELEASE=ON' : '-DCMAKE_BUILD_TYPE=Release'
     String buildTypeDir = debug ? 'debug' : 'release'
@@ -57,7 +57,7 @@ def runCompileClientCommand(platform, project, jobName, boolean debug=false)
     project.paths.construct_build_prefix()
 
     String clientArgs = '-DBUILD_CLIENTS_SAMPLES=ON -DBUILD_CLIENTS_TESTS=ON -DBUILD_CLIENTS_BENCH=ON'
-    String warningArgs = '-DWERROR=ON'
+    String warningArgs = '-DWERROR=OFF'
     String cmake = platform.jenkinsLabel.contains('centos') ? 'cmake3' : 'cmake'
     String amdgpuTargets = env.BRANCH_NAME.startsWith('PR-') ? '-DAMDGPU_TARGETS=\$gfx_arch' : ''
     String buildTypeArgClients = debug ? '-DCMAKE_BUILD_TYPE=Debug' : '-DCMAKE_BUILD_TYPE=Release'

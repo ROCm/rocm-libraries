@@ -78,8 +78,6 @@ namespace rocRoller
 
         KernelGraph AddF6LDSPadding::apply(KernelGraph const& graph)
         {
-            TIMER(t, "KernelGraph::AddF6LDSPadding");
-
             auto const& arch = m_context->targetArchitecture();
 
             auto candidates = findCandidates(graph);
