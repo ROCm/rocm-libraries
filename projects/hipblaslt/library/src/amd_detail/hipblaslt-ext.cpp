@@ -109,9 +109,10 @@ namespace hipblaslt_ext
         pimpl->type_d       = typeD;
         pimpl->type_compute = typeCompute;
 
-        // default value of non-swizzle order
-        pimpl->order_a = (opA == HIPBLAS_OP_T) ? HIPBLASLT_ORDER_ROW : HIPBLASLT_ORDER_COL;
-        pimpl->order_b = (opB == HIPBLAS_OP_T) ? HIPBLASLT_ORDER_ROW : HIPBLASLT_ORDER_COL;
+        // default value of order is COL despite of opA/B,
+        // currently only swizzle cases use the variables
+        pimpl->order_a = HIPBLASLT_ORDER_COL;
+        pimpl->order_b = HIPBLASLT_ORDER_COL;
     }
 
     GemmProblemType::~GemmProblemType() = default;
