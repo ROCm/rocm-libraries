@@ -779,8 +779,6 @@ namespace rocRoller
 
         KernelGraph LowerTensorContraction::apply(KernelGraph const& graph)
         {
-            TIMER(t, "KernelGraph::lowerTensorContraction");
-
             auto contractions = graph.control.getNodes<TensorContraction>().to<std::vector>();
             AssertFatal(contractions.size() <= 1,
                         "More than one TensorContraction not supported yet.");
@@ -809,6 +807,7 @@ namespace rocRoller
 
         ConstraintStatus NoDanglingJammedNumbers(const KernelGraph& graph)
         {
+            TIMER(t, "Constraint::NoDanglingJammedNumbers");
             using GD = rocRoller::Graph::Direction;
 
             ConstraintStatus retval;

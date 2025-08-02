@@ -807,7 +807,10 @@ ComputeScheme NodeFactory::Decide2DScheme(const function_pool& pool, NodeMetaDat
 {
     // First choice is 2D_SINGLE kernel, if the problem will fit into LDS.
     // Next best is CS_2D_RC. Last resort is RTRT.
-    if(use_CS_2D_SINGLE(pool, nodeData))
+    if(use_CS_2D_SINGLE(pool,
+                        nodeData,
+                        rocfft_array_type_complex_interleaved,
+                        rocfft_array_type_complex_interleaved))
         return CS_KERNEL_2D_SINGLE; // the node has all build info
     else if(use_CS_2D_RC(pool, nodeData))
         return CS_2D_RC;
@@ -902,10 +905,12 @@ ComputeScheme NodeFactory::Decide3DScheme(const function_pool& pool, NodeMetaDat
     // TODO: CS_KERNEL_3D_SINGLE?
 }
 
-bool NodeFactory::use_CS_2D_SINGLE(const function_pool& pool, NodeMetaData& nodeData)
+bool NodeFactory::use_CS_2D_SINGLE(const function_pool& pool,
+                                   NodeMetaData&        nodeData,
+                                   rocfft_array_type    inArrayType,
+                                   rocfft_array_type    outArrayType)
 {
     if(!pool.has_function(
-
            FMKey(nodeData.length[0], nodeData.length[1], nodeData.precision, CS_KERNEL_2D_SINGLE)))
         return false;
 
@@ -916,10 +921,40 @@ bool NodeFactory::use_CS_2D_SINGLE(const function_pool& pool, NodeMetaData& node
     auto kernel = pool.get_kernel(
         FMKey(nodeData.length[0], nodeData.length[1], nodeData.precision, CS_KERNEL_2D_SINGLE));
 
-    auto ldsUsage = nodeData.length[0] * nodeData.length[1] * kernel.transforms_per_block
-                    * complex_type_size(nodeData.precision);
-    if(1.5 * ldsUsage > ldsSize)
-        return false;
+    auto length0 = nodeData.length[0];
+    auto length1 = nodeData.length[1];
+
+    // For larger LDS, account properly for real-complex usage and
+    // aim for occupancy-2
+    if(ldsSize > 65536)
+    {
+        // Real-forward transform adds an extra element on fastest length
+        // for post-processing
+        if(inArrayType == rocfft_array_type_real
+           && outArrayType == rocfft_array_type_hermitian_interleaved)
+            ++length0;
+        // real-inverse transforms adds an extra element on second-fastest length for pre-processing
+        else if(inArrayType == rocfft_array_type_hermitian_interleaved
+                && outArrayType == rocfft_array_type_real)
+            ++length1;
+
+        auto ldsUsage = length0 * length1 * kernel.transforms_per_block
+                        * complex_type_size(nodeData.precision);
+
+        if(ldsUsage > ldsSize / 2)
+            return false;
+    }
+    // For default (64KiB) LDS, just account for 2D data size and
+    // apply a fudge factor to get good-enough occupancy.  Ideally we
+    // can use the above heuristic everywhere but some tuned
+    // 2D_SINGLE solutions are faster despite being occupancy-1.
+    else
+    {
+        auto ldsUsage = length0 * length1 * kernel.transforms_per_block
+                        * complex_type_size(nodeData.precision);
+        if(1.5 * ldsUsage > ldsSize)
+            return false;
+    }
 
     return true;
 }

@@ -13,7 +13,7 @@ def runCI =
 {
     nodeDetails, jobName->
 
-    def prj  = new rocProject('rocFFT-internal', 'Debug')
+    def prj  = new rocProject('rocFFT', 'Debug')
 
     prj.defaults.ccache = true
     prj.timeout.compile = 600

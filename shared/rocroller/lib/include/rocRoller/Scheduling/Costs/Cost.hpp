@@ -73,6 +73,8 @@ namespace rocRoller
              */
             Result operator()(std::vector<Generator<Instruction>::iterator>&) const;
 
+            float operator()(Instruction const& inst) const;
+
             /**
              * @brief Gets the cost of one generator for the given iteration
              *

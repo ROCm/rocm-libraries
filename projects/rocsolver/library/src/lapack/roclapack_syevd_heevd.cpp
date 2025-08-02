@@ -38,12 +38,14 @@ rocblas_status rocsolver_syevd_heevd_impl(rocblas_handle handle,
     rocblas_int batch_count = 1;
 
     // memory workspace sizes:
+    bool optim_mem;
     // size for constants in rocblas calls
     size_t size_scalars;
     // size of reusable workspaces
     size_t size_work1;
     size_t size_work2;
     size_t size_work3;
+    size_t size_work4;
     size_t size_tmptau_W;
     // extra space for call stedc
     size_t size_splits, size_tmpz;
@@ -52,19 +54,19 @@ rocblas_status rocsolver_syevd_heevd_impl(rocblas_handle handle,
     // size for temporary householder scalars
     size_t size_tau;
 
-    rocsolver_syevd_heevd_getMemorySize<false, T, S>(
+    rocsolver_syevd_heevd_getMemorySize<false, false, T, S>(
         handle, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2, &size_work3,
-        &size_tmpz, &size_splits, &size_tmptau_W, &size_tau, &size_workArr);
+        &size_work4, &size_tmpz, &size_splits, &size_tmptau_W, &size_tau, &size_workArr, &optim_mem);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work1, size_work2,
-                                                      size_work3, size_tmpz, size_splits,
+                                                      size_work3, size_work4, size_tmpz, size_splits,
                                                       size_tmptau_W, size_tau, size_workArr);
 
     // memory workspace allocation
-    void *scalars, *work1, *work2, *work3, *tmpz, *splits, *tmptau_W, *tau, *workArr;
-    rocblas_device_malloc mem(handle, size_scalars, size_work1, size_work2, size_work3, size_tmpz,
-                              size_splits, size_tmptau_W, size_tau, size_workArr);
+    void *scalars, *work1, *work2, *work3, *work4, *tmpz, *splits, *tmptau_W, *tau, *workArr;
+    rocblas_device_malloc mem(handle, size_scalars, size_work1, size_work2, size_work3, size_work4,
+                              size_tmpz, size_splits, size_tmptau_W, size_tau, size_workArr);
 
     if(!mem)
         return rocblas_status_memory_error;
@@ -73,19 +75,20 @@ rocblas_status rocsolver_syevd_heevd_impl(rocblas_handle handle,
     work1 = mem[1];
     work2 = mem[2];
     work3 = mem[3];
-    tmpz = mem[4];
-    splits = mem[5];
-    tmptau_W = mem[6];
-    tau = mem[7];
-    workArr = mem[8];
+    work4 = mem[4];
+    tmpz = mem[5];
+    splits = mem[6];
+    tmptau_W = mem[7];
+    tau = mem[8];
+    workArr = mem[9];
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
     // execution
     return rocsolver_syevd_heevd_template<false, false, T>(
         handle, evect, uplo, n, A, shiftA, lda, strideA, D, strideD, E, strideE, info, batch_count,
-        (T*)scalars, work1, work2, work3, (S*)tmpz, (rocblas_int*)splits, (T*)tmptau_W, (T*)tau,
-        (T**)workArr);
+        (T*)scalars, work1, work2, work3, work4, (S*)tmpz, (rocblas_int*)splits, (T*)tmptau_W,
+        (T*)tau, (T**)workArr, optim_mem);
 }
 
 ROCSOLVER_END_NAMESPACE

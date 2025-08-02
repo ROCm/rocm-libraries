@@ -197,11 +197,15 @@ if(WIN32)
       ARGS -E copy ${file_i} $<TARGET_FILE_DIR:rocsolver-test>
     )
   endforeach()
-  add_custom_command(TARGET rocsolver-test
-    POST_BUILD
-    COMMAND ${CMAKE_COMMAND}
-    ARGS -E copy_directory $ENV{rocblas_DIR}/bin/rocblas/library $<TARGET_FILE_DIR:rocsolver-test>/library
-  )
+  if(DEFINED ENV{rocblas_DIR})
+    add_custom_command(TARGET rocsolver-test
+      POST_BUILD
+      COMMAND ${CMAKE_COMMAND}
+      ARGS -E copy_directory $ENV{rocblas_DIR}/bin/rocblas/library $<TARGET_FILE_DIR:rocsolver-test>/library
+    )
+  else()
+    message(WARNING "rocblas_DIR not set. rocBLAS Tensile runtime kernels will not be copied to client staging directory (insitu testing affected).")
+  endif()
 endif()
 
 target_link_libraries(rocsolver-test PRIVATE

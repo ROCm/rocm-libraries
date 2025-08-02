@@ -1824,6 +1824,64 @@ namespace ExpressionTest
         }
     }
 
+    TEST_CASE("Ignore converts between same-width integral types", "[expression][codegen]")
+    {
+        auto context = TestContext::ForDefaultTarget();
+
+        const auto make_expression = [&](auto type) {
+            auto r
+                = std::make_shared<Register::Value>(context.get(), Register::Type::Vector, type, 1);
+            r->allocateNow();
+            return r->expression();
+        };
+
+        SECTION("Int32")
+        {
+            auto a = make_expression(DataType::Int32);
+
+            auto expr = convert(DataType::UInt32, a) + convert(DataType::UInt32, a);
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            auto result = R"(
+                v_add_u32 v1, v0, v0
+            )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+        }
+
+        SECTION("Int32 Mixed")
+        {
+            auto a = make_expression(DataType::Int32);
+            auto b = make_expression(DataType::UInt32);
+
+            auto expr = convert(DataType::UInt32, a) + convert(DataType::Int32, b);
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            auto result = R"(
+                v_add_u32 v2, v0, v1
+            )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+        }
+
+        SECTION("Int64 Mixed")
+        {
+            auto a = make_expression(DataType::Int64);
+            auto b = make_expression(DataType::UInt64);
+
+            auto expr = convert(DataType::UInt64, a) + convert(DataType::Int64, b);
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            CHECK(context.output().find("mov") == std::string::npos);
+        }
+    }
+
     TEST_CASE("Expression evaluate comparisons", "[expression]")
     {
         auto command = std::make_shared<Command>();
