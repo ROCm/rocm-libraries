@@ -714,8 +714,7 @@ pushd .
   # #################################################
   # configure & build
   # #################################################
-  cmake_common_options="-DGPU_TARGETS=${gpu_architecture}"
-  cmake_client_options=""
+  cmake_common_options="-DGPU_TARGETS=${gpu_architecture} -DHIPBLASLT_ENABLE_FETCH=ON"
 
   if [[ "${legacy_hipblas_direct}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DHIPBLASLT_ENABLE_HIPBLAS_DIRECT=ON"
@@ -832,7 +831,7 @@ pushd .
   fi
 
   if [[ "${build_clients}" == false ]]; then
-    cmake_client_options=""
+    cmake_client_options="HIPBLASLT_ENABLE_CLIENTS=OFF"
   fi
 
   echo $cmake_common_options ${cmake_client_options}
