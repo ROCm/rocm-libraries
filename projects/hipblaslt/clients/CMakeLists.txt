@@ -34,14 +34,15 @@ target_link_libraries(hipblaslt-clients-common
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
     if(NOT ROCM_LIBRARIES_SUPERBUILD)
-        find_package(mxDataGenerator QUIET)
-        if(NOT mxDataGenerator_FOUND)
+        if(HIPBLASLT_ENABLE_FETCH)
             FetchContent_Declare(
                 mxDataGenerator
                 GIT_REPOSITORY https://github.com/ROCm/mxDataGenerator.git
                 GIT_TAG 3ac153eec4c1a1e0da7546abc9c0c4f54e180f43
             )
             FetchContent_MakeAvailable(mxDataGenerator)
+        else()
+            find_package(mxDataGenerator REQUIRED)
         endif()
     endif()
     target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_USE_ROCROLLER)
