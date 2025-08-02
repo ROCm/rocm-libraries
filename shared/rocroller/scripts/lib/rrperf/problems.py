@@ -160,7 +160,8 @@ class GEMMProblem:
     scaleValue_A: float = 1.0
     scaleValue_B: float = 1.0
 
-    workgroupMapping: tuple[int, int] = (-1, -1)
+    workgroupMappingDim: int = -1
+    workgroupMappingValue: int = -1
 
     def __post_init__(self):
         convert_class_params(GEMMProblem, self)
