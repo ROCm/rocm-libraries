@@ -108,6 +108,8 @@ struct Arguments
 
     int8_t norm_check;
     int8_t unit_check;
+    bool norm_check_assert;
+
     int8_t timing;
 
     char transA;
@@ -136,6 +138,9 @@ struct Arguments
     char orderB;
     char orderC;
     char orderD;
+
+    bool inEqualOut;
+    int logging;
     /*************************************************************************
      *                     End Of Arguments                                  *
      *************************************************************************/
@@ -185,6 +190,7 @@ struct Arguments
     OPER(devices) SEP                \
     OPER(norm_check) SEP             \
     OPER(unit_check) SEP             \
+    OPER(norm_check_assert) SEP      \
     OPER(timing) SEP                 \
     OPER(transA) SEP                 \
     OPER(transB) SEP                 \
@@ -204,7 +210,9 @@ struct Arguments
     OPER(orderA) SEP                 \
     OPER(orderB) SEP                 \
     OPER(orderC) SEP                 \
-    OPER(orderD) SEP
+    OPER(orderD) SEP                 \
+    OPER(inEqualOut) SEP             \
+    OPER(logging) SEP
     // clang-format on
 
     // Validate input format.

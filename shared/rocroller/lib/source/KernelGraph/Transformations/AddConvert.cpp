@@ -215,8 +215,6 @@ namespace rocRoller
 
         KernelGraph AddConvert::apply(KernelGraph const& k)
         {
-            TIMER(t, "KernelGraph::addConvert");
-
             auto graph = k;
 
             AddConvertOperations adder;

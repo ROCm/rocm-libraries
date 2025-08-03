@@ -276,7 +276,6 @@ namespace rocRoller
 
         KernelGraph OrderMultiplyNodes::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::OrderMultiplyNodes");
             auto rv = original;
 
             for(auto const& group : findAndOrderGroups(original))

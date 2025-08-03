@@ -90,7 +90,7 @@ list( APPEND COMMON_LINK_LIBS "-lm -lstdc++fs")
 if (CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
   list( APPEND COMMON_LINK_LIBS "-lgfortran") # for lapack
 else()
-  list( APPEND COMMON_LINK_LIBS "-lflang_rt.runtime") # for lapack
+  list( APPEND COMMON_LINK_LIBS "-lFortranRuntime -lFortranDecimal") # for lapack
 endif()
 
 #if (NOT WIN32)
@@ -110,6 +110,11 @@ set_target_properties( hipsparselt-test PROPERTIES
   IMPORT_SUFFIX ".lib"
   LINKER_LANGUAGE CXX
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
+)
+set_target_properties( hipsparselt-test PROPERTIES BUILD_RPATH_USE_ORIGIN TRUE)
+set_target_properties( hipsparselt-test PROPERTIES
+  BUILD_RPATH "${HIP_CLANG_ROOT}/lib"
+  INSTALL_RPATH "$ORIGIN/../llvm/lib"
 )
 
 set( HIPSPARSELT_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipsparselt_gtest.data")

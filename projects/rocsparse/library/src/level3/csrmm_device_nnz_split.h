@@ -104,7 +104,7 @@ namespace rocsparse
             for(unsigned int i = 0; i < WF_SIZE; ++i)
             {
                 const T v = rocsparse::shfl(val, i, WF_SIZE);
-                const J c = __shfl(col_ind, i, WF_SIZE);
+                const J c = rocsparse::shfl(col_ind, i, WF_SIZE);
 
                 valB[i] = v * conj_val(dense_B[c + ldb * (colB + lid)], conj_B);
             }
@@ -249,7 +249,7 @@ namespace rocsparse
         for(unsigned int i = 0; i < WF_SIZE; ++i)
         {
             const T v = rocsparse::shfl(val, i, WF_SIZE);
-            const J c = __shfl(col_ind, i, WF_SIZE);
+            const J c = rocsparse::shfl(col_ind, i, WF_SIZE);
 
             valB[i] = (colB + lid) < N ? v * conj_val(dense_B[c + ldb * (colB + lid)], conj_B)
                                        : static_cast<T>(0);

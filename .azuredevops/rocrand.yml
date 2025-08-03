@@ -38,8 +38,11 @@ trigger:
 
 pr: none
 
-jobs:
+stages:
+- stage: rocrand
+  jobs:
   - template: ${{ variables.CI_COMPONENT_PATH }}/rocRAND.yml@pipelines_repo
     parameters:
       sparseCheckoutDir: projects/rocrand
       triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
+- template: templates/report-summary-check-wrapper.yml

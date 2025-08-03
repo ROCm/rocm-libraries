@@ -23,7 +23,8 @@
 #include "test_common.hpp"
 #include <gtest/gtest.h>
 
-__global__ void write_target_arch(rocrand_impl::host::target_arch* dest_arch)
+__global__
+void write_target_arch(rocrand_impl::host::target_arch* dest_arch)
 {
     constexpr auto arch = rocrand_impl::host::get_device_arch();
     *dest_arch          = arch;
@@ -61,8 +62,8 @@ template<class T,
          unsigned int BlockSize = rocrand_impl::host::default_config_provider<
                                       dummy_rng_type>::template device_config<T>(true)
                                       .threads>
-__global__ __launch_bounds__(BlockSize) void write_config(unsigned int* block_size,
-                                                          unsigned int* grid_size)
+__global__ __launch_bounds__(BlockSize)
+void write_config(unsigned int* block_size, unsigned int* grid_size)
 {
     if(blockIdx.x == 0 && threadIdx.x == 0 && BlockSize == blockDim.x)
     {
@@ -174,8 +175,8 @@ TEST(rocrand_config_dispatch_tests, device_id_from_stream)
 }
 
 template<class ConfigProvider>
-__global__ void least_common_grid_size_kernel(unsigned int*    least_common_grid_size,
-                                              rocrand_ordering order)
+__global__
+void least_common_grid_size_kernel(unsigned int* least_common_grid_size, rocrand_ordering order)
 {
     *least_common_grid_size = rocrand_impl::host::get_least_common_grid_size<ConfigProvider>(
         rocrand_impl::host::is_ordering_dynamic(order));
@@ -226,7 +227,8 @@ TEST(rocrand_config_dispatch_tests, default_config_provider)
 }
 
 template<class ConfigProvider>
-__global__ void config_selector_kernel(unsigned int* output)
+__global__
+void config_selector_kernel(unsigned int* output)
 {
     if(threadIdx.x == 0 && blockIdx.x == 0)
     {
@@ -241,14 +243,16 @@ namespace rocrand_impl::host
 template<>
 struct generator_config_selector<dummy_rng_type, unsigned short>
 {
-    __host__ __device__ static constexpr unsigned int get_threads(const target_arch arch)
+    __host__ __device__
+    static constexpr unsigned int get_threads(const target_arch arch)
     {
         if(arch == target_arch::gfx906)
             return 64;
         return generator_config_defaults<dummy_rng_type, unsigned short>::threads;
     }
 
-    __host__ __device__ static constexpr unsigned int get_blocks(const target_arch /*arch*/)
+    __host__ __device__
+    static constexpr unsigned int get_blocks(const target_arch /*arch*/)
     {
         return generator_config_defaults<dummy_rng_type, unsigned short>::blocks;
     }
@@ -263,8 +267,8 @@ TEST(rocrand_config_dispatch_tests, config_selection)
     HIP_CHECK(hipMallocHelper(&d_output, size * sizeof(*d_output)));
 
     using config_provider_t = rocrand_impl::host::default_config_provider<dummy_rng_type>;
-    config_provider_t                      config_provider{};
-    rocrand_impl::host::generator_config   config{};
+    config_provider_t                    config_provider{};
+    rocrand_impl::host::generator_config config{};
 
     static constexpr hipStream_t      default_stream = 0;
     static constexpr rocrand_ordering ordering       = ROCRAND_ORDERING_PSEUDO_DYNAMIC;

@@ -138,8 +138,11 @@ public:
     __forceinline__ __device__ __host__
     value next()
     {
-        value ret = detail::get_element_at(m_state.result, m_state.substate);
-
+#if defined(__HIP_PLATFORM_AMD__)
+        value ret = ROCRAND_HIPVEC_ACCESS(m_state.result)[m_state.substate];
+#else
+        value ret = (&m_state.result.x)[m_state.substate];
+#endif
         m_state.substate++;
         if(m_state.substate == 2)
         {

@@ -694,8 +694,8 @@ public:
     static std::string format_name(std::string string)
     {
         format     format = get_format();
-        std::regex r(
-            "([A-z0-9]*):\\s*((?:common::custom_type<[A-z0-9,]*>)|[A-z:\\(\\)\\.<>\\s0-9]*)(\\}*)");
+        std::regex r("([A-z0-9]*):\\s*((?:common::custom_type<[A-z0-9,]*>)|(?:common::custom_type_"
+                     "copyable<[A-z0-9,]*>)|[A-z:\\(\\)\\.<>\\s0-9]*)(\\}*)");
         // First we perform some checks
         bool checks[4] = {false};
         for(std::sregex_iterator i = std::sregex_iterator(string.begin(), string.end(), r);
@@ -916,6 +916,16 @@ template<>
 inline const char* Traits<rocprim::uint128_t>::name()
 {
     return "rocprim::uint128_t";
+}
+template<>
+inline const char* Traits<common::custom_type_copyable<char, double>>::name()
+{
+    return "common::custom_type_copyable<char,double>";
+}
+template<>
+inline const char* Traits<common::custom_type_copyable<double, double>>::name()
+{
+    return "common::custom_type_copyable<double,double>";
 }
 
 inline const char* get_block_scan_algorithm_name(rocprim::block_scan_algorithm alg)

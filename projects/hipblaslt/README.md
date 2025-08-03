@@ -66,20 +66,27 @@ Required software:
 * CMake 3.16.8 or later
 * python3.8 or later
 * python3.8-venv or later
-* AMD [ROCm](https://github.com/RadeonOpenCompute/ROCm), version 5.5 or later
-* [hipBLAS-common](https://github.com/ROCm/hipBLAS-common)
+* AMD [ROCm](https://github.com/ROCm/ROCm), version 5.5 or later
+* [hipBLAS-common](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblas-common)
 * [roctracer](https://github.com/ROCm/roctracer)
 
 ## Build and install
 
 You can build hipBLASLt using the `install.sh` script:
 
+> [!NOTE]
+> The following clone command downloads all components in the [rocm-libraries](https://github.com/ROCm/rocm-libraries) GitHub repository.
+This is recommended for working with multiple library components, but can take a very long time to
+download. For a shorter download process that only clones the hipBLASLt library, see the
+[hipBLASLt installation documentation](https://rocm.docs.amd.com/projects/hipBLASLt/en/latest/installation.html)
+for version 7.0 or later.
+
 ```bash
-# Clone hipBLASLt using git
-git clone https://github.com/ROCmSoftwarePlatform/hipBLASLt
+# Clone rocm-libraries including hipBLASLt using git
+git clone https://github.com/ROCm/rocm-libraries.git
 
 # Go to hipBLASLt directory
-cd hipBLASLt
+cd rocm-libraries/projects/hipBLASLt
 
 # Run requirements.txt in folder tensilelite
 python3 -m pip install -r tensilelite/requirements.txt
@@ -118,6 +125,6 @@ To build and run TensileLite Host Library Tests, use the following commands:
 ## Contribute
 
 If you want to submit an issue, you can do so on
-[GitHub](https://github.com/ROCmSoftwarePlatform/hipBLASLt/issues).
+[GitHub](https://github.com/ROCm/rocm-libraries/issues).
 
 To contribute to our repository, you can create a GitHub pull request.

@@ -1,0 +1,75 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "opt-rocm",
+      "displayName": "/opt/rocm Config",
+      "description": "Sets compiler and prefix path for /opt/rocm install",
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
+        "CMAKE_PREFIX_PATH": "/opt/rocm;/opt/rocm/llvm",
+        "CMAKE_BUILD_TYPE": "Release",
+        "ROCROLLER_ENABLE_FETCH": "ON"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "Address Sanitizer",
+      "description": "Build with asan",
+      "inherits": "opt-rocm",
+      "cacheVariables": {
+        "ROCROLLER_ENABLE_ASAN": "ON"
+      }
+    },
+    {
+      "name": "precheckin",
+      "displayName": "Precheckin Config",
+      "description": "Config used in precheckin build",
+      "inherits": "opt-rocm",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "ROCROLLER_ENABLE_YAML_CPP": "OFF",
+        "ROCROLLER_TESTS_SKIP_SLOW": "OFF"
+      }
+    },
+    {
+      "name": "amd-mrisa",
+      "displayName": "AMD MR ISAs",
+      "description": "Do not use pregenerated arch defs",
+      "inherits": "opt-rocm",
+      "cacheVariables": {
+        "ROCROLLER_ENABLE_PREGENERATED_ARCH_DEF": "OFF"
+      }
+    },
+    {
+      "name": "coverage",
+      "displayName": "Coverage",
+      "description": "Build with coverage",
+      "inherits": "opt-rocm",
+      "cacheVariables": {
+        "ROCROLLER_BUILD_SHARED_LIBS": "OFF",
+        "ROCROLLER_ENABLE_COVERAGE": "ON",
+        "ROCROLLER_ENABLE_LLD": "ON"
+      }
+    },
+    {
+      "name": "docs",
+      "displayName": "Documentation",
+      "description": "Build documentation",
+      "inherits": "opt-rocm",
+      "cacheVariables": {
+        "ROCROLLER_ENABLE_DOCS": "ON"
+      }
+    },
+    {
+      "name": "codeql",
+      "displayName": "Codeql",
+      "description": "Configure for codeql build",
+      "inherits": "opt-rocm",
+      "cacheVariables": {
+        "ROCROLLER_ENABLE_TEST_DISCOVERY": "OFF"
+      }
+    }
+
+]
+}

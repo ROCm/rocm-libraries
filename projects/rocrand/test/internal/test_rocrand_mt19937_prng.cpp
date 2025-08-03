@@ -536,8 +536,10 @@ using mt19937_generator_engine_tests_types = ::testing::Types<mt19937_generator>
 TYPED_TEST_SUITE(mt19937_generator_engine_tests, mt19937_generator_engine_tests_types);
 
 /// Initialize the octo engines for both generators. Skip \p subsequence_size for the first generator.
-__global__ __launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE) void init_engines_kernel(
-    mt19937_octo_engine* octo_engines, const unsigned int* engines, unsigned int subsequence_size)
+__global__ __launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE)
+void init_engines_kernel(mt19937_octo_engine* octo_engines,
+                         const unsigned int*  engines,
+                         unsigned int         subsequence_size)
 {
     constexpr unsigned int n         = mt19937_constants::n;
     const unsigned int     thread_id = blockIdx.x * blockDim.x + threadIdx.x;
@@ -558,11 +560,11 @@ __global__ __launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE) void init_engines_k
 }
 
 /// Each generator produces \p n elements in its own \p data section.
-__global__ __launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE) void generate_kernel(
-    mt19937_octo_engine* engines,
-    unsigned int*        data,
-    unsigned int         elements_per_generator,
-    unsigned int         subsequence_size)
+__global__ __launch_bounds__(ROCRAND_DEFAULT_MAX_BLOCK_SIZE)
+void generate_kernel(mt19937_octo_engine* engines,
+                     unsigned int*        data,
+                     unsigned int         elements_per_generator,
+                     unsigned int         subsequence_size)
 {
     constexpr unsigned int n                     = mt19937_constants::n;
     constexpr unsigned int threads_per_generator = mt19937_octo_engine::threads_per_generator;
