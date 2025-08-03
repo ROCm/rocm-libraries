@@ -140,16 +140,19 @@ namespace TensileLite
                     {MatrixInstruction(16, 16, 4, DataType::Int8), 32}, // v_mfma_i32_16x16x4_4b_i8
                     {MatrixInstruction(4, 4, 4, DataType::Int8), 8}, // v_mfma_i32_4x4x4_16b_i8
                     // XF32
-                    {MatrixInstruction(32, 32, 8, DataType::BFloat16), 96}, // v_mfma_f32_32x32x8_bf16 * 3
-                    {MatrixInstruction(32, 32, 16, DataType::BFloat16), 96}, // v_mfma_f32_32x32x16_bf16 * 3
-                    {MatrixInstruction(16, 16, 16, DataType::BFloat16), 48}, // v_mfma_f32_16x16x16_bf16 * 3
-                    {MatrixInstruction(16, 16, 32, DataType::BFloat16), 48}, // v_mfma_f32_16x16x16_bf16 * 3
+                    {MatrixInstruction(32, 32, 8, DataType::XFloat32), 96}, // v_mfma_f32_32x32x8_bf16 * 3
+                    {MatrixInstruction(32, 32, 16, DataType::XFloat32), 96}, // v_mfma_f32_32x32x16_bf16 * 3
+                    {MatrixInstruction(16, 16, 16, DataType::XFloat32), 48}, // v_mfma_f32_16x16x16_bf16 * 3
+                    {MatrixInstruction(16, 16, 32, DataType::XFloat32), 48}, // v_mfma_f32_16x16x16_bf16 * 3
                     // F6
                     {MatrixInstruction(32, 32, 64, DataType::Float6), 32}, // v_mfma_f32_32x32x64_f6
                     {MatrixInstruction(16, 16, 128, DataType::Float6), 16}, // v_mfma_f32_16x16x128_f6
                     // F4
                     {MatrixInstruction(32, 32, 64, DataType::Float4), 32}, // v_mfma_f32_32x32x64_f4
                     {MatrixInstruction(16, 16, 128, DataType::Float4), 16}, // v_mfma_f32_16x16x128_f4
+                    // DOT2
+                    {MatrixInstruction( 1,  1,  64, DataType::Half), 16}, // V_DOT2_F32_F16
+                    {MatrixInstruction( 1,  1,  64, DataType::BFloat16), 16}, // V_DOT2_F32_BF16
                 }}};
 
     } // namespace analytical

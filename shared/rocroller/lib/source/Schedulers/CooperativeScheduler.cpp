@@ -74,23 +74,29 @@ namespace rocRoller
             size_t numSeqs = 0;
 
             size_t idx = 0;
-            float  currentCost;
 
             while(true)
             {
                 co_yield handleNewNodes(seqs, iterators);
                 numSeqs = seqs.size();
 
+                float currentCost = 0;
+                bool  lockedOut   = false;
+
                 if(iterators[idx] != seqs[idx].end())
                 {
-                    currentCost = (*m_cost)(iterators[idx]);
+                    auto const& inst = *iterators[idx];
+
+                    lockedOut   = !m_lockstate.isSchedulable(inst, idx);
+                    currentCost = (*m_cost)(inst);
                 }
-                if(iterators[idx] == seqs[idx].end() || currentCost > 0)
+
+                if(iterators[idx] == seqs[idx].end() || lockedOut || currentCost > 0)
                 {
                     size_t origIdx    = idx;
                     float  minCost    = std::numeric_limits<float>::max();
                     int    minCostIdx = -1;
-                    if(iterators[idx] != seqs[idx].end())
+                    if(iterators[idx] != seqs[idx].end() && !lockedOut)
                     {
                         minCost    = currentCost;
                         minCostIdx = idx;
@@ -102,8 +108,10 @@ namespace rocRoller
                     {
                         if(iterators[idx] != seqs[idx].end())
                         {
-                            currentCost = (*m_cost)(iterators[idx]);
-                            if(currentCost < minCost)
+                            auto const& inst = *iterators[idx];
+                            lockedOut        = !m_lockstate.isSchedulable(inst, idx);
+                            currentCost      = (*m_cost)(inst);
+                            if(!lockedOut && currentCost < minCost)
                             {
                                 minCost    = currentCost;
                                 minCostIdx = idx;
@@ -121,10 +129,8 @@ namespace rocRoller
 
                     idx = minCostIdx;
                 }
-                co_yield yieldFromStream(iterators[idx]);
+                co_yield yieldFromStream(iterators[idx], idx);
             }
-
-            m_lockstate.isValid(false);
         }
     }
 }

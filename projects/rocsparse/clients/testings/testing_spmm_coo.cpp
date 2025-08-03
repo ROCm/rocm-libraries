@@ -346,7 +346,7 @@ void testing_spmm_coo(const Arguments& arg)
 
         double gflop_count = spmm_gflop_count(N, nnz_A, nnz_C, hbeta != static_cast<T>(0));
         double gbyte_count
-            = coomm_gbyte_count<T, I>(nnz_A, nnz_B, nnz_C, hbeta != static_cast<T>(0));
+            = coomm_gbyte_count<A, B, C, I>(nnz_A, nnz_B, nnz_C, hbeta != static_cast<T>(0));
 
         double gpu_gbyte  = get_gpu_gbyte(gpu_time_used, gbyte_count);
         double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);

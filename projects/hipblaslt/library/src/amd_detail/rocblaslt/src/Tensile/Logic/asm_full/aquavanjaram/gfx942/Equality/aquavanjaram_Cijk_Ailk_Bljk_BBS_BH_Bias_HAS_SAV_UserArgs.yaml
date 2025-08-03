@@ -24074,7 +24074,7 @@
     tailLoopOptB: true
   - 1LDSBuffer: 0
     ActivationAlt: false
-    ActivationFuncCall: false
+    ActivationFuncCall: true
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -24292,7 +24292,7 @@
     tailLoopOptB: true
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: false
+    ActivationFuncCall: true
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1
@@ -29397,6 +29397,8 @@
     - [141, 0.0]
   - - [32768, 32768, 1, 6144]
     - [141, 0.0]
+  - - [128256, 49152, 1, 4096]
+    - [89, 0.0]
 - null
 - null
 - DeviceEfficiency

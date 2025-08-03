@@ -32,6 +32,7 @@
 #include "bn_test_data.hpp"
 #include "test_operations.hpp"
 
+#define WORKAROUND_SWDEV_547301 1
 // Define an enum to identify which version of BN api to call
 enum BNApiType
 {
@@ -126,12 +127,7 @@ protected:
         bn_infer_test_data.activ_alpha = static_cast<double>(0.1f);
         bn_infer_test_data.activ_beta  = static_cast<double>(0.3f);
 
-        auto&& handle = get_handle();
-        if(!miopen::solver::ck_utility::is_ck_whitelist(handle.GetStream()))
-        {
-            test_skipped = true;
-            GTEST_SKIP() << "Not Applicable on " << handle.GetDeviceName() << " Architecture";
-        }
+        auto&& handle      = get_handle();
         miopenStatus_t res = miopenStatusUnknownError;
         if(bn_infer_test_data.activ_mode > 0)
         {
@@ -233,8 +229,13 @@ protected:
                             bn_infer_test_data.activ_alpha,
                             bn_infer_test_data.out_ref.data,
                             bn_infer_test_data.out_ref.data);
-        // 4e-3 is tolerance used by CK kernel.
-        test::CompareTensor<YDataType>(bn_infer_test_data.output, bn_infer_test_data.out_ref, 4e-3);
+        auto tolerance = 4e-3;
+#if WORKAROUND_SWDEV_547301
+        // Workaround to let BN Infer tests pass on Navi4x,SWDEV-547301
+        tolerance = miopen::StartsWith(handle.GetDeviceName(), "gfx120") ? 8e-3 : 4e-3;
+#endif
+        test::CompareTensor<YDataType>(
+            bn_infer_test_data.output, bn_infer_test_data.out_ref, tolerance);
     }
 
     TestCase bn_config;
@@ -279,12 +280,7 @@ protected:
                                            : static_cast<double>(0.5f);
         bn_bwd_test_data.activ_beta  = static_cast<double>(0.3f);
 
-        auto&& handle = get_handle();
-        if(!miopen::solver::ck_utility::is_ck_whitelist(handle.GetStream()))
-        {
-            test_skipped = true;
-            GTEST_SKIP() << "Not Applicable on " << handle.GetDeviceName() << " Architecture";
-        }
+        auto&& handle      = get_handle();
         miopenStatus_t res = miopenStatusUnknownError;
         if(bn_bwd_test_data.activ_mode > 0)
         {
@@ -448,12 +444,7 @@ protected:
         bn_fwd_train_test_data.activ_alpha = static_cast<double>(0.1f);
         bn_fwd_train_test_data.activ_beta  = static_cast<double>(0.3f);
 
-        auto&& handle = get_handle();
-        if(!miopen::solver::ck_utility::is_ck_whitelist(handle.GetStream()))
-        {
-            test_skipped = true;
-            GTEST_SKIP() << "Not Applicable on " << handle.GetDeviceName() << " Architecture";
-        }
+        auto&& handle      = get_handle();
         miopenStatus_t res = miopenStatusUnknownError;
         if(bn_fwd_train_test_data.activ_mode > 0)
         {
