@@ -21,7 +21,6 @@ if(HIPBLASLT_ENABLE_BLIS)
 else()
     target_link_libraries(hipblaslt-clients-common PUBLIC ${BLAS_LIBRARIES})
 endif()
-
 target_link_libraries(hipblaslt-clients-common
     PUBLIC
         roc::hipblaslt
@@ -30,7 +29,6 @@ target_link_libraries(hipblaslt-clients-common
     PRIVATE
         hip::device
 )
-
 
 if(HIPBLASLT_ENABLE_ROCROLLER)
     if(NOT ROCM_LIBRARIES_SUPERBUILD)
