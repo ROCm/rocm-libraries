@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.24.4)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
 
-project(hipblaslt VERSION 1.1.0 LANGUAGES CXX ASM)
+project(hipblaslt VERSION 1.1.0 LANGUAGES CXX C Fortran ASM)
 
 if("${CMAKE_SOURCE_DIR}" STREQUAL "${PROJECT_SOURCE_DIR}")
     set(HIPBLASLT_IS_SUBPROJECT FALSE)
