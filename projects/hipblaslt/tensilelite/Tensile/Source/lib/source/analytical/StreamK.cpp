@@ -252,8 +252,8 @@ namespace TensileLite
                 const Hardware& analytical_hardware,
                 int dynamic_grid_version)
             {
-                int cu_count = analytical_hardware.N_CU;
-                int tiles = number_of_output_tiles(mt_m, mt_n, x, y, batch);
+                size_t cu_count = analytical_hardware.N_CU;
+                size_t tiles = number_of_output_tiles(mt_m, mt_n, x, y, batch);
 
                 // Dynamically pick the minimum between the cu_count or number of tiles.
                 if(dynamic_grid_version == 1)
