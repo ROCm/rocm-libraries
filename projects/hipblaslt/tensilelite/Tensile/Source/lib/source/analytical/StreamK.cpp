@@ -333,6 +333,7 @@ namespace TensileLite
                                 10);
                 }
                 else if(dynamic_grid_version == 6)
+                {
                     size_t iters_per_tile = std::max(size_t(1), math::safe_ceil_div(z, mt_k));
                     size_t sk_grid = tiles; // Fallback if no good fractional tile is found
                     size_t tile_size = mt_m * mt_n * workspace_size_per_elem_c;
