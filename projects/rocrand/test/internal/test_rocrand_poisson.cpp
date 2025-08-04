@@ -583,26 +583,42 @@ TYPED_TEST(PoissonTest, poisson_distribution_inv_test)
                                          internal_poisson_reader{});
 }
 
-// // External Tests
-// TYPED_TEST(PoissonTest, external_rocrand_poisson)
-// {
-//     using type = typename TestFixture::rocrand_prng_type;
+// External Tests
+template<typename type>
+struct external_poisson_dis
+{
+    __device__ __host__
+    auto operator()(type* state, const double lambda) const
+    {
+        return rocrand_poisson(state, lambda);
+    }
+};
 
-//     run_poisson_test<type, unsigned int>(
-//         TestFixture::small_poisson_lambdas,
-//         [=](type* state, const double lambda) { return rocrand_poisson(state, lambda); },
-//             internal_poisson_reader{});
-// }
+TYPED_TEST(PoissonTest, external_rocrand_poisson)
+{
+    using type = typename TestFixture::rocrand_prng_type;
 
-// // Special Tests
-// TEST(PoissonTest, philox4x32_10_uint4_output)
-// {
-//     std::vector<double> small_poisson_lambdas = {1, 2, 4, 8, 16, 32, 64};
+    run_poisson_test<type, unsigned int>(TestFixture::small_poisson_lambdas,
+                                         external_poisson_dis<type>{},
+                                         internal_poisson_reader{});
+}
 
-//     run_poisson_test<rocrand_state_philox4x32_10, uint4>(
-//         small_poisson_lambdas,
-//         [=](rocrand_state_philox4x32_10* state, const double lambda)
-//         { return rocrand_poisson4(state, lambda); },
-//         internal_poisson_reader4{},
-//         4);
-// }
+// Special Tests
+struct special_poisson_dis
+{
+    __device__ __host__
+    auto operator()(rocrand_state_philox4x32_10* state, const double lambda)
+    {
+        return rocrand_poisson4(state, lambda);
+    }
+};
+
+TEST(PoissonTest, philox4x32_10_uint4_output)
+{
+    std::vector<double> small_poisson_lambdas = {1, 2, 4, 8, 16, 32, 64};
+
+    run_poisson_test<rocrand_state_philox4x32_10, uint4>(small_poisson_lambdas,
+                                                         special_poisson_dis{},
+                                                         internal_poisson_reader4{},
+                                                         4);
+}
