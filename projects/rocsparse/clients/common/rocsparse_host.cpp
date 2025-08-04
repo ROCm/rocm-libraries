@@ -121,8 +121,8 @@ void host_roti(
         T xs = x_val[i];
         T ys = y[idx];
 
-        x_val[i] = *c * xs + *s * ys;
-        y[idx]   = *c * ys - *s * xs;
+        x_val[i] = std::fma(*c, xs, *s * ys);
+        y[idx]   = std::fma(*c, ys, -*s * xs);
     }
 }
 
