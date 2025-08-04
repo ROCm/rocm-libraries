@@ -368,7 +368,7 @@ namespace TensileLite
                     else if (tiles < cu_count)
                     {
                         const std::vector<size_t> tile_fractions = {16, 12, 8, 6, 4, 3, 2, 1};
-                        for(int frac: tile_fractions)
+                        for(size_t frac: tile_fractions)
                         {
                             size_t splitGrid = tiles * frac;
                             size_t itersPerCU = iters_per_tile / frac;
