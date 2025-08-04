@@ -258,7 +258,7 @@ namespace TensileLite
                 // Dynamically pick the minimum between the cu_count or number of tiles.
                 if(dynamic_grid_version == 1)
                 {
-                    return min(cu_count, tiles);
+                    return std::min(cu_count, tiles);
                 }
 
                 // Dynamically pick the minimum between the cu_count or number of tiles,
