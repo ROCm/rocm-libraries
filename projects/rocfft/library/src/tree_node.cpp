@@ -965,7 +965,6 @@ void CommAllToAll::ExecuteAsync(const rocfft_plan     plan,
         }
 
         // in subcomm: sendCounts, recvCounts, etc are sized for num_ranks, indexed by subcomm_rank
-        size_t    elem_size        = element_size(precision, arrayType);
         const int send_count_bytes = static_cast<int>(uniform_count_inside_subcomm * elem_size);
 
         int ret = MPI_Ialltoall(sendBuf.get(in_buffer, out_buffer, local_comm_rank),

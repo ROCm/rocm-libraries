@@ -45,19 +45,15 @@ constexpr size_t PowMax()
     return u;
 }
 
-// types of global transpositions
-enum class transpose_type
+// types of grid layouts for global transpositions
+enum class grid_layout
 {
-    pencil_to_pencil,
-    pencil_to_slab,
-    pencil_to_brick,
-    slab_to_pencil,
-    slab_to_slab,
-    slab_to_brick,
-    brick_to_pencil,
-    brick_to_slab,
-    brick_to_brick
+    invalid = 0,
+    slab    = 1,
+    pencil  = 2,
+    brick   = 3
 };
+using transpose_type = std::pair<grid_layout, grid_layout>;
 
 // Generic function to check is pow of a given base number or not
 template <int base>

@@ -2122,6 +2122,7 @@ void rocfft_plan_t::GlobalTransposeP2P(size_t                     elem_size,
 }
 
 // global transpose using MPI sub-communicators
+// subcomm is guaranteed to be a valid communicator (not MPI_COMM_NULL) before this call
 void rocfft_plan_t::GlobalTransposeA2ASubcomm(size_t                     elem_size,
                                               const rocfft_field_t&      inField,
                                               const rocfft_field_t&      outField,
@@ -2133,9 +2134,13 @@ void rocfft_plan_t::GlobalTransposeA2ASubcomm(size_t                     elem_si
                                               MPI_Comm_wrapper_t&&       subcomm)
 {
 #ifdef ROCFFT_MPI_ENABLE
-    int subcomm_rank = -1, subcomm_size = -1;
-    MPI_Comm_rank(subcomm, &subcomm_rank);
-    MPI_Comm_size(subcomm, &subcomm_size);
+    int  subcomm_size = -1;
+    auto rcmpi        = MPI_Comm_size(subcomm, &subcomm_size);
+    if(rcmpi != MPI_SUCCESS || subcomm_size < 2)
+        throw std::runtime_error(
+            "MPI_Comm_size error: subcommunicator is invalid or contains fewer than two ranks "
+            "(error code: "
+            + std::to_string(rcmpi) + ", size: " + std::to_string(subcomm_size) + ")");
 
     // map subcomm-local rank <-> global rank for this pencil
     // for all ranks, set up a vector:
@@ -2146,8 +2151,13 @@ void rocfft_plan_t::GlobalTransposeA2ASubcomm(size_t                     elem_si
 
     // build mapping by MPI_Allgather (gathering global rank from all subcomm ranks)
     int my_global_rank = get_local_comm_rank();
-    MPI_Allgather(
+    rcmpi              = MPI_Allgather(
         &my_global_rank, 1, MPI_INT, global_rank_of_subcomm_rank.data(), 1, MPI_INT, subcomm);
+    if(rcmpi != MPI_SUCCESS)
+    {
+        throw std::runtime_error("MPI_Allgather failed: " + std::to_string(rcmpi));
+    }
+
     for(int i = 0; i < subcomm_size; ++i)
         subcomm_rank_of_global_rank[global_rank_of_subcomm_rank[i]] = i;
 
@@ -2169,16 +2179,16 @@ void rocfft_plan_t::GlobalTransposeA2ASubcomm(size_t                     elem_si
     for(size_t inBrickIdx = 0; inBrickIdx < inField.bricks.size(); ++inBrickIdx)
     {
         const auto& inBrick       = inField.bricks[inBrickIdx];
-        int         inRank        = inBrick.location.comm_rank;
-        int         inSubcommRank = subcomm_rank_of_global_rank[inRank];
+        const int   inRank        = inBrick.location.comm_rank;
+        const int   inSubcommRank = subcomm_rank_of_global_rank[inRank];
         if(inSubcommRank == -1)
             continue; // skip input bricks not in this subcomm
 
         for(size_t outBrickIdx = 0; outBrickIdx < outField.bricks.size(); ++outBrickIdx)
         {
             const auto& outBrick       = outField.bricks[outBrickIdx];
-            int         outRank        = outBrick.location.comm_rank;
-            int         outSubcommRank = subcomm_rank_of_global_rank[outRank];
+            const int   outRank        = outBrick.location.comm_rank;
+            const int   outSubcommRank = subcomm_rank_of_global_rank[outRank];
             if(outSubcommRank == -1)
                 continue; // skip output bricks not in this subcomm
 
@@ -2298,12 +2308,12 @@ void rocfft_plan_t::GlobalTransposeA2ASubcomm(size_t                     elem_si
     }
 
     // check uniformity for alltoall within the subcomm
-    bool uniform_counts = std::all_of(send_counts.begin(),
-                                      send_counts.end(),
-                                      [&](size_t c) { return c == send_counts[0]; })
-                          && std::all_of(recv_counts.begin(), recv_counts.end(), [&](size_t c) {
-                                 return c == recv_counts[0];
-                             });
+    const bool uniform_counts
+        = std::all_of(
+              send_counts.begin(), send_counts.end(), [&](size_t c) { return c == send_counts[0]; })
+          && std::all_of(recv_counts.begin(), recv_counts.end(), [&](size_t c) {
+                 return c == recv_counts[0];
+             });
 
     size_t uniform_count_inside_subcomm = 0;
     if(uniform_counts)
@@ -2506,13 +2516,12 @@ void rocfft_plan_t::GlobalTransposeA2A(size_t                     elem_size,
     }
 
     // check if uniform exchange to use MPI_Alltoall
-    bool uniform_counts = false;
-    uniform_counts      = std::all_of(send_counts.begin(),
-                                 send_counts.end(),
-                                 [&](size_t c) { return c == send_counts[0]; })
-                     && std::all_of(recv_counts.begin(), recv_counts.end(), [&](size_t c) {
-                            return c == recv_counts[0];
-                        });
+    const bool uniform_counts
+        = std::all_of(
+              send_counts.begin(), send_counts.end(), [&](size_t c) { return c == send_counts[0]; })
+          && std::all_of(recv_counts.begin(), recv_counts.end(), [&](size_t c) {
+                 return c == recv_counts[0];
+             });
 
     // add the all-to-all op itself, which depends on pack ops
     auto alltoall_ptr = std::make_unique<CommAllToAll>(precision,
@@ -2572,7 +2581,21 @@ rocfft_field_t MakeFieldWithPencilSplit(const rocfft_field_t&      currentField,
     rocfft_field_t out = currentField;
     out.bricks.resize(n_bricks);
 
-    int ndim = (int)lengthsWithBatch.size();
+    const int ndim = static_cast<int>(lengthsWithBatch.size());
+    for(int i = 0; i < 2; ++i)
+    {
+        int ax = split_axes[i];
+        int sz = split_sizes[i];
+        if(ax < 0 || ax >= ndim)
+            throw std::out_of_range("split_axes[" + std::to_string(i) + "] value "
+                                    + std::to_string(ax)
+                                    + " is out of range for ndim=" + std::to_string(ndim));
+        if(sz <= 0 || static_cast<size_t>(sz) > lengthsWithBatch[ax])
+            throw std::invalid_argument("split_sizes[" + std::to_string(i) + "] ("
+                                        + std::to_string(sz)
+                                        + ") must be positive and not exceed axis length ("
+                                        + std::to_string(lengthsWithBatch[ax]) + ")");
+    }
 
     // distribute location/device assignments round-robin
     for(int i = 0; i < n_bricks; ++i)
@@ -2601,8 +2624,8 @@ rocfft_field_t MakeFieldWithPencilSplit(const rocfft_field_t&      currentField,
         brick.upper[axis_q] = len_q * (q + 1) / Q;
 
         // contiguous strides
-        auto brickLength = brick.length();
-        int  dist        = 1;
+        const auto brickLength = brick.length();
+        int        dist        = 1;
         for(size_t s = 0; s < brick.stride.size(); ++s)
         {
             brick.stride[s] = dist;
@@ -2618,142 +2641,89 @@ rocfft_field_t MakeFieldWithPencilSplit(const rocfft_field_t&      currentField,
 }
 
 // get transpose plan structure
-inline int grid_kind(const std::array<int, 3>& g)
+inline grid_layout grid_kind(const std::array<int, 3>& grid)
 {
-    int n_ones = 0;
-    for(int i = 0; i < 3; ++i)
-        if(g[i] == 1)
-            ++n_ones;
+    const int n_ones = std::count(grid.begin(), grid.end(), 1);
     if(n_ones == 2)
-        return 1; // slab
+        return grid_layout::slab;
     if(n_ones == 1)
-        return 2; // pencil
+        return grid_layout::pencil;
     if(n_ones == 0)
-        return 3; // brick
-    return 0;
+        return grid_layout::brick;
+    return grid_layout::invalid;
 }
 
 inline transpose_type get_transpose_type(const std::array<int, 3>& from,
                                          const std::array<int, 3>& to)
 {
-    int kind_from = grid_kind(from);
-    int kind_to   = grid_kind(to);
-
-    if(kind_from == 2 && kind_to == 2)
-        return transpose_type::pencil_to_pencil;
-    if(kind_from == 2 && kind_to == 1)
-        return transpose_type::pencil_to_slab;
-    if(kind_from == 2 && kind_to == 3)
-        return transpose_type::pencil_to_brick;
-    if(kind_from == 1 && kind_to == 2)
-        return transpose_type::slab_to_pencil;
-    if(kind_from == 1 && kind_to == 1)
-        return transpose_type::slab_to_slab;
-    if(kind_from == 1 && kind_to == 3)
-        return transpose_type::slab_to_brick;
-    if(kind_from == 3 && kind_to == 2)
-        return transpose_type::brick_to_pencil;
-    if(kind_from == 3 && kind_to == 1)
-        return transpose_type::brick_to_slab;
-    if(kind_from == 3 && kind_to == 3)
-        return transpose_type::brick_to_brick;
-    throw std::runtime_error("Unknown transpose kind!");
+    return std::make_pair(grid_kind(from), grid_kind(to));
 }
 
-inline const char* transpose_type_str(transpose_type t)
+inline const char* grid_layout_str(grid_layout l)
 {
-    switch(t)
+    switch(l)
     {
-    case transpose_type::pencil_to_pencil:
-        return "pencil_to_pencil";
-    case transpose_type::pencil_to_slab:
-        return "pencil_to_slab";
-    case transpose_type::pencil_to_brick:
-        return "pencil_to_brick";
-    case transpose_type::slab_to_pencil:
-        return "slab_to_pencil";
-    case transpose_type::slab_to_slab:
-        return "slab_to_slab";
-    case transpose_type::slab_to_brick:
-        return "slab_to_brick";
-    case transpose_type::brick_to_pencil:
-        return "brick_to_pencil";
-    case transpose_type::brick_to_slab:
-        return "brick_to_slab";
-    case transpose_type::brick_to_brick:
-        return "brick_to_brick";
+    case grid_layout::slab:
+        return "slab";
+    case grid_layout::pencil:
+        return "pencil";
+    case grid_layout::brick:
+        return "brick";
     default:
-        return "?";
+        return "invalid";
     }
 }
 
-template <typename T>
-void push_unique_grid(std::vector<T>& vec, const T& val)
+inline std::string transpose_type_str(transpose_type t)
 {
-    if(std::find(vec.begin(), vec.end(), val) == vec.end())
-        vec.push_back(val);
+    return std::string(grid_layout_str(t.first)) + "_to_" + grid_layout_str(t.second);
 }
-// find all pairs (a,b) such that a*b=prod and a>=1, b>=1
-std::vector<std::pair<int, int>> get_proc_candidates(int prod)
+
+// heuristic method to create a processor grid
+std::pair<int, int> get_most_balanced_proc_pair(int prod)
 {
-    std::vector<std::pair<int, int>> result;
-    for(int a = 1; a <= prod; ++a)
+    for(int a = static_cast<int>(std::sqrt(prod)); a >= 1; --a)
     {
         if(prod % a == 0)
-        {
-            int b = prod / a;
-            result.emplace_back(a, b);
-        }
+            return {a, prod / a};
     }
-    return result;
+    return {1, prod}; // should not hit unless prod < 1
 }
 
 void get_transpose_plan(const std::array<int, 3>&        input_grid,
                         const std::array<int, 3>&        output_grid,
-                        std::vector<std::array<int, 3>>& plan,
-                        std::vector<transpose_type>&     trans_types)
+                        std::vector<std::array<int, 3>>& transpose_plan,
+                        std::vector<transpose_type>&     transpose_types)
 {
-    plan.clear();
-    trans_types.clear();
+    transpose_plan.clear();
+    transpose_types.clear();
 
-    int                             prod = input_grid[0] * input_grid[1] * input_grid[2];
-    std::vector<std::array<int, 3>> pencils;
+    int                          prod = input_grid[0] * input_grid[1] * input_grid[2];
+    std::set<std::array<int, 3>> pencils;
 
-    // get sequence of grids
-    // for each axis, generate the pencil with 1 in that axis, largest and most balanced possible
+    // for each axis, generate the pencil with 1 in that axis, as balanced as possible
     for(int pos = 0; pos < 3; ++pos)
     {
-        auto pairs = get_proc_candidates(prod);
-        // choose the pair with minimal |a-b| (most balanced)
-        int best_a = 1, best_b = prod, min_diff = prod;
-        for(const auto& [a, b] : pairs)
-        {
-            int diff = std::abs(a - b);
-            if(diff < min_diff)
-            {
-                best_a   = a;
-                best_b   = b;
-                min_diff = diff;
-            }
-        }
-        std::array<int, 3> grid;
-        int                idx = 0;
+        auto [best_a, best_b] = get_most_balanced_proc_pair(prod);
+
+        std::array<int, 3> grid = {0, 0, 0};
+        int                idx  = 0;
         for(int i = 0; i < 3; ++i)
             grid[i] = (i == pos) ? 1 : ((idx++ == 0) ? best_a : best_b);
 
         if((grid != input_grid) && (grid != output_grid))
-            push_unique_grid(pencils, grid);
+            pencils.insert(grid); // direct insert, no duplicate check needed
     }
 
-    // tranpose plan: input -> [all pencils] -> output
-    plan.push_back(input_grid);
+    // full transpose plan is: input -> [all pencils] -> output
+    transpose_plan.push_back(input_grid);
     for(const auto& g : pencils)
-        plan.push_back(g);
-    plan.push_back(output_grid);
+        transpose_plan.push_back(g);
+    transpose_plan.push_back(output_grid);
 
-    // get transpose type sequence
-    for(size_t i = 1; i < plan.size(); ++i)
-        trans_types.push_back(get_transpose_type(plan[i - 1], plan[i]));
+    // generate transpose type sequence as pairs of grid_layouts
+    for(size_t i = 1; i < transpose_plan.size(); ++i)
+        transpose_types.push_back(get_transpose_type(transpose_plan[i - 1], transpose_plan[i]));
 }
 
 bool rocfft_plan_t::BuildOptMultiDevicePlan()
@@ -2850,12 +2820,13 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
     // plan transposition steps
     if(num_split_dims_in >= 2 && num_split_dims_out >= 2 && rank == 3)
     {
+
         get_transpose_plan(in_grid, out_grid, grids_sequence, transpose_sequence);
 
-        pencil_to_pencil
-            = std::all_of(transpose_sequence.begin(),
-                          transpose_sequence.end(),
-                          [](transpose_type t) { return t == transpose_type::pencil_to_pencil; });
+        pencil_to_pencil = std::all_of(
+            transpose_sequence.begin(), transpose_sequence.end(), [](transpose_type t) {
+                return t == std::make_pair(grid_layout::pencil, grid_layout::pencil);
+            });
     }
 
     rocfft_field_t         currentField       = desc.inFields.front();
@@ -2906,30 +2877,12 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
                 }
             }
 
-            // create subcommunicator using MPI_Group (RAII)
-            MPI_Group world_group;
-            MPI_Comm_group(desc.mpi_comm, &world_group);
+            // create subcommunicator using helper (RAII)
             std::vector<int> pencil_neighbors_vec(pencil_neighbors.begin(), pencil_neighbors.end());
-            MPI_Group        pencil_group;
-            MPI_Group_incl(world_group,
-                           static_cast<int>(pencil_neighbors_vec.size()),
-                           pencil_neighbors_vec.data(),
-                           &pencil_group);
-            MPI_Comm tmp_comm = MPI_COMM_NULL;
-            MPI_Comm_create(desc.mpi_comm, pencil_group, &tmp_comm);
-            MPI_Group_free(&pencil_group);
-            MPI_Group_free(&world_group);
-            MPI_Comm_wrapper_t pencil_comm;
-            bool               valid_pencil_comm = false;
-            if(tmp_comm != MPI_COMM_NULL)
-            {
-                pencil_comm       = MPI_Comm_wrapper_t::from_raw(tmp_comm);
-                valid_pencil_comm = true;
-            }
-            else
-            {
+            MPI_Comm_wrapper_t pencil_comm
+                = make_subcommunicator(desc.mpi_comm, pencil_neighbors_vec);
+            if(!pencil_comm)
                 throw std::runtime_error("Failed to create a valid Pencil sub-communicator");
-            }
 
             // allocate temp buffers for nextField,
             // loop over the pencil_neighbors_vec (these are the global ranks in this subcomm)
@@ -2963,7 +2916,7 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
                             currentAntecedents,
                             transposeItems,
                             transposeNumber++,
-                            (valid_pencil_comm ? std::move(pencil_comm) : MPI_Comm_wrapper_t{}));
+                            std::move(pencil_comm));
 
             currentField       = nextField;
             currentBufs        = tempBufs;
