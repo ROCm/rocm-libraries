@@ -147,6 +147,9 @@ namespace TensileLite
                     // F6
                     {MatrixInstruction(32, 32, 64, DataType::Float6), 32}, // v_mfma_f32_32x32x64_f6
                     {MatrixInstruction(16, 16, 128, DataType::Float6), 16}, // v_mfma_f32_16x16x128_f6
+                    // BF6
+                    {MatrixInstruction(32, 32, 64, DataType::BFloat6), 32}, // v_mfma_f32_32x32x64_bf6
+                    {MatrixInstruction(16, 16, 128, DataType::BFloat6), 16}, // v_mfma_f32_16x16x128_bf6
                     // F4
                     {MatrixInstruction(32, 32, 64, DataType::Float4), 32}, // v_mfma_f32_32x32x64_f4
                     {MatrixInstruction(16, 16, 128, DataType::Float4), 16}, // v_mfma_f32_16x16x128_f4
