@@ -569,7 +569,7 @@ namespace ArgumentsHelper
     // clang-format off
 #define APPLY(NAME)                                                                         \
     template <>                                                                             \
-    HIPBLASLT_CLANG_STATIC constexpr auto                                                   \
+    constexpr auto                                                                          \
         apply<e_##NAME == e_M ? hipblaslt_argument(-1) :                                    \
               e_##NAME == e_N ? hipblaslt_argument(-2) :                                    \
               e_##NAME == e_K ? hipblaslt_argument(-3) :                                    \
@@ -593,7 +593,7 @@ namespace ArgumentsHelper
 
     // Specialization for e_M
     template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_M> =
+    constexpr auto apply<e_M> =
         [](auto&& func, const Arguments& arg, auto T) {
             if(arg.grouped_gemm <= 1)
             {
@@ -613,7 +613,7 @@ namespace ArgumentsHelper
 
     // Specialization for e_N
     template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_N> =
+    constexpr auto apply<e_N> =
         [](auto&& func, const Arguments& arg, auto T) {
             if(arg.grouped_gemm <= 1)
             {
@@ -633,7 +633,7 @@ namespace ArgumentsHelper
 
     // Specialization for e_K
     template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_K> =
+    constexpr auto apply<e_K> =
         [](auto&& func, const Arguments& arg, auto T) {
             if(arg.grouped_gemm <= 1)
             {
@@ -653,7 +653,7 @@ namespace ArgumentsHelper
 
     // Specialization for e_lda
     template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_lda> =
+    constexpr auto apply<e_lda> =
         [](auto&& func, const Arguments& arg, auto T) {
             if(arg.grouped_gemm <= 1)
             {
@@ -673,7 +673,7 @@ namespace ArgumentsHelper
 
     // Specialization for e_stride_a
     template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_stride_a> =
+    constexpr auto apply<e_stride_a> =
         [](auto&& func, const Arguments& arg, auto T) {
             if(arg.grouped_gemm <= 1)
             {
@@ -693,7 +693,7 @@ namespace ArgumentsHelper
 
     // Specialization for e_ldb
     template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_ldb> =
+    constexpr auto apply<e_ldb> =
         [](auto&& func, const Arguments& arg, auto T) {
             if(arg.grouped_gemm <= 1)
             {
@@ -713,7 +713,7 @@ namespace ArgumentsHelper
 
     // Specialization for e_stride_b
     template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_stride_b> =
+    constexpr auto apply<e_stride_b> =
         [](auto&& func, const Arguments& arg, auto T) {
             if(arg.grouped_gemm <= 1)
             {
@@ -733,7 +733,7 @@ namespace ArgumentsHelper
 
     // Specialization for e_ldc
     template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_ldc> =
+    constexpr auto apply<e_ldc> =
         [](auto&& func, const Arguments& arg, auto T) {
             if(arg.grouped_gemm <= 1)
             {
@@ -753,7 +753,7 @@ namespace ArgumentsHelper
 
     // Specialization for e_stride_c
     template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_stride_c> =
+    constexpr auto apply<e_stride_c> =
         [](auto&& func, const Arguments& arg, auto T) {
             if(arg.grouped_gemm <= 1)
             {
@@ -773,7 +773,7 @@ namespace ArgumentsHelper
 
     // Specialization for e_ldd
     template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_ldd> =
+    constexpr auto apply<e_ldd> =
         [](auto&& func, const Arguments& arg, auto T) {
             if(arg.grouped_gemm <= 1)
             {
@@ -793,7 +793,7 @@ namespace ArgumentsHelper
 
     // Specialization for e_stride_d
     template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_stride_d> =
+    constexpr auto apply<e_stride_d> =
         [](auto&& func, const Arguments& arg, auto T) {
             if(arg.grouped_gemm <= 1)
             {
@@ -813,7 +813,7 @@ namespace ArgumentsHelper
 
     // Specialization for e_lde
     template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_lde> =
+    constexpr auto apply<e_lde> =
         [](auto&& func, const Arguments& arg, auto T) {
             if(arg.grouped_gemm <= 1)
             {
@@ -833,7 +833,7 @@ namespace ArgumentsHelper
 
     // Specialization for e_stride_e
     template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_stride_e> =
+    constexpr auto apply<e_stride_e> =
         [](auto&& func, const Arguments& arg, auto T) {
             if(arg.grouped_gemm <= 1)
             {
@@ -853,21 +853,21 @@ namespace ArgumentsHelper
 
     // Specialization for e_alpha
     template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_alpha> =
+    constexpr auto apply<e_alpha> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("alpha", arg.get_alpha<decltype(T)>());
         };
 
     // Specialization for e_beta
     template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_beta> =
+    constexpr auto apply<e_beta> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("beta", arg.get_beta<decltype(T)>());
         };
 
     // Specialization for e_rotating
     template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_rotating> =
+    constexpr auto apply<e_rotating> =
         [](auto&& func, const Arguments& arg, auto T) {
             if(arg.rotating > 0)
                 func("rotating_buffer", arg.rotating);
