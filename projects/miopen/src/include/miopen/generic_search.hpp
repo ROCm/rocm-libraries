@@ -372,11 +372,19 @@ void CompileAgent(size_t thread_index,
     MIOPEN_LOG_I2("Thread: " << thread_index << " Done, completed tuning");
 }
 
+template <PerfConfig>
+struct SolutionPerf
+{
+    PerfConfig cfg;
+    float time
+};
+
 template <class Solver, class Context, class Problem>
 auto GenericSearch(const Solver s,
                    const Context& context_,
                    const Problem& problem,
-                   const AnyInvokeParams& invoke_ctx_)
+                   const AnyInvokeParams& invoke_ctx_,
+                   std::vector<SolutionPerf>& perf_sols = nullptr)
     -> decltype(s.GetDefaultPerformanceConfig(context_, problem))
 {
     auto context                  = context_;
@@ -391,6 +399,10 @@ auto GenericSearch(const Solver s,
         copy.SetInvokeType(InvokeType::AutoTune);
         return copy;
     }();
+
+    //list of best solutions
+    if(perf_sols)
+        perf_sols.reserve(10);
 
     auto& profile_h = context.GetStream();
     const AutoEnableProfiling enableProfiling{profile_h};
@@ -454,6 +466,7 @@ auto GenericSearch(const Solver s,
     {
         size_t n_current       = 0;
         size_t last_imprv      = 0;
+        size_t n_updates       = 0;
         auto threads_remaining = total_threads;
         std::vector<float> samples;
         while(true)
@@ -584,6 +597,9 @@ auto GenericSearch(const Solver s,
                             worst_time = samples.back();
                             n_best     = n_current;
                             last_imprv = 0;
+                            if(perf_sols)
+                                perf_sols[n_updates % 10] = {best_config, best_time};
+                            n_updates++;
                         }
                         else
                         {
@@ -630,8 +646,13 @@ auto GenericSearch(const Solver s,
 
     if(!is_passed)
         MIOPEN_THROW("Search failed");
-    // Run once with the default config and show score.
 
+    if(perf_sols)
+        std::sort(perf_sols.begin(), perf_sols.end(), [](SolutionPerf<PerformanceConfig> a, SolutionPerf<PerformanceConfig> b) {
+            return a.time < b.time;
+        });
+
+    // Run once with the default config and show score.
     const auto& invoker = profile_h.PrepareInvoker(*default_solution.invoker_factory,
                                                    default_solution.construction_params);
     invoker(profile_h, invoke_ctx);
