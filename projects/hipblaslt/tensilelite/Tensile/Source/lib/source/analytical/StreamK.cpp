@@ -282,7 +282,7 @@ namespace TensileLite
                         }
                     }
 
-                    return min(sk_grid, tiles);
+                    return std::min(sk_grid, tiles);
                 }
                 // Dynamically predict the best grid-size by weighing the cost of the fix-up
                 // step and the cost of processing MAC-loop instructions. When the cost of fix-up
