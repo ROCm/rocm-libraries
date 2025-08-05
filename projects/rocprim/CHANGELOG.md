@@ -4,9 +4,14 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ## rocPRIM 4.1.0 for ROCm 7.1
 
+### Added
+
+* Added `get_sreg_lanemask_lt`, `get_sreg_lanemask_le`, `get_sreg_lanemask_gt` and `get_sreg_lanemask_ge`.
+
 ### Resolved issues
 
 * Fixed `device_select`, `device_merge`, and `device_merge_sort` not allocating the correct amount of virtual shared memory on the host.
+
 
 ## rocPRIM 4.0.0 for ROCm 7.0
 

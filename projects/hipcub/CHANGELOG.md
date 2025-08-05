@@ -8,6 +8,13 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 ### Removed
 * Removed `TexRefInputIterator`, which was removed from CUB after CCCL's 2.6.0 release. This API should have already been removed, but somehow it remained and was not tested.
+* Deprecated `hipcub::ConstantInputIterator`, use `rocprim::constant_iterator` or `rocthrust::constant_iterator` instead.
+* Deprecated `hipcub::CountingInputIterator`, use `rocprim::counting_iterator` or `rocthrust::counting_iterator` instead.
+* Deprecated `hipcub::DiscardOutputIterator`, use `rocprim::discard_iterator` or `rocthrust::discard_iterator` instead.
+* Deprecated `hipcub::TransformInputIterator`, use `rocprim::transform_iterator` or `rocthrust::transform_iterator` instead.
+* Deprecated `hipcub::AliasTemporaries`, which is considered to be internal API. Moved it to detail namespace.
+* Deprecated almost all functions in `projects/hipcub/hipcub/include/hipcub/backend/rocprim/util_ptx.hpp`.
+* Deprecated hipCUB macros: `HIPCUB_MAX`, `HIPCUB_MIN`, `HIPCUB_QUOTIENT_FLOOR`, `HIPCUB_QUOTIENT_CEILING`, `HIPCUB_ROUND_UP_NEAREST` and `HIPCUB_ROUND_DOWN_NEAREST`.
 
 ### Changed
 * Changed `CUDA_STANDARD` for tests in `test/hipcub`, due to C++17 APIs such as `std::exclusive_scan` is used in some tests. Still use `CUDA_STANDARD 14` for `test/extra`.
