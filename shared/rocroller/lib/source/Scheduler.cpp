@@ -342,10 +342,7 @@ namespace rocRoller
 
         int LockState::getLockDepth(int streamId) const
         {
-            if(m_streamToStack.contains(streamId))
-                return m_streamToStack.at(streamId).size();
-
-            return 0;
+            return m_streamToStack.contains(streamId) ? m_streamToStack.at(streamId).size() : 0;
         }
 
         Generator<Instruction> Scheduler::yieldFromStream(Generator<Instruction>::iterator& iter,
