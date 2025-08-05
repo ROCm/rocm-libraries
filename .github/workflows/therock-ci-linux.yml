@@ -52,6 +52,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
+          ref: 5682f361d81bd53dbf677ed678539688a856a54f
 
       - name: Runner Health Settings
         run: |
@@ -151,5 +152,5 @@ jobs:
     with:
       project_to_test: ${{ inputs.project_to_test }}
       amdgpu_families: "gfx94X-dcgpu"
-      test_runs_on: "linux-mi300-1gpu-ossci-rocm"
+      test_runs_on: "linux-mi325-1gpu-ossci-rocm"
       platform: "linux"
