@@ -817,14 +817,25 @@ namespace GEMMDriverTest
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
 
-                if(!res.ok)
+                if(true || !res.ok)
                 {
-                    const auto asmFileName = commandKernel.getKernelName() + ".s";
-                    const auto logFileName = commandKernel.getKernelName() + ".log";
+                    std::filesystem::path base
+                        = std::filesystem::absolute(std::filesystem::path("failures/"));
+                    if(!std::filesystem::exists(base))
+                    {
+                        std::filesystem::create_directories(base);
+                    }
+                    std::filesystem::path asmFilePath
+                        = base / fmt::format("{}_{}.s", commandKernel.getKernelName(), iteration);
+                    std::filesystem::path logFilePath
+                        = base / fmt::format("{}_{}.log", commandKernel.getKernelName(), iteration);
 
-                    // Write to file on error
-                    std::ofstream asmFile(asmFileName);
-                    std::ofstream logFile(logFileName);
+                    std::ofstream asmFile(asmFilePath);
+                    std::ofstream logFile(logFilePath);
+
+                    std::cout << asmFilePath << std::endl;
+                    std::cout << logFilePath << std::endl;
+
                     asmFile << commandKernel.getInstructions() << std::endl;
 
                     const auto instructions = commandKernel.getInstructions();
