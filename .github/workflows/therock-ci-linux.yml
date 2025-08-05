@@ -52,6 +52,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
+          ref: 5682f361d81bd53dbf677ed678539688a856a54f
 
       - name: Runner Health Settings
         run: |
