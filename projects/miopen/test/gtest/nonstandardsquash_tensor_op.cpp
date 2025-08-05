@@ -202,7 +202,6 @@ private:
         const TestCase& testCase = GetParam();
 
         double tolerance = 1;
-
         if(std::is_same_v<T, half_float::half>)
         {
             // taken from original c-test
