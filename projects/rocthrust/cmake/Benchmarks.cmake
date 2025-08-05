@@ -48,9 +48,9 @@ function(add_thrust_benchmark BENCHMARK_NAME BENCHMARK_SOURCE NOT_INTERNAL)
 
     # Separate normal from internal benchmarks
     if(NOT_INTERNAL)
-        set(OUTPUT_DIR "${CMAKE_BINARY_DIR}/benchmarks/")
+        set(OUTPUT_DIR "${CMAKE_BINARY_DIR}/benchmark/")
     else()
-        set(OUTPUT_DIR "${CMAKE_BINARY_DIR}/benchmarks/internal/")
+        set(OUTPUT_DIR "${CMAKE_BINARY_DIR}/benchmark/internal/")
     endif()
 
     set_target_properties(${BENCHMARK_TARGET}

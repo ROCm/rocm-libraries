@@ -52,6 +52,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
+          ref: 5682f361d81bd53dbf677ed678539688a856a54f
 
       - name: Runner Health Settings
         run: |
@@ -109,7 +110,7 @@ jobs:
 
       - name: Configure AWS Credentials
         if: always()
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        uses: aws-actions/configure-aws-credentials@59b441846ad109fa4a1549b73ef4e149c4bfb53b # v4.3.0
         with:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::692859939525:role/therock-artifacts-external
@@ -151,5 +152,5 @@ jobs:
     with:
       project_to_test: ${{ inputs.project_to_test }}
       amdgpu_families: "gfx94X-dcgpu"
-      test_runs_on: "linux-mi300-1gpu-ossci-rocm"
+      test_runs_on: "linux-mi325-1gpu-ossci-rocm"
       platform: "linux"

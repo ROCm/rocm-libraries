@@ -66,7 +66,9 @@ def check_included_tests(
         return missingTestCount
 
     test_dirs = [
-        Path(d) for d in tests_dir.iterdir() if d.is_dir() and not should_exclude(d, exclude_paths)
+        Path(d)
+        for d in tests_dir.iterdir()
+        if d.is_dir() and not should_exclude(d, exclude_paths)
     ]
     missingTestCount = 0
     test_count = 0
@@ -75,10 +77,7 @@ def check_included_tests(
         test_count += len(tests_in_dir)
         missingTestCount += missing_tests(test_dir / "CMakeLists.txt")
 
-    print(
-        "Checked %i paths, found %i missing paths"
-        % (test_count, missingTestCount)
-    )
+    print("Checked %i paths, found %i missing paths" % (test_count, missingTestCount))
     return missingTestCount
 
 

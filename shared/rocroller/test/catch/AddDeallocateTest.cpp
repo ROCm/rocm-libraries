@@ -38,15 +38,15 @@
 
 namespace AddDeallocateTest
 {
+    using namespace rocRoller;
+    using namespace rocRoller::KernelGraph;
+    using namespace rocRoller::KernelGraph::ControlGraph;
+    using namespace rocRoller::KernelGraph::CoordinateGraph;
+
+    using GD = Graph::Direction;
+
     TEST_CASE("AddDeallocate", "[kernel-graph]")
     {
-        using namespace rocRoller;
-        using namespace rocRoller::KernelGraph;
-        using namespace rocRoller::KernelGraph::ControlGraph;
-        using namespace rocRoller::KernelGraph::CoordinateGraph;
-
-        using GD = Graph::Direction;
-
         auto context = TestContext::ForTestDevice();
         auto example = rocRollerTest::Graphs::GEMM(DataType::Float);
 
@@ -175,4 +175,106 @@ namespace AddDeallocateTest
             CHECK(ldsDeallocateInsideLoop.size() == 3);
         }
     }
+
+    TEST_CASE("AddDeallocate simplifyDependencies", "[kernel-graph]")
+    {
+        rocRoller::KernelGraph::KernelGraph graph;
+
+        // Create a simple graph with some dependencies
+        auto kernel = graph.control.addElement(Kernel());
+        auto a      = graph.control.addElement(Deallocate());
+        auto b      = graph.control.addElement(Deallocate());
+        auto c      = graph.control.addElement(Deallocate());
+        auto d      = graph.control.addElement(Deallocate());
+        auto e      = graph.control.addElement(Deallocate());
+
+        graph.control.addElement(Body(), {kernel}, {a});
+        graph.control.addElement(Sequence(), {a}, {b});
+        graph.control.addElement(Sequence(), {a}, {c});
+        graph.control.addElement(Sequence(), {b}, {d});
+        graph.control.addElement(Sequence(), {d}, {e});
+
+        std::set<int> deps;
+
+        deps = {a, b, c};
+        AddDeallocateDetail::simplifyDependencies(graph, deps);
+        CHECK(deps == std::set<int>{b, c});
+
+        deps = {a, b, c, d};
+        AddDeallocateDetail::simplifyDependencies(graph, deps);
+        CHECK(deps == std::set<int>{c, d});
+
+        deps = {a, b, c, d, e};
+        AddDeallocateDetail::simplifyDependencies(graph, deps);
+        CHECK(deps == std::set<int>{c, e});
+
+        deps = {};
+        AddDeallocateDetail::simplifyDependencies(graph, deps);
+        CHECK(deps.empty());
+
+        deps = {a};
+        AddDeallocateDetail::simplifyDependencies(graph, deps);
+        CHECK(deps == std::set<int>{a});
+
+        deps = {kernel, e};
+        CHECK_THROWS_AS(AddDeallocateDetail::simplifyDependencies(graph, deps),
+                        rocRoller::FatalError);
+    }
+
+    TEST_CASE("AddDeallocate mergeDeallocateNodes", "[kernel-graph]")
+    {
+        rocRoller::KernelGraph::KernelGraph graph;
+
+        // Create a simple graph with some deallocate nodes
+        auto kernel = graph.control.addElement(Kernel());
+        auto a      = graph.control.addElement(Deallocate());
+        auto b      = graph.control.addElement(Deallocate());
+        auto c      = graph.control.addElement(Deallocate());
+        auto d      = graph.control.addElement(Deallocate());
+        auto e      = graph.control.addElement(Deallocate());
+
+        graph.control.addElement(Body(), {kernel}, {a});
+        graph.control.addElement(Sequence(), {a}, {b});
+        graph.control.addElement(Sequence(), {a}, {c});
+        graph.control.addElement(Sequence(), {b}, {d});
+        graph.control.addElement(Sequence(), {d}, {e});
+
+        auto av = graph.coordinates.addElement(VGPR());
+        auto bv = graph.coordinates.addElement(VGPR());
+        auto cv = graph.coordinates.addElement(VGPR());
+        auto dv = graph.coordinates.addElement(VGPR());
+        auto ev = graph.coordinates.addElement(VGPR());
+
+        graph.mapper.connect<Dimension>(a, av);
+        graph.mapper.connect<Dimension>(b, bv);
+        graph.mapper.connect<Dimension>(c, cv);
+        graph.mapper.connect<Dimension>(d, dv);
+        graph.mapper.connect<Dimension>(e, ev);
+
+        std::vector<int> srcs = {b, c, d};
+
+        // Merge deallocate nodes
+        AddDeallocateDetail::mergeDeallocateNodes(graph, a, srcs);
+
+        // Check that the merged node has the correct connections
+        auto connections = graph.mapper.getConnections(a);
+
+        auto hasConnection = [&](int tag) {
+            return std::find_if(connections.begin(),
+                                connections.end(),
+                                [&](const auto& conn) { return conn.coordinate == tag; })
+                   != connections.end();
+        };
+
+        CHECK(connections.size() == 4);
+        CHECK(hasConnection(av));
+        CHECK(hasConnection(bv));
+        CHECK(hasConnection(cv));
+        CHECK(hasConnection(dv));
+
+        // Check that the source nodes are removed
+        auto deallocates = graph.control.getNodes<Deallocate>().to<std::set>();
+        CHECK(deallocates == std::set<int>{a, e});
+    }
+
 }

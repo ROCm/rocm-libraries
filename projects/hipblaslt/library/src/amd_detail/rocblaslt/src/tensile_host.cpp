@@ -291,20 +291,6 @@ namespace
         }
     }
 
-    inline bool gpu_arch_match(std::string_view gpu_arch, std::string_view pattern)
-    {
-        if(!pattern.length())
-        {
-            return true;
-        }
-
-        constexpr char    prefix[]   = "gfx";
-        const std::size_t prefix_len = std::string_view(prefix).length();
-        gpu_arch.remove_prefix(prefix_len);
-        std::regex arch_regex(pattern.data());
-        return std::regex_search(gpu_arch.data(), arch_regex);
-    }
-
     inline TensileLite::ActivationType getTensileActivationType(rocblaslt_epilogue epilogue)
     {
         switch(epilogue)
@@ -1124,7 +1110,8 @@ namespace
         }
     }
 
-    inline void
+    //TODO: add profile logging for grouped gemm
+    /*inline void
         logProfileFromTensileDataGemm(const TensileLite::ContractionProblemGroupedGemm& problem,
                                       const TensileLite::ContractionGroupedInputs&      inputs,
                                       bool                                              flush,
@@ -1255,7 +1242,7 @@ namespace
             coldIterations,
             "iters",
             hotIterations);
-    }
+    }*/
 #undef GEN_BENCH_ARG
 
     /****************************************************************
@@ -2429,6 +2416,18 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         }
 
         auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+        if(prob.workspaceSize < solution->requiredWorkspaceSize(data->problem, *hardware))
+        {
+            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+            {
+                std::ostringstream msg;
+                msg << "Input workspace size " << prob.workspaceSize
+                    << " is less than the required workspace size ";
+                msg << solution->requiredWorkspaceSize(data->problem, *hardware) << std::endl;
+                log_info(__func__, msg.str());
+            }
+            return rocblaslt_status_invalid_value;
+        }
 
         if(getenv("HIPBLASLT_BENCH_PERF") != nullptr
            || getenv("HIPBLASLT_BENCH_PERF_ALL") != nullptr)

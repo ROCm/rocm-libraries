@@ -170,6 +170,11 @@ namespace TensileLite
         return m_gridbasedBatchExp;
     }
 
+    bool Debug::disableStaggerU() const
+    {
+        return m_disableStaggerU;
+    }
+
     Debug::Debug()
         : m_value(DEBUG_SM)
         , m_value2(DEBUG_SM2)
@@ -236,6 +241,10 @@ namespace TensileLite
                        "-DTensile_ENABLE_MARKER=ON\n");
 #endif
         }
+
+        const char* tensile_disable_staggerU = std::getenv("TENSILE_DISABLE_STAGGERU");
+        if(tensile_disable_staggerU)
+            m_disableStaggerU = strtol(tensile_disable_staggerU, nullptr, 0) != 0;
     }
 
 } // namespace TensileLite
