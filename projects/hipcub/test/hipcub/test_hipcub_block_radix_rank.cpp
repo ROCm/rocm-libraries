@@ -596,7 +596,7 @@ void rank_with_prefix_sum_kernel(const KeyType* keys_input,
 
     const size_t pfs_size       = (1 << RadixBits);
     const size_t pfs_offset     = (blockIdx.x * pfs_size) + (threadIdx.x * bins_tracked_per_thread);
-    const size_t pfs_total_size = pfs_size * blockDim.x;
+    [[maybe_unused]] const size_t pfs_total_size = pfs_size * blockDim.x;
 
     for(size_t i = 0; i < bins_tracked_per_thread; i++)
     {

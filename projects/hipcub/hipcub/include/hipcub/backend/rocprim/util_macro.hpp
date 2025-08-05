@@ -61,31 +61,37 @@ auto max HIPCUB_PREVENT_MACRO_SUBSTITUTION(T&& t, U&& u)
     #undef HIPCUB_PREVENT_MACRO_SUBSTITUTION
 #endif
 
+/// Deprecated since rocm [7.1]
 #ifndef HIPCUB_MAX
     /// Select maximum(a, b)
     #define HIPCUB_MAX(a, b) (((b) > (a)) ? (b) : (a))
 #endif
 
+/// Deprecated since rocm [7.1]
 #ifndef HIPCUB_MIN
     /// Select minimum(a, b)
     #define HIPCUB_MIN(a, b) (((b) < (a)) ? (b) : (a))
 #endif
 
+/// Deprecated since rocm [7.1]
 #ifndef HIPCUB_QUOTIENT_FLOOR
     /// Quotient of x/y rounded down to nearest integer
     #define HIPCUB_QUOTIENT_FLOOR(x, y) ((x) / (y))
 #endif
 
+/// Deprecated since rocm [7.1]
 #ifndef HIPCUB_QUOTIENT_CEILING
     /// Quotient of x/y rounded up to nearest integer
     #define HIPCUB_QUOTIENT_CEILING(x, y) (((x) + (y)-1) / (y))
 #endif
 
+/// Deprecated since rocm [7.1]
 #ifndef HIPCUB_ROUND_UP_NEAREST
     /// x rounded up to the nearest multiple of y
     #define HIPCUB_ROUND_UP_NEAREST(x, y) (HIPCUB_QUOTIENT_CEILING(x, y) * y)
 #endif
 
+/// Deprecated since rocm [7.1]
 #ifndef HIPCUB_ROUND_DOWN_NEAREST
     /// x rounded down to the nearest multiple of y
     #define HIPCUB_ROUND_DOWN_NEAREST(x, y) (((x) / (y)) * y)

@@ -49,28 +49,28 @@ namespace internal {
   * @{
   */
 
- template <
-     int         LENGTH,
-     typename    T,
-     typename    ScanOp>
- __device__ __forceinline__ T ThreadScanExclusive(
-     T                   inclusive,              ///< [in] Initial value for inclusive aggregate
-     T                   exclusive,              ///< [in] Initial value for exclusive aggregate
-     T                   *input,                 ///< [in] Input array
-     T                   *output,                ///< [out] Output array (may be aliased to \p input)
-     ScanOp              scan_op,                ///< [in] Binary scan operator
-     Int2Type<LENGTH>    /*length*/)
- {
-     #pragma unroll
-     for (int i = 0; i < LENGTH; ++i)
-     {
-         inclusive = scan_op(exclusive, input[i]);
-         output[i] = exclusive;
-         exclusive = inclusive;
-     }
+template<int LENGTH,
+         typename T,
+         typename ScanOp>
+ HIPCUB_DEVICE
+HIPCUB_FORCEINLINE
+    T ThreadScanExclusive(T      inclusive, ///< [in] Initial value for inclusive aggregate
+                          T      exclusive, ///< [in] Initial value for exclusive aggregate
+                          T*     input, ///< [in] Input array
+                          T*     output, ///< [out] Output array (may be aliased to \p input)
+                          ScanOp scan_op, ///< [in] Binary scan operator
+                          detail::int_constant_t<LENGTH> /*length*/)
+{
+#pragma unroll
+    for(int i = 0; i < LENGTH; ++i)
+    {
+        inclusive = scan_op(exclusive, input[i]);
+        output[i] = exclusive;
+        exclusive = inclusive;
+    }
 
-     return inclusive;
- }
+    return inclusive;
+}
 
  #ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
 
@@ -81,27 +81,33 @@ namespace internal {
   * \tparam T          <b>[inferred]</b> The data type to be scanned.
   * \tparam ScanOp     <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
   */
- template <
-     int         LENGTH,
-     typename    T,
-     typename    ScanOp>
- __device__ __forceinline__ T ThreadScanExclusive(
-     T           *input,                 ///< [in] Input array
-     T           *output,                ///< [out] Output array (may be aliased to \p input)
-     ScanOp      scan_op,                ///< [in] Binary scan operator
-     T           prefix,                 ///< [in] Prefix to seed scan with
-     bool        apply_prefix = true)    ///< [in] Whether or not the calling thread should apply its prefix.  If not, the first output element is undefined.  (Handy for preventing thread-0 from applying a prefix.)
- {
-     T inclusive = input[0];
-     if (apply_prefix)
-     {
-         inclusive = scan_op(prefix, inclusive);
-     }
-     output[0] = prefix;
-     T exclusive = inclusive;
+template<int LENGTH,
+         typename T,
+         typename ScanOp>
+ HIPCUB_DEVICE
+HIPCUB_FORCEINLINE T ThreadScanExclusive(
+    T*     input, ///< [in] Input array
+    T*     output, ///< [out] Output array (may be aliased to \p input)
+    ScanOp scan_op, ///< [in] Binary scan operator
+    T      prefix, ///< [in] Prefix to seed scan with
+    bool   apply_prefix
+    = true) ///< [in] Whether or not the calling thread should apply its prefix.  If not, the first output element is undefined.  (Handy for preventing thread-0 from applying a prefix.)
+{
+    T inclusive = input[0];
+    if(apply_prefix)
+    {
+        inclusive = scan_op(prefix, inclusive);
+    }
+    output[0]   = prefix;
+    T exclusive = inclusive;
 
-     return ThreadScanExclusive(inclusive, exclusive, input + 1, output + 1, scan_op, Int2Type<LENGTH - 1>());
- }
+    return ThreadScanExclusive(inclusive,
+                               exclusive,
+                               input + 1,
+                               output + 1,
+                               scan_op,
+                               detail::int_constant_t<LENGTH - 1>());
+}
 
  /**
   * \brief Perform a sequential exclusive prefix scan over the statically-sized \p input array, seeded with the specified \p prefix.  The aggregate is returned.
@@ -110,42 +116,43 @@ namespace internal {
   * \tparam T          <b>[inferred]</b> The data type to be scanned.
   * \tparam ScanOp     <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
   */
- template <
-     int         LENGTH,
-     typename    T,
-     typename    ScanOp>
- __device__ __forceinline__ T ThreadScanExclusive(
-     T           (&input)[LENGTH],       ///< [in] Input array
-     T           (&output)[LENGTH],      ///< [out] Output array (may be aliased to \p input)
-     ScanOp      scan_op,                ///< [in] Binary scan operator
-     T           prefix,                 ///< [in] Prefix to seed scan with
-     bool        apply_prefix = true)    ///< [in] Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
- {
-     return ThreadScanExclusive<LENGTH>((T*) input, (T*) output, scan_op, prefix, apply_prefix);
- }
+template<int LENGTH,
+         typename T,
+         typename ScanOp>
+ HIPCUB_DEVICE
+HIPCUB_FORCEINLINE T ThreadScanExclusive(
+    T (&input)[LENGTH], ///< [in] Input array
+    T (&output)[LENGTH], ///< [out] Output array (may be aliased to \p input)
+    ScanOp scan_op, ///< [in] Binary scan operator
+    T      prefix, ///< [in] Prefix to seed scan with
+    bool   apply_prefix
+    = true) ///< [in] Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
+{
+    return ThreadScanExclusive<LENGTH>((T*)input, (T*)output, scan_op, prefix, apply_prefix);
+}
 
  #endif
 
- template <
-     int         LENGTH,
-     typename    T,
-     typename    ScanOp>
- __device__ __forceinline__ T ThreadScanInclusive(
-     T                   inclusive,              ///< [in] Initial value for inclusive aggregate
-     T                   *input,                 ///< [in] Input array
-     T                   *output,                ///< [out] Output array (may be aliased to \p input)
-     ScanOp              scan_op,                ///< [in] Binary scan operator
-     Int2Type<LENGTH>    /*length*/)
- {
-     #pragma unroll
-     for (int i = 0; i < LENGTH; ++i)
-     {
-         inclusive = scan_op(inclusive, input[i]);
-         output[i] = inclusive;
-     }
+template<int LENGTH,
+         typename T,
+         typename ScanOp>
+ HIPCUB_DEVICE
+HIPCUB_FORCEINLINE
+    T ThreadScanInclusive(T      inclusive, ///< [in] Initial value for inclusive aggregate
+                          T*     input, ///< [in] Input array
+                          T*     output, ///< [out] Output array (may be aliased to \p input)
+                          ScanOp scan_op, ///< [in] Binary scan operator
+                          detail::int_constant_t<LENGTH> /*length*/)
+{
+#pragma unroll
+    for(int i = 0; i < LENGTH; ++i)
+    {
+        inclusive = scan_op(inclusive, input[i]);
+        output[i] = inclusive;
+    }
 
-     return inclusive;
- }
+    return inclusive;
+}
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
 
@@ -156,21 +163,25 @@ namespace internal {
   * \tparam T          <b>[inferred]</b> The data type to be scanned.
   * \tparam ScanOp     <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
   */
- template <
-     int         LENGTH,
-     typename    T,
-     typename    ScanOp>
- __device__ __forceinline__ T ThreadScanInclusive(
-     T           *input,                 ///< [in] Input array
-     T           *output,                ///< [out] Output array (may be aliased to \p input)
-     ScanOp      scan_op)                ///< [in] Binary scan operator
- {
-     T inclusive = input[0];
-     output[0] = inclusive;
+template<int LENGTH,
+         typename T,
+         typename ScanOp>
+ HIPCUB_DEVICE
+HIPCUB_FORCEINLINE
+    T ThreadScanInclusive(T*     input, ///< [in] Input array
+                          T*     output, ///< [out] Output array (may be aliased to \p input)
+                          ScanOp scan_op) ///< [in] Binary scan operator
+{
+    T inclusive = input[0];
+    output[0]   = inclusive;
 
-     // Continue scan
-     return ThreadScanInclusive(inclusive, input + 1, output + 1, scan_op, Int2Type<LENGTH - 1>());
- }
+    // Continue scan
+    return ThreadScanInclusive(inclusive,
+                               input + 1,
+                               output + 1,
+                               scan_op,
+                               detail::int_constant_t<LENGTH - 1>());
+}
 
  /**
   * \brief Perform a sequential inclusive prefix scan over the statically-sized \p input array.  The aggregate is returned.
@@ -179,17 +190,17 @@ namespace internal {
   * \tparam T          <b>[inferred]</b> The data type to be scanned.
   * \tparam ScanOp     <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
   */
- template <
-     int         LENGTH,
-     typename    T,
-     typename    ScanOp>
- __device__ __forceinline__ T ThreadScanInclusive(
-     T           (&input)[LENGTH],       ///< [in] Input array
-     T           (&output)[LENGTH],      ///< [out] Output array (may be aliased to \p input)
-     ScanOp      scan_op)                ///< [in] Binary scan operator
- {
-     return ThreadScanInclusive<LENGTH>((T*) input, (T*) output, scan_op);
- }
+template<int LENGTH,
+         typename T,
+         typename ScanOp>
+ HIPCUB_DEVICE
+HIPCUB_FORCEINLINE
+    T ThreadScanInclusive(T (&input)[LENGTH], ///< [in] Input array
+                          T (&output)[LENGTH], ///< [out] Output array (may be aliased to \p input)
+                          ScanOp scan_op) ///< [in] Binary scan operator
+{
+    return ThreadScanInclusive<LENGTH>((T*)input, (T*)output, scan_op);
+}
 
  /**
   * \brief Perform a sequential inclusive prefix scan over \p LENGTH elements of the \p input array, seeded with the specified \p prefix.  The aggregate is returned.
@@ -198,27 +209,32 @@ namespace internal {
   * \tparam T          <b>[inferred]</b> The data type to be scanned.
   * \tparam ScanOp     <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
   */
- template <
-     int         LENGTH,
-     typename    T,
-     typename    ScanOp>
- __device__ __forceinline__ T ThreadScanInclusive(
-     T           *input,                 ///< [in] Input array
-     T           *output,                ///< [out] Output array (may be aliased to \p input)
-     ScanOp      scan_op,                ///< [in] Binary scan operator
-     T           prefix,                 ///< [in] Prefix to seed scan with
-     bool        apply_prefix = true)    ///< [in] Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
- {
-     T inclusive = input[0];
-     if (apply_prefix)
-     {
-         inclusive = scan_op(prefix, inclusive);
-     }
-     output[0] = inclusive;
+template<int LENGTH,
+         typename T,
+         typename ScanOp>
+ HIPCUB_DEVICE
+HIPCUB_FORCEINLINE T ThreadScanInclusive(
+    T*     input, ///< [in] Input array
+    T*     output, ///< [out] Output array (may be aliased to \p input)
+    ScanOp scan_op, ///< [in] Binary scan operator
+    T      prefix, ///< [in] Prefix to seed scan with
+    bool   apply_prefix
+    = true) ///< [in] Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
+{
+    T inclusive = input[0];
+    if(apply_prefix)
+    {
+        inclusive = scan_op(prefix, inclusive);
+    }
+    output[0] = inclusive;
 
-     // Continue scan
-     return ThreadScanInclusive(inclusive, input + 1, output + 1, scan_op, Int2Type<LENGTH - 1>());
- }
+    // Continue scan
+    return ThreadScanInclusive(inclusive,
+                               input + 1,
+                               output + 1,
+                               scan_op,
+                               detail::int_constant_t<LENGTH - 1>());
+}
 
  /**
   * \brief Perform a sequential inclusive prefix scan over the statically-sized \p input array, seeded with the specified \p prefix.  The aggregate is returned.
@@ -227,19 +243,20 @@ namespace internal {
   * \tparam T          <b>[inferred]</b> The data type to be scanned.
   * \tparam ScanOp     <b>[inferred]</b> Binary scan operator type having member <tt>T operator()(const T &a, const T &b)</tt>
   */
- template <
-     int         LENGTH,
-     typename    T,
-     typename    ScanOp>
- __device__ __forceinline__ T ThreadScanInclusive(
-     T           (&input)[LENGTH],       ///< [in] Input array
-     T           (&output)[LENGTH],      ///< [out] Output array (may be aliased to \p input)
-     ScanOp      scan_op,                ///< [in] Binary scan operator
-     T           prefix,                 ///< [in] Prefix to seed scan with
-     bool        apply_prefix = true)    ///< [in] Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
- {
-     return ThreadScanInclusive<LENGTH>((T*) input, (T*) output, scan_op, prefix, apply_prefix);
- }
+template<int LENGTH,
+         typename T,
+         typename ScanOp>
+ HIPCUB_DEVICE
+HIPCUB_FORCEINLINE T ThreadScanInclusive(
+    T (&input)[LENGTH], ///< [in] Input array
+    T (&output)[LENGTH], ///< [out] Output array (may be aliased to \p input)
+    ScanOp scan_op, ///< [in] Binary scan operator
+    T      prefix, ///< [in] Prefix to seed scan with
+    bool   apply_prefix
+    = true) ///< [in] Whether or not the calling thread should apply its prefix.  (Handy for preventing thread-0 from applying a prefix.)
+{
+    return ThreadScanInclusive<LENGTH>((T*)input, (T*)output, scan_op, prefix, apply_prefix);
+}
 
  #endif
 

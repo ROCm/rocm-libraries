@@ -92,7 +92,8 @@ struct RadixSortTwiddle
 
         enum
         {
-            FLOAT_KEY = TraitsT::CATEGORY == FLOATING_POINT,
+            HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH FLOAT_KEY = TraitsT::CATEGORY == FLOATING_POINT,
+            HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
         };
 
         static __device__ __forceinline__ UnsignedBits ProcessFloatMinusZero(UnsignedBits key)

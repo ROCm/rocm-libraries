@@ -687,8 +687,7 @@ TEST(HipcubDeviceForTests, ForCountingIterator)
 
             // Device pointers
             unsigned int* d_count;
-            const auto    it = hipcub::CountingInputIterator<T>{0};
-
+            const auto    it = rocprim::counting_iterator<T>{0};
             // Allocate memory
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_count, sizeof(unsigned int)));
 
@@ -739,7 +738,7 @@ TEST(HipcubDeviceForTests, ForCopyCountingIterator)
 
             // Device pointers
             unsigned int* d_count;
-            const auto    it = hipcub::CountingInputIterator<T>{0};
+            const auto    it = rocprim::counting_iterator<T>{0};
 
             // Allocate memory
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_count, sizeof(unsigned int)));

@@ -799,7 +799,7 @@ public:
 private:
   HIPCUB_DEVICE __forceinline__ void SyncImplementation() const
   {
-    CTA_SYNC();
+      __syncthreads();
   }
 
   friend BlockMergeSortStrategyT;

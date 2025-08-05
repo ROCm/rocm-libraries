@@ -31,9 +31,9 @@
 #define HIPCUB_ROCPRIM_UTIL_TYPE_HPP_
 
 #include "../../config.hpp"
+#include "../../util_deprecated.hpp"
 
 #include <rocprim/detail/various.hpp> // IWYU pragma: export
-#include <rocprim/thread/radix_key_codec.hpp> // IWYU pragma: export
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
 #include <rocprim/types/future_value.hpp> // IWYU pragma: export
 
@@ -147,8 +147,8 @@ struct DoubleBuffer
     }
 };
 
-template <int A>
-struct Int2Type
+template<int A>
+struct HIPCUB_DEPRECATED_BECAUSE("Use ::std::integral_constant instead") Int2Type
 {
     enum {VALUE = A};
 };
@@ -480,21 +480,16 @@ struct Uninitialized
 
 /******************************************************************************
  * Simple type traits utilities.
- *
- * For example:
- *     Traits<int>::CATEGORY             // SIGNED_INTEGER
- *     Traits<NullType>::nullptr_TYPE       // true
- *     Traits<uint4>::CATEGORY           // NOT_A_NUMBER
- *     Traits<uint4>::PRIMITIVE;         // false
- *
  ******************************************************************************/
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 /**
- * \brief Basic type traits categories
+ * \brief Basic type traits categories.
+ * This enum is deprecated, please use <rocprim/type_traits> instead. Or if you have
+ * libhipcxx, please use the type_traits system in libhipcxx.
  */
-enum Category
+enum HIPCUB_DEPRECATED_BECAUSE("Use <rocprim/type_traits> instead.") Category
 {
     NOT_A_NUMBER,
     SIGNED_INTEGER,
@@ -502,10 +497,10 @@ enum Category
     FLOATING_POINT
 };
 
-
 /**
  * \brief Basic type traits
  */
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
 template<Category _CATEGORY,
          bool     _PRIMITIVE,
          bool     _nullptr_TYPE,
@@ -514,31 +509,34 @@ template<Category _CATEGORY,
 struct BaseTraits
 {
     /// Category
-    static const Category CATEGORY      = _CATEGORY;
+    HIPCUB_DEPRECATED_BECAUSE("Use <rocprim/type_traits> instead.")
+    static constexpr Category CATEGORY = _CATEGORY;
     enum
     {
-        PRIMITIVE    = _PRIMITIVE,
-        nullptr_TYPE = _nullptr_TYPE,
+        PRIMITIVE HIPCUB_DEPRECATED_BECAUSE("Use <rocprim/type_traits> instead.") = _PRIMITIVE,
+        nullptr_TYPE                                                              = _nullptr_TYPE,
     };
 };
-
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 
 /**
  * Basic type traits (unsigned primitive specialization)
  */
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
 template <typename _UnsignedBits, typename T>
 struct BaseTraits<UNSIGNED_INTEGER, true, false, _UnsignedBits, T>
 {
     using UnsignedBits = _UnsignedBits;
 
-    static const Category       CATEGORY    = UNSIGNED_INTEGER;
-    static const UnsignedBits   LOWEST_KEY  = UnsignedBits(0);
-    static const UnsignedBits   MAX_KEY     = UnsignedBits(-1);
+    HIPCUB_DEPRECATED_BECAUSE("Use <rocprim/type_traits> instead.")
+    static constexpr Category     CATEGORY   = UNSIGNED_INTEGER;
+    static constexpr UnsignedBits LOWEST_KEY = UnsignedBits(0);
+    static constexpr UnsignedBits MAX_KEY    = UnsignedBits(-1);
 
     enum
     {
-        PRIMITIVE    = true,
-        nullptr_TYPE = false,
+        PRIMITIVE HIPCUB_DEPRECATED_BECAUSE("Use <rocprim/type_traits> instead.") = true,
+        nullptr_TYPE                                                              = false,
     };
 
     using key_codec = decltype(::rocprim::traits::get<T>().template radix_key_codec<false>());
@@ -569,25 +567,27 @@ struct BaseTraits<UNSIGNED_INTEGER, true, false, _UnsignedBits, T>
         return retval;
     }
 };
-
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 
 /**
  * Basic type traits (signed primitive specialization)
  */
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
 template <typename _UnsignedBits, typename T>
 struct BaseTraits<SIGNED_INTEGER, true, false, _UnsignedBits, T>
 {
     using UnsignedBits = _UnsignedBits;
 
-    static const Category       CATEGORY    = SIGNED_INTEGER;
-    static const UnsignedBits   HIGH_BIT    = UnsignedBits(1) << ((sizeof(UnsignedBits) * 8) - 1);
-    static const UnsignedBits   LOWEST_KEY  = HIGH_BIT;
-    static const UnsignedBits   MAX_KEY     = UnsignedBits(-1) ^ HIGH_BIT;
+    HIPCUB_DEPRECATED_BECAUSE("Use <rocprim/type_traits> instead.")
+    static constexpr Category     CATEGORY   = SIGNED_INTEGER;
+    static constexpr UnsignedBits HIGH_BIT   = UnsignedBits(1) << ((sizeof(UnsignedBits) * 8) - 1);
+    static constexpr UnsignedBits LOWEST_KEY = HIGH_BIT;
+    static constexpr UnsignedBits MAX_KEY    = UnsignedBits(-1) ^ HIGH_BIT;
 
     enum
     {
-        PRIMITIVE    = true,
-        nullptr_TYPE = false,
+        PRIMITIVE HIPCUB_DEPRECATED_BECAUSE("Use <rocprim/type_traits> instead.") = true,
+        nullptr_TYPE                                                              = false,
     };
 
     using key_codec = decltype(::rocprim::traits::get<T>().template radix_key_codec<false>());
@@ -614,10 +614,13 @@ struct BaseTraits<SIGNED_INTEGER, true, false, _UnsignedBits, T>
         return reinterpret_cast<T&>(retval);
     }
 };
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 
+// This API needs to be deprecated once libhipcxx is available.
 template <typename _T>
 struct FpLimits;
 
+// This API needs to be deprecated once libhipcxx is available.
 template <>
 struct FpLimits<float>
 {
@@ -630,6 +633,7 @@ struct FpLimits<float>
     }
 };
 
+// This API needs to be deprecated once libhipcxx is available.
 template <>
 struct FpLimits<double>
 {
@@ -642,6 +646,7 @@ struct FpLimits<double>
     }
 };
 
+// This API needs to be deprecated once libhipcxx is available.
 template <>
 struct FpLimits<__half>
 {
@@ -656,6 +661,7 @@ struct FpLimits<__half>
     }
 };
 
+// This API needs to be deprecated once libhipcxx is available.
 template <>
 struct FpLimits<hip_bfloat16>
 {
@@ -673,22 +679,24 @@ struct FpLimits<hip_bfloat16>
 /**
  * Basic type traits (fp primitive specialization)
  */
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
 template <typename _UnsignedBits, typename T>
 struct BaseTraits<FLOATING_POINT, true, false, _UnsignedBits, T>
 {
     using UnsignedBits = _UnsignedBits;
 
-    static const Category       CATEGORY    = FLOATING_POINT;
-    static const UnsignedBits   HIGH_BIT    = UnsignedBits(1) << ((sizeof(UnsignedBits) * 8) - 1);
-    static const UnsignedBits   LOWEST_KEY  = UnsignedBits(-1);
-    static const UnsignedBits   MAX_KEY     = UnsignedBits(-1) ^ HIGH_BIT;
+    HIPCUB_DEPRECATED_BECAUSE("Use <rocprim/type_traits> instead.")
+    static constexpr Category     CATEGORY   = FLOATING_POINT;
+    static constexpr UnsignedBits HIGH_BIT   = UnsignedBits(1) << ((sizeof(UnsignedBits) * 8) - 1);
+    static constexpr UnsignedBits LOWEST_KEY = UnsignedBits(-1);
+    static constexpr UnsignedBits MAX_KEY    = UnsignedBits(-1) ^ HIGH_BIT;
 
     using key_codec = decltype(::rocprim::traits::get<T>().template radix_key_codec<false>());
 
     enum
     {
-        PRIMITIVE    = true,
-        nullptr_TYPE = false,
+        PRIMITIVE HIPCUB_DEPRECATED_BECAUSE("Use <rocprim/type_traits> instead.") = true,
+        nullptr_TYPE                                                              = false,
     };
 
     static HIPCUB_HOST_DEVICE __forceinline__ UnsignedBits TwiddleIn(UnsignedBits key)
@@ -711,11 +719,12 @@ struct BaseTraits<FLOATING_POINT, true, false, _UnsignedBits, T>
         return FpLimits<T>::Lowest();
     }
 };
-
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 
 /**
  * \brief Numeric type traits
  */
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
 template <typename T> struct NumericTraits :            BaseTraits<NOT_A_NUMBER, false, false, T, T> {};
 
 template <> struct NumericTraits<NullType> :            BaseTraits<NOT_A_NUMBER, false, true, NullType, NullType> {};
@@ -744,7 +753,8 @@ struct NumericTraits<__uint128_t>
     static constexpr UnsignedBits LOWEST_KEY = UnsignedBits(0);
     static constexpr UnsignedBits MAX_KEY    = UnsignedBits(-1);
 
-    static constexpr bool PRIMITIVE = false;
+    HIPCUB_DEPRECATED_BECAUSE("Use <rocprim/type_traits> instead.")
+    static constexpr bool PRIMITIVE    = false;
     static constexpr bool nullptr_TYPE = false;
 
     using key_codec = decltype(::rocprim::traits::get<T>().template radix_key_codec<false>());
@@ -781,6 +791,7 @@ struct NumericTraits<__int128_t>
     static constexpr UnsignedBits LOWEST_KEY = HIGH_BIT;
     static constexpr UnsignedBits MAX_KEY    = UnsignedBits(-1) ^ HIGH_BIT;
 
+    HIPCUB_DEPRECATED_BECAUSE("Use <rocprim/type_traits> instead.")
     static constexpr bool PRIMITIVE = false;
     static constexpr bool nullptr_TYPE = false;
 
@@ -816,12 +827,30 @@ template <> struct NumericTraits<__half> :              BaseTraits<FLOATING_POIN
 template <> struct NumericTraits<hip_bfloat16 > :       BaseTraits<FLOATING_POINT, true, false, unsigned short, hip_bfloat16 > {};
 
 template <> struct NumericTraits<bool> :                BaseTraits<UNSIGNED_INTEGER, true, false, typename UnitWord<bool>::VolatileWord, bool> {};
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
 
 /**
  * \brief Type traits
  */
-template <typename T>
-struct Traits : NumericTraits<typename std::remove_cv<T>::type> {};
+template<typename T>
+struct Traits : NumericTraits<typename std::remove_cv<T>::type>
+{};
+
+namespace detail
+{
+// __uint128_t and __int128_t are not primitive
+
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
+template<typename T>
+struct is_primitive : ::std::bool_constant<Traits<T>::PRIMITIVE>
+{};
+
+template<typename T>
+inline constexpr bool is_primitive_v = is_primitive<T>::value;
+
+HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
+
+} // namespace detail
 
 /**
  * \brief Common type of zero types.
@@ -909,6 +938,9 @@ struct common_type_extended_fp<
 
 template<class...>
 using void_t = void;
+
+template<int Value>
+using int_constant_t = ::std::integral_constant<int, Value>;
 
 // Common type of more than two types.
 

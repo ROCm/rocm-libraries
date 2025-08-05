@@ -895,8 +895,8 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysValuesWithValidItems)
     T*           host_keys_input   = new T[size];
     T*           host_values_input = new T[size];
 
-    T* host_keys_expected   = new T[size];
-    T* host_values_expected = new T[size];
+    [[maybe_unused]] T* host_keys_expected   = new T[size];
+    [[maybe_unused]] T* host_values_expected = new T[size];
 
     T* device_keys_input;
     T* device_values_input;

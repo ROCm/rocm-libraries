@@ -2,6 +2,21 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## hipCUB-4.1.0 for ROCm 7.1
+
+### Added
+
+### Removed
+* Deprecated `hipcub::ConstantInputIterator`, use `rocprim::constant_iterator` or `rocthrust::constant_iterator` instead.
+* Deprecated `hipcub::CountingInputIterator`, use `rocprim::counting_iterator` or `rocthrust::counting_iterator` instead.
+* Deprecated `hipcub::DiscardOutputIterator`, use `rocprim::discard_iterator` or `rocthrust::discard_iterator` instead.
+* Deprecated `hipcub::TransformInputIterator`, use `rocprim::transform_iterator` or `rocthrust::transform_iterator` instead.
+* Deprecated `hipcub::AliasTemporaries`, which is considered to be internal API. Moved it to detail namespace.
+* Deprecated almost all functions in `projects/hipcub/hipcub/include/hipcub/backend/rocprim/util_ptx.hpp`.
+* Deprecated hipCUB macros: `HIPCUB_MAX`, `HIPCUB_MIN`, `HIPCUB_QUOTIENT_FLOOR`, `HIPCUB_QUOTIENT_CEILING`, `HIPCUB_ROUND_UP_NEAREST` and `HIPCUB_ROUND_DOWN_NEAREST`.
+
+### Changed
+
 ## hipCUB-4.0.0 for ROCm 7.0
 
 ### Added
