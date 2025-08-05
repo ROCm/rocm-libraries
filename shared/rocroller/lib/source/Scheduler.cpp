@@ -33,7 +33,7 @@ namespace rocRoller
     {
         RegisterComponentBase(Scheduler);
 
-        std::string toString(SchedulerProcedure const& proc)
+        std::string toString(SchedulerProcedure proc)
         {
             switch(proc)
             {
@@ -54,27 +54,25 @@ namespace rocRoller
             Throw<FatalError>("Invalid Scheduler Procedure: ", ShowValue(static_cast<int>(proc)));
         }
 
-        std::ostream& operator<<(std::ostream& stream, SchedulerProcedure const& proc)
+        std::ostream& operator<<(std::ostream& stream, SchedulerProcedure proc)
         {
             return stream << toString(proc);
         }
 
-        std::string toString(Dependency const& dep)
+        std::string toString(Dependency dep)
         {
             switch(dep)
             {
             case Dependency::None:
                 return "None";
-            case Dependency::SCC:
-                return "SCC";
-            case Dependency::VCC:
-                return "VCC";
             case Dependency::Branch:
                 return "Branch";
-            case Dependency::Unlock:
-                return "Unlock";
             case Dependency::M0:
                 return "M0";
+            case Dependency::VCC:
+                return "VCC";
+            case Dependency::SCC:
+                return "SCC";
             default:
                 break;
             }
@@ -82,122 +80,287 @@ namespace rocRoller
             Throw<FatalError>("Invalid Dependency: ", ShowValue(static_cast<int>(dep)));
         }
 
-        std::ostream& operator<<(std::ostream& stream, Dependency const& dep)
+        std::ostream& operator<<(std::ostream& stream, Dependency dep)
         {
             return stream << toString(dep);
         }
 
+        std::string toString(LockOperation lockOp)
+        {
+            switch(lockOp)
+            {
+            case LockOperation::None:
+                return "None";
+            case LockOperation::Lock:
+                return "Lock";
+            case LockOperation::Unlock:
+                return "Unlock";
+            default:
+                break;
+            }
+
+            Throw<FatalError>("Invalid LockOperation: ", ShowValue(static_cast<int>(lockOp)));
+        }
+
+        std::ostream& operator<<(std::ostream& stream, LockOperation lockOp)
+        {
+            return stream << toString(lockOp);
+        }
+
+        constexpr bool isNonPreemptibleDependency(Dependency dep)
+        {
+            return dep != Dependency::M0 && dep != Dependency::VCC;
+        }
+
         LockState::LockState(ContextPtr ctx)
-            : m_dependency(Dependency::None)
-            , m_lockdepth(0)
-            , m_ctx(ctx)
+            : m_ctx(ctx)
         {
         }
 
         LockState::LockState(ContextPtr ctx, Dependency dependency)
-            : m_dependency(dependency)
-            , m_ctx(ctx)
+            : m_ctx(ctx)
         {
-            AssertFatal(m_dependency != Scheduling::Dependency::Count
-                            && m_dependency != Scheduling::Dependency::Unlock,
-                        "Can not instantiate LockState with Count or Unlock dependency");
-
-            m_lockdepth = 1;
+            lock(dependency, 0);
         }
 
-        void LockState::add(Instruction const& instruction)
+        void LockState::lock(Dependency dep, int streamId)
         {
-            lockCheck(instruction);
+            AssertFatal(dep != Dependency::Count && dep != Dependency::None);
 
-            int inst_lockvalue = instruction.getLockValue();
+            auto topDep = getTopDependency(streamId);
+            AssertFatal(topDep <= dep,
+                        "Out of order dependency lock can't be acquired.",
+                        ShowValue(topDep),
+                        ShowValue(dep));
 
-            // Instruction does not lock or unlock, do nothing
-            if(inst_lockvalue == 0)
+            // Can a stream acquire the same lock (single resource, just the top) multiple times? yes
+            // VCC -> SCC -> SCC -> SCC
+            if(m_depToStream.contains(dep))
             {
-                return;
+                AssertFatal(
+                    topDep == dep && m_depToStream.at(dep) == streamId,
+                    "Only the same stream can acquire the top dependency lock multiple times.",
+                    ShowValue(dep),
+                    ShowValue(m_depToStream[dep]),
+                    ShowValue(streamId));
             }
 
-            // Instruction can only lock (1) or unlock (-1)
-            if(inst_lockvalue != -1 && inst_lockvalue != 1)
+            m_streamToStack[streamId].push(dep);
+            m_depToStream[dep] = streamId;
+            m_locks.insert(dep);
+
+            if(isNonPreemptibleDependency(dep))
+                m_nonPreemptibleStream = streamId;
+        }
+
+        void LockState::unlock(Dependency dep, int streamId)
+        {
+            AssertFatal(streamId >= 0);
+            AssertFatal(m_streamToStack.contains(streamId));
+            AssertFatal(m_streamToStack[streamId].size() > 0);
+            AssertFatal(dep != Dependency::Count);
+
+            // LIFO
             {
-                Throw<FatalError>("Invalid instruction lockstate: ", ShowValue(inst_lockvalue));
+                auto topDep = getTopDependency(streamId);
+                if(dep != Dependency::None)
+                    AssertFatal(topDep == dep, "locks can only be released in the LIFO order");
+                else
+                    dep = topDep;
             }
 
-            // Instruction trying to unlock when there is no lock
-            if(m_lockdepth == 0 && inst_lockvalue == -1)
             {
-                Throw<FatalError>("Trying to unlock when not locked");
+                auto iter = m_depToStream.find(dep);
+                AssertFatal(iter != m_depToStream.end() && iter->second == streamId,
+                            ShowValue(dep),
+                            ShowValue(streamId));
             }
 
-            // Instruction initializes the lockstate
-            if(m_lockdepth == 0)
+            // pop the stack top
+            m_streamToStack[streamId].pop();
+
+            // erase one instance of dep from the multiset.
+            // if that's the last instance, then erase its streamID mapping.
             {
-                m_dependency = instruction.getDependency();
+                auto iter = m_locks.find(dep);
+                AssertFatal(iter != m_locks.end());
+                m_locks.erase(iter);
+
+                if(!m_locks.contains(dep))
+                    m_depToStream.erase(dep);
             }
 
-            m_lockdepth += inst_lockvalue;
-
-            // Instruction releases lock
-            if(m_lockdepth == 0)
+            // update m_nonPreemptibleStream state if needed
+            // Example: when a stream holds multiple non-preemptible
+            // locks like Branch -> VCC -> SCC.
+            m_nonPreemptibleStream.reset();
+            auto tempDep = getTopDependency(streamId);
+            while(tempDep != Dependency::None)
             {
-                m_dependency = Scheduling::Dependency::None;
+                if(m_depToStream.contains(tempDep) && m_depToStream.at(tempDep) == streamId
+                   && isNonPreemptibleDependency(tempDep))
+                {
+                    m_nonPreemptibleStream = streamId;
+                    break;
+                }
+
+                auto depVal = static_cast<int>(tempDep);
+                tempDep     = static_cast<Dependency>(--depVal);
             }
         }
 
-        bool LockState::isLocked() const
+        bool LockState::isSchedulable(Instruction const& instr, int streamId) const
         {
-            return m_lockdepth > 0;
+            auto dep = instr.getDependency();
+            AssertFatal(dep != Dependency::Count && streamId >= 0);
+
+            auto topDep = getTopDependency(streamId);
+            // check if the order of the dependencies satisfies
+            AssertFatal(dep == Dependency::None || topDep <= dep,
+                        "Out of order dependency lock can't be acquired.",
+                        ShowValue(topDep),
+                        ShowValue(dep));
+
+            if(m_streamToStack.empty())
+                return true;
+
+            // if the stream itself is non-preemptible,
+            // it's schedulable
+            if(isNonPreemptibleStream(streamId))
+                return true;
+            // else if another stream is non-preemptible,
+            // it's not schedulable.
+            else if(m_nonPreemptibleStream.has_value())
+                return false;
+
+            auto lockOp = instr.getLockValue();
+            // if the given instr is not a lock instruction,
+            // it's schedulable.
+            if(lockOp != LockOperation::Lock)
+                return true;
+
+            // if the dependency is already locked and is being
+            // scheduled by the same stream again, it's schedulable.
+            if(m_locks.contains(dep))
+                return m_depToStream.at(dep) == streamId;
+
+            // If the given stream tries to acquire a non-preemptible lock
+            // and another stream currently holds a higher-ranked preemptible lock,
+            // the scheduler cannot schedule this lower-ranked non-preemptible
+            // lock from streamId until the higher-ranked preemptible lock is released
+            // by the another stream.
+            if(isNonPreemptibleDependency(dep))
+            {
+                auto depVal  = static_cast<int>(dep);
+                auto tempDep = static_cast<Dependency>(++depVal);
+                while(tempDep != Dependency::Count)
+                {
+                    if(m_locks.contains(tempDep))
+                        return false;
+
+                    depVal  = static_cast<int>(tempDep);
+                    tempDep = static_cast<Dependency>(++depVal);
+                }
+            }
+
+            return true;
         }
 
-        // Will grow into a function that accepts args and checks the lock is in a valid state against those args
-        void LockState::isValid(bool locked) const
+        void LockState::add(Instruction const& instruction, int streamId)
         {
-            AssertFatal(isLocked() == locked, "Lock in invalid state");
+            // TODO: Enable lockCheck after fixing the locking around
+            //       the instruction(s) that hasImplicitAccess() and
+            //       readsSpecialRegister().
+            //       Also, identify which particular dependency lock
+            //       is required among M0, VCC and SCC.
+            // lockCheck(instruction, streamId);
+
+            AssertFatal(isSchedulable(instruction, streamId),
+                        "cannot add any instruction from this stream at this point");
+
+            auto lockOp = instruction.getLockValue();
+
+            switch(lockOp)
+            {
+            case LockOperation::None:
+                break;
+
+            case LockOperation::Lock:
+                lock(instruction.getDependency(), streamId);
+                break;
+
+            case LockOperation::Unlock:
+                unlock(instruction.getDependency(), streamId);
+                break;
+
+            case LockOperation::Count:
+                Throw<FatalError>("Invalid LockOperation ", static_cast<int>(lockOp));
+            }
         }
 
-        void LockState::lockCheck(Instruction const& instruction)
+        bool LockState::isNonPreemptibleStream(int streamId) const
+        {
+            return m_nonPreemptibleStream.has_value() && streamId == m_nonPreemptibleStream.value();
+        }
+
+        bool LockState::isLocked(Dependency dep, int streamId) const
+        {
+            return m_depToStream.contains(dep) && m_depToStream.at(dep) == streamId;
+        }
+
+        void LockState::lockCheck(Instruction const& instruction, int streamId) const
         {
             auto               context      = m_ctx.lock();
             const auto&        architecture = context->targetArchitecture();
             GPUInstructionInfo info = architecture.GetInstructionInfo(instruction.getOpCode());
 
             AssertFatal(
-                !info.isBranch() || isLocked(),
+                !info.isBranch() || isLocked(Dependency::Branch, streamId),
                 concatenate(instruction.getOpCode(),
                             " is a branch instruction, it should only be used within a lock."));
 
             AssertFatal(
-                !info.hasImplicitAccess() || isLocked(),
+                !info.hasImplicitAccess() || isLocked(Dependency::M0, streamId)
+                    || isLocked(Dependency::VCC, streamId) || isLocked(Dependency::SCC, streamId),
                 concatenate(instruction.getOpCode(),
                             " implicitly reads a register, it should only be used within a lock."));
 
             AssertFatal(
-                !instruction.readsSpecialRegisters() || isLocked(),
+                !instruction.readsSpecialRegisters() || isLocked(Dependency::M0, streamId)
+                    || isLocked(Dependency::VCC, streamId) || isLocked(Dependency::SCC, streamId),
                 concatenate(instruction.getOpCode(),
                             " reads a special register, it should only be used within a lock."));
         }
 
-        Dependency LockState::getDependency() const
+        Dependency LockState::getTopDependency(int streamId) const
         {
-            return m_dependency;
+            if(m_streamToStack.contains(streamId) && !(m_streamToStack.at(streamId).empty()))
+                return m_streamToStack.at(streamId).top();
+
+            return Dependency::None;
         }
 
-        int LockState::getLockDepth() const
+        int LockState::getLockDepth(int streamId) const
         {
-            return m_lockdepth;
+            if(m_streamToStack.contains(streamId))
+                return m_streamToStack.at(streamId).size();
+
+            return 0;
         }
 
-        Generator<Instruction> Scheduler::yieldFromStream(Generator<Instruction>::iterator& iter)
+        Generator<Instruction> Scheduler::yieldFromStream(Generator<Instruction>::iterator& iter,
+                                                          int streamId)
         {
             do
             {
                 AssertFatal(iter != std::default_sentinel_t{},
-                            "End of instruction stream reached without unlocking");
-                m_lockstate.add(*iter);
+                            "End of instruction stream reached without unlocking",
+                            ShowValue(streamId));
+                m_lockstate.add(*iter, streamId);
                 co_yield *iter;
                 ++iter;
                 co_yield consumeComments(iter, std::default_sentinel_t{});
-            } while(m_lockstate.isLocked());
+            } while(m_lockstate.isNonPreemptibleStream(streamId));
         }
 
         bool Scheduler::supportsAddingStreams() const
