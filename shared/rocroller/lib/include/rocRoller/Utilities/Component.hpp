@@ -42,7 +42,10 @@ namespace rocRoller
     namespace Component
     {
         template <typename T>
-        concept CSingleUse = requires() { requires static_cast<bool>(T::SingleUse) == true; };
+        concept CSingleUse = requires()
+        {
+            requires static_cast<bool>(T::SingleUse) == true;
+        };
 
         /**
          * @brief A `ComponentBase` is a base class for a category of components.
@@ -52,7 +55,8 @@ namespace rocRoller
          *
          */
         template <typename T>
-        concept ComponentBase = requires(T& a) {
+        concept ComponentBase = requires(T& a)
+        {
             /**
              * The Argument type should be either a single type, or a tuple of types needed to
              * pick the correct component implementation.
@@ -64,7 +68,9 @@ namespace rocRoller
             //{ a.name() } -> std::convertible_to<std::string>;
             //{ T::Match(c) } -> std::convertible_to<bool>;
 
-            { T::Basename } -> std::convertible_to<std::string>;
+            {
+                T::Basename
+                } -> std::convertible_to<std::string>;
         };
 
         /**
@@ -85,21 +91,31 @@ namespace rocRoller
          * A concrete subclass which fulfils the required functionality in a subset of situations.
          */
         template <typename T>
-        concept Component = requires(T a) {
+        concept Component = requires(T a)
+        {
             typename T::Base;
             typename T::Base::Argument;
 
             // Single-use status can't depend on implementation.
-            requires CSingleUse<T> == CSingleUse<typename T::Base>;
+            requires CSingleUse<T>
+            == CSingleUse<typename T::Base>;
 
             requires std::derived_from<T, typename T::Base>;
             requires ComponentBase<typename T::Base>;
 
-            { T::Match } -> std::convertible_to<Matcher<typename T::Base>>;
-            { T::Build } -> std::convertible_to<Builder<typename T::Base>>;
+            {
+                T::Match
+                } -> std::convertible_to<Matcher<typename T::Base>>;
+            {
+                T::Build
+                } -> std::convertible_to<Builder<typename T::Base>>;
 
-            { T::Name } -> std::convertible_to<std::string>;
-            { T::Basename } -> std::convertible_to<std::string>;
+            {
+                T::Name
+                } -> std::convertible_to<std::string>;
+            {
+                T::Basename
+                } -> std::convertible_to<std::string>;
         };
 
         /**
@@ -107,12 +123,10 @@ namespace rocRoller
          * May be the same object from one call to the next.
          */
         template <ComponentBase Base>
-            requires(!CSingleUse<Base>)
-        std::shared_ptr<Base> Get(typename Base::Argument const& arg);
+        requires(!CSingleUse<Base>) std::shared_ptr<Base> Get(typename Base::Argument const& arg);
 
         template <ComponentBase Base>
-            requires(!CSingleUse<Base>)
-        std::shared_ptr<Base> Get(typename Base::Argument&& arg);
+        requires(!CSingleUse<Base>) std::shared_ptr<Base> Get(typename Base::Argument&& arg);
 
         /**
          * @brief Convenience function which will construct a tuple and call the above implementation of
