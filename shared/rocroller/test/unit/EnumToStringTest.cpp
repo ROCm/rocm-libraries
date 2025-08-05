@@ -303,7 +303,6 @@ TEST(EnumToStringTest, ALL)
             {Dependency::SCC, "SCC"},
             {Dependency::VCC, "VCC"},
             {Dependency::Branch, "Branch"},
-            {Dependency::Unlock, "Unlock"},
             {Dependency::M0, "M0"},
         });
     }

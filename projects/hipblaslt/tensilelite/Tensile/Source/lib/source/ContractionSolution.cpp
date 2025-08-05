@@ -690,14 +690,6 @@ namespace TensileLite
                 args.append("beta_2", inputs.beta, problem.betaType());
         }
 
-        if(sizeMapping.persistentKernel != 0 || sizeMapping.streamK != 0)
-        {
-            uint32_t magicShift;
-            args.template append<uint32_t>("magicNumberProblemNumGroupTiles0",
-                                           magicNumber(2, problemNumGroupTiles.x, &magicShift));
-            args.template append<uint32_t>("magicShiftProblemNumGroupTiles0", magicShift);
-        }
-
         if(sizeMapping.streamK != 0)
         {
             // SK doesn't care gsu
@@ -714,25 +706,9 @@ namespace TensileLite
             // In this case no actual iterations will be run, but workgroups will be mapped correctly for beta*C
             auto     itersPerTile = max(1, problem.getItersPerTile(sizeMapping));
             auto     totalIters   = tiles * itersPerTile;
-            uint32_t magicNumberItersPerTile;
-            uint32_t magicShiftItersPerTile;
-            magicNumberItersPerTile = magicNumber(2, itersPerTile, &magicShiftItersPerTile);
-
             args.template append<uint32_t>("itersPerTile", itersPerTile);
-            args.template append<uint32_t>("magicNumberItersPerTile", magicNumberItersPerTile);
-            args.template append<uint32_t>("magicShiftItersPerTile", magicShiftItersPerTile);
-
-            uint32_t numGroupTiles0x1 = problemNumGroupTiles.x * problemNumGroupTiles.y;
-            uint32_t magicNumProblemNumGroupTiles0By1;
-            uint32_t magicShiftProblemNumGroupTiles0By1;
-            magicNumProblemNumGroupTiles0By1
-                = magicNumber(2, numGroupTiles0x1, &magicShiftProblemNumGroupTiles0By1);
-            args.template append<uint32_t>("magicNumProblemNumGroupTiles0By1",
-                                           magicNumProblemNumGroupTiles0By1);
-            args.template append<uint32_t>("magicShiftProblemNumGroupTiles0By1",
-                                           magicShiftProblemNumGroupTiles0By1);
-
             args.template append<uint32_t>("totalIters", totalIters);
+            
             if(sizeMapping.streamK == 1) // Basic SK
             {
                 uint32_t itersPerWave = CeilDivide(totalIters, numWorkGroups.x);
@@ -766,9 +742,12 @@ namespace TensileLite
                 uint32_t skItersPerWG = skTiles * itersPerTile / skGrid;
                 uint32_t skExtraIters = skTiles * itersPerTile % (skGrid);
 
+                // Pack skGrid and skTiles into a single uint32_t such that the upper 16 bits
+                // represent skGrid and the lower 16 bits represent skTiles
+                uint32_t skGridAndTiles = (skGrid <<16) | (skTiles & 0xFFFF);
+
                 args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
-                args.template append<uint32_t>("skGrid", skGrid);
-                args.template append<uint32_t>("skTiles", skTiles);
+                args.template append<uint32_t>("skGridAndTiles", skGridAndTiles);
                 args.template append<uint32_t>("skExtraIters", skExtraIters);
             }
         }
@@ -3195,7 +3174,7 @@ namespace TensileLite
             // Max splitting is currently constant, but should be dependant on K dimension
             else if (tiles < cuCount)
             {
-                const std::vector<int> tileFractions = {8, 6, 4, 3, 2, 1};
+                const std::vector<int> tileFractions = {16, 12, 8, 6, 4, 3, 2, 1};
                 for(int frac: tileFractions)
                 {
                     size_t splitGrid = tiles * frac;

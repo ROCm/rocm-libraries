@@ -223,7 +223,7 @@ void catch_signals_and_exceptions_as_failures(std::function<void()> test, bool s
     // Set up the return point, and handle siglongjmp returning back to here
     if(sigsetjmp(t_handler.sigjmp_buf_, true))
     {
-#if(__GLIBC__ < 2) || (__GLIBC__ == 2 && __GLIBC_MINOR__ < 32)
+#if (__GLIBC__ < 2) || (__GLIBC__ == 2 && __GLIBC_MINOR__ < 32)
         FAIL() << "Received " << sys_siglist[t_handler.signal] << " signal";
 #else
         FAIL() << "Received " << sigdescr_np(t_handler.signal) << " signal";
@@ -373,6 +373,9 @@ bool hipblaslt_client_global_filters(const Arguments& args)
     static_cast<void>(hipGetDevice(&deviceId));
     static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
     if(args.gpu_arch[0] && !gpu_arch_match(deviceProperties.gcnArchName, args.gpu_arch))
+        return false;
+    if(args.gpu_arch_exclude[0]
+       && gpu_arch_match(deviceProperties.gcnArchName, args.gpu_arch_exclude))
         return false;
 
     return true;
