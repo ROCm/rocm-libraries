@@ -90,7 +90,12 @@ list( APPEND COMMON_LINK_LIBS "-lm -lstdc++fs")
 if (CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
   list( APPEND COMMON_LINK_LIBS "-lgfortran") # for lapack
 else()
-  list( APPEND COMMON_LINK_LIBS "-lflang_rt.runtime") # for lapack
+  find_library(FortranRuntime NAMES FortranRuntime PATH ${HIP_CLANG_ROOT}/lib)
+  if ( ${FortranRuntime} STREQUAL "FortranRuntime-NOTFOUND" )
+    list( APPEND COMMON_LINK_LIBS "-lflang_rt.runtime") # for lapack
+  else()
+    list( APPEND COMMON_LINK_LIBS "-lFortranRuntime -lFortranDecimal") # for lapack
+  endif()
 endif()
 
 #if (NOT WIN32)
