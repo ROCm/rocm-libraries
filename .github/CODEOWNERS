@@ -18,14 +18,14 @@
 /projects/hipblas-common/                           @ROCm/hipblas-common-reviewers
 /projects/hipblaslt/                                @ROCm/hipblaslt-reviewers
 /projects/hipcub/                                   @ROCm/prims-rands-reviewers
-/projects/hipfft/                                   @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
+/projects/hipfft/                                   @ROCm/fft-reviewers
 /projects/hiprand/                                  @ROCm/prims-rands-reviewers
 /projects/hipsolver/                                @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd
 /projects/hipsparse/                                @ntrost57 @YvanMokwinski @jsandham
 /projects/hipsparselt/                              @ROCm/hipsparselt-reviewers
 /projects/miopen/                                   @ROCm/miopen-reviewers
 /projects/rocblas/                                  @ROCm/rocblas-reviewers
-/projects/rocfft/                                   @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
+/projects/rocfft/                                   @ROCm/fft-reviewers
 /projects/rocprim/                                  @ROCm/prims-rands-reviewers
 /projects/rocrand/                                  @ROCm/prims-rands-reviewers
 /projects/rocsolver/                                @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd

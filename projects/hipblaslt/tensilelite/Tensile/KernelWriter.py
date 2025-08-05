@@ -948,9 +948,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
         scheduleTF32Emu = kernel["UseF32XEmulation"]
         if scheduleTF32Emu:
-          # 24 is the instruction count for the TF32 emulation sequence in LocalRead.py
-          instPerPackA = 24#len(packAItems)
-          instPerPackB = 24#len(packBItems)
+          # 26 is the instruction count for the TF32 emulation sequence in LocalRead.py
+          instPerPackA = 26#len(packAItems)
+          instPerPackB = 26#len(packBItems)
           while packAItems or packBItems:
             for n in range(instPerPackA):
               if packAItems:
@@ -4682,22 +4682,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     if kernel["StreamK"]:
       # StreamK args
-      self.defineSgpr("MagicNumberProblemNumGroupTiles0", 1) # Magic number to use for division
-      self.defineSgpr("MagicShiftProblemNumGroupTiles0", 1) # Magic shift/abit to use for division alg 2
       self.defineSgpr("ItersPerTile", 1)
-      self.defineSgpr("MagicNumberItersPerTile", 1)
-      self.defineSgpr("MagicShiftItersPerTile", 1)
-      self.defineSgpr("MagicNumProblemNumGroupTiles0By1", 1)  # for PKAB, use for Magic Div Alg 2 by (nwg0*nwg1)
-      self.defineSgpr("MagicShiftProblemNumGroupTiles0By1", 1)  # for PKAB, use for Magic Div Alg 2 by (nwg0*nwg1)
       self.defineSgpr("TotalIters", 1)
       self.defineSgpr("SKItersPerWG", 1)
-      self.states.numSgprStreamK += 9
+      self.states.numSgprStreamK += 3
       if kernel["StreamK"] >= 2: # Two-tile SK
-        self.defineSgpr("skGrid", 1)
-        self.defineSgpr("skTiles", 1)
+        self.defineSgpr("skGridAndTiles", 1)
         self.defineSgpr("skExtraIters", 1)
         # self.defineSgpr("dpTilesPerWG", 1, kernarg=True)
-        self.states.numSgprStreamK += 3
+        self.states.numSgprStreamK += 2
 
     if kernel["LocalWriteUseSgprA"]:
         self.defineSgpr("LocalWriteAddrA", 1)
