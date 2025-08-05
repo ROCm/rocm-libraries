@@ -1058,14 +1058,16 @@ namespace rocRollerTest
         }
     }
 
-    struct LockCheckSchedulerTest : public SchedulerTest,
-                                    public testing::WithParamInterface<
-                                        std::tuple<Scheduling::SchedulerProcedure, std::string>>
+    struct LockCheckSchedulerTest
+        : public SchedulerTest,
+          public testing::WithParamInterface<
+              std::tuple<Scheduling::SchedulerProcedure,
+                         std::tuple<std::string, std::vector<Scheduling::Dependency>>>>
     {
     protected:
         GPUArchitectureTarget targetArchitecture() override
         {
-            return {GPUArchitectureGFX::GFX90A};
+            return {GPUArchitectureGFX::GFX90A}; 
         }
     };
 
@@ -1075,23 +1077,27 @@ namespace rocRollerTest
         GTEST_SKIP() << "Skipping LockCheckTest in release mode.";
 #endif
 
-        auto gen = [](std::string inst, bool lock) -> Generator<Instruction> {
+        auto gen = [](auto const& instr, auto const& deps, bool lock) -> Generator<Instruction> {
             if(lock)
             {
-                co_yield_(Instruction::Lock(Scheduling::Dependency::SCC));
+                for(const auto& dep : deps)
+                    co_yield_(Instruction::Lock(dep));
             }
             auto label = Register::Value::Label("testLabel");
-            co_yield_(Instruction(inst, {}, {label}, {}, ""));
+            co_yield_(Instruction(instr, {}, {label}, {}, ""));
             if(lock)
             {
-                co_yield_(Instruction::Unlock());
+                for(size_t i = 0; i < deps.size(); ++i)
+                    co_yield_(Instruction::Unlock());
             }
         };
+
+        const auto& [instr, deps] = std::get<1>(GetParam());
 
         {
             std::vector<Generator<Instruction>> gens;
             gens.push_back(testGeneratorWithComments(true));
-            gens.push_back(gen(std::get<1>(GetParam()), false));
+            gens.push_back(gen(instr, deps, false));
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
                 std::get<0>(GetParam()), Scheduling::CostFunction::MinNops, m_context);
             EXPECT_THROW({ m_context->schedule((*scheduler)(gens)); }, FatalError);
@@ -1100,7 +1106,7 @@ namespace rocRollerTest
         {
             std::vector<Generator<Instruction>> gens;
             gens.push_back(testGeneratorWithComments(true));
-            gens.push_back(gen(std::get<1>(GetParam()), true));
+            gens.push_back(gen(instr, deps, true));
             auto scheduler = Component::GetNew<Scheduling::Scheduler>(
                 std::get<0>(GetParam()), Scheduling::CostFunction::MinNops, m_context);
             EXPECT_NO_THROW({ m_context->schedule((*scheduler)(gens)); });
@@ -1110,11 +1116,17 @@ namespace rocRollerTest
     INSTANTIATE_TEST_SUITE_P(
         LockCheckSchedulerTest,
         LockCheckSchedulerTest,
-        testing::Combine(::testing::Values(Scheduling::SchedulerProcedure::Sequential,
-                                           Scheduling::SchedulerProcedure::RoundRobin,
-                                           Scheduling::SchedulerProcedure::Random,
-                                           Scheduling::SchedulerProcedure::Cooperative,
-                                           Scheduling::SchedulerProcedure::Priority),
-                         ::testing::Values("s_branch",
-                                           "s_cbranch_scc0"))); //, "s_addc_u32", "s_subb_u32")));
+        testing::Combine(
+            ::testing::Values(Scheduling::SchedulerProcedure::Sequential,
+                              Scheduling::SchedulerProcedure::RoundRobin,
+                              Scheduling::SchedulerProcedure::Random,
+                              Scheduling::SchedulerProcedure::Cooperative,
+                              Scheduling::SchedulerProcedure::Priority),
+            ::testing::Values(
+                std::make_tuple("s_branch", std::vector{Scheduling::Dependency::Branch}),
+                std::make_tuple(
+                    "s_cbranch_scc0",
+                    std::vector{Scheduling::Dependency::Branch,
+                                Scheduling::Dependency::SCC})) //, "s_addc_u32", "s_subb_u32")));
+            ));
 }
