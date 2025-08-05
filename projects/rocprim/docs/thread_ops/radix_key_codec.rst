@@ -2,18 +2,11 @@
   :description: rocPRIM documentation and API reference library
   :keywords: rocPRIM, ROCm, API, documentation
 
-.. _dev-adjacent_find:
+.. _radix-key-codec:
 
 ********************************************************************
- Adjacent Find
+ Radix Key Encoder/Decoder
 ********************************************************************
 
-Configuring the kernel
-========================
-
-.. doxygenstruct:: rocprim::adjacent_find_config
-
-adjacent_find
-========================
-
-.. doxygenfunction:: rocprim::adjacent_find
+.. doxygenclass:: rocprim::radix_key_codec
+   :members:
