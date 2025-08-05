@@ -104,8 +104,7 @@ endif()
 # ============================================================================
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 find_package(hip REQUIRED)
-
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/libs-common libs-common)
+find_package(hipsparse REQUIRED)
 
 if(HIPSPARSELT_ENABLE_MARKER)
     if(HIPSPARSELT_ENABLE_CUDA)

@@ -26,7 +26,7 @@
 
 #pragma once
 #include <exception>
-#include <hipsparse-common/hipsparse-common.h>
+#include <hipsparse/hipsparse.h>
 
 // Convert the current C++ exception to hiblasStatus_t
 // This allows extern "C" functions to return this function in a catch(...) block

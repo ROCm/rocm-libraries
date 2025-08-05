@@ -68,7 +68,7 @@
 #ifndef _HIPSPARSELT_H_
 #define _HIPSPARSELT_H_
 
-#include <hipsparse-common/hipsparse-common.h>
+#include <hipsparse/hipsparse.h>
 #include <hipsparselt/hipsparselt-export.h>
 #include <hipsparselt/hipsparselt-version.h>
 
@@ -81,10 +81,10 @@
 #include <hip/hip_fp8.h>
 #include <hip/library_types.h>
 #else
-#include <library_types.h>
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cuda_fp8.h>
+#include <library_types.h>
 #endif
 
 /* Opaque structures holding information */
