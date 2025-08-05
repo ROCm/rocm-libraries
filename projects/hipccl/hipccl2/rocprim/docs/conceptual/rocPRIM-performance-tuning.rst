@@ -5,7 +5,7 @@
 .. _tuning:
 
 ********************************************************************
- Performance tuning
+rocPRIM Performance tuning
 ********************************************************************
 
 Algorithms often perform better if their launch parameters (number of blocks, block size, items per thread, etc.) are tailored for the particular architecture they are run on.
