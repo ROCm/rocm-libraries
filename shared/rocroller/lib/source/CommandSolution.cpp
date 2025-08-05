@@ -430,7 +430,6 @@ namespace rocRoller
             std::make_shared<KernelGraph::UpdateWavefrontParameters>(m_commandParameters));
         transforms.push_back(std::make_shared<KernelGraph::AddComputeIndex>());
 
-
         transforms.push_back(std::make_shared<KernelGraph::LoadPacked>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::AddConvert>());
 
