@@ -198,41 +198,9 @@ namespace rocRoller
             }
 
             template <typename T>
-            static void mapOptional(IO& io, const char* key, std::optional<T>& obj)
-            {
-                if(outputting())
-                {
-                    if(obj.has_value())
-                        io.mapRequired(key, *obj);
-                }
-                else
-                {
-                    // TODO: FIXME
-                    obj = T();
-                    io.mapOptional(key, *obj) if(obj == T()) obj.reset();
-                }
-            }
-
-            template <typename T>
             static void mapOptional(IO& io, const char* key, T& obj)
             {
                 io.mapOptional(key, obj);
-            }
-
-            template <typename T, typename Context>
-            static void mapOptional(IO& io, const char* key, std::optional<T>& obj, Context& ctx)
-            {
-                if(outputting())
-                {
-                    if(obj.has_value())
-                        io.mapRequired(key, *obj, ctx);
-                }
-                else
-                {
-                    // TODO: FIXME
-                    obj = T();
-                    io.mapOptional(key, *obj, ctx) if(obj == T()) obj.reset();
-                }
             }
 
             template <typename T, typename Context>

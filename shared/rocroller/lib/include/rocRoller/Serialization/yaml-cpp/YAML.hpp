@@ -61,13 +61,6 @@ namespace rocRoller
             }
 
             template <typename T>
-            void mapOptional(const char* key, std::optional<T>& obj)
-            {
-                if(obj.has_value())
-                    mapRequired(key, *obj);
-            }
-
-            template <typename T>
             void mapOptional(const char* key, T& obj)
             {
                 mapRequired(key, obj);
@@ -324,18 +317,6 @@ namespace rocRoller
                 auto subnode = (*node)[key];
                 AssertFatal(subnode, "Key ", ShowValue(key), " not found: ", YAML::Dump(*node));
                 input(subnode, obj);
-            }
-
-            template <typename T>
-            void mapOptional(const char* key, std::optional<T>& obj)
-            {
-                auto subnode = (*node)[key];
-                if(subnode)
-                {
-                    T tmp;
-                    input(subnode, tmp);
-                    obj = tmp;
-                }
             }
 
             template <typename T>

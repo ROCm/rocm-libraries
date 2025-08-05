@@ -137,15 +137,11 @@ namespace rocRoller
 
                         if(solutionParams.types.scaleSkipPermlane)
                         {
-                            AssertFatal(solutionParams.types.scaleShuffleTileA.has_value());
-
-                            std::vector<size_t> tile(
-                                solutionParams.types.scaleShuffleTileA->begin(),
-                                solutionParams.types.scaleShuffleTileA->end());
+                            AssertFatal(solutionParams.types.scaleShuffleTileA.size() == 3);
 
                             scaleInputA
                                 = command->addOperation(rocRoller::Operations::SubTileTranspose(
-                                    *m_tagLoadScaleA, std::move(tile)));
+                                    *m_tagLoadScaleA, solutionParams.types.scaleShuffleTileA));
                         }
 
                         m_tagBlockScaleA = mulInputA
@@ -179,15 +175,11 @@ namespace rocRoller
 
                         if(solutionParams.types.scaleSkipPermlane)
                         {
-                            AssertFatal(solutionParams.types.scaleShuffleTileB.has_value());
-
-                            std::vector<size_t> tile(
-                                solutionParams.types.scaleShuffleTileB->begin(),
-                                solutionParams.types.scaleShuffleTileB->end());
+                            AssertFatal(solutionParams.types.scaleShuffleTileB.size() == 3);
 
                             scaleInputB
                                 = command->addOperation(rocRoller::Operations::SubTileTranspose(
-                                    *m_tagLoadScaleB, std::move(tile)));
+                                    *m_tagLoadScaleB, solutionParams.types.scaleShuffleTileB));
                         }
 
                         m_tagBlockScaleB = mulInputB

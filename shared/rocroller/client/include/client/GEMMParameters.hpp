@@ -76,8 +76,8 @@ namespace rocRoller
                 bool scaleSkipPermlane = false;
 
                 // Order: M/N, K tile, K subtile
-                std::optional<std::array<size_t, 3>> scaleShuffleTileA;
-                std::optional<std::array<size_t, 3>> scaleShuffleTileB;
+                std::vector<size_t> scaleShuffleTileA;
+                std::vector<size_t> scaleShuffleTileB;
 
                 std::string kernelNamePart() const;
             };

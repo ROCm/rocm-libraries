@@ -221,7 +221,7 @@ namespace rocRoller::Client::GEMMClient
         {
             if(problemParams.types.scaleSkipPermlane)
             {
-                AssertFatal(problemParams.types.scaleShuffleTileA.has_value());
+                AssertFatal(problemParams.types.scaleShuffleTileA.size() == 3);
 
                 auto descScaleA = descA.withNormalizedDimensions();
                 {
@@ -231,7 +231,7 @@ namespace rocRoller::Client::GEMMClient
                 }
 
                 auto tmpScaleA
-                    = preSwizzle(hostScaleA, descScaleA, *problemParams.types.scaleShuffleTileA);
+                    = preSwizzle(hostScaleA, descScaleA, problemParams.types.scaleShuffleTileA);
                 deviceScaleA = make_shared_device(tmpScaleA);
             }
             else
@@ -243,7 +243,7 @@ namespace rocRoller::Client::GEMMClient
         {
             if(problemParams.types.scaleSkipPermlane)
             {
-                AssertFatal(problemParams.types.scaleShuffleTileB.has_value());
+                AssertFatal(problemParams.types.scaleShuffleTileB.size() == 3);
 
                 auto descScaleB = descB.withNormalizedDimensions();
                 {
@@ -253,7 +253,7 @@ namespace rocRoller::Client::GEMMClient
                 }
 
                 auto tmpScaleB
-                    = preSwizzle(hostScaleB, descScaleB, *problemParams.types.scaleShuffleTileB);
+                    = preSwizzle(hostScaleB, descScaleB, problemParams.types.scaleShuffleTileB);
                 deviceScaleB = make_shared_device(tmpScaleB);
             }
             else

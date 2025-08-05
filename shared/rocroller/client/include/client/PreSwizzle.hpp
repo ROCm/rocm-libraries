@@ -36,10 +36,11 @@ namespace rocRoller::Client
 {
 
     template <typename T>
-    inline std::vector<T> preSwizzle(std::vector<T> const&        input,
-                                     TensorDescriptor const&      desc,
-                                     std::array<size_t, 3> const& tile)
+    inline std::vector<T> preSwizzle(std::vector<T> const&      input,
+                                     TensorDescriptor const&    desc,
+                                     std::vector<size_t> const& tile)
     {
+        AssertFatal(tile.size() == 3);
         AssertFatal(desc.dimensions() == 2,
                     "Batch dimension not yet supported.",
                     ShowValue(desc.dimensions()),
@@ -48,17 +49,19 @@ namespace rocRoller::Client
                     ShowValue(desc),
                     ShowValue(input.size()));
 
-        auto [tileM, tileK, subTileK] = tile;
+        auto tileMN   = tile[0];
+        auto tileK    = tile[1];
+        auto subTileK = tile[2];
 
-        size_t instPerTileK  = tileK / subTileK;
-        size_t instKPerTileM = tileM / subTileK;
+        size_t instPerTileK   = tileK / subTileK;
+        size_t instKPerTileMN = tileMN / subTileK;
 
         std::vector<size_t> srcSizes = {subTileK,
                                         instPerTileK,
                                         desc.size(0) / (tileK),
-                                        instKPerTileM,
+                                        instKPerTileMN,
                                         subTileK,
-                                        desc.size(1) / (tileM)};
+                                        desc.size(1) / (tileMN)};
 
         TensorDescriptor src(desc.dataType(), srcSizes);
 
