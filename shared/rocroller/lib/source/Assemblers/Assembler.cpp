@@ -33,9 +33,7 @@
 
 namespace rocRoller
 {
-    // Expands to:
     RegisterComponentBase(Assembler);
-    // const std::string Assembler::Basename = "Assembler"
 
     template <>
     void Component::ComponentFactory<Assembler>::registerImplementations()

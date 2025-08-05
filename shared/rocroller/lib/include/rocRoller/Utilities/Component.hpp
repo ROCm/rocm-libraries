@@ -195,7 +195,7 @@ namespace rocRoller
             static void RegisterBase(ComponentFactoryBase* base);
 
         private:
-            inline static std::unordered_set<ComponentFactoryBase*> m_instances; // other offender
+            inline static std::unordered_set<ComponentFactoryBase*> m_instances;
         };
 
         template <ComponentBase Base>
