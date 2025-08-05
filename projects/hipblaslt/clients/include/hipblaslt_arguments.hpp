@@ -112,6 +112,7 @@ struct Arguments
     // the gpu arch string after "gfx" for which the test is valid,
     // it represents a regular expression.
     char gpu_arch[16];
+    char gpu_arch_exclude[16];
 
     // memory padding for testing write out of bounds
     uint32_t pad;
@@ -179,7 +180,7 @@ struct Arguments
     bool print_kernel_info;
 
     bool flush;
-    int tensile_solution_selection_method;
+    int  tensile_solution_selection_method;
 
     /*************************************************************************
      *                     End Of Arguments                                  *
@@ -229,6 +230,7 @@ struct Arguments
     OPER(scale_type) SEP             \
     OPER(initialization) SEP         \
     OPER(gpu_arch) SEP               \
+    OPER(gpu_arch_exclude) SEP       \
     OPER(pad) SEP                    \
     OPER(grouped_gemm) SEP           \
     OPER(threads) SEP                \
@@ -871,7 +873,7 @@ namespace ArgumentsHelper
                 func("rotating_buffer", arg.rotating);
         };
 };
-    // clang-format on
+// clang-format on
 
 #else
 #error "Unsupported C++ version"

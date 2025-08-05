@@ -8,18 +8,6 @@
 rocSPARSE documentation
 ********************************************************************
 
-.. important::
-   **hipSPARSE is the recommended library for development**
-   
-   For new development projects, **hipSPARSE** is recommended instead of rocSPARSE. 
-   hipSPARSE provides a comprehensive, portable interface that supports multiple backends 
-   (including rocSPARSE and cuSPARSE) and is the preferred library for sparse matrix operations.
-   
-   For documentation and examples, see the `hipSPARSE documentation <https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/>`_.
-   
-   The rocSPARSE documentation is maintained for reference purposes and to document any 
-   specialized functionality that might not be available in hipSPARSE.
-
 rocSPARSE is a library that provides basic linear algebra subroutines for sparse matrices and vectors.
 It's created using the HIP programming language, implemented on top of the ROCm runtime and toolchains,
 and optimized for AMD discrete GPUs.
@@ -29,6 +17,11 @@ The rocSPARSE public repository is located at `<https://github.com/ROCm/rocm-lib
 .. note::
 
    The rocSPARSE repository for ROCm 6.4.2 and earlier is located at `<https://github.com/ROCm/rocSPARSE>`_.
+
+.. note::
+   For portability, we provide the `hipSPARSE <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparse>`_ library.
+   hipSPARSE provides a comprehensive, portable interface that supports multiple backends (including rocSPARSE and cuSPARSE).
+   For documentation and examples, see the `hipSPARSE documentation <https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/>`_.
 
 For ROCm code examples, see `<https://github.com/ROCm/rocm-examples>`_.
 
