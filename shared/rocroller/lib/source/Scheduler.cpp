@@ -25,21 +25,10 @@
  *******************************************************************************/
 
 #include <rocRoller/Context.hpp>
-#include <rocRoller/Scheduling/PriorityScheduler.hpp>
-#include <rocRoller/Scheduling/RoundRobinScheduler.hpp>
 #include <rocRoller/Scheduling/Scheduler.hpp>
 
 namespace rocRoller
 {
-    template <>
-    void Component::ComponentFactory<Scheduling::Scheduler>::registerImplementations()
-    {
-        Component::ComponentFactory<Scheduling::Scheduler>::registerComponent<
-            Scheduling::PriorityScheduler>();
-        Component::ComponentFactory<Scheduling::Scheduler>::registerComponent<
-            Scheduling::RoundRobinScheduler>();
-    }
-
     namespace Scheduling
     {
         RegisterComponentBase(Scheduler);

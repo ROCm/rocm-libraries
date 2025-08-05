@@ -24,40 +24,18 @@
  *
  *******************************************************************************/
 
-#include <rocRoller/Assemblers/Assembler.hpp>
-#include <rocRoller/Utilities/Component.hpp>
-#include <rocRoller/Utilities/Error.hpp>
-#include <rocRoller/Utilities/Settings.hpp>
+#include <rocRoller/Scheduling/PriorityScheduler.hpp>
+#include <rocRoller/Scheduling/RoundRobinScheduler.hpp>
+#include <rocRoller/Scheduling/Scheduler.hpp>
 
 namespace rocRoller
 {
-    RegisterComponentBase(Assembler);
-
-    std::string toString(AssemblerType t)
+    template <>
+    void Component::ComponentFactory<Scheduling::Scheduler>::registerImplementations()
     {
-        switch(t)
-        {
-        case AssemblerType::InProcess:
-            return "InProcess";
-        case AssemblerType::Subprocess:
-            return "Subprocess";
-        case AssemblerType::Count:
-            return "Count";
-        }
-
-        Throw<FatalError>("Invalid AssemblerType: ", ShowValue(static_cast<int>(t)));
+        Component::ComponentFactory<Scheduling::Scheduler>::registerComponent<
+            Scheduling::PriorityScheduler>();
+        Component::ComponentFactory<Scheduling::Scheduler>::registerComponent<
+            Scheduling::RoundRobinScheduler>();
     }
-
-    std::ostream& operator<<(std::ostream& stream, AssemblerType t)
-    {
-        return stream << toString(t);
-    }
-
-    AssemblerPtr Assembler::Get()
-    {
-        auto setting = Settings::Get(Settings::KernelAssembler);
-
-        return Component::Get<Assembler>(setting);
-    }
-
 }
