@@ -263,7 +263,7 @@ namespace rocRoller
                         return false;
 
                     depVal  = static_cast<int>(tempDep);
-                    tempDep = static_cast<Dependency>(++depVal); 
+                    tempDep = static_cast<Dependency>(++depVal);
                 }
             }
 
@@ -272,12 +272,12 @@ namespace rocRoller
 
         void LockState::add(Instruction const& instruction, StreamId streamId)
         {
-            // TODO: Update lockCheck for locking around
+            // TODO: Enable lockCheck after fixing the locking around
             //       the instruction(s) that hasImplicitAccess() and
             //       readsSpecialRegister().
-            //       Also, identify which exact dependency lock(s)
-            //       are required among M0, VCC and SCC.
-            lockCheck(instruction, streamId);
+            //       Also, identify which particular dependency lock
+            //       is required among M0, VCC and SCC.
+            // lockCheck(instruction, streamId);
 
             AssertFatal(isSchedulable(instruction, streamId),
                         "cannot add any instruction from this stream at this point");
@@ -333,10 +333,7 @@ namespace rocRoller
                 !instruction.readsSpecialRegisters() || isLocked(Dependency::M0, streamId)
                     || isLocked(Dependency::VCC, streamId) || isLocked(Dependency::SCC, streamId),
                 concatenate(instruction.getOpCode(),
-                            " reads a special register, it should only be used within a lock.",
-                            ShowValue(isLocked(Dependency::M0, streamId)),
-                            ShowValue(isLocked(Dependency::VCC, streamId)),
-                            ShowValue(isLocked(Dependency::SCC, streamId))));
+                            " reads a special register, it should only be used within a lock."));
         }
 
         Dependency LockState::getTopDependency(StreamId streamId) const
