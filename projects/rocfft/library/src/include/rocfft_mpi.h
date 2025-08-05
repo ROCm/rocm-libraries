@@ -91,20 +91,6 @@ public:
         }
     }
 
-    // split communicator
-    void split(MPI_Comm parent_comm, int color, int key)
-    {
-        free(); // clean old communicator (if any)
-
-        // now create new communicator from parent_comm
-        if(parent_comm == MPI_COMM_NULL)
-            throw std::runtime_error("MPI_Comm_split: parent communicator is MPI_COMM_NULL");
-
-        int mpi_result = MPI_Comm_split(parent_comm, color, key, &mpi_comm);
-        if(mpi_result != MPI_SUCCESS || mpi_comm == MPI_COMM_NULL)
-            throw std::runtime_error("MPI_Comm_split failed");
-    }
-
     // check if communicator has been initialized
     operator bool() const
     {
@@ -128,10 +114,11 @@ public:
     {
         auto rcmpi = MPI_Type_contiguous(size_bytes, MPI_BYTE, &type);
         if(rcmpi != MPI_SUCCESS)
-            throw std::runtime_error("MPI_Type_contiguous failed: " + std::to_string(rcmpi));
+            throw std::runtime_error("MPI_Type_contiguous failed with code: "
+                                     + std::to_string(rcmpi));
         rcmpi = MPI_Type_commit(&type);
         if(rcmpi != MPI_SUCCESS)
-            throw std::runtime_error("MPI_Type_commit failed: " + std::to_string(rcmpi));
+            throw std::runtime_error("MPI_Type_commit failed with code: " + std::to_string(rcmpi));
     }
     ~MPI_Datatype_vector_wrapper_t()
     {
@@ -285,26 +272,26 @@ inline MPI_Comm_wrapper_t make_subcommunicator(MPI_Comm parent_comm, const std::
     if(ranks.empty())
         return MPI_Comm_wrapper_t{};
 
-    MPI_Group world_group = MPI_GROUP_NULL, sub_group = MPI_GROUP_NULL;
+    MPI_Group parent_group = MPI_GROUP_NULL, sub_group = MPI_GROUP_NULL;
     MPI_Comm  new_comm = MPI_COMM_NULL;
 
-    auto rcmpi = MPI_Comm_group(parent_comm, &world_group);
+    auto rcmpi = MPI_Comm_group(parent_comm, &parent_group);
     if(rcmpi != MPI_SUCCESS)
-        throw std::runtime_error("MPI_Comm_group failed" + std::to_string(rcmpi));
+        throw std::runtime_error("MPI_Comm_group failed with code: " + std::to_string(rcmpi));
 
-    rcmpi = MPI_Group_incl(world_group, static_cast<int>(ranks.size()), ranks.data(), &sub_group);
-    MPI_Group_free(&world_group);
+    rcmpi = MPI_Group_incl(parent_group, static_cast<int>(ranks.size()), ranks.data(), &sub_group);
+    MPI_Group_free(&parent_group);
     if(rcmpi != MPI_SUCCESS)
     {
         if(sub_group != MPI_GROUP_NULL)
             MPI_Group_free(&sub_group);
-        throw std::runtime_error("MPI_Group_incl failed" + std::to_string(rcmpi));
+        throw std::runtime_error("MPI_Group_incl failed with code: " + std::to_string(rcmpi));
     }
 
     rcmpi = MPI_Comm_create(parent_comm, sub_group, &new_comm);
     MPI_Group_free(&sub_group);
     if(rcmpi != MPI_SUCCESS)
-        throw std::runtime_error("MPI_Comm_create failed" + std::to_string(rcmpi));
+        throw std::runtime_error("MPI_Comm_create failed with code: " + std::to_string(rcmpi));
 
     if(new_comm == MPI_COMM_NULL)
         return MPI_Comm_wrapper_t{};

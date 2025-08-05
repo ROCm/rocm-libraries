@@ -828,6 +828,11 @@ struct rocfft_location_t
         return device < other.device;
     }
 
+    bool operator==(const rocfft_location_t& other) const
+    {
+        return comm_rank == other.comm_rank && device == other.device;
+    }
+
     int comm_rank = 0;
     int device    = 0;
 };
