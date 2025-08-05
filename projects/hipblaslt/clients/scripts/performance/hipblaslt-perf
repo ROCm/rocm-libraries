@@ -229,6 +229,12 @@ def main():
                         help='folder where the cpp bench executables are located',
                         default=executable_folder)
 
+    parser.add_argument('--run_sh',
+                        type=str,
+                        help='run a sh file calling a set of ./hipblaslt-bench commands',
+                        action='append',
+                        default=None)
+
     parser.add_argument('--suite',
                         type=str,
                         action='append')
@@ -255,7 +261,10 @@ def main():
 
     arguments = parser.parse_args()
 
-    command_perf(arguments, probYaml_folder)
+    if arguments.run_sh is not None:
+        print(f'TODO: running {arguments.run_sh} and generate csv file')
+    else:
+        command_perf(arguments, probYaml_folder)
 
     sys.exit(0)
 
