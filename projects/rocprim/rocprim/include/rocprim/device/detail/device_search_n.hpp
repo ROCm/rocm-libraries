@@ -34,25 +34,24 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Config, class InputIterator, class BinaryPredicate>
+template<class InputIterator, class BinaryPredicate>
 struct search_n_impl_kernels
 {
-    static constexpr auto params           = device_params<Config>();
-    static constexpr auto block_size       = params.kernel_config.block_size;
-    static constexpr auto items_per_thread = params.kernel_config.items_per_thread;
-    static constexpr auto items_per_block  = block_size * items_per_thread;
-
-    static ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>()
-                                                    .kernel_config.block_size) void
-        search_n_normal_kernel(
-            InputIterator input,
-            size_t* __restrict__ output,
-            const size_t size,
-            const size_t possible_head_exist_size,
-            const size_t count,
-            const typename std::iterator_traits<InputIterator>::value_type* value,
-            const BinaryPredicate                                           binary_predicate)
+    template<class ArchConfig>
+    static ROCPRIM_DEVICE
+    void search_n_normal_kernel_impl(
+        InputIterator input,
+        size_t* __restrict__ output,
+        const size_t                                                    size,
+        const size_t                                                    possible_head_exist_size,
+        const size_t                                                    count,
+        const typename std::iterator_traits<InputIterator>::value_type* value,
+        const BinaryPredicate                                           binary_predicate)
     {
+        static constexpr auto params           = ArchConfig::params;
+        static constexpr auto block_size       = params.kernel_config.block_size;
+        static constexpr auto items_per_thread = params.kernel_config.items_per_thread;
+        static constexpr auto items_per_block  = block_size * items_per_thread;
 
         const size_t this_thread_start_idx
             = (block_id<0>() * items_per_block) + (items_per_thread * block_thread_id<0>());
@@ -95,7 +94,9 @@ struct search_n_impl_kernels
         *output = target;
     }
 
-    static ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(block_size) void search_n_find_heads_kernel(
+    template<class ArchConfig>
+    static ROCPRIM_DEVICE
+    void search_n_find_heads_kernel_impl(
         InputIterator                                                   input,
         const size_t                                                    input_size,
         const size_t                                                    possible_head_exist_size,
@@ -104,6 +105,11 @@ struct search_n_impl_kernels
         size_t* __restrict__ unfiltered_heads,
         const size_t group_size)
     {
+        static constexpr auto params           = ArchConfig::params;
+        static constexpr auto block_size       = params.kernel_config.block_size;
+        static constexpr auto items_per_thread = params.kernel_config.items_per_thread;
+        static constexpr auto items_per_block  = block_size * items_per_thread;
+
         const size_t this_thread_start_idx
             = (block_id<0>() * items_per_block) + (items_per_thread * block_thread_id<0>());
         const size_t this_thread_end_idx
@@ -127,14 +133,20 @@ struct search_n_impl_kernels
         }
     }
 
-    static ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(block_size) void
-        search_n_heads_filter_kernel(const size_t input_size,
-                                     const size_t count,
-                                     const size_t* __restrict__ unfiltered_heads,
-                                     const size_t unfiltered_heads_size,
-                                     size_t* __restrict__ filtered_heads,
-                                     size_t* __restrict__ filtered_heads_size)
+    template<class ArchConfig>
+    static ROCPRIM_DEVICE
+    void search_n_heads_filter_kernel_impl(const size_t input_size,
+                                           const size_t count,
+                                           const size_t* __restrict__ unfiltered_heads,
+                                           const size_t unfiltered_heads_size,
+                                           size_t* __restrict__ filtered_heads,
+                                           size_t* __restrict__ filtered_heads_size)
     {
+        static constexpr auto params           = ArchConfig::params;
+        static constexpr auto block_size       = params.kernel_config.block_size;
+        static constexpr auto items_per_thread = params.kernel_config.items_per_thread;
+        static constexpr auto items_per_block  = block_size * items_per_thread;
+
         const size_t this_thread_start_idx
             = (block_id<0>() * items_per_block) + (block_thread_id<0>() * items_per_thread);
         const size_t this_thread_end_idx
@@ -163,7 +175,9 @@ struct search_n_impl_kernels
         }
     }
 
-    static ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(block_size) void search_n_discard_heads_kernel(
+    template<class ArchConfig>
+    static ROCPRIM_DEVICE
+    void search_n_discard_heads_kernel_impl(
         InputIterator                                                   input,
         const size_t                                                    input_size,
         const size_t                                                    count,
@@ -172,6 +186,11 @@ struct search_n_impl_kernels
         size_t* __restrict__ filtered_heads,
         size_t* filtered_heads_size)
     {
+        static constexpr auto params           = ArchConfig::params;
+        static constexpr auto block_size       = params.kernel_config.block_size;
+        static constexpr auto items_per_thread = params.kernel_config.items_per_thread;
+        static constexpr auto items_per_block  = block_size * items_per_thread;
+
         const size_t heads_size = *filtered_heads_size;
         const auto   block_idx  = block_id<0>();
         if(heads_size == 0)
@@ -243,7 +262,7 @@ hipError_t search_n_impl(void*          temporary_storage,
     using input_type       = typename std::iterator_traits<InputIterator>::value_type;
     using output_type      = typename std::iterator_traits<OutputIterator>::value_type;
     using config           = wrapped_search_n_config<Config, input_type>;
-    using search_n_kernels = search_n_impl_kernels<config, InputIterator, BinaryPredicate>;
+    using search_n_kernels = search_n_impl_kernels<InputIterator, BinaryPredicate>;
 
     // The `size` must greater than or equal to `count`
     if(count > size)
@@ -254,7 +273,7 @@ hipError_t search_n_impl(void*          temporary_storage,
     target_arch target_arch;
     ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
 
-    const auto         params           = dispatch_target_arch<config>(target_arch);
+    const auto         params           = dispatch_target_arch<config, false>(target_arch);
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;
     const unsigned int items_per_block  = block_size * items_per_thread;
@@ -278,6 +297,7 @@ hipError_t search_n_impl(void*          temporary_storage,
 
         // Return end or begin
         search_n_start_timer(start, debug_synchronous);
+        
         search_n_kernels::search_n_init_kernel<<<1, 1, 0, stream>>>(tmp_output,
                                                                     count <= 0 ? 0 : size);
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_init_kernel", 1, start);
@@ -301,14 +321,23 @@ hipError_t search_n_impl(void*          temporary_storage,
         search_n_start_timer(start, debug_synchronous);
         search_n_kernels::search_n_init_kernel<<<1, 1, 0, stream>>>(tmp_output, size);
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_init_kernel", 1, start);
-        search_n_kernels::search_n_normal_kernel<<<num_blocks, block_size, 0, stream>>>(
-            input,
-            tmp_output,
-            size,
-            possible_head_exist_size,
-            count,
-            value,
-            binary_predicate);
+
+        auto search_n_normal_kernel = [=] __device__ (auto arch_config)
+        {
+            search_n_kernels::template search_n_normal_kernel_impl<decltype(arch_config)>(
+                input,
+                tmp_output,
+                size,
+                possible_head_exist_size,
+                count,
+                value,
+                binary_predicate);
+        };
+
+        auto search_n_normal_tuned_kernel = configure_kernel<config>(target_arch, search_n_normal_kernel);
+
+        search_n_normal_tuned_kernel.launch(num_blocks, block_size, 0, stream);
+
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_normal_kernel", size, start);
         ROCPRIM_RETURN_ON_ERROR(
             transform(tmp_output, output, 1, identity<output_type>(), stream, debug_synchronous));
@@ -353,8 +382,10 @@ hipError_t search_n_impl(void*          temporary_storage,
 
     // This function processes `possible_head_exist_size` items
     const size_t num_blocks_for_find_heads = ceiling_div(possible_head_exist_size, items_per_block);
-    search_n_kernels::
-        search_n_find_heads_kernel<<<num_blocks_for_find_heads, block_size, 0, stream>>>(
+
+    auto search_n_find_heads_kernel = [=] __device__ (auto arch_config)
+    {
+        search_n_kernels::template search_n_find_heads_kernel_impl<decltype(arch_config)>(
             input,
             size,
             possible_head_exist_size,
@@ -362,20 +393,34 @@ hipError_t search_n_impl(void*          temporary_storage,
             binary_predicate,
             unfiltered_heads,
             count /*group_size*/);
+    };
+
+    auto search_n_find_heads_tuned_kernel = configure_kernel<config>(target_arch, search_n_find_heads_kernel);
+
+    search_n_find_heads_tuned_kernel.launch(num_blocks_for_find_heads, block_size, 0, stream);
+
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_find_heads_kernel",
                                                 possible_head_exist_size,
                                                 start);
 
     // This function processes `num_groups` items
     const size_t num_blocks_for_heads_filter = ceiling_div(num_groups, items_per_block);
-    search_n_kernels::
-        search_n_heads_filter_kernel<<<num_blocks_for_heads_filter, block_size, 0, stream>>>(
+
+    auto search_n_heads_filter_kernel = [=] __device__ (auto arch_config)
+    {
+        search_n_kernels::template search_n_heads_filter_kernel_impl<decltype(arch_config)>(
             size, // It is just a value to decode the heads' index value
             count, // It is just a value to determine whether a certain head is invalid
             unfiltered_heads, // Input heads
             num_groups, // Size of unfiltered_heads
             filtered_heads, // Output
             tmp_output); // Used to store the number of items in `filtered_heads`
+    };
+
+    auto search_n_heads_filter_tuned_kernel = configure_kernel<config>(target_arch, search_n_heads_filter_kernel);
+
+    search_n_heads_filter_tuned_kernel.launch(num_blocks_for_heads_filter, block_size, 0, stream);
+
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_heads_filter_kernel", num_groups, start);
 
     size_t h_filtered_heads_size = 0;
@@ -410,8 +455,10 @@ hipError_t search_n_impl(void*          temporary_storage,
     // So the actual num_blocks_for_discard_heads needed is smaller than the current value
     const size_t num_blocks_for_discard_heads
         = ceiling_div(h_filtered_heads_size * count, items_per_block);
-    search_n_kernels::
-        search_n_discard_heads_kernel<<<num_blocks_for_discard_heads, block_size, 0, stream>>>(
+
+    auto search_n_discard_heads_kernel = [=] __device__ (auto arch_config)
+    {
+        search_n_kernels::template search_n_discard_heads_kernel_impl<decltype(arch_config)>(
             input,
             size,
             count,
@@ -419,6 +466,12 @@ hipError_t search_n_impl(void*          temporary_storage,
             binary_predicate,
             filtered_heads,
             tmp_output); // Currently, `tmp_output` contains the actual size of `filtered_heads`
+    };
+
+    auto search_n_discard_heads_tuned_kernel = configure_kernel<config>(target_arch, search_n_discard_heads_kernel);
+
+    search_n_discard_heads_tuned_kernel.launch(num_blocks_for_discard_heads, block_size, 0, stream);
+
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_discard_heads_kernel ",
                                                 h_filtered_heads_size,
                                                 start);

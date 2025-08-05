@@ -909,7 +909,7 @@ TYPED_TEST(RocprimDeviceSearchNTests, NoiseTest_1block)
             hipStream_t                  stream = 0; // default
             rocprim::detail::target_arch target_arch;
             HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-            const auto params = rocprim::detail::dispatch_target_arch<wrapped_config>(target_arch);
+            const auto params = rocprim::detail::dispatch_target_arch<wrapped_config, false>(target_arch);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
             const unsigned int items_per_block  = block_size * items_per_thread;
@@ -1029,7 +1029,7 @@ TYPED_TEST(RocprimDeviceSearchNTests, NoiseTest_2block)
             hipStream_t                  stream = 0; // default
             rocprim::detail::target_arch target_arch;
             HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-            const auto params = rocprim::detail::dispatch_target_arch<wrapped_config>(target_arch);
+            const auto params = rocprim::detail::dispatch_target_arch<wrapped_config, false>(target_arch);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
             const unsigned int items_per_block  = block_size * items_per_thread;
@@ -1149,7 +1149,7 @@ TYPED_TEST(RocprimDeviceSearchNTests, NoiseTest_3block)
             hipStream_t                  stream = 0; // default
             rocprim::detail::target_arch target_arch;
             HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-            const auto params = rocprim::detail::dispatch_target_arch<wrapped_config>(target_arch);
+            const auto params = rocprim::detail::dispatch_target_arch<wrapped_config, false>(target_arch);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
             const unsigned int items_per_block  = block_size * items_per_thread;
@@ -1269,7 +1269,7 @@ TYPED_TEST(RocprimDeviceSearchNTests, MultiResult1)
             hipStream_t                  stream = 0; // default
             rocprim::detail::target_arch target_arch;
             HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-            const auto params = rocprim::detail::dispatch_target_arch<wrapped_config>(target_arch);
+            const auto params = rocprim::detail::dispatch_target_arch<wrapped_config, false>(target_arch);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
             const unsigned int items_per_block  = block_size * items_per_thread;
@@ -1390,7 +1390,7 @@ TYPED_TEST(RocprimDeviceSearchNTests, MultiResult2)
             hipStream_t                  stream = 0; // default
             rocprim::detail::target_arch target_arch;
             HIP_CHECK(rocprim::detail::host_target_arch(stream, target_arch));
-            const auto params = rocprim::detail::dispatch_target_arch<wrapped_config>(target_arch);
+            const auto params = rocprim::detail::dispatch_target_arch<wrapped_config, false>(target_arch);
             const unsigned int block_size       = params.kernel_config.block_size;
             const unsigned int items_per_thread = params.kernel_config.items_per_thread;
             const unsigned int items_per_block  = block_size * items_per_thread;

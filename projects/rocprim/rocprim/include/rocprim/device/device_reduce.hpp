@@ -103,7 +103,7 @@ inline hipError_t launch_block_reduce_for_arch(detail::target_arch arch,
                                                                                           \
         launch_block_reduce_for_arch<config, WithInitialValue, fit_larger, fit_items, result_type> \
             (target_arch,                                                                          \
-             input,                                                                               \
+             input,                                                                                \
              size,                                                                                 \
              output,                                                                               \
              initial_value,                                                                        \
@@ -211,13 +211,18 @@ inline hipError_t reduce_impl(void*               temporary_storage,
             {
                 start = std::chrono::steady_clock::now();
             }
-            launch_block_reduce_for_arch<config, false, true, 1, result_type>
+            const hipError_t error = launch_block_reduce_for_arch<config, false, true, 1, result_type>
                 (target_arch,
                     input + offset,
                     current_size,
                     block_prefixes + i * number_of_blocks_limit,
                     initial_value,
                     reduce_op,dim3(current_blocks), dim3(block_size), 0, stream);
+
+            if(error != hipSuccess)
+            {
+                return error;
+            }
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", current_size, start);
         }
 
