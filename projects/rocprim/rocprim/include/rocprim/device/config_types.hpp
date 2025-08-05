@@ -341,8 +341,6 @@ auto configure_kernel(target_arch arch, Kernel kernel) -> tuned_kernel<Kernel>
     if(!tuned_kernel)
     {
         tuned_kernel = trampoline<Config, target_arch::unknown, Kernel>;
-
-        printf("[transform][unknow]\n");
     }
 
     return {tuned_kernel.value(), kernel};
