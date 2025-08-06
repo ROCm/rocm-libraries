@@ -399,10 +399,9 @@ auto GenericSearch(const Solver s,
         return copy;
     }();
 
-    //list of best solutions
+    // list of sampled solutions
     if(perf_sols)
     {
-        perf_sols->reserve(10);
         perf_sols->erase(perf_sols->begin(), perf_sols->end());
     }
 
@@ -468,7 +467,6 @@ auto GenericSearch(const Solver s,
     {
         size_t n_current       = 0;
         size_t last_imprv      = 0;
-        size_t n_updates       = 0;
         auto threads_remaining = total_threads;
         std::vector<float> samples;
         while(true)
@@ -599,14 +597,16 @@ auto GenericSearch(const Solver s,
                             worst_time = samples.back();
                             n_best     = n_current;
                             last_imprv = 0;
-                            if(perf_sols)
-                                (*perf_sols)[n_updates % 10] = {best_config.ToString(), best_time};
-                            n_updates++;
                         }
                         else
                         {
                             MIOPEN_LOG_I2("Mean is not better: " << elapsed_time
                                                                  << " >= " << best_time);
+                        }
+
+                        if(perf_sols)
+                        {
+                            perf_sols->push_back({current_config.ToString(), elapsed_time});
                         }
                     }
                 }
