@@ -30,6 +30,7 @@
 #include "common_test_header.hpp"
 
 #include "hipcub/util_allocator.hpp"
+#include <valgrind/valgrind.h>
 
 __global__ void EmptyKernel() { }
 
@@ -37,6 +38,13 @@ __global__ void EmptyKernel() { }
 
 TEST(HipcubCachingDeviceAllocatorTests, Test1)
 {
+    // This test is very timing sensitive. Valgrind signigficantly slows down
+    // kernel execution and therefore messes up the test. If valgrind is being 
+    // used we should disable this test
+    if (RUNNING_ON_VALGRIND) {
+        GTEST_SKIP() << "Skipping test under Valgrind";
+    }
+
     // Get number of GPUs and current GPU
     int num_gpus;
     int initial_gpu;
