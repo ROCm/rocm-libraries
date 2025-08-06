@@ -70,7 +70,7 @@ T5LayernormBackward::GetSolution(const ExecutionContext& context,
         std::accumulate(dims.begin(), dims.end() - 1, 1ULL, std::multiplies<size_t>());
     auto inner_size = dims[dims.size() - 1];
 
-    auto reqd_work_item_cnt = get_reqd_work_item_cnt(context);
+    auto reqd_work_item_cnt = get_reqd_work_item_cnt_t5(context);
 
     {
         size_t xlocalsize = LOCAL_SIZE;
@@ -258,7 +258,7 @@ T5LayernormBackward::GetSolution(const ExecutionContext& context,
 
                 auto inner_size = dims[dims.size() - 1];
 
-                auto reqd_work_item_cnt = get_reqd_work_item_cnt(handle_);
+                auto reqd_work_item_cnt = get_reqd_work_item_cnt_t5(handle_);
                 auto parallelism_size =
                     get_parallelism_size(reqd_work_item_cnt, inner_size, outer_size);
 
@@ -364,7 +364,7 @@ T5LayernormBackward::GetWorkspaceSize(const ExecutionContext& context,
 
     auto inner_size = dims[dims.size() - 1];
 
-    auto reqd_work_item_cnt = get_reqd_work_item_cnt(context);
+    auto reqd_work_item_cnt = get_reqd_work_item_cnt_t5(context);
 
     if(is_parallelism(reqd_work_item_cnt, inner_size, outer_size))
     {

@@ -25,9 +25,10 @@
  *******************************************************************************/
 #pragma once
 
-#include <miopen/activ.hpp>
 #include <miopen/problem_description_base.hpp>
+#include <miopen/activ.hpp>
 #include <miopen/tensor.hpp>
+#include <miopen/mlo_internal.hpp>
 #include <cassert>
 
 namespace miopen {
@@ -42,7 +43,16 @@ enum class Direction
     Backward,
 };
 
-struct ProblemDescription : ProblemDescriptionBase
+struct ProblemDescriptionTag
+{
+};
+
+struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
+                                                    ProblemDescriptionTag
+#if MIOPEN_ENABLE_SQLITE
+    ,
+                                                    SQLiteSerializable<ProblemDescription>
+#endif
 {
     ProblemDescription(miopenNormMode_t mode_,
                        const TensorDescriptor& xDesc_,
@@ -282,7 +292,44 @@ struct ProblemDescription : ProblemDescriptionBase
         return (outer_size > 32);
     }
 
+    void Serialize(std::ostream& stream) const { stream << MakeNetworkConfig().ToString(); }
+
     NetworkConfig MakeNetworkConfig() const override;
+
+    template <class Self>
+    static void Visit(Self&& self, std::function<void(int64_t, std::string)> f)
+    {
+        // The column names match the driver command line argument names
+        f(static_cast<uint64_t>(self.direction), "direction");
+        f(self.GetBatchSize(), "in_n");
+        f(self.GetChannel(), "in_c");
+        f(self.GetDepth(), "in_d");
+        f(self.GetHeight(), "in_h");
+        f(self.GetWidth(), "in_w");
+        f(self.normalized_dim, "normalized_dim");
+        f(static_cast<uint64_t>(self.mode), "mode");
+    }
+
+    template <class Self>
+    static void Visit(Self&& self, std::function<void(std::string, std::string)> f)
+    {
+        f(self.xDesc.GetLayout_str(), "layout");
+        f(GetDataTypeName(self.xDesc.GetType()), "data_type");
+    }
+
+    template <class Self, class Visitor>
+    static void VisitAll(Self&& self, const Visitor& f)
+    {
+        Visit(std::forward<Self>(self), [&](int64_t value, std::string name) { f(value, name); });
+        Visit(std::forward<Self>(self),
+              [&](std::string value, std::string name) { f(value, name); });
+    }
+
+    // This declaration marks layernorm as a primitive with tuning enabled.
+    // Any tunable solver would be able pick it and fetch a db instance in ExecutePrimitive.
+    // It has to be discoverable via ADL from problem description.
+    friend auto GetDb(const ExecutionContext& context, const ProblemDescriptionTag&)
+        -> PerformanceDb;
 
 private:
     Direction direction;
@@ -303,6 +350,15 @@ private:
     int32_t normalized_dim;
 
     NetworkConfig MakeForwardNetworkConfig() const;
+
+    std::size_t GetBatchSize() const { return xDesc.GetLengths()[0]; }
+    std::size_t GetChannel() const { return xDesc.GetNumDims() > 2 ? xDesc.GetLengths()[1] : 0; }
+    std::size_t GetDepth() const { return xDesc.GetNumDims() > 4 ? xDesc.GetLengths()[2] : 0; }
+    std::size_t GetHeight() const
+    {
+        return xDesc.GetNumDims() > 2 ? xDesc.GetLengths()[xDesc.GetNumDims() - 2] : 0;
+    }
+    std::size_t GetWidth() const { return xDesc.GetLengths()[xDesc.GetNumDims() - 1]; }
 };
 
 } // namespace layernorm

@@ -24,21 +24,134 @@
  *
  *******************************************************************************/
 
+#include "miopen/layernorm/problem_description.hpp"
 #include <miopen/datatype.hpp>
 #include <miopen/kernel_build_params.hpp>
+#include "miopen/invoke_params.hpp"
+#include "miopen/mlo_internal.hpp"
+#include <miopen/generic_search.hpp>
 #include <miopen/layernorm.hpp>
 #include <miopen/layernorm/solvers.hpp>
 #include <miopen/layernorm/invoke_params.hpp>
 #include <miopen/layernorm/utils.hpp>
 #include <miopen/target_properties.hpp>
 
-#define LOCAL_SIZE 256
+#define DEFAULT_LOCAL_SIZE 256
+#define MAX_LOCAL_SIZE 1024
 
 namespace miopen {
 
 namespace solver {
 
 namespace layernorm {
+
+void PerformanceConfigLayernormForward::HeuristicInit(
+    const miopen::layernorm::ProblemDescription& problem)
+{
+#if !MIOPEN_BACKEND_HIP
+    std::ignore = problem;
+#else
+    switch(problem.GetXDesc().GetType())
+    {
+    case miopenHalf:
+    case miopenFloat:
+    case miopenBFloat16: local_size = 1; break;
+    case miopenDouble:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenInt8:
+    case miopenInt32:
+    case miopenInt64:
+    default: MIOPEN_THROW("Unsupported datatype");
+    }
+#endif
+    initialized = true;
+}
+
+bool PerformanceConfigLayernormForward::SetNextValue(
+    const miopen::layernorm::ProblemDescription& problem)
+{
+#if !MIOPEN_BACKEND_HIP
+    std::ignore = problem;
+    return false;
+#else
+    if(!initialized)
+    {
+        HeuristicInit(problem);
+    }
+    if(local_size <= 0)
+    {
+        MIOPEN_THROW(miopenStatusInvalidValue, "Local size zero or negative");
+    }
+    if(local_size * 2 <= MAX_LOCAL_SIZE)
+    {
+        local_size *= 2;
+        return true;
+    }
+    return false;
+#endif
+}
+
+bool PerformanceConfigLayernormForward::IsValidValue() const
+{
+    return local_size > 0 && local_size <= MAX_LOCAL_SIZE;
+}
+
+bool PerformanceConfigLayernormForward::IsValid(
+    const ExecutionContext&, const miopen::layernorm::ProblemDescription& problem) const
+{
+#if !MIOPEN_BACKEND_HIP
+    std::ignore = problem;
+    return false;
+#else
+    switch(problem.GetXDesc().GetType())
+    {
+    case miopenHalf:
+    case miopenFloat:
+    case miopenBFloat16: return true;
+    case miopenDouble:
+    case miopenFloat8_fnuz:
+    case miopenBFloat8_fnuz:
+    case miopenInt8:
+    case miopenInt32:
+    case miopenInt64:
+    default: MIOPEN_THROW("Unsupported datatype");
+    }
+    return false;
+#endif
+}
+
+bool PerformanceConfigLayernormForward::operator==(
+    const PerformanceConfigLayernormForward& other) const
+{
+    return local_size == other.local_size;
+}
+
+PerformanceConfigLayernormForward LayernormForward::GetDefaultPerformanceConfig(
+    const ExecutionContext&, const miopen::layernorm::ProblemDescription& problem) const
+{
+    PerformanceConfigLayernormForward config;
+    config.HeuristicInit(problem);
+    config.local_size = DEFAULT_LOCAL_SIZE;
+    MIOPEN_LOG_I(config.ToString());
+    return config;
+}
+
+bool LayernormForward::IsValidPerformanceConfig(
+    const ExecutionContext& context,
+    const miopen::layernorm::ProblemDescription& problem,
+    const PerformanceConfigLayernormForward& config) const
+{
+    return config.IsValid(context, problem);
+}
+
+PerformanceConfigLayernormForward
+LayernormForward::Search(const ExecutionContext& context,
+                         const miopen::layernorm::ProblemDescription& problem,
+                         const AnyInvokeParams& invoke_context) const
+{
+    return GenericSearch(*this, context, problem, invoke_context);
+}
 
 bool LayernormForward::IsApplicable(const ExecutionContext&,
                                     const miopen::layernorm::ProblemDescription& problem) const
@@ -56,9 +169,9 @@ bool LayernormForward::IsApplicable(const ExecutionContext&,
     return true;
 }
 
-ConvSolution
-LayernormForward::GetSolution(const ExecutionContext& context,
-                              const miopen::layernorm::ProblemDescription& problem) const
+ConvSolution LayernormForward::GetSolution(const ExecutionContext& context,
+                                           const miopen::layernorm::ProblemDescription& problem,
+                                           const PerformanceConfigLayernormForward& config) const
 {
     std::ignore = context;
 
@@ -93,7 +206,7 @@ LayernormForward::GetSolution(const ExecutionContext& context,
             inner_size *= dims[i];
         }
 
-        size_t xlocalsize = LOCAL_SIZE;
+        size_t xlocalsize = config.local_size;
         size_t xgridsize  = outer_size * stride * xlocalsize;
         size_t ylocalsize = 1;
         size_t ygridsize  = 1;
@@ -115,7 +228,7 @@ LayernormForward::GetSolution(const ExecutionContext& context,
             {"INNER_SIZE", inner_size},
             {"STRIDE", stride},
             {"PARALLEL_SIZE", 1},
-            {"LOCAL_SIZE", LOCAL_SIZE},
+            {"LOCAL_SIZE", config.local_size},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
             {"MIOPEN_WEIGHT_BIAS", 1},
             {"MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD", 2},

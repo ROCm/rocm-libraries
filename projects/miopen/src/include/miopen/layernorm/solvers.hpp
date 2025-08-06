@@ -25,6 +25,9 @@
  *******************************************************************************/
 #pragma once
 
+#include "miopen/execution_context.hpp"
+#include "miopen/invoke_params.hpp"
+#include "miopen/performance_config.hpp"
 #include <miopen/layernorm/problem_description.hpp>
 #include <miopen/solver.hpp>
 
@@ -37,24 +40,99 @@ namespace layernorm {
 using NormalizationSolver =
     NonTunableSolverBase<ExecutionContext, miopen::layernorm::ProblemDescription>;
 
-struct LayernormForward final : NormalizationSolver
+template <class PerformanceConfig>
+using NormalizationTunableSolver =
+    TunableSolverMixin<ExecutionContext, miopen::layernorm::ProblemDescription, PerformanceConfig>;
+
+struct PerformanceConfigLayernormForward : PerfConfigBase<PerformanceConfigLayernormForward>
+{
+    int local_size;
+    bool initialized = false;
+    PerformanceConfigLayernormForward(int _local_size) : local_size(_local_size) {}
+    PerformanceConfigLayernormForward() : PerformanceConfigLayernormForward(static_cast<int>(1)) {}
+    PerformanceConfigLayernormForward(bool) : PerformanceConfigLayernormForward(static_cast<int>(1))
+    {
+    }
+    void HeuristicInit(const miopen::layernorm::ProblemDescription& problem);
+    bool SetNextValue(const miopen::layernorm::ProblemDescription& problem);
+    bool IsValidValue() const;
+    bool IsValid(const ExecutionContext& context,
+                 const miopen::layernorm::ProblemDescription& problem) const;
+
+    template <typename Self, typename F>
+    static void Visit(Self&& s, F f)
+    {
+        f(s.local_size, "local_size");
+    }
+    bool operator==(const PerformanceConfigLayernormForward& other) const;
+};
+
+struct LayernormForward final : NormalizationTunableSolver<PerformanceConfigLayernormForward>
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<LayernormForward>(); }
 
     bool IsApplicable(const ExecutionContext& context,
                       const miopen::layernorm::ProblemDescription& problem) const override;
+    bool IsDynamic() const override { return true; }
+    PerformanceConfigLayernormForward GetDefaultPerformanceConfig(
+        const ExecutionContext& context,
+        const miopen::layernorm::ProblemDescription& problem) const override;
+    bool IsValidPerformanceConfig(const ExecutionContext& context,
+                                  const miopen::layernorm::ProblemDescription& problem,
+                                  const PerformanceConfigLayernormForward& config) const override;
+    PerformanceConfigLayernormForward Search(const ExecutionContext& context,
+                                             const miopen::layernorm::ProblemDescription& problem,
+                                             const AnyInvokeParams& invoke_context) const override;
     ConvSolution GetSolution(const ExecutionContext& context,
-                             const miopen::layernorm::ProblemDescription& problem) const override;
+                             const miopen::layernorm::ProblemDescription& problem,
+                             const PerformanceConfigLayernormForward& config) const override;
 };
 
-struct LayernormBackward final : NormalizationSolver
+struct PerformanceConfigLayernormBackward : PerfConfigBase<PerformanceConfigLayernormBackward>
+{
+    int local_size;
+    bool initialized = false;
+    PerformanceConfigLayernormBackward(int _local_size) : local_size(_local_size) {}
+    PerformanceConfigLayernormBackward() : PerformanceConfigLayernormBackward(static_cast<int>(1))
+    {
+    }
+    PerformanceConfigLayernormBackward(bool)
+        : PerformanceConfigLayernormBackward(static_cast<int>(1))
+    {
+    }
+    void HeuristicInit(const miopen::layernorm::ProblemDescription& problem);
+    bool SetNextValue(const miopen::layernorm::ProblemDescription& problem);
+    bool IsValidValue() const;
+    bool IsValid(const ExecutionContext& context,
+                 const miopen::layernorm::ProblemDescription& problem) const;
+
+    template <typename Self, typename F>
+    static void Visit(Self&& s, F f)
+    {
+        f(s.local_size, "local_size");
+    }
+    bool operator==(const PerformanceConfigLayernormBackward& other) const;
+};
+
+struct LayernormBackward final : NormalizationTunableSolver<PerformanceConfigLayernormBackward>
 {
     const std::string& SolverDbId() const override { return GetSolverDbId<LayernormBackward>(); }
 
     bool IsApplicable(const ExecutionContext& context,
                       const miopen::layernorm::ProblemDescription& problem) const override;
+    bool IsDynamic() const override { return true; }
+    PerformanceConfigLayernormBackward GetDefaultPerformanceConfig(
+        const ExecutionContext& context,
+        const miopen::layernorm::ProblemDescription& problem) const override;
+    bool IsValidPerformanceConfig(const ExecutionContext& context,
+                                  const miopen::layernorm::ProblemDescription& problem,
+                                  const PerformanceConfigLayernormBackward& config) const override;
+    PerformanceConfigLayernormBackward Search(const ExecutionContext& context,
+                                              const miopen::layernorm::ProblemDescription& problem,
+                                              const AnyInvokeParams& invoke_context) const override;
     ConvSolution GetSolution(const ExecutionContext& context,
-                             const miopen::layernorm::ProblemDescription& problem) const override;
+                             const miopen::layernorm::ProblemDescription& problem,
+                             const PerformanceConfigLayernormBackward& config) const override;
     std::size_t
     GetWorkspaceSize(const ExecutionContext& context,
                      const miopen::layernorm::ProblemDescription& problem) const override;
