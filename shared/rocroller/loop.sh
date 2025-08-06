@@ -11,7 +11,7 @@ rm $DIR -fr; mkdir $DIR
 ROCPROF_DIR=rocprof_$INSTR_WIDTH
 
 for (( i=0; i<=8; i++ )); do
-    EXE="prog_${i}_${INSTR_WIDTH}".out
+    EXE="./prog_${i}_${INSTR_WIDTH}".out
 
     hipcc ../hip.cpp -DBYTE_STRIDE="$i" -DINSTR_WIDTH=$INSTR_WIDTH -O3 -o ./$EXE
 
@@ -20,29 +20,30 @@ for (( i=0; i<=8; i++ )); do
 
         rm $ROCPROF_DIR/ -rf
 
-        myrocprof=rocprofv3
-        # myrocprof=~/repos/rocprofiler-sdk-build/bin/rocprofv3
+        ROCPROF=/opt/rocm/bin/rocprofv3
 
-        # HSA_CU_MASK=0 $myrocprof -i ../input.json  --att --att-perfcounter-ctrl 3 --att-perfcounters "SQ_LDS_BANK_CONFLICT" -d $ROCPROF_DIR/ -- ./$EXE
-        # $myrocprof --att -d $ROCPROF_DIR/ --att-perfcounter-ctrl 3 --att-perfcounters "SQ_LDS_BANK_CONFLICT" -- ./$EXE
-
-        /opt/rocm/bin/rocprofv3 --att \
+        export ROCROLLER_BUILD_DIR=./
+        # EXE="../scripts/rrperf run --suite fp4_target_d2lds_mi16x16x128_pf4x1_wgm"
+        # EXE="./client/rocroller-gemm --m=1024 --n=1024 --k=512 generate validate"
+        $ROCPROF --att \
         -d ${ROCPROF_DIR}/ \
         --att-perfcounter-ctrl=8 \
         --att-perfcounters="SQ_INST_LEVEL_VMEM,SQ_INST_LEVEL_LDS,SQ_LDS_BANK_CONFLICT,SQ_VALU_MFMA_BUSY_CYCLES" \
         --att-target-cu=1 \
-        --att-shader-engine-mask=0x1 -- ./$EXE
+        --att-shader-engine-mask=0x1 -- $EXE
 
         { output="$(cat $ROCPROF_DIR/stats_ui_output_agent_*_dispatch_1.csv)"; }
 
         len=${#output}
 
-        # if (( len > CHAR_LIMIT )); then
+        if (( len > CHAR_LIMIT )); then
             mv $ROCPROF_DIR/ $DIR/$i/
             break
-        # fi
+        fi
     done
     
+    exit
+
     rm ./$EXE
 
 done
