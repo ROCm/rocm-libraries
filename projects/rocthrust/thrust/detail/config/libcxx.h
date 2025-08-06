@@ -32,7 +32,7 @@
 //     using optional_int = _THRUST_STD::optional<int>;
 
 // When targeting CUDA, we want to use 'libcudacxx'. This
-// should always be available, since we are also depedent
+// should always be available, since we are also dependent
 // on CCCL/thrust, which is a sibling of CCCL/libcudacxx.
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  define _THRUST_STD_INCLUDE(LIB)      <cuda/std/LIB>

@@ -49,7 +49,7 @@ THRUST_NAMESPACE_BEGIN
 #  ifdef _CCCL_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <size_t N, class T>
 using tuple_element = _THRUST_STD::tuple_element<N, T>;
-#  else // ^^^ _CCCL_DOXYGEN_INVOKED ^^^ / vvv !_CCCL_DOXYGEN_INVOKED vvv
+#  else
 using _THRUST_STD::tuple_element;
 #  endif // _CCCL_DOXYGEN_INVOKED
 
@@ -62,7 +62,7 @@ using _THRUST_STD::tuple_element;
 #  ifdef _CCCL_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <class T>
 using tuple_size = _THRUST_STD::tuple_size<T>;
-#  else // ^^^ _CCCL_DOXYGEN_INVOKED ^^^ / vvv !_CCCL_DOXYGEN_INVOKED vvv
+#  else
 using _THRUST_STD::tuple_size;
 #  endif // _CCCL_DOXYGEN_INVOKED
 
@@ -80,7 +80,7 @@ using _THRUST_STD::tuple_size;
 #  ifdef _CCCL_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <class T, class U>
 using pair = _THRUST_STD::pair<T, U>;
-#  else // ^^^ _CCCL_DOXYGEN_INVOKED ^^^ / vvv !_CCCL_DOXYGEN_INVOKED vvv
+#  else
 using _THRUST_STD::pair;
 #  endif // _CCCL_DOXYGEN_INVOKED
 
