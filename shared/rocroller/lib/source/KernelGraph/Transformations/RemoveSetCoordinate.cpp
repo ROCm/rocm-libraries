@@ -39,8 +39,8 @@ namespace rocRoller
         namespace CG = rocRoller::KernelGraph::ControlGraph;
 
         static void collectSetCoordinates(KernelGraph const&       graph,
-                                          std::unordered_set<int>& visited,
                                           int                      tag,
+                                          std::unordered_set<int>& visited,
                                           std::vector<int>&        result)
         {
             auto traverse = [&]<typename... EdgeTypes>()
@@ -51,7 +51,7 @@ namespace rocRoller
                         if(not visited.contains(child))
                         {
                             visited.insert(child);
-                            collectSetCoordinates(graph, visited, child, result);
+                            collectSetCoordinates(graph, child, visited, result);
                         }
                     }
                 };
@@ -80,7 +80,7 @@ namespace rocRoller
             for(auto const& node : roots)
             {
                 visited.insert(node);
-                collectSetCoordinates(graph, visited, node, result);
+                collectSetCoordinates(graph, node, visited, result);
             }
             return result;
         }
