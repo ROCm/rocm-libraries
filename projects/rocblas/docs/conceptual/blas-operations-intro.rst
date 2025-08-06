@@ -72,13 +72,7 @@ are as follows.
    "``z``","double complex"
 
 The data type is appended to the front of the function name, so ``daxpy`` is the ``axpy``
-(vector update) function for double-precision inputs. In addition, the data type prefixes can be preceded with an ``e`` to indicate extended precision.
-For example, if the name of an operation begins with ``ed``, it accepts extended-precision double values.
-
-.. note::
-
-   There is no consistent convention across different implementations regarding the capitalization of function names.
-   The rocBLAS API and documentation use lower case.
+(vector update) function for double-precision inputs.
 
 Level-1 BLAS operations
 -----------------------
