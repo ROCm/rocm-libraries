@@ -33,18 +33,22 @@
 #include <string>
 #include <vector>
 
-struct InputWithExpected {
+struct InputWithExpected
+{
     std::map<std::string, int> values;
-    int expected;
+    int                        expected;
 };
 
-struct MyTestData {
-    std::string name;
+struct MyTestData
+{
+    std::string                    name;
     std::vector<InputWithExpected> inputs;
 };
 
 // Parameterized test class declaration
-class AnalyticalGtest : public ::testing::TestWithParam<MyTestData> {};
+class AnalyticalGtest : public ::testing::TestWithParam<MyTestData>
+{
+};
 
 void ComputeLoads(int MT_M, int MT_N, int MT_K, int expected, bool debug = false)
 {
