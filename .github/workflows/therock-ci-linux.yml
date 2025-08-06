@@ -66,7 +66,7 @@ jobs:
           echo "---"
           ccache -z
           ccache -s -v
-          echo cmake --version
+          cmake --version
           echo "Installed Python versions:"
           ls -d /opt/python
           echo "python: $(which python), python3: $(which python3)"
@@ -121,6 +121,12 @@ jobs:
         with:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::692859939525:role/therock-artifacts-external
+
+      - name: Create Log archive
+        if: always()
+        run: |
+          python3 build_tools/create_log_archive.py \
+            --build-dir=build
 
       - name: Create Logs index Files
         if: always()
