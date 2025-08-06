@@ -45,8 +45,8 @@
 #define DISABLE_WARNING_RETURN_TYPE
 #endif
 
-#include "hipfft/hipfft-export.h"
-#include "hipfft/hipfft-version.h"
+#include "hipfft-export.h"
+#include "hipfft-version.h"
 #include <hip/hip_complex.h>
 #include <hip/library_types.h>
 
