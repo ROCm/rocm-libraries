@@ -33,7 +33,6 @@
 #include <vector>
 
 #include "test_seed.hpp"
-#include "thrust/detail/tuple.inl"
 
 #define TEST_EVENT_WAIT(e) test_event_wait(e)
 

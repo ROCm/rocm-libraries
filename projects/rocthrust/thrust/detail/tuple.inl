@@ -23,28 +23,6 @@
 
 THRUST_NAMESPACE_BEGIN
 
-// define null_type
-struct null_type {};
-
-// null_type comparisons
-THRUST_HOST_DEVICE inline
-bool operator==(const null_type&, const null_type&) { return true; }
-
-THRUST_HOST_DEVICE inline
-bool operator>=(const null_type&, const null_type&) { return true; }
-
-THRUST_HOST_DEVICE inline
-bool operator<=(const null_type&, const null_type&) { return true; }
-
-THRUST_HOST_DEVICE inline
-bool operator!=(const null_type&, const null_type&) { return false; }
-
-THRUST_HOST_DEVICE inline
-bool operator<(const null_type&, const null_type&) { return false; }
-
-THRUST_HOST_DEVICE inline
-bool operator>(const null_type&, const null_type&) { return false; }
-
 // forward declaration for tuple
 template <
   class T0 = null_type, class T1 = null_type, class T2 = null_type,
@@ -52,7 +30,6 @@ template <
   class T6 = null_type, class T7 = null_type, class T8 = null_type,
   class T9 = null_type>
 class tuple;
-
 
 template <size_t N, class T> struct tuple_element;
 
