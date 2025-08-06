@@ -111,9 +111,9 @@ endif()
 string( CONCAT TESTS_OUT_DIR "${PROJECT_BINARY_DIR}" ${TESTS_OUT_DIR} )
 
 option( BUILD_CLIENTS_TESTS_OPENMP "Build tests with OpenMP" ON )
-if( BUILD_CLIENTS_TESTS_OPENMP AND BUILD_WITH_LIB NOT STREQUAL "CUDA" )
+if( BUILD_CLIENTS_TESTS_OPENMP AND NOT BUILD_WITH_LIB STREQUAL "CUDA" )
   # Attempt to find a config version, which provides openmp_LIB_DIR.
-  #find_package( OpenMP CONFIG PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
+  find_package( OpenMP CONFIG PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
   if( NOT OPENMP_FOUND OR NOT DEFINED ${openmp_LIB_DIR} )
      # Fall-back to module mode.
      find_package( OpenMP REQUIRED )
