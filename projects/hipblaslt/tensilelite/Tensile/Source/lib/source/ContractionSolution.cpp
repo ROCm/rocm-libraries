@@ -3174,7 +3174,7 @@ namespace TensileLite
             // Max splitting is currently constant, but should be dependant on K dimension
             else if (tiles < cuCount)
             {
-                const std::vector<int> tileFractions = {8, 6, 4, 3, 2, 1};
+                const std::vector<int> tileFractions = {16, 12, 8, 6, 4, 3, 2, 1};
                 for(int frac: tileFractions)
                 {
                     size_t splitGrid = tiles * frac;
