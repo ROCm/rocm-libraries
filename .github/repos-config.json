@@ -1,6 +1,14 @@
 {
   "repositories": [
     {
+      "name": "miopen",
+      "url": "ROCm/MIOpen",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
+    },
+    {
       "name": "tensile",
       "url": "ROCm/Tensile",
       "branch": "release/rocm-rel-7.0",
@@ -51,7 +59,7 @@
       "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": false,
+      "auto_subtree_push": true,
       "enable_pr_fanout": false
     },
     {
@@ -96,7 +104,7 @@
       "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": false,
-      "auto_subtree_push": false,
+      "auto_subtree_push": true,
       "enable_pr_fanout": false
     },
     {
