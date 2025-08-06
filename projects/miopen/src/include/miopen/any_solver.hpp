@@ -69,10 +69,10 @@ struct AnySolver
     };
     ConvSolution GetSolution(const ExecutionContext& ctx,
                                               const miopen::conv::ProblemDescription& problem,
-					      const PerfConfig& config) const
+					      const std::string& params) const
     {
         assert(ptr_value != nullptr);
-        return ptr_value->GetSolution(ctx, problem, config);
+        return ptr_value->GetSolution(ctx, problem, params);
     };
     std::vector<ConvSolution> GetAllSolutions(const ExecutionContext& ctx,
                                               const miopen::conv::ProblemDescription& problem) const
@@ -132,7 +132,7 @@ struct AnySolver
     std::string GenericSearch(const ExecutionContext& ctx,
 				   const miopen::conv::ProblemDescription& problem,
 				   const miopen::AnyInvokeParams& invoke_ctx,
-				   std::vector<miopen::solver::SolutionPerf>* perf_sols = nullptr)
+				   std::vector<miopen::solver::SolutionPerf>* perf_sols = nullptr) const
     {
         assert(ptr_value != nullptr);
         return ptr_value->GenericSearch(ctx, problem, invoke_ctx, perf_sols);
@@ -186,7 +186,7 @@ struct AnySolver
         virtual ConvSolution
         GetSolution(const ExecutionContext& ctx,
                         const miopen::conv::ProblemDescription& problem,
-	                const PerfConfig& config) const                 = 0;
+	                const std::string& params) const                 = 0;
         virtual std::vector<ConvSolution>
         GetAllSolutions(const ExecutionContext& ctx,
                         const miopen::conv::ProblemDescription& problem) const                 = 0;
@@ -301,7 +301,7 @@ struct AnySolver
         // tunable legacy solver
         ConvSolution GetSolution(const ExecutionContext&,
                                                   const miopen::conv::ProblemDescription&,
-	                                          const PerfConfig& config,
+	                                          const std::string& params,
                                                   std::true_type,
                                                   std::true_type) const
         {
@@ -319,12 +319,17 @@ struct AnySolver
         // tunable solver, not legacy
         ConvSolution GetSolution(const ExecutionContext& ctx,
                                                   const miopen::conv::ProblemDescription& problem,
-	                                          const PerfConfig& config,
+	                                          const std::string& params,
                                                   std::true_type,
                                                   std::false_type) const
         {
             using PerformanceConfig = decltype(value.GetDefaultPerformanceConfig(ctx, problem));
-            return value.GetSolution(ctx, problem, static_cast<const PerformanceConfig&>(config));
+            PerformanceConfig config{};
+            bool success = config.Deserialize(params);
+            if(!success)
+                MIOPEN_THROW("Failed to deserialize parameters.");
+
+            return value.GetSolution(ctx, problem, config);
         }
 
         std::vector<ConvSolution> GetAllSolutions(const ExecutionContext& ctx,
@@ -338,7 +343,7 @@ struct AnySolver
         // non tunable solver
         ConvSolution GetSolution(const ExecutionContext& ctx,
                                                   const miopen::conv::ProblemDescription& problem,
-	                                          const PerfConfig& config,
+	                                          const std::string& params,
                                                   std::false_type,
                                                   std::true_type) const
         {
@@ -346,7 +351,7 @@ struct AnySolver
         }
         ConvSolution GetSolution(const ExecutionContext& ctx,
                                                   const miopen::conv::ProblemDescription& problem,
-	                                          const PerfConfig& config,
+	                                          const std::string& params,
                                                   std::false_type,
                                                   std::false_type) const
         {
@@ -375,11 +380,11 @@ struct AnySolver
         ConvSolution
         GetSolution(const ExecutionContext& ctx,
                         const miopen::conv::ProblemDescription& problem,
-			const PerfConfig& config) const override
+			const std::string& params) const override
         {
             return GetSolution(ctx,
                                    problem,
-				   config,
+				   params,
                                    std::integral_constant<bool, TunableSolver::Is>(),
                                    std::integral_constant<bool, LegacySolver::Is>());
         }
