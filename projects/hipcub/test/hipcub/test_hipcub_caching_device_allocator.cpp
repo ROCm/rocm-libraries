@@ -30,7 +30,7 @@
 #include "common_test_header.hpp"
 
 #include "hipcub/util_allocator.hpp"
-#include <valgrind/valgrind.h>
+#include <cstdlib>
 
 __global__ void EmptyKernel() { }
 
@@ -41,7 +41,7 @@ TEST(HipcubCachingDeviceAllocatorTests, Test1)
     // This test is very timing sensitive. Valgrind signigficantly slows down
     // kernel execution and therefore messes up the test. If valgrind is being 
     // used we should disable this test
-    if (RUNNING_ON_VALGRIND) {
+    if (std::getenv("UNDER_VALGRIND")) {
         GTEST_SKIP() << "Skipping test under Valgrind";
     }
 
