@@ -55,7 +55,7 @@ void testing_gthr(const Arguments& arg)
     // Initialize data on CPU
     rocsparse_seedrand();
     rocsparse_init_index(hx_ind, nnz, base, M + base);
-    rocsparse_init<T>(hy, 1, M, 1);
+    rocsparse_init<T>(hy, 1, M, 1, arg.convert_to_int);
 
     // Allocate device memory
     device_vector<rocsparse_int> dx_ind(nnz);
