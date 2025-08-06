@@ -23,8 +23,8 @@ on:
     paths:
 #      - 'projects/**'
 #      - 'shared/**'
-      - 'projects/miopen'
-      - 'projects/hipblas'
+      - 'projects/miopen/**'
+      - 'projects/hipblas/**'
 
 jobs:
   trigger-rtd:
