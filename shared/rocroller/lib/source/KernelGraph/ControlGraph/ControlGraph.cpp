@@ -135,7 +135,7 @@ namespace rocRoller::KernelGraph::ControlGraph
         if(not Settings::getInstance()->get(Settings::EnforceGraphConstraints))
             return true;
 
-        if(not isRestricted)
+        if(not m_changesRestricted)
             return true;
 
         auto const& el = getElement(index);

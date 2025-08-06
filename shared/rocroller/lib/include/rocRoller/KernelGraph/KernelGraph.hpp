@@ -65,6 +65,53 @@ namespace rocRoller
             std::unordered_map<int, rocRoller::KernelGraph::CoordinateGraph::Transformer>
                 m_transformers;
 
+            /**
+             * @brief Check if a parent node is a SetCoordinate and connected by a 
+             *        Body/Initialize edge
+             *
+             */
+            bool isParentSetCoordinate(int const edge, int const node) const;
+
+            /**
+             * @brief Check if a parent node is a ForLoop and connected by a 
+             *        Body/ForLoopIncrement edge
+             *
+             */
+            bool isParentForLoopOp(int const edge, int const node) const;
+
+            /**
+             * @brief Set expression using a ForLoop op in a given transformer
+             *
+             */
+            void setTransformerByForLoopOp(CoordinateGraph::Transformer& transformer,
+                                           int                           forLoopOp);
+
+            /**
+             * @brief Set expression using a SetCoordinate op in a given transformer
+             *
+             */
+            void setTransformerBySetCoordinate(CoordinateGraph::Transformer& transformer,
+                                               int                           setCoordinateOp);
+
+            /**
+             * @brief Collect ForLoop and SetCoordinate nodes for each op in control graph for a given op.
+             *
+             * @param tag The operation. 
+             * @param parentForLoopAndSetCoordinate An unordered map with the key as an op and the value is
+             *                                      the parent ForLoop/SetCoordinate.
+             */
+            void collectParentForLoopAndSetCoordinate(
+                int tag, std::unordered_map<int, int>& parentForLoopAndSetCoordinate) const;
+
+            /**
+             * @brief Collect ForLoop and SetCoordinate nodes for each op in control graph.
+             *
+             * @return An unordered map with the key as an op and the value is the parent 
+             *         ForLoop/SetCoordinate for all ops in control graph.
+             *
+             */
+            std::unordered_map<int, int> collectParentForLoopAndSetCoordinate() const;
+
         public:
             ControlGraph::ControlGraph       control;
             CoordinateGraph::CoordinateGraph coordinates;

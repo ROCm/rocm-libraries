@@ -252,7 +252,7 @@ namespace rocRoller
              */
             void setRestricted()
             {
-                isRestricted = true;
+                m_changesRestricted = true;
             }
 
         private:
@@ -294,7 +294,7 @@ namespace rocRoller
 
             mutable CacheStatus m_cacheStatus = CacheStatus::Invalid;
 
-            mutable bool isRestricted = false;
+            mutable bool m_changesRestricted = false;
         };
 
         std::string name(ControlGraph::Element const& el);

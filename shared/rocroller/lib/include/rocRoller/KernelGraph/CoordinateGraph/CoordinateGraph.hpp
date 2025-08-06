@@ -116,7 +116,7 @@ namespace rocRoller
          */
         class CoordinateGraph : public Graph::Hypergraph<Dimension, Edge>
         {
-            bool isRestricted = false;
+            bool m_changesRestricted = false;
 
         public:
             using Base = Graph::Hypergraph<Dimension, Edge>;
@@ -170,7 +170,7 @@ namespace rocRoller
              */
             void setRestricted()
             {
-                isRestricted = true;
+                m_changesRestricted = true;
             }
         };
 
