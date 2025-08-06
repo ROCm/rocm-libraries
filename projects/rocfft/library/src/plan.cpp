@@ -2682,7 +2682,7 @@ inline std::string transpose_type_str(transpose_type t)
 // heuristic method to create a processor grid
 std::pair<int, int> get_most_balanced_proc_pair(int prod, int limit_a, int limit_b)
 {
-    int best_a = 1, best_b = prod, min_diff = prod;
+    int best_a = -1, best_b = -1, min_diff = prod;
     for(int a = 1; a <= prod; ++a)
     {
         if(prod % a == 0)
@@ -2699,6 +2699,14 @@ std::pair<int, int> get_most_balanced_proc_pair(int prod, int limit_a, int limit
                 }
             }
         }
+    }
+    if(best_a == -1 || best_b == -1)
+    {
+        throw std::runtime_error(
+            "get_most_balanced_proc_pair: Cannot decompose prod=" + std::to_string(prod)
+            + " within given limits: limit_a=" + std::to_string(limit_a)
+            + ", limit_b=" + std::to_string(limit_b)
+            + " (limit_a * limit_b = " + std::to_string(limit_a * limit_b) + ")");
     }
     return {best_a, best_b};
 }
@@ -2718,19 +2726,21 @@ void get_transpose_plan(const std::array<int, 3>&        input_grid,
     // for each axis, generate the pencil with 1 in that axis, as balanced as possible
     for(int pos = 0; pos < 3; ++pos)
     {
-        // axes to split: the two that are not 'pos'
-        size_t split_a = (pos + 1) % 3;
-        size_t split_b = (pos + 2) % 3;
+        // the two axes to split (not the pencil axis)
+        int split_a = (pos + 1) % 3;
+        int split_b = (pos + 2) % 3;
 
+        // find the best factorization that does not exceed axis lengths
         auto [best_a, best_b]
             = get_most_balanced_proc_pair(prod,
                                           static_cast<int>(global_lengths[split_a]),
                                           static_cast<int>(global_lengths[split_b]));
 
+        // assign axes explicitly to avoid confusion
         std::array<int, 3> grid = {0, 0, 0};
-        int                idx  = 0;
-        for(int i = 0; i < 3; ++i)
-            grid[i] = (i == pos) ? 1 : ((idx++ == 0) ? best_a : best_b);
+        grid[pos]               = 1; // Pencil axis
+        grid[split_a]           = best_a; // First split axis
+        grid[split_b]           = best_b; // Second split axis
 
         if((grid != input_grid) && (grid != output_grid))
             pencils.insert(grid); // direct insert, no duplicate check needed
@@ -2841,7 +2851,6 @@ bool rocfft_plan_t::BuildOptMultiDevicePlan()
     // plan transposition steps
     if(num_split_dims_in >= 2 && num_split_dims_out >= 2 && rank == 3)
     {
-
         get_transpose_plan(in_grid,
                            out_grid,
                            {lengths[0], lengths[1], lengths[2]},
