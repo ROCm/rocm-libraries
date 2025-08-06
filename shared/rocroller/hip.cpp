@@ -16,26 +16,25 @@
     }
 
 template <int byte_stride = BYTE_STRIDE, int instr = INSTR_WIDTH>
-__global__ void kernel(float* reg)
+__global__ void kernel(int* reg)
 {
-    __shared__ float shared[1024];
+    __shared__ int shared[1024];
 
     int tx = (threadIdx.x * 8) % std::size(shared);
 
-    float temp[64];
+    int temp[64];
 #pragma unroll
     for(int i = 0; i < 64; ++i)
     {
-        temp[i] = shared[(tx * 64) + i];
+        // temp[i] = shared[(tx * 64) + i];
+        asm volatile("ds_read_b32 %0, %1"
+                     : "=v"(temp[i])
+                     : "v"(uint32_t(uint64_t(shared)) + (tx * 64) + i));
     }
-
-    // reg[0] = shared[tx];
-    // reg[1] = shared[tx + 1];
-
-    // printf("%d -> %d\n", threadIdx.x, tx);
 
     __syncthreads();
 
+    // Ensure not optimized away
 #pragma unroll
     for(int i = 0; i < 64; ++i)
     {
@@ -45,7 +44,7 @@ __global__ void kernel(float* reg)
 
 int main()
 {
-    float* d_a;
+    int* d_a;
     assert(hipMalloc(&d_a, 1024) == hipSuccess);
 
     dim3 threads(64);
