@@ -210,7 +210,13 @@ inline hipError_t partition_impl(void*                       temporary_storage,
     using key_type    = typename std::iterator_traits<KeyIterator>::value_type;
     using value_type  = typename std::iterator_traits<ValueIterator>::value_type;
 
-    using config = wrapped_partition_config<Config, SubAlgo, key_type, value_type>;
+    // value_type is always empty_type, except for select_unique_by_key.
+    using flag_or_value_type
+        = std::conditional_t<SubAlgo == partition_subalgo::select_predicated_flag,
+                             typename std::iterator_traits<FlagIterator>::value_type,
+                             value_type>;
+
+    using config = wrapped_partition_config<Config, SubAlgo, key_type, flag_or_value_type>;
 
     constexpr bool write_only_selected = SubAlgo == partition_subalgo::select_flag
                                          || SubAlgo == partition_subalgo::select_predicate
@@ -279,6 +285,9 @@ inline hipError_t partition_impl(void*                       temporary_storage,
     // vsmem size
     void*  vsmem                      = nullptr;
     size_t virtual_shared_memory_size = 0;
+
+    // The flags parameter is normally an array of bools, but when the method is predicated_flag,
+    // it is an array of values (say ints) that are filtered by the predicate.
     using flag_type =
         typename std::conditional<method == select_method::predicated_flag,
                                   typename std::iterator_traits<FlagIterator>::value_type,

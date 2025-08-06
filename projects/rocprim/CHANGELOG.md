@@ -23,6 +23,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
   * 891 specializations have been improved.
   * 399 specializations have been added.
 
+### Optimizations
+
+* Improved performance of `rocprim::device_select` overload that takes flags and a predicate.
+
 ### Upcoming changes
 
 * Deprecated the `->` operator for the `zip_iterator`.

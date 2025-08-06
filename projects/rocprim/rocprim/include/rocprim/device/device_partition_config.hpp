@@ -148,11 +148,11 @@ struct wrapped_partition_config<default_config,
     };
 };
 
-template<typename KeyType, typename ValueType>
+template<typename KeyType, typename FlagType>
 struct wrapped_partition_config<default_config,
                                 partition_subalgo::select_predicated_flag,
                                 KeyType,
-                                ValueType>
+                                FlagType>
 {
     template<target_arch Arch>
     struct architecture_config
@@ -160,7 +160,7 @@ struct wrapped_partition_config<default_config,
         static constexpr partition_config_params params
             = default_select_predicated_flag_config<static_cast<unsigned int>(Arch),
                                                     KeyType,
-                                                    ValueType>{};
+                                                    FlagType>{};
     };
 };
 
