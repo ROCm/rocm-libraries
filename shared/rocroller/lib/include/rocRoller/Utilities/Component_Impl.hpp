@@ -97,6 +97,12 @@ namespace rocRoller
         }
 
         template <ComponentBase Base>
+        ComponentFactory<Base>::ComponentFactory()
+        {
+            ComponentFactory<Base>::registerImplementations();
+        }
+
+        template <ComponentBase Base>
         ComponentFactory<Base>& ComponentFactory<Base>::Instance()
         {
             static ComponentFactory instance;

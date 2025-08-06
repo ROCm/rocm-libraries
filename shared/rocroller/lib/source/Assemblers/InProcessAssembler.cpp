@@ -53,7 +53,7 @@
 
 namespace rocRoller
 {
-    RegisterComponent(InProcessAssembler);
+    // RegisterComponent(InProcessAssembler);
     static_assert(Component::Component<InProcessAssembler>);
 
     bool InProcessAssembler::Match(Argument arg)

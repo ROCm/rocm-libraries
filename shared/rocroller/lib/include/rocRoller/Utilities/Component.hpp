@@ -211,6 +211,8 @@ namespace rocRoller
                 Builder<Base> builder;
             };
 
+            ComponentFactory();
+
             static ComponentFactory& Instance();
 
             template <typename T>

@@ -26,7 +26,6 @@
 
 #pragma once
 
-#include "rocRoller/Utilities/Component.hpp"
 #include <memory>
 #include <string>
 #include <vector>
