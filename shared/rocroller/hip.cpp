@@ -18,17 +18,16 @@
 template <int byte_stride = BYTE_STRIDE, int instr = INSTR_WIDTH>
 __global__ void kernel(float* reg)
 {
-    const int        BN = 64;
-    const int        BK = 8;
-    const int        TN = 4;
-    __shared__ float shared[BK][BN];
+    __shared__ float shared[1024];
 
-    int tx = (threadIdx.x % (BN / TN)) * TN;
+    int tx = (threadIdx.x * 8) % std::size(shared);
 
-    reg[0] = shared[0][tx];
+    reg[0] = shared[tx];
 
-    // reg[i]     = shared[0][tx];
-    // reg[i + 1] = shared[0][tx + 1];
+    // reg[0] = shared[tx];
+    // reg[1] = shared[tx + 1];
+
+    // printf("%d -> %d\n", threadIdx.x, tx);
 }
 
 int main()
@@ -36,8 +35,8 @@ int main()
     float* d_a;
     assert(hipMalloc(&d_a, 1024) == hipSuccess);
 
-    dim3 threads(256);
-    dim3 blocks(256);
+    dim3 threads(64);
+    dim3 blocks(1024);
     hipLaunchKernelGGL(kernel, blocks, threads, 0, 0, d_a);
 
     // Check for launch errors
