@@ -127,7 +127,7 @@ jobs:
         if: always()
         run: |
           python3 TheRock/build_tools/create_log_archive.py \
-            --build-dir=build
+            --build-dir=TheRock/build
 
       - name: Create Logs index Files
         if: always()
