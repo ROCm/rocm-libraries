@@ -134,6 +134,8 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setTypeD(hipDataType type); //!< Set the D matrix datatype.
         HIPBLASLT_EXPORT void
             setTypeCompute(hipblasComputeType_t type); //!< Set the compute datatype.
+        HIPBLASLT_EXPORT void setOrderA(hipblasLtOrder_t order); //!< Set the A martix data order.
+        HIPBLASLT_EXPORT void setOrderB(hipblasLtOrder_t order); //!< Set the B matrix data order.
 
         HIPBLASLT_EXPORT hipblasOperation_t   getOpA() const; //!< The A matrix transpose.
         HIPBLASLT_EXPORT hipblasOperation_t   getOpB() const; //!< The B matrix transpose.
@@ -142,6 +144,8 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT hipDataType          getTypeC() const; //!< The C matrix datatype.
         HIPBLASLT_EXPORT hipDataType          getTypeD() const; //!< The D matrix datatype.
         HIPBLASLT_EXPORT hipblasComputeType_t getTypeCompute() const; //!< The compute datatype.
+        HIPBLASLT_EXPORT hipblasLtOrder_t     getOrderA() const; //!< The A matrix data order.
+        HIPBLASLT_EXPORT hipblasLtOrder_t     getOrderB() const; //!< The B matrix data order.
     };
 
     [[deprecated("GemmProblemTypeV2 is deprecated, use GemmProblemType instead.")]]

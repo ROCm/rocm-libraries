@@ -186,6 +186,16 @@ namespace rocisa
         }
 
         virtual std::vector<InstructionInput> getParams() const = 0;
+
+        virtual int getIssueLatency() const
+        {
+            return 1; // Default issue latency is 1, should be overridden in derived classes
+        }
+
+        virtual int getIssueCycles() const
+        {
+            return 1; // Default issue cycles is 1, should be overridden in derived classes
+        }
     };
 
     struct CompositeInstruction : public Instruction
