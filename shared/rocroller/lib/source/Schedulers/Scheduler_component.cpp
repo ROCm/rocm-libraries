@@ -27,6 +27,7 @@
 #include <rocRoller/Scheduling/PriorityScheduler.hpp>
 #include <rocRoller/Scheduling/RoundRobinScheduler.hpp>
 #include <rocRoller/Scheduling/Scheduler.hpp>
+#include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
 {

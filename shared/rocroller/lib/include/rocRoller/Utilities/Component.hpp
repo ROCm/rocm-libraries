@@ -26,7 +26,6 @@
 
 #pragma once
 
-#include "rocRoller/Utilities/LazySingleton.hpp"
 #include <concepts>
 #include <functional>
 #include <iostream>
@@ -36,6 +35,8 @@
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+
+#include <rocRoller/Utilities/LazySingleton.hpp>
 
 namespace rocRoller
 {

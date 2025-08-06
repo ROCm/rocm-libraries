@@ -24,9 +24,10 @@
  *
  *******************************************************************************/
 
-#include "rocRoller/Assemblers/InProcessAssembler.hpp"
-#include "rocRoller/Assemblers/SubprocessAssembler.hpp"
 #include <rocRoller/Assemblers/Assembler.hpp>
+#include <rocRoller/Assemblers/InProcessAssembler.hpp>
+#include <rocRoller/Assemblers/SubprocessAssembler.hpp>
+#include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
 {
