@@ -193,12 +193,12 @@ namespace rocRoller
              * value(s) have been consumed.
              */
             Generator<Instruction> prepareSourceOperands(std::vector<Register::ValuePtr>& results,
-                                                         int&                       schedulerLockCount,
+                                                         int& schedulerLockCount,
                                                          std::vector<ExpressionPtr> exprs)
             {
                 std::vector<char>       done(exprs.size(), false);
                 std::vector<ResultType> resultTypes(exprs.size());
-                results         = std::vector<Register::ValuePtr>(exprs.size(), nullptr);
+                results            = std::vector<Register::ValuePtr>(exprs.size(), nullptr);
                 schedulerLockCount = 0;
 
                 auto sprUses = [] {
