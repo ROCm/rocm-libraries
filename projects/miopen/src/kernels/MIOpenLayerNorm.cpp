@@ -205,6 +205,9 @@ __device__ void layernormbwdweightbias(const TI* __restrict__ dy,
 {
     const uint64_t gid = threadIdx.x + blockIdx.x * blockDim.x;
 
+    if(gid >= INNER_SIZE)
+        return;
+
     if(dw || db)
     {
         FLOAT_ACCUM sum_dw = 0;

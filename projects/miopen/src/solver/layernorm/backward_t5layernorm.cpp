@@ -161,7 +161,7 @@ T5LayernormBackward::GetSolution(const ExecutionContext& context,
 
         {
             size_t xlocalsize = LOCAL_SIZE;
-            size_t xgridsize  = AlignUp(inner_size, LOCAL_SIZE);
+            size_t xgridsize  = AlignUp(inner_size, xlocalsize);
             size_t ylocalsize = 1;
             size_t ygridsize  = 1;
             size_t zlocalsize = 1;
@@ -203,7 +203,7 @@ T5LayernormBackward::GetSolution(const ExecutionContext& context,
     else
     {
         size_t xlocalsize = LOCAL_SIZE;
-        size_t xgridsize  = inner_size;
+        size_t xgridsize  = AlignUp(inner_size, xlocalsize);
         size_t ylocalsize = 1;
         size_t ygridsize  = 1;
         size_t zlocalsize = 1;

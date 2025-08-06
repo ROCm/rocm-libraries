@@ -134,6 +134,9 @@ __device__ void t5layernormbwdweightcontiguous(const TI* __restrict__ dy,
 {
     const uint64_t gid = threadIdx.x + blockIdx.x * blockDim.x;
 
+    if(gid >= inner_size)
+        return;
+
     FLOAT_ACCUM sum = static_cast<FLOAT_ACCUM>(0);
     for(uint64_t i = 0; i < outer_size; ++i)
     {

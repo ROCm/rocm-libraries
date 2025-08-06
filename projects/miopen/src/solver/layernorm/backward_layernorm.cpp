@@ -35,7 +35,7 @@
 #include <miopen/layernorm.hpp>
 #include <miopen/target_properties.hpp>
 
-#define DEFAULT_LOCAL_SIZE 256
+#define DEFAULT_LOCAL_SIZE 64
 #define MAX_LOCAL_SIZE 1024
 
 namespace miopen {
@@ -342,7 +342,7 @@ ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
     else
     {
         size_t xlocalsize = config.local_size;
-        size_t xgridsize  = inner_size;
+        size_t xgridsize  = AlignUp(inner_size, xlocalsize);
         size_t ylocalsize = 1;
         size_t ygridsize  = 1;
         size_t zlocalsize = 1;

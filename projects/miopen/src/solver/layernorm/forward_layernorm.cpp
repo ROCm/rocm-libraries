@@ -36,7 +36,7 @@
 #include <miopen/layernorm/utils.hpp>
 #include <miopen/target_properties.hpp>
 
-#define DEFAULT_LOCAL_SIZE 256
+#define DEFAULT_LOCAL_SIZE 16
 #define MAX_LOCAL_SIZE 1024
 
 namespace miopen {
