@@ -35,9 +35,6 @@ std::vector<MyTestData> parseYamlManually(const std::string& filename)
 {
 
     std::string YamlfullPath = std::string(YAML_PATH) + "/testlib/source/" + filename;
-
-    std::cout << YamlfullPath << std::endl;
-
     std::ifstream file(YamlfullPath);
     if(!file)
     {
@@ -128,7 +125,7 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
 {
     const MyTestData& test = GetParam();
 
-    const string gpuArchNumber = std::to_string(test.inputs[0].values.at("gpu_arch"));
+    const std::string gpuArchNumber = std::to_string(test.inputs[0].values.at("gpu_arch"));
     auto gpuArchEnum = TensileLite::analytical::Hardware::archNameToEnum("gfx" + gpuArchNumber);
 
     //TODO: Hardcoding numbers for gfx942. Future archs could be added here with if else loop.
