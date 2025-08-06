@@ -115,3 +115,40 @@ inline std::size_t realDataTypeSize(hipDataType dtype)
 
     return dtypeMap.at(dtype);
 }
+
+inline std::size_t realDataTypeSizeBits(hipDataType dtype)
+{
+    // These types were not defined in older versions of ROCm, so need to be handled specially here.
+    auto const dtype_int = static_cast<int>(dtype);
+    if(dtype_int == HIP_R_4F_E2M1_EXT)
+    {
+        return 4;
+    }
+    if(dtype_int == HIP_R_6F_E2M3_EXT || dtype_int == HIP_R_6F_E3M2_EXT)
+    {
+        return 6;
+    }
+
+    static const std::map<hipDataType, std::size_t> dtypeMap{
+        {HIP_R_32F, 32},
+        {HIP_R_64F, 64},
+        {HIP_R_16F, 16},
+        {HIP_R_8I, 8},
+        {HIP_R_8U, 8},
+        {HIP_R_32I, 32},
+        {HIP_R_32U, 32},
+        {HIP_R_16BF, 16},
+        {HIP_R_4I, 4},
+        {HIP_R_4U, 4},
+        {HIP_R_16I, 16},
+        {HIP_R_16U, 16},
+        {HIP_R_64I, 64},
+        {HIP_R_64U, 64},
+        {HIP_R_8F_E4M3_FNUZ, 8},
+        {HIP_R_8F_E5M2_FNUZ, 8},
+        {HIP_R_8F_E4M3, 8},
+        {HIP_R_8F_E5M2, 8},
+    };
+
+    return dtypeMap.at(dtype);
+}
