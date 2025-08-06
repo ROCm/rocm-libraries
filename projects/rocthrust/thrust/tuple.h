@@ -53,12 +53,6 @@ THRUST_NAMESPACE_END
 
 THRUST_NAMESPACE_BEGIN
 
-// TODO: uncomment this
-// this shit is cooked why do people do this???
-// define null_type for backwards compatibility
-
-// ====================
-
 /*! \addtogroup utility
  *  \{
  */

@@ -136,11 +136,12 @@ THRUST_NAMESPACE_END
 
 _LIBCUDACXX_BEGIN_NAMESPACE_STD
 
-// TODO: resolve missing '__is_tuple_of_iterator_references' in libhipcxx
-// template <class... Ts>
-// struct __is_tuple_of_iterator_references<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>> :
-// true_type
-// {};
+// 'libhipcxx' implementation is incomplete so we ignore this for now
+#  if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_HIP
+template <class... Ts>
+struct __is_tuple_of_iterator_references<THRUST_NS_QUALIFIER::detail::tuple_of_iterator_references<Ts...>> : true_type
+{};
+#  endif
 
 // define tuple_size, tuple_element, etc.
 template <class... Ts>
