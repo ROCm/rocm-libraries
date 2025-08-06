@@ -130,6 +130,9 @@ void run_vector_test()
                                       expected_num));
         }
     }
+
+    HIP_CHECK(hipFree(device_input));
+    HIP_CHECK(hipFree(device_output));
 }
 
 TYPED_TEST(HipcubVector, Vector1)
