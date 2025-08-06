@@ -30,8 +30,7 @@
 #include <vector>
 #include <cctype>
 
-using namespace std;
-
+// Parse Analytical_gtest.yaml to get the test data
 std::vector<MyTestData> parseYamlManually(const std::string& filename) {
 
     std::string YamlfullPath = std::string(YAML_PATH) + "/testlib/source/" + filename;
