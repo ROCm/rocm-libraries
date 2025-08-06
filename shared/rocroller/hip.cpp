@@ -24,20 +24,18 @@ __global__ void kernel(int* reg)
 
     int temp[64];
 
-    // #pragma unroll
-    //     for(int i = 0; i < 64; ++i)
-    //     {
-    //         temp[i] = uint32_t(uint64_t(shared)) + (tx * 64) + i;
-    //     }
+#pragma unroll
+    for(int i = 0; i < 64; ++i)
+    {
+        temp[i] = uint32_t(uint64_t(shared)) + (tx * 64) + i;
+    }
 
     __syncthreads();
 
 #pragma unroll
     for(int i = 0; i < 64; ++i)
     {
-        asm volatile("ds_read_b32 %0, %1"
-                     : "=v"(temp[i])
-                     : "v"(uint32_t(uint64_t(shared)) + (tx * 64)));
+        asm volatile("ds_read_b32 %0, %1" : "=v"(temp[i]) : "v"(temp[i]));
     }
 
     __syncthreads();
