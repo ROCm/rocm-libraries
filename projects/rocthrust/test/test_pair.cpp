@@ -31,9 +31,8 @@ TYPED_TEST(PairTests, TestTriviallyCopyable)
 
   static_assert(_THRUST_STD::is_copy_constructible<thrust::pair<T, T>>::value, "");
 
-// If 'libcudacxx' or 'libhipcxx' is installed, check if the
-// pair trivial copy constructor is disabled
-#if !defined(_LIBCUDACXX_DEPRECATED_ABI_DISABLE_PAIR_TRIVIAL_COPY_CTOR)
+// 'libhipcxx' is now up to par with 'libcudacxx'
+#if THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_HIP || !_THRUST_HAS_DEVICE_SYSTEM_STD
   static_assert(_THRUST_STD::is_trivially_copyable<thrust::pair<T, T>>::value,
                 "thrust::pair is not trivially copyable even though it should be!");
 #endif
