@@ -1342,8 +1342,8 @@ def fp4_32x32x64_scale_options():
 def fp4_kernels():
     yield from fp4_kernels_no_wgm()
     yield from fp4_kernels_wgm()
-    yield from addSkipPermlane(fp4_kernels_no_wgm())
-    yield from addSkipPermlane(fp4_kernels_wgm())
+    yield from fp4_16x16x128_scale_options()
+    yield from fp4_32x32x64_scale_options()
 
 
 def fp4_target_sweep_wgms():
