@@ -1,0 +1,4 @@
+tests:
+  - name: ComputeLoads
+    inputs:
+      - { M: 128, N: 128, K: 64, gpu_arch: 942, expected: 8192 }
