@@ -19,19 +19,24 @@
 #include <thrust/swap.h>
 #include <thrust/tuple.h>
 
-#include <type_traits>
-#include <utility>
-
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-TESTS_DEFINE(PairTests, NumericalTestsParams);
+#include _THRUST_STD_INCLUDE(type_traits)
 
+TESTS_DEFINE(PairTests, NumericalTestsParams);
 TYPED_TEST(PairTests, TestTriviallyCopyable)
 {
   using T = typename TestFixture::input_type;
-  static_assert(std::is_trivially_copyable<thrust::pair<T, T>>::value,
+
+  static_assert(_THRUST_STD::is_copy_constructible<thrust::pair<T, T>>::value, "");
+
+// If 'libcudacxx' or 'libhipcxx' is installed, check if the
+// pair trivial copy constructor is disabled
+#if !defined(_LIBCUDACXX_DEPRECATED_ABI_DISABLE_PAIR_TRIVIAL_COPY_CTOR)
+  static_assert(_THRUST_STD::is_trivially_copyable<thrust::pair<T, T>>::value,
                 "thrust::pair is not trivially copyable even though it should be!");
+#endif
 }
 
 TYPED_TEST(PairTests, TestPairManipulation)

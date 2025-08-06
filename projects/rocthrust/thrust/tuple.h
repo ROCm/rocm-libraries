@@ -1,5 +1,5 @@
 /*
- *  Copyright 2008-2018 NVIDIA Corporation
+ *  Copyright 2008-2025 NVIDIA Corporation
  *  Modifications Copyright (c) 2025, Advanced Micro Devices, Inc.  All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -34,68 +34,30 @@
 
 #include <thrust/type_traits/is_trivially_relocatable.h>
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-#  include <cuda/std/tuple>
-#  include <cuda/std/type_traits>
-#  include <cuda/std/utility>
-#elif defined(__has_include)
-#  if __has_include(<cuda/std/tuple>)
-#    include <cuda/std/tuple>
-#  endif // __has_include(<cuda/std/tuple>)
-#  if __has_include(<cuda/std/type_traits>)
-#    include <cuda/std/type_traits>
-#  endif // __has_include(<cuda/std/type_traits>)
-#  if __has_include(<cuda/std/utility>)
-#    include <cuda/std/utility>
-#  endif // __has_include(<cuda/std/utility>)
-#endif // THRUST_DEVICE_SYSTEM
+#include "thrust/detail/config/execution_space.h"
+#include "thrust/detail/config/namespace.h"
 
-#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+THRUST_NAMESPACE_BEGIN
+struct null_type
+{};
+THRUST_NAMESPACE_END
 
-#  include <tuple>
-#  include <type_traits>
+// If 'libcudacxx' or 'libhipcxx' is available (_THRUST_HAS_DEVICE_SYSTEM_STD), we will
+// use the implementations provided there. Otherwise we will fall back to an older
+// implementation of thrust::tuple.
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+
+#  include _THRUST_STD_INCLUDE(tuple)
+#  include _THRUST_STD_INCLUDE(type_traits)
+#  include _THRUST_STD_INCLUDE(utility)
 
 THRUST_NAMESPACE_BEGIN
 
-/*! \cond
- */
+// TODO: uncomment this
+// this shit is cooked why do people do this???
+// define null_type for backwards compatibility
 
-// define null_type for backwards compatability
-struct null_type
-{};
-
-THRUST_HOST_DEVICE inline bool operator==(const null_type&, const null_type&)
-{
-  return true;
-}
-
-THRUST_HOST_DEVICE inline bool operator>=(const null_type&, const null_type&)
-{
-  return true;
-}
-
-THRUST_HOST_DEVICE inline bool operator<=(const null_type&, const null_type&)
-{
-  return true;
-}
-
-THRUST_HOST_DEVICE inline bool operator!=(const null_type&, const null_type&)
-{
-  return false;
-}
-
-THRUST_HOST_DEVICE inline bool operator<(const null_type&, const null_type&)
-{
-  return false;
-}
-
-THRUST_HOST_DEVICE inline bool operator>(const null_type&, const null_type&)
-{
-  return false;
-}
-
-/*! \endcond
- */
+// ====================
 
 /*! \addtogroup utility
  *  \{
@@ -114,8 +76,12 @@ THRUST_HOST_DEVICE inline bool operator>(const null_type&, const null_type&)
  *  \see pair
  *  \see tuple
  */
+#  ifdef _CCCL_DOXYGEN_INVOKED
 template <size_t N, class T>
-using tuple_element = _CUDA_VSTD::tuple_element<N, T>;
+using tuple_element = _THRUST_STD::tuple_element<N, T>;
+#  else
+using _THRUST_STD::tuple_element;
+#  endif
 
 /*! This metafunction returns the number of elements
  *  of a \p tuple type of interest.
@@ -125,21 +91,19 @@ using tuple_element = _CUDA_VSTD::tuple_element<N, T>;
  *  \see pair
  *  \see tuple
  */
+#  ifdef _CCCL_DOXYGEN_INVOKED
 template <class T>
-using tuple_size = _CUDA_VSTD::tuple_size<T>;
+using tuple_size = _THRUST_STD::tuple_size<T>;
+#  else
+using _THRUST_STD::tuple_size;
+#  endif
 
-template <class>
-struct __is_tuple_of_iterator_references : _CUDA_VSTD::false_type
-{};
-
-/*! \brief \p tuple is a class template that can be instantiated with up to ten
- *  arguments. Each template argument specifies the type of element in the \p
- *  tuple. Consequently, tuples are heterogeneous, fixed-size collections of
- *  values. An instantiation of \p tuple with two arguments is similar to an
+/*! \brief \p tuple is a heterogeneous, fixed-size collection of values.
+ *  An instantiation of \p tuple with two arguments is similar to an
  *  instantiation of \p pair with the same two arguments. Individual elements
  *  of a \p tuple may be accessed with the \p get function.
  *
- *  \tparam TN The type of the <tt>N</tt> \c tuple element. Thrust's \p tuple
+ *  \tparam Ts The type of the <tt>N</tt> \c tuple element. Thrust's \p tuple
  *          type currently supports up to ten elements.
  *
  *  The following code snippet demonstrates how to create a new \p tuple object
@@ -171,86 +135,16 @@ struct __is_tuple_of_iterator_references : _CUDA_VSTD::false_type
  *  \see tuple_size
  *  \see tie
  */
+#  ifdef _CCCL_DOXYGEN_INVOKED
 template <class... Ts>
-struct tuple : public _CUDA_VSTD::tuple<Ts...>
-{
-  using super_t = _CUDA_VSTD::tuple<Ts...>;
-  using super_t::super_t;
+using tuple = _THRUST_STD::tuple<T...>;
+#  else
+using _THRUST_STD::tuple;
+#  endif
 
-  tuple() = default;
-
-  template <class _TupleOfIteratorReferences,
-            _CUDA_VSTD::__enable_if_t<__is_tuple_of_iterator_references<_TupleOfIteratorReferences>::value, int> = 0,
-            _CUDA_VSTD::__enable_if_t<(tuple_size<_TupleOfIteratorReferences>::value == sizeof...(Ts)), int>     = 0>
-  _CCCL_HOST_DEVICE tuple(_TupleOfIteratorReferences&& tup)
-      : tuple(_CUDA_VSTD::forward<_TupleOfIteratorReferences>(tup).template __to_tuple<Ts...>(
-        _CUDA_VSTD::__make_tuple_indices_t<sizeof...(Ts)>()))
-  {}
-
-  _CCCL_EXEC_CHECK_DISABLE
-  template <class TupleLike,
-            _CUDA_VSTD::__enable_if_t<_CUDA_VSTD::__tuple_assignable<TupleLike, super_t>::value, int> = 0>
-  _CCCL_HOST_DEVICE tuple& operator=(TupleLike&& other)
-  {
-    super_t::operator=(_CUDA_VSTD::forward<TupleLike>(other));
-    return *this;
-  }
-
-#  if defined(_CCCL_COMPILER_MSVC_2017)
-  // MSVC2017 needs some help to convert tuples
-  template <class... Us,
-            _CUDA_VSTD::__enable_if_t<!_CUDA_VSTD::is_same<tuple<Us...>, tuple>::value, int> = 0,
-            _CUDA_VSTD::__enable_if_t<_CUDA_VSTD::__tuple_convertible<_CUDA_VSTD::tuple<Us...>, super_t>::value, int> = 0>
-  _CCCL_HOST_DEVICE constexpr operator tuple<Us...>()
-  {
-    return __to_tuple<Us...>(typename _CUDA_VSTD::__make_tuple_indices<sizeof...(Ts)>::type{});
-  }
-
-  template <class... Us, size_t... Id>
-  _CCCL_HOST_DEVICE constexpr tuple<Us...> __to_tuple(_CUDA_VSTD::__tuple_indices<Id...>) const
-  {
-    return tuple<Us...>{_CUDA_VSTD::get<Id>(*this)...};
-  }
-#  endif // _CCCL_COMPILER_MSVC_2017
-};
-
-#  if _CCCL_STD_VER >= 2017
-template <class... Ts>
-_CCCL_HOST_DEVICE tuple(Ts...) -> tuple<Ts...>;
-
-template <class T1, class T2>
-struct pair;
-
-template <class T1, class T2>
-_CCCL_HOST_DEVICE tuple(pair<T1, T2>) -> tuple<T1, T2>;
-#  endif // _CCCL_STD_VER >= 2017
-
-template <class... Ts>
-inline _CCCL_HOST_DEVICE
-  _CUDA_VSTD::__enable_if_t<_CUDA_VSTD::__all<_CUDA_VSTD::__is_swappable<Ts>::value...>::value, void>
-  swap(tuple<Ts...>& __x,
-       tuple<Ts...>& __y) noexcept((_CUDA_VSTD::__all<_CUDA_VSTD::__is_nothrow_swappable<Ts>::value...>::value))
-{
-  __x.swap(__y);
-}
-
-template <class... Ts>
-inline _CCCL_HOST_DEVICE tuple<typename _CUDA_VSTD::__unwrap_ref_decay<Ts>::type...> make_tuple(Ts&&... __t)
-{
-  return tuple<typename _CUDA_VSTD::__unwrap_ref_decay<Ts>::type...>(_CUDA_VSTD::forward<Ts>(__t)...);
-}
-
-template <class... Ts>
-inline _CCCL_HOST_DEVICE tuple<Ts&...> tie(Ts&... ts) noexcept
-{
-  return tuple<Ts&...>(ts...);
-}
-
-using _CUDA_VSTD::get;
-
-template <typename... Ts>
-struct proclaim_trivially_relocatable<tuple<Ts...>> : ::cuda::std::conjunction<is_trivially_relocatable<Ts>...>
-{};
+using _THRUST_STD::get;
+using _THRUST_STD::make_tuple;
+using _THRUST_STD::tie;
 
 /*! \endcond
  */
@@ -261,148 +155,18 @@ struct proclaim_trivially_relocatable<tuple<Ts...>> : ::cuda::std::conjunction<i
 /*! \} // utility
  */
 
+template <typename T>
+struct access_traits
+{
+  using const_type     = const T&;
+  using non_const_type = T&;
+
+  using parameter_type = const typename thrust::detail::remove_cv<T>::type&;
+};
+
 THRUST_NAMESPACE_END
 
-_LIBCUDACXX_BEGIN_NAMESPACE_STD
-
-template <class... Ts>
-struct tuple_size<THRUST_NS_QUALIFIER::tuple<Ts...>> : tuple_size<tuple<Ts...>>
-{};
-
-template <size_t Id, class... Ts>
-struct tuple_element<Id, THRUST_NS_QUALIFIER::tuple<Ts...>> : tuple_element<Id, tuple<Ts...>>
-{};
-
-template <class... Ts>
-struct __tuple_like_ext<THRUST_NS_QUALIFIER::tuple<Ts...>> : true_type
-{};
-
-template <>
-struct tuple_size<tuple<THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<>>
-{};
-
-template <class T0>
-struct tuple_size<tuple<T0,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0>>
-{};
-
-template <class T0, class T1>
-struct tuple_size<tuple<T0,
-                        T1,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1>>
-{};
-
-template <class T0, class T1, class T2>
-struct tuple_size<tuple<T0,
-                        T1,
-                        T2,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2>>
-{};
-
-template <class T0, class T1, class T2, class T3>
-struct tuple_size<tuple<T0,
-                        T1,
-                        T2,
-                        T3,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3>>
-{};
-
-template <class T0, class T1, class T2, class T3, class T4>
-struct tuple_size<tuple<T0,
-                        T1,
-                        T2,
-                        T3,
-                        T4,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3, T4>>
-{};
-
-template <class T0, class T1, class T2, class T3, class T4, class T5>
-struct tuple_size<tuple<T0,
-                        T1,
-                        T2,
-                        T3,
-                        T4,
-                        T5,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3, T4, T5>>
-{};
-
-template <class T0, class T1, class T2, class T3, class T4, class T5, class T6>
-struct tuple_size<
-  tuple<T0, T1, T2, T3, T4, T5, T6, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>>
-    : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6>>
-{};
-
-template <class T0, class T1, class T2, class T3, class T4, class T5, class T6, class T7>
-struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>>
-    : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7>>
-{};
-
-template <class T0, class T1, class T2, class T3, class T4, class T5, class T6, class T7, class T8>
-struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8, THRUST_NS_QUALIFIER::null_type>>
-    : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8>>
-{};
-
-_LIBCUDACXX_END_NAMESPACE_STD
-
-// This is a workaround for the fact that structured bindings require that the specializations of
-// `tuple_size` and `tuple_element` reside in namespace std (https://eel.is/c++draft/dcl.struct.bind#4).
-// See https://github.com/NVIDIA/libcudacxx/issues/316 for a short discussion
-#  if _CCCL_STD_VER >= 2017
-namespace std
-{
-template <class... Ts>
-struct tuple_size<THRUST_NS_QUALIFIER::tuple<Ts...>> : tuple_size<tuple<Ts...>>
-{};
-
-template <size_t Id, class... Ts>
-struct tuple_element<Id, THRUST_NS_QUALIFIER::tuple<Ts...>> : tuple_element<Id, tuple<Ts...>>
-{};
-} // namespace std
-#  endif // _CCCL_STD_VER >= 2017
-
-#else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
+#else
 
 #  include <thrust/detail/tuple.inl>
 #  include <thrust/pair.h>
@@ -415,14 +179,6 @@ THRUST_NAMESPACE_BEGIN
 
 /*! \addtogroup tuple
  *  \{
- */
-
-/*! \cond
- */
-
-struct null_type;
-
-/*! \endcond
  */
 
 /*! This metafunction returns the type of a
@@ -1008,18 +764,6 @@ template <typename T0,
 THRUST_HOST_DEVICE inline tuple<T0&, T1&, T2&, T3&, T4&, T5&, T6&, T7&, T8&, T9&>
 tie(T0& t0, T1& t1, T2& t2, T3& t3, T4& t4, T5& t5, T6& t6, T7& t7, T8& t8, T9& t9);
 
-THRUST_HOST_DEVICE inline bool operator==(const null_type&, const null_type&);
-
-THRUST_HOST_DEVICE inline bool operator>=(const null_type&, const null_type&);
-
-THRUST_HOST_DEVICE inline bool operator<=(const null_type&, const null_type&);
-
-THRUST_HOST_DEVICE inline bool operator!=(const null_type&, const null_type&);
-
-THRUST_HOST_DEVICE inline bool operator<(const null_type&, const null_type&);
-
-THRUST_HOST_DEVICE inline bool operator>(const null_type&, const null_type&);
-
 /*! \endcond
  */
 
@@ -1031,9 +775,7 @@ THRUST_HOST_DEVICE inline bool operator>(const null_type&, const null_type&);
 
 THRUST_NAMESPACE_END
 
-#  if THRUST_CPP_DIALECT >= 2017
-namespace std
-{
+_THRUST_STD_NAMESPACE_BEGIN
 template <class... Ts>
 struct tuple_size<THRUST_NS_QUALIFIER::tuple<Ts...>> : std::tuple_size<std::tuple<Ts...>>
 {};
@@ -1041,6 +783,45 @@ struct tuple_size<THRUST_NS_QUALIFIER::tuple<Ts...>> : std::tuple_size<std::tupl
 template <size_t Id, class... Ts>
 struct tuple_element<Id, THRUST_NS_QUALIFIER::tuple<Ts...>> : std::tuple_element<Id, std::tuple<Ts...>>
 {};
+_THRUST_STD_NAMESPACE_END
+
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+
+THRUST_NAMESPACE_BEGIN
+
+THRUST_HOST_DEVICE inline bool operator==(const null_type&, const null_type&)
+{
+  return true;
+}
+
+THRUST_HOST_DEVICE inline bool operator>=(const null_type&, const null_type&)
+{
+  return true;
+}
+
+THRUST_HOST_DEVICE inline bool operator<=(const null_type&, const null_type&)
+{
+  return true;
+}
+
+THRUST_HOST_DEVICE inline bool operator!=(const null_type&, const null_type&)
+{
+  return false;
+}
+
+THRUST_HOST_DEVICE inline bool operator<(const null_type&, const null_type&)
+{
+  return false;
+}
+
+THRUST_HOST_DEVICE inline bool operator>(const null_type&, const null_type&)
+{
+  return false;
+}
+
+THRUST_NAMESPACE_END
+
+_THRUST_STD_NAMESPACE_BEGIN
 
 template <>
 struct tuple_size<THRUST_NS_QUALIFIER::tuple<
@@ -1165,7 +946,4 @@ struct tuple_size<THRUST_NS_QUALIFIER::tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8,
     : std::integral_constant<std::size_t, 9>
 {};
 
-} // namespace std
-#  endif // THRUST_CPP_DIALECT >= 2017
-
-#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+_THRUST_STD_NAMESPACE_END
