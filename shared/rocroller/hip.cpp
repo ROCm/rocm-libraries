@@ -22,12 +22,25 @@ __global__ void kernel(float* reg)
 
     int tx = (threadIdx.x * 8) % std::size(shared);
 
-    reg[0] = shared[tx];
+    float temp[64];
+#pragma unroll
+    for(int i = 0; i < 64; ++i)
+    {
+        temp[i] = shared[(tx * 64) + i];
+    }
 
     // reg[0] = shared[tx];
     // reg[1] = shared[tx + 1];
 
     // printf("%d -> %d\n", threadIdx.x, tx);
+
+    __syncthreads();
+
+#pragma unroll
+    for(int i = 0; i < 64; ++i)
+    {
+        reg[i] = temp[i];
+    }
 }
 
 int main()
