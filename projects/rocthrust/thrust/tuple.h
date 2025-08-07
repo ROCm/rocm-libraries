@@ -175,15 +175,6 @@ using _THRUST_STD::tie;
 /*! \} // utility
  */
 
-template <typename T>
-struct access_traits
-{
-  using const_type     = const T&;
-  using non_const_type = T&;
-
-  using parameter_type = const typename thrust::detail::remove_cv<T>::type&;
-};
-
 THRUST_NAMESPACE_END
 
 #else
