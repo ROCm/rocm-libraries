@@ -26,6 +26,7 @@
 
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 
 #include <rocRoller/Utilities/Settings.hpp>
 
@@ -33,61 +34,6 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
-
-        bool KernelGraph::isParentSetCoordinate(int const edge, int const node) const
-        {
-            return control.get<ControlGraph::SetCoordinate>(node).has_value()
-                   && (control.get<ControlGraph::Initialize>(edge).has_value()
-                       || control.get<ControlGraph::Body>(edge).has_value());
-        }
-
-        bool KernelGraph::isParentForLoopOp(int const edge, int const node) const
-        {
-            return control.get<ControlGraph::ForLoopOp>(node).has_value()
-                   && (control.get<ControlGraph::ForLoopIncrement>(edge).has_value()
-                       || control.get<ControlGraph::Body>(edge).has_value());
-        }
-
-        void KernelGraph::collectParentForLoopAndSetCoordinate(
-            int tag, std::unordered_map<int, int>& parentForLoopAndSetCoordinate) const
-        {
-            using GD = rocRoller::Graph::Direction;
-
-            int parent = -1;
-
-            auto const edge = control.getNeighbours<Graph::Direction::Upstream>(tag).take(1).only();
-            if(edge.has_value())
-            {
-                auto const node
-                    = control.getNeighbours<Graph::Direction::Upstream>(*edge).take(1).only();
-                AssertFatal(node.has_value(), "Node does not exist!");
-
-                if(isParentSetCoordinate(*edge, *node) or isParentForLoopOp(*edge, *node))
-                    parent = *node;
-                else
-                {
-                    if(not parentForLoopAndSetCoordinate.contains(*node))
-                        collectParentForLoopAndSetCoordinate(*node, parentForLoopAndSetCoordinate);
-                    parent = parentForLoopAndSetCoordinate.at(*node);
-                }
-            }
-
-            parentForLoopAndSetCoordinate[tag] = parent;
-        }
-
-        std::unordered_map<int, int> KernelGraph::collectParentForLoopAndSetCoordinate() const
-        {
-            std::unordered_map<int, int> parentForLoopAndSetCoordinate;
-
-            for(auto const node : control.getNodes())
-            {
-                if(not parentForLoopAndSetCoordinate.contains(node))
-                    collectParentForLoopAndSetCoordinate(node, parentForLoopAndSetCoordinate);
-            }
-
-            return parentForLoopAndSetCoordinate;
-        }
-
         void KernelGraph::setTransformerByForLoopOp(CoordinateGraph::Transformer& transformer,
                                                     int                           forLoopOp)
         {
@@ -173,63 +119,41 @@ namespace rocRoller
 
         void KernelGraph::buildAllTransformers()
         {
-            m_transformers.clear();
-
-            auto parentForLoopAndSetCoordinate = collectParentForLoopAndSetCoordinate();
-            for(auto const& [node, parent] : parentForLoopAndSetCoordinate)
-            {
-                auto [iter, _] = m_transformers.emplace(node, &coordinates);
-
-                auto tag = parent;
-                while(tag != -1)
-                {
-                    if(std::holds_alternative<ControlGraph::SetCoordinate>(control.getNode(tag)))
-                        setTransformerBySetCoordinate(iter->second, tag);
-                    else
-                    {
-                        AssertFatal(
-                            control.isElemType<ControlGraph::ForLoopOp>()(tag),
-                            "A node in control stack is not a ForLoopOp nor a SetCoordinate");
-                        setTransformerByForLoopOp(iter->second, tag);
-                    }
-
-                    tag = parentForLoopAndSetCoordinate.at(tag);
-                }
-            }
+            for(auto const& node : control.getNodes())
+                buildTransformer(node, IgnoreCache);
         }
 
-        rocRoller::KernelGraph::CoordinateGraph::Transformer KernelGraph::getTransformer(int op)
+        rocRoller::KernelGraph::CoordinateGraph::Transformer KernelGraph::buildTransformer(int op)
         {
             if(not m_transformers.contains(op))
-            {
-                using GD = rocRoller::Graph::Direction;
-
-                auto [iter, _] = m_transformers.emplace(op, &coordinates);
-
-                auto node = op;
-                while(true)
-                {
-                    auto const edge
-                        = control.getNeighbours<Graph::Direction::Upstream>(node).take(1).only();
-                    if(not edge.has_value())
-                        break;
-
-                    auto const parent
-                        = control.getNeighbours<Graph::Direction::Upstream>(*edge).take(1).only();
-
-                    if(isParentSetCoordinate(edge.value(), parent.value()))
-                    {
-                        setTransformerBySetCoordinate(iter->second, parent.value());
-                    }
-                    else if(isParentForLoopOp(edge.value(), parent.value()))
-                    {
-                        setTransformerByForLoopOp(iter->second, parent.value());
-                    }
-
-                    node = parent.value();
-                }
-            }
+                return buildTransformer(op, IgnoreCache);
             return m_transformers.at(op);
+        }
+
+        rocRoller::KernelGraph::CoordinateGraph::Transformer
+            KernelGraph::buildTransformer(int op, IgnoreCachePolicy const)
+        {
+            auto [iter, _] = m_transformers.insert_or_assign(op, &coordinates);
+
+            auto const stk = controlStack(op, control);
+
+            for(int index : stk | std::views::reverse)
+            {
+                std::visit(
+                    [&](auto&& node) {
+                        using OpType = std::decay_t<decltype(node)>;
+                        if constexpr(std::is_same_v<OpType, ControlGraph::SetCoordinate>)
+                        {
+                            setTransformerBySetCoordinate(iter->second, index);
+                        }
+                        else if constexpr(std::is_same_v<OpType, ControlGraph::ForLoopOp>)
+                        {
+                            setTransformerByForLoopOp(iter->second, index);
+                        }
+                    },
+                    control.getNode(index));
+            }
+            return iter->second;
         }
 
         ConstraintStatus KernelGraph::checkConstraints() const

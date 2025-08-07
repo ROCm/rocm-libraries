@@ -324,7 +324,7 @@ namespace rocRoller
                 //
                 // Fill in workgroup indexes and workitem indexes for each transformer
                 //
-                auto coord = m_graph->getTransformer(tag);
+                auto coord = m_graph->buildTransformer(tag);
                 coord.fillExecutionCoordinates(m_context);
                 for(auto const& [node, _] : m_graph->getAllTransformers())
                 {
@@ -713,7 +713,7 @@ namespace rocRoller
             Generator<Instruction> operator()(int tag, ComputeIndex const& ci)
             {
                 co_yield m_loadStoreTileGenerator.genComputeIndex(
-                    tag, ci, m_graph->getTransformer(tag));
+                    tag, ci, m_graph->buildTransformer(tag));
             }
 
             Generator<Instruction> operator()(int tag, SetCoordinate const& setCoordinate)
@@ -738,13 +738,13 @@ namespace rocRoller
             Generator<Instruction> operator()(int tag, LoadTiled const& load)
             {
                 co_yield m_loadStoreTileGenerator.genLoadTile(
-                    tag, load, m_graph->getTransformer(tag));
+                    tag, load, m_graph->buildTransformer(tag));
             }
 
             Generator<Instruction> operator()(int tag, LoadLDSTile const& load)
             {
                 co_yield m_loadStoreTileGenerator.genLoadLDSTile(
-                    tag, load, m_graph->getTransformer(tag));
+                    tag, load, m_graph->buildTransformer(tag));
             }
 
             Generator<Instruction> operator()(int tag, LoadSGPR const& load)
@@ -766,7 +766,7 @@ namespace rocRoller
 
                 co_yield Instruction::Comment("GEN: LoadSGPR; user index");
 
-                auto indexes = m_graph->getTransformer(tag).reverse({userTag});
+                auto indexes = m_graph->buildTransformer(tag).reverse({userTag});
                 co_yield generateOffset(
                     offset, indexes[0], dst->variableType().dataType, user.offset);
 
@@ -855,7 +855,7 @@ namespace rocRoller
 
                 co_yield Instruction::Comment("GEN: LoadVGPR; user index");
 
-                auto indexes = m_graph->getTransformer(userTag).reverse({userTag});
+                auto indexes = m_graph->buildTransformer(userTag).reverse({userTag});
                 co_yield generateOffset(
                     offset, indexes[0], vgpr->variableType().dataType, user.offset);
 
@@ -998,7 +998,7 @@ namespace rocRoller
             Generator<Instruction> operator()(int tag, StoreTiled const& store)
             {
                 co_yield m_loadStoreTileGenerator.genStoreTile(
-                    tag, store, m_graph->getTransformer(tag));
+                    tag, store, m_graph->buildTransformer(tag));
             }
 
             Generator<Instruction> operator()(int tag, StoreLDSTile const& store)
@@ -1008,7 +1008,7 @@ namespace rocRoller
                 co_yield Instruction::Comment("GEN: StoreLDSTile");
 
                 co_yield m_loadStoreTileGenerator.genStoreLDSTile(
-                    tag, store, m_graph->getTransformer(tag));
+                    tag, store, m_graph->buildTransformer(tag));
             }
 
             Generator<Instruction> operator()(int tag, LoadTileDirect2LDS const& load)
@@ -1018,7 +1018,7 @@ namespace rocRoller
                 co_yield Instruction::Comment("GEN: LoadTileDirect2LDS");
 
                 co_yield m_loadStoreTileGenerator.genLoadTileDirect2LDS(
-                    tag, load, m_graph->getTransformer(tag));
+                    tag, load, m_graph->buildTransformer(tag));
             }
 
             Generator<Instruction> operator()(int tag, StoreVGPR const& store)
@@ -1033,7 +1033,7 @@ namespace rocRoller
                 auto offset = Register::Value::Placeholder(
                     m_context, Register::Type::Vector, DataType::Int64, 1);
 
-                auto indexes = m_graph->getTransformer(tag).forward({userTag});
+                auto indexes = m_graph->buildTransformer(tag).forward({userTag});
 
                 co_yield Instruction::Comment("GEN: StoreVGPR; user index");
                 co_yield generateOffset(
@@ -1064,7 +1064,7 @@ namespace rocRoller
                 auto offset = Register::Value::Placeholder(
                     m_context, Register::Type::Scalar, DataType::Int64, 1);
 
-                auto indexes = m_graph->getTransformer(tag).forward({userTag});
+                auto indexes = m_graph->buildTransformer(tag).forward({userTag});
 
                 co_yield Instruction::Comment("GEN: StoreSGPR; user index");
                 co_yield generateOffset(
@@ -1105,7 +1105,7 @@ namespace rocRoller
 
                 const uint waveTileSize = waveTile.sizes[0] * waveTile.sizes[1];
 
-                auto                      coords = m_graph->getTransformer(tag);
+                auto                      coords = m_graph->buildTransformer(tag);
                 Expression::ExpressionPtr waveTileExpr, simdBlockExpr, vgprIndexExpr, expectedExpr;
 
                 {
@@ -1253,7 +1253,7 @@ namespace rocRoller
                 {
                     // Generate an expression of TID and add it to the seed
                     auto tidTag  = m_graph->mapper.get(tag, NaryArgument::LHS);
-                    auto indexes = m_graph->getTransformer(tag).forward({tidTag});
+                    auto indexes = m_graph->buildTransformer(tag).forward({tidTag});
                     seedExpr     = seedExpr + indexes[0];
                 }
 

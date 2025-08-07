@@ -66,20 +66,6 @@ namespace rocRoller
                 m_transformers;
 
             /**
-             * @brief Check if a parent node is a SetCoordinate and connected by a 
-             *        Body/Initialize edge
-             *
-             */
-            bool isParentSetCoordinate(int const edge, int const node) const;
-
-            /**
-             * @brief Check if a parent node is a ForLoop and connected by a 
-             *        Body/ForLoopIncrement edge
-             *
-             */
-            bool isParentForLoopOp(int const edge, int const node) const;
-
-            /**
              * @brief Set expression using a ForLoop op in a given transformer
              *
              */
@@ -93,38 +79,47 @@ namespace rocRoller
             void setTransformerBySetCoordinate(CoordinateGraph::Transformer& transformer,
                                                int                           setCoordinateOp);
 
-            /**
-             * @brief Collect ForLoop and SetCoordinate nodes for each op in control graph for a given op.
-             *
-             * @param tag The operation. 
-             * @param parentForLoopAndSetCoordinate An unordered map with the key as an op and the value is
-             *                                      the parent ForLoop/SetCoordinate.
-             */
-            void collectParentForLoopAndSetCoordinate(
-                int tag, std::unordered_map<int, int>& parentForLoopAndSetCoordinate) const;
-
-            /**
-             * @brief Collect ForLoop and SetCoordinate nodes for each op in control graph.
-             *
-             * @return An unordered map with the key as an op and the value is the parent 
-             *         ForLoop/SetCoordinate for all ops in control graph.
-             *
-             */
-            std::unordered_map<int, int> collectParentForLoopAndSetCoordinate() const;
-
         public:
             ControlGraph::ControlGraph       control;
             CoordinateGraph::CoordinateGraph coordinates;
             ControlToCoordinateMapper        mapper;
 
+            /**
+            * Set up the coordinate graph and transducer for existing transformers.
+            */
             void initializeTransformersForCodeGen(rocRoller::Expression::ExpressionTransducer);
-            CoordinateGraph::Transformer getTransformer(int op);
-            void                         buildAllTransformers();
+
+            /**
+            *  Build a transformer for a given operation in control graph if the transformer
+            *  does not exist, otherwise return existing transformer.
+            */
+            CoordinateGraph::Transformer buildTransformer(int op);
+
+            /**
+            *  Build a transformer for a given operation in control graph. If the transformer
+            *  exists, it will be re-built.
+            */
+            CoordinateGraph::Transformer buildTransformer(int op, IgnoreCachePolicy const);
+
+            /**
+            *  Build transformers for all operations in control graph. Rebuild transformers
+            *  if they already exist.
+            */
+            void buildAllTransformers();
+
+            /**
+            *  Set expression of an op's transformer using a given coordinate and expression.
+            */
             void updateTransformer(int op, int coord, Expression::ExpressionPtr expr);
+
             std::unordered_map<int, CoordinateGraph::Transformer> const& getAllTransformers() const
             {
                 return m_transformers;
             }
+
+            /**
+            *  Set both control and coordinate graphs to be restricted mode.
+            */
             void setRestricted()
             {
                 control.setRestricted();

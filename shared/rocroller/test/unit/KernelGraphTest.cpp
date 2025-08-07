@@ -3119,7 +3119,7 @@ namespace KernelGraphTest
         //
         std::unordered_map<int, Transformer> transformers;
         for(auto op : kgraph1.control.getNodes())
-            transformers.emplace(op, kgraph1.getTransformer(op));
+            transformers.emplace(op, kgraph1.buildTransformer(op));
 
         //
         // Build all transformers at once
@@ -3130,7 +3130,7 @@ namespace KernelGraphTest
         // The resulting transformers should be identical
         //
         for(auto op : kgraph1.control.getNodes())
-            EXPECT_EQ(transformers.at(op).getIndexes(), kgraph1.getTransformer(op).getIndexes());
+            EXPECT_EQ(transformers.at(op).getIndexes(), kgraph1.buildTransformer(op).getIndexes());
     }
 
     TEST_F(KernelGraphTest, RemoveSetCoordinate)
