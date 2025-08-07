@@ -15,7 +15,11 @@ The rocFFT library calculates discrete Fourier transforms for one, two, and thre
 supporting various data types for real and complex values.
 To learn more, see :doc:`What is rocFFT? <./what-is-rocfft>`
 
-The rocFFT public repository is located at `<https://github.com/ROCm/rocFFT>`_.
+The rocFFT public repository is located at `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocfft>`_.
+
+.. note::
+
+   The rocFFT repository for ROCm 6.4.3 and earlier is located at `<https://github.com/ROCm/rocFFT>`_.
 
 .. grid:: 2
   :gutter: 3
@@ -42,7 +46,7 @@ The rocFFT public repository is located at `<https://github.com/ROCm/rocFFT>`_.
 
   .. grid-item-card:: Samples
 
-    * `rocFFT GitHub client examples <https://github.com/ROCm/rocFFT/tree/develop/clients/samples>`_
+    * `rocFFT GitHub client examples <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocfft/clients/samples>`_
 
   .. grid-item-card:: API reference
 
