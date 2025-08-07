@@ -31,9 +31,7 @@
 
 namespace rocRoller
 {
-    // RegisterComponentBase(Assembler);
-
-    const std::string Assembler::Basename = "Assembler";
+    RegisterComponentBase(Assembler);
 
     std::string toString(AssemblerType t)
     {
