@@ -62,17 +62,17 @@ struct AnySolver
     };
     bool TestPerfCfgParams(const ExecutionContext& ctx,
                            const miopen::conv::ProblemDescription& problem,
-                           const std::string& params) const
+                           const std::string& perf_cfg) const
     {
         assert(ptr_value != nullptr);
-        return ptr_value->TestPerfCfgParams(ctx, problem, params);
+        return ptr_value->TestPerfCfgParams(ctx, problem, perf_cfg);
     };
     ConvSolution GetSolution(const ExecutionContext& ctx,
                              const miopen::conv::ProblemDescription& problem,
-                             const std::string& params) const
+                             const std::string& perf_cfg) const
     {
         assert(ptr_value != nullptr);
-        return ptr_value->GetSolution(ctx, problem, params);
+        return ptr_value->GetSolution(ctx, problem, perf_cfg);
     };
     std::vector<ConvSolution> GetAllSolutions(const ExecutionContext& ctx,
                                               const miopen::conv::ProblemDescription& problem) const
@@ -182,10 +182,10 @@ struct AnySolver
         virtual bool IsTunable() const                                                   = 0;
         virtual bool TestPerfCfgParams(const ExecutionContext& ctx,
                                        const miopen::conv::ProblemDescription& problem,
-                                       const std::string& params) const                  = 0;
+                                       const std::string& perf_cfg) const                = 0;
         virtual ConvSolution GetSolution(const ExecutionContext& ctx,
                                          const miopen::conv::ProblemDescription& problem,
-                                         const std::string& params) const                = 0;
+                                         const std::string& perf_cfg) const              = 0;
         virtual std::vector<ConvSolution>
         GetAllSolutions(const ExecutionContext& ctx,
                         const miopen::conv::ProblemDescription& problem) const      = 0;
@@ -262,7 +262,7 @@ struct AnySolver
 
         bool TestPerfCfgParams(const ExecutionContext& ctx,
                                const miopen::conv::ProblemDescription& problem,
-                               const std::string& params,
+                               const std::string& perf_cfg,
                                std::true_type) const
         {
             using PerformanceConfig = decltype(value.GetDefaultPerformanceConfig(
@@ -270,11 +270,11 @@ struct AnySolver
                 std::declval<const miopen::conv::ProblemDescription&>()));
             PerformanceConfig config{};
 
-            bool success = config.Deserialize(params);
+            bool success = config.Deserialize(perf_cfg);
             if(!success)
             {
                 MIOPEN_LOG_WE("Perf params are obsolete or corrupt: "
-                              << params << ". Performance may degrade.");
+                              << perf_cfg << ". Performance may degrade.");
                 return false;
             }
 
@@ -292,16 +292,16 @@ struct AnySolver
 
         bool TestPerfCfgParams(const ExecutionContext& ctx,
                                const miopen::conv::ProblemDescription& problem,
-                               const std::string& params) const override
+                               const std::string& perf_cfg) const override
         {
             return TestPerfCfgParams(
-                ctx, problem, params, std::integral_constant<bool, TunableSolver::Is>());
+                ctx, problem, perf_cfg, std::integral_constant<bool, TunableSolver::Is>());
         }
 
         // tunable legacy solver
         ConvSolution GetSolution(const ExecutionContext&,
                                  const miopen::conv::ProblemDescription&,
-                                 const std::string& params,
+                                 const std::string& perf_cfg,
                                  std::true_type,
                                  std::true_type) const
         {
@@ -319,13 +319,13 @@ struct AnySolver
         // tunable solver, not legacy
         ConvSolution GetSolution(const ExecutionContext& ctx,
                                  const miopen::conv::ProblemDescription& problem,
-                                 const std::string& params,
+                                 const std::string& perf_cfg,
                                  std::true_type,
                                  std::false_type) const
         {
             using PerformanceConfig = decltype(value.GetDefaultPerformanceConfig(ctx, problem));
             PerformanceConfig config{};
-            bool success = config.Deserialize(params);
+            bool success = config.Deserialize(perf_cfg);
             if(!success)
                 MIOPEN_THROW("Failed to deserialize parameters.");
 
@@ -343,7 +343,7 @@ struct AnySolver
         // non tunable solver
         ConvSolution GetSolution(const ExecutionContext& ctx,
                                  const miopen::conv::ProblemDescription& problem,
-                                 const std::string& params,
+                                 const std::string& perf_cfg,
                                  std::false_type,
                                  std::true_type) const
         {
@@ -351,7 +351,7 @@ struct AnySolver
         }
         ConvSolution GetSolution(const ExecutionContext& ctx,
                                  const miopen::conv::ProblemDescription& problem,
-                                 const std::string& params,
+                                 const std::string& perf_cfg,
                                  std::false_type,
                                  std::false_type) const
         {
@@ -379,11 +379,11 @@ struct AnySolver
 
         ConvSolution GetSolution(const ExecutionContext& ctx,
                                  const miopen::conv::ProblemDescription& problem,
-                                 const std::string& params) const override
+                                 const std::string& perf_cfg) const override
         {
             return GetSolution(ctx,
                                problem,
-                               params,
+                               perf_cfg,
                                std::integral_constant<bool, TunableSolver::Is>(),
                                std::integral_constant<bool, LegacySolver::Is>());
         }
