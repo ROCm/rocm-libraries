@@ -32,18 +32,28 @@
 #include "hipcub/util_allocator.hpp"
 #include <cstdlib>
 
+#if __has_include(<valgrind/valgrind.h>)
+    #include <valgrind/valgrind.h>
+    #define HAS_VALGRIND_H 1
+#else
+    #define HAS_VALGRIND_H 0
+#endif
+
 __global__ void EmptyKernel() { }
 
 // Hipified test/test_allocator.cu
 
 TEST(HipcubCachingDeviceAllocatorTests, Test1)
 {
-    // This test is very timing sensitive. Valgrind signigficantly slows down
-    // kernel execution and therefore messes up the test. If valgrind is being 
-    // used we should disable this test
-    if (std::getenv("UNDER_VALGRIND")) {
+
+#if HAS_VALGRIND_H
+    // This test is very timing sensitive. Valgrind significantly slows down
+    // kernel execution and therefore messes up the timing of the test. 
+    // If valgrind is being used we should disable this test otherwise it will fail
+    if (RUNNING_ON_VALGRIND) {
         GTEST_SKIP() << "Skipping test under Valgrind";
     }
+#endif //HAS_VALGRIND_H
 
     // Get number of GPUs and current GPU
     int num_gpus;
