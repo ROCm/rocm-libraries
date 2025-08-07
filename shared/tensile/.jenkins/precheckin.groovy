@@ -59,7 +59,9 @@ def runCI =
     }
 
     if (platform.os.contains("rhel8"))
-        compileCommand = null
+        compileCommand = { platform, project -> 
+            // Skip compile
+        }
 
     
     def testCommand =
