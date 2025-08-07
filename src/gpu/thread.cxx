@@ -159,7 +159,7 @@ __device__ void WorkNode_Header::moveAndUnlock(WorkNode_Header **new_location) {
     atomicExch(reinterpret_cast<uintptr_t*>(new_location), reinterpret_cast<uintptr_t>(this));
 }
 // Signal that the caller is abdicating any responsability for freeing the WorkNode, unless the caller is the last one
-// to do so, in which case, free the WorkNode. Note that it is legal to call `delete this`:
+// to do so, in which case, in which case, we free ourself. Note that it is legal to call `delete this`:
 // https://isocpp.org/wiki/faq/freestore-mgmt#delete-this, so presumably free(this) is also legal for trivially
 // destructible types (as long as we're careful).
 // Returns true if we're the last one with any responsability for the WorkNode (i.e. the WorkNode has already been
