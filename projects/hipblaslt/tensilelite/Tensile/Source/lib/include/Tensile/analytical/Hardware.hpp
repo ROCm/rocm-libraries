@@ -272,6 +272,7 @@ namespace TensileLite
         public:
             enum class Architecture
             {
+                gfx90a,
                 gfx942,
                 gfx950,
                 Count
@@ -280,7 +281,9 @@ namespace TensileLite
             static Architecture archNameToEnum(const std::string& str)
             {
                 static const std::unordered_map<std::string, Architecture> strToEnumMap
-                    = {{"gfx942", Architecture::gfx942}, {"gfx950", Architecture::gfx950}};
+                    = {{"gfx90a", Architecture::gfx90a},
+                       {"gfx942", Architecture::gfx942},
+                       {"gfx950", Architecture::gfx950}};
 
                 auto it = strToEnumMap.find(str);
                 if(it != strToEnumMap.end())
