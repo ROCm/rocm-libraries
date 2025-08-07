@@ -1938,6 +1938,45 @@ namespace GEMMDriverTest
         basicGEMM<FP8, FP8, float>(gemm);
     }
 
+        TEST_P(GEMMTestGPU, GPU_ScaledGEMMMXF8TN)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
+        auto gemm = setup_GEMMF8F6F4(32, 32, 64);
+
+        gemm.macM = 128;
+        gemm.macN = 256;
+        gemm.macK = 128;
+
+        gemm.m = 2 * gemm.macM;
+        gemm.n = 3 * gemm.macN;
+        gemm.k = 4 * gemm.macK;
+
+        gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
+
+        gemm.loadLDSA      = true;
+        gemm.loadLDSB      = true;
+        gemm.loadLDSScaleA = false;
+        gemm.loadLDSScaleB = false;
+
+        // gemm.unrollK           = 2;
+        // gemm.prefetch          = true;
+        // gemm.prefetchInFlight  = 2;
+        // gemm.prefetchLDSFactor = 2;
+
+        gemm.scaleAMode = Operations::ScaleMode::Separate;
+        gemm.scaleBMode = Operations::ScaleMode::Separate;
+
+        gemm.scaleBlockSize
+            = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
+
+        gemm.scaleTypeA = DataType::E8M0;
+        gemm.scaleTypeB = DataType::E8M0;
+
+        basicGEMM<FP8, FP8, float>(gemm);
+    }
+
     void checkGEMMF8F6F4(rocRoller::ContextPtr m_context,
                          std::string           mfma,
                          std::string           modifiers,
