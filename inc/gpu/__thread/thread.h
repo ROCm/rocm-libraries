@@ -155,7 +155,7 @@ inline __host__ thread::thread(uint32_t width, Fn_t &&typed_fn, Args_t &&...args
     #pragma GCC diagnostic pop
 
 #ifndef __HIP_DEVICE_COMPILE__
-    worknode_d.reset(worknode_h->sendToGPU());
+    worknode_d = worknode_h->sendToGPU();
 #endif
 }
 
