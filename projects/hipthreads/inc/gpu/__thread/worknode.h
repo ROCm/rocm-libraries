@@ -100,10 +100,10 @@ struct WorkNode_Header {
     // For use in functions like get_width where worknode hasn't moved anywhere, and we know *link_to_self == nullptr.
     __device__ void unlockActive();
     __device__ void moveAndUnlock(WorkNode_Header **new_location);
-    // Signal that we're abdicating any responsability for freeing worknode, unless we're the last one to do so, in which
-    // case, free worknode.
-    // Returns true if we're the last one with any responsability for worknode (i.e. the WorkNode has already been detached,
-    // or the WorkNode has finished execution).
+    // Signal that the caller is abdicating any responsability for freeing the WorkNode, unless the caller is the last
+    // one to do so, in which case, we free ourself.
+    // Returns true if we're the last one with any responsability for worknode (i.e. the WorkNode has already been
+    // detached, or the WorkNode has finished execution).
     __device__ bool release();
     __device__ bool isSchedulerDoneWith();
 

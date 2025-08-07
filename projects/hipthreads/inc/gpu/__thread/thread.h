@@ -112,6 +112,8 @@ class thread {
   private:
 #ifdef __HIP_DEVICE_COMPILE__
     // If we don't initialize worknode_d to nullptr, operator= might fail when assigning to a default constructed gpu::thread.
+    // TODO: Make WorkNodeDeleter work for both host and device and replace this with
+    // hip::std::unique_ptr<WorkNode_Header, WorkNodeDeleter> so we don't have to specialize between host and device
     WorkNode_Header *worknode_d = nullptr;
 #else
     std::unique_ptr<WorkNode_Header, WorkNodeDeleter> worknode_d = nullptr;
