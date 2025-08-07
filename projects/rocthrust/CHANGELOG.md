@@ -8,6 +8,7 @@ Documentation for rocThrust available at
 ### Added
 
 * Added a new CMake option `-DSQLITE_USE_SYSTEM_PACKAGE` to allow SQLite to be provided by the system.
+* Introduced `libhipcxx` as a soft depedency. When `liphipcxx` can be included, rocthrust, may use structs and methods defined in `libhipcxx`. This allows for a more complete behaviour parity with CCCL and mirrors CCCL's thrust own depedency on `libcudacxx`.
 
 ## rocThrust 4.0.0 for ROCm 7.0
 
