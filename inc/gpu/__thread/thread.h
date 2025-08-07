@@ -44,7 +44,6 @@
 #include <hip/std/__utility/swap.h>
 
 #include "gpu/__support/hip_check.h"
-#include "gpu/__clib/malloc.h"
 #include "gpu/__clib/memcpy.h"
 #include "gpu/__thread/id.h"
 #include "gpu/__thread/worknode.h"
@@ -56,15 +55,6 @@ namespace internal {
 //====================================================================================================================//
 //      THREAD CLASS DEFINITION
 //====================================================================================================================//
-
-struct WorkNodeDeleter {
-    // WorkNode<T> is trivially destructible (implied by std::is_trivially_copyable).
-    // Note: Technically, we should do a static_cast of ptr back to WorkNode_t before freeing. If we really want to fix
-    // it, we could give unique_ptr a function pointer instead of a functor (i.e. the type of worknode_d would be
-    // std::unique_ptr<WorkNode_Header, void (*)(WorkNode_Header *)>), and at construction time pass a pointer to a
-    // function that will do the cast before the free.
-    void operator()(WorkNode_Header* ptr) { gpu::free(ptr); }
-};
 
 // TODO: split this file up into a WorkNode header and a thread header
 class thread {
