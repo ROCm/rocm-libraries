@@ -5548,63 +5548,6 @@ class KernelWriterAssembly(KernelWriter):
     maxNumOOBElementsA = numElementsPer4BytesA - 1
     maxNumOOBElementsB = numElementsPer4BytesB - 1
 
-    # for A
-    if doA:
-      if (kernel["WaveSeparateGlobalReadA"] == 0):
-        tmpSgprA = tmpSgprQregA
-      else:
-        tmpSgprA = tmpSgprA2
-      imod.add(SSubU32(dst=sgpr(tmpSgprA1), src0=sgpr("SizeI"), src1=1))
-      imod.add(scalarStaticDivideAndRemainder(tmpSgprA, tmpSgprA, tmpSgprA1, \
-                                              kernel["MacroTile0"], \
-                                              ContinuousRegister(tmpSgpr, 2), 1))
-      if (kernel["WaveSeparateGlobalReadA"] > 0):
-        imod.add(scalarStaticDivideAndRemainder(tmpSgprQregA, tmpSgprQregA, tmpSgprA, \
-                                                (nlpA * lspA), \
-                                                ContinuousRegister(tmpSgpr, 2), 1))
-      imod.add(SLShiftRightB32(dst=sgpr(tmpSgprQregA), shiftHex=hex(log2(lspA)), \
-                               src=sgpr(tmpSgprQregA), comment="divide lsp"))
-      imod.add(SMulI32(dst=sgpr(tmpSgprQregA), src0=sgpr(tmpSgprQregA), src1=nlcA, comment=""))
-      imod.add(SLShiftRightB32(dst=sgpr(tmpSgpr), shiftHex=hex(log2(lscA)), \
-                               src=sgpr("LoopCounterL"), comment=""))
-      imod.add(SAddI32(dst=sgpr(tmpSgprQregA), src0=sgpr(tmpSgprQregA), src1=sgpr(tmpSgpr), comment=""))
-      imod.add(scalarStaticDivideAndRemainder(tmpSgpr, tmpSgprA1, "SizesSum+%u"%loopIdx, \
-                                              kernel["DepthU"], ContinuousRegister(tmpSgpr, 2), 2))
-    # for B
-    if doB:
-      if (kernel["WaveSeparateGlobalReadB"] == 0):
-        tmpSgprB = tmpSgprQregB
-      else:
-        tmpSgprB = tmpSgprB2
-      imod.add(SSubU32(dst=sgpr(tmpSgprB1), src0=sgpr("SizeJ"), src1=1))
-      imod.add(scalarStaticDivideAndRemainder(tmpSgprB, tmpSgprB, tmpSgprB1, \
-                                              kernel["MacroTile1"], \
-                                              ContinuousRegister(tmpSgpr, 2), 1))
-      if (kernel["WaveSeparateGlobalReadB"] > 0):
-        imod.add(scalarStaticDivideAndRemainder(tmpSgprQregB, tmpSgprQregB, tmpSgprB, \
-                                               (nlpB * lspB), \
-                                               ContinuousRegister(tmpSgpr, 2), 1))
-      imod.add(SLShiftRightB32(dst=sgpr(tmpSgprQregB), shiftHex=hex(log2(lspB)), \
-                               src=sgpr(tmpSgprQregB), comment="divide lsp"))
-      imod.add(SMulI32(dst=sgpr(tmpSgprQregB), src0=sgpr(tmpSgprQregB), src1=nlcB, comment=""))
-      imod.add(SLShiftRightB32(dst=sgpr(tmpSgpr), shiftHex=hex(log2(lscB)), \
-                               src=sgpr("LoopCounterL"), comment=""))
-      imod.add(SAddI32(dst=sgpr(tmpSgprQregB), src0=sgpr(tmpSgprQregB), src1=sgpr(tmpSgpr), comment=""))
-      imod.add(scalarStaticDivideAndRemainder(tmpSgpr, tmpSgprB1, "SizesSum+%u"%loopIdx, \
-                                              kernel["DepthU"], ContinuousRegister(tmpSgpr, 2), 2))
-    # A
-    if doA:
-      imod.add(SAndB32(dst=sgpr(tmpSgprA1), src0=sgpr(tmpSgprA1), src1=(tPA["glvw"] - 1), \
-                       comment="s[sgprLoopCounterL] % glvw"))
-      imod.add(SAndB32(dst=sgpr(tmpSgprKA), src0=sgpr(tmpSgprA1), src1=hex(maxNumOOBElementsA), \
-                       comment=" % numElementsPer4Bytes"))
-    # B
-    if doB:
-      imod.add(SAndB32(dst=sgpr(tmpSgprB1), src0=sgpr(tmpSgprB1), src1=(tPB["glvw"] - 1), \
-                       comment="s[sgprLoopCounterL] % glvw"))
-      imod.add(SAndB32(dst=sgpr(tmpSgprKB), src0=sgpr(tmpSgprB1), src1=hex(maxNumOOBElementsB), \
-                       comment=" % numElementsPer4Bytes"))
-    #########################################################################################################
     numDwordA = int(tPA["glvw"] * tPA["bpeGR"]) >> 2
     numDwordB = int(tPB["glvw"] * tPB["bpeGR"]) >> 2
     numDwordA = 1 if numDwordA == 0 else numDwordA
