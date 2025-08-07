@@ -76,7 +76,7 @@ public:
 
   // allow assignment from tuples
   // XXX might be worthwhile to guard this with an enable_if is_assignable
-  // _CCCL_EXEC_CHECK_DISABLE
+  THRUST_EXEC_CHECK_DISABLE
   template <typename... Us>
   inline THRUST_HOST_DEVICE tuple_of_iterator_references& operator=(const thrust::tuple<Us...>& other)
   {
@@ -86,7 +86,7 @@ public:
 
   // allow assignment from pairs
   // XXX might be worthwhile to guard this with an enable_if is_assignable
-  // _CCCL_EXEC_CHECK_DISABLE
+  THRUST_EXEC_CHECK_DISABLE
   template <typename U1, typename U2>
   inline THRUST_HOST_DEVICE tuple_of_iterator_references& operator=(const thrust::pair<U1, U2>& other)
   {
@@ -97,7 +97,7 @@ public:
   // allow assignment from reference<tuple>
   // XXX perhaps we should generalize to reference<T>
   //     we could captures reference<pair> this way
-  // _CCCL_EXEC_CHECK_DISABLE
+  THRUST_EXEC_CHECK_DISABLE
   template <typename Pointer, typename Derived, typename... Us>
   inline THRUST_HOST_DEVICE tuple_of_iterator_references&
   operator=(const thrust::reference<thrust::tuple<Us...>, Pointer, Derived>& other)
@@ -157,7 +157,6 @@ struct tuple_element<Id, THRUST_NS_QUALIFIER::detail::tuple_of_iterator_referenc
 _LIBCUDACXX_END_NAMESPACE_STD
 
 // structured bindings support
-// #if !_CCCL_COMPILER(NVRTC)
 namespace std
 {
 
@@ -172,7 +171,6 @@ struct tuple_element<Id, THRUST_NS_QUALIFIER::detail::tuple_of_iterator_referenc
 {};
 
 } // namespace std
-// #endif // !_CCCL_COMPILER(NVRTC)
 
 #else // THRUST_DEVICE_SYSTEM != THRUST_DEVICE_SYSTEM_CUDA
 
