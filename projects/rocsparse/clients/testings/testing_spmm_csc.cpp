@@ -189,8 +189,8 @@ void testing_spmm_csc(const Arguments& arg)
     host_vector<C> hC_gold(nnz_C);
 
     // Initialize data on CPU
-    rocsparse_init<B>(hB, nnz_B, 1, 1);
-    rocsparse_init<C>(hC_1, nnz_C, 1, 1);
+    rocsparse_init<B>(hB, nnz_B, 1, 1, arg.convert_to_int);
+    rocsparse_init<C>(hC_1, nnz_C, 1, 1, arg.convert_to_int);
 
     hC_2    = hC_1;
     hC_gold = hC_1;
