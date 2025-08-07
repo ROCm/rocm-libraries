@@ -506,7 +506,11 @@ typedef enum hipblasClientProcessor
     gfx1035 = 1035,
     gfx1100 = 1100,
     gfx1101 = 1101,
-    gfx1102 = 1102
+    gfx1102 = 1102,
+    gfx1150 = 1150,
+    gfx1151 = 1151,
+    gfx1200 = 1200,
+    gfx1201 = 1201
 } hipblasClientProcessor;
 
 /* get architecture number */
