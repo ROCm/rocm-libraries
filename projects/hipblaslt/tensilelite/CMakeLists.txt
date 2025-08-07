@@ -18,10 +18,9 @@ if(TENSILELITE_ENABLE_HOST)
     target_compile_definitions(tensilelite-host
         PUBLIC
             $<BUILD_INTERFACE:TENSILE_DEFAULT_SERIALIZATION>
-
+            $<BUILD_INTERFACE:TENSILE_USE_HIP>
+            $<BUILD_INTERFACE:__HIP_HCC_COMPAT_MODE__=1> # if we don't have this we fail tests on 942_304cu
     )
-
-    target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_USE_HIP>)
 
     if(HIPBLASLT_ENABLE_LLVM)
         target_link_libraries(tensilelite-host PRIVATE LLVMObjectYAML)
