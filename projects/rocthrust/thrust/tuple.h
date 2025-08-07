@@ -34,9 +34,6 @@
 
 #include <thrust/type_traits/is_trivially_relocatable.h>
 
-#include "thrust/detail/config/execution_space.h"
-#include "thrust/detail/config/namespace.h"
-
 THRUST_NAMESPACE_BEGIN
 struct null_type
 {};
@@ -48,8 +45,6 @@ THRUST_NAMESPACE_END
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 
 #  include _THRUST_STD_INCLUDE(tuple)
-#  include _THRUST_STD_INCLUDE(type_traits)
-#  include _THRUST_STD_INCLUDE(utility)
 
 THRUST_NAMESPACE_BEGIN
 
