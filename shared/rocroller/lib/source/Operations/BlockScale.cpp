@@ -47,6 +47,7 @@ namespace rocRoller
 
             if(m_strides.empty())
             {
+                // Default value for first stride based on hardware arch
                 m_strides.push_back(32);
             }
 

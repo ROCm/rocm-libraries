@@ -137,7 +137,8 @@ namespace rocRoller
 
                         if(solutionParams.types.scaleSkipPermlane)
                         {
-                            AssertFatal(solutionParams.types.scaleShuffleTileA.size() == 3);
+                            AssertFatal(solutionParams.types.scaleShuffleTileA.size() == 3,
+                                        ShowValue(solutionParams.types.scaleShuffleTileA));
 
                             scaleInputA
                                 = command->addOperation(rocRoller::Operations::SubTileTranspose(

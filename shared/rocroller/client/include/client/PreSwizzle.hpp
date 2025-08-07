@@ -40,7 +40,7 @@ namespace rocRoller::Client
                                      TensorDescriptor const&    desc,
                                      std::vector<size_t> const& tile)
     {
-        AssertFatal(tile.size() == 3);
+        AssertFatal(tile.size() == 3, ShowValue(tile.size()), ShowValue(tile));
         AssertFatal(desc.dimensions() == 2,
                     "Batch dimension not yet supported.",
                     ShowValue(desc.dimensions()),
@@ -75,7 +75,11 @@ namespace rocRoller::Client
         auto dst
             = TensorDescriptor::ShuffledNoPadding(desc.dataType(), srcSizes, {4, 1, 2, 3, 0, 5});
 
-        AssertFatal(src.totalAllocatedElements() == dst.totalAllocatedElements());
+        AssertFatal(src.totalAllocatedElements() == dst.totalAllocatedElements(),
+                    ShowValue(src.totalAllocatedElements()),
+                    ShowValue(dst.totalAllocatedElements()),
+                    ShowValue(src),
+                    ShowValue(dst));
 
         return shuffleDims(input, dst, src);
     }

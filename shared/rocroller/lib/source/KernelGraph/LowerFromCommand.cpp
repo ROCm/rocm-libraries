@@ -775,11 +775,7 @@ namespace rocRoller
                             "ScaleMode::Inline not supported yet.");
             }
 
-            void operator()(Operations::SubTileTranspose const& t)
-            {
-                // AssertFatal(t.scaleMode() != Operations::ScaleMode::Inline,
-                //             "ScaleMode::Inline not supported yet.");
-            }
+            void operator()(Operations::SubTileTranspose const& t) {}
 
             void operator()(Operations::Literal const& literal)
             {

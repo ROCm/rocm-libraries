@@ -467,13 +467,14 @@ namespace rocRoller
 
                 if(!contraction.scalePreShuffledTileA.empty())
                 {
-                    AssertFatal(scaleModeB == Operations::ScaleMode::Separate,
-                                "Pre-swizzled inputs must be for both A and B or neither.",
-                                ShowValue(scaleModeB));
-
-                    AssertFatal(!contraction.scalePreShuffledTileB.empty(),
-                                "Pre-swizzled inputs must be for both A and B or neither.",
-                                ShowValue(contraction.scalePreShuffledTileB));
+                    AssertFatal(
+                        scaleModeA == Operations::ScaleMode::Separate
+                            && scaleModeB == Operations::ScaleMode::Separate
+                            && !contraction.scalePreShuffledTileB.empty(),
+                        "Pre-swizzled inputs must currently be for both A and B or neither.",
+                        ShowValue(scaleModeA),
+                        ShowValue(scaleModeB),
+                        ShowValue(contraction.scalePreShuffledTileB));
 
                     expectedSkipValue = true;
                 }

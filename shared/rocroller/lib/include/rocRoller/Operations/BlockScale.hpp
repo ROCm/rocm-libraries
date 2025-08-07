@@ -88,7 +88,7 @@ namespace rocRoller
 
             std::unordered_set<OperationTag> getInputs() const;
             std::string                      toString() const;
-            const std::vector<size_t>&       tileDimensions() const;
+            std::vector<size_t> const&       tileDimensions() const;
 
             auto operator<=>(SubTileTranspose const&) const = default;
             bool operator==(SubTileTranspose const& other) const;
