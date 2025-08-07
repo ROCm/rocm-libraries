@@ -387,7 +387,8 @@ static __host__ void notifyDeviceThereMightNotBeAnyMoreWork [[maybe_unused]] (bo
     }
 }
 
-__host__ WorkNode_Header *WorkNode_Header::sendToGPU(WorkNode_Header **new_location) {
+// TODO: Should we return a thrust::unique_ptr instead?
+__host__ std::unique_ptr<WorkNode_Header, WorkNodeDeleter> WorkNode_Header::sendToGPU(WorkNode_Header **new_location) {
     prepDeviceForWork();
 
     this->link_to_self = new_location;
@@ -415,9 +416,9 @@ __host__ WorkNode_Header *WorkNode_Header::sendToGPU(WorkNode_Header **new_locat
     // __LIBGPU_HIP_CHECK__(hipMemsetAsync(new_location, (reinterpret_cast<uintptr_t>(worknode_d.get()) & 0xFF) | 0x1, 1, getEnqueingStream()));
 
     __LIBGPU_HIP_CHECK__(hipEventSynchronize(copyFinished));
-    return worknode_d.release();
+    return worknode_d;
 }
-__host__ WorkNode_Header *WorkNode_Header::sendToGPU() {
+__host__ std::unique_ptr<WorkNode_Header, WorkNodeDeleter> WorkNode_Header::sendToGPU() {
     const uint32_t myPushCount = cpuWorkQueuePushCount++;
     const size_t myPushIndex = myPushCount % CPU_WORK_QUEUE_SIZE;
 

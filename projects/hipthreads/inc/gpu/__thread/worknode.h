@@ -113,8 +113,8 @@ struct WorkNode_Header {
     // Post-condition: worknode is likely unlocked and may get invalidated
     __device__ void insertIntoMainQueue();
 
-    __host__ WorkNode_Header *sendToGPU();
-    __host__ WorkNode_Header *sendToGPU(WorkNode_Header **new_location);
+    __host__ std::unique_ptr<WorkNode_Header, WorkNodeDeleter> sendToGPU();
+    __host__ std::unique_ptr<WorkNode_Header, WorkNodeDeleter> sendToGPU(WorkNode_Header **new_location);
 };
 static_assert(std::is_standard_layout_v<WorkNode_Header>);
 
