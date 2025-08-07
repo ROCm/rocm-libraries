@@ -58,6 +58,9 @@ def runCI =
         commonGroovy.runCompileCommand(platform, project, jobName, false)
     }
 
+    if (platform.os.contains("rhel8"))
+        compileCommand = null
+
     
     def testCommand =
     {
