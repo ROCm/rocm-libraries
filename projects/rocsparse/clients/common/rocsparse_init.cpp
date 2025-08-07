@@ -31,7 +31,7 @@
 template <typename I, typename J>
 void host_coo_to_csr(J M, I nnz, const J* coo_row_ind, I* csr_row_ptr, rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Resize and initialize csr_row_ptr with zeros
     for(size_t i = 0; i < M + 1; ++i)
@@ -58,7 +58,7 @@ void host_csr_to_coo(J                     M,
                      std::vector<J>&       coo_row_ind,
                      rocsparse_index_base  base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Resize coo_row_ind
     coo_row_ind.resize(nnz);
@@ -86,7 +86,7 @@ void host_csr_to_coo_aos(J                     M,
                          std::vector<I>&       coo_ind,
                          rocsparse_index_base  base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Resize coo_ind
     coo_ind.resize(2 * nnz);
@@ -118,7 +118,7 @@ void host_csr_to_ell(J                     M,
                      rocsparse_index_base  csr_base,
                      rocsparse_index_base  ell_base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Determine ELL width
     ell_width = 0;
@@ -196,7 +196,7 @@ template <typename T>
 void rocsparse_init_exact(
     T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count, int a, int b)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
     {
@@ -298,7 +298,7 @@ template <typename T>
 void rocsparse_init_inexact(
     T* A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count, T a, T b)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
     {
@@ -322,7 +322,7 @@ void rocsparse_init_exact(std::vector<T>& A,
                           int             a,
                           int             b)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_init_exact(A.data(), M, N, lda, stride, batch_count, a, b);
 }
@@ -347,7 +347,7 @@ template <typename T>
 void rocsparse_init_inexact(
     std::vector<T>& A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count, T a, T b)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_init_inexact(A.data(), M, N, lda, stride, batch_count, a, b);
 }
@@ -356,7 +356,7 @@ void rocsparse_init_inexact(
 template <typename I>
 void rocsparse_init_index(std::vector<I>& x, size_t nnz, size_t start, size_t end)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     std::vector<bool> check(end - start, false);
 
@@ -386,7 +386,7 @@ template <typename T>
 void rocsparse_init_alternating_sign(
     std::vector<T>& A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
         for(size_t i = 0; i < M; ++i)
@@ -403,7 +403,7 @@ void rocsparse_init_alternating_sign(
 template <typename T>
 void rocsparse_init_nan(T* A, size_t N)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     for(size_t i = 0; i < N; ++i)
         A[i] = T(rocsparse_nan_rng());
@@ -413,7 +413,7 @@ template <typename T>
 void rocsparse_init_nan(
     std::vector<T>& A, size_t M, size_t N, size_t lda, size_t stride, size_t batch_count)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
         for(size_t i = 0; i < M; ++i)
@@ -434,7 +434,7 @@ void rocsparse_init_coo_matrix(std::vector<I>&      row_ind,
                                bool                 full_rank,
                                bool                 to_int)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(nnz == 0)
     {
@@ -652,7 +652,7 @@ void rocsparse_init_csr_laplace2d(std::vector<I>&      row_ptr,
                                   I&                   nnz,
                                   rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Do nothing
     if(dim_x == 0 || dim_y == 0)
@@ -727,7 +727,7 @@ void rocsparse_init_coo_laplace2d(std::vector<I>&      row_ind,
                                   int64_t&             nnz,
                                   rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Always load using int64 as we dont know ahead of time how many nnz exist in matrix
     std::vector<int64_t> row_ptr;
@@ -754,7 +754,7 @@ void rocsparse_init_gebsr_laplace2d(std::vector<I>&      row_ptr,
                                     J                    col_block_dim,
                                     rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_init_csr_laplace2d(row_ptr, col_ind, val, dim_x, dim_y, Mb, Nb, nnzb, base);
 
@@ -778,7 +778,7 @@ void rocsparse_init_ell_laplace2d(std::vector<I>&      col_ind,
                                   I&                   width,
                                   rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     I csr_nnz;
 
@@ -808,7 +808,7 @@ void rocsparse_init_csr_laplace3d(std::vector<I>&      row_ptr,
                                   I&                   nnz,
                                   rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Do nothing
     if(dim_x == 0 || dim_y == 0 || dim_z == 0)
@@ -893,7 +893,7 @@ void rocsparse_init_coo_laplace3d(std::vector<I>&      row_ind,
                                   int64_t&             nnz,
                                   rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Always load using int64 as we dont know ahead of time how many nnz exist in matrix
     std::vector<int64_t> row_ptr;
@@ -921,7 +921,7 @@ void rocsparse_init_gebsr_laplace3d(std::vector<I>&      row_ptr,
                                     J                    col_block_dim,
                                     rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_init_csr_laplace3d(row_ptr, col_ind, val, dim_x, dim_y, dim_z, Mb, Nb, nnzb, base);
 
@@ -945,7 +945,7 @@ void rocsparse_init_csr_mtx(const char*          filename,
                             I&                   nnz,
                             rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     I       coo_M, coo_N;
     int64_t coo_nnz;
@@ -985,7 +985,7 @@ void rocsparse_init_coo_mtx(const char*          filename,
                             int64_t&             nnz,
                             rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_importer_matrixmarket importer(filename);
     rocsparse_status                status
@@ -1007,7 +1007,7 @@ void rocsparse_init_gebsr_mtx(const char*          filename,
                               J                    col_block_dim,
                               rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // this->init_csr(bsr_row_ptr, bsr_col_ind, bsr_val, Mb, Nb, nnzb, base);
     rocsparse_init_csr_mtx(filename, bsr_row_ptr, bsr_col_ind, bsr_val, Mb, Nb, nnzb, base);
@@ -1032,7 +1032,7 @@ void rocsparse_init_csr_smtx(const char*          filename,
                              I&                   nnz,
                              rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_importer_mlcsr importer(filename);
     const rocsparse_status   status
@@ -1058,7 +1058,7 @@ void rocsparse_init_coo_smtx(const char*          filename,
                              int64_t&             nnz,
                              rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     std::vector<int64_t> csr_row_ptr;
     rocsparse_init_csr_smtx<int64_t, I, T>(
@@ -1081,7 +1081,7 @@ void rocsparse_init_gebsr_smtx(const char*          filename,
                                J                    col_block_dim,
                                rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_importer_mlcsr importer(filename);
     const rocsparse_status   status = rocsparse_import_sparse_csr(
@@ -1110,7 +1110,7 @@ void rocsparse_init_csr_bsmtx(const char*          filename,
                               I&                   nnz,
                               rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     std::vector<I> bsr_row_ptr;
     std::vector<J> bsr_col_ind;
@@ -1195,7 +1195,7 @@ void rocsparse_init_coo_bsmtx(const char*          filename,
                               int64_t&             nnz,
                               rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     std::vector<int64_t> csr_row_ptr;
     rocsparse_init_csr_bsmtx<int64_t, I, T>(
@@ -1218,7 +1218,7 @@ void rocsparse_init_gebsr_bsmtx(const char*          filename,
                                 J                    col_block_dim,
                                 rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_importer_mlbsr importer(filename);
     rocsparse_direction      import_dir = {};
@@ -1253,7 +1253,7 @@ void rocsparse_init_csr_rocalution(const char*          filename,
                                    I&                   nnz,
                                    rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_importer_rocalution importer(filename);
     rocsparse_status              status
@@ -1273,7 +1273,7 @@ void rocsparse_init_coo_rocalution(const char*          filename,
                                    int64_t&             nnz,
                                    rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     I              csr_nnz = 0;
     std::vector<I> row_ptr(M + 1);
@@ -1299,7 +1299,7 @@ void rocsparse_init_gebsr_rocalution(const char*          filename,
                                      J                    col_block_dim,
                                      rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Temporarily the file contains a CSR matrix.
     rocsparse_init_csr_rocalution(filename, row_ptr, col_ind, val, Mb, Nb, nnzb, base);
@@ -1325,7 +1325,7 @@ void rocsparse_init_csr_rocsparseio(const char*          filename,
                                     I&                   nnz,
                                     rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_importer_rocsparseio importer(filename);
     rocsparse_status               status
@@ -1345,7 +1345,7 @@ void rocsparse_init_coo_rocsparseio(const char*          filename,
                                     int64_t&             nnz,
                                     rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_importer_rocsparseio importer(filename);
     rocsparse_status               status
@@ -1368,7 +1368,7 @@ void rocsparse_init_gebsr_rocsparseio(const char*          filename,
                                       J                    col_block_dim,
                                       rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_direction            import_dir = {};
     rocsparse_importer_rocsparseio importer(filename);
@@ -1406,7 +1406,7 @@ void rocsparse_init_csr_random(std::vector<I>&            csr_row_ptr,
                                bool                       full_rank,
                                bool                       to_int)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     switch(init_kind)
     {
@@ -1495,7 +1495,7 @@ void rocsparse_init_coo_random(std::vector<I>&            row_ind,
                                bool                       full_rank,
                                bool                       to_int)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     switch(init_kind)
     {
@@ -1566,7 +1566,7 @@ void rocsparse_init_gebsr_random(std::vector<I>&            row_ptr,
                                  bool                       full_rank,
                                  bool                       to_int)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_init_csr_random(
         row_ptr, col_ind, val, Mb, Nb, nnzb, base, init_kind, full_rank, to_int);
@@ -1602,7 +1602,7 @@ void rocsparse_init_coo_tridiagonal(std::vector<I>&      row_ind,
                                     I                    l,
                                     I                    u)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(l >= 0 || -l >= M)
     {
@@ -1672,7 +1672,7 @@ void rocsparse_init_csr_tridiagonal(std::vector<I>&      row_ptr,
                                     J                    l,
                                     J                    u)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     int64_t        coo_nnz;
     std::vector<J> row_ind;
@@ -1709,7 +1709,7 @@ void rocsparse_init_gebsr_tridiagonal(std::vector<I>&      row_ptr,
                                       J                    l,
                                       J                    u)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_init_csr_tridiagonal(row_ptr, col_ind, val, Mb, Nb, nnzb, base, l, u);
 
@@ -1737,7 +1737,7 @@ void rocsparse_init_coo_pentadiagonal(std::vector<I>&      row_ind,
                                       I                    u,
                                       I                    uu)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(ll >= 0 || l >= 0 || ll >= l || -l >= M || -ll >= M)
     {
@@ -1829,7 +1829,7 @@ void rocsparse_init_csr_pentadiagonal(std::vector<I>&      row_ptr,
                                       J                    u,
                                       J                    uu)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     int64_t        coo_nnz;
     std::vector<J> row_ind;
@@ -1868,7 +1868,7 @@ void rocsparse_init_gebsr_pentadiagonal(std::vector<I>&      row_ptr,
                                         J                    u,
                                         J                    uu)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_init_csr_pentadiagonal(row_ptr, col_ind, val, Mb, Nb, nnzb, base, ll, l, u, uu);
     const size_t nvalues = size_t(nnzb) * row_block_dim * col_block_dim;
