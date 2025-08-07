@@ -91,7 +91,6 @@ custom.config:
   StreamK: 3
   StreamKAtomic: 0
   StreamKXCCMapping: 0
-  TransposeLDS: 1
 amdhsa.version:
   - 1
   - 1
