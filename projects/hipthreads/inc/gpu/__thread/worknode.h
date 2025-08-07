@@ -7,6 +7,7 @@
 
 #include <hip/std/__functional/invoke.h>
 
+#include "gpu/__clib/malloc.h"
 #include "gpu/__functional/invoke.h"
 #include "gpu/__thread/id.h"
 
@@ -32,6 +33,15 @@ struct ThreadData {
   private:
     static __device__ __thread_id::underlying_type nextTid();
     static __host__ __thread_id::underlying_type nextTid();
+};
+
+struct WorkNodeDeleter {
+    // WorkNode<T> is trivially destructible (implied by std::is_trivially_copyable).
+    // Note: Technically, we should do a static_cast of ptr back to WorkNode<T> before freeing. If we really want to fix
+    // it, we could give unique_ptr a function pointer instead of a functor (i.e. the type of worknode_d would be
+    // std::unique_ptr<WorkNode_Header, void (*)(WorkNode_Header *)>), and at construction time pass a pointer to a
+    // function that will do the cast before the free.
+    void operator()(WorkNode_Header* ptr) { gpu::free(ptr); }
 };
 
 // TODO: Can we make a bunch of these members private?
