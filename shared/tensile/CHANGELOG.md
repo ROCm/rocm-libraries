@@ -4,34 +4,36 @@
 
 ### Added
 
-- Added support for gfx950
-- Added code object compression via bundling
-- Added support for non-default HIP SDK installations on Windows
-- Added master solution library documentation
-- Added compiler version dependent assembler and architecture capabilities
-- Added documentation from GitHub Wiki to ROCm docs
-- Added support for gfx1150
+- Support for gfx950 and gfx1150
+- Code object compression via bundling
+- Support for non-default HIP SDK installations on Windows
+- Master solution library documentation
+- Sssembler and architecture capabilities based on the ompiler version
+- [ROCm Documentation](https://rocm.docs.amd.com/projects/Tensile/en/latest/src/index.html) from the GitHub Wiki
+- 4-tuple targets for bundler invocations
+- PATHEXT extensions on Windows when searching for toolchain components
 
 ### Changed
 
 - Loosened check for CLI compiler choices
-- Introduced 4-tuple targets for bundler invocations
-- Introduced PATHEXT extensions on Windows when searching for toolchain components
 - Enabled passing fully qualified paths to toolchain components
-- Enabled environment variable overrides when searching for a ROCm stack 
-- Improved default toolchain configuration
+- Enabled environment variable overrides when searching for a ROCm stack
 - Ignored f824 flake errors
+
+### Optimized
+
+- Default toolchain configuration
 
 ### Removed
 
-- Removed support for the gfx940 and gfx941 targets
-- Removed unused tuning files
-- Removed disabled tests
+- Support for the gfx940 and gfx941 targets
+- Unused tuning files
+- Disabled tests
 
 ### Resolved issues
 
-- Fixed configure time path not being invoked at build
-- Fixed find_package for msgpack to work with versions 5 and 6
+- Fixed the issue of configure time path not being invoked at build
+- Fixed `find_package` for `msgpack` to work with versions 5 and 6
 - Fixed rhel9 testing
 - Fixed gfx908 builds
 - Fixed "argument list too long" error
