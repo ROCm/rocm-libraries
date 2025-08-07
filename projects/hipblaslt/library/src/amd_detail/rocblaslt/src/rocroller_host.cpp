@@ -1023,11 +1023,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     {
         tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
             2,
-<<<<<<< HEAD
-            gemm->kernelType.scaleTypeA,
-=======
             gemm->kernelType.scaleTypeB,
->>>>>>> 9e6f038e30cefd34546b30b3cd1a44c5dfb48400
             gemm->kernelType.transB == HIPBLAS_OP_N ? oneStridesN : oneStridesT));
         tagLoadScaleB
             = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleB));
