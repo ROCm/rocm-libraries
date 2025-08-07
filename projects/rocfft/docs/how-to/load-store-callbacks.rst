@@ -19,7 +19,7 @@ to the library using
 
 .. note::
 
-   Callback functions must be built as relocatable device code, by
+   Callback functions must be built as relocatable device code by
    passing the ``-fgpu-rdc`` option to the compiler and linker.
 
 Device functions supplied as callbacks must load and store element
