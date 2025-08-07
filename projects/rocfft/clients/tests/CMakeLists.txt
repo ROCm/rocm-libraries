@@ -389,7 +389,7 @@ if( ROCFFT_MPI_ENABLE )
 
 endif()
 
-set(COVERAGE_TEST_OPTIONS "--smoketest --callback_prob_factor=0" CACHE STRING "Command line arguments for rocfft-test when generating a code coverage report")
+set(COVERAGE_TEST_OPTIONS "--smoketest" CACHE STRING "Command line arguments for rocfft-test when generating a code coverage report")
 
 if(BUILD_CODE_COVERAGE)
   # Coverage won't work in a standalone build of the tests, as we can't
