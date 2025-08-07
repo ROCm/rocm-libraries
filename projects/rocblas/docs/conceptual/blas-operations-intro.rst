@@ -5,11 +5,11 @@
 .. _blas-operations-intro:
 
 ********************************************************************
-An introduction to the BLAS operations
+BLAS operations introduction
 ********************************************************************
 
 rocBLAS is an implementation of the BLAS (Basic Linear Algebra Subprograms) operations
-based on the `BLAS reference specification <https://netlib.org/blas/>`_.
+based on the BLAS reference specification in Netlib.
 The BLAS specification defines basic, low-level routines for matrix and vector operations.
 
 Here are some of the advantages of the BLAS reference operations:
@@ -22,13 +22,13 @@ Here are some of the advantages of the BLAS reference operations:
 *  The routines are platform independent, so they provide interoperability and promote code sharing.
 *  Online support and discussion groups are available.
 
-The BLAS routines are now included in the `LAPACK <https://www.netlib.org/lapack/>`_ library,
+The BLAS routines are included in the LAPACK library on NetLib,
 which provides solutions for more complex algebraic operations.
 
 The BLAS levels
 ============================
 
-BLAS routines are subdivided into three subcategories: level-1, level-2, and level-3.
+BLAS routines are divided into three subcategories: level-1, level-2, and level-3.
 The categories indicate the operations that are supported and the type of inputs
 to the operations.
 
@@ -42,15 +42,11 @@ quadratic (:math:`O(n^2)`), and level-3 functions are cubic (:math:`O(n^3)`).
 
 .. note::
 
-   Not all levels support all functions. See the `BLAS reference specification <https://netlib.org/blas/>`_
+   Not all levels support all functions. See the BLAS reference specification in Netlib
    for more information.
 
 Core BLAS operations
 ============================
-
-A `reference sheet <https://www.netlib.org/blas/blasqr.pdf>`_ for all BLAS operations
-is available in PDF format. It lists the operations for each level, along with a description
-of the inputs and the available options.
 
 This section summarizes the most common BLAS operations and the naming conventions
 that apply to the functions.
@@ -58,7 +54,7 @@ that apply to the functions.
 BLAS type prefixes
 -------------------
 
-Most BLAS operations indicate the data type they are designed to manipulate. The different data types
+Most BLAS operations indicate the data type they are designed to manipulate. The data types
 are as follows.
 
 
@@ -71,7 +67,7 @@ are as follows.
    "``c``","complex"
    "``z``","double complex"
 
-The data type is appended to the front of the function name, so ``daxpy`` is the ``axpy``
+The data type is appended before the function name, so ``daxpy`` is the ``axpy``
 (vector update) function for double-precision inputs.
 
 Level-1 BLAS operations
@@ -88,8 +84,8 @@ The BLAS operations include the following level-1 routines.
    "``copy``","Copies a vector"
    "``swap``","Swaps two vectors"
    "``dot``","Calculates the vector dot product"
-   "``asum``","Calculates the 1-norm of a vector"
-   "``nrm2``","Calculates the 2-norm of a vector"
+   "``asum``","Calculates the L1-norm of a vector"
+   "``nrm2``","Calculates the L2-norm of a vector"
    "``i_amax``","Calculates the infinity-norm of a vector"
    "``rot``","Applies a plane rotation"
 
@@ -104,7 +100,7 @@ Level-2 and level-3 BLAS operations
 
 The names of the level-2 and level-3 functions are composite abbreviations.
 Typically, the first letter indicates the data type the function operates on,
-as described above. The next two letters indicate the matrix type and the final
+as described above. The next two letters indicate the matrix type, and the final
 two letters describe the high-level operation. For example, the name of the ``sgemm`` function
 is assembled from the ``s`` (real) data type, the ``ge`` (general) matrix type,
 and the ``mm`` (matrix-matrix multiply) operation. The following table lists the
@@ -154,22 +150,22 @@ BLAS operation options
 
 Many BLAS operations accept options, although several restrictions apply.
 The following table lists the main options.
-See the `reference table <https://www.netlib.org/blas/blasqr.pdf>`_ for
+See the BLAS reference specification in Netlib for
 more information.
 
 .. csv-table::
    :header: "Option","Description"
    :widths: 20, 40
 
-   "``trans``","No transpose/Transpose"
+   "``trans``","No transpose/transpose"
    "``uplo``","Upper/lower triangular"
-   "``diag``","Non-unit/unit triangular"
+   "``diag``","Non-unit/unit diagonal"
    "``side``","Left/right"
 
 BLAS versus BLASLt
 =======================
 
-The BLASLt routines extend the BLAS routines with a focus on
+The BLASLt routines extend the BLAS routines, specifically on
 general matrix-to-matrix multiply (GEMM) operations.
 It provides extra flexibility and lets you control the
 matrix data layouts, input types, and compute types and choose the algorithm implementations and heuristics.
