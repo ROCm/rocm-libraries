@@ -3237,23 +3237,23 @@ namespace KernelGraphTest
                "7"[label="NOP(7)"];
                "14"[label="Body(14)",shape=box];
                "15"[label="Sequence(15)",shape=box];
-               "28"[label="Sequence(28)",shape=box];
-               "29"[label="Sequence(29)",shape=box];
                "30"[label="Sequence(30)",shape=box];
+               "31"[label="Sequence(31)",shape=box];
+               "32"[label="Sequence(32)",shape=box];
                "33"[label="Body(33)",shape=box];
                "1" -> "14"
                "2" -> "15"
-               "3" -> "28"
-               "3" -> "29"
                "3" -> "30"
+               "3" -> "31"
+               "3" -> "32"
                "3" -> "33"
                "14" -> "2"
                "15" -> "3"
-               "28" -> "4"
-               "29" -> "5"
-               "30" -> "6"
+               "30" -> "4"
+               "31" -> "5"
+               "32" -> "6"
                "33" -> "7"
-        }).";
+               }).";
 
         EXPECT_EQ(NormalizedSource(expected), NormalizedSource(kg2.control.toDOT()));
     }

@@ -25,10 +25,9 @@
  *******************************************************************************/
 
 #include <rocRoller/ExpressionTransformations.hpp>
-#include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
-#include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/KernelGraph/Transforms/RemoveSetCoordinate.hpp>
+#include <rocRoller/KernelGraph/Transforms/RemoveSetCoordinate_details.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 
@@ -38,169 +37,108 @@ namespace rocRoller
     {
         namespace CG = rocRoller::KernelGraph::ControlGraph;
 
-        static void collectSetCoordinates(KernelGraph const&       graph,
-                                          int                      tag,
-                                          std::unordered_set<int>& visited,
-                                          std::vector<int>&        result)
+        namespace RemoveSetCoordinateDetails
         {
-            auto traverse = [&]<typename... EdgeTypes>()
+            void findLeaves(int                      tag,
+                            KernelGraph const&       kg,
+                            std::unordered_set<int>& visited,
+                            std::vector<int>&        leaves)
             {
+                visited.insert(tag);
+
+                bool hasChildren = false;
+
                 auto traverse = [&]<typename EdgeType>() {
-                    for(auto child : graph.control.getOutputNodeIndices<EdgeType>(tag))
+                    for(auto child : kg.control.getOutputNodeIndices<EdgeType>(tag))
                     {
+                        hasChildren = true;
                         if(not visited.contains(child))
                         {
-                            visited.insert(child);
-                            collectSetCoordinates(graph, child, visited, result);
+                            findLeaves(child, kg, visited, leaves);
                         }
                     }
                 };
-                (traverse.template operator()<EdgeTypes>(), ...);
-            };
 
-            traverse.template operator()<CG::Sequence,
-                                         CG::ForLoopIncrement,
-                                         CG::Else,
-                                         CG::Body,
-                                         CG::Initialize>();
+                traverse.template operator()<ControlGraph::Sequence>();
 
-            if(graph.control.get<CG::SetCoordinate>(tag).has_value())
-                result.push_back(tag);
-        }
-
-        static std::vector<int> collectSetCoordinates(KernelGraph const& graph)
-        {
-            auto roots = graph.control.roots().to<std::vector>();
-
-            std::vector<int> result;
-            if(roots.empty())
-                return result;
-
-            std::unordered_set<int> visited;
-            for(auto const& node : roots)
-            {
-                visited.insert(node);
-                collectSetCoordinates(graph, node, visited, result);
-            }
-            return result;
-        }
-
-        static void findLeaves(int                      tag,
-                               KernelGraph const&       kg,
-                               std::unordered_set<int>& visited,
-                               std::vector<int>&        leaves)
-        {
-            visited.insert(tag);
-
-            bool hasChildren = false;
-
-            auto traverse = [&]<typename EdgeType>() {
-                for(auto child : kg.control.getOutputNodeIndices<EdgeType>(tag))
+                if(hasChildren)
                 {
-                    hasChildren = true;
-                    if(not visited.contains(child))
-                    {
-                        findLeaves(child, kg, visited, leaves);
-                    }
-                }
-            };
-
-            traverse.template operator()<ControlGraph::Sequence>();
-
-            if(hasChildren)
-            {
-                // Consider reusing visited for direct traversal instead of calling DFS
-                for(auto child : kg.control.getOutputNodeIndices<CG::Body>(tag))
-                    for(auto node : kg.control.depthFirstVisit(child))
-                        visited.insert(node);
-            }
-            else
-                traverse.template operator()<ControlGraph::Body>();
-
-            if(not hasChildren)
-                leaves.push_back(tag);
-        }
-
-        static std::vector<int> findLeaves(std::vector<int> nodes, KernelGraph const& kg)
-        {
-            std::unordered_set<int> visited;
-            std::vector<int>        leaves;
-
-            for(auto node : nodes)
-            {
-                findLeaves(node, kg, visited, leaves);
-            }
-            return leaves;
-        }
-
-        static void connect(bool const              isSequenceEdge,
-                            std::vector<int> const& A,
-                            std::vector<int> const& B,
-                            KernelGraph&            kg)
-        {
-            if(A.empty() or B.empty())
-                return;
-
-            auto addEdges = [&]<typename EdgeType>() {
-                for(auto const a : A)
-                    for(auto const b : B)
-                        kg.control.addElement(EdgeType(), {a}, {b});
-            };
-
-            if(isSequenceEdge)
-                addEdges.template operator()<ControlGraph::Sequence>();
-            else
-                addEdges.template operator()<ControlGraph::Body>();
-        }
-
-        static bool const getAndVerifyInputEdgesAreOfTheSameType(KernelGraph const& kg,
-                                                                 int const          node)
-        {
-            using GD = rocRoller::Graph::Direction;
-
-            auto const allSequence
-                = std::ranges::all_of(kg.control.getNeighbours<GD::Upstream>(node), [&](int x) {
-                      return std::holds_alternative<CG::Sequence>(kg.control.getEdge(x));
-                  });
-
-            if(not allSequence)
-            {
-                auto const allBody
-                    = std::ranges::all_of(kg.control.getNeighbours<GD::Upstream>(node), [&](int x) {
-                          return std::holds_alternative<CG::Body>(kg.control.getEdge(x));
-                      });
-                AssertFatal(allBody, "A SetCoordinate's input edges are of different types");
-            }
-
-            return allSequence;
-        }
-
-        static void removeSetCoordinates(KernelGraph& kg)
-        {
-            using GD = rocRoller::Graph::Direction;
-
-            auto setCoordinates = collectSetCoordinates(kg);
-            for(auto sc : setCoordinates)
-            {
-                auto inputNodes = kg.control.getInputNodeIndices(sc, [](auto) { return true; })
-                                      .to<std::vector>();
-                AssertFatal(not inputNodes.empty());
-
-                bool const isSequenceEdge = getAndVerifyInputEdgesAreOfTheSameType(kg, sc);
-
-                auto bodyNodes = kg.control.getOutputNodeIndices<CG::Body>(sc).to<std::vector>();
-                auto sequenceNodes
-                    = kg.control.getOutputNodeIndices<CG::Sequence>(sc).to<std::vector>();
-
-                deleteControlNode(kg, sc);
-
-                if(not bodyNodes.empty())
-                {
-                    connect(isSequenceEdge, inputNodes, bodyNodes, kg);
-                    connect(true, findLeaves(bodyNodes, kg), sequenceNodes, kg);
+                    // Consider reusing visited for direct traversal instead of calling DFS
+                    for(auto child : kg.control.getOutputNodeIndices<CG::Body>(tag))
+                        for(auto node : kg.control.depthFirstVisit(child))
+                            visited.insert(node);
                 }
                 else
-                    connect(isSequenceEdge, inputNodes, sequenceNodes, kg);
+                    traverse.template operator()<ControlGraph::Body>();
+
+                if(not hasChildren)
+                    leaves.push_back(tag);
+            }
+
+            std::vector<int> findLeaves(std::vector<int> nodes, KernelGraph const& kg)
+            {
+                std::unordered_set<int> visited;
+                std::vector<int>        leaves;
+
+                for(auto node : nodes)
+                {
+                    findLeaves(node, kg, visited, leaves);
+                }
+                return leaves;
+            }
+
+            void removeSetCoordinates(KernelGraph& kg)
+            {
+                using GD = rocRoller::Graph::Direction;
+
+                auto const setCoordinates = kg.control.getNodes<CG::SetCoordinate>().to<std::set>();
+                for(auto const sc : setCoordinates | std::views::reverse)
+                {
+                    auto inputNodes = kg.control.getInputNodeIndices(sc, [](auto) { return true; })
+                                          .to<std::vector>();
+                    AssertFatal(not inputNodes.empty());
+
+                    auto const checkInputEdgeType = [&]<typename EdgeType>(int node) {
+                        return std::ranges::all_of(
+                            kg.control.getNeighbours<GD::Upstream>(node), [&](int x) {
+                                return std::holds_alternative<EdgeType>(kg.control.getEdge(x));
+                            });
+                    };
+
+                    bool const                        areAllInputsSequenceEdge
+                        = checkInputEdgeType.template operator()<CG::Sequence>(sc);
+                    if(not areAllInputsSequenceEdge)
+                    {
+                        bool const                        areAllInputsBodyEdge
+                            = checkInputEdgeType.template operator()<CG::Body>(sc);
+                        AssertFatal(areAllInputsBodyEdge,
+                                    "The input edges of a SetCoordinate are not Sequence nor Body");
+                    }
+
+                    auto bodyNodes
+                        = kg.control.getOutputNodeIndices<CG::Body>(sc).to<std::vector>();
+                    auto sequenceNodes
+                        = kg.control.getOutputNodeIndices<CG::Sequence>(sc).to<std::vector>();
+
+                    deleteControlNode(kg, sc);
+
+                    if(not bodyNodes.empty())
+                    {
+                        if(areAllInputsSequenceEdge)
+                            connectAllPairs<CG::Sequence>(inputNodes, bodyNodes, kg);
+                        else
+                            connectAllPairs<CG::Body>(inputNodes, bodyNodes, kg);
+
+                        connectAllPairs<CG::Sequence>(findLeaves(bodyNodes, kg), sequenceNodes, kg);
+                    }
+                    else
+                    {
+                        if(areAllInputsSequenceEdge)
+                            connectAllPairs<CG::Sequence>(inputNodes, sequenceNodes, kg);
+                        else
+                            connectAllPairs<CG::Body>(inputNodes, sequenceNodes, kg);
+                    }
+                }
             }
         }
 
@@ -211,7 +149,7 @@ namespace rocRoller
             auto newGraph = k;
 
             newGraph.buildAllTransformers();
-            removeSetCoordinates(newGraph);
+            RemoveSetCoordinateDetails::removeSetCoordinates(newGraph);
 
             // Post-transformation check: should NOT have any SetCoordinates in Control Graph
             auto setCoordinates
