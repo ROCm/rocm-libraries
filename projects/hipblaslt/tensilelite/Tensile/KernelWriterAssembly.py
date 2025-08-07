@@ -4982,7 +4982,7 @@ class KernelWriterAssembly(KernelWriter):
                   finalLoop = 1
                 else:
                   finalLoop = 0
-      
+
                 self.param.idx = idx
                 self.param.jumpLabel = jumpLabel
                 self.param.tmpVgpr = tmpVgpr
@@ -5017,7 +5017,7 @@ class KernelWriterAssembly(KernelWriter):
             imod.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(),
                                   comment="Skip loading "+tc[idx]))
             generateDetailsForBehavior(tP[idx], tmpVgpr + tmpVgprStartIdx[idx], "LOAD", jumpLabel,
-                                       sLoadTileIdx[idx], sLoadNum[idx])          
+                                       sLoadTileIdx[idx], sLoadNum[idx])
 
           generateJumpBranch(idx+1)
 
@@ -5063,7 +5063,7 @@ class KernelWriterAssembly(KernelWriter):
             addrbase = self.globalread_gpr_record.b.addrVgpr[idx]
             offset = self.globalread_gpr_record.b.offset[idx]
           if kernel["_UseSgprForGRO"]:
-            imod.add(VAddU32(dst=vgpr(tmpVgpr), src0=vgpr(addrbase), src1=offset)) 
+            imod.add(VAddU32(dst=vgpr(tmpVgpr), src0=vgpr(addrbase), src1=offset))
           else:
             imod.add(VMovB32(dst=vgpr(tmpVgpr), src=vgpr(addrbase)))
           if idx != (numTiles - 1):
@@ -5124,7 +5124,7 @@ class KernelWriterAssembly(KernelWriter):
           imod.add(SCmpEQU32(src0=sgpr(sLoadCnt), src1=(nlp * nlc),
                              comment="Have reloaded all subtiles?"))
           imod.add(SCBranchSCC1(labelName=tailGlobalLoadEndLabel.getLabelName(), comment=""))
-  
+
         imod.add(SSubI32(dst=sgpr(sLoadTileIdx), src0=sgpr(sLoadTileIdx), src1=nlc, \
                          comment="Check the upper subtile"))
         imod.add(SCmpLtI32(src0=sgpr(sLoadTileIdx), src1=0, comment=""))
@@ -7603,11 +7603,11 @@ class KernelWriterAssembly(KernelWriter):
 
               r = 0
               numLoadVectorComp = int(loadWidth*self.states.bpr//tP["bpeGR"])
-              if kernel["ProblemType"]["DataType%s"%tcDataType].isDouble() and kernel["BufferLoad"]:
-                # adjustment for dgemm + BufferLoad
+              if (kernel["ProblemType"]["DataType%s"%tcDataType].isDouble() or kernel["ProblemType"]["DataType%s"%tcDataType].isSingle())\
+                 and kernel["BufferLoad"]:
+                # adjustment for {d,s}gemm + BufferLoad
                 # use same buffer_load instruction for tail loop as out of tail loop
                 # this is mandatory for DirectToLds case. Also, it improves tail loop performance.
-                # so far, limit to double only
                 numLoadVectorComp = numLoadVectorComp // kernel["GlobalReadVectorWidth%c"%tc]
 
               if isLds == True:
@@ -7695,9 +7695,14 @@ class KernelWriterAssembly(KernelWriter):
                           destVgprHi = self.vgprPool.checkOut(1, 'destVgprHi')
                   regIdx = r // 2
                 elif dataType.isInt8x4() or dataType.isSingle():
+                  # Only supported for buffer loads since it has OOB checks
+                  if kernel["BufferLoad"]:
+                    numElementsPerLoad = kernel["GlobalReadVectorWidth%c"%tc]
                   regIdx = r
                 elif dataType.isDouble():
-                  numElementsPerLoad = kernel["GlobalReadVectorWidth%c"%tc] # adjust numElementsPerLoad for DGEMM
+                  # Only supported for buffer loads since it has OOB checks
+                  if kernel["BufferLoad"]:
+                    numElementsPerLoad = kernel["GlobalReadVectorWidth%c"%tc] # adjust numElementsPerLoad for DGEMM
                   regIdx = r*2
                 elif dataType.isSingleComplex():
                   regIdx = r*2
