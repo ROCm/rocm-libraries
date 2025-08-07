@@ -37,6 +37,37 @@
 THRUST_NAMESPACE_BEGIN
 struct null_type
 {};
+
+THRUST_HOST_DEVICE inline bool operator==(const null_type&, const null_type&)
+{
+  return true;
+}
+
+THRUST_HOST_DEVICE inline bool operator>=(const null_type&, const null_type&)
+{
+  return true;
+}
+
+THRUST_HOST_DEVICE inline bool operator<=(const null_type&, const null_type&)
+{
+  return true;
+}
+
+THRUST_HOST_DEVICE inline bool operator!=(const null_type&, const null_type&)
+{
+  return false;
+}
+
+THRUST_HOST_DEVICE inline bool operator<(const null_type&, const null_type&)
+{
+  return false;
+}
+
+THRUST_HOST_DEVICE inline bool operator>(const null_type&, const null_type&)
+{
+  return false;
+}
+
 THRUST_NAMESPACE_END
 
 // If 'libcudacxx' or 'libhipcxx' is available (_THRUST_HAS_DEVICE_SYSTEM_STD), we will
@@ -775,40 +806,6 @@ struct tuple_element<Id, THRUST_NS_QUALIFIER::tuple<Ts...>> : std::tuple_element
 _THRUST_STD_NAMESPACE_END
 
 #endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-
-THRUST_NAMESPACE_BEGIN
-
-THRUST_HOST_DEVICE inline bool operator==(const null_type&, const null_type&)
-{
-  return true;
-}
-
-THRUST_HOST_DEVICE inline bool operator>=(const null_type&, const null_type&)
-{
-  return true;
-}
-
-THRUST_HOST_DEVICE inline bool operator<=(const null_type&, const null_type&)
-{
-  return true;
-}
-
-THRUST_HOST_DEVICE inline bool operator!=(const null_type&, const null_type&)
-{
-  return false;
-}
-
-THRUST_HOST_DEVICE inline bool operator<(const null_type&, const null_type&)
-{
-  return false;
-}
-
-THRUST_HOST_DEVICE inline bool operator>(const null_type&, const null_type&)
-{
-  return false;
-}
-
-THRUST_NAMESPACE_END
 
 _THRUST_STD_NAMESPACE_BEGIN
 
