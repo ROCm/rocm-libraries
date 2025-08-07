@@ -24,8 +24,6 @@
  *
  *******************************************************************************/
 
-#include <rocRoller/Utilities/Component.hpp>
-
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -33,6 +31,8 @@
 #include <iostream>
 #include <string>
 #include <vector>
+
+#include <rocRoller/Utilities/Component.hpp>
 
 using namespace rocRoller::Component;
 
@@ -50,7 +50,9 @@ struct Printer
     virtual void print() = 0;
 };
 
-RegisterComponentBase(Printer);
+const std::string Printer::Basename = "Printer";
+
+// RegisterComponentBase(Printer);
 
 static_assert(ComponentBase<Printer>);
 
@@ -102,11 +104,18 @@ struct BPrinter : public Printer
     }
 };
 
+template <>
+void rocRoller::Component::ComponentFactory<Printer>::registerImplementations()
+{
+    rocRoller::Component::ComponentFactory<Printer>::registerComponent<APrinter>();
+    rocRoller::Component::ComponentFactory<Printer>::registerComponent<BPrinter>();
+}
+
 static_assert(Component<APrinter>);
 static_assert(Component<BPrinter>);
 
-RegisterComponent(APrinter);
-RegisterComponent(BPrinter);
+// RegisterComponent(APrinter);
+// RegisterComponent(BPrinter);
 
 using myarr = std::array<int, 4>;
 
