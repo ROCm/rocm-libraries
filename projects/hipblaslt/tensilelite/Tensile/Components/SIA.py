@@ -58,6 +58,7 @@ class SIA3(SIA):
         if not kernel["D_U_iseqMI_K"]:
             localWriteEndIter = fixLocalWriteEndMfmaIndex(writer, kernel, tensorParametersA, tensorParametersB, \
                 globalReadIncACode, globalReadIncBCode, numMfmaBetweenLWandBarrier, lastLoop)
+            kernel["GlobalReadPerMfma"] = 2
         numGlobalReadInsPerIter, numLocalWriteModPerIter, numEmptyGlobalReadIncCode = getScheduleParamMfma(writer)
         numLocalWritesPerSched = writer.states.numLocalWriteModPerMfma
         # Schedule global read
@@ -266,6 +267,8 @@ def getLocalWriteMFMAEnd(writer, kernel, tensorParametersA, tensorParametersB):
         writer.states.syncPlrMfmaIndex = (mfmaiter0 + mfmaiter1 + mfmaiter2)
         if ( kernel["UseF32XEmulation"]) :
             writer.states.syncPlrMfmaIndex = writer.states.syncPlrMfmaIndex *3   # TF32
+        elif ( kernel["ProblemType"]["DataType"].isComplex()):
+            writer.states.syncPlrMfmaIndex = writer.states.syncPlrMfmaIndex *4   # Complex
 
     numMfmaBetweenLWandBarrier = 2 if kernel["MatrixInstM"] == 32 else 3
     writer.states.lwEndMfmaIndex = max(writer.states.syncPlrMfmaIndex - numMfmaBetweenLWandBarrier,0) if writer.states.numItersPLR else numMfmaPerIter*kernel["LoopIters"] - 1
@@ -611,7 +614,8 @@ def schedGlobalRead(writer, itemsGRToSched, itemsGRIncToSched, numGlobalReadInsP
     for item in itemsGRToSched[:schedNumForIter0]:
         writer.codes.perIterGlobalRead[0].add(item)
     itemsGRToSched = itemsGRToSched[schedNumForIter0:] # trim the scheduled GRs, do the rest in the following loop
-
+    numGlobalReadInsPerIter = 2* numGlobalReadInsPerIter
+    endIter = min(endIter, 2)
     lastLoadIter = 0
     for u in range(1, endIter):
         # append itemPerIter GR for each iteration,
