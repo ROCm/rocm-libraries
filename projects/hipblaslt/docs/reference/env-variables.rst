@@ -99,9 +99,9 @@ For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-us
 
     * - | ``TENSILE_SOLUTION_SELECTION_METHOD``
         | Controls hipBLASLt kernel selection strategy for GEMM operations.
-      - | 0: Standard tuned libraries (no Stream-K)
+      - | 0: Default (standard tuned libraries, no Stream-K)
         | 2: Stream-K (enables Stream-K library for consistent performance)
-        | Default: Varies based on the CPU type, for instance, 0 on the Instinct™ MI300A.
+        | This variable has no effect on the AMD Instinct™ MI350 series. Stream-K is always used.
 
 
     * - | ``TENSILE_STREAMK_DYNAMIC_GRID``

@@ -24,8 +24,8 @@ Set this variable to ``2`` to enable the Stream-K library or leave it set to ``0
 
 .. note::
 
-   The AMD Instinct™ MI350 series have a default ``TENSILE_SOLUTION_SELECTION_METHOD`` setting of ``2`` (Stream-K enabled).
-   To disable Stream-K, set ``TENSILE_SOLUTION_SELECTION_METHOD`` to ``0``.
+   On the AMD Instinct™ MI350 series, Stream-K is the only kernel selection strategy available.
+   There is no alternative library and the ``TENSILE_SOLUTION_SELECTION_METHOD`` variable has no effect.
 
 *  ``TENSILE_SOLUTION_SELECTION_METHOD=0`` (Standard tuned libraries)
 
