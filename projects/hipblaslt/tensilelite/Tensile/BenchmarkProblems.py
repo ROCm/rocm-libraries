@@ -269,6 +269,7 @@ def writeBenchmarkFiles(
                             kernelHelperObjs,
                             kernelWriterAssembly,
                             debugConfig.splitGSU,
+                            globalParameters["SharedFolderPath"],
                             cmdLineArchs,
                             disableAsmComments=globalParameters["DisableAsmComments"],
                             errorTolerant=True,

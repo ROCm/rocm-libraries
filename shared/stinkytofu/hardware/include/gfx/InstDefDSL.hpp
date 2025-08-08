@@ -1,0 +1,204 @@
+/* ************************************************************************
+ * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
+
+#pragma once
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "isa/gfx/GfxIsa.hpp"
+
+namespace stinkytofu
+{
+    // The base gfx instruction.
+    struct GfxInstDef
+    {
+        std::string name;
+
+        HwInstDesc hwInstDesc;
+
+        // for debugging
+        std::string definedFile;
+        int         definedLine = 0;
+
+        static std::string getFlagStr(InstFlag flag)
+        {
+            switch(flag)
+            {
+#define MACRO(flagName) \
+    case flagName:      \
+        return #flagName;
+#include "isa/gfx/Flags.def"
+
+#undef MACRO
+            default:
+                assert(false && "Unknown InstFlag");
+                return "Unknown";
+            }
+        }
+
+        bool is(InstFlag f) const
+        {
+            return hwInstDesc.flags.test(f);
+        }
+
+        std::string getFlagsStr() const
+        {
+            std::string res;
+            for(InstFlag f = IF_BEGIN; f < IF_COUNT; f = InstFlag(f + 1))
+            {
+                if(is(f))
+                {
+                    if(!res.empty())
+                    {
+                        res += ", ";
+                    }
+                    res += getFlagStr(f);
+                }
+            }
+            return res;
+        }
+
+        virtual ~GfxInstDef() = default;
+    };
+
+    // GpuArch is a collection of instructions for a specific GPU architecture
+    // (named by the string).
+    //
+    // It contains a list of instructions with their properties (e.g. cycle,
+    // latency, .. etc), and provide query and add/remove functions.
+    //
+    // It also contains a error flag to indicate if there is any error during
+    // the initialization.
+    //
+    // Note the finalize function must be called after no more changes are made
+    // to the instructions.
+    struct GpuArch
+    {
+        using List = std::vector<std::unique_ptr<GfxInstDef>>;
+
+        struct InstructionInfo
+        {
+            uint16_t default_cycle = 0;
+
+            std::vector<std::pair<std::string, uint16_t>> cycle;
+            std::vector<std::pair<std::string, uint16_t>> latency;
+
+            static_assert(sizeof(uint16_t) == sizeof(HwInstDesc::issue),
+                          "default_cycle type mismatch");
+            static_assert(sizeof(uint16_t) == sizeof(HwInstDesc::issue), "cycle type mismatch");
+            static_assert(sizeof(uint16_t) == sizeof(HwInstDesc::latency), "latency type mismatch");
+        };
+
+    private:
+        List instructions;
+
+        std::unordered_map<std::string, GfxInstDef*> added;
+
+        bool error = false;
+
+        bool finalized = false;
+
+        std::string name;
+
+        void updateCycleAndLatency(const InstructionInfo& info);
+
+        GfxInstDef* getInst(const std::string& name);
+
+    public:
+        GpuArch(const std::string& name)
+            : name(name)
+        {
+        }
+
+        const std::string& getName() const
+        {
+            return name;
+        }
+
+        const List& getInstructions() const
+        {
+            return instructions;
+        }
+
+        bool has(const std::string& name) const
+        {
+            return added.find(name) != added.end();
+        }
+
+        const GfxInstDef* getInst(const std::string& name) const
+        {
+            return added.find(name)->second;
+        }
+
+        bool add(std::unique_ptr<GfxInstDef> inst);
+        bool erase(const std::string& name);
+
+        // load hardware data from yaml file.
+        //
+        // hardware data includes default cycle, cycle for each instruction,
+        // latency for each instruction, .. etc.
+        bool loadHardwareDataFromYaml(const std::string& yamlPath);
+
+        void finalize(uint16_t startOpcode = 0)
+        {
+            assert(!finalized && "GpuArch already finalized");
+            finalized = true;
+
+            assert((instructions.size() + startOpcode) <= UINT16_MAX
+                   && "Running out of opcodes! Please expand the opcode type to uint32_t!");
+            for(size_t i = 0; i < instructions.size(); ++i)
+                instructions[i]->hwInstDesc.isaOpcode = static_cast<uint16_t>(i) + startOpcode;
+        }
+
+        bool hasError() const
+        {
+            return error;
+        }
+    };
+
+    // keep the last `keepDepth` directories and the filename.
+    std::string getReducedFilename(const char* filename, unsigned keepDepth);
+
+    // generic "def" like TableGen
+    template <typename T, typename... Args>
+    T* defT(
+        const std::string name, GpuArch& registry, const char* file, size_t line, Args&&... args)
+    {
+        auto inst = std::make_unique<T>(std::forward<Args>(args)...);
+        T*   ptr  = inst.get();
+
+        inst->name        = name;
+        inst->definedFile = getReducedFilename(file, 0);
+        inst->definedLine = line;
+        registry.add(std::move(inst));
+
+        return ptr;
+    }
+
+#define DEF_T(T, name, ...) defT<T>(name, registry, __FILE__, __LINE__, ##__VA_ARGS__)
+
+} // namespace stinkytofu

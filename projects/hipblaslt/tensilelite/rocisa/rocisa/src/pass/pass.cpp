@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 #include "pass.hpp"
+#include "stinkytofu.hpp"
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/shared_ptr.h>
@@ -37,13 +38,89 @@ namespace rocisa
             removeDuplicatedFunction(kernel->body);
         }
 
-        auto assignDict = getAssignmentDict(kernel->body);
         compositeToInstruction(kernel->body);
+        // Convert text variables to registers
+        convertTextVariablesToRegisters(kernel->body);
+
+        auto kernelInfo = rocIsa::getInstance().getKernel();
+        if(option.stinkyOpt)
+        {
+            for(auto& item : kernel->body->items())
+            {
+                if(auto module = std::dynamic_pointer_cast<Module>(item))
+                {
+                    auto stinkySchedule = [&kernelInfo, &option](std::shared_ptr<Module> module,
+                                                                 const std::string&      pathPrefix)
+                    {
+                        std::unique_ptr<stinkytofu::PassManagerDebugConfig> debugConfig
+                            = std::make_unique<stinkytofu::PassManagerDebugConfig>();
+
+                        debugConfig->setPrintBeforeAll(true);
+                        debugConfig->setPrintAfterAll(true);
+                        debugConfig->setDumpToFileInBefore(pathPrefix + "before.txt");
+                        debugConfig->setDumpToFileInAfter(pathPrefix + "after.txt");
+                        stinkytofu::PassManagerDebugConfig::addDebugOnly("StinkyDAGSchedulerPass");
+                        stinkytofu::PassManagerDebugConfig::addDebugOnly("StinkyAsmToRocisaPass");
+
+                        stinkytofu::StinkyOptInfo optInfo;
+                        optInfo.unrollGemmMovableBarrier = true;
+                        optInfo.unrollGemm               = true;
+                        optInfo.distributeGlobalRead     = true;
+
+                        stinkytofu::PassManager passManager;
+                        passManager.setKernelConfig(kernelInfo.isaVersion,
+                                                    option.TileA0,
+                                                    option.TileB0,
+                                                    option.TileM0,
+                                                    option.NumGRA,
+                                                    option.NumGRB,
+                                                    option.NumGRM,
+                                                    option.WavefrontSize,
+                                                    option.numWaves);
+                        passManager.setDebugConfig(std::move(debugConfig));
+                        passManager.setOptConfig(optInfo);
+
+                        passManager.registerAnalysisPass(
+                            stinkytofu::createRocisaDFSFlatItemsPass(*module.get()));
+                        passManager.registerAnalysisPass(
+                            stinkytofu::createRocisaStinkyMappingPass());
+
+                        passManager.addPass(
+                            stinkytofu::createRocisaToStinkyAsmPass(true /*ignore waitCnt*/));
+                        passManager.addPass(stinkytofu::createStinkyClusterDSReadPass());
+                        passManager.addPass(stinkytofu::createStinkyDAGSchedulerPass());
+                        passManager.addPass(stinkytofu::createScheduleLastLRsPass());
+                        passManager.addPass(stinkytofu::createStinkyUnrollInsertWaitCntPass());
+                        passManager.addPass(stinkytofu::createStinkyAsmToRocisaPass());
+                        passManager.run();
+                    };
+                    // Convert the module to stinkytofu instructions
+                    if(module->name == "loopBody")
+                    {
+                        stinkySchedule(module, "loopBody-");
+                    }
+                    else if(module->name == "noLoadLoop")
+                    {
+                        for(auto& subItem : module->items())
+                        {
+                            if(auto subModule = std::dynamic_pointer_cast<Module>(subItem))
+                            {
+                                if(subModule->name == "noLoadLoopBody")
+                                {
+                                    stinkySchedule(subModule, "noLoadLoop-");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if(option.doOpt())
         {
             auto maxVgpr = kernel->totalVgprs;
             auto maxSgpr = kernel->totalSgprs;
-            auto graph   = buildGraph(kernel->body, maxVgpr, maxSgpr, assignDict);
+            auto graph   = buildGraph(kernel->body, maxVgpr, maxSgpr);
             if(option.removeDupAssign)
             {
                 removeDuplicateAssignment(graph);
@@ -73,11 +150,20 @@ void init_pass(nb::module_ m)
 
     nb::class_<rocisa::rocIsaPassOption>(m_pass, "rocIsaPassOption")
         .def(nb::init<>())
+        .def_rw("stinkyOpt", &rocisa::rocIsaPassOption::stinkyOpt)
+        .def_rw("hardwareConfigPath", &rocisa::rocIsaPassOption::hardwareConfigPath)
         .def_rw("insertDelayAlu", &rocisa::rocIsaPassOption::insertDelayAlu)
         .def_rw("removeDupFunc", &rocisa::rocIsaPassOption::removeDupFunc)
         .def_rw("removeDupAssign", &rocisa::rocIsaPassOption::removeDupAssign)
         .def_rw("getCycles", &rocisa::rocIsaPassOption::getCycles)
-        .def_rw("numWaves", &rocisa::rocIsaPassOption::numWaves);
+        .def_rw("numWaves", &rocisa::rocIsaPassOption::numWaves)
+        .def_rw("ta0", &rocisa::rocIsaPassOption::TileA0)
+        .def_rw("tb0", &rocisa::rocIsaPassOption::TileB0)
+        .def_rw("tm0", &rocisa::rocIsaPassOption::TileM0)
+        .def_rw("nGRA", &rocisa::rocIsaPassOption::NumGRA)
+        .def_rw("nGRB", &rocisa::rocIsaPassOption::NumGRB)
+        .def_rw("nGRM", &rocisa::rocIsaPassOption::NumGRM)
+        .def_rw("wavefrontSz", &rocisa::rocIsaPassOption::WavefrontSize);
 
     nb::class_<rocisa::rocIsaPassResult>(m_pass, "rocIsaPassResult")
         .def(nb::init<>())

@@ -28,11 +28,23 @@ namespace rocisa
     // External structures and functions
     struct rocIsaPassOption
     {
+        std::string hardwareConfigPath = "."; // Path to the hardware config files
+
+        bool stinkyOpt       = false;
         bool insertDelayAlu  = false;
         bool removeDupFunc   = true;
         bool removeDupAssign = true;
         bool getCycles       = true;
         int  numWaves        = 0; // is used when getCycles is true
+
+        // This part is for kernel config to stinkytofu
+        uint32_t TileA0        = 16;
+        uint32_t TileB0        = 16;
+        uint32_t TileM0        = 16;
+        uint32_t NumGRA        = 16;
+        uint32_t NumGRB        = 16;
+        uint32_t NumGRM        = 16;
+        uint32_t WavefrontSize = 32;
 
         bool doOpt() const
         {
@@ -92,13 +104,11 @@ namespace rocisa
     void insertDelayAlu(std::shared_ptr<Module> module);
     void removeDuplicatedFunction(std::shared_ptr<Module> module);
     void compositeToInstruction(std::shared_ptr<Module>& module);
-    std::unordered_map<std::string, int>
-          getAssignmentDict(const std::shared_ptr<Module>& module); // Return value is std::move()d
+    void convertTextVariablesToRegisters(std::shared_ptr<Module> module);
     Graph buildGraph(
         std::shared_ptr<Module>               module,
         int                                   vgprMax,
-        int                                   sgprMax,
-        std::unordered_map<std::string, int>& assignmentDict); // Return value is std::move()d
+        int                                   sgprMax); // Return value is std::move()d
     void removeDuplicateAssignment(Graph& graph);
 
     int getCycles(std::shared_ptr<Module> module, int numWaves);

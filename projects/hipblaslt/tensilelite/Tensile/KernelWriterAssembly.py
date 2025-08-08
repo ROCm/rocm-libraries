@@ -8989,14 +8989,14 @@ class KernelWriterAssembly(KernelWriter):
                       comment="incLower <- ?"))
           imod.add(SCSelectB32(dst=sgpr(incUpper), src0=sgpr("WrapU%s+1"%tc), src1=0,
                       comment="incUpper <- ?"))
-          imod.add(self.incrementSrd(tP, sgpr(incLower), sgpr(incUpper)))
+          imod.addModuleAsFlatItems(self.incrementSrd(tP, sgpr(incLower), sgpr(incUpper)))
 
           if kernel["ProblemType"]["Sparse"]:
             if (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) :
               tc = "Metadata"
               if kernel["DirectToVgprSparseMetadata"]:
                 incSparse = tmpIncSparse
-                imod.add(self.calculateIncrementMetadata(kernel, incSparse))
+                imod.addModuleAsFlatItems(self.calculateIncrementMetadata(kernel, incSparse))
               else:
                 incSparse = "GlobalReadIncs%s+%u"%(tc,self.states.unrollIdx)
               if prefetchIndex:
@@ -9009,9 +9009,9 @@ class KernelWriterAssembly(KernelWriter):
               imod.add(SCSelectB32(dst=sgpr(incUpper), src0=sgpr("WrapU%s+1"%tc), src1=0,
                           comment="incUpper <- ?"))
               if kernel["DirectToVgprSparseMetadata"]:
-                imod.add(self.incrementMetadataSrd(sgpr(incLower), sgpr(incUpper)))
+                imod.addModuleAsFlatItems(self.incrementMetadataSrd(sgpr(incLower), sgpr(incUpper)))
               else:
-                imod.add(self.incrementSrd(tP["tpsMetadata"], sgpr(incLower), sgpr(incUpper)))
+                imod.addModuleAsFlatItems(self.incrementSrd(tP["tpsMetadata"], sgpr(incLower), sgpr(incUpper)))
 
       else:
         if loopIdx != self.states.unrollIdx or (tc in ('A', 'B') and kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx] in kernel["ProblemType"]["MirrorDims%s"%tc]):
@@ -9019,10 +9019,10 @@ class KernelWriterAssembly(KernelWriter):
             incUpper = tmpSgprInfo.idx
             # GRO may be negative for other summation if stride-other < stride-unroll or if mirror dim.
             imod.add(SAShiftRightI32(dst=sgpr(incUpper), shiftHex=31, src=sgpr("GlobalReadIncs%s+%u"%(tc,loopIdx)), comment="sign-extend"))
-            imod.add(self.incrementSrd(tP, sgpr("GlobalReadIncs%s+%u"%(tc,loopIdx)), sgpr(incUpper)))
+            imod.addModuleAsFlatItems(self.incrementSrd(tP, sgpr("GlobalReadIncs%s+%u"%(tc,loopIdx)), sgpr(incUpper)))
         else:
           incUpper = 0 # GRO is positive for loop unroll
-          imod.add(self.incrementSrd(tP, sgpr("GlobalReadIncs%s+%u"%(tc,loopIdx)), hex(incUpper)))
+          imod.addModuleAsFlatItems(self.incrementSrd(tP, sgpr("GlobalReadIncs%s+%u"%(tc,loopIdx)), hex(incUpper)))
 
         if kernel["ProblemType"]["Sparse"]:
           if (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) :
@@ -9031,8 +9031,8 @@ class KernelWriterAssembly(KernelWriter):
             if kernel["DirectToVgprSparseMetadata"]:
               with self.allocTmpSgpr(1) as tmpSgprInfo:
                 incSparse = tmpSgprInfo.idx
-                imod.add(self.calculateIncrementMetadata(kernel, incSparse))
-                imod.add(self.incrementMetadataSrd(sgpr(incSparse), 0))
+                imod.addModuleAsFlatItems(self.calculateIncrementMetadata(kernel, incSparse))
+                imod.addModuleAsFlatItems(self.incrementMetadataSrd(sgpr(incSparse), 0))
             else:
               incSparse = "GlobalReadIncs%s+%u"%(tc,loopIdx)
               if loopIdx != self.states.unrollIdx or (kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx] in kernel["ProblemType"]["MirrorDims%s"%tc]):
@@ -9040,10 +9040,10 @@ class KernelWriterAssembly(KernelWriter):
                   incUpper = tmpSgprInfo.idx
                   # GRO may be negative for other summation if stride-other < stride-unroll or if mirror dim.
                   imod.add(SAShiftRightI32(dst=sgpr(incUpper), shiftHex=31, src=sgpr(incSparse), comment="sign-extend"))
-                  imod.add(self.incrementMetadataSrd(sgpr(incSparse), sgpr(incUpper)))
+                  imod.addModuleAsFlatItems(self.incrementMetadataSrd(sgpr(incSparse), sgpr(incUpper)))
               else:
                 incUpper = 0 # GRO is positive for loop unroll
-                imod.add(self.incrementSrd(tP["tpsMetadata"], sgpr(incSparse), hex(incUpper)))
+                imod.addModuleAsFlatItems(self.incrementSrd(tP["tpsMetadata"], sgpr(incSparse), hex(incUpper)))
 
     else:
       graIdx = 0

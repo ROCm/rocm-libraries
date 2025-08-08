@@ -1319,6 +1319,16 @@ namespace rocisa
             return {prior};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {prior};
+        }
+
         std::string toString() const override
         {
             return formatWithComment(instStr + " " + std::to_string(prior));
@@ -1358,6 +1368,16 @@ namespace rocisa
             return {};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {};
+        }
+
         std::string toString() const override
         {
             return formatWithComment(instStr);
@@ -1383,6 +1403,16 @@ namespace rocisa
         }
 
         std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
         {
             return {};
         }
@@ -1414,6 +1444,16 @@ namespace rocisa
         }
 
         std::vector<InstructionInput> getParams() const override
+        {
+            return {waitState};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
         {
             return {waitState};
         }
@@ -1457,7 +1497,7 @@ namespace rocisa
         std::string toString() const override
         {
             std::string resultStr = "";
-            for (int i = 0; i < count; i++)
+            for(int i = 0; i < count; i++)
             {
                 resultStr += formatWithComment(instStr);
             }
@@ -1487,6 +1527,16 @@ namespace rocisa
         }
 
         std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
         {
             return {};
         }
@@ -1522,6 +1572,16 @@ namespace rocisa
             return {simm16};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {simm16};
+        }
+
         std::string toString() const override
         {
             return formatWithComment(instStr + " " + std::to_string(simm16));
@@ -1540,9 +1600,13 @@ namespace rocisa
             setInst("s_set_vgpr_msb");
         }
 
-        SSetVgprMsb(const int msbSrc0, const int msbSrc1, const int msbSrc2, const int msbDst, const std::string& comment = "")
+        SSetVgprMsb(const int          msbSrc0,
+                    const int          msbSrc1,
+                    const int          msbSrc2,
+                    const int          msbDst,
+                    const std::string& comment = "")
             : Instruction(InstType::INST_NOTYPE, comment)
-            , simm16( (msbDst << 6) + (msbSrc2 << 4) + (msbSrc1 << 2) + msbSrc0 )
+            , simm16((msbDst << 6) + (msbSrc2 << 4) + (msbSrc1 << 2) + msbSrc0)
         {
             setInst("s_set_vgpr_msb");
         }
@@ -1642,7 +1706,7 @@ namespace rocisa
     struct _SWaitCnt : public Instruction
     {
         _SWaitCnt(int lgkmcnt = -1, int vmcnt = -1, const std::string& comment = "")
-            : Instruction(InstType::INST_NOTYPE, comment)
+            : Instruction(InstType::INST_SWAIT, comment)
             , lgkmcnt(lgkmcnt)
             , vmcnt(vmcnt)
         {
@@ -1661,6 +1725,16 @@ namespace rocisa
         }
 
         std::vector<InstructionInput> getParams() const override
+        {
+            return {lgkmcnt, vmcnt};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
         {
             return {lgkmcnt, vmcnt};
         }
@@ -1697,7 +1771,7 @@ namespace rocisa
     struct _SWaitCntVscnt : public Instruction
     {
         _SWaitCntVscnt(int vscnt = -1, const std::string& comment = "")
-            : Instruction(InstType::INST_NOTYPE, comment)
+            : Instruction(InstType::INST_SWAIT, comment)
             , vscnt(vscnt)
         {
         }
@@ -1718,6 +1792,16 @@ namespace rocisa
             return {vscnt};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {vscnt};
+        }
+
         std::string toString() const override
         {
             int maxVscnt = getAsmCaps()["MaxVscnt"];
@@ -1731,7 +1815,7 @@ namespace rocisa
     struct _SWaitStorecnt : public Instruction
     {
         _SWaitStorecnt(int storecnt = -1, const std::string& comment = "")
-            : Instruction(InstType::INST_NOTYPE, comment)
+            : Instruction(InstType::INST_SWAIT, comment)
             , storecnt(storecnt)
         {
         }
@@ -1752,6 +1836,16 @@ namespace rocisa
             return {storecnt};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {storecnt};
+        }
+
         std::string toString() const override
         {
             std::string kStr;
@@ -1767,7 +1861,7 @@ namespace rocisa
     struct _SWaitLoadcnt : public Instruction
     {
         _SWaitLoadcnt(int loadcnt = -1, const std::string& comment = "")
-            : Instruction(InstType::INST_NOTYPE, comment)
+            : Instruction(InstType::INST_SWAIT, comment)
             , loadcnt(loadcnt)
         {
         }
@@ -1788,6 +1882,16 @@ namespace rocisa
             return {loadcnt};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {loadcnt};
+        }
+
         std::string toString() const override
         {
             std::string kStr;
@@ -1803,7 +1907,7 @@ namespace rocisa
     struct _SWaitKMcnt : public Instruction
     {
         _SWaitKMcnt(int kmcnt = -1, const std::string& comment = "")
-            : Instruction(InstType::INST_NOTYPE, comment)
+            : Instruction(InstType::INST_SWAIT, comment)
             , kmcnt(kmcnt)
         {
         }
@@ -1824,6 +1928,16 @@ namespace rocisa
             return {kmcnt};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {kmcnt};
+        }
+
         std::string toString() const override
         {
             std::string kStr;
@@ -1839,7 +1953,7 @@ namespace rocisa
     struct _SWaitDscnt : public Instruction
     {
         _SWaitDscnt(int dscnt = -1, const std::string& comment = "")
-            : Instruction(InstType::INST_NOTYPE, comment)
+            : Instruction(InstType::INST_SWAIT, comment)
             , dscnt(dscnt)
         {
         }
@@ -1856,6 +1970,16 @@ namespace rocisa
         }
 
         std::vector<InstructionInput> getParams() const override
+        {
+            return {dscnt};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
         {
             return {dscnt};
         }
@@ -1929,6 +2053,16 @@ namespace rocisa
         }
 
         std::vector<InstructionInput> getParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
         {
             return {};
         }
@@ -2095,6 +2229,16 @@ namespace rocisa
             return {va_vdst, va_sdst, va_ssrc, hold_cnt, vm_vsrc, va_vcc, sa_sdst};
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {va_vdst, va_sdst, va_ssrc, hold_cnt, vm_vsrc, va_vcc, sa_sdst};
+        }
+
         std::string toString() const override
         {
             if(!getArchCaps()["HasSchedMode"])
@@ -2187,6 +2331,16 @@ namespace rocisa
         }
 
         std::vector<InstructionInput> getParams() const override
+        {
+            return getSrcParams();
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
         {
             if(hasInstID1())
             {

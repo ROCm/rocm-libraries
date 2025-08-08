@@ -1,0 +1,236 @@
+/* ************************************************************************
+ * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
+#include "stinkytofu-opt.hpp"
+
+#include "ir/asm/IRParser.hpp"
+
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+using namespace stinkytofu;
+
+namespace
+{
+    /**
+     * DeserializeStinkytofuIRPass is a pass that deserializes Stinkytofu IR from a file.
+     */
+    class DeserializeStinkytofuIRPass : public StinkyInstPass
+    {
+    public:
+        static char ID;
+
+        DeserializeStinkytofuIRPass(const std::string& stinkytofuIRFile)
+            : stinkytofuIRFile(stinkytofuIRFile)
+        {
+        }
+
+        const char* getName() const override
+        {
+            return "DeserializeStinkytofuIRPass";
+        }
+
+        PassID getPassID() const override
+        {
+            return &DeserializeStinkytofuIRPass::ID;
+        }
+
+        void run(IRList& insts, PassContext& passCtx) override
+        {
+            GfxArchID arch = getGfxArchID(passCtx.getKernelInfo().arch[0],
+                                          passCtx.getKernelInfo().arch[1],
+                                          passCtx.getKernelInfo().arch[2]);
+
+            std::string irText             = readFile(stinkytofuIRFile);
+            auto        parsedInstructions = parseSourceString(irText);
+
+            StinkyInstIRBuilder& irBuilder
+                = passCtx.getOrCreateIRBuilder<StinkyInstIRBuilder>(insts, arch);
+
+            for(const auto& inst : parsedInstructions)
+            {
+                auto              opcode     = getMnemonicToIsaOpcode(inst->opcodeStr, arch);
+                const HwInstDesc* hwInstDesc = getMCIDByIsaOp(opcode, arch);
+                if(hwInstDesc == nullptr)
+                {
+                    std::cerr << "Warning: No hardware instruction descriptor found for opcode "
+                              << opcode << " in arch gfx" << int(arch) << "\n";
+                }
+                else
+                {
+                    StinkyInstruction* stinkyInst
+                        = irBuilder.createStinkyInstBefore(insts.end(), hwInstDesc);
+
+                    // move destRegs and srcRegs
+                    stinkyInst->destRegs = inst->destRegs;
+                    stinkyInst->srcRegs  = inst->srcRegs;
+
+                    // Overwrite cycles when valid (> 0), otherwise use default from HwInstDesc
+                    if(inst->issueCycles > 0)
+                    {
+                        stinkyInst->issueCycles = inst->issueCycles;
+                    }
+
+                    if(inst->latencyCycles > 0)
+                    {
+                        stinkyInst->latencyCycles = inst->latencyCycles;
+                    }
+                }
+            }
+        }
+
+    private:
+        const std::string stinkytofuIRFile;
+
+        std::string readFile(const std::string& filename)
+        {
+            std::ifstream     file(filename);
+            std::stringstream buffer;
+            buffer << file.rdbuf();
+            return buffer.str();
+        }
+    };
+
+    char DeserializeStinkytofuIRPass::ID = 0;
+
+    // Function to print available passes
+    void printAvailablePasses()
+    {
+        std::cout << "Available passes:\n";
+        std::cout << "=================\n";
+        for(const auto& passInfo : availablePasses)
+        {
+            std::cout << "  --" << passInfo.name << "\n";
+        }
+    }
+
+    // Function to find and create a pass by name
+    std::unique_ptr<Pass> createPassByName(const std::string& passName)
+    {
+        for(const auto& passInfo : availablePasses)
+        {
+            if(passName == passInfo.name)
+            {
+                return passInfo.creator();
+            }
+        }
+        return nullptr;
+    }
+
+    // Function to parse command-line arguments for passes
+    std::vector<std::string> parsePassNames(int argc, char** argv, int startIdx)
+    {
+        std::vector<std::string> passNames;
+        for(int i = startIdx; i < argc; ++i)
+        {
+            std::string arg = argv[i];
+            if(arg.substr(0, 2) == "--")
+            {
+                passNames.push_back(arg.substr(2)); // Remove "--" prefix
+            }
+        }
+        return passNames;
+    }
+}
+
+int main(int argc, char** argv)
+{
+    if(argc < 2)
+    {
+        std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
+        std::cerr << "Options:\n";
+        std::cerr << "  --list-passes    List all available passes\n";
+        std::cerr << "  --help           Show this help message\n\n";
+        std::cerr << "Example:\n";
+        std::cerr << "  " << argv[0]
+                  << " input.txt --StinkyDAGSchedulerPass --ScheduleFirstLRsPass\n";
+        return 1;
+    }
+
+    // Check for special options
+    std::string firstArg = argv[1];
+    if(firstArg == "--list-passes")
+    {
+        printAvailablePasses();
+        return 0;
+    }
+    if(firstArg == "--help")
+    {
+        std::cerr << "stinkytofu-opt - StinkyTofu IR optimizer\n\n";
+        std::cerr << "Usage: " << argv[0] << " [options] <ir_file> [--pass1] [--pass2] ...\n\n";
+        std::cerr << "Options:\n";
+        std::cerr << "  --list-passes    List all available passes\n";
+        std::cerr << "  --help           Show this help message\n\n";
+        printAvailablePasses();
+        return 0;
+    }
+
+    std::string filename = argv[1];
+
+    auto                      debugConfig = getPassManagerDebugConfig();
+    stinkytofu::StinkyOptInfo optInfo     = getStinkyOptInfo();
+
+    stinkytofu::PassManager passManager;
+
+    passManager.setDebugConfig(std::move(debugConfig));
+    passManager.setOptConfig(optInfo);
+    setKernelConfig(passManager);
+
+    // Add deserialization pass first to load the IR
+    passManager.addPass(std::make_unique<DeserializeStinkytofuIRPass>(filename));
+
+    // Parse and add user-specified passes from command line
+    std::vector<std::string> requestedPasses = parsePassNames(argc, argv, 2);
+
+    if(!requestedPasses.empty())
+    {
+        std::cout << "\n=== Adding Passes ===\n";
+        for(const auto& passName : requestedPasses)
+        {
+            auto pass = createPassByName(passName);
+            if(pass)
+            {
+                std::cout << "Adding pass: " << passName << "\n";
+                passManager.addPass(std::move(pass));
+            }
+            else
+            {
+                std::cerr << "Warning: Unknown pass '" << passName << "' - skipping\n";
+                std::cerr << "Use --list-passes to see available passes\n";
+            }
+        }
+        std::cout << "\n";
+    }
+    else
+    {
+        std::cout << "\n=== No optimization passes specified ===\n";
+        std::cout << "Only deserialization will be performed.\n";
+        std::cout << "Use --list-passes to see available passes.\n\n";
+    }
+
+    passManager.run();
+
+    return 0;
+}
