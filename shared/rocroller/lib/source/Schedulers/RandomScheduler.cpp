@@ -100,7 +100,10 @@ namespace rocRoller
 
                     auto status = m_ctx.lock()->peek(inst);
 
-                    return status.outOfRegisters.count() == 0;
+                    if(status.outOfRegisters.count() != 0)
+                        return false;
+
+                    return true;
                 };
 
                 // Try to find a stream that doesn't cause an out of register
