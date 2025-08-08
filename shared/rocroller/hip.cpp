@@ -23,201 +23,23 @@ __global__ void kernel(int* clocks)
 
     // clock_t start = clock();
 
-    for(int i = 0; i < 16; ++i)
+    const int ITERS = 64;
+
+    int temp[ITERS];
+
+    for(int i = 0; i < ITERS; ++i)
     {
-        asm volatile("ds_read_b32 v1, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v2, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v3, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v4, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v5, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v6, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v7, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v8, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v9, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v10, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v11, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v12, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v13, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v14, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v15, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v16, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v17, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v18, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v19, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v20, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v21, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v22, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v23, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v24, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v25, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v26, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v27, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v28, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v29, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v30, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v31, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v32, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v33, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v34, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v35, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v36, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v37, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v38, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v39, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v40, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v41, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v42, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v43, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v44, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v45, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v46, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v47, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v48, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v49, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v50, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v51, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v52, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v53, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v54, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v55, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v56, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v57, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v58, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v59, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v60, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v61, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v62, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v63, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
-        asm volatile("ds_read_b32 v64, %0 offset:0"
-                     :
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * stride));
+        temp[i] = uint32_t(uint64_t(shared)) + threadIdx.x * 4 * 32;
     }
+
+#pragma unroll
+    for(int i = 0; i < ITERS; ++i)
+    {
+        asm volatile("ds_read_b32 %0, %1 offset:0" : "=v"(temp[i]) : "v"(temp[i]));
+        // temp[i] = shared[threadIdx.x];
+    }
+
+    __syncthreads();
 
     // clock_t end = clock();
 
@@ -225,11 +47,16 @@ __global__ void kernel(int* clocks)
     // {
     //     clocks[threadIdx.x] = int(end) - int(start);
     // }
+
+    for(int i = 0; i < ITERS; ++i)
+    {
+        clocks[i] = temp[i];
+    }
 }
 
 int main()
 {
-    const int    N    = 256;
+    const int    N    = 64;
     const size_t size = N * sizeof(int);
     int          h_a[N];
 

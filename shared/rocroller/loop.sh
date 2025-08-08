@@ -13,7 +13,7 @@ ROCPROF_DIR=rocprof_$INSTR_WIDTH
 for (( i=0; i<=8; i++ )); do
     EXE="./prog_${i}_${INSTR_WIDTH}".out
 
-    hipcc ../hip.cpp -DBYTE_STRIDE="$i" -DINSTR_WIDTH=$INSTR_WIDTH -O3 -o ./$EXE
+    hipcc ../hip.cpp -DBYTE_STRIDE="$i" -DINSTR_WIDTH=$INSTR_WIDTH -O3 -o $EXE
 
 
     while true; do
@@ -34,7 +34,7 @@ for (( i=0; i<=8; i++ )); do
         $ROCPROF --att \
         -d ${ROCPROF_DIR}/ \
         --att-perfcounter-ctrl=8 \
-        --att-perfcounters="SQ_INST_LEVEL_VMEM,SQ_INST_LEVEL_LDS,SQ_LDS_BANK_CONFLICT,SQ_VALU_MFMA_BUSY_CYCLES" \
+        --att-perfcounters="SQ_INST_LEVEL_VMEM,SQ_INST_LEVEL_LDS,SQ_LDS_IDX_ACTIVE,SQ_LDS_BANK_CONFLICT,SQ_LDS_UNALIGNED_STALL" \
         --att-target-cu=1 \
         --att-shader-engine-mask=0x1 -- $EXE
 
