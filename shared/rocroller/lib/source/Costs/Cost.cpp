@@ -31,7 +31,8 @@ namespace rocRoller
 {
     namespace Scheduling
     {
-        RegisterComponentBase(Cost);
+        // RegisterComponentBase(Cost);
+        const std::string Cost::Basename = "Cost";
 
         std::string toString(CostFunction proc)
         {
