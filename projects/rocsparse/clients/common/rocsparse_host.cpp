@@ -43,7 +43,7 @@ template <typename T, typename I, typename X, typename Y>
 void host_axpby(
     I size, I nnz, T alpha, const X* x_val, const I* x_ind, T beta, Y* y, rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     for(I i = 0; i < size; ++i)
     {
@@ -60,7 +60,7 @@ template <typename I, typename X, typename Y, typename T>
 void host_doti(
     I nnz, const X* x_val, const I* x_ind, const Y* y, T* result, rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     *result = static_cast<T>(0);
 
@@ -74,7 +74,7 @@ template <typename I, typename X, typename Y, typename T>
 void host_dotci(
     I nnz, const X* x_val, const I* x_ind, const Y* y, T* result, rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     *result = static_cast<T>(0);
 
@@ -87,7 +87,7 @@ void host_dotci(
 template <typename I, typename T>
 void host_gthr(I nnz, const T* y, T* x_val, const I* x_ind, rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     for(I i = 0; i < nnz; ++i)
     {
@@ -99,7 +99,7 @@ template <typename T>
 void host_gthrz(
     rocsparse_int nnz, T* y, T* x_val, const rocsparse_int* x_ind, rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     for(rocsparse_int i = 0; i < nnz; ++i)
     {
@@ -112,7 +112,7 @@ template <typename I, typename T>
 void host_roti(
     I nnz, T* x_val, const I* x_ind, T* y, const T* c, const T* s, rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     for(I i = 0; i < nnz; ++i)
     {
@@ -121,15 +121,15 @@ void host_roti(
         T xs = x_val[i];
         T ys = y[idx];
 
-        x_val[i] = *c * xs + *s * ys;
-        y[idx]   = *c * ys - *s * xs;
+        x_val[i] = std::fma(*c, xs, *s * ys);
+        y[idx]   = std::fma(*c, ys, -*s * xs);
     }
 }
 
 template <typename I, typename T>
 void host_sctr(I nnz, const T* x_val, const I* x_ind, T* y, rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     for(I i = 0; i < nnz; ++i)
     {
@@ -159,7 +159,7 @@ void host_bsrmv(rocsparse_direction  dir,
                 Y*                   y,
                 rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Quick return
     if(alpha == static_cast<T>(0))
@@ -378,7 +378,7 @@ void host_bsrmv(rocsparse_direction  dir,
                 Y*                   y,
                 rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     return host_bsrmv(dir,
                       trans,
@@ -416,7 +416,7 @@ void host_bsrxmv(rocsparse_direction  dir,
                  T*                   y,
                  rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(bsr_mask_ptr == nullptr)
     {
@@ -644,7 +644,7 @@ void host_gebsrmv(rocsparse_direction  dir,
                   T*                   y,
                   rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Quick return
     if(alpha == static_cast<T>(0))
@@ -1035,7 +1035,7 @@ static inline void host_bsr_lsolve(rocsparse_direction  dir,
                                    rocsparse_int*       struct_pivot,
                                    rocsparse_int*       numeric_pivot)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -1149,7 +1149,7 @@ static inline void host_bsr_usolve(rocsparse_direction  dir,
                                    rocsparse_int*       struct_pivot,
                                    rocsparse_int*       numeric_pivot)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -1255,7 +1255,7 @@ void host_bsrsv(rocsparse_operation  trans,
                 rocsparse_int*       struct_pivot,
                 rocsparse_int*       numeric_pivot)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Initialize pivot
     *struct_pivot  = mb + 1;
@@ -1386,7 +1386,7 @@ void host_coomv(rocsparse_operation  trans,
                 Y*                   y,
                 rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(trans == rocsparse_operation_none)
     {
@@ -1439,7 +1439,7 @@ void host_coomv_aos(rocsparse_operation  trans,
                     Y*                   y,
                     rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     switch(trans)
     {
@@ -1509,7 +1509,7 @@ static void host_csrmv_general(rocsparse_operation  trans,
                                rocsparse_spmv_alg   algo,
                                bool                 force_conj)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     bool conj = (trans == rocsparse_operation_conjugate_transpose || force_conj);
 
@@ -1656,7 +1656,7 @@ static void host_csrmv_symmetric(rocsparse_operation  trans,
                                  rocsparse_spmv_alg   algo,
                                  bool                 force_conj)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     bool conj = (trans == rocsparse_operation_conjugate_transpose || force_conj);
 
@@ -1812,7 +1812,7 @@ void host_csrmv(rocsparse_operation   trans,
                 rocsparse_spmv_alg    algo,
                 bool                  force_conj)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     switch(matrix_type)
     {
@@ -1874,7 +1874,7 @@ void host_cscmv(rocsparse_operation trans,
                 rocsparse_matrix_type matrix_type,
                 rocsparse_spmv_alg    algo)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     switch(trans)
     {
@@ -1949,7 +1949,7 @@ static void host_csr_lsolve(J                    M,
                             J*                   struct_pivot,
                             J*                   numeric_pivot)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Get device properties
     int             dev;
@@ -2059,7 +2059,7 @@ static void host_csr_usolve(J                    M,
                             J*                   struct_pivot,
                             J*                   numeric_pivot)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Get device properties
     int             dev;
@@ -2169,7 +2169,7 @@ void host_csrsv(rocsparse_operation  trans,
                 J*                   struct_pivot,
                 J*                   numeric_pivot)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Initialize pivot
     *struct_pivot  = M + 1;
@@ -2290,7 +2290,7 @@ void host_coosv(rocsparse_operation  trans,
                 I*                   struct_pivot,
                 I*                   numeric_pivot)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(std::is_same<I, int32_t>() && nnz < std::numeric_limits<int32_t>::max())
     {
@@ -2351,7 +2351,7 @@ void host_ellmv(rocsparse_operation  trans,
                 Y*                   y,
                 rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(trans == rocsparse_operation_none)
     {
@@ -2442,7 +2442,7 @@ void host_hybmv(rocsparse_operation  trans,
                 T*                   y,
                 rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(M == 0 || N == 0)
     {
@@ -2504,7 +2504,7 @@ void host_bsrmm(rocsparse_handle     handle,
                 rocsparse_order      order_C,
                 rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(transA != rocsparse_operation_none)
     {
@@ -2594,7 +2594,7 @@ void host_gebsrmm(rocsparse_handle          handle,
                   T*                        C,
                   int64_t                   ldc)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(transA != rocsparse_operation_none)
     {
@@ -2681,7 +2681,7 @@ void host_csrmm(J                    M,
                 rocsparse_index_base base,
                 bool                 force_conj_A)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     bool conj_A = (transA == rocsparse_operation_conjugate_transpose || force_conj_A);
     bool conj_B = (transB == rocsparse_operation_conjugate_transpose);
@@ -2809,7 +2809,7 @@ void host_csrmm_batched(J                    M,
                         rocsparse_index_base base,
                         bool                 force_conj_A)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     const bool Ci_A_Bi  = (batch_count_A == 1 && batch_count_B == batch_count_C);
     const bool Ci_Ai_B  = (batch_count_B == 1 && batch_count_A == batch_count_C);
@@ -2914,7 +2914,7 @@ void host_coomm(I                    M,
                 rocsparse_order      order_C,
                 rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     bool conj_A = (transA == rocsparse_operation_conjugate_transpose);
     bool conj_B = (transB == rocsparse_operation_conjugate_transpose);
@@ -3031,7 +3031,7 @@ void host_coomm_batched(I                    M,
                         rocsparse_order      order_C,
                         rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     bool Ci_A_Bi  = (batch_count_A == 1 && batch_count_B == batch_count_C);
     bool Ci_Ai_B  = (batch_count_B == 1 && batch_count_A == batch_count_C);
@@ -3135,7 +3135,7 @@ void host_cscmm(J                   M,
                 rocsparse_order      order_C,
                 rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     switch(transA)
     {
@@ -3231,7 +3231,7 @@ void host_cscmm_batched(J                    M,
                         rocsparse_order      order_C,
                         rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     switch(transA)
     {
@@ -3338,7 +3338,7 @@ static inline void host_lssolve(J                    M,
                                 J*                   struct_pivot,
                                 J*                   numeric_pivot)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -3445,7 +3445,7 @@ static inline void host_ussolve(J                    M,
                                 J*                   struct_pivot,
                                 J*                   numeric_pivot)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -3551,7 +3551,7 @@ void host_csrsm(J                    M,
                 J*                   struct_pivot,
                 J*                   numeric_pivot)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(nrhs == 0)
     {
@@ -3748,7 +3748,7 @@ void host_coosm(I                    M,
                 I*                   struct_pivot,
                 I*                   numeric_pivot)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(std::is_same<I, int32_t>() && nnz < std::numeric_limits<int32_t>::max())
     {
@@ -3822,7 +3822,7 @@ void host_bsrsm(rocsparse_int       mb,
                 rocsparse_int*       struct_pivot,
                 rocsparse_int*       numeric_pivot)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Initialize pivot
     *struct_pivot  = mb + 1;
@@ -3952,7 +3952,7 @@ void host_gemvi(I                    M,
                 T*                   y,
                 rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
 #ifdef _OPENMP
 #pragma omp parallel for schedule(dynamic, 1024)
@@ -3986,7 +3986,7 @@ void host_gemmi(rocsparse_int        M,
                 int64_t              ldc,
                 rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(transB == rocsparse_operation_transpose)
     {
@@ -4039,7 +4039,7 @@ void host_bsrgemm_nnzb(J                    Mb,
                        rocsparse_index_base base_C,
                        rocsparse_index_base base_D)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     return host_csrgemm_nnz(Mb,
                             Nb,
@@ -4085,7 +4085,7 @@ void host_bsrgemm(rocsparse_direction  dir,
                   rocsparse_index_base base_C,
                   rocsparse_index_base base_D)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(Mb == 0 || Nb == 0)
     {
@@ -4390,7 +4390,7 @@ void host_bsrgeam_nnzb(rocsparse_direction  dir,
                        rocsparse_index_base base_B,
                        rocsparse_index_base base_C)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     return host_csrgeam_nnz(Mb,
                             Nb,
@@ -4427,7 +4427,7 @@ void host_bsrgeam(rocsparse_direction  dir,
                   rocsparse_index_base base_B,
                   rocsparse_index_base base_C)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
 #ifdef _OPENMP
 #pragma omp parallel
@@ -4623,7 +4623,7 @@ void host_csrgeam_nnz(J                    M,
                       rocsparse_index_base base_B,
                       rocsparse_index_base base_C)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(M == 0 || N == 0)
     {
@@ -4719,7 +4719,7 @@ void host_csrgeam(J                    M,
                   rocsparse_index_base base_B,
                   rocsparse_index_base base_C)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     T alpha_val = (alpha == nullptr) ? 0 : *alpha;
     T beta_val  = (beta == nullptr) ? 0 : *beta;
@@ -4858,7 +4858,7 @@ void host_csrgemm_nnz(J                    M,
                       rocsparse_index_base base_C,
                       rocsparse_index_base base_D)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(M == 0 || N == 0)
     {
@@ -5008,7 +5008,7 @@ void host_csrgemm(J                    M,
                   rocsparse_index_base base_C,
                   rocsparse_index_base base_D)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(M == 0 || N == 0)
     {
@@ -5176,7 +5176,7 @@ void rocsparse_host<T, I, J, A, B, C>::cooddmm(rocsparse_operation  transA,
                                                C*                   coo_val_C,
                                                rocsparse_index_base base_C)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     const T a = *alpha;
     const T b = *beta;
@@ -5235,7 +5235,7 @@ void rocsparse_host<T, I, J, A, B, C>::cooaosddmm(rocsparse_operation  transA,
                                                   C*                   coo_val_C,
                                                   rocsparse_index_base base_C)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     const T a = *alpha;
     const T b = *beta;
@@ -5294,7 +5294,7 @@ void rocsparse_host<T, I, J, A, B, C>::csrddmm(rocsparse_operation  transA,
                                                C*                   csr_val_C,
                                                rocsparse_index_base base_C)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     const T a = *alpha;
     const T b = *beta;
@@ -5357,7 +5357,7 @@ void rocsparse_host<T, I, J, A, B, C>::ellddmm(rocsparse_operation  transA,
                                                C*                   ell_val_C,
                                                rocsparse_index_base ell_base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     const T a = *alpha;
     const T b = *beta;
@@ -5423,7 +5423,7 @@ void rocsparse_host<T, I, J, A, B, C>::cscddmm(rocsparse_operation  transA,
                                                C*                   csr_val_C,
                                                rocsparse_index_base base_C)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     const T a = *alpha;
     const T b = *beta;
@@ -5483,7 +5483,7 @@ void host_bsric0(rocsparse_direction               direction,
                  rocsparse_int*                    numeric_pivot)
 
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_int M = Mb * block_dim;
 
@@ -5718,7 +5718,7 @@ void host_bsrilu0(rocsparse_direction               dir,
                   T                                 boost_val)
 
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Initialize pivots
     *struct_pivot  = mb + 1;
@@ -5933,7 +5933,7 @@ void host_csric0(rocsparse_int                     M,
                  rocsparse_int*                    singular_pivot,
                  double                            tol)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Initialize pivot
     *struct_pivot   = -1;
@@ -6094,7 +6094,7 @@ void host_csrilu0(rocsparse_int                     M,
                   U                                 boost_tol,
                   T                                 boost_val)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if((struct_pivot == nullptr) || (numeric_pivot == nullptr) || (singular_pivot == nullptr))
     {
@@ -6273,7 +6273,7 @@ void host_gtsv_no_pivot(rocsparse_int         m,
                         std::vector<T>&       B,
                         rocsparse_int         ldb)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     //
     // Compute BLOCKSIZE as the lowest power of 2 greater or equal than m,
@@ -6385,7 +6385,7 @@ void host_gtsv_no_pivot_strided_batch(rocsparse_int         m,
                                       rocsparse_int         batch_count,
                                       rocsparse_int         batch_stride)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     //
     // Compute BLOCKSIZE as the lowest power of 2 greater or equal than m,
@@ -6496,7 +6496,7 @@ void host_gtsv_interleaved_batch_thomas(rocsparse_int m,
                                         rocsparse_int batch_count,
                                         rocsparse_int batch_stride)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     std::vector<T> c1(m * batch_count, 0);
     std::vector<T> x1(m * batch_count, 0);
@@ -6563,7 +6563,7 @@ void host_gtsv_interleaved_batch_lu(rocsparse_int m,
                                     rocsparse_int batch_count,
                                     rocsparse_int batch_stride)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     std::vector<T>             l(m * batch_count, 0);
     std::vector<T>             u0(m * batch_count, 0);
@@ -6700,7 +6700,7 @@ void host_gtsv_interleaved_batch_qr(rocsparse_int m,
                                     rocsparse_int batch_count,
                                     rocsparse_int batch_stride)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     std::vector<T> r0(m * batch_count, 0);
     std::vector<T> r1(m * batch_count, 0);
@@ -6808,7 +6808,7 @@ void host_gtsv_interleaved_batch(rocsparse_gtsv_interleaved_alg algo,
                                  rocsparse_int                  batch_count,
                                  rocsparse_int                  batch_stride)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     switch(algo)
     {
@@ -6842,7 +6842,7 @@ void host_gpsv_interleaved_batch_qr(rocsparse_int m,
                                     rocsparse_int batch_count,
                                     rocsparse_int batch_stride)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     std::vector<T> r3(m * batch_count, 0);
     std::vector<T> r4(m * batch_count, 0);
@@ -7061,7 +7061,7 @@ void host_gpsv_interleaved_batch(rocsparse_gpsv_interleaved_alg algo,
                                  rocsparse_int                  batch_count,
                                  rocsparse_int                  batch_stride)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     switch(algo)
     {
@@ -7088,7 +7088,7 @@ rocsparse_status host_nnz(rocsparse_direction dirA,
                           rocsparse_int*      nnz_per_row_columns,
                           rocsparse_int*      nnz_total_dev_host_ptr)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_int mn = (dirA == rocsparse_direction_row) ? m : n;
     for(rocsparse_int j = 0; j < mn; ++j)
@@ -7135,7 +7135,7 @@ void host_prune_dense2csr(rocsparse_int               m,
                           std::vector<rocsparse_int>& csr_row_ptr,
                           std::vector<rocsparse_int>& csr_col_ind)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     csr_row_ptr.resize(m + 1, 0);
     csr_row_ptr[0] = base;
@@ -7192,7 +7192,7 @@ void host_prune_dense2csr_by_percentage(rocsparse_int               m,
                                         std::vector<rocsparse_int>& csr_row_ptr,
                                         std::vector<rocsparse_int>& csr_col_ind)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_int nnz_A = m * n;
     rocsparse_int pos   = std::ceil(nnz_A * (percentage / 100)) - 1;
@@ -7226,7 +7226,7 @@ void host_dense2csx(J                    m,
                     I*                   csx_row_col_ptr,
                     J*                   csx_col_row_ind)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     static constexpr T s_zero = {};
     J                  len    = (rocsparse_direction_row == DIRA) ? m : n;
@@ -7312,7 +7312,7 @@ void host_csx2dense(J                    m,
                     T*                   A,
                     int64_t              ld)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(order == rocsparse_order_column)
     {
@@ -7396,7 +7396,7 @@ void host_dense_to_coo(I                     m,
                        std::vector<I>&       coo_row_ind,
                        std::vector<I>&       coo_col_ind)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Find number of non-zeros in dense matrix
     int64_t nnz = 0;
@@ -7453,7 +7453,7 @@ void host_coo_to_dense(I                     m,
                        int64_t               ld,
                        rocsparse_order       order)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     I nm = order == rocsparse_order_column ? n : m;
 
@@ -7510,7 +7510,7 @@ void host_csr_to_csc(J                    M,
                      rocsparse_action     action,
                      rocsparse_index_base base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Determine nnz per column
     for(I i = 0; i < nnz; ++i)
@@ -7569,7 +7569,7 @@ void host_bsr_to_csr(rocsparse_direction               direction,
                      std::vector<rocsparse_int>&       csr_col_ind,
                      rocsparse_index_base              csr_base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     return host_gebsr_to_csr(direction,
                              mb,
@@ -7602,7 +7602,7 @@ void host_csr_to_bsr(rocsparse_direction               direction,
                      std::vector<rocsparse_int>&       bsr_col_ind,
                      rocsparse_index_base              bsr_base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     return host_csr_to_gebsr(direction,
                              m,
@@ -7636,7 +7636,7 @@ void host_csr_to_gebsr(rocsparse_direction               direction,
                        std::vector<rocsparse_int>&       bsr_col_ind,
                        rocsparse_index_base              bsr_base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_int mb = (m + row_block_dim - 1) / row_block_dim;
 
@@ -7793,7 +7793,7 @@ void host_gebsr_to_gebsc(rocsparse_int                     Mb,
                          rocsparse_action                  action,
                          rocsparse_index_base              base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     bsc_row_ind.resize(nnzb);
     bsc_col_ptr.resize(Nb + 1, 0);
@@ -7861,7 +7861,7 @@ void host_gebsr_to_csr(rocsparse_direction               direction,
                        std::vector<rocsparse_int>&       csr_col_ind,
                        rocsparse_index_base              csr_base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_int m   = mb * row_block_dim;
     size_t        nnz = size_t(nnzb) * row_block_dim * col_block_dim;
@@ -7946,7 +7946,7 @@ void host_gebsr_to_gebsr(rocsparse_direction               direction,
                          rocsparse_int                     col_block_dim_C,
                          rocsparse_index_base              base_C)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_int m = mb * row_block_dim_A;
     rocsparse_int n = nb * col_block_dim_A;
@@ -8004,7 +8004,7 @@ void host_bsr_to_bsc(rocsparse_int               mb,
                      rocsparse_index_base        bsr_base,
                      rocsparse_index_base        bsc_base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     bsc_row_ind.resize(nnzb);
     bsc_col_ptr.resize(nb + 1, 0);
@@ -8075,7 +8075,7 @@ void host_csr_to_hyb(rocsparse_int                     M,
                      rocsparse_hyb_partition           part,
                      rocsparse_index_base              base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     ell_nnz = 0;
     coo_nnz = 0;
@@ -8181,7 +8181,7 @@ void host_csr_to_csr_compress(rocsparse_int                     M,
                               rocsparse_index_base              base,
                               T                                 tol)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(M <= 0 || N <= 0)
     {
@@ -8270,7 +8270,7 @@ void host_prune_csr_to_csr(rocsparse_int                     M,
                            rocsparse_index_base              csr_base_C,
                            T                                 threshold)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     csr_row_ptr_C.resize(M + 1, 0);
     csr_row_ptr_C[0] = csr_base_C;
@@ -8334,7 +8334,7 @@ void host_prune_csr_to_csr_by_percentage(rocsparse_int                     M,
                                          rocsparse_index_base              csr_base_C,
                                          T                                 percentage)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_int pos = std::ceil(nnz_A * (percentage / 100)) - 1;
     pos               = std::min(pos, nnz_A - 1);
@@ -8382,7 +8382,7 @@ void host_ell_to_csr(rocsparse_int                     M,
                      rocsparse_index_base              ell_base,
                      rocsparse_index_base              csr_base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     csr_row_ptr.resize(M + 1, 0);
 
@@ -8450,7 +8450,7 @@ void host_coosort_by_column(rocsparse_int               M,
                             std::vector<rocsparse_int>& coo_col_ind,
                             std::vector<T>&             coo_val)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     // Permutation vector
     std::vector<rocsparse_int> perm(nnz);
@@ -8503,7 +8503,7 @@ void host_bsrpad_value(rocsparse_int m,
                        const rocsparse_int* __restrict__ bsr_col_ind,
                        rocsparse_index_base bsr_base)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_int start_local_index = m % block_dim;
 

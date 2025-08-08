@@ -265,8 +265,8 @@ void testing_spmm_batched_csr(const Arguments& arg)
     host_vector<C> hC_gold(batch_count_C * nnz_C);
 
     // Initialize data on CPU
-    rocsparse_init<B>(hB, batch_count_B * nnz_B, 1, 1);
-    rocsparse_init<C>(hC_1, batch_count_C * nnz_C, 1, 1);
+    rocsparse_init<B>(hB, batch_count_B * nnz_B, 1, 1, arg.convert_to_int);
+    rocsparse_init<C>(hC_1, batch_count_C * nnz_C, 1, 1, arg.convert_to_int);
 
     if(arg.convert_to_int)
     {
