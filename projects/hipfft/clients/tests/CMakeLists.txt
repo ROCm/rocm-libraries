@@ -244,7 +244,7 @@ if (WIN32)
 endif()
 
 option(BUILD_CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)
-set(COVERAGE_TEST_OPTIONS "--smoketest" CACHE STRING "Command line arguments for hipfft-test when generating a code coverage report (Note: an additional run of hipfft-test targeting multi_gpu* and callback* tests is always executed and coverage results are aggregated)")
+set(COVERAGE_TEST_OPTIONS "--smoketest;--gtest_filter=-*call*" CACHE STRING "Command line arguments for hipfft-test when generating a code coverage report (Note: an additional run of hipfft-test targeting multi_gpu* and callback* tests is always executed and coverage results are aggregated)")
 if (BUILD_CODE_COVERAGE)
   add_custom_target(
     code_cov_tests
