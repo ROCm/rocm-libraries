@@ -31,42 +31,6 @@
 #include "handle.h"
 #include "utility.hpp"
 
-inline rocblaslt_status getOriginalSizes(hipblasOperation_t opA,
-                                         hipblasOperation_t opB,
-                                         int64_t            num_rows_a,
-                                         int64_t            num_cols_a,
-                                         int64_t            num_rows_b,
-                                         int64_t            num_cols_b,
-                                         int64_t&           m,
-                                         int64_t&           n,
-                                         int64_t&           k)
-{
-    // values of num_* are values after been transposed, redirect to before which
-    // been transposed. initialized m,n,k by NN.
-    m = num_rows_a, n = num_cols_b, k = num_cols_a;
-    if(opA == HIPBLAS_OP_T || opA == HIPBLAS_OP_C)
-    {
-        m = num_cols_a;
-        k = num_rows_a;
-    }
-    if(opB == HIPBLAS_OP_T || opB == HIPBLAS_OP_C)
-    {
-        n = num_rows_b;
-        if(k != num_cols_b)
-        {
-            std::cerr << "A, B matrix size are not matched" << std::endl;
-            return rocblaslt_status_invalid_size;
-        }
-    }
-    else if(k != num_rows_b)
-    {
-        std::cerr << "A, B matrix size are not matched" << std::endl;
-        return rocblaslt_status_invalid_size;
-    }
-
-    return rocblaslt_status_success;
-}
-
 inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order)
 {
     if((datatype == HIP_R_16F && order != HIPBLASLT_ORDER_COL16_4R8)
@@ -78,73 +42,35 @@ inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order
 }
 
 /*******************************************************************************
- * Validate Matmul Descr. init Arguments - matrix init.
+ * Calculate Default Swizzle-A-Batched-Stride
  ******************************************************************************/
-inline rocblaslt_status validateMatmulDescrArgs(rocblaslt_handle       handle,
-                                                hipblasOperation_t     opA,
-                                                hipblasOperation_t     opB,
-                                                int64_t                num_rows_a,
-                                                int64_t                num_cols_a,
-                                                int64_t                lda,
-                                                int64_t                num_rows_b,
-                                                int64_t                num_cols_b,
-                                                int64_t                ldb,
-                                                int64_t                num_rows_c,
-                                                int64_t                num_cols_c,
-                                                int64_t                ldc,
-                                                int64_t                num_rows_d,
-                                                int64_t                num_cols_d,
-                                                int64_t                ldd,
-                                                hipDataType            type_a,
-                                                hipDataType            type_b,
-                                                hipDataType            type_c,
-                                                hipDataType            type_d,
-                                                rocblaslt_compute_type compute_type)
+inline void setDefaultSwizzledBatchedStride(const hipblasLtOrder_t& matOrder,
+                                            const uint64_t          matUnrollDim,
+                                            const uint64_t          matTileDim,
+                                            int64_t&                batch_stride)
 {
-    // handle must be valid
-    if(!handle)
-        return rocblaslt_status_invalid_handle;
-
-    // sizes of matrics A,B,C,D must fulfill the matrix multiplication rule.
-    // D = A x B + C
-    // values of num_* are values after been transposed, redirect to before which
-    // been transposed.
-    int64_t m, n, k;
-    auto    status
-        = getOriginalSizes(opA, opB, num_rows_a, num_cols_a, num_rows_b, num_cols_b, m, n, k);
-    if(status != rocblaslt_status_success)
-        return status;
-
-    if(m != num_rows_c || m != num_rows_d || n != num_cols_c || n != num_cols_d)
+    size_t MiM = 16, MiK = 0, MiKv = 0, PackK = 0;
+    if(matOrder == HIPBLASLT_ORDER_COL16_4R8)
     {
-        std::cerr << " matrix size is not valid" << std::endl;
-        return rocblaslt_status_invalid_size;
+        //f16
+        MiK   = 16;
+        MiKv  = 4;
+        PackK = 16 / MiKv / 2;
     }
-
-    // data type of matrics must be the same
-    if(type_a != type_b || type_a != type_c || type_a != type_c)
-        return rocblaslt_status_invalid_value;
-
-    switch(type_a)
+    else if(matOrder == HIPBLASLT_ORDER_COL16_4R16)
     {
-    case HIP_R_32F:
-        if(compute_type != rocblaslt_compute_f32)
-            return rocblaslt_status_invalid_value;
-        break;
-    case HIP_R_32I:
-        if(compute_type != rocblaslt_compute_i32)
-            return rocblaslt_status_invalid_value;
-        break;
-    case HIP_R_8I:
-        if(compute_type != rocblaslt_compute_i32)
-            return rocblaslt_status_invalid_value;
-        break;
-    default:
-        return rocblaslt_status_invalid_value;
-        break;
+        //f8
+        MiK   = 32;
+        MiKv  = 8;
+        PackK = 16 / MiKv / 1;
     }
+    else
+        return;
 
-    return rocblaslt_status_success;
+    size_t K_block = MiK * PackK;
+    //align to k for swizzleK and to m for 16
+    batch_stride = ((matTileDim + MiM - 1) / MiM) * MiM * ((matUnrollDim + K_block - 1) / K_block)
+                   * K_block;
 }
 
 /*******************************************************************************
@@ -276,7 +202,9 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
     // sizes must not be negative
     if(batch_stride_a < 0 || batch_stride_b < 0 || batch_stride_c < 0 || batch_stride_d < 0)
     {
+#ifndef CODE_COVERAGE
         std::cerr << "matrix and stride size must be positive" << std::endl;
+#endif
         return rocblaslt_status_invalid_size;
     }
 
@@ -284,8 +212,10 @@ inline rocblaslt_status validateMatmulArgs(int64_t                       m,
     if(num_batches_a != num_batches_b || num_batches_a != num_batches_c
        || num_batches_a != num_batches_d || num_batches_a < 1)
     {
+#ifndef CODE_COVERAGE
         std::cerr << " number of batches of matrics A,B,C,D must be the same and negative"
                   << std::endl;
+#endif
         return rocblaslt_status_invalid_size;
     }
 

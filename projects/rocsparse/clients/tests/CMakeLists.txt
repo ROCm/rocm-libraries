@@ -356,11 +356,11 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_check_matrix_hyb.cpp
 ../testings/testing_check_spmat.cpp
 ../testings/testing_bsrpad_value.cpp
+rocsparse_test_listeners.cpp
   )
 
 
 set(ROCSPARSE_CLIENTS_COMMON
-  ../common/rocsparse.cpp
   ../common/utility.cpp
   ../common/rocsparse_random.cpp
   ../common/rocsparse_reproducibility.cpp

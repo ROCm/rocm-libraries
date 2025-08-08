@@ -155,6 +155,7 @@ struct Arguments
     bool skip_reproducibility;
     bool sparsity_pattern_statistics;
     bool call_stage_analysis;
+    bool convert_to_int;
     char filename[128];
     char function[64];
     char name[64];
@@ -299,6 +300,7 @@ struct Arguments
         ROCSPARSE_FORMAT_CHECK(skip_reproducibility);
         ROCSPARSE_FORMAT_CHECK(sparsity_pattern_statistics);
         ROCSPARSE_FORMAT_CHECK(call_stage_analysis);
+        ROCSPARSE_FORMAT_CHECK(convert_to_int);
         ROCSPARSE_FORMAT_CHECK(filename);
         ROCSPARSE_FORMAT_CHECK(function);
         ROCSPARSE_FORMAT_CHECK(name);
@@ -516,6 +518,7 @@ private:
         print("skip_reproducibility", arg.skip_reproducibility);
         print("sparsity_pattern_statistics", arg.sparsity_pattern_statistics);
         print("call_stage_analysis", arg.call_stage_analysis);
+        print("convert_to_int", arg.convert_to_int);
         print("name", arg.name);
         print("category", arg.category);
         print("hardware", arg.hardware);
