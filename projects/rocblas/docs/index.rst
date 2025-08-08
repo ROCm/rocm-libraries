@@ -33,6 +33,7 @@ The rocBLAS public repository is located at
   .. grid-item-card:: Conceptual
 
     * :doc:`rocBLAS design notes <./conceptual/rocblas-design-notes>`
+    * :doc:`BLAS operations introduction <./conceptual/blas-operations-intro>`
 
   .. grid-item-card:: How To
 

@@ -25,34 +25,26 @@
  *******************************************************************************/
 
 #pragma once
-
-#include <rocRoller/Operations/Command_fwd.hpp>
-#include <rocRoller/Operations/OperationTag.hpp>
-#include <rocRoller/Serialization/Base_fwd.hpp>
-
-#include <memory>
+#include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
 
 namespace rocRoller
 {
-    namespace Operations
+    namespace KernelGraph
     {
-        class BaseOperation
+        /**
+         * @brief Remove all SetCoordinates from control graph
+         *
+         */
+        class RemoveSetCoordinate : public GraphTransform
         {
         public:
-            BaseOperation();
+            RemoveSetCoordinate() {}
 
-            void         setCommand(CommandPtr);
-            OperationTag getTag() const;
-            void         setTag(OperationTag tag);
-
-            std::strong_ordering operator<=>(BaseOperation const&) const;
-
-        protected:
-            OperationTag           m_tag;
-            std::weak_ptr<Command> m_command;
-
-            template <typename T1, typename T2, typename T3>
-            friend struct rocRoller::Serialization::MappingTraits;
+            KernelGraph apply(KernelGraph const& original) override;
+            std::string name() const override
+            {
+                return "RemoveSetCoordinate";
+            }
         };
     }
-} // namespace rocRoller
+}
