@@ -129,6 +129,7 @@ namespace ArgumentTracerTest
         kgraph = rocRollerTest::transform<KG::AddDeallocateArguments>(kgraph, context.get());
         kgraph = rocRollerTest::transform<KG::CleanArguments>(kgraph, context.get(), command);
         kgraph = rocRollerTest::transform<KG::SetWorkitemCount>(kgraph, context.get());
+        kgraph = rocRollerTest::transform<KG::RemoveSetCoordinate>(kgraph);
 
         auto hasUserMapping = [](KG::KernelGraph const& kg, int userDim) {
             auto pred
