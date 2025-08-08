@@ -17,12 +17,6 @@ target_include_directories(rocisa-cpp
 )
 
 if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
-    if(Python_VERSION VERSION_GREATER_EQUAL "3.8")
-        message(STATUS "Found Python version: ${Python_VERSION}")
-    else()
-        message(FATAL_ERROR "Python version 3.8 or higher is required, but found version ${Python_VERSION}")
-    endif()
-
     include(FetchContent)
     FetchContent_Declare(
       nanobind
