@@ -835,7 +835,7 @@ class StreamK(Component):
         module.add(SMovBX(dst=EXEC(), src=activeMask, comment="Set thread 0"))
         module.add(GStoreB32(src=src, base=base, soffset=soffset, flat=flat, comment=comment))
         module.add(SMovBX(dst=EXEC(), src=fullMask, comment="Reset exec mask"))
-        module.add(SWaitCnt(vmcnt=0, comment="wait for data store")) #TODO: See if this wait is necessery
+        module.add(SWaitCnt(vscnt=0, comment="wait for data store")) #TODO: See if this wait is necessery
         return module
 
     def partialsWriteBatch(self, writer, kernel, ss, batchIdx, applyAlpha, beta, edge, gwvw, atomicW, \
