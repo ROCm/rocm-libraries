@@ -33,7 +33,7 @@ namespace rocRoller
     {
         RegisterComponentBase(Scheduler);
 
-        std::ostream& operator<<(std::ostream& stream, const StreamId val)
+        std::ostream& operator<<(std::ostream& stream, StreamId val)
         {
             return stream << static_cast<uint32_t>(val);
         }

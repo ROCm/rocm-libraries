@@ -187,8 +187,8 @@ namespace rocRoller
              * Evaluates each expression in `exprs`, storing the results in respective indices of
              * `results`.
              *
-             * During expression evaluation, special resources may be acquired. If this is the case,
-             * the respective Scheduler::Dependency is to be locked, and `schedulerLockCount` be incremented.
+             * During expression evaluation, special resources may be acquired. When this occurs,
+             * lock the corresponding Scheduler::Dependency and increment `schedulerLockCount`.
              * It's the caller's responsibility to unlock the scheduler in this case, once the
              * value(s) have been consumed.
              */

@@ -50,7 +50,7 @@ namespace rocRoller
             }
         };
 
-        std::ostream& operator<<(std::ostream& stream, const StreamId val);
+        std::ostream& operator<<(std::ostream& stream, StreamId val);
 
         constexpr bool isNonPreemptibleDependency(Dependency dep);
 
@@ -58,28 +58,28 @@ namespace rocRoller
          * Locking Rules
          *
          * A scheduler has a number of streams which each will yield a sequence of instructions.
-         * The job of the scheduler is to pick (i.e. schedule) the instruction from the beginning 
-	 * of one of the streams, and then repeat until there are no more streams with any 
-	 * instructions left.
+         * The job of the scheduler is to pick (i.e. schedule) the instruction from the beginning
+     * of one of the streams, and then repeat until there are no more streams with any
+     * instructions left.
          *
-         * - If a scheduler schedules a lock for a non-preemptible dependency, 
-	 *   it must continue to select instructions from that same stream 
-	 *   until that lock has been unlocked.
+         * - If a scheduler schedules a lock for a non-preemptible dependency,
+     *   it must continue to select instructions from that same stream
+     *   until that lock has been unlocked.
          * - That stream might include further lock/unlock instructions which
          *   must occur in a last-in, first-out order, those should be treated
          *   as a stack to track when the original lock has been unlocked.
-	 *
-	 * - Dependency rank (low-to-high):
-	 *   Branch (Non-preemptible)
-	 *   M0 (Preemptible)
-	 *   VCC (Preemptible)
-	 *   SCC (Non-preemptible)
+     *
+     * - Dependency rank (low-to-high):
+     *   Branch (Non-preemptible)
+     *   M0 (Preemptible)
+     *   VCC (Preemptible)
+     *   SCC (Non-preemptible)
          *
          * - If a stream yields any kind of lock, it cannot yield a lower-ranked
          *   dependency lock until it releases the higher-ranked dependency lock.
          * - If a scheduler schedules a lock for a preemptible dependency,
-	 *   it cannot schedule the same kind of lock from any other stream 
-	 *   until that lock is released.
+     *   it cannot schedule the same kind of lock from any other stream
+     *   until that lock is released.
          *      Example:
          *          1. Stream 0 locks M0.
          *          2. Stream 1 locks VCC.
@@ -91,9 +91,9 @@ namespace rocRoller
          *          8. Stream 0 unlocks VCC.
          *          9. Stream 0 unlocks M0.
          *
-         * - If a scheduler schedules a lock for a preemptible dependency, 
-	 *   it cannot schedule a lower-ranked non-preemptible dependency lock 
-	 *   from any stream until that lock is released.
+         * - If a scheduler schedules a lock for a preemptible dependency,
+     *   it cannot schedule a lower-ranked non-preemptible dependency lock
+     *   from any stream until that lock is released.
          *      Examples:
          *          - If stream 0 locks M0, and then we see stream 3 try to lock
          *            Branch, we can't pull from stream 3 until stream 0
