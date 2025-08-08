@@ -817,7 +817,7 @@ namespace GEMMDriverTest
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
 
-                if(true || !res.ok)
+                if(!res.ok)
                 {
                     std::filesystem::path base
                         = std::filesystem::absolute(std::filesystem::path("failures/"));
@@ -827,18 +827,44 @@ namespace GEMMDriverTest
                     }
                     std::filesystem::path asmFilePath
                         = base / fmt::format("{}_{}.s", commandKernel.getKernelName(), iteration);
-                    std::filesystem::path logFilePath
-                        = base / fmt::format("{}_{}.log", commandKernel.getKernelName(), iteration);
+                    std::filesystem::path valuesFilePath
+                        = base / fmt::format("{}_{}.txt", commandKernel.getKernelName(), iteration);
 
                     std::ofstream asmFile(asmFilePath);
-                    std::ofstream logFile(logFilePath);
+                    std::ofstream valuesFile(valuesFilePath);
 
                     std::cout << asmFilePath << std::endl;
-                    std::cout << logFilePath << std::endl;
+                    std::cout << valuesFilePath << std::endl;
 
                     asmFile << commandKernel.getInstructions() << std::endl;
 
-                    const auto instructions = commandKernel.getInstructions();
+                    const auto logMatrix
+                        = [&valuesFile](
+                              const auto& name, const auto& matrix, const auto I, const auto J) {
+                              const auto floatMatrix = unpackToFloat(matrix);
+                              AssertFatal(floatMatrix.size() == I * J,
+                                          ShowValue(floatMatrix.size()),
+                                          ShowValue(I),
+                                          ShowValue(J));
+                              valuesFile << name << "\n";
+                              for(size_t i = 0; i < I; i++)
+                              {
+                                  for(size_t j = 0; j < J; j++)
+                                  {
+                                      auto v = floatMatrix[i * J + j];
+                                      valuesFile << std::setw(16) << std::scientific << v << " ";
+                                  }
+                                  valuesFile << std::endl;
+                              }
+                              valuesFile << std::endl;
+                          };
+
+                    logMatrix("A", hostA, K, M);
+                    logMatrix("B", hostB, N, K);
+                    logMatrix("C", hostC, M, N);
+                    logMatrix("D", d_result, M, N);
+
+                    valuesFile << "Diff\n";
                     for(size_t i = 0; i < M; i++)
                     {
                         for(size_t j = 0; j < N; j++)
@@ -848,11 +874,11 @@ namespace GEMMDriverTest
                             if((a - b) * (a - b) / (b * b)
                                > res.acceptableError.relativeL2Tolerance)
                             {
-                                logFile << std::setw(8) << i << std::setw(8) << j //
-                                        << std::setw(16) << std::scientific << a //
-                                        << std::setw(16) << std::scientific << b //
-                                        << std::setw(16) << std::scientific << a - b //
-                                        << std::endl;
+                                valuesFile << std::setw(8) << i << std::setw(8) << j //
+                                           << std::setw(16) << std::scientific << a //
+                                           << std::setw(16) << std::scientific << b //
+                                           << std::setw(16) << std::scientific << a - b //
+                                           << std::endl;
                             }
                         }
                     }
