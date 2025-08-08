@@ -66,7 +66,7 @@ function(add_rocthrust_test TEST)
             rocthrust
             roc::rocprim_hip
         PUBLIC
-            sqlite3
+            ${ROCTHRUST_SQLITE_LIB}
     )
     if (TARGET GTest::GTest)
         target_link_libraries(${TEST_TARGET}

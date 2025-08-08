@@ -13,6 +13,9 @@
 include(cmake/DownloadProject.cmake)
 include(FetchContent)
 
+# The option of using the SQLite provided by the system, instead of downloading a copy
+option( SQLITE_USE_SYSTEM_PACKAGE "Use SQLite3 from find_package" OFF )
+
 # rocPRIM (https://github.com/ROCmSoftwarePlatform/rocPRIM)
 if(NOT DOWNLOAD_ROCPRIM)
   find_package(rocprim QUIET)
@@ -93,11 +96,16 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   # for cache serialization.  We also want to use a static SQLite,
   # and distro static libraries aren't typically built
   # position-independent.
-  if(DEFINED ENV{SQLITE_3_49_2_SRC_URL})
-    set(SQLITE_3_49_2_SRC_URL_INIT $ENV{SQLITE_3_49_2_SRC_URL})
+  if( SQLITE_USE_SYSTEM_PACKAGE )
+    find_package(SQLite3 3.36 REQUIRED)
+    list(APPEND static_depends PACKAGE SQLite3)
+    set(ROCTHRUST_SQLITE_LIB SQLite::SQLite3)
   else()
-    set(SQLITE_3_49_2_SRC_URL_INIT https://sqlite.org/2025/sqlite-amalgamation-3490200.zip)
-  endif()
+    if(DEFINED ENV{SQLITE_3_49_2_SRC_URL})
+      set(SQLITE_3_49_2_SRC_URL_INIT $ENV{SQLITE_3_49_2_SRC_URL})
+    else()
+      set(SQLITE_3_49_2_SRC_URL_INIT https://sqlite.org/2025/sqlite-amalgamation-3490200.zip)
+    endif()
     set(SQLITE_3_49_2_SRC_URL ${SQLITE_3_49_2_SRC_URL_INIT} CACHE STRING "Location of SQLite source code")
     set(SQLITE_SRC_3_43_2_SHA3_256 fad307cde789046256b4960734d7fec6b31db7f5dc8525474484885faf82866c CACHE STRING "SHA3-256 hash of SQLite source code")
 
@@ -107,30 +115,32 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
       cmake_policy(SET CMP0135 NEW)
     endif()
 
-  message("Downloading SQLite.")
-  FetchContent_Declare(sqlite_local
-    URL ${SQLITE_3_49_2_SRC_URL}
-    URL_HASH SHA3_256=${SQLITE_SRC_3_43_2_SHA3_256}
-  )
-  FetchContent_MakeAvailable(sqlite_local)
+    message("Downloading SQLite.")
+    FetchContent_Declare(sqlite_local
+      URL ${SQLITE_3_49_2_SRC_URL}
+      URL_HASH SHA3_256=${SQLITE_SRC_3_43_2_SHA3_256}
+    )
+    FetchContent_MakeAvailable(sqlite_local)
 
-  add_library(sqlite3 OBJECT ${sqlite_local_SOURCE_DIR}/sqlite3.c)
-  target_include_directories(sqlite3 PUBLIC ${sqlite_local_SOURCE_DIR})
-  set_target_properties( sqlite3 PROPERTIES
-      C_VISIBILITY_PRESET "hidden"
-      VISIBILITY_INLINES_HIDDEN ON
-      POSITION_INDEPENDENT_CODE ON
-      LINKER_LANGUAGE CXX
-  )
+    add_library(sqlite3 OBJECT ${sqlite_local_SOURCE_DIR}/sqlite3.c)
+    target_include_directories(sqlite3 PUBLIC ${sqlite_local_SOURCE_DIR})
+    set_target_properties( sqlite3 PROPERTIES
+        C_VISIBILITY_PRESET "hidden"
+        VISIBILITY_INLINES_HIDDEN ON
+        POSITION_INDEPENDENT_CODE ON
+        LINKER_LANGUAGE CXX
+    )
 
-  # We don't need extensions, and omitting them from SQLite removes the
-  # need for dlopen/dlclose from within rocThrust.
-  # We also don't need the shared cache, and omitting it yields some performance improvements.
-  target_compile_options(
-      sqlite3
-      PRIVATE -DSQLITE_OMIT_LOAD_EXTENSION
-      PRIVATE -DSQLITE_OMIT_SHARED_CACHE
-  )
+    # We don't need extensions, and omitting them from SQLite removes the
+    # need for dlopen/dlclose from within rocThrust.
+    # We also don't need the shared cache, and omitting it yields some performance improvements.
+    target_compile_options(
+        sqlite3
+        PRIVATE -DSQLITE_OMIT_LOAD_EXTENSION
+        PRIVATE -DSQLITE_OMIT_SHARED_CACHE
+    )
+    set(ROCTHRUST_SQLITE_LIB sqlite3)
+  endif()
 endif()
 
 # Benchmark dependencies
