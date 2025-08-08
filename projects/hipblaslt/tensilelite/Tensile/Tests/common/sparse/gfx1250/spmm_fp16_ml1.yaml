@@ -370,6 +370,7 @@ BenchmarkProblems:
         - DepthU: [64, 128]
         - WavefrontSize: [32] # from 64 -> 32 !!!
         - TransposeLDS: [-1]
+        - MaxLDS: [65536] #TODO: remove this once ds const offset issue resolved
         - SourceSwap: [0]
         - LdsPadA: [0]
         - LdsPadB: [0]
