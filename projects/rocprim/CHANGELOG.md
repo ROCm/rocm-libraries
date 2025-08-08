@@ -8,6 +8,12 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Added `get_sreg_lanemask_lt`, `get_sreg_lanemask_le`, `get_sreg_lanemask_gt` and `get_sreg_lanemask_ge`.
 
+### Optimizations
+
+* Improved performance of many algorithms, by updating their tuned configs.
+  * 891 specializations have been improved.
+  * 399 specializations have been added.
+
 ### Upcoming changes
 
 * Deprecated the `->` operator for the `zip_iterator`.
