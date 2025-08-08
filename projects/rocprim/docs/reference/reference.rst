@@ -8,8 +8,6 @@
  rocPRIM API Reference
 ********************************************************************
 
-* :ref:`ops-summary`
-* :ref:`data-type-support`
 * :ref:`dev-index`
 * :ref:`block-index`
 * :ref:`warp-index` 
