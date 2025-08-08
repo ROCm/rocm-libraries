@@ -117,7 +117,7 @@ def run_problems(
     return result
 
 
-def generate_missing_attr_value(attr, run):
+def generate_missing_attr_value(run, attr):
     """Generate value for an option missing in previous rrperf version."""
     match attr:
         case "workgroupMapping":
@@ -142,7 +142,7 @@ def backcast(generator, build_dir):
                 **{f.name:
                     getattr(run, f.name)
                     if hasattr(run, f.name)
-                    else generate_missing_attr_value(f.name, run)
+                    else generate_missing_attr_value(run, f.name)
                     for f in fields(backClass)}
             )
             yield backObj
