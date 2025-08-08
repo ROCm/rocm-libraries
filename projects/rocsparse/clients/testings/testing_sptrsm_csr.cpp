@@ -25,80 +25,6 @@
 template <typename I, typename J, typename T>
 void testing_sptrsm_csr_bad_arg(const Arguments& arg)
 {
-    J        m           = 100;
-    J        n           = 100;
-    J        k           = 16;
-    I        nnz         = 100;
-    const T  local_alpha = 0.6;
-    const T* alpha       = &local_alpha;
-
-    rocsparse_operation  trans_A = rocsparse_operation_none;
-    rocsparse_operation  trans_B = rocsparse_operation_none;
-    rocsparse_index_base base    = rocsparse_index_base_zero;
-    rocsparse_spsm_alg   alg     = rocsparse_spsm_alg_default;
-
-    // Index and data type
-    rocsparse_indextype itype        = get_indextype<I>();
-    rocsparse_indextype jtype        = get_indextype<J>();
-    rocsparse_datatype  compute_type = get_datatype<T>();
-
-    // Create rocsparse handle
-    rocsparse_local_handle local_handle;
-
-    // SpSM structures
-    rocsparse_local_spmat local_A(
-        m, n, nnz, (void*)0x4, (void*)0x4, (void*)0x4, itype, jtype, base, compute_type);
-    rocsparse_local_dnmat local_B(m, k, m, (void*)0x4, compute_type, rocsparse_order_column);
-    rocsparse_local_dnmat local_C(m, k, m, (void*)0x4, compute_type, rocsparse_order_column);
-
-    rocsparse_handle      handle = local_handle;
-    rocsparse_spmat_descr matA   = local_A;
-    rocsparse_dnmat_descr matB   = local_B;
-    rocsparse_dnmat_descr matC   = local_C;
-
-    size_t  local_buffer_size;
-    size_t* buffer_size = &local_buffer_size;
-    void*   temp_buffer = (void*)0x4;
-
-#define PARAMS_BUFFER_SIZE                                                                    \
-    handle, trans_A, trans_B, alpha, matA, matB, matC, compute_type, alg, stage, buffer_size, \
-        temp_buffer
-
-#define PARAMS_ANALYSIS                                                                       \
-    handle, trans_A, trans_B, alpha, matA, matB, matC, compute_type, alg, stage, buffer_size, \
-        temp_buffer
-
-#define PARAMS_SOLVE                                                                          \
-    handle, trans_A, trans_B, alpha, matA, matB, matC, compute_type, alg, stage, buffer_size, \
-        temp_buffer
-
-    {
-        static constexpr int       nargs_to_exclude                  = 1;
-        const int                  args_to_exclude[nargs_to_exclude] = {11};
-        const rocsparse_spsm_stage stage = rocsparse_spsm_stage_buffer_size;
-        select_bad_arg_analysis(
-            rocsparse_spsm, nargs_to_exclude, args_to_exclude, PARAMS_BUFFER_SIZE);
-    }
-
-    {
-        static constexpr int nargs_to_exclude                  = 2;
-        const int            args_to_exclude[nargs_to_exclude] = {10, 11};
-
-        const rocsparse_spsm_stage stage = rocsparse_spsm_stage_preprocess;
-        select_bad_arg_analysis(rocsparse_spsm, nargs_to_exclude, args_to_exclude, PARAMS_ANALYSIS);
-    }
-
-    {
-        static constexpr int nargs_to_exclude                  = 2;
-        const int            args_to_exclude[nargs_to_exclude] = {10, 11};
-
-        const rocsparse_spsm_stage stage = rocsparse_spsm_stage_compute;
-        select_bad_arg_analysis(rocsparse_spsm, nargs_to_exclude, args_to_exclude, PARAMS_SOLVE);
-    }
-
-#undef PARAMS_BUFFER_SIZE
-#undef PARAMS_ANALYSIS
-#undef PARAMS_SOLVE
 }
 
 template <typename I, typename J, typename T>
@@ -106,370 +32,356 @@ void testing_sptrsm_csr(const Arguments& arg)
 {
     J                    M               = arg.M;
     J                    N               = arg.N;
-    J                    K               = arg.K;
-    rocsparse_operation  trans_A         = arg.transA;
-    rocsparse_operation  trans_B         = arg.transB;
-    rocsparse_index_base base            = arg.baseA;
-    rocsparse_spsm_alg   alg             = arg.spsm_alg;
-    rocsparse_diag_type  diag            = arg.diag;
-    rocsparse_fill_mode  uplo            = arg.uplo;
-    rocsparse_order      order_B         = arg.orderB;
-    rocsparse_order      order_C         = arg.orderC;
-    rocsparse_int        ld_multiplier_B = arg.ld_multiplier_B;
-    rocsparse_int        ld_multiplier_C = arg.ld_multiplier_C;
+    const J                    K               = arg.K;
+    const rocsparse_operation  trans_A         = arg.transA;
+    const rocsparse_operation  trans_B         = arg.transB;
+    const rocsparse_index_base base            = arg.baseA;
+    const rocsparse_spsm_alg   alg             = arg.spsm_alg;
+    const rocsparse_diag_type  diag            = arg.diag;
+    const rocsparse_fill_mode  uplo            = arg.uplo;
+    const rocsparse_order      order_B         = arg.orderB;
+    const rocsparse_order      order_C         = arg.orderC;
+    const rocsparse_int        ld_multiplier_B = arg.ld_multiplier_B;
+    const rocsparse_int        ld_multiplier_C = arg.ld_multiplier_C;
 
     // In the generic routines, C is always non-transposed (op(A) * C = op(B))
-    rocsparse_operation trans_C = rocsparse_operation_none;
-
-    T halpha = arg.get_alpha<T>();
-
+    const rocsparse_operation trans_C = rocsparse_operation_none;
+    
+    const host_scalar<T> halpha(arg.get_alpha<T>());
+    
     // Index and data type
-    rocsparse_indextype itype = get_indextype<I>();
-    rocsparse_indextype jtype = get_indextype<J>();
-    rocsparse_datatype  ttype = get_datatype<T>();
+    const rocsparse_datatype  ttype = get_datatype<T>();
 
     // Create rocsparse handle
     rocsparse_local_handle handle(arg);
-
     rocsparse_matrix_factory<T, I, J> matrix_factory(arg);
 
-    // Allocate host memory for matrix
-    host_vector<I> hcsr_row_ptr;
-    host_vector<J> hcsr_col_ind;
-    host_vector<T> hcsr_val;
-
     // Sample matrix
-    I nnz_A;
-    matrix_factory.init_csr(hcsr_row_ptr, hcsr_col_ind, hcsr_val, M, N, nnz_A, base);
-
+    // Allocate host memory for matrix
+    host_csr_matrix<T,I,J> hA;
+    
+    // Sample matrix
+    matrix_factory.init_csr(hA,
+			    M,
+			    N,			  
+			    base);
+    
+    // Non-squared matrices are not supported
+    if(M != N)
+      {
+	return;
+      }
+    
+    const I nnz_A = hA.nnz;
+    
     //
     // Scale values.
     //
     {
-        const size_t       size = hcsr_val.size();
-        floating_data_t<T> mx   = floating_data_t<T>(0);
-        for(size_t i = 0; i < size; ++i)
-        {
-            mx = std::max(mx, std::abs(hcsr_val[i]));
-        }
-        mx = floating_data_t<T>(1.0) / mx;
-        for(size_t i = 0; i < size; ++i)
-        {
-            hcsr_val[i] *= mx;
-        }
+      const size_t       size = nnz_A;
+      floating_data_t<T> mx   = floating_data_t<T>(0);
+      for(size_t i = 0; i < size; ++i)
+	{
+	  mx = std::max(mx, std::abs(hA.val[i]));
+	}
+      mx = floating_data_t<T>(1.0) / mx;
+      for(size_t i = 0; i < size; ++i)
+	{
+	  hA.val[i] *= mx;
+	}
     }
-
-    J B_m = (trans_B == rocsparse_operation_none) ? M : K;
-    J B_n = (trans_B == rocsparse_operation_none) ? K : M;
-
-    J C_m = M;
-    J C_n = K;
-
-    int64_t ldb = (order_B == rocsparse_order_column)
-                      ? ((trans_B == rocsparse_operation_none) ? (int64_t(ld_multiplier_B) * M)
-                                                               : (int64_t(ld_multiplier_B) * K))
-                      : ((trans_B == rocsparse_operation_none) ? (int64_t(ld_multiplier_B) * K)
-                                                               : (int64_t(ld_multiplier_B) * M));
-
-    int64_t ldc = (order_C == rocsparse_order_column) ? (int64_t(ld_multiplier_C) * M)
-                                                      : (int64_t(ld_multiplier_C) * K);
-
-    ldb = std::max(int64_t(1), ldb);
-    ldc = std::max(int64_t(1), ldc);
-
-    int64_t nrowB = (order_B == rocsparse_order_column) ? ldb : B_m;
-    int64_t ncolB = (order_B == rocsparse_order_column) ? B_n : ldb;
-    int64_t nrowC = (order_C == rocsparse_order_column) ? ldc : C_m;
-    int64_t ncolC = (order_C == rocsparse_order_column) ? C_n : ldc;
-
-    // Non-squared matrices are not supported
-    if(M != N)
-    {
-        return;
-    }
-
+    
+    const J B_m = (trans_B == rocsparse_operation_none) ? M : K;
+    const J B_n = (trans_B == rocsparse_operation_none) ? K : M;    
+    const J C_m = M;
+    const J C_n = K;
+    
+    const int64_t ldb = std::max(int64_t(1),
+			   ((order_B == rocsparse_order_column)
+			    ? ((trans_B == rocsparse_operation_none)
+			       ? (int64_t(ld_multiplier_B) * M)
+			       : (int64_t(ld_multiplier_B) * K))
+			    : ((trans_B == rocsparse_operation_none)
+			       ? (int64_t(ld_multiplier_B) * K)
+			       : (int64_t(ld_multiplier_B) * M))) );
+    
+    const int64_t ldc = std::max(int64_t(1),
+			   ((order_C == rocsparse_order_column)
+			    ? (int64_t(ld_multiplier_C) * M)
+			    : (int64_t(ld_multiplier_C) * K)) );
+    
+    const int64_t nrowB = (order_B == rocsparse_order_column) ? ldb : B_m;
+    const int64_t ncolB = (order_B == rocsparse_order_column) ? B_n : ldb;
+    const int64_t nrowC = (order_C == rocsparse_order_column) ? ldc : C_m;
+    const int64_t ncolC = (order_C == rocsparse_order_column) ? C_n : ldc;
+    
     // Allocate host memory for vectors
-    host_dense_matrix<T> htemp(B_m, B_n);
     host_dense_matrix<T> hB(nrowB, ncolB);
-    host_dense_matrix<T> hC_1(nrowC, ncolC);
-    host_dense_matrix<T> hC_2(nrowC, ncolC);
-    host_dense_matrix<T> hC_gold(nrowC, ncolC);
+    
+    {
+      host_dense_matrix<T> htemp(B_m, B_n);
+      rocsparse_matrix_utils::init(htemp);
+      
+      if(order_B == rocsparse_order_column)
+	{
+	  for(J j = 0; j < B_n; j++)
+	    {
+	      for(J i = 0; i < B_m; i++)
+		{
+		  hB[i + ldb * j] = htemp[i + B_m * j];
+		}
+	    }
+	}
+      else
+	{
+	  for(J i = 0; i < B_m; i++)
+	    {
+	      for(J j = 0; j < B_n; j++)
+		{
+		  hB[ldb * i + j] = htemp[B_n * i + j];
+		}
+	    }	
+	}
+    }
 
-    rocsparse_matrix_utils::init(htemp);
-
+    host_dense_matrix<T> hC(nrowC, ncolC);
+    
     // Copy B to C
     if(order_B == rocsparse_order_column)
-    {
-        for(J j = 0; j < B_n; j++)
-        {
-            for(J i = 0; i < B_m; i++)
-            {
-                hB[i + ldb * j] = htemp[i + B_m * j];
-            }
+      {
+	if(trans_B == rocsparse_operation_none)
+	  {
+	    if(order_C == rocsparse_order_column)
+	      {
+		for(J j = 0; j < B_n; j++)
+		  {
+		    for(J i = 0; i < B_m; i++)
+		      {
+			hC[i + ldc * j] = hB[i + ldb * j];
+		      }
+		  }
+	      }
+	    else
+	      {
+		for(J j = 0; j < B_n; j++)
+		  {
+		    for(J i = 0; i < B_m; i++)
+		      {
+			hC[i * ldc + j] = hB[i + ldb * j];
+		      }
+		  }
+	      }
+	  }
+	else
+	  {
+	    if(order_C == rocsparse_order_column)
+	      {
+		for(J j = 0; j < B_n; j++)
+		  {
+		    for(J i = 0; i < B_m; i++)
+		      {
+			hC[i * ldc + j] = hB[i + ldb * j];
+		      }
+		  }
+	      }
+	    else
+	      {
+		for(J j = 0; j < B_n; j++)
+		  {
+		    for(J i = 0; i < B_m; i++)
+		      {
+			hC[i + ldc * j] = hB[i + ldb * j];
+		      }
+		  }
+	      }
         }
-
-        if(trans_B == rocsparse_operation_none)
-        {
-            if(order_C == rocsparse_order_column)
-            {
-                for(J j = 0; j < B_n; j++)
-                {
-                    for(J i = 0; i < B_m; i++)
-                    {
-                        hC_1[i + ldc * j] = hB[i + ldb * j];
-                    }
-                }
-            }
-            else
-            {
-                for(J j = 0; j < B_n; j++)
-                {
-                    for(J i = 0; i < B_m; i++)
-                    {
-                        hC_1[i * ldc + j] = hB[i + ldb * j];
-                    }
-                }
-            }
-        }
-        else
-        {
-            if(order_C == rocsparse_order_column)
-            {
-                for(J j = 0; j < B_n; j++)
-                {
-                    for(J i = 0; i < B_m; i++)
-                    {
-                        hC_1[i * ldc + j] = hB[i + ldb * j];
-                    }
-                }
-            }
-            else
-            {
-                for(J j = 0; j < B_n; j++)
-                {
-                    for(J i = 0; i < B_m; i++)
-                    {
-                        hC_1[i + ldc * j] = hB[i + ldb * j];
-                    }
-                }
-            }
-        }
-    }
+      }
     else
-    {
-        for(J i = 0; i < B_m; i++)
-        {
-            for(J j = 0; j < B_n; j++)
-            {
-                hB[ldb * i + j] = htemp[B_n * i + j];
-            }
-        }
-
-        if(trans_B == rocsparse_operation_none)
-        {
-            if(order_C == rocsparse_order_column)
-            {
-                for(J j = 0; j < B_n; j++)
-                {
-                    for(J i = 0; i < B_m; i++)
-                    {
-                        hC_1[i + ldc * j] = hB[ldb * i + j];
-                    }
-                }
-            }
-            else
-            {
-                for(J j = 0; j < B_n; j++)
-                {
-                    for(J i = 0; i < B_m; i++)
-                    {
-                        hC_1[i * ldc + j] = hB[ldb * i + j];
-                    }
-                }
-            }
-        }
-        else
-        {
-            if(order_C == rocsparse_order_column)
-            {
-                for(J j = 0; j < B_n; j++)
-                {
-                    for(J i = 0; i < B_m; i++)
-                    {
-                        hC_1[i * ldc + j] = hB[ldb * i + j];
-                    }
-                }
-            }
-            else
-            {
-                for(J j = 0; j < B_n; j++)
-                {
-                    for(J i = 0; i < B_m; i++)
-                    {
-                        hC_1[i + ldc * j] = hB[ldb * i + j];
-                    }
-                }
-            }
-        }
-    }
-
-    hC_2    = hC_1;
-    hC_gold = hC_1;
+      {
+	if(trans_B == rocsparse_operation_none)
+	  {
+	    if(order_C == rocsparse_order_column)
+	      {
+		for(J j = 0; j < B_n; j++)
+		  {
+		    for(J i = 0; i < B_m; i++)
+		      {
+			hC[i + ldc * j] = hB[ldb * i + j];
+		      }
+		  }
+	      }
+	    else
+	      {
+		for(J j = 0; j < B_n; j++)
+		  {
+		    for(J i = 0; i < B_m; i++)
+		      {
+			hC[i * ldc + j] = hB[ldb * i + j];
+		      }
+		  }
+	      }
+	  }
+	else
+	  {
+	    if(order_C == rocsparse_order_column)
+	      {
+		for(J j = 0; j < B_n; j++)
+		  {
+		    for(J i = 0; i < B_m; i++)
+		      {
+			hC[i * ldc + j] = hB[ldb * i + j];
+		      }
+		  }
+	      }
+	    else
+	      {
+		for(J j = 0; j < B_n; j++)
+		  {
+		    for(J i = 0; i < B_m; i++)
+		      {
+			hC[i + ldc * j] = hB[ldb * i + j];
+		      }
+		  }
+	      }
+	  }
+      }
+    
 
     if(trans_B == rocsparse_operation_conjugate_transpose)
-    {
+      {
         if(order_C == rocsparse_order_column)
-        {
+	  {
             for(J j = 0; j < C_n; j++)
-            {
+	      {
                 for(J i = 0; i < C_m; i++)
-                {
-                    hC_gold[i + ldc * j] = rocsparse_conj<T>(hC_gold[i + ldc * j]);
-                }
-            }
-        }
+		  {
+                    hC[i + ldc * j] = rocsparse_conj<T>(hC[i + ldc * j]);
+		  }
+	      }
+	  }
         else
-        {
+	  {
             for(J i = 0; i < C_m; i++)
-            {
+	      {
                 for(J j = 0; j < C_n; j++)
-                {
-                    hC_gold[ldc * i + j] = rocsparse_conj<T>(hC_gold[ldc * i + j]);
-                }
-            }
-        }
-    }
+		  {
+                    hC[ldc * i + j] = rocsparse_conj<T>(hC[ldc * i + j]);
+		  }
+	      }
+	  }
+      }
 
     // Allocate device memory
-    device_vector<I>       dcsr_row_ptr(M + 1);
-    device_vector<J>       dcsr_col_ind(nnz_A);
-    device_vector<T>       dcsr_val(nnz_A);
-    device_dense_matrix<T> dB(nrowB, ncolB);
-    device_dense_matrix<T> dC_1(nrowC, ncolC);
-    device_dense_matrix<T> dC_2(nrowC, ncolC);
-    device_vector<T>       dalpha(1);
-
-    // Copy data from CPU to device
-    CHECK_HIP_ERROR(
-        hipMemcpy(dcsr_row_ptr, hcsr_row_ptr.data(), sizeof(I) * (M + 1), hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(
-        hipMemcpy(dcsr_col_ind, hcsr_col_ind.data(), sizeof(J) * nnz_A, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dcsr_val, hcsr_val.data(), sizeof(T) * nnz_A, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dB, hB, sizeof(T) * nrowB * ncolB, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dC_1, hC_1, sizeof(T) * nrowC * ncolC, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dC_2, hC_2, sizeof(T) * nrowC * ncolC, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(dalpha, &halpha, sizeof(T), hipMemcpyHostToDevice));
+    device_csr_matrix<T,I,J> dA(hA);
+    device_dense_matrix<T> dB(hB);
+    device_dense_matrix<T> dC(nrowC, ncolC);    
+    CHECK_HIP_ERROR(hipMemset(dC, 0, sizeof(T) * nrowC * ncolC));
+    
+    device_scalar<T>       dalpha(halpha);
 
     // Create descriptors
-    rocsparse_local_spmat A(
-        M, N, nnz_A, dcsr_row_ptr, dcsr_col_ind, dcsr_val, itype, jtype, base, ttype);
-
+    rocsparse_local_spmat A(dA);
     rocsparse_local_dnmat B(B_m, B_n, ldb, dB, ttype, order_B);
-    rocsparse_local_dnmat C1(C_m, C_n, ldc, dC_1, ttype, order_C);
-    rocsparse_local_dnmat C2(C_m, C_n, ldc, dC_2, ttype, order_C);
+    rocsparse_local_dnmat C(C_m, C_n, ldc, dC, ttype, order_C);
+    rocsparse_error * p_error = nullptr;
+    
+    CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_attribute(A,
+							rocsparse_spmat_fill_mode,
+							&uplo,
+							sizeof(uplo)));
 
-    CHECK_ROCSPARSE_ERROR(
-        rocsparse_spmat_set_attribute(A, rocsparse_spmat_fill_mode, &uplo, sizeof(uplo)));
+    CHECK_ROCSPARSE_ERROR(rocsparse_spmat_set_attribute(A,
+							rocsparse_spmat_diag_type,
+							&diag,
+							sizeof(diag)));
 
-    CHECK_ROCSPARSE_ERROR(
-        rocsparse_spmat_set_attribute(A, rocsparse_spmat_diag_type, &diag, sizeof(diag)));
 
-    // Query SpSM buffer
-    size_t buffer_size;
-    CHECK_ROCSPARSE_ERROR(rocsparse_spsm(handle,
-                                         trans_A,
-                                         trans_B,
-                                         &halpha,
-                                         A,
-                                         B,
-                                         C1,
-                                         ttype,
-                                         alg,
-                                         rocsparse_spsm_stage_buffer_size,
-                                         &buffer_size,
-                                         nullptr));
+    rocsparse_sptrsm_descr sptrsm_descr;
+    CHECK_ROCSPARSE_ERROR(rocsparse_create_sptrsm_descr(&sptrsm_descr));
 
-    // Allocate buffer
-    void* dbuffer;
-    CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
 
-    // Perform analysis on host
-    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-    CHECK_ROCSPARSE_ERROR(rocsparse_spsm(handle,
-                                         trans_A,
-                                         trans_B,
-                                         &halpha,
-                                         A,
-                                         B,
-                                         C1,
-                                         ttype,
-                                         alg,
-                                         rocsparse_spsm_stage_preprocess,
-                                         nullptr,
-                                         dbuffer));
+    //
+    // Set algorithm.
+    //
+    {
+      const rocsparse_sptrsm_alg alg = rocsparse_sptrsm_alg_default;
+      CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_set_input(handle,
+							      sptrsm_descr,
+							      rocsparse_sptrsm_input_alg,
+							      &alg,
+							      sizeof(alg),
+							      p_error));
+    }
 
-    // Perform analysis on device
-    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
-    CHECK_ROCSPARSE_ERROR(rocsparse_spsm(handle,
-                                         trans_A,
-                                         trans_B,
-                                         dalpha,
-                                         A,
-                                         B,
-                                         C2,
-                                         ttype,
-                                         alg,
-                                         rocsparse_spsm_stage_preprocess,
-                                         nullptr,
-                                         dbuffer));
+    //
+    // Set operation A
+    //
+    {
+      const rocsparse_operation operation_A = trans_A;
+      CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_set_input(handle,
+							      sptrsm_descr,
+							      rocsparse_sptrsm_input_operation_A,
+							      &operation_A,
+							      sizeof(operation_A),
+							      p_error));
+    }
+    
+    //
+    // Set operation B
+    //
+    {
+      const rocsparse_operation operation_X = trans_B;
+      CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_set_input(handle,
+						       sptrsm_descr,
+						       rocsparse_sptrsm_input_operation_X,
+						       &operation_X,
+						       sizeof(operation_X),
+						       p_error));
+    }
+    
+    //
+    // Set scalar datatype.
+    //
+    {
+      const rocsparse_datatype scalar_datatype = ttype;
+      CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_set_input(handle,
+						       sptrsm_descr,
+						       rocsparse_sptrsm_input_scalar_datatype,
+						       &scalar_datatype,
+						       sizeof(scalar_datatype),
+						       p_error));
+    }
+    
+
+    {
+      size_t buffer_size_in_bytes;
+      CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_buffer_size( handle,
+							  sptrsm_descr,
+							  A,
+							  B,
+							  C,
+							  rocsparse_sptrsm_stage_analysis,
+							  &buffer_size_in_bytes,
+							  p_error));
+
+      void* buffer;
+      CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size_in_bytes));
+      
+      CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm( handle,
+					      sptrsm_descr,
+					      A,
+					      B,
+					      C,
+					      rocsparse_sptrsm_stage_analysis,
+					      buffer_size_in_bytes,
+					      buffer,
+					      p_error));
+      CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
+    }
+    
 
     if(arg.unit_check)
     {
-        // Solve on host
-        CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-        CHECK_ROCSPARSE_ERROR(testing::rocsparse_spsm(handle,
-                                                      trans_A,
-                                                      trans_B,
-                                                      &halpha,
-                                                      A,
-                                                      B,
-                                                      C1,
-                                                      ttype,
-                                                      alg,
-                                                      rocsparse_spsm_stage_compute,
-                                                      &buffer_size,
-                                                      dbuffer));
-
-        // Solve on device
-        CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
-        CHECK_ROCSPARSE_ERROR(testing::rocsparse_spsm(handle,
-                                                      trans_A,
-                                                      trans_B,
-                                                      dalpha,
-                                                      A,
-                                                      B,
-                                                      C2,
-                                                      ttype,
-                                                      alg,
-                                                      rocsparse_spsm_stage_compute,
-                                                      &buffer_size,
-                                                      dbuffer));
-
-        CHECK_HIP_ERROR(hipDeviceSynchronize());
-
-        if(ROCSPARSE_REPRODUCIBILITY)
-        {
-            rocsparse_reproducibility::save("dC_1", dC_1);
-        }
-        if(ROCSPARSE_REPRODUCIBILITY)
-        {
-            rocsparse_reproducibility::save("dC_2", dC_2);
-        }
-
-        // Copy output to host
-        CHECK_HIP_ERROR(hipMemcpy(hC_1, dC_1, sizeof(T) * nrowC * ncolC, hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(hC_2, dC_2, sizeof(T) * nrowC * ncolC, hipMemcpyDeviceToHost));
-
         // CPU csrsm
         J analysis_pivot = -1;
         J solve_pivot    = -1;
@@ -478,11 +390,11 @@ void testing_sptrsm_csr(const Arguments& arg)
                             nnz_A,
                             trans_A,
                             trans_C,
-                            halpha,
-                            hcsr_row_ptr,
-                            hcsr_col_ind,
-                            hcsr_val,
-                            hC_gold,
+                            halpha[0],
+                            hA.ptr,
+                            hA.ind,
+                            hA.val,
+                            hC,
                             ldc,
                             order_C,
                             diag,
@@ -491,38 +403,136 @@ void testing_sptrsm_csr(const Arguments& arg)
                             &analysis_pivot,
                             &solve_pivot);
 
+	
+	
+	CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle,
+							 rocsparse_pointer_mode_host));
+	
+	CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_set_input(handle,
+							 sptrsm_descr,
+							 rocsparse_sptrsm_input_scalar_alpha,
+							 halpha,
+							 sizeof(const T*),
+							 p_error));
+	
+	size_t buffer_size_in_bytes;
+	CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_buffer_size( handle,
+							    sptrsm_descr,
+							    A,
+							    B,
+							    C,
+							    rocsparse_sptrsm_stage_compute,
+							    &buffer_size_in_bytes,
+							    p_error));
+	
+	void* buffer;
+	CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size_in_bytes));
+	
+	CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm( handle,
+						sptrsm_descr,
+						A,
+						B,
+						C,
+						rocsparse_sptrsm_stage_compute,
+						buffer_size_in_bytes,
+						buffer,
+						p_error));
+	CHECK_HIP_ERROR(hipDeviceSynchronize());
+	
+
+        if(ROCSPARSE_REPRODUCIBILITY)
+        {
+            rocsparse_reproducibility::save("dC_host",
+					    dC);
+        }
+	
         if(analysis_pivot == -1 && solve_pivot == -1)
         {
-            hC_gold.near_check(hC_1);
-            hC_gold.near_check(hC_2);
+            hC.near_check(dC);
         }
+
+	//
+	// Reset.
+	//
+	CHECK_HIP_ERROR(hipMemset(dC, 0, sizeof(T) * nrowC * ncolC));
+	
+        // Solve on device
+	CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle,
+							 rocsparse_pointer_mode_device));
+	
+	CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_set_input(handle,
+								sptrsm_descr,
+								rocsparse_sptrsm_input_scalar_alpha,
+								dalpha,
+								sizeof(const T*),
+								p_error));
+
+	
+	CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm( handle,
+						sptrsm_descr,
+						A,
+						B,
+						C,
+						rocsparse_sptrsm_stage_compute,
+						buffer_size_in_bytes,
+						buffer,
+						p_error));
+	CHECK_HIP_ERROR(hipDeviceSynchronize());
+
+        if(ROCSPARSE_REPRODUCIBILITY)
+        {
+            rocsparse_reproducibility::save("dC_device", dC);
+        }
+
+        if(analysis_pivot == -1 && solve_pivot == -1)
+        {
+            hC.near_check(dC);
+        }
+	CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
     }
 
     if(arg.timing)
     {
-
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+	CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_set_input(handle,
+							 sptrsm_descr,
+							 rocsparse_sptrsm_input_scalar_alpha,
+							 halpha,
+							 sizeof(const T*),
+							 p_error));
+	
+	size_t buffer_size_in_bytes;
+	CHECK_ROCSPARSE_ERROR(rocsparse_sptrsm_buffer_size( handle,
+							    sptrsm_descr,
+							    A,
+							    B,
+							    C,
+							    rocsparse_sptrsm_stage_compute,
+							    &buffer_size_in_bytes,
+							    p_error));
+	
+	void* buffer;
+	CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size_in_bytes));
 
         const double gpu_time_used = rocsparse_clients::run_benchmark(arg,
-                                                                      rocsparse_spsm,
+                                                                      rocsparse_sptrsm,
                                                                       handle,
-                                                                      trans_A,
-                                                                      trans_B,
-                                                                      &halpha,
-                                                                      A,
+                                                                      sptrsm_descr,
+								      A,
                                                                       B,
-                                                                      C1,
-                                                                      ttype,
-                                                                      alg,
-                                                                      rocsparse_spsm_stage_compute,
-                                                                      &buffer_size,
-                                                                      dbuffer);
+                                                                      C,
+                                                                      rocsparse_sptrsm_stage_compute,
+                                                                      buffer_size_in_bytes,
+								      buffer,
+								      p_error);
 
-        double gflop_count = spsv_gflop_count(M, nnz_A, diag) * K;
-        double gpu_gflops  = get_gpu_gflops(gpu_time_used, gflop_count);
+	CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
+	
+        const double gflop_count = spsv_gflop_count(M, nnz_A, diag) * K;
+        const double gpu_gflops  = get_gpu_gflops(gpu_time_used, gflop_count);
 
-        double gbyte_count = csrsv_gbyte_count<T>(M, nnz_A) * K;
-        double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
+        const double gbyte_count = csrsv_gbyte_count<T>(M, nnz_A) * K;
+        const double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
 
         display_timing_info(display_key_t::M,
                             M,
@@ -541,8 +551,7 @@ void testing_sptrsm_csr(const Arguments& arg)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
+    CHECK_ROCSPARSE_ERROR(rocsparse_destroy_sptrsm_descr(sptrsm_descr));
 }
 
 #define INSTANTIATE(ITYPE, JTYPE, TTYPE)                                                 \
@@ -564,7 +573,8 @@ INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
 
 static void testing_sptrsm_csr_extra0(const Arguments& arg)
 {
-    static const bool         verbose = false;
+
+  static const bool         verbose = false;
     const rocsparse_operation trans_A = rocsparse_operation_none;
     rocsparse_operation       trans_B = rocsparse_operation_transpose;
 
@@ -937,20 +947,14 @@ static void
     device_vector<rocsparse_float_complex> dC(m * k);
 
     // Copy data from CPU to device
-    CHECK_HIP_ERROR(hipMemcpy(
-        dcsr_row_ptr, hcsr_row_ptr.data(), sizeof(rocsparse_int) * (m + 1), hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(
-        dcsr_col_ind, hcsr_col_ind.data(), sizeof(rocsparse_int) * nnz_A, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(hipMemcpy(
-        dcsr_val, hcsr_val.data(), sizeof(rocsparse_float_complex) * nnz_A, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(
-        hipMemcpy(dB, hB, sizeof(rocsparse_float_complex) * k * m, hipMemcpyHostToDevice));
-    CHECK_HIP_ERROR(
-        hipMemcpy(dC, hC, sizeof(rocsparse_float_complex) * m * k, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dcsr_row_ptr, hcsr_row_ptr.data(), sizeof(rocsparse_int) * (m + 1), hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dcsr_col_ind, hcsr_col_ind.data(), sizeof(rocsparse_int) * nnz_A, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dcsr_val, hcsr_val.data(), sizeof(rocsparse_float_complex) * nnz_A, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dB, hB, sizeof(rocsparse_float_complex) * k * m, hipMemcpyHostToDevice));
+    CHECK_HIP_ERROR(hipMemcpy(dC, hC, sizeof(rocsparse_float_complex) * m * k, hipMemcpyHostToDevice));
 
     // Create descriptors
-    rocsparse_local_spmat A(
-        m, m, nnz_A, dcsr_row_ptr, dcsr_col_ind, dcsr_val, itype, jtype, base, compute_type);
+    rocsparse_local_spmat A(m, m, nnz_A, dcsr_row_ptr, dcsr_col_ind, dcsr_val, itype, jtype, base, compute_type);
 
     rocsparse_local_dnmat B(k, m, ldb, dB, compute_type, order_B);
     rocsparse_local_dnmat C(m, k, ldc, dC, compute_type, order_C);
@@ -977,8 +981,8 @@ static void
                                          nullptr));
 
     // Allocate buffer
-    void* dbuffer;
-    CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
+    void* buffer;
+    CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
 
     // Perform analysis on host
     CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
@@ -993,7 +997,7 @@ static void
                                          alg,
                                          rocsparse_spsm_stage_preprocess,
                                          nullptr,
-                                         dbuffer));
+                                         buffer));
 
     CHECK_ROCSPARSE_ERROR(testing::rocsparse_spsm(handle,
                                                   trans_A,
@@ -1006,7 +1010,7 @@ static void
                                                   alg,
                                                   rocsparse_spsm_stage_compute,
                                                   &buffer_size,
-                                                  dbuffer));
+                                                  buffer));
 
     CHECK_HIP_ERROR(hipDeviceSynchronize());
 
@@ -1076,7 +1080,7 @@ static void
 
     hC_cpu.unit_check(hC_gpu);
 
-    CHECK_HIP_ERROR(rocsparse_hipFree(dbuffer));
+    CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
 }
 
 static void testing_sptrsm_csr_extra1(const Arguments& arg)
@@ -1085,6 +1089,7 @@ static void testing_sptrsm_csr_extra1(const Arguments& arg)
     spsm_csr_B_conjugate(arg, rocsparse_order_row, rocsparse_order_column);
     spsm_csr_B_conjugate(arg, rocsparse_order_column, rocsparse_order_row);
     spsm_csr_B_conjugate(arg, rocsparse_order_column, rocsparse_order_column);
+
 }
 
 void testing_sptrsm_csr_extra(const Arguments& arg)

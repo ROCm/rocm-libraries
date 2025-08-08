@@ -68,8 +68,7 @@ extern "C" {
 *  which will perform analysis on the sparse matrix \f$op(A)\f$. Finally, the user completes the computation by calling
 *  \p rocsparse_spsm with the stage \ref rocsparse_spsm_stage_compute. The buffer size, buffer allocation, and preprecess
 *  stages only need to be called once for a given sparse triangular matrix \f$op(A)\f$ while the computation stage can be
-*  repeatedly used with different \f$B\f$ and \f$C\f$ matrices. Once all calls to \p rocsparse_spsm are complete, the
-*  temporary buffer can be deallocated.
+*  repeatedly used with different \f$B\f$ and \f$C\f$ matrices. 
 *
 *  As noted above, both \f$B\f$ and \f$C\f$ can be in row or column order (this includes mixing the order so that \f$B\f$ is
 *  row order and \f$C\f$ is column order and vice versa). Internally however, rocSPARSE kernels solve the system assuming the

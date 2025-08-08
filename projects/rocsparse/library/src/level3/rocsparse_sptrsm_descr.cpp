@@ -100,6 +100,11 @@ rocsparse_order _rocsparse_sptrsm_descr::get_Y_order() const
     return this->m_Y_order;
 }
 
+void _rocsparse_sptrsm_descr::set_nrhs(int64_t value)
+{
+  this->m_nrhs = value;
+}
+
 void _rocsparse_sptrsm_descr::set_stage(rocsparse_sptrsm_stage value)
 {
     this->m_stage = value;

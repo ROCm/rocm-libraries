@@ -64,6 +64,7 @@ public:
 
     rocsparse_order get_Y_order() const;
 
+  void             set_nrhs(int64_t);
     void set_stage(rocsparse_sptrsm_stage value);
     void set_alg(rocsparse_sptrsm_alg value);
     void set_scalar_alpha(const void* value);

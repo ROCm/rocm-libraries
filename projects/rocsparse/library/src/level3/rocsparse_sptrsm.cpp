@@ -212,54 +212,57 @@ catch(...)
 
 namespace rocsparse
 {
-    enum class sptrsm_case
+   typedef enum 
     {
         NT_NT,
         T_NT,
         NT_T,
         T_T
-    };
+    } sptrsm_case;
 
     static sptrsm_case sptrsm_get_case(rocsparse_operation X_operation,
                                        rocsparse_order     order_B,
                                        rocsparse_order     order_C)
     {
-        const bool B_is_transposed
-            = (((X_operation == rocsparse_operation_none) && (order_B == rocsparse_order_row))
-               || ((X_operation != rocsparse_operation_none)
-                   && (order_B == rocsparse_order_column)));
-        const bool C_is_transposed = (order_C == rocsparse_order_row);
-
-        if(B_is_transposed && C_is_transposed)
+      const bool B_is_transposed = 
+	((X_operation == rocsparse_operation_none) &&
+	 (order_B == rocsparse_order_row)) ||
+	((X_operation != rocsparse_operation_none) &&
+	 (order_B == rocsparse_order_column));
+      
+      const bool C_is_transposed = (order_C == rocsparse_order_row);
+      
+      if(B_is_transposed && C_is_transposed)
         {
-            // 1) B col order + transposed and C row order
-            // 2) B row order + non-transposed and C row order
-            return sptrsm_case::T_T;
+	  // 1) B col order + transposed and C row order
+	  // 2) B row order + non-transposed and C row order
+	  return sptrsm_case::T_T;
         }
-        else if(B_is_transposed && !C_is_transposed)
+      else if(B_is_transposed && !C_is_transposed)
         {
-            // 1) B col order + transposed and C col order
-            // 2) B row order + non-transposed and C col order
-            return sptrsm_case::T_NT;
+	  // 1) B col order + transposed and C col order
+	  // 2) B row order + non-transposed and C col order
+	  return sptrsm_case::T_NT;	    
         }
-        else if(!B_is_transposed && C_is_transposed)
+      else if(!B_is_transposed && C_is_transposed)
         {
-            // 1) B row order + transposed and C row order
-            // 2) B col order + non-transposed and C row order
-            return sptrsm_case::NT_T;
+	  // 1) B row order + transposed and C row order
+	  // 2) B col order + non-transposed and C row order
+	  return sptrsm_case::NT_T;
         }
-        else
+      else
         {
-            // 1) B row order + transposed and C col order
-            // 2) B col order + non-transposed and C col order
-            return sptrsm_case::NT_NT;
+	  // 1) B row order + transposed and C col order
+	  // 2) B col order + non-transposed and C col order
+	  return sptrsm_case::NT_NT;
         }
     }
-
+  
     static rocsparse_status sptrsm_solve_T_T(rocsparse_handle            handle,
                                              rocsparse_operation         operation,
                                              rocsparse_operation         X_operation,
-                                             const void*                 alpha,
+                                             rocsparse_datatype          alpha_datatype,
+					     const void*                 alpha,
                                              rocsparse_const_spmat_descr A,
                                              rocsparse_const_dnmat_descr X,
                                              const rocsparse_dnmat_descr Y,
@@ -267,9 +270,10 @@ namespace rocsparse
                                              void*                       buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
-        const rocsparse_datatype alpha_datatype = A->data_type;
+	
         // 1) B col order + transposed and C row order
         // 2) B row order + non-transposed and C row order
+	
         void* csrsm_buffer = buffer;
         if(X->rows > 0 && X->cols > 0)
         {
@@ -370,7 +374,8 @@ namespace rocsparse
     static rocsparse_status sptrsm_solve_T_NT(rocsparse_handle            handle,
                                               rocsparse_operation         operation,
                                               rocsparse_operation         X_operation,
-                                              const void*                 alpha,
+                                              rocsparse_datatype          alpha_datatype,
+					      const void*                 alpha,
                                               rocsparse_const_spmat_descr A,
                                               rocsparse_const_dnmat_descr X,
                                               const rocsparse_dnmat_descr Y,
@@ -378,16 +383,16 @@ namespace rocsparse
                                               void*                       buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
-        const rocsparse_datatype alpha_datatype = A->data_type;
-
+        
         const size_t sizeof_datatype = rocsparse::datatype_sizeof(X->data_type);
 
         // 1) B col order + transposed and C col order
         // 2) B row order + non-transposed and C col order
         void* sptrsm_buffer = buffer;
-        void* csrsm_buffer
-            = ((char*)buffer) + ((sizeof_datatype * X->rows * X->cols - 1) / 256 + 1) * 256;
 
+	void* csrsm_buffer
+	  = reinterpret_cast<char*>(buffer) + ((sizeof_datatype * X->rows * X->cols - 1) / 256 + 1) * 256;
+	
         if(X->rows > 0 && X->cols > 0)
         {
             if(X->order == rocsparse_order_column)
@@ -514,6 +519,7 @@ namespace rocsparse
     static rocsparse_status sptrsm_solve_NT_T(rocsparse_handle            handle,
                                               rocsparse_operation         operation,
                                               rocsparse_operation         X_operation,
+					      rocsparse_datatype          alpha_datatype,
                                               const void*                 alpha,
                                               rocsparse_const_spmat_descr A,
                                               rocsparse_const_dnmat_descr X,
@@ -523,7 +529,6 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        const rocsparse_datatype alpha_datatype = A->data_type;
         // 1) B row order + transposed and C row order
         // 2) B col order + non-transposed and C row order
         void* csrsm_buffer = buffer;
@@ -627,6 +632,7 @@ namespace rocsparse
     static rocsparse_status sptrsm_solve_NT_NT(rocsparse_handle            handle,
                                                rocsparse_operation         operation,
                                                rocsparse_operation         X_operation,
+					       const rocsparse_datatype    alpha_datatype,
                                                const void*                 alpha,
                                                rocsparse_const_spmat_descr A,
                                                rocsparse_const_dnmat_descr X,
@@ -635,13 +641,12 @@ namespace rocsparse
                                                void*                       buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
-        const rocsparse_datatype alpha_datatype = A->data_type;
 
         // 1) B row order + transposed and C col order
         // 2) B col order + non-transposed and C col order
         void* sptrsm_buffer = buffer;
         void* csrsm_buffer
-            = ((char*)buffer)
+            = reinterpret_cast<char*>(buffer)
               + ((rocsparse::datatype_sizeof(X->data_type) * X->rows * X->cols - 1) / 256 + 1)
                     * 256;
 
@@ -773,6 +778,7 @@ namespace rocsparse
     static rocsparse_status sptrsm_buffer_size(rocsparse_handle            handle,
                                                rocsparse_sptrsm_descr      sptrsm_descr,
                                                rocsparse_const_spmat_descr A,
+                                               rocsparse_const_dnmat_descr X,
                                                rocsparse_sptrsm_stage      sptrsm_stage,
                                                size_t*                     buffer_size_in_bytes)
     {
@@ -818,16 +824,15 @@ namespace rocsparse
             case rocsparse::sptrsm_case::NT_NT:
             case rocsparse::sptrsm_case::T_NT:
             {
-                *buffer_size_in_bytes
-                    += ((rocsparse::datatype_sizeof(sptrsm_descr->get_X_datatype()) * nrhs * n - 1)
-                            / 256
-                        + 1)
-                       * 256;
-                break;
+	      
+	      *buffer_size_in_bytes
+		+= ((rocsparse::datatype_sizeof(sptrsm_descr->get_X_datatype()) * nrhs * n - 1) / 256 + 1) * 256;
+	      
+	      break;
             }
             case rocsparse::sptrsm_case::T_T:
             case rocsparse::sptrsm_case::NT_T:
-            {
+	      {
                 break;
             }
             }
@@ -836,7 +841,6 @@ namespace rocsparse
 
         case rocsparse_format_coo:
         {
-
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_buffer_size(handle,
                                                                    operation,
                                                                    operation_X,
@@ -862,7 +866,7 @@ namespace rocsparse
             case rocsparse::sptrsm_case::NT_NT:
             case rocsparse::sptrsm_case::T_NT:
             {
-                *buffer_size_in_bytes
+	       *buffer_size_in_bytes
                     += ((rocsparse::datatype_sizeof(sptrsm_descr->get_X_datatype()) * nrhs * n - 1)
                             / 256
                         + 1)
@@ -897,7 +901,6 @@ namespace rocsparse
 
     static rocsparse_status sptrsm(rocsparse_handle            handle,
                                    rocsparse_sptrsm_descr      sptrsm_descr,
-                                   const void*                 alpha,
                                    rocsparse_const_spmat_descr A,
                                    rocsparse_const_dnmat_descr X,
                                    const rocsparse_dnmat_descr Y,
@@ -908,6 +911,7 @@ namespace rocsparse
         ROCSPARSE_ROUTINE_TRACE;
         const rocsparse_operation    operation      = sptrsm_descr->get_operation_A();
         const rocsparse_operation    X_operation    = sptrsm_descr->get_operation_X();
+	const void*                  alpha          = sptrsm_descr->get_scalar_alpha();
         const rocsparse_datatype     alpha_datatype = A->data_type;
         const rocsparse::sptrsm_case sptrsm_case = sptrsm_get_case(X_operation, X->order, Y->order);
 
@@ -940,32 +944,31 @@ namespace rocsparse
             {
             case rocsparse_format_csr:
             {
-                if(A->analysed == false)
+	      if(A->analysed == false)
                 {
-                    RETURN_IF_ROCSPARSE_ERROR(
-                        (rocsparse::csrsm_analysis(handle,
-                                                   operation,
-                                                   X_operation,
-                                                   A->rows,
-                                                   Y->cols,
-                                                   A->nnz,
-                                                   alpha_datatype,
-                                                   alpha,
-                                                   A->descr,
-                                                   A->data_type,
-                                                   A->const_val_data,
-                                                   A->row_type,
-                                                   A->const_row_data,
-                                                   A->col_type,
-                                                   A->const_col_data,
-                                                   Y->data_type,
-                                                   Y->values,
-                                                   Y->ld,
-                                                   A->info,
-                                                   rocsparse_analysis_policy_force,
-                                                   rocsparse_solve_policy_auto,
-                                                   csrsm_buffer)));
-
+		  RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrsm_analysis(handle,
+								      operation,
+								      X_operation,
+								      A->rows,
+								      Y->cols,
+								      A->nnz,
+								      alpha_datatype,
+								      alpha,
+								      A->descr,
+								      A->data_type,
+								      A->const_val_data,
+								      A->row_type,
+								      A->const_row_data,
+								      A->col_type,
+								      A->const_col_data,
+								      Y->data_type,
+								      Y->values,
+								      Y->ld,
+								      A->info,
+								      rocsparse_analysis_policy_force,
+								      rocsparse_solve_policy_auto,
+								      csrsm_buffer));
+		  
                     A->analysed = true;
                 }
                 return rocsparse_status_success;
@@ -975,29 +978,28 @@ namespace rocsparse
             {
                 if(A->analysed == false)
                 {
-                    RETURN_IF_ROCSPARSE_ERROR(
-                        (rocsparse::coosm_analysis(handle,
-                                                   operation,
-                                                   X_operation,
-                                                   A->rows,
-                                                   Y->cols,
-                                                   A->nnz,
-                                                   alpha_datatype,
-                                                   alpha,
-                                                   A->descr,
-                                                   A->data_type,
-                                                   A->const_val_data,
-                                                   A->row_type,
-                                                   A->const_row_data,
-                                                   A->col_type,
-                                                   A->const_col_data,
-                                                   Y->data_type,
-                                                   Y->values,
-                                                   Y->ld,
-                                                   A->info,
-                                                   rocsparse_analysis_policy_force,
-                                                   rocsparse_solve_policy_auto,
-                                                   csrsm_buffer)));
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::coosm_analysis(handle,
+									operation,
+									X_operation,
+									A->rows,
+									Y->cols,
+									A->nnz,
+									alpha_datatype,
+									alpha,
+									A->descr,
+									A->data_type,
+									A->const_val_data,
+									A->row_type,
+									A->const_row_data,
+									A->col_type,
+									A->const_col_data,
+									Y->data_type,
+									Y->values,
+									Y->ld,
+									A->info,
+									rocsparse_analysis_policy_force,
+									rocsparse_solve_policy_auto,
+									csrsm_buffer));
                     A->analysed = true;
                 }
                 return rocsparse_status_success;
@@ -1015,65 +1017,69 @@ namespace rocsparse
         }
 
         case rocsparse_sptrsm_stage_compute:
-        {
+	  {
             switch(sptrsm_case)
-            {
-            case rocsparse::sptrsm_case::T_T:
-            {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::sptrsm_solve_T_T(handle,
-                                                                       operation,
-                                                                       X_operation,
-                                                                       alpha,
-                                                                       A,
-                                                                       X,
-                                                                       Y,
-                                                                       sptrsm_descr->get_alg(),
-                                                                       buffer)));
-                return rocsparse_status_success;
-            }
-            case rocsparse::sptrsm_case::T_NT:
-            {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::sptrsm_solve_T_NT(handle,
-                                                                        operation,
-                                                                        X_operation,
-                                                                        alpha,
-                                                                        A,
-                                                                        X,
-                                                                        Y,
-                                                                        sptrsm_descr->get_alg(),
-                                                                        buffer)));
-                return rocsparse_status_success;
-            }
-            case rocsparse::sptrsm_case::NT_T:
-            {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::sptrsm_solve_NT_T(handle,
-                                                                        operation,
-                                                                        X_operation,
-                                                                        alpha,
-                                                                        A,
-                                                                        X,
-                                                                        Y,
-                                                                        sptrsm_descr->get_alg(),
-                                                                        buffer)));
-                return rocsparse_status_success;
-            }
-            case rocsparse::sptrsm_case::NT_NT:
-            {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::sptrsm_solve_NT_NT(handle,
-                                                                         operation,
-                                                                         X_operation,
-                                                                         alpha,
-                                                                         A,
-                                                                         X,
-                                                                         Y,
-                                                                         sptrsm_descr->get_alg(),
-                                                                         buffer)));
-                return rocsparse_status_success;
-            }
-            }
+	      {
+	      case rocsparse::sptrsm_case::T_T:
+		{
+		  RETURN_IF_ROCSPARSE_ERROR(rocsparse::sptrsm_solve_T_T(handle,
+									operation,
+									X_operation,
+									alpha_datatype,
+									alpha,
+									A,
+									X,
+									Y,
+									sptrsm_descr->get_alg(),
+									buffer));
+		  return rocsparse_status_success;
+		}
+	      case rocsparse::sptrsm_case::T_NT:
+		{
+		  RETURN_IF_ROCSPARSE_ERROR(rocsparse::sptrsm_solve_T_NT(handle,
+									 operation,
+									 X_operation,
+									 alpha_datatype,
+									 alpha,
+									 A,
+									 X,
+									 Y,
+									 sptrsm_descr->get_alg(),
+									 buffer));
+		  return rocsparse_status_success;
+		}
+	      case rocsparse::sptrsm_case::NT_T:
+		{
+		  RETURN_IF_ROCSPARSE_ERROR(rocsparse::sptrsm_solve_NT_T(handle,
+									 operation,
+									 X_operation,
+									 alpha_datatype,
+									 alpha,
+									 A,
+									 X,
+									 Y,
+									 sptrsm_descr->get_alg(),
+									 buffer));
+		  return rocsparse_status_success;
+		}
+	      case rocsparse::sptrsm_case::NT_NT:
+		{
+		  RETURN_IF_ROCSPARSE_ERROR(rocsparse::sptrsm_solve_NT_NT(handle,
+									  operation,
+									  X_operation,
+									  alpha_datatype,
+									  alpha,
+									  A,
+									  X,
+									  Y,
+									  sptrsm_descr->get_alg(),
+									  buffer));
+		  return rocsparse_status_success;
+		}
+	      }
 
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-        }
+	  }
         }
     }
 
@@ -1103,8 +1109,33 @@ try
     ROCSPARSE_CHECKARG_ENUM(5, sptrsm_stage);
     ROCSPARSE_CHECKARG_POINTER(6, buffer_size_in_bytes);
 
-    RETURN_IF_ROCSPARSE_ERROR(
-        rocsparse::sptrsm_buffer_size(handle, sptrsm_descr, A, sptrsm_stage, buffer_size_in_bytes));
+    switch(sptrsm_stage)
+      {	
+      case rocsparse_sptrsm_stage_analysis:
+        {
+	  //
+	  // Let's record X order and X datatype.
+	  //
+	  sptrsm_descr->set_X_datatype(X->data_type);
+	  sptrsm_descr->set_X_order(X->order);
+	  sptrsm_descr->set_Y_datatype(Y->data_type);
+	  sptrsm_descr->set_Y_order(Y->order);
+	  sptrsm_descr->set_nrhs(Y->cols);
+	  break;
+	}
+	
+      case rocsparse_sptrsm_stage_compute:
+        {
+	  break;
+	}	
+      }
+    
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::sptrsm_buffer_size(handle,
+							    sptrsm_descr,
+							    A,
+							    X,
+							    sptrsm_stage,
+							    buffer_size_in_bytes));
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -1117,13 +1148,12 @@ catch(...)
 
 extern "C" rocsparse_status rocsparse_sptrsm(rocsparse_handle            handle, // 0
                                              rocsparse_sptrsm_descr      sptrsm_descr, // 1
-                                             const void*                 alpha, // 2
-                                             rocsparse_const_spmat_descr A, // 3
-                                             rocsparse_const_dnmat_descr X, // 4
-                                             rocsparse_dnmat_descr       Y, // 5
-                                             rocsparse_sptrsm_stage      sptrsm_stage, // 6
-                                             size_t                      buffer_size_in_bytes, // 7
-                                             void*                       buffer, // 8
+                                             rocsparse_const_spmat_descr A, // 2
+                                             rocsparse_const_dnmat_descr X, // 3
+                                             rocsparse_dnmat_descr       Y, // 4
+                                             rocsparse_sptrsm_stage      sptrsm_stage, // 5
+                                             size_t                      buffer_size_in_bytes, // 6
+                                             void*                       buffer, // 7
                                              rocsparse_error*            p_error)
 try
 {
@@ -1131,40 +1161,45 @@ try
 
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(1, sptrsm_descr);
-    ROCSPARSE_CHECKARG_POINTER(2, alpha);
-    ROCSPARSE_CHECKARG_POINTER(3, A);
-    ROCSPARSE_CHECKARG_POINTER(4, X);
-    ROCSPARSE_CHECKARG_POINTER(5, Y);
+    ROCSPARSE_CHECKARG_POINTER(2, A);
+    ROCSPARSE_CHECKARG_POINTER(3, X);
+    ROCSPARSE_CHECKARG_POINTER(4, Y);
 
-    ROCSPARSE_CHECKARG_ENUM(6, sptrsm_stage);
+    ROCSPARSE_CHECKARG_ENUM(5, sptrsm_stage);
 
-    ROCSPARSE_CHECKARG(7,
+    ROCSPARSE_CHECKARG(6,
                        buffer_size_in_bytes,
                        (buffer_size_in_bytes == 0) && (buffer != nullptr),
                        rocsparse_status_invalid_size);
-
-    ROCSPARSE_CHECKARG(8,
+    
+    ROCSPARSE_CHECKARG(7,
                        buffer,
-                       (buffer == nullptr) && (buffer_size_in_bytes == 0),
+                       (buffer == nullptr) && (buffer_size_in_bytes != 0),
                        rocsparse_status_invalid_pointer);
-
+    
     // Check if descriptors are initialized
     // Basically this never happens, but I let it here.
     // LCOV_EXCL_START
-    ROCSPARSE_CHECKARG(3, A, (A->init == false), rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(4, X, (X->init == false), rocsparse_status_not_initialized);
-    ROCSPARSE_CHECKARG(5, Y, (Y->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(2, A, (A->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(3, X, (X->init == false), rocsparse_status_not_initialized);
+    ROCSPARSE_CHECKARG(4, Y, (Y->init == false), rocsparse_status_not_initialized);
     // LCOV_EXCL_STOP
 
     const rocsparse_datatype compute_type = sptrsm_descr->get_scalar_datatype();
 
     // Check for matching types while we do not support mixed precision computation
-    ROCSPARSE_CHECKARG(3, A, (A->data_type != compute_type), rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(4, X, (X->data_type != compute_type), rocsparse_status_not_implemented);
-    ROCSPARSE_CHECKARG(5, Y, (Y->data_type != compute_type), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(2, A, (A->data_type != compute_type), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(3, X, (X->data_type != compute_type), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(4, Y, (Y->data_type != compute_type), rocsparse_status_not_implemented);
 
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::sptrsm(
-        handle, sptrsm_descr, alpha, A, X, Y, sptrsm_stage, buffer_size_in_bytes, buffer));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::sptrsm(handle,
+						sptrsm_descr,
+						A,
+						X,
+						Y,
+						sptrsm_stage,
+						buffer_size_in_bytes,
+						buffer));
 
     return rocsparse_status_success;
     // LCOV_EXCL_START

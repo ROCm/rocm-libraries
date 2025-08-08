@@ -120,24 +120,29 @@ namespace rocsparse
         {
             // 1) B col order + transposed and C row order
             // 2) B row order + non-transposed and C row order
+	  std::cout << "sptrsm_case::T_T " << std::endl;
             return spsm_case::T_T;
         }
         else if(B_is_transposed && !C_is_transposed)
         {
             // 1) B col order + transposed and C col order
             // 2) B row order + non-transposed and C col order
+	  std::cout << "sptrsm_case::T_NT " << std::endl;
             return spsm_case::T_NT;
         }
         else if(!B_is_transposed && C_is_transposed)
         {
             // 1) B row order + transposed and C row order
             // 2) B col order + non-transposed and C row order
+	  std::cout << "sptrsm_case::NT_T " << std::endl;
             return spsm_case::NT_T;
         }
         else
         {
             // 1) B row order + transposed and C col order
             // 2) B col order + non-transposed and C col order
+	  	  std::cout << "sptrsm_case::NT_NT " << std::endl;
+
             return spsm_case::NT_NT;
         }
     }
