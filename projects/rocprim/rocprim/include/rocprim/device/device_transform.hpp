@@ -64,13 +64,13 @@ inline hipError_t launch_transform_for_arch(detail::target_arch arch,
 {
     auto kernel = [=] __device__ (auto arch_config)
     {
-        constexpr auto device_params = decltype(arch_config)::params;
+        constexpr auto params = decltype(arch_config)::params;
 
         detail::transform_kernel_impl<
             IsPointer,
-            device_params.kernel_config.block_size,
-            device_params.kernel_config.items_per_thread,
-            device_params.load_type,
+            params.kernel_config.block_size,
+            params.kernel_config.items_per_thread,
+            params.load_type,
             ResultType>(in, n, out, op);
     };
 

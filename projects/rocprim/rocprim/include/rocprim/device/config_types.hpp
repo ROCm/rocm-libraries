@@ -300,6 +300,27 @@ struct blev_batch_memcpy_kernel_config_selector
                                                    .blev_batch_memcpy_kernel_config.block_size;
 };
 
+template<typename Config, target_arch Arch>
+struct merge_oddeven_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.merge_oddeven_config.block_size;
+};
+
+template<typename Config, target_arch Arch>
+struct merge_mergepath_partition_config_selector
+{
+    static constexpr unsigned int block_size = Config::template architecture_config<Arch>::params
+                                                   .merge_mergepath_partition_config.block_size;
+};
+
+template<typename Config, target_arch Arch>
+struct merge_mergepath_config_selector
+{
+    static constexpr unsigned int block_size
+        = Config::template architecture_config<Arch>::params.merge_mergepath_config.block_size;
+};
+
 template<class Config, target_arch Arch>
 struct target_config
 {
