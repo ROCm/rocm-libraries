@@ -27,15 +27,13 @@ __global__ void kernel(int* clocks)
 
     int temp[ITERS];
 
-    for(int i = 0; i < ITERS; ++i)
-    {
-        temp[i] = uint32_t(uint64_t(shared)) + threadIdx.x * 4 * 32;
-    }
-
 #pragma unroll
     for(int i = 0; i < ITERS; ++i)
     {
-        asm volatile("ds_read_b32 %0, %1 offset:0" : "=v"(temp[i]) : "v"(temp[i]));
+        asm volatile("ds_read_b32 %0, %1 offset:0"
+                     : "=v"(temp[i])
+                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * 4 * 32));
+        // asm volatile("ds_read_b32 v0, %0 offset:0" : : "v"(temp[i]));
         // temp[i] = shared[threadIdx.x];
     }
 
