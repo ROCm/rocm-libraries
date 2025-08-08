@@ -153,12 +153,11 @@ endif()
 
 if(HIPBLASLT_BUNDLE_PYTHON_DEPS)
     set(HIPBLASLT_PYTHON_DEPS "rocisa")
-    find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
+    set(hipblaslt_python_dev Development.Module)
+    hipblaslt_find_python("${hipblaslt_python_dev}")
     hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa/lib" "${asan_opts}")
 else()
-    find_package(Python COMPONENTS Interpreter REQUIRED)
-    # Just pass through to the found python executable and trust that the
-    # user set it up properly.
+    hipblaslt_find_python("${hipblaslt_python_dev}")
     set(HIPBLASLT_PYTHON_COMMAND "${Python_EXECUTABLE}")
 endif()
 

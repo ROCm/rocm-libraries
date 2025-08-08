@@ -1,6 +1,15 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+macro(hipblaslt_find_python python_dev_component)
+    find_package(Python3 3.8 COMPONENTS Interpreter ${python_dev_component} REQUIRED)
+    set(Python_EXECUTABLE "${Python3_EXECUTABLE}")
+    find_package(Python 3.8 COMPONENTS Interpreter ${python_dev_component} REQUIRED)
+    if(NOT "${Python_EXECUTABLE}" STREQUAL "${Python3_EXECUTABLE}")
+        message(WARNING "FindPython and FindPython3 found different executables. You may need to pin -DPython_EXECUTABLE and -DPython3_EXECUTABLE (${Python_EXECUTABLE} vs ${Python3_EXECUTABLE})")
+    endif()
+endmacro()
+
 # Sets the HIPBLASLT_PYTHON_COMMAND variable in the parent scope such that it
 # can invoke the Python interpreter valid for the build parameters. Because
 # this may involve a multi token list, it must be used without quotes in
