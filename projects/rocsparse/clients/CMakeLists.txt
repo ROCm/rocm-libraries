@@ -24,6 +24,24 @@
 # The ROCm platform requires Ubuntu 16.04 or Fedora 24, which has cmake 3.5
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 
+function( apply_omp_settings lib_target_ )
+  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::OpenMP_CXX)
+    set_target_properties( ${lib_target_} PROPERTIES
+      BUILD_RPATH "${HIP_CLANG_ROOT}/lib"
+    )
+    set_target_properties( ${lib_target_} PROPERTIES
+      INSTALL_RPATH "$ORIGIN/../llvm/lib"
+    )
+  elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
+    set_target_properties( ${lib_target_} PROPERTIES
+      BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}"
+    )
+    set_target_properties( ${lib_target_} PROPERTIES
+      INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}"
+    )
+  endif()
+endfunction()
+
 if (rocblas_FOUND)
   message("Build rocSPARSE client with rocBLAS")
   add_compile_options(-DROCSPARSE_WITH_ROCBLAS)
@@ -67,6 +85,19 @@ if ( BUILD_FORTRAN_CLIENTS )
   # Create rocBLAS Fortran module
   add_library(rocsparse_fortran OBJECT ${rocsparse_fortran_source})
 
+endif()
+
+# OpenMP
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
+  set( COMMON_LINK_LIBS "OpenMP::omp")
+  message(STATUS "Found openmp-config.cmake at ${OpenMP_DIR}")
+else()
+  # if it fails to find OpenMP compile and link flags in strange configurations it can just use non-parallel reference computation
+  # if there is no omp.h to find the client compilation will fail and this should be obvious, used to be REQUIRED
+  find_package(OpenMP)
+  if (TARGET OpenMP::OpenMP_CXX)
+    set( COMMON_LINK_LIBS "OpenMP::OpenMP_CXX")
+  endif()
 endif()
 
 # Determine if CXX Compiler is hip-clang
