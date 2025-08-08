@@ -100,7 +100,7 @@ namespace rocRoller
         template <ComponentBase Base>
         ComponentFactory<Base>::ComponentFactory()
         {
-            if(!std::is_same<Base, Assembler>::value)
+            if constexpr(!std::is_same<Base, Assembler>::value)
                 ComponentFactory<Base>::registerImplementations();
         }
 

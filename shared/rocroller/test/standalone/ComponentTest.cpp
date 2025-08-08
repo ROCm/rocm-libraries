@@ -104,13 +104,6 @@ struct BPrinter : public Printer
     }
 };
 
-template <>
-void rocRoller::Component::ComponentFactory<Printer>::registerImplementations()
-{
-    rocRoller::Component::ComponentFactory<Printer>::registerComponent<APrinter>();
-    rocRoller::Component::ComponentFactory<Printer>::registerComponent<BPrinter>();
-}
-
 static_assert(Component<APrinter>);
 static_assert(Component<BPrinter>);
 
@@ -152,4 +145,11 @@ int main(int argc, const char* argv[])
         std::cout << foo.fdsa[i] << std::endl;
 
     return 0;
+}
+
+template <>
+void ComponentFactory<Printer>::registerImplementations()
+{
+    // ComponentFactory<Printer>::registerComponent<APrinter>();
+    // ComponentFactory<Printer>::registerComponent<BPrinter>();
 }
