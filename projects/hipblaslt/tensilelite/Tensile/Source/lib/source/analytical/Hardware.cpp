@@ -33,8 +33,8 @@ namespace TensileLite
         const std::unordered_map<Hardware::Architecture, Hardware::ArchitectureConstants>
             Hardware::ARCH_CONSTANT_MAP
             = {{Hardware::Architecture::gfx90a,
-                Hardware::ArchitectureConstants( // TODO Fix architecture constants for gfx90a
-                    8, 17, 1.21875121875121875122 * 6, 4, 4, 1.5e-2, 1.5)},
+                Hardware::ArchitectureConstants(
+                    1, 5.5, 1.21875121875121875122 * 1.2, 1.2, 4, 3e-2, 1.5)},
                {Hardware::Architecture::gfx942,
                 Hardware::ArchitectureConstants(
                     8, 17, 1.21875121875121875122 * 6, 4, 4, 1.5e-2, 1.5)},
