@@ -67,6 +67,7 @@ namespace rocRoller
         {
             bool yieldedAny = false;
 
+            // a vector of instruction streams
             std::vector<Generator<Instruction>::iterator> iterators;
             co_yield handleNewNodes(seqs, iterators);
 
@@ -76,10 +77,13 @@ namespace rocRoller
 
                 for(size_t i = 0; i < seqs.size(); i++)
                 {
-
                     while(iterators[i] != seqs[i].end())
                     {
-                        co_yield yieldFromStream(iterators[i]);
+                        auto const& instr = *iterators[i];
+                        if(!m_lockstate.isSchedulable(instr, i))
+                            break;
+                        for(auto const& inst : yieldFromStream(iterators[i], i))
+                            co_yield inst;
                         yieldedAny = true;
                     }
 

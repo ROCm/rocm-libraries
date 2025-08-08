@@ -125,6 +125,7 @@ namespace PermLanesTest
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);
         kgraph                     = kgraph.transform(std::make_shared<LoadPacked>(context));
+        kgraph                     = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
         context->schedule(k->preamble());
         context->schedule(k->prolog());

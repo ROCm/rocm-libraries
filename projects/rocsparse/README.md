@@ -6,6 +6,9 @@ sparse computation. It's implemented on top of AMD
 created using the [HIP](https://github.com/ROCm/HIP/) programming
 language and optimized for AMD's latest discrete GPUs.
 
+> [!NOTE]
+> For portability, ROCm provides the **[hipSPARSE](https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparse)** library. hipSPARSE includes a comprehensive, portable interface that supports multiple backends (including rocSPARSE and cuSPARSE). For documentation and examples, see the [hipSPARSE documentation](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
+
 ## Documentation
 
 > [!NOTE]
