@@ -69,13 +69,14 @@ foreach(arch IN LISTS archs)
         COMMAND_EXPAND_LISTS
     )
 
-    list(APPEND extop_cp_depends "extop-library-${arch}")
     add_custom_target(extop-library-${arch} ALL
         DEPENDS
             "${output_code_object_file}"
             ${HIPBLASLT_PYTHON_DEPS}
+            ${extop_cp_depends}
         COMMAND ${HIPBLASLT_PYTHON_COMMAND} "${ops_dir}/ExtOpCreateLibrary.py" --src=${CMAKE_CURRENT_BINARY_DIR} --co=${output_code_object_file} --output=${output_dir} --arch=${arch}
         COMMAND ${CMAKE_COMMAND} -E copy "${output_dir}/hipblasltExtOpLibrary.dat" "${HIPBLASLT_TENSILE_LIBPATH}/library"
         COMMENT "Creating hipblasltExtOpLibrary.dat for ${arch}"
     )
+    list(APPEND extop_cp_depends "extop-library-${arch}")
 endforeach()
