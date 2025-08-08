@@ -919,13 +919,14 @@ void CommAllToAll::ExecuteAsync(const rocfft_plan     plan,
 
     // check that we have as many elems in our count/offset buffers as
     // we have ranks
-    size_t num_ranks    = -1;
-    int    subcomm_rank = -1;
+    size_t num_ranks;
+    int    subcomm_rank;
     if(subcomm)
     {
         int tmp_num_ranks = 0;
         MPI_Comm_size(subcomm, &tmp_num_ranks);
-        assert(tmp_num_ranks >= 0);
+        if(tmp_num_ranks < 0)
+            throw std::runtime_error("Sub-communicator size is not positive");
         num_ranks = static_cast<size_t>(tmp_num_ranks);
         MPI_Comm_rank(subcomm, &subcomm_rank);
     }
