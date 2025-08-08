@@ -27,10 +27,6 @@ if(NOT WIN32)
     enable_language( Fortran )
 endif()
 
-if( NOT TARGET hipblas )
-  find_package( hipblas REQUIRED CONFIG PATHS /opt/rocm/hipblas )
-endif( )
-
 set(hipblas_test_source
   hipblas_gtest_main.cpp
   hipblas_test.cpp
@@ -117,7 +113,7 @@ set( hipblas_test_common
   ${BLIS_CPP}
 )
 
-add_executable( hipblas-test ${hipblas_f90_source} ${hipblas_test_source} ${hipblas_solver_test_source} ${hipblas_test_common} )
+add_executable( hipblas-test ${hipblas_test_source} ${hipblas_solver_test_source} ${hipblas_test_common} )
 
 target_include_directories( hipblas-test
   PRIVATE

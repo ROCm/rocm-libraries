@@ -125,7 +125,9 @@ if(BUILD_ADDRESS_SANITIZER)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
 endif()
 
-add_subdirectory( library )
+if(NOT SKIP_LIBRARY)
+  add_subdirectory(library)
+endif()
 
 include( clients/cmake/build-options.cmake )
 

@@ -47,15 +47,6 @@ else( )
   set( hipblas_source "${CMAKE_CURRENT_SOURCE_DIR}/nvidia_detail/hipblas.cpp" )
 endif( )
 
-set (hipblas_f90_source
-  hipblas_module.f90
-)
-
-# Create hipBLAS Fortran module
-if(NOT WIN32)
-    add_library(hipblas_fortran ${hipblas_f90_source})
-endif()
-
 if(BUILD_ADDRESS_SANITIZER)
     add_link_options(-fuse-ld=lld)
 endif()

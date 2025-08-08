@@ -27,10 +27,6 @@ enable_language( Fortran )
 
 set(hipblas_bench_source client.cpp)
 
-if( NOT TARGET hipblas )
-  find_package( hipblas REQUIRED CONFIG PATHS /opt/rocm/hipblas )
-endif( )
-
 set( hipblas_benchmark_common
       ../common/utility.cpp
       ../common/cblas_interface.cpp
