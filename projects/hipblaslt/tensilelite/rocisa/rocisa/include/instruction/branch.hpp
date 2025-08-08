@@ -44,12 +44,22 @@ namespace rocisa
         {
         }
 
-        std::vector<InstructionInput> getParams() const
+        std::vector<InstructionInput> getParams() const override
         {
             return {labelName};
         }
 
-        std::string toString() const
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {labelName};
+        }
+
+        virtual std::string toString() const override
         {
             return formatWithComment(instStr + " " + labelName);
         }

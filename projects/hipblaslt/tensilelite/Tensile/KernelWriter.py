@@ -169,6 +169,7 @@ class StateValues:
   scheduleGlobalRead: int                = 0
   scheduleLocalWrite: int                = 0
   scheduleIterAlg: int                   = 0
+  stinkyOpt: bool                        = False
   ## ShadowInit
   doShadowInit: int                      = 0
   ## Loop
@@ -255,7 +256,7 @@ class StateValues:
   startVgprAddressDbg: int               = -1
   startVgprAlphaTmp: int                 = -1
   startVgprSerial: int                   = -1
-  startVgprIdentityMatrix: int           = -1 
+  startVgprIdentityMatrix: int           = -1
 
   numSgprSizesSum: int                   = 0
   numSgprSizesFree: int                  = 0
@@ -571,6 +572,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.exclasses = ExternClasses()
 
+    self.sharedFolderPath = ""
+
   ##############################################################################
   # makeSchedule:  Schedule work into interations.
 
@@ -722,7 +725,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         elif mfmaBlockCount >= 2 and mfmaCount == 2:
           # interleave case, we still need nop 0
           waitState = 0
-      
+
     if waitState >= 0:
       dstPackItems.append(SNop(waitState=waitState, comment="nop for x32f emulation"))
 
@@ -859,12 +862,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       #import pdb
       #pdb.set_trace()
       # simple algorithm - do half the reads first:
+      # TODO: remove this half logic after stinkytofu works.
       readsToSchedule = countLocalRead(localReadCode) / 2
       #localReadCode.prettyPrint()
       readItems = localReadCode.flatitems()
       while readItems:
         item = readItems.pop(0)
         #print "readsToSchedule=", readsToSchedule, "item=", item
+        item.name += " iter%s"%(iteration)  # tag for group
         iterCode.add(item)
         readsThisItem = countLocalRead(item)
         if readsThisItem:
@@ -878,6 +883,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # add rest of the reads here
       for item in readItems:
         iterCode.add(item)
+
+      if kernel["1LDSBuffer"]:
+        if localWriteCode.itemsSize() > 0:
+          barrier = Module()
+          barrier.addComment0("1 LDS buffer: read-sync-write")
+          barrier.add(SWaitCnt(dscnt=0, comment=""))
+          barrier.add(SBarrier())
+          iterCode.add(barrier)
 
       #move down write to be the last
       iterCode.add(localWriteCode)
@@ -2943,19 +2956,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.addComment1("iter %u%s"%(u,extraComment))
       plrIdx = (u+pflr) % self.states.numVgprBuffer
       plrIdxDTV = (u+pflr) % kernel["LoopIters"]
-      packPreIdx = (u+pflr) % self.states.numPackBuffer # pack store and pack pre read
-      packIdx = u % self.states.numPackBuffer # pack read
-      # hack: full pack prefetch case, move local read for next loop 1 iter ahead (no change for CMS)
-      uNext = u
-      if kernel["ForceUnrollSubIter"] and self.states.doFullPackCodePrefetch and u >= self.states.numVgprBuffer and not kernel["UseCustomMainLoopSchedule"]:
-        if u == kernel["LoopIters"] - 2:
-          uNext = kernel["LoopIters"] - 1
-          self.states.SubTileIdx = 0 # hack: force to idx0 for next loop
-        elif u == kernel["LoopIters"] - 1:
-          uNext = kernel["LoopIters"] - 2
-      packStoreIdx = (uNext+pflr) % self.states.numPackBuffer
-
-      localReads = Module()
+      localReads = Module("local read")
 
       pointerLWCode = Module()
       pointerLRCode = Module()
@@ -4380,6 +4381,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, beginLabelOnly=False))
 
     loopLabelToNoGRloopAfterABLoop = Label("NoGRloopAfterABLoop", "" )
+    loop = Module("loopBody")
     if needSecondLoop and kernel["PrefetchGlobalRead"] >= 2:
       # force to generate 2 loop bodies (PGR2 only)
       # TODO: unify 2 loop bodies code generation with else case
@@ -4388,27 +4390,29 @@ class KernelWriter(metaclass=abc.ABCMeta):
       dsWriteBA = True if isULSGRO else False
       # second GR buffer check for DTV
       isDTVGRSecondBuf = True if isDTV else False
-      module.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, packPre, 0, loopCopies, False , dsWriteBA=dsWriteBA, isDTVGRSecondBuf=isDTVGRSecondBuf, skipClose=True))
+      loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, 0, loopCopies, False , dsWriteBA=dsWriteBA, isDTVGRSecondBuf=isDTVGRSecondBuf, skipClose=True))
 
       loopCounter = self.loopCounter(kernel, self.states.unrollIdx)
-      module.add(SSubU32(dst=loopCounter, src0=loopCounter, \
+      loop.add(SSubU32(dst=loopCounter, src0=loopCounter, \
                          src1=1, \
                          comment="dec counterL"))
       endCounter = kernel["PrefetchGlobalRead"]
-      module.add(SCmpLeU32(src0=loopCounter, \
+      loop.add(SCmpLeU32(src0=loopCounter, \
                            src1=hex(endCounter), \
                           comment="counteL<=%d"%endCounter))
-      module.add(SCBranchSCC1(labelName=loopLabelToNoGRloopAfterABLoop.getLabelName(), comment="exit LoopL" ))
+      loop.add(SCBranchSCC1(labelName=loopLabelToNoGRloopAfterABLoop.getLabelName(), comment="exit LoopL" ))
       # grBA check for UnrollLoopSwapGlobalReadOrder
       grBA = True if isULSGRO else False
-      module.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, packPre, 1, loopCopies, True , grBA=grBA))
+      loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, 1, loopCopies, True , grBA=grBA))
     else:
       for lc in range(0, loopCopies):
         # second GR buffer check for DTV
         isDTVGRSecondBuf = True if isDTV and lc == 0 else False
         # loop body code generation
         finalLoop = lc == loopCopies - 1
-        module.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, packPre, lc, loopCopies, finalLoop, isDTVGRSecondBuf=isDTVGRSecondBuf ))
+        loop.add(self._loopBody( kernel, tensorParametersA, tensorParametersB, pack, lc, loopCopies, finalLoop, isDTVGRSecondBuf=isDTVGRSecondBuf ))
+    module.add(loop)
+
     if kernel["ExpertSchedulingMode"] > 0:
       module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="enable hardware dependency checking"))
 
@@ -5143,12 +5147,38 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Kernels with epilog especially with activation is too long (50000~ lines).
     # Need to refactor global write elements.
     ripo = rocIsaPassOption()
+    ripo.hardwareConfigPath = self.sharedFolderPath + "/stinkytofu"
     ripo.removeDupFunc = bool(kernel["ActivationFuncCall"])
     ripo.numWaves = kernel["NumThreads"] // kernel["WavefrontSize"]
+    ripo.wavefrontSz = kernel["WavefrontSize"]
+    ripo.ta0  = kernel["MacroTile0"]
+    ripo.tb0  = kernel["MacroTile1"]
+    ripo.tm0   = kernel["DepthU"]
+    bytesPerVGPR = 4
+    ripo.nGRA = int((kernel["NumLoadsCoalescedA"] \
+        * kernel["NumLoadsPerpendicularA"] * kernel["GlobalReadVectorWidthA"] \
+        * kernel["GlobalReadVectorWidthA"] * tensorParametersA["bpeGR"]) \
+        // (tensorParametersA["globalReadInstruction"].blockWidth * bytesPerVGPR))
+
+    ripo.nGRB = int((kernel["NumLoadsCoalescedB"] \
+        * kernel["NumLoadsPerpendicularB"] * kernel["GlobalReadVectorWidthB"] \
+        * kernel["GlobalReadVectorWidthB"] * tensorParametersB["bpeGR"]) \
+        // (tensorParametersB["globalReadInstruction"].blockWidth * bytesPerVGPR))
+    if kernel["ProblemType"]["Sparse"]:
+      ripo.nGRM = (kernel["NumLoadsCoalescedMetadata"] \
+          * kernel["NumLoadsPerpendicularMetadata"] * kernel["GlobalReadVectorWidthMetadata"] \
+          * kernel["GlobalReadVectorWidthMetadata"] * tensorParametersM["bpeGR"]) \
+          // (tensorParametersM["globalReadInstruction"].blockWidth * bytesPerVGPR)
+    else:
+      ripo.nGRM = 0
+
     if kernel["ProblemType"]["ActivationType"] == "all":
       ripo.removeDupAssign = False
     if self.states.archCaps["HasSchedMode"]:
       ripo.insertDelayAlu = True
+    if self.states.stinkyOpt:
+      ripo.stinkyOpt = True
+
     passResult = rocIsaPass(moduleKernelBody, ripo)
     kernel["MathClocksUnrolledLoop"] = passResult.cycles
 
@@ -5221,6 +5251,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.scheduleLocalWrite = kernel["ScheduleLocalWrite"] \
           and kernel["PrefetchGlobalRead"] \
           and kernel["BufferLoad"]  # flat updates lgkmcnt counts = hard to schedule writes and loads?
+      # Temp hack for experimental scheduling config
+      if kernel["ScheduleIterAlg"] == 1:
+        self.states.stinkyOpt = True
+      else:
+
+        self.states.stinkyOpt = False
       self.states.scheduleIterAlg = kernel["ScheduleIterAlg"]
     else:
       self.states.scheduleGlobalRead = 0
@@ -6191,7 +6227,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         maxOffsetMXSA += kernel["LdsOffsetA_Blk"]
         maxOffsetMXSB += kernel["LdsOffsetA_Blk"]
         maxOffsetMetadata += kernel["LdsOffsetA_Blk"]
-        
+
       numVgprMultiplierA = maxOffsetA // maxLDSConstOffset + 1
       numVgprMultiplierB = maxOffsetB // maxLDSConstOffset + 1
       numVgprMultiplierMXSA = maxOffsetMXSA // maxLDSConstOffset + 1
@@ -6315,7 +6351,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         * kernel["NumLoadsPerpendicularB"] * kernel["GlobalReadVectorWidthB"]
     numGlobalReadInstructionsB = int(numGlobalReadsB * tensorParametersB["bpeGR"])// \
         (tensorParametersB["globalReadInstruction"].blockWidth * 4)
-    
+
     if kernel["enableTDMB"]:
       self.states.b.numVgprGlobalReadOffsets = 0
     elif kernel["BufferLoad"]:
@@ -6687,7 +6723,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     self.states.a.startVgprValu = vgprIdx
     vgprIdx += self.states.a.numVgprValu
-    
+
     numVgprValuPackA = 0
     if tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
       self.states.a.startVgprValuPack = vgprIdx
@@ -6725,7 +6761,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         vgprIdx = ((vgprIdx+1)//2)*2
     else:
       vgprIdx = ((vgprIdx+1)//2)*2
-      
+
     self.states.b.startVgprValu = vgprIdx
     vgprIdx += self.states.b.numVgprValu
     numVgprValuPackB = 0
@@ -6786,7 +6822,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if(self.states.archCaps["VgprBank"]):
           vgprIdx += 1
         # gfx1250
-        if self.states.m.numVgprValu >= 2: 
+        if self.states.m.numVgprValu >= 2:
           vgprIdx = ((vgprIdx+1)//2)*2
         self.states.m.startVgprValu = vgprIdx
         vgprIdx += self.states.m.numVgprValu
@@ -6870,7 +6906,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # for cgemm or zgemm + MIAV case, allocate 2 or 4 vgpr for alpha calculation (cannot use tmp vgpr in write batch)
     if kernel["ProblemType"]["DataType"].isComplex() \
-      and kernel["MIArchVgpr"]: 
+      and kernel["MIArchVgpr"]:
 
       # need proper alignment
       vgprIdx = ((vgprIdx+2 - 1)//2)*2
@@ -8372,6 +8408,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     ti = rocIsa.getInstance()
     ti.setData(data)
     ti.setOutputOptions(outOptions)
+
+  def setSharedFolderPath(self, path):
+    self.sharedFolderPath = path
 
   def updateBranchPlaceHolder(self, module, placeholders, targets, operations):
     phs = [ ph for ph in placeholders ]

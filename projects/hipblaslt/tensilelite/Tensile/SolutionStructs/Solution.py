@@ -2040,7 +2040,7 @@ class Solution(collections.abc.Mapping):
         if not state["enableLDSTrB"] and not state["UnrollMajorLDSB"]:
           reject(state, printRejectionReason, "Currently FP4 requires LDSTrInst == True for UnrolledMajorLDSB == False")
           return
-        
+
         # Currently we only support fp4 edge with AssertFree0(1)ElementMultiple = 2.
         # TODO: Enalbe edge with arbitrary number
         state["AssertFree0ElementMultiple"] = 2
@@ -3777,6 +3777,9 @@ class Solution(collections.abc.Mapping):
         state["1LDSBuffer"] = 0
       else:
         state["1LDSBuffer"] = 1
+
+    if state["ScheduleIterAlg"] == 1:
+      state["ScheduleLocalWrite"] = 0
 
     if state["1LDSBuffer"]:
       if not state["PrefetchGlobalRead"]:

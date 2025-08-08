@@ -1,0 +1,206 @@
+/* ************************************************************************
+ * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ *
+ * ************************************************************************ */
+#pragma once
+
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace stinkytofu
+{
+    /// Token kinds for the IR lexer.
+    enum class TokenKind
+    {
+        // Structural tokens
+        Eof, // End of file
+        Newline, // Line break
+        Colon, // ':'
+        LeftBracket, // '['
+        RightBracket, // ']'
+        Comma, // ','
+
+        // Literals
+        Identifier, // Instruction names, register types, labels
+        IntegerLiteral, // Integer constants
+        HexLiteral, // Hexadecimal constants (0x...)
+
+        // Register and operand markers
+        VReg, // v[...]
+        SReg, // s[...]
+        AccReg, // acc[...]
+        SccReg, // SCC[...]
+        BarrierReg, // BARRIER[...]
+        DSWriteReg, // DS_WRITE[...]
+
+        // Special identifiers
+        Dest, // "Dest:"
+        Src, // "Src :"
+        IssueCycles, // "issueCycles:"
+        LatencyCycles, // "latencyCycles:"
+
+        // Invalid token
+        Unknown
+    };
+
+    /// Represents a single token in the IR stream.
+    class Token
+    {
+    public:
+        TokenKind        kind;
+        std::string_view text;
+        unsigned         line;
+        unsigned         column;
+
+        Token(TokenKind k, std::string_view t, unsigned l, unsigned c)
+            : kind(k)
+            , text(t)
+            , line(l)
+            , column(c)
+        {
+        }
+
+        Token()
+            : kind(TokenKind::Unknown)
+            , line(0)
+            , column(0)
+        {
+        }
+
+        bool is(TokenKind k) const
+        {
+            return kind == k;
+        }
+
+        bool isNot(TokenKind k) const
+        {
+            return kind != k;
+        }
+
+        bool isOneOf(TokenKind k1, TokenKind k2) const
+        {
+            return is(k1) || is(k2);
+        }
+
+        template <typename... Ts>
+        bool isOneOf(TokenKind k1, TokenKind k2, Ts... ks) const
+        {
+            return is(k1) || isOneOf(k2, ks...);
+        }
+
+        std::string_view getText() const
+        {
+            return text;
+        }
+
+        unsigned getLine() const
+        {
+            return line;
+        }
+
+        unsigned getColumn() const
+        {
+            return column;
+        }
+    };
+
+    /// Lexer for the StinkyTofu IR text format.
+    /// Converts the input text into a stream of tokens.
+    class IRLexer
+    {
+    private:
+        const char*        bufferStart;
+        const char*        bufferEnd;
+        const char*        curPtr;
+        unsigned           currentLine;
+        unsigned           currentColumn;
+        std::vector<Token> tokens;
+        size_t             currentTokenIndex;
+
+    public:
+        /// Initialize the lexer with the input buffer.
+        IRLexer(const char* start, const char* end);
+        IRLexer(const std::string& input);
+
+        /// Lex the entire input and store tokens.
+        void lex();
+
+        /// Get the next token without consuming it.
+        const Token& peek() const;
+
+        /// Get the next token and advance.
+        const Token& consume();
+
+        /// Check if we're at the end of the token stream.
+        bool isAtEnd() const;
+
+        /// Get all tokens (useful for debugging).
+        const std::vector<Token>& getAllTokens() const
+        {
+            return tokens;
+        }
+
+    private:
+        /// Lex a single token.
+        Token lexToken();
+
+        /// Skip whitespace (but not newlines).
+        void skipWhitespace();
+
+        /// Skip whitespace including newlines.
+        void skipWhitespaceAndNewlines();
+
+        /// Lex an identifier or keyword.
+        Token lexIdentifier();
+
+        /// Lex a numeric literal.
+        Token lexNumber();
+
+        /// Check if a character is whitespace (excluding newline).
+        static bool isWhitespace(char c);
+
+        /// Check if a character can start an identifier.
+        static bool isIdentifierStart(char c);
+
+        /// Check if a character can continue an identifier.
+        static bool isIdentifierContinue(char c);
+
+        /// Check if a character is a digit.
+        static bool isDigit(char c);
+
+        /// Check if a character is a hex digit.
+        static bool isHexDigit(char c);
+
+        /// Get current character without advancing.
+        char peekChar() const;
+
+        /// Get current character and advance.
+        char consumeChar();
+
+        /// Check if at end of buffer.
+        bool isAtBufferEnd() const;
+
+        /// Get token kind for a keyword or identifier.
+        TokenKind getIdentifierKind(std::string_view text);
+    };
+
+} // namespace stinkytofu

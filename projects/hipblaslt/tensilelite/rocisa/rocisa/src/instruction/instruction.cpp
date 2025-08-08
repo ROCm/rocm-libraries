@@ -43,6 +43,16 @@ namespace rocisa
         {
             NB_OVERRIDE_PURE(getParams);
         }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            NB_OVERRIDE_PURE(getDstParams);
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            NB_OVERRIDE_PURE(getSrcParams);
+        }
     };
 
     struct PyCompositeInstruction : public CompositeInstruction
