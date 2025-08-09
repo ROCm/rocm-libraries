@@ -389,23 +389,19 @@ amdhsa.kernels:
                 });
 
             auto lds = Register::Value::AllocateLDS(
-                m_context, DataType::Raw32, workgroupSize * 4 * strideMultiplier);
+                m_context, DataType::Raw32, workgroupSize * strideMultiplier * instrDwords);
             auto ldsOffset = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Int32, 1);
-            co_yield m_context->copier()->copy(
-                ldsOffset, Register::Value::Literal(lds->getLDSAllocation()->offset()));
             auto workitemIndex = m_context->kernel()->workitemIndex()[0];
-            co_yield Expression::generate(ldsOffset,
-                                          ldsOffset->expression()
-                                              + workitemIndex->expression()
-                                                    * Expression::literal(4 * strideMultiplier),
-                                          m_context);
+            co_yield Expression::generate(
+                ldsOffset,
+                Expression::literal(lds->getLDSAllocation()->offset())
+                    + workitemIndex->expression()
+                          * Expression::literal(4 * strideMultiplier * instrDwords),
+                m_context);
 
-            auto i = Register::Value::Placeholder(m_context,
-                                                  Register::Type::Scalar,
-                                                  DataType::UInt32,
-                                                  k->wavefront_size() / 32,
-                                                  Register::AllocationOptions::FullyContiguous());
+            auto i = Register::Value::Placeholder(
+                m_context, Register::Type::Scalar, DataType::UInt64, 1);
             co_yield Expression::generate(i, Expression::literal(loops + 1), m_context);
 
             auto label = m_context->labelAllocator()->label("label");
