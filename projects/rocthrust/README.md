@@ -6,7 +6,7 @@
 Thrust is a parallel algorithm library. It has been ported to
 [HIP](https://github.com/ROCm/HIP) and [ROCm](https://www.github.com/ROCm/ROCm), which use
 the [rocPRIM](https://github.com/ROCm/rocPRIM) library. The HIP-ported library
-works on HIP and ROCm software. Currently there is no CUDA backend in place.
+works on HIP and ROCm software.
 
 ## Requirements
 
