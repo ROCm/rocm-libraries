@@ -351,10 +351,10 @@ amdhsa.kernels:
         const auto one  = std::make_shared<Expression::Expression>(1u);
         const auto zero = std::make_shared<Expression::Expression>(0u);
 
-        const auto workgroupSize     = 256u;
-        auto       workitemCountExpr = Expression::literal(workgroupSize);
+        const auto workgroupSize = 256u;
+        auto       workitemCount = Expression::literal(8 * workgroupSize);
         k->setWorkgroupSize({workgroupSize, 1, 1});
-        k->setWorkitemCount({workitemCountExpr, one, one});
+        k->setWorkitemCount({workitemCount, one, one});
         k->setDynamicSharedMemBytes(zero);
 
         m_context->schedule(k->preamble());
