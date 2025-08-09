@@ -1,5 +1,5 @@
 #!/bin/bash -ex
-INSTR_WIDTH=$1
+export INSTR_WIDTH=$1
 
 # Due how rocprofv3 works, sometimes data is not recorded and thus needs to be re-ran
 # If the output is too short (i.e. only csv headers), repeat the run
@@ -10,14 +10,13 @@ rm -rf $DIR/; mkdir $DIR/
 
 ROCPROF_DIR=rocprof_$INSTR_WIDTH
 
-for (( i=0; i<=8; i++ )); do
-    EXE="./prog_${i}_${INSTR_WIDTH}".out
+for (( i=1; i<=32; i*=2 )); do
+    # EXE="./prog_${i}_${INSTR_WIDTH}".out
+    # hipcc ../hip.cpp -DBYTE_STRIDE="$i" -DINSTR_WIDTH=$INSTR_WIDTH -O3 -o $EXE
 
-    hipcc ../hip.cpp -DBYTE_STRIDE="$i" -DINSTR_WIDTH=$INSTR_WIDTH -O3 -o $EXE
-
-
-    while true; do
-        echo "Trying BYTE_STRIDE=$i"
+    while true; do # loop in case of https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/amd-mainline/how-to/using-thread-trace.html#troubleshooting
+        echo "Trying INSTR_WIDTH=$INSTR_WIDTH BYTE_STRIDE=$i"
+        export BYTE_STRIDE=$i
 
         rm $ROCPROF_DIR/ -rf
 
@@ -52,8 +51,6 @@ for (( i=0; i<=8; i++ )); do
         fi
     done
     
-    exit
-
-    rm ./$EXE
+    # rm ./$EXE
 
 done

@@ -363,13 +363,20 @@ amdhsa.kernels:
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
 
+        auto strideMultiplier = 1;
+        if(const char* env_p = std::getenv("BYTE_STRIDE"))
+            strideMultiplier = atoi(env_p); // adjust for bank conflict
+
+        auto instrDwords = 1;
+        if(const char* env_p = std::getenv("INSTR_WIDTH"))
+            instrDwords = atoi(env_p); // e.g. 1 for ds_read_b32
+
         auto kb = [&]() -> Generator<Instruction> {
-            const auto instrDwords      = 4; // e.g. 1 for ds_read_b32
-            const auto strideMultiplier = 32; // adjust for bank conflict
             const auto loops
                 = 0; // Loop due to suspecting instruction cache causing latency, doesn't seem to change anything from testing
-            const auto dstRegCount = 128;
-            const auto count       = dstRegCount / instrDwords;
+            const auto dstRegCount = 192;
+            const auto count
+                = dstRegCount / instrDwords; // number of instructions put one after another
 
             auto dst = Register::Value::Placeholder(
                 m_context,
