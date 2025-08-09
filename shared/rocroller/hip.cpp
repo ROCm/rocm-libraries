@@ -19,22 +19,18 @@ template <int byte_stride = BYTE_STRIDE, int instr = INSTR_WIDTH>
 __global__ void kernel(int* clocks)
 {
     __shared__ uint32_t shared[16128];
-    const int           stride = 4 * 2;
-
     // clock_t start = clock();
 
     const int ITERS = 64;
-
-    int temp[ITERS];
+    int       temp[ITERS];
+    uint32_t  offset = uint32_t(uint64_t(shared)) + threadIdx.x * 4 * 32;
 
 #pragma unroll
     for(int i = 0; i < ITERS; ++i)
     {
-        asm volatile("ds_read_b32 %0, %1 offset:0"
-                     : "=v"(temp[i])
-                     : "v"(uint32_t(uint64_t(shared)) + threadIdx.x * 4 * 32));
-        // asm volatile("ds_read_b32 v0, %0 offset:0" : : "v"(temp[i]));
-        // temp[i] = shared[threadIdx.x];
+        // asm volatile("ds_read_b32 %0, %1" : "=v"(temp[i]) : "v"(offset));
+        // asm volatile("ds_read_b32 v10, %0" : : "v"(offset));
+        temp[i] = shared[offset + i * 32];
     }
 
     __syncthreads();

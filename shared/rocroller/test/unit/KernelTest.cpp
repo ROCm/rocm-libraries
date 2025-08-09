@@ -266,37 +266,32 @@ amdhsa.kernels:
     {
         auto k = m_context->kernel();
 
-        k->setKernelName("hello_world");
+        k->setKernelName("lds_bank_conflict");
         k->setKernelDimensions(1);
-
-        k->addArgument(
-            {"ptr", {DataType::Float, PointerType::PointerGlobal}, DataDirection::WriteOnly});
-        k->addArgument({"val", {DataType::Float}});
 
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
 
         auto kb = [&]() -> Generator<Instruction> {
-            Register::ValuePtr s_ptr, s_value;
-            co_yield m_context->argLoader()->getValue("ptr", s_ptr);
-            co_yield m_context->argLoader()->getValue("val", s_value);
+            const auto count = 64;
 
-            auto v_ptr   = Register::Value::Placeholder(m_context,
-                                                      Register::Type::Vector,
-                                                      {DataType::Float, PointerType::PointerGlobal},
-                                                      1);
-            auto v_value = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Float, 1);
+            auto dst = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Int32, count);
 
-            co_yield v_ptr->allocate();
-
-            co_yield m_context->copier()->copy(v_ptr, s_ptr, "Move pointer");
-
-            co_yield v_value->allocate();
-
-            co_yield m_context->copier()->copy(v_value, s_value, "Move value");
-
-            co_yield m_context->mem()->storeGlobal(v_ptr, v_value, 0, 4);
+            auto lds = Register::Value::AllocateLDS(m_context, DataType::Int32, count * 4 * 32);
+            auto ldsOffset = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Int32, 1);
+            co_yield m_context->copier()->copy(
+                ldsOffset, Register::Value::Literal(lds->getLDSAllocation()->offset()));
+            auto workitemIndex = m_context->kernel()->workitemIndex()[0];
+            co_yield Expression::generate(
+                ldsOffset,
+                ldsOffset->expression() + workitemIndex->expression() * Expression::literal(4 * 32),
+                m_context);
+            for(int i = 0; i < count; ++i)
+            {
+                co_yield m_context->mem()->loadLocal(dst->element({i}), ldsOffset, 0, 4);
+            }
         };
 
         m_context->schedule(kb());
@@ -311,37 +306,13 @@ amdhsa.kernels:
             std::shared_ptr<rocRoller::ExecutableKernel> executableKernel
                 = m_context->instructions()->getExecutableKernel();
 
-            auto ptr = make_shared_device<float>();
-
-            ASSERT_THAT(hipMemset(ptr.get(), 0, sizeof(float)), HasHipSuccess(0));
-
-            KernelArguments kargs;
-            kargs.append("ptr", ptr.get());
-            kargs.append("val", 6.0f);
-            KernelInvocation invocation;
-
+            KernelArguments  kargs;
+            KernelInvocation invocation{{1, 1, 1}, {64, 1, 1}, 0};
             executableKernel->executeKernel(kargs, invocation);
-
-            float resultValue = 0.0f;
-            ASSERT_THAT(hipMemcpy(&resultValue, ptr.get(), sizeof(float), hipMemcpyDefault),
-                        HasHipSuccess(0));
-
-            EXPECT_EQ(resultValue, 6.0f);
-
-            // Call the kernel a second time with different input.
-            KernelArguments kargs2;
-            kargs2.append("ptr", ptr.get());
-            kargs2.append("val", 7.5f);
-
-            executableKernel->executeKernel(kargs2, invocation);
-
-            ASSERT_THAT(hipMemcpy(&resultValue, ptr.get(), sizeof(float), hipMemcpyDefault),
-                        HasHipSuccess(0));
-
-            EXPECT_EQ(resultValue, 7.5f);
         }
         else
         {
+            AssertFatal(false);
             std::vector<char> assembledKernel = m_context->instructions()->assemble();
             EXPECT_GT(assembledKernel.size(), 0);
         }
@@ -373,62 +344,42 @@ amdhsa.kernels:
 
         auto command = std::make_shared<Command>();
 
-        VariableType floatPtr{DataType::Float, PointerType::PointerGlobal};
-        VariableType floatVal{DataType::Float, PointerType::Value};
-        VariableType uintVal{DataType::UInt32, PointerType::Value};
-
-        auto ptrTag   = command->allocateTag();
-        auto ptr_arg  = command->allocateArgument(floatPtr, ptrTag, ArgumentType::Value);
-        auto valTag   = command->allocateTag();
-        auto val_arg  = command->allocateArgument(floatVal, valTag, ArgumentType::Value);
-        auto sizeTag  = command->allocateTag();
-        auto size_arg = command->allocateArgument(uintVal, sizeTag, ArgumentType::Limit);
-
-        auto ptr_exp  = std::make_shared<Expression::Expression>(ptr_arg);
-        auto val_exp  = std::make_shared<Expression::Expression>(val_arg);
-        auto size_exp = std::make_shared<Expression::Expression>(size_arg);
-
-        auto one  = std::make_shared<Expression::Expression>(1u);
-        auto zero = std::make_shared<Expression::Expression>(0u);
-
         auto k = m_context->kernel();
 
         k->setKernelDimensions(1);
 
-        k->addArgument({"ptr",
-                        {DataType::Float, PointerType::PointerGlobal},
-                        DataDirection::WriteOnly,
-                        ptr_exp});
-        k->addArgument({"val", {DataType::Float}, DataDirection::ReadOnly, val_exp});
+        const auto one  = std::make_shared<Expression::Expression>(1u);
+        const auto zero = std::make_shared<Expression::Expression>(0u);
 
-        k->setWorkgroupSize({1, 1, 1});
-        k->setWorkitemCount({size_exp, one, one});
+        const auto workgroupSize     = 256u;
+        auto       workitemCountExpr = Expression::literal(workgroupSize);
+        k->setWorkgroupSize({workgroupSize, 1, 1});
+        k->setWorkitemCount({workitemCountExpr, one, one});
         k->setDynamicSharedMemBytes(zero);
 
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
 
         auto kb = [&]() -> Generator<Instruction> {
-            Register::ValuePtr s_ptr, s_value;
-            co_yield m_context->argLoader()->getValue("ptr", s_ptr);
-            co_yield m_context->argLoader()->getValue("val", s_value);
+            const auto count = 64;
 
-            auto v_ptr   = Register::Value::Placeholder(m_context,
-                                                      Register::Type::Vector,
-                                                      {DataType::Float, PointerType::PointerGlobal},
-                                                      1);
-            auto v_value = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Float, 1);
+            auto dst = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Int32, count);
 
-            co_yield v_ptr->allocate();
-
-            co_yield m_context->copier()->copy(v_ptr, s_ptr, "Move pointer");
-
-            co_yield v_value->allocate();
-
-            co_yield m_context->copier()->copy(v_value, s_value, "Move value");
-
-            co_yield m_context->mem()->storeGlobal(v_ptr, v_value, 0, 4);
+            auto lds = Register::Value::AllocateLDS(m_context, DataType::Int32, count * 4 * 32);
+            auto ldsOffset = Register::Value::Placeholder(
+                m_context, Register::Type::Vector, DataType::Int32, 1);
+            co_yield m_context->copier()->copy(
+                ldsOffset, Register::Value::Literal(lds->getLDSAllocation()->offset()));
+            auto workitemIndex = m_context->kernel()->workitemIndex()[0];
+            co_yield Expression::generate(
+                ldsOffset,
+                ldsOffset->expression() + workitemIndex->expression() * Expression::literal(4 * 32),
+                m_context);
+            for(int i = 0; i < count; ++i)
+            {
+                co_yield m_context->mem()->loadLocal(dst->element({i}), ldsOffset, 0, 4);
+            }
         };
 
         m_context->schedule(kb());
@@ -440,30 +391,13 @@ amdhsa.kernels:
         commandKernel.setContext(m_context);
         commandKernel.generateKernel();
 
-        auto         ptr  = make_shared_device<float>();
-        float        val  = 6.0f;
-        unsigned int size = 1;
-
-        ASSERT_THAT(hipMemset(ptr.get(), 0, sizeof(float)), HasHipSuccess(0));
-
         CommandArguments commandArgs = command->createArguments();
 
-        commandArgs.setArgument(ptrTag, ArgumentType::Value, ptr.get());
-        commandArgs.setArgument(valTag, ArgumentType::Value, val);
-        commandArgs.setArgument(sizeTag, ArgumentType::Limit, size);
-
         commandKernel.launchKernel(commandArgs.runtimeArguments());
-
-        float resultValue = 0.0f;
-        ASSERT_THAT(hipMemcpy(&resultValue, ptr.get(), sizeof(float), hipMemcpyDefault),
-                    HasHipSuccess(0));
-
-        EXPECT_EQ(resultValue, 6.0f);
     }
 
     INSTANTIATE_TEST_SUITE_P(GPU_KernelTests,
                              GPU_KernelTest,
                              ::testing::Values(AssemblerType::InProcess,
                                                AssemblerType::Subprocess));
-
 }

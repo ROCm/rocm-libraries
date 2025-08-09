@@ -28,17 +28,17 @@ for (( i=0; i<=8; i++ )); do
         export ROCROLLER_SAVE_ASSEMBLY=1
         # EXE="../scripts/rrperf run --suite fp4_target_d2lds_mi16x16x128_pf4x1_wgm"
         # EXE="./client/rocroller-gemm --m=1024 --n=1024 --k=512 generate validate"
-        # EXE="./test/rocroller-tests --gtest_filter=*GPU_KernelTest.GPU_WholeKernel/1*"
+        EXE="./test/rocroller-tests --gtest_filter=*GPU_KernelTest.GPU_WholeKernel/1*"
         # EXE="./test/rocroller-tests --gtest_filter=*ARCH_KernelTest.GPU_WholeKernel/10*"
         # EXE="./test/rocroller-tests --gtest_filter=*GEMMTest/GEMMTestGPU.GPU_BasicGEMM/0*"
         $ROCPROF --att \
         -d ${ROCPROF_DIR}/ \
         --att-perfcounter-ctrl=8 \
-        --att-perfcounters="SQ_INST_LEVEL_VMEM,SQ_INST_LEVEL_LDS,SQ_LDS_IDX_ACTIVE,SQ_LDS_BANK_CONFLICT,SQ_LDS_UNALIGNED_STALL" \
+        --att-perfcounters="SQ_LDS_BANK_CONFLICT,SQ_LDS_IDX_ACTIVE,SQ_LDS_MEM_VIOLATIONS,SQ_INST_LEVEL_LDS" \
         --att-target-cu=1 \
-        --att-shader-engine-mask=0x1 -- $EXE
+        --att-shader-engine-mask=0xFFFFFFFF -- $EXE
 
-        { output="$(cat $ROCPROF_DIR/stats_ui_output_agent_*_dispatch_2.csv)"; }
+        { output="$(cat $ROCPROF_DIR/stats_ui_output_agent_*_dispatch_1.csv)"; }
 
         len=${#output}
 
