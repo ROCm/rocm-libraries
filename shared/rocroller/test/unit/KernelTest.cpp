@@ -352,7 +352,7 @@ amdhsa.kernels:
         const auto zero = std::make_shared<Expression::Expression>(0u);
 
         const auto workgroupSize = 256u;
-        auto       workitemCount = Expression::literal(8 * workgroupSize);
+        auto       workitemCount = Expression::literal(64 * workgroupSize);
         k->setWorkgroupSize({workgroupSize, 1, 1});
         k->setWorkitemCount({workitemCount, one, one});
         k->setDynamicSharedMemBytes(zero);

@@ -36,7 +36,7 @@ for (( i=0; i<=8; i++ )); do
         --att-perfcounter-ctrl=8 \
         --att-perfcounters="SQ_LDS_BANK_CONFLICT,SQ_LDS_IDX_ACTIVE,SQ_LDS_MEM_VIOLATIONS,SQ_INST_LEVEL_LDS" \
         --att-target-cu=1 \
-        --att-shader-engine-mask=0xFFFFFFFF -- $EXE
+        --att-shader-engine-mask=0x1 -- $EXE
 
         { output="$(cat $ROCPROF_DIR/stats_ui_output_agent_*_dispatch_1.csv)"; }
 
