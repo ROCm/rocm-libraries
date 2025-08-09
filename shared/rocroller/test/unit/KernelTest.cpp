@@ -31,11 +31,13 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
+#include <rocRoller/CodeGen/BranchGenerator.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/ExecutableKernel.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
+#include <rocRoller/InstructionValues/LabelAllocator.hpp>
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
@@ -376,10 +378,25 @@ amdhsa.kernels:
                 ldsOffset,
                 ldsOffset->expression() + workitemIndex->expression() * Expression::literal(4 * 32),
                 m_context);
+
+            auto i = Register::Value::Placeholder(m_context,
+                                                  Register::Type::Scalar,
+                                                  DataType::UInt32,
+                                                  k->wavefront_size() / 32,
+                                                  Register::AllocationOptions::FullyContiguous());
+            co_yield Expression::generate(i, Expression::literal(32), m_context);
+
+            auto label = m_context->labelAllocator()->label("label");
+            co_yield Instruction::Label(label);
+
             for(int i = 0; i < count; ++i)
             {
                 co_yield m_context->mem()->loadLocal(dst->element({i}), ldsOffset, 0, 4);
             }
+
+            co_yield Instruction::Wait(WaitCount::Zero(m_context->targetArchitecture()));
+            co_yield Expression::generate(i, i->expression() - Expression::literal(1), m_context);
+            co_yield m_context->brancher()->branchIfNonZero(label, i);
         };
 
         m_context->schedule(kb());
