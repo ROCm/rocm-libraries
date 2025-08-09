@@ -229,7 +229,11 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
 
     target_compile_features(hipblaslt PUBLIC cxx_std_17)
-    target_compile_definitions(hipblaslt PUBLIC ROCM_USE_FLOAT16)
+    target_compile_definitions(hipblaslt
+        PUBLIC
+            ROCM_USE_FLOAT16
+            $<BUILD_INTERFACE:__HIP_HCC_COMPAT_MODE__=1> # if we don't have this we fail tests on 942_304cu
+    )
 
     if(HIPBLASLT_ENABLE_HIPBLAS_DIRECT)
         # This definition shows up in a public header
