@@ -354,7 +354,8 @@ amdhsa.kernels:
         const auto zero = std::make_shared<Expression::Expression>(0u);
 
         const auto workgroupSize = 256u;
-        auto       workitemCount = Expression::literal(64 * workgroupSize);
+        auto       workitemCount
+            = Expression::literal(1024 * workgroupSize); // Have high workgroup count for rocprofv3
         k->setWorkgroupSize({workgroupSize, 1, 1});
         k->setWorkitemCount({workitemCount, one, one});
         k->setDynamicSharedMemBytes(zero);
@@ -363,35 +364,53 @@ amdhsa.kernels:
         m_context->schedule(k->prolog());
 
         auto kb = [&]() -> Generator<Instruction> {
-            const auto count = 64;
+            const auto instrDwords      = 4; // e.g. 1 for ds_read_b32
+            const auto strideMultiplier = 32; // adjust for bank conflict
+            const auto loops
+                = 0; // Loop due to suspecting instruction cache causing latency, doesn't seem to change anything from testing
+            const auto dstRegCount = 128;
+            const auto count       = dstRegCount / instrDwords;
 
             auto dst = Register::Value::Placeholder(
-                m_context, Register::Type::Vector, DataType::Int32, count);
+                m_context,
+                Register::Type::Vector,
+                DataType::Raw32,
+                count * instrDwords,
+                Register::AllocationOptions{
+                    .contiguousChunkWidth = Register::FULLY_CONTIGUOUS,
+                    .alignment            = instrDwords,
+                });
 
-            auto lds = Register::Value::AllocateLDS(m_context, DataType::Int32, count * 4 * 32);
+            auto lds = Register::Value::AllocateLDS(
+                m_context, DataType::Raw32, workgroupSize * 4 * strideMultiplier);
             auto ldsOffset = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Int32, 1);
             co_yield m_context->copier()->copy(
                 ldsOffset, Register::Value::Literal(lds->getLDSAllocation()->offset()));
             auto workitemIndex = m_context->kernel()->workitemIndex()[0];
-            co_yield Expression::generate(
-                ldsOffset,
-                ldsOffset->expression() + workitemIndex->expression() * Expression::literal(4 * 32),
-                m_context);
+            co_yield Expression::generate(ldsOffset,
+                                          ldsOffset->expression()
+                                              + workitemIndex->expression()
+                                                    * Expression::literal(4 * strideMultiplier),
+                                          m_context);
 
             auto i = Register::Value::Placeholder(m_context,
                                                   Register::Type::Scalar,
                                                   DataType::UInt32,
                                                   k->wavefront_size() / 32,
                                                   Register::AllocationOptions::FullyContiguous());
-            co_yield Expression::generate(i, Expression::literal(32), m_context);
+            co_yield Expression::generate(i, Expression::literal(loops + 1), m_context);
 
             auto label = m_context->labelAllocator()->label("label");
             co_yield Instruction::Label(label);
 
-            for(int i = 0; i < count; ++i)
+            for(int i = 0; i < count * instrDwords; i += instrDwords)
             {
-                co_yield m_context->mem()->loadLocal(dst->element({i}), ldsOffset, 0, 4);
+                co_yield m_context->mem()->loadLocal(
+                    dst->subset(Generated(iota(i, i + instrDwords))),
+                    ldsOffset,
+                    0,
+                    4 * instrDwords);
             }
 
             co_yield Instruction::Wait(WaitCount::Zero(m_context->targetArchitecture()));
