@@ -418,7 +418,12 @@ amdhsa.kernels:
                 });
 
             auto lds = Register::Value::AllocateLDS(
-                m_context, DataType::Raw32, workgroupSize * strideMultiplier * instrDwords);
+                m_context,
+                DataType::Raw32,
+                std::min(static_cast<unsigned int>(m_context->targetArchitecture().GetCapability(
+                                                       GPUCapability::MaxLdsSize)
+                                                   / 4),
+                         workgroupSize * strideMultiplier * instrDwords));
             auto ldsOffset = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Int32, 1);
             auto workitemIndex = m_context->kernel()->workitemIndex()[0];
@@ -426,7 +431,8 @@ amdhsa.kernels:
                 ldsOffset,
                 Expression::literal(lds->getLDSAllocation()->offset())
                     + workitemIndex->expression()
-                          * Expression::literal(4 * strideMultiplier * instrDwords),
+                          * Expression::literal((4 * strideMultiplier * instrDwords)
+                                                % lds->getLDSAllocation()->size()),
                 m_context);
 
             auto i = Register::Value::Placeholder(
