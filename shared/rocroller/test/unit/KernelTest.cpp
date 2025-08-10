@@ -403,8 +403,8 @@ amdhsa.kernels:
         auto kb = [&]() -> Generator<Instruction> {
             const auto loops
                 = 0; // Loop due to suspecting instruction cache causing latency, doesn't seem to change anything from testing
-            // _b96 requires 64-bit instructions, _b128 already automatically indexes with 64-bit alignment
-            const auto alignment   = instrDwords >= 3 ? 4 : 1;
+            // _b96 requires 64-bit alignment
+            const auto alignment   = instrDwords == 3 ? 4 : instrDwords;
             const auto dstRegCount = 192;
             const auto count
                 = dstRegCount / instrDwords; // number of instructions put one after another
