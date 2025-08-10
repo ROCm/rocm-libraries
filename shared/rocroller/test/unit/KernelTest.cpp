@@ -403,7 +403,8 @@ amdhsa.kernels:
         auto kb = [&]() -> Generator<Instruction> {
             const auto loops
                 = 0; // Loop due to suspecting instruction cache causing latency, doesn't seem to change anything from testing
-            const auto alignment   = instrDwords > 2 ? 2 : 1;
+            // _b96 requires 64-bit instructions, _b128 already automatically indexes with 64-bit alignment
+            const auto alignment   = instrDwords >= 3 ? 4 : 1;
             const auto dstRegCount = 192;
             const auto count
                 = dstRegCount / instrDwords; // number of instructions put one after another
@@ -443,7 +444,7 @@ amdhsa.kernels:
             auto label = m_context->labelAllocator()->label("label");
             co_yield Instruction::Label(label);
 
-            for(int i = 0; i < count * instrDwords - instrDwords; i += alignment)
+            for(int i = 0; i < count * instrDwords; i += alignment)
             {
                 co_yield m_context->mem()->loadLocal(
                     dst->subset(Generated(iota(i, i + instrDwords))),
