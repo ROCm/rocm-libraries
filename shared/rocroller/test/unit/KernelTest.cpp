@@ -403,6 +403,7 @@ amdhsa.kernels:
         auto kb = [&]() -> Generator<Instruction> {
             const auto loops
                 = 0; // Loop due to suspecting instruction cache causing latency, doesn't seem to change anything from testing
+            const auto alignment   = instrDwords > 2 ? 4 : 1;
             const auto dstRegCount = 192;
             const auto count
                 = dstRegCount / instrDwords; // number of instructions put one after another
@@ -414,7 +415,7 @@ amdhsa.kernels:
                 count * instrDwords,
                 Register::AllocationOptions{
                     .contiguousChunkWidth = Register::FULLY_CONTIGUOUS,
-                    .alignment            = instrDwords,
+                    .alignment            = instrDwords * alignment,
                 });
 
             auto lds = Register::Value::AllocateLDS(
@@ -442,7 +443,7 @@ amdhsa.kernels:
             auto label = m_context->labelAllocator()->label("label");
             co_yield Instruction::Label(label);
 
-            for(int i = 0; i < count * instrDwords; i += instrDwords)
+            for(int i = 0; i < count * instrDwords; i += instrDwords * alignment)
             {
                 co_yield m_context->mem()->loadLocal(
                     dst->subset(Generated(iota(i, i + instrDwords))),
