@@ -148,6 +148,7 @@ Compile for host and device backend at the same time
 You can set both the host and device backend at the same time. For example compiling for TBB:
 
 .. code-block:: bash
+    
     hipcc binary_search_example.cpp \
     -DTHRUST_DEVICE_SYSTEM=3 \
     -D__THRUST_DEVICE_SYSTEM_NAMESPACE=tbb \
