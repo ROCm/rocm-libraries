@@ -122,7 +122,7 @@ namespace rocsparse
 
         if(local_thread_index == 0)
         {
-            coo_val[innz] = coo_val[innz] * beta + alpha * s[local_coeff_index][0];
+            coo_val[innz] = beta * coo_val[innz] + alpha * s[local_coeff_index][0];
         }
     }
 
