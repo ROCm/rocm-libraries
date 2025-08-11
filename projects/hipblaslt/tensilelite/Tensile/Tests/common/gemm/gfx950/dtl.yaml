@@ -23,6 +23,46 @@ GlobalParameters:
   #GenerateSourcesAndExit: True
 
 BenchmarkProblems:
+  ########################################
+  # F32
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: S
+      DestDataType: S
+      ComputeDataType: S
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 4, 1, 1, 2, 2, 2, 2]
+        - DepthU: [ 32 ]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [1]
+        - PrefetchGlobalRead: [1,2]
+        - PrefetchLocalRead: [1]
+        - GlobalReadVectorWidthA: [1, 4]
+        - GlobalReadVectorWidthB: [1, 4]
+        - LocalReadVectorWidth: [1, 4]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1] #0,1
+        - StaggerU: [0]
+        - StreamK: [0]
+        - DirectToLds: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[1,67,517], [1,93,709], [1], [1,76,865]]
 
   ########################################
   # F8HS TN DTL
@@ -616,4 +656,3 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Range: [[4096], [8192], [1], [64,64,384]]
-

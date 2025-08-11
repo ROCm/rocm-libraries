@@ -33,10 +33,12 @@
 #include "../../block/block_store.hpp"
 #include "../../block/block_scan.hpp"
 #include "../../block/block_discontinuity.hpp"
+#include "ordered_block_id.hpp"
 
 #include "../config_types.hpp"
 #include "device_config_helper.hpp"
 #include "lookback_scan_state.hpp"
+#include "rocprim/intrinsics/thread.hpp"
 #include "rocprim/type_traits.hpp"
 #include "rocprim/types/tuple.hpp"
 
@@ -914,7 +916,8 @@ template<select_method SelectMethod,
          class Key,
          class Value,
          class FlagType,
-         class OffsetType>
+         class OffsetType,
+         class BlockIdWrapper>
 struct partition_kernel_impl_
 {
 
@@ -934,6 +937,7 @@ struct partition_kernel_impl_
     using block_scan_offset_type
         = ::rocprim::block_scan<OffsetType, block_size, params.block_scan_method>;
     using block_discontinuity_key_type = ::rocprim::block_discontinuity<Key, block_size>;
+    using ordered_block_id = BlockIdWrapper;
 
     // Memory required for 2-phase scatter
     using exchange_keys_storage_type   = Key[items_per_block];
@@ -952,6 +956,7 @@ struct partition_kernel_impl_
         typename block_load_flag_type::storage_type         load_flags;
         typename block_discontinuity_key_type::storage_type discontinuity_values;
         typename block_scan_offset_type::storage_type       scan_offsets;
+        typename ordered_block_id::storage_type             block_id;
     };
 
     template<
@@ -976,6 +981,7 @@ struct partition_kernel_impl_
               InequalityOp,
               OffsetLookbackScanState,
               const unsigned int,
+              ordered_block_id,
               storage_type&,
               UnaryPredicates...)
         -> std::enable_if_t<!is_lookback_kernel_runnable<OffsetLookbackScanState>()>
@@ -1005,6 +1011,7 @@ struct partition_kernel_impl_
               InequalityOp            inequality_op,
               OffsetLookbackScanState offset_scan_state,
               const unsigned int      number_of_blocks,
+              ordered_block_id        block_id,
               storage_type&           storage,
               UnaryPredicates...      predicates)
         -> std::enable_if_t<is_lookback_kernel_runnable<OffsetLookbackScanState>()>
@@ -1023,9 +1030,13 @@ struct partition_kernel_impl_
         size_t prev_selected_count_values[sizeof...(UnaryPredicates)]{};
         load_selected_count(prev_selected_count, prev_selected_count_values);
 
-        const auto         flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
-        const auto         flat_block_id        = ::rocprim::detail::block_id<0>();
-        const auto         block_offset         = flat_block_id * items_per_block;
+        const auto flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
+        const auto flat_block_id = block_id.get(flat_block_thread_id, storage.block_id);
+        ::rocprim::syncthreads(); // sync threads to reuse shared memory
+        
+        // const auto flat_block_id = ::rocprim::detail::block_id<0>();
+
+        const auto         block_offset = flat_block_id * items_per_block;
         const unsigned int valid_in_global_last_block
             = total_size - prev_processed - items_per_block * (number_of_blocks - 1);
         const bool is_last_launch

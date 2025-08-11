@@ -26,6 +26,7 @@
 
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
 
 #include <rocRoller/Utilities/Settings.hpp>
 
@@ -33,6 +34,35 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+        void KernelGraph::setTransformerByForLoopOp(CoordinateGraph::Transformer& transformer,
+                                                    int                           forLoopOp)
+        {
+            auto loopIncrTag = mapper.get(forLoopOp, NaryArgument::DEST);
+            auto expr = std::make_shared<Expression::Expression>(rocRoller::Expression::DataFlowTag{
+                loopIncrTag, Register::Type::Scalar, rocRoller::DataType::Int32});
+            auto loopDims
+                = coordinates.getOutputNodeIndices<CoordinateGraph::DataFlowEdge>(loopIncrTag);
+            for(auto const& dim : loopDims | std::views::filter([&](int dim) {
+                                      return !transformer.hasCoordinate(dim);
+                                  }))
+            {
+                transformer.setCoordinate(dim, expr);
+            }
+        }
+
+        void KernelGraph::setTransformerBySetCoordinate(CoordinateGraph::Transformer& transformer,
+                                                        int setCoordinateOp)
+        {
+            auto connections = mapper.getConnections(setCoordinateOp);
+            if(not transformer.hasCoordinate(connections[0].coordinate))
+            {
+                auto setCoordinate
+                    = control.get<ControlGraph::SetCoordinate>(setCoordinateOp).value();
+
+                transformer.setCoordinate(connections[0].coordinate, setCoordinate.value);
+            }
+        }
+
         std::string KernelGraph::toDOT(bool drawMappings, std::string title) const
         {
             std::stringstream ss;
@@ -69,6 +99,61 @@ namespace rocRoller
                 retval.combine(check);
             }
             return retval;
+        }
+
+        void KernelGraph::initializeTransformersForCodeGen(
+            Expression::ExpressionTransducer transducer)
+        {
+            for(auto& p : m_transformers)
+            {
+                p.second.setCoordinateGraph(&coordinates);
+                p.second.setTransducer(transducer);
+            }
+        }
+
+        void KernelGraph::updateTransformer(int op, int coord, Expression::ExpressionPtr expr)
+        {
+            AssertFatal(m_transformers.contains(op), "Transformer does not exist");
+            m_transformers.at(op).setCoordinate(coord, expr);
+        }
+
+        void KernelGraph::buildAllTransformers()
+        {
+            for(auto const& node : control.getNodes())
+                buildTransformer(node, IgnoreCache);
+        }
+
+        rocRoller::KernelGraph::CoordinateGraph::Transformer KernelGraph::buildTransformer(int op)
+        {
+            if(not m_transformers.contains(op))
+                return buildTransformer(op, IgnoreCache);
+            return m_transformers.at(op);
+        }
+
+        rocRoller::KernelGraph::CoordinateGraph::Transformer
+            KernelGraph::buildTransformer(int op, IgnoreCachePolicy const)
+        {
+            auto [iter, _] = m_transformers.insert_or_assign(op, &coordinates);
+
+            auto const stk = controlStack(op, control);
+
+            for(int index : stk | std::views::reverse)
+            {
+                std::visit(
+                    [&](auto&& node) {
+                        using OpType = std::decay_t<decltype(node)>;
+                        if constexpr(std::is_same_v<OpType, ControlGraph::SetCoordinate>)
+                        {
+                            setTransformerBySetCoordinate(iter->second, index);
+                        }
+                        else if constexpr(std::is_same_v<OpType, ControlGraph::ForLoopOp>)
+                        {
+                            setTransformerByForLoopOp(iter->second, index);
+                        }
+                    },
+                    control.getNode(index));
+            }
+            return iter->second;
         }
 
         ConstraintStatus KernelGraph::checkConstraints() const
