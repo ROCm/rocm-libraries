@@ -69,12 +69,13 @@ struct nth_element_onesweep_lookback_state
 
     underlying_type state;
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE explicit nth_element_onesweep_lookback_state(underlying_type state)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    explicit nth_element_onesweep_lookback_state(underlying_type state)
         : state(state)
     {}
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE nth_element_onesweep_lookback_state(prefix_flag     status,
-                                                                     underlying_type value)
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    nth_element_onesweep_lookback_state(prefix_flag status, underlying_type value)
         : state(static_cast<underlying_type>(status) | value)
     {}
 
@@ -120,11 +121,11 @@ struct n_th_element_iteration_data
     bool         equality_bucket;
 };
 
-template<class config, class KeysIterator, class BinaryFunction>
+template<class ArchConfig, class KeysIterator, class BinaryFunction>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
-    kernel_block_sort_impl(KeysIterator keys, const unsigned int size, BinaryFunction compare_function)
+    block_sort_kernel_impl(KeysIterator keys, const unsigned int size, BinaryFunction compare_function)
 {
-    constexpr nth_element_config_params params = device_params<config>();
+    constexpr nth_element_config_params params = ArchConfig::params;
 
     constexpr unsigned int stop_recursion_size = params.stop_recursion_size;
 
@@ -154,29 +155,41 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     block_store_key().store(keys, sample_buffer, size, storage.store);
 }
 
-template<class config, class KeysIterator, class BinaryFunction>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<config>().stop_recursion_size) void
-    kernel_block_sort(KeysIterator keys, const unsigned int size, BinaryFunction compare_function)
+template<class Config, class KeysIterator, class BinaryFunction>
+inline hipError_t launch_block_sort(detail::target_arch arch,
+                                    KeysIterator        keys,
+                                    const unsigned int  size,
+                                    BinaryFunction      compare_function,
+                                    dim3                grid,
+                                    dim3                block,
+                                    size_t              shmem,
+                                    hipStream_t         stream)
 {
-    kernel_block_sort_impl<config>(keys, size, compare_function);
+    auto kernel = [=] __device__ (auto arch_config)
+    {
+        block_sort_kernel_impl<decltype(arch_config)>(keys, size, compare_function);
+    };
+
+    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
-template<class config, class KeysIterator, class BinaryFunction>
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
-    kernel_find_splitters_impl(KeysIterator                                             keys,
+template<class ArchConfig, class KeysIterator, class BinaryFunction>
+ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void find_splitters_kernel_impl(
+                               KeysIterator                                             keys,
                                typename std::iterator_traits<KeysIterator>::value_type* tree,
                                bool*          equality_buckets,
                                const unsigned int   size,
                                BinaryFunction compare_function)
 {
-    constexpr nth_element_config_params params        = device_params<config>();
+    constexpr nth_element_config_params params        = ArchConfig::params;
     constexpr unsigned int              num_splitters = params.number_of_buckets - 1;
 
     using key_type = typename std::iterator_traits<KeysIterator>::value_type;
 
     using block_sort_key = block_sort<key_type, num_splitters>;
 
-    ROCPRIM_SHARED_MEMORY typename block_sort_key::storage_type storage;
+    ROCPRIM_SHARED_MEMORY
+    typename block_sort_key::storage_type storage;
 
     const unsigned int stride = size / num_splitters;
     const unsigned int idx    = threadIdx.x;
@@ -203,27 +216,41 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     equality_buckets[idx] = equality_bucket;
 }
 
-template<class config, class KeysIterator, class BinaryFunction>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<config>().number_of_buckets - 1) void
-    kernel_find_splitters(KeysIterator                                             keys,
+template<class Config, class KeysIterator, class BinaryFunction>
+inline hipError_t
+    launch_find_splitters(detail::target_arch                                      arch,
+                          KeysIterator                                             keys,
                           typename std::iterator_traits<KeysIterator>::value_type* tree,
                           bool*                                                    equality_buckets,
                           const unsigned int                                       size,
-                          BinaryFunction                                           compare_function)
+                          BinaryFunction                                           compare_function,
+                          dim3                                                     grid,
+                          dim3                                                     block,
+                          size_t                                                   shmem,
+                          hipStream_t                                              stream)
 {
-    kernel_find_splitters_impl<config>(keys, tree, equality_buckets, size, compare_function);
+    auto kernel = [=] __device__ (auto arch_config)
+    {
+        find_splitters_kernel_impl<decltype(arch_config)>(keys,
+                                                        tree,
+                                                        equality_buckets,
+                                                        size,
+                                                        compare_function);
+    };
+
+    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
-template<class config, class KeysIterator, class BinaryFunction>
+template<class ArchConfig, class KeysIterator, class BinaryFunction>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
-    kernel_count_bucket_sizes_impl(KeysIterator                                             keys,
+    count_bucket_sizes_kernel_impl(KeysIterator                                             keys,
                                    typename std::iterator_traits<KeysIterator>::value_type* tree,
                                    const unsigned int                                             size,
                                    unsigned int*                                                  buckets,
                                    bool*          equality_buckets,
                                    BinaryFunction compare_function)
 {
-    constexpr nth_element_config_params params = device_params<config>();
+    constexpr nth_element_config_params params = ArchConfig::params;
 
     constexpr unsigned int num_buckets           = params.number_of_buckets;
     constexpr unsigned int num_threads_per_block = params.kernel_config.block_size;
@@ -318,32 +345,42 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     }
 }
 
-template<class config, class KeysIterator, class BinaryFunction>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<config>().kernel_config.block_size) void
-    kernel_count_bucket_sizes(KeysIterator                                             keys,
+template<class Config, class KeysIterator, class BinaryFunction>
+inline hipError_t
+    launch_count_bucket_sizes(detail::target_arch                                      arch,
+                              KeysIterator                                             keys,
                               typename std::iterator_traits<KeysIterator>::value_type* tree,
                               const unsigned int                                       size,
                               unsigned int*                                            buckets,
                               bool*          equality_buckets,
-                              BinaryFunction compare_function)
+                              BinaryFunction compare_function,
+                              dim3           grid,
+                              dim3           block,
+                              size_t         shmem,
+                              hipStream_t    stream)
 {
-    kernel_count_bucket_sizes_impl<config>(keys,
-                                           tree,
-                                           size,
-                                           buckets,
-                                           equality_buckets,
-                                           compare_function);
+    auto kernel = [=] __device__ (auto arch_config)
+    {
+        count_bucket_sizes_kernel_impl<decltype(arch_config)>(keys,
+                                                            tree,
+                                                            size,
+                                                            buckets,
+                                                            equality_buckets,
+                                                            compare_function);
+    };
+
+    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
-template<class config>
+template<class ArchConfig>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
-    kernel_find_nth_element_bucket_impl(unsigned int*                      buckets,
+    find_nth_element_bucket_kernel_impl(unsigned int*                      buckets,
                                         n_th_element_iteration_data* nth_element_data,
                                         bool*                        equality_buckets,
                                         const unsigned int           rank)
 
 {
-    constexpr nth_element_config_params params = device_params<config>();
+    constexpr nth_element_config_params params = ArchConfig::params;
 
     constexpr unsigned int num_buckets = params.number_of_buckets;
 
@@ -381,20 +418,32 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     }
 }
 
-template<class config>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<config>().number_of_buckets) void
-    kernel_find_nth_element_bucket(unsigned int*                buckets,
-                                   n_th_element_iteration_data* nth_element_data,
-                                   bool*                        equality_buckets,
-                                   const unsigned int           rank)
+template<class Config>
+inline hipError_t launch_find_nth_element_bucket(detail::target_arch          arch,
+                                                 unsigned int*                buckets,
+                                                 n_th_element_iteration_data* nth_element_data,
+                                                 bool*                        equality_buckets,
+                                                 const unsigned int           rank,
+                                                 dim3                         grid,
+                                                 dim3                         block,
+                                                 size_t                       shmem,
+                                                 hipStream_t                  stream)
 
 {
-    kernel_find_nth_element_bucket_impl<config>(buckets, nth_element_data, equality_buckets, rank);
+    auto kernel = [=] __device__ (auto arch_config)
+    {
+        find_nth_element_bucket_kernel_impl<decltype(arch_config)>(buckets,
+                                                                    nth_element_data,
+                                                                    equality_buckets,
+                                                                    rank);
+    };
+
+    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
-template<class config, unsigned int NumPartitions, class KeysIterator, class BinaryFunction>
+template<class ArchConfig, unsigned int NumPartitions, class KeysIterator, class BinaryFunction>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
-    kernel_copy_buckets_impl(KeysIterator                                             keys,
+    copy_buckets_kernel_impl(KeysIterator                                             keys,
                              typename std::iterator_traits<KeysIterator>::value_type* tree,
                              const unsigned int                                       size,
                              nth_element_onesweep_lookback_state* lookback_states,
@@ -406,7 +455,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     using key_type = typename std::iterator_traits<KeysIterator>::value_type;
     using state    = nth_element_onesweep_lookback_state;
 
-    constexpr nth_element_config_params params = device_params<config>();
+    constexpr nth_element_config_params params = ArchConfig::params;
 
     constexpr unsigned int num_buckets           = params.number_of_buckets;
     constexpr unsigned int num_splitters         = num_buckets - 1;
@@ -415,9 +464,10 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     constexpr unsigned int num_items_per_block   = num_threads_per_block * num_items_per_thread;
     constexpr unsigned int num_partitions        = NumPartitions;
 
-    using block_rank         = rocprim::block_radix_rank<num_threads_per_block,
+    using block_rank = rocprim::block_radix_rank<num_threads_per_block,
                                                  Log2<static_cast<int>(num_partitions + 1)>::VALUE,
                                                  params.radix_rank_algorithm>;
+
     using block_load_element = block_load<key_type, num_threads_per_block, num_items_per_thread>;
 
     static_assert(block_rank::digits_per_thread == 1,
@@ -581,31 +631,42 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
     }
 }
 
-template<class config, unsigned int NumPartitions, class KeysIterator, class BinaryFunction>
-ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<config>().kernel_config.block_size) void
-    kernel_copy_buckets(KeysIterator                                             keys,
+template<class Config, unsigned int NumPartitions, class KeysIterator, class BinaryFunction>
+inline hipError_t
+    launch_copy_buckets(detail::target_arch                                      arch,
+                        KeysIterator                                             keys,
                         typename std::iterator_traits<KeysIterator>::value_type* tree,
                         const unsigned int                                       size,
                         nth_element_onesweep_lookback_state*                     lookback_states,
                         n_th_element_iteration_data*                             nth_element_data,
                         typename std::iterator_traits<KeysIterator>::value_type* keys_buffer,
                         bool*                                                    equality_buckets,
-                        BinaryFunction                                           compare_function)
+                        BinaryFunction                                           compare_function,
+                        dim3                                                     grid,
+                        dim3                                                     block,
+                        size_t                                                   shmem,
+                        hipStream_t                                              stream)
 {
-    kernel_copy_buckets_impl<config, NumPartitions>(keys,
-                                                    tree,
-                                                    size,
-                                                    lookback_states,
-                                                    nth_element_data,
-                                                    keys_buffer,
-                                                    equality_buckets,
-                                                    compare_function);
+    auto kernel = [=] __device__ (auto arch_config)
+    {
+        copy_buckets_kernel_impl<decltype(arch_config), NumPartitions>(keys,
+                                                                       tree,
+                                                                       size,
+                                                                       lookback_states,
+                                                                       nth_element_data,
+                                                                       keys_buffer,
+                                                                       equality_buckets,
+                                                                       compare_function);
+    };
+
+    return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
-template<class config, unsigned int NumPartitions, class KeysIterator, class BinaryFunction>
+template<class Config, unsigned int NumPartitions, class KeysIterator, class BinaryFunction>
 ROCPRIM_INLINE
 hipError_t
-    nth_element_keys_impl(KeysIterator                                             keys,
+    nth_element_keys_impl(detail::target_arch                                      arch,
+                          KeysIterator                                             keys,
                           typename std::iterator_traits<KeysIterator>::value_type* keys_buffer,
                           typename std::iterator_traits<KeysIterator>::value_type* tree,
                           unsigned int                                             rank,
@@ -664,36 +725,75 @@ hipError_t
                                                        stream));
 
         start_timer();
-        kernel_find_splitters<config>
-            <<<1, num_splitters, 0, stream>>>(keys, tree, equality_buckets, size, compare_function);
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("kernel_find_splitters", size, start);
+        hipError_t launch_err = launch_find_splitters<Config>(arch,
+                                                              keys,
+                                                              tree,
+                                                              equality_buckets,
+                                                              size,
+                                                              compare_function,
+                                                              1,
+                                                              num_splitters,
+                                                              0,
+                                                              stream);
+        if(launch_err != hipSuccess)
+        {
+            return launch_err;
+        }
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("find_splitters_kernel", size, start);
 
         start_timer();
-        kernel_count_bucket_sizes<config>
-            <<<num_blocks, num_threads_per_block, 0, stream>>>(keys,
-                                                               tree,
-                                                               size,
-                                                               buckets,
-                                                               equality_buckets,
-                                                               compare_function);
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("kernel_count_bucket_sizes", size, start);
+        launch_err = launch_count_bucket_sizes<Config>(arch,
+                                                       keys,
+                                                       tree,
+                                                       size,
+                                                       buckets,
+                                                       equality_buckets,
+                                                       compare_function,
+                                                       num_blocks,
+                                                       num_threads_per_block,
+                                                       0,
+                                                       stream);
+        if(launch_err != hipSuccess)
+        {
+            return launch_err;
+        }
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("count_bucket_sizes_kernel", size, start);
 
         start_timer();
-        kernel_find_nth_element_bucket<config>
-            <<<1, num_buckets, 0, stream>>>(buckets, nth_element_data, equality_buckets, rank);
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("kernel_find_nth_element_bucket", size, start);
+        launch_err = launch_find_nth_element_bucket<Config>(arch,
+                                                            buckets,
+                                                            nth_element_data,
+                                                            equality_buckets,
+                                                            rank,
+                                                            1,
+                                                            num_buckets,
+                                                            0,
+                                                            stream);
+        if(launch_err != hipSuccess)
+        {
+            return launch_err;
+        }
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("find_nth_element_bucket_kernel", size, start);
 
         start_timer();
-        kernel_copy_buckets<config, num_partitions>
-            <<<num_blocks, num_threads_per_block, 0, stream>>>(keys,
-                                                               tree,
-                                                               size,
-                                                               lookback_states,
-                                                               nth_element_data,
-                                                               keys_buffer,
-                                                               equality_buckets,
-                                                               compare_function);
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("kernel_copy_buckets", size, start);
+        launch_err = launch_copy_buckets<Config, num_partitions>(arch,
+                                                                 keys,
+                                                                 tree,
+                                                                 size,
+                                                                 lookback_states,
+                                                                 nth_element_data,
+                                                                 keys_buffer,
+                                                                 equality_buckets,
+                                                                 compare_function,
+                                                                 num_blocks,
+                                                                 num_threads_per_block,
+                                                                 0,
+                                                                 stream);
+        if(launch_err != hipSuccess)
+        {
+            return launch_err;
+        }
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("copy_buckets_kernel", size, start);
 
         // Copy the results in keys_buffer back to the keys
         ROCPRIM_RETURN_ON_ERROR(transform(keys_buffer,
@@ -729,7 +829,18 @@ hipError_t
     }
 
     start_timer();
-    kernel_block_sort<config><<<1, stop_recursion_size, 0, stream>>>(keys, size, compare_function);
+    hipError_t launch_err = launch_block_sort<Config>(arch,
+                                                      keys,
+                                                      size,
+                                                      compare_function,
+                                                      1,
+                                                      stop_recursion_size,
+                                                      0,
+                                                      stream);
+    if(launch_err != hipSuccess)
+    {
+        return launch_err;
+    }
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("kernel_block_sort", size, start);
     return hipSuccess;
 }
