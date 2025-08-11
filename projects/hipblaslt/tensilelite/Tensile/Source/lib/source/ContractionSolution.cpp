@@ -2977,6 +2977,50 @@ namespace TensileLite
         return 0;
     }
 
+    TensileLite::analytical::DataType datatypeToAnalyticalDatatype(rocisa::DataType type)
+    {
+        switch(type)
+        {
+            case rocisa::DataType::Float:
+                return TensileLite::analytical::DataType::Float;
+            case rocisa::DataType::Double:
+                return TensileLite::analytical::DataType::Double;
+            case rocisa::DataType::Half:
+                return TensileLite::analytical::DataType::Half;
+            case rocisa::DataType::Int8x4:
+                return TensileLite::analytical::DataType::Int8x4;
+            case rocisa::DataType::Int32:
+                return TensileLite::analytical::DataType::Int32;
+            case rocisa::DataType::BFloat16:
+                return TensileLite::analytical::DataType::BFloat16;
+            case rocisa::DataType::Int8:
+                return TensileLite::analytical::DataType::Int8;
+            case rocisa::DataType::Int64:
+                return TensileLite::analytical::DataType::Int64;
+            case rocisa::DataType::XFloat32:
+                return TensileLite::analytical::DataType::XFloat32;
+            case rocisa::DataType::Float8_fnuz:
+                return TensileLite::analytical::DataType::Float8_fnuz;
+            case rocisa::DataType::BFloat8_fnuz:
+                return TensileLite::analytical::DataType::BFloat8_fnuz;
+            case rocisa::DataType::Float8BFloat8_fnuz:
+                return TensileLite::analytical::DataType::Float8BFloat8_fnuz;
+            case rocisa::DataType::BFloat8Float8_fnuz:
+                return TensileLite::analytical::DataType::BFloat8Float8_fnuz;
+            case rocisa::DataType::Float8:
+                return TensileLite::analytical::DataType::Float8;
+            case rocisa::DataType::BFloat8:
+                return TensileLite::analytical::DataType::BFloat8;
+            case rocisa::DataType::Float8BFloat8:
+                return TensileLite::analytical::DataType::Float8BFloat8;
+            case rocisa::DataType::BFloat8Float8:
+                return TensileLite::analytical::DataType::BFloat8Float8;
+
+            default:
+                return TensileLite::analytical::DataType::None;
+        }
+    }
+
     size_t ContractionSolution::getSKGrid(Problem const&  problem,
                                           Hardware const& hardware,
                                           size_t          tiles) const
@@ -3021,7 +3065,7 @@ namespace TensileLite
             {
                 batch *= problem.batchSize(i);
             }
-            analytical::DataType miDataType = static_cast<analytical::DataType>(problem.computeInputType());
+            analytical::DataType miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
             return analytical::streamk::select_streamk_grid(x,
