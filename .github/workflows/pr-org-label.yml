@@ -10,7 +10,7 @@ on:
 
 jobs:
   label-prs:
-    if: github.repository == 'ROCm/rocm-systems'
+    if: github.repository == 'ROCm/rocm-libraries'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -59,7 +59,6 @@ jobs:
             echo "Checking PR #$pr"
 
             labels=$(gh pr view "$pr" --json labels --jq '.labels[].name')
-
 
             if echo "$labels" | grep -qFx "${{ env.ORG_LABEL }}" \
               || echo "$labels" | grep -qFx "${{ env.STREAMHPC_LABEL }}" \
