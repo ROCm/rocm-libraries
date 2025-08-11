@@ -186,8 +186,19 @@ set( rocfft-test_include_dirs
   )
 
 set( rocfft-test_link_libs
-  ${FFTW_LIBRARIES} OpenMP::OpenMP_CXX
+  ${FFTW_LIBRARIES}
   )
+
+option( BUILD_CLIENTS_TESTS_OPENMP "Build tests with OpenMP" ON )
+if( BUILD_CLIENTS_TESTS_OPENMP )
+  # Attempt to find a config version, which provides openmp_LIB_DIR.
+  #find_package( OpenMP CONFIG PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
+  if( NOT OPENMP_FOUND OR NOT DEFINED ${openmp_LIB_DIR} )
+     # Fall-back to module mode.
+     find_package( OpenMP REQUIRED )
+  endif()
+    list( APPEND rocfft-test_link_libs OpenMP::OpenMP_CXX )	
+endif()
 
 include( ../cmake/build-gtest.cmake )
 
@@ -262,27 +273,15 @@ if( USE_CUDA )
     )
   target_compile_definitions( rocfft-test PRIVATE __HIP_PLATFORM_NVCC__ )
 endif( )
-target_link_libraries( rocfft-test PRIVATE ${ROCFFT_CLIENTS_HOST_LINK_LIBS} ${ROCFFT_CLIENTS_DEVICE_LINK_LIBS} )
+target_link_libraries( rocfft-test PRIVATE
+   ${ROCFFT_CLIENTS_HOST_LINK_LIBS}
+   ${ROCFFT_CLIENTS_DEVICE_LINK_LIBS} )
 
 include( ../../cmake/sqlite.cmake )
 target_link_libraries( rocfft-test PUBLIC ${ROCFFT_SQLITE_LIB} )
 target_include_directories( rocfft-test PRIVATE ${sqlite_local_SOURCE_DIR} )
 
 set_property( TARGET rocfft-test APPEND PROPERTY LINK_LIBRARIES ${ROCFFT_SQLITE_LIB} )
-
-option( BUILD_CLIENTS_TESTS_OPENMP "Build tests with OpenMP" ON )
-
-if( BUILD_CLIENTS_TESTS_OPENMP )
-  find_package(OpenMP REQUIRED)
-  if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
-    target_link_libraries( rocfft-test PRIVATE OpenMP::OpenMP_CXX -L${HIP_CLANG_ROOT}/lib -Wl,-rpath=${HIP_CLANG_ROOT}/lib )
-    target_include_directories( rocfft-test PRIVATE ${HIP_CLANG_ROOT}/include )
-  else()
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-      target_link_libraries( rocfft-test PRIVATE OpenMP::OpenMP_CXX )
-    endif()
-  endif()
-endif()
 
 if(FFTW_MULTITHREAD)
   target_compile_options( rocfft-test PRIVATE -DFFTW_MULTITHREAD )
@@ -390,7 +389,7 @@ if( ROCFFT_MPI_ENABLE )
 
 endif()
 
-set(COVERAGE_TEST_OPTIONS "--smoketest" CACHE STRING "Command line arguments for rocfft-test when generating a code coverage report")
+set(COVERAGE_TEST_OPTIONS "--smoketest;--gtest_filter=-*call*" CACHE STRING "Command line arguments for rocfft-test when generating a code coverage report")
 
 if(BUILD_CODE_COVERAGE)
   # Coverage won't work in a standalone build of the tests, as we can't
