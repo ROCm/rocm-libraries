@@ -161,23 +161,6 @@ else()
     set(HIPBLASLT_PYTHON_COMMAND "${Python_EXECUTABLE}")
 endif()
 
-if(HIPBLASLT_ENABLE_MSGPACK)
-    # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
-    # Prefer 6.x (msgpack-cxx)
-    find_package(msgpack-cxx CONFIG)
-    if(msgpack-cxx_FOUND)
-        message(STATUS "Found msgpack-cxx (>=6.x)")
-        set(hipblaslt_msgpack_target "msgpack-cxx")
-    else()
-        # TODO: set minimum version requied for *-cxx library
-        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
-        set(hipblaslt_msgpack_target "msgpackc-cxx")
-        message(STATUS "Found msgpack (<=5.x)")
-    endif()
-endif()
-
-add_subdirectory(tensilelite)
-
 if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBRARIES_SUPERBUILD)
     if(HIPBLASLT_ENABLE_FETCH)
         block(SCOPE_FOR VARIABLES)
@@ -201,6 +184,23 @@ if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBRARIES_SUPERBUILD)
         find_package(rocroller REQUIRED)
     endif()
 endif()
+
+if(HIPBLASLT_ENABLE_MSGPACK)
+    # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
+    # Prefer 6.x (msgpack-cxx)
+    find_package(msgpack-cxx CONFIG)
+    if(msgpack-cxx_FOUND)
+        message(STATUS "Found msgpack-cxx (>=6.x)")
+        set(hipblaslt_msgpack_target "msgpack-cxx")
+    else()
+        # TODO: set minimum version requied for *-cxx library
+        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
+        set(hipblaslt_msgpack_target "msgpackc-cxx")
+        message(STATUS "Found msgpack (<=5.x)")
+    endif()
+endif()
+
+add_subdirectory(tensilelite)
 
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_BUILD_SHARED_LIBS)
