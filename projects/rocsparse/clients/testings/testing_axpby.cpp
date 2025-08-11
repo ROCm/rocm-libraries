@@ -38,6 +38,10 @@ void testing_axpby_bad_arg(const Arguments& arg)
 template <typename I, typename X, typename Y, typename T>
 void testing_axpby(const Arguments& arg)
 {
+    rocsparse_bfloat16 test = 1.0e-2f;
+
+    std::cout << "test: " << test << " test.data: " << test.data << std::endl;
+
     I size = arg.M;
     I nnz  = arg.nnz;
 
@@ -64,8 +68,8 @@ void testing_axpby(const Arguments& arg)
     // Initialize data on CPU
     rocsparse_seedrand();
     rocsparse_init_index(hx_ind, nnz, base, size + base);
-    rocsparse_init<X>(hx_val, 1, nnz, 1);
-    rocsparse_init<Y>(hy_1, 1, size, 1);
+    rocsparse_init<X>(hx_val, 1, nnz, 1, arg.convert_to_int);
+    rocsparse_init<Y>(hy_1, 1, size, 1, arg.convert_to_int);
     hy_2    = hy_1;
     hy_gold = hy_1;
 

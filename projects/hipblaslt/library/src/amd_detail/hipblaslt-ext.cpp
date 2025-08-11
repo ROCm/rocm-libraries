@@ -83,6 +83,8 @@ namespace hipblaslt_ext
         hipDataType          type_c; //!< The C matrix datatype.
         hipDataType          type_d; //!< The D matrix datatype.
         hipblasComputeType_t type_compute; //!< The compute datatype.
+        hipblasLtOrder_t     order_a; //!< The A martix data layout order
+        hipblasLtOrder_t     order_b; //!< The B martix data layout order
     };
 
     GemmProblemType::GemmProblemType()
@@ -106,6 +108,11 @@ namespace hipblaslt_ext
         pimpl->type_c       = typeC;
         pimpl->type_d       = typeD;
         pimpl->type_compute = typeCompute;
+
+        // default value of order is COL despite of opA/B,
+        // currently only swizzle cases use the variables
+        pimpl->order_a = HIPBLASLT_ORDER_COL;
+        pimpl->order_b = HIPBLASLT_ORDER_COL;
     }
 
     GemmProblemType::~GemmProblemType() = default;
@@ -170,6 +177,16 @@ namespace hipblaslt_ext
         pimpl->type_compute = type;
     }
 
+    void GemmProblemType::setOrderA(hipblasLtOrder_t order)
+    {
+        pimpl->order_a = order;
+    }
+
+    void GemmProblemType::setOrderB(hipblasLtOrder_t order)
+    {
+        pimpl->order_b = order;
+    }
+
     hipblasOperation_t GemmProblemType::getOpA() const
     {
         return pimpl->op_a;
@@ -203,6 +220,16 @@ namespace hipblaslt_ext
     hipblasComputeType_t GemmProblemType::getTypeCompute() const
     {
         return pimpl->type_compute;
+    }
+
+    hipblasLtOrder_t GemmProblemType::getOrderA() const
+    {
+        return pimpl->order_a;
+    }
+
+    hipblasLtOrder_t GemmProblemType::getOrderB() const
+    {
+        return pimpl->order_b;
     }
 
     class GemmEpilogue::GemmEpilogueImpl
@@ -307,12 +334,12 @@ namespace hipblaslt_ext
 
     void GemmEpilogue::setAct0(float act0)
     {
-      pimpl->act0 = act0;
+        pimpl->act0 = act0;
     }
 
     void GemmEpilogue::setAct1(float act1)
     {
-      pimpl->act1 = act1;
+        pimpl->act1 = act1;
     }
 
     hipblasLtEpilogue_t GemmEpilogue::getMode() const
@@ -372,12 +399,12 @@ namespace hipblaslt_ext
 
     float GemmEpilogue::getAct0()
     {
-      return pimpl->act0;
+        return pimpl->act0;
     }
 
     float GemmEpilogue::getAct1()
     {
-      return pimpl->act1;
+        return pimpl->act1;
     }
 
     class GemmTuning::GemmTuningImpl
