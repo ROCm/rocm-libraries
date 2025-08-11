@@ -17,13 +17,14 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/system/tbb/detail/scan.h>
-#include <thrust/distance.h>
+
 #include <thrust/advance.h>
-#include <thrust/iterator/iterator_traits.h>
 #include <thrust/detail/function.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/iterator/is_output_iterator.h>
+#include <thrust/distance.h>
+#include <thrust/iterator/iterator_traits.h>
+#include <thrust/system/tbb/detail/scan.h>
 
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  include <cuda/std/__functional/invoke.h>
@@ -35,6 +36,10 @@
 
 #include <tbb/blocked_range.h>
 #include <tbb/parallel_scan.h>
+
+#ifndef _CCCL_IF_CONSTEXPR
+#  define _CCCL_IF_CONSTEXPR(x) if constexpr (x)
+#endif
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -51,19 +56,27 @@ struct inclusive_body
 {
   InputIterator input;
   OutputIterator output;
-  thrust::detail::wrapped_function<BinaryFunction,ValueType> binary_op;
+  thrust::detail::wrapped_function<BinaryFunction, ValueType> binary_op;
   ValueType sum;
   bool first_call;
 
   inclusive_body(InputIterator input, OutputIterator output, BinaryFunction binary_op, ValueType dummy)
-    : input(input), output(output), binary_op{binary_op}, sum(dummy), first_call(true)
+      : input(input)
+      , output(output)
+      , binary_op{binary_op}
+      , sum(dummy)
+      , first_call(true)
   {}
 
   inclusive_body(inclusive_body& b, ::tbb::split)
-    : input(b.input), output(b.output), binary_op{b.binary_op}, sum(b.sum), first_call(true)
+      : input(b.input)
+      , output(b.output)
+      , binary_op{b.binary_op}
+      , sum(b.sum)
+      , first_call(true)
   {}
 
-  template<typename Size>
+  template <typename Size>
   void operator()(const ::tbb::blocked_range<Size>& r, ::tbb::pre_scan_tag)
   {
     InputIterator iter = input + r.begin();
@@ -73,20 +86,26 @@ struct inclusive_body
     ++iter;
 
     for (Size i = r.begin() + 1; i != r.end(); ++i, ++iter)
+    {
       temp = binary_op(temp, *iter);
+    }
 
     if (first_call)
+    {
       sum = temp;
+    }
     else
+    {
       sum = binary_op(sum, temp);
+    }
 
     first_call = false;
   }
 
-  template<typename Size>
+  template <typename Size>
   void operator()(const ::tbb::blocked_range<Size>& r, ::tbb::final_scan_tag)
   {
-    InputIterator  iter1 = input  + r.begin();
+    InputIterator iter1  = input + r.begin();
     OutputIterator iter2 = output + r.begin();
 
     if (first_call)
@@ -102,12 +121,16 @@ struct inclusive_body
       ++iter1;
       ++iter2;
       for (Size i = r.begin() + 1; i != r.end(); ++i, ++iter1, ++iter2)
+      {
         *iter2 = sum = binary_op(sum, *iter1);
+      }
     }
     else
     {
       for (Size i = r.begin(); i != r.end(); ++i, ++iter1, ++iter2)
+      {
         *iter2 = sum = binary_op(sum, *iter1);
+      }
     }
 
     first_call = false;
@@ -129,28 +152,32 @@ struct inclusive_body
   }
 };
 
-
-template<typename InputIterator,
-         typename OutputIterator,
-         typename BinaryFunction,
-         typename ValueType>
+template <typename InputIterator, typename OutputIterator, typename BinaryFunction, typename ValueType>
 struct exclusive_body
 {
   InputIterator input;
   OutputIterator output;
-  thrust::detail::wrapped_function<BinaryFunction,ValueType> binary_op;
+  thrust::detail::wrapped_function<BinaryFunction, ValueType> binary_op;
   ValueType sum;
   bool first_call;
 
   exclusive_body(InputIterator input, OutputIterator output, BinaryFunction binary_op, ValueType init)
-    : input(input), output(output), binary_op{binary_op}, sum(init), first_call(true)
+      : input(input)
+      , output(output)
+      , binary_op{binary_op}
+      , sum(init)
+      , first_call(true)
   {}
 
   exclusive_body(exclusive_body& b, ::tbb::split)
-    : input(b.input), output(b.output), binary_op{b.binary_op}, sum(b.sum), first_call(true)
+      : input(b.input)
+      , output(b.output)
+      , binary_op{b.binary_op}
+      , sum(b.sum)
+      , first_call(true)
   {}
 
-  template<typename Size>
+  template <typename Size>
   void operator()(const ::tbb::blocked_range<Size>& r, ::tbb::pre_scan_tag)
   {
     InputIterator iter = input + r.begin();
@@ -160,27 +187,33 @@ struct exclusive_body
     ++iter;
 
     for (Size i = r.begin() + 1; i != r.end(); ++i, ++iter)
+    {
       temp = binary_op(temp, *iter);
+    }
 
     if (first_call && r.begin() > 0)
+    {
       sum = temp;
+    }
     else
+    {
       sum = binary_op(sum, temp);
+    }
 
     first_call = false;
   }
 
-  template<typename Size>
+  template <typename Size>
   void operator()(const ::tbb::blocked_range<Size>& r, ::tbb::final_scan_tag)
   {
-    InputIterator  iter1 = input  + r.begin();
+    InputIterator iter1  = input + r.begin();
     OutputIterator iter2 = output + r.begin();
 
     for (Size i = r.begin(); i != r.end(); ++i, ++iter1, ++iter2)
     {
       ValueType temp = binary_op(sum, *iter1);
-      *iter2 = sum;
-      sum = temp;
+      *iter2         = sum;
+      sum            = temp;
     }
 
     first_call = false;
@@ -202,16 +235,11 @@ struct exclusive_body
   }
 };
 
-} // end scan_detail
+} // namespace scan_detail
 
-template<typename InputIterator,
-         typename OutputIterator,
-         typename BinaryFunction>
-  OutputIterator inclusive_scan(tag,
-                                InputIterator first,
-                                InputIterator last,
-                                OutputIterator result,
-                                BinaryFunction binary_op)
+template <typename InputIterator, typename OutputIterator, typename BinaryFunction>
+OutputIterator
+inclusive_scan(tag, InputIterator first, InputIterator last, OutputIterator result, BinaryFunction binary_op)
 {
   using namespace thrust::detail;
 
@@ -219,13 +247,13 @@ template<typename InputIterator,
   using ValueType = typename thrust::iterator_value<InputIterator>::type;
 
   using Size = typename thrust::iterator_difference<InputIterator>::type;
-  Size n = thrust::distance(first, last);
+  Size n     = thrust::distance(first, last);
 
   if (n != 0)
   {
     using Body = typename scan_detail::inclusive_body<InputIterator, OutputIterator, BinaryFunction, ValueType, false>;
     Body scan_body(first, result, binary_op, *first);
-    ::tbb::parallel_scan(::tbb::blocked_range<Size>(0,n), scan_body);
+    ::tbb::parallel_scan(::tbb::blocked_range<Size>(0, n), scan_body);
   }
 
   thrust::advance(result, n);
@@ -239,16 +267,16 @@ OutputIterator inclusive_scan(
 {
   using namespace thrust::detail;
 
-  // Use the input iterator's value type and the initial value type per wg21.link/p2322
-  #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
-    using ValueType = typename ::cuda::std::
-      __accumulator_t<BinaryFunction, typename ::cuda::std::iterator_traits<InputIterator>::value_type, InitialValueType>;
-  #elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
-    using ValueType = ::rocprim::
-      accumulator_t<BinaryFunction, typename ::std::iterator_traits<InputIterator>::value_type, InitialValueType>;
-  #else
-    using ValueType = typename std::iterator_traits<InputIterator>::value_type;
-  #endif
+// Use the input iterator's value type and the initial value type per wg21.link/p2322
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+  using ValueType = typename ::cuda::std::
+    __accumulator_t<BinaryFunction, typename ::cuda::std::iterator_traits<InputIterator>::value_type, InitialValueType>;
+#elif THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_HIP
+  using ValueType = ::rocprim::
+    accumulator_t<BinaryFunction, typename ::std::iterator_traits<InputIterator>::value_type, InitialValueType>;
+#else
+  using ValueType = typename std::iterator_traits<InputIterator>::value_type;
+#endif
 
   using Size = typename thrust::iterator_difference<InputIterator>::type;
   Size n     = thrust::distance(first, last);
@@ -265,16 +293,9 @@ OutputIterator inclusive_scan(
   return result;
 }
 
-template<typename InputIterator,
-         typename OutputIterator,
-         typename InitialValueType,
-         typename BinaryFunction>
-  OutputIterator exclusive_scan(tag,
-                                InputIterator first,
-                                InputIterator last,
-                                OutputIterator result,
-                                InitialValueType init,
-                                BinaryFunction binary_op)
+template <typename InputIterator, typename OutputIterator, typename InitialValueType, typename BinaryFunction>
+OutputIterator exclusive_scan(
+  tag, InputIterator first, InputIterator last, OutputIterator result, InitialValueType init, BinaryFunction binary_op)
 {
   using namespace thrust::detail;
 
@@ -282,13 +303,13 @@ template<typename InputIterator,
   using ValueType = InitialValueType;
 
   using Size = typename thrust::iterator_difference<InputIterator>::type;
-  Size n = thrust::distance(first, last);
+  Size n     = thrust::distance(first, last);
 
   if (n != 0)
   {
     using Body = typename scan_detail::exclusive_body<InputIterator, OutputIterator, BinaryFunction, ValueType>;
     Body scan_body(first, result, binary_op, init);
-    ::tbb::parallel_scan(::tbb::blocked_range<Size>(0,n), scan_body);
+    ::tbb::parallel_scan(::tbb::blocked_range<Size>(0, n), scan_body);
   }
 
   thrust::advance(result, n);
