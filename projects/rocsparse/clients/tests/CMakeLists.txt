@@ -402,17 +402,11 @@ target_compile_options(rocsparse-test PRIVATE -ffp-contract=on -mfma -Wno-deprec
 # Internal common header
 target_include_directories(rocsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
 
-# Target link libraries
-target_link_libraries(rocsparse-test PRIVATE GTest::gtest roc::rocsparse hip::host hip::device)
-
 # Add OpenMP if available
-if(OPENMP_FOUND)
-if (NOT WIN32)
-   target_link_libraries(rocsparse-test PRIVATE OpenMP::OpenMP_CXX -Wl,-rpath=${HIP_CLANG_ROOT}/lib)
-  else()
-   target_link_libraries(rocsparse-test PRIVATE libomp)
-  endif()
-endif()
+apply_omp_settings(rocsparse-test)
+
+# Target link libraries
+target_link_libraries(rocsparse-test PRIVATE GTest::gtest roc::rocsparse hip::host hip::device ${ROCSPARSE_CLIENT_LIBS})
 
 if (NOT WIN32)
   if (BUILD_WITH_ROCTX)
