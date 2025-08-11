@@ -176,18 +176,9 @@ def main():
                         if output_len > CHAR_LIMIT:
                             break
 
-                    except subprocess.CalledProcessError as e:
-                        print(f"Command failed with error: {e}")
-                        print("Retrying...")
-                        continue
-                    except FileNotFoundError as e:
-                        print(f"File not found: {e}")
-                        print("Retrying...")
-                        continue
                     except Exception as e:
                         print(f"Unexpected error: {e}")
-                        print("Retrying...")
-                        continue
+                        return
 
 
 if __name__ == "__main__":
