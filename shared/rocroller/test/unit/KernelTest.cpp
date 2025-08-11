@@ -400,6 +400,10 @@ amdhsa.kernels:
         if(const char* env_p = std::getenv("INSTR_WIDTH"))
             instrDwords = atoi(env_p); // e.g. 1 for ds_read_b32
 
+        bool write; // else read
+        if(const char* env_p = std::getenv("WRITE"))
+            write = atoi(env_p) == 1 ? true : false;
+
         auto kb = [&]() -> Generator<Instruction> {
             const auto loops
                 = 0; // Loop due to suspecting instruction cache causing latency, doesn't seem to change anything from testing
@@ -408,7 +412,6 @@ amdhsa.kernels:
             const auto dstRegCount = 192;
             const auto count
                 = dstRegCount / instrDwords; // number of instructions put one after another
-            const bool write = true; // else read
 
             auto dst = Register::Value::Placeholder(
                 m_context,
