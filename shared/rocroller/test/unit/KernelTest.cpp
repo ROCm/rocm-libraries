@@ -403,7 +403,7 @@ amdhsa.kernels:
         auto kb = [&]() -> Generator<Instruction> {
             const auto loops
                 = 0; // Loop due to suspecting instruction cache causing latency, doesn't seem to change anything from testing
-            // _b96 requires 64-bit alignment
+            // _b96 requires 64-bit alignment for dst, _b96 has huge penalty if not 64-bit aligned for LDS addr
             const auto alignment   = instrDwords == 3 ? 4 : instrDwords;
             const auto dstRegCount = 192;
             const auto count
@@ -433,7 +433,7 @@ amdhsa.kernels:
                 ldsOffset,
                 Expression::literal(lds->getLDSAllocation()->offset())
                     + workitemIndex->expression()
-                          * Expression::literal((4 * strideMultiplier * instrDwords)
+                          * Expression::literal((4 * strideMultiplier * alignment)
                                                 % lds->getLDSAllocation()->size()),
                 m_context);
 
