@@ -42,7 +42,7 @@ void rocsparse_matrix_factory_zero<T, I, J>::init_csr(std::vector<I>&        csr
                                                       rocsparse_fill_mode    uplo,
                                                       rocsparse_storage_mode storage)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     csr_row_ptr.resize((M > 0) ? (M + 1) : 0, static_cast<I>(base));
     csr_col_ind.resize(0);
@@ -66,7 +66,7 @@ void rocsparse_matrix_factory_zero<T, I, J>::init_gebsr(std::vector<I>&        b
                                                         rocsparse_fill_mode    uplo,
                                                         rocsparse_storage_mode storage)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     bsr_row_ptr.resize((Mb > 0) ? (Mb + 1) : 0, static_cast<I>(base));
     bsr_col_ind.resize(0);
@@ -87,7 +87,7 @@ void rocsparse_matrix_factory_zero<T, I, J>::init_coo(std::vector<I>&        coo
                                                       rocsparse_fill_mode    uplo,
                                                       rocsparse_storage_mode storage)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     coo_row_ind.resize(0);
     coo_col_ind.resize(0);

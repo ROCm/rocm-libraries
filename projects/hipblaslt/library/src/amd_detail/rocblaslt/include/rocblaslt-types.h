@@ -634,6 +634,8 @@ namespace rocblaslt
         hipDataType            type_c;
         hipDataType            type_d;
         rocblaslt_compute_type type_compute;
+        hipblasLtOrder_t       order_a;
+        hipblasLtOrder_t       order_b;
     };
 
     class RocGemmEpilogueV2

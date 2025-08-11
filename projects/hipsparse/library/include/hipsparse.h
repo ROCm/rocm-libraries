@@ -85,6 +85,7 @@
 #endif
 #endif
 
+#include "hipsparse-bfloat16.h"
 #include "hipsparse-types.h"
 
 #include "hipsparse-auxiliary.h"
