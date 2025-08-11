@@ -393,10 +393,9 @@ rocsparse_status
                                m,
                                false);
 
-        // Create row blocks, workgroup flag, and workgroup data structures
-        std::vector<I>        row_blocks(csrmv_info->adaptive.size, 0);
-        std::vector<uint32_t> wg_flags(csrmv_info->adaptive.size, 0);
-        std::vector<J>        wg_ids(csrmv_info->adaptive.size, 0);
+        // Create row blocks and workgroup data structures
+        std::vector<I> row_blocks(csrmv_info->adaptive.size, 0);
+        std::vector<J> wg_ids(csrmv_info->adaptive.size, 0);
 
         ComputeRowBlocks<I, J>(row_blocks.data(),
                                wg_ids.data(),
@@ -433,10 +432,9 @@ rocsparse_status
                                                sizeof(I) * csrmv_info->adaptive.size,
                                                hipMemcpyHostToDevice,
                                                stream));
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(csrmv_info->adaptive.wg_flags,
-                                               wg_flags.data(),
+            RETURN_IF_HIP_ERROR(hipMemsetAsync(csrmv_info->adaptive.wg_flags,
+                                               0,
                                                sizeof(uint32_t) * csrmv_info->adaptive.size,
-                                               hipMemcpyHostToDevice,
                                                stream));
             RETURN_IF_HIP_ERROR(hipMemcpyAsync(csrmv_info->adaptive.wg_ids,
                                                wg_ids.data(),

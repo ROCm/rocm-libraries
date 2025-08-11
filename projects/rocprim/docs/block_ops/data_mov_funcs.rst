@@ -67,18 +67,3 @@ Store
 
 .. doxygengroup:: blockmodule_warp_store_functions
    :content-only:
-
-Direct Blocked Cast
-====================
-
-Load
----------
-
-.. doxygengroup:: blockmodule_cast_load_functions
-   :content-only:
-
-Store
-----------
-
-.. doxygengroup:: blockmodule_cast_store_functions
-   :content-only:

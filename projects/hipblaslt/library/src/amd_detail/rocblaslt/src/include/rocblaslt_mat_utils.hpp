@@ -42,6 +42,38 @@ inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order
 }
 
 /*******************************************************************************
+ * Calculate Default Swizzle-A-Batched-Stride
+ ******************************************************************************/
+inline void setDefaultSwizzledBatchedStride(const hipblasLtOrder_t& matOrder,
+                                            const uint64_t          matUnrollDim,
+                                            const uint64_t          matTileDim,
+                                            int64_t&                batch_stride)
+{
+    size_t MiM = 16, MiK = 0, MiKv = 0, PackK = 0;
+    if(matOrder == HIPBLASLT_ORDER_COL16_4R8)
+    {
+        //f16
+        MiK   = 16;
+        MiKv  = 4;
+        PackK = 16 / MiKv / 2;
+    }
+    else if(matOrder == HIPBLASLT_ORDER_COL16_4R16)
+    {
+        //f8
+        MiK   = 32;
+        MiKv  = 8;
+        PackK = 16 / MiKv / 1;
+    }
+    else
+        return;
+
+    size_t K_block = MiK * PackK;
+    //align to k for swizzleK and to m for 16
+    batch_stride = ((matTileDim + MiM - 1) / MiM) * MiM * ((matUnrollDim + K_block - 1) / K_block)
+                   * K_block;
+}
+
+/*******************************************************************************
  * Validate Matmul Swizzle Arguments
  ******************************************************************************/
 inline rocblaslt_status validateMatmulSwizzleArgs(const rocblaslt_matmul_desc   matmul_descr,
