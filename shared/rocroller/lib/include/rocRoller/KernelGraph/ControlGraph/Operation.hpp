@@ -450,6 +450,8 @@ namespace rocRoller
             Operations::ScaleMode scaleModeB = Operations::ScaleMode::None;
             std::vector<size_t>   scaleStridesA;
             std::vector<size_t>   scaleStridesB;
+            std::vector<size_t>   scalePreShuffledTileA;
+            std::vector<size_t>   scalePreShuffledTileB;
             VariableType          accType = DataType::Float;
 
             std::string name() const;

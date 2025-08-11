@@ -416,32 +416,32 @@ auto rocsparse_iaxyt_dispatch(const Arguments& arg)
 
     const auto T = arg.compute_type;
 
-    bool f32r_case = (A == rocsparse_datatype_f32_r && A == X && A == Y && A == T);
-    bool f64r_case = (A == rocsparse_datatype_f64_r && A == X && A == Y && A == T);
-    bool f32c_case = (A == rocsparse_datatype_f32_c && A == X && A == Y && A == T);
-    bool f64c_case = (A == rocsparse_datatype_f64_c && A == X && A == Y && A == T);
+    const bool f32r_case = (A == rocsparse_datatype_f32_r && A == X && A == Y && A == T);
+    const bool f64r_case = (A == rocsparse_datatype_f64_r && A == X && A == Y && A == T);
+    const bool f32c_case = (A == rocsparse_datatype_f32_c && A == X && A == Y && A == T);
+    const bool f64c_case = (A == rocsparse_datatype_f64_c && A == X && A == Y && A == T);
 
-    bool i8r_i8r_i32r_i32r_case
+    const bool i8r_i8r_i32r_i32r_case
         = (A == rocsparse_datatype_i8_r && X == rocsparse_datatype_i8_r
            && Y == rocsparse_datatype_i32_r && T == rocsparse_datatype_i32_r);
 
-    bool i8r_i8r_f32r_f32r_case
+    const bool i8r_i8r_f32r_f32r_case
         = (A == rocsparse_datatype_i8_r && X == rocsparse_datatype_i8_r
            && Y == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool f16r_f16r_f32r_f32r_case
+    const bool f16r_f16r_f32r_f32r_case
         = (A == rocsparse_datatype_f16_r && X == rocsparse_datatype_f16_r
            && Y == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool bf16r_bf16r_f32r_f32r_case
+    const bool bf16r_bf16r_f32r_f32r_case
         = (A == rocsparse_datatype_bf16_r && X == rocsparse_datatype_bf16_r
            && Y == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool f32r_f32c_f32c_f32c_case
+    const bool f32r_f32c_f32c_f32c_case
         = (A == rocsparse_datatype_f32_r && X == rocsparse_datatype_f32_c
            && Y == rocsparse_datatype_f32_c && T == rocsparse_datatype_f32_c);
 
-    bool f64r_f64c_f64c_f64c_case
+    const bool f64r_f64c_f64c_f64c_case
         = (A == rocsparse_datatype_f64_r && X == rocsparse_datatype_f64_c
            && Y == rocsparse_datatype_f64_c && T == rocsparse_datatype_f64_c);
 
@@ -535,32 +535,32 @@ auto rocsparse_ijaxyt_dispatch(const Arguments& arg)
 
     const auto T = arg.compute_type;
 
-    bool f32r_case = (A == rocsparse_datatype_f32_r && A == X && A == Y && A == T);
-    bool f64r_case = (A == rocsparse_datatype_f64_r && A == X && A == Y && A == T);
-    bool f32c_case = (A == rocsparse_datatype_f32_c && A == X && A == Y && A == T);
-    bool f64c_case = (A == rocsparse_datatype_f64_c && A == X && A == Y && A == T);
+    const bool f32r_case = (A == rocsparse_datatype_f32_r && A == X && A == Y && A == T);
+    const bool f64r_case = (A == rocsparse_datatype_f64_r && A == X && A == Y && A == T);
+    const bool f32c_case = (A == rocsparse_datatype_f32_c && A == X && A == Y && A == T);
+    const bool f64c_case = (A == rocsparse_datatype_f64_c && A == X && A == Y && A == T);
 
-    bool i8r_i8r_i32r_i32r_case
+    const bool i8r_i8r_i32r_i32r_case
         = (A == rocsparse_datatype_i8_r && X == rocsparse_datatype_i8_r
            && Y == rocsparse_datatype_i32_r && T == rocsparse_datatype_i32_r);
 
-    bool i8r_i8r_f32r_f32r_case
+    const bool i8r_i8r_f32r_f32r_case
         = (A == rocsparse_datatype_i8_r && X == rocsparse_datatype_i8_r
            && Y == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool f16r_f16r_f32r_f32r_case
+    const bool f16r_f16r_f32r_f32r_case
         = (A == rocsparse_datatype_f16_r && X == rocsparse_datatype_f16_r
            && Y == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool bf16r_bf16r_f32r_f32r_case
+    const bool bf16r_bf16r_f32r_f32r_case
         = (A == rocsparse_datatype_bf16_r && X == rocsparse_datatype_bf16_r
            && Y == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool f32r_f32c_f32c_f32c_case
+    const bool f32r_f32c_f32c_f32c_case
         = (A == rocsparse_datatype_f32_r && X == rocsparse_datatype_f32_c
            && Y == rocsparse_datatype_f32_c && T == rocsparse_datatype_f32_c);
 
-    bool f64r_f64c_f64c_f64c_case
+    const bool f64r_f64c_f64c_f64c_case
         = (A == rocsparse_datatype_f64_r && X == rocsparse_datatype_f64_c
            && Y == rocsparse_datatype_f64_c && T == rocsparse_datatype_f64_c);
 
@@ -682,59 +682,67 @@ auto rocsparse_iabct_dispatch(const Arguments& arg)
 
     const auto T = arg.compute_type;
 
-    bool f32r_case = (A == rocsparse_datatype_f32_r && A == B && A == C && A == T);
-    bool f64r_case = (A == rocsparse_datatype_f64_r && A == B && A == C && A == T);
-    bool f32c_case = (A == rocsparse_datatype_f32_c && A == B && A == C && A == T);
-    bool f64c_case = (A == rocsparse_datatype_f64_c && A == B && A == C && A == T);
+    const bool f32r_case = (A == rocsparse_datatype_f32_r && A == B && A == C && A == T);
+    const bool f64r_case = (A == rocsparse_datatype_f64_r && A == B && A == C && A == T);
+    const bool f32c_case = (A == rocsparse_datatype_f32_c && A == B && A == C && A == T);
+    const bool f64c_case = (A == rocsparse_datatype_f64_c && A == B && A == C && A == T);
 
-    bool i8r_i8r_i32r_i32r_case
+    const bool i8r_i8r_i32r_i32r_case
         = (A == rocsparse_datatype_i8_r && B == rocsparse_datatype_i8_r
            && C == rocsparse_datatype_i32_r && T == rocsparse_datatype_i32_r);
 
-    bool i8r_i8r_f32r_f32r_case
+    const bool i8r_i8r_f32r_f32r_case
         = (A == rocsparse_datatype_i8_r && B == rocsparse_datatype_i8_r
            && C == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool f16r_f16r_f32r_f32r_case
+    const bool f16r_f16r_f32r_f32r_case
         = (A == rocsparse_datatype_f16_r && B == rocsparse_datatype_f16_r
            && C == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-#define DISPATCH_TEST(ITYPE)                                         \
-    if(f32r_case)                                                    \
-    {                                                                \
-        return TEST<ITYPE, float, float, float, float>{}(arg);       \
-    }                                                                \
-    else if(f64r_case)                                               \
-    {                                                                \
-        return TEST<ITYPE, double, double, double, double>{}(arg);   \
-    }                                                                \
-    else if(f32c_case)                                               \
-    {                                                                \
-        return TEST<ITYPE,                                           \
-                    rocsparse_float_complex,                         \
-                    rocsparse_float_complex,                         \
-                    rocsparse_float_complex,                         \
-                    rocsparse_float_complex>{}(arg);                 \
-    }                                                                \
-    else if(f64c_case)                                               \
-    {                                                                \
-        return TEST<ITYPE,                                           \
-                    rocsparse_double_complex,                        \
-                    rocsparse_double_complex,                        \
-                    rocsparse_double_complex,                        \
-                    rocsparse_double_complex>{}(arg);                \
-    }                                                                \
-    else if(i8r_i8r_i32r_i32r_case)                                  \
-    {                                                                \
-        return TEST<ITYPE, int8_t, int8_t, int32_t, int32_t>{}(arg); \
-    }                                                                \
-    else if(i8r_i8r_f32r_f32r_case)                                  \
-    {                                                                \
-        return TEST<ITYPE, int8_t, int8_t, float, float>{}(arg);     \
-    }                                                                \
-    else if(f16r_f16r_f32r_f32r_case)                                \
-    {                                                                \
-        return TEST<ITYPE, _Float16, _Float16, float, float>{}(arg); \
+    const bool bf16r_bf16r_f32r_f32r_case
+        = (A == rocsparse_datatype_bf16_r && B == rocsparse_datatype_bf16_r
+           && C == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
+
+#define DISPATCH_TEST(ITYPE)                                                             \
+    if(f32r_case)                                                                        \
+    {                                                                                    \
+        return TEST<ITYPE, float, float, float, float>{}(arg);                           \
+    }                                                                                    \
+    else if(f64r_case)                                                                   \
+    {                                                                                    \
+        return TEST<ITYPE, double, double, double, double>{}(arg);                       \
+    }                                                                                    \
+    else if(f32c_case)                                                                   \
+    {                                                                                    \
+        return TEST<ITYPE,                                                               \
+                    rocsparse_float_complex,                                             \
+                    rocsparse_float_complex,                                             \
+                    rocsparse_float_complex,                                             \
+                    rocsparse_float_complex>{}(arg);                                     \
+    }                                                                                    \
+    else if(f64c_case)                                                                   \
+    {                                                                                    \
+        return TEST<ITYPE,                                                               \
+                    rocsparse_double_complex,                                            \
+                    rocsparse_double_complex,                                            \
+                    rocsparse_double_complex,                                            \
+                    rocsparse_double_complex>{}(arg);                                    \
+    }                                                                                    \
+    else if(i8r_i8r_i32r_i32r_case)                                                      \
+    {                                                                                    \
+        return TEST<ITYPE, int8_t, int8_t, int32_t, int32_t>{}(arg);                     \
+    }                                                                                    \
+    else if(i8r_i8r_f32r_f32r_case)                                                      \
+    {                                                                                    \
+        return TEST<ITYPE, int8_t, int8_t, float, float>{}(arg);                         \
+    }                                                                                    \
+    else if(f16r_f16r_f32r_f32r_case)                                                    \
+    {                                                                                    \
+        return TEST<ITYPE, _Float16, _Float16, float, float>{}(arg);                     \
+    }                                                                                    \
+    else if(bf16r_bf16r_f32r_f32r_case)                                                  \
+    {                                                                                    \
+        return TEST<ITYPE, rocsparse_bfloat16, rocsparse_bfloat16, float, float>{}(arg); \
     }
 
     switch(I)
@@ -769,61 +777,69 @@ auto rocsparse_ijabct_dispatch(const Arguments& arg)
 
     const auto T = arg.compute_type;
 
-    bool f32r_case = (A == rocsparse_datatype_f32_r && A == B && A == C && A == T);
-    bool f64r_case = (A == rocsparse_datatype_f64_r && A == B && A == C && A == T);
-    bool f32c_case = (A == rocsparse_datatype_f32_c && A == B && A == C && A == T);
-    bool f64c_case = (A == rocsparse_datatype_f64_c && A == B && A == C && A == T);
+    const bool f32r_case = (A == rocsparse_datatype_f32_r && A == B && A == C && A == T);
+    const bool f64r_case = (A == rocsparse_datatype_f64_r && A == B && A == C && A == T);
+    const bool f32c_case = (A == rocsparse_datatype_f32_c && A == B && A == C && A == T);
+    const bool f64c_case = (A == rocsparse_datatype_f64_c && A == B && A == C && A == T);
 
-    bool i8r_i8r_i32r_i32r_case
+    const bool i8r_i8r_i32r_i32r_case
         = (A == rocsparse_datatype_i8_r && B == rocsparse_datatype_i8_r
            && C == rocsparse_datatype_i32_r && T == rocsparse_datatype_i32_r);
 
-    bool i8r_i8r_f32r_f32r_case
+    const bool i8r_i8r_f32r_f32r_case
         = (A == rocsparse_datatype_i8_r && B == rocsparse_datatype_i8_r
            && C == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-    bool f16r_f16r_f32r_f32r_case
+    const bool f16r_f16r_f32r_f32r_case
         = (A == rocsparse_datatype_f16_r && B == rocsparse_datatype_f16_r
            && C == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
 
-#define DISPATCH_TEST(ITYPE, JTYPE)                                         \
-    if(f32r_case)                                                           \
-    {                                                                       \
-        return TEST<ITYPE, JTYPE, float, float, float, float>{}(arg);       \
-    }                                                                       \
-    else if(f64r_case)                                                      \
-    {                                                                       \
-        return TEST<ITYPE, JTYPE, double, double, double, double>{}(arg);   \
-    }                                                                       \
-    else if(f32c_case)                                                      \
-    {                                                                       \
-        return TEST<ITYPE,                                                  \
-                    JTYPE,                                                  \
-                    rocsparse_float_complex,                                \
-                    rocsparse_float_complex,                                \
-                    rocsparse_float_complex,                                \
-                    rocsparse_float_complex>{}(arg);                        \
-    }                                                                       \
-    else if(f64c_case)                                                      \
-    {                                                                       \
-        return TEST<ITYPE,                                                  \
-                    JTYPE,                                                  \
-                    rocsparse_double_complex,                               \
-                    rocsparse_double_complex,                               \
-                    rocsparse_double_complex,                               \
-                    rocsparse_double_complex>{}(arg);                       \
-    }                                                                       \
-    else if(i8r_i8r_i32r_i32r_case)                                         \
-    {                                                                       \
-        return TEST<ITYPE, JTYPE, int8_t, int8_t, int32_t, int32_t>{}(arg); \
-    }                                                                       \
-    else if(i8r_i8r_f32r_f32r_case)                                         \
-    {                                                                       \
-        return TEST<ITYPE, JTYPE, int8_t, int8_t, float, float>{}(arg);     \
-    }                                                                       \
-    else if(f16r_f16r_f32r_f32r_case)                                       \
-    {                                                                       \
-        return TEST<ITYPE, JTYPE, _Float16, _Float16, float, float>{}(arg); \
+    const bool bf16r_bf16r_f32r_f32r_case
+        = (A == rocsparse_datatype_bf16_r && B == rocsparse_datatype_bf16_r
+           && C == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
+
+#define DISPATCH_TEST(ITYPE, JTYPE)                                                             \
+    if(f32r_case)                                                                               \
+    {                                                                                           \
+        return TEST<ITYPE, JTYPE, float, float, float, float>{}(arg);                           \
+    }                                                                                           \
+    else if(f64r_case)                                                                          \
+    {                                                                                           \
+        return TEST<ITYPE, JTYPE, double, double, double, double>{}(arg);                       \
+    }                                                                                           \
+    else if(f32c_case)                                                                          \
+    {                                                                                           \
+        return TEST<ITYPE,                                                                      \
+                    JTYPE,                                                                      \
+                    rocsparse_float_complex,                                                    \
+                    rocsparse_float_complex,                                                    \
+                    rocsparse_float_complex,                                                    \
+                    rocsparse_float_complex>{}(arg);                                            \
+    }                                                                                           \
+    else if(f64c_case)                                                                          \
+    {                                                                                           \
+        return TEST<ITYPE,                                                                      \
+                    JTYPE,                                                                      \
+                    rocsparse_double_complex,                                                   \
+                    rocsparse_double_complex,                                                   \
+                    rocsparse_double_complex,                                                   \
+                    rocsparse_double_complex>{}(arg);                                           \
+    }                                                                                           \
+    else if(i8r_i8r_i32r_i32r_case)                                                             \
+    {                                                                                           \
+        return TEST<ITYPE, JTYPE, int8_t, int8_t, int32_t, int32_t>{}(arg);                     \
+    }                                                                                           \
+    else if(i8r_i8r_f32r_f32r_case)                                                             \
+    {                                                                                           \
+        return TEST<ITYPE, JTYPE, int8_t, int8_t, float, float>{}(arg);                         \
+    }                                                                                           \
+    else if(f16r_f16r_f32r_f32r_case)                                                           \
+    {                                                                                           \
+        return TEST<ITYPE, JTYPE, _Float16, _Float16, float, float>{}(arg);                     \
+    }                                                                                           \
+    else if(bf16r_bf16r_f32r_f32r_case)                                                         \
+    {                                                                                           \
+        return TEST<ITYPE, JTYPE, rocsparse_bfloat16, rocsparse_bfloat16, float, float>{}(arg); \
     }
 
     switch(I)

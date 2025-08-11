@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,35 +24,36 @@
  *
  *******************************************************************************/
 
-#pragma once
+#include <unordered_set>
+#include <vector>
 
-#include <rocRoller/Operations/Command_fwd.hpp>
-#include <rocRoller/Operations/OperationTag.hpp>
-#include <rocRoller/Serialization/Base_fwd.hpp>
-
-#include <memory>
+#include <rocRoller/KernelGraph/KernelGraph.hpp>
 
 namespace rocRoller
 {
-    namespace Operations
+    namespace KernelGraph
     {
-        class BaseOperation
+        namespace RemoveSetCoordinateDetails
         {
-        public:
-            BaseOperation();
+            /**
+             * Find the leave nodes (in terms of program order) inside the subgraph rooted
+             * at a given node.
+            */
+            void findLeaves(int                      tag,
+                            KernelGraph const&       kg,
+                            std::unordered_set<int>& visited,
+                            std::vector<int>&        leaves);
 
-            void         setCommand(CommandPtr);
-            OperationTag getTag() const;
-            void         setTag(OperationTag tag);
+            /**
+             * Find the leave nodes (in terms of program order) inside the subgraphs rooted
+             * at a given set of nodes.
+            */
+            std::vector<int> findLeaves(std::vector<int> nodes, KernelGraph const& kg);
 
-            std::strong_ordering operator<=>(BaseOperation const&) const;
-
-        protected:
-            OperationTag           m_tag;
-            std::weak_ptr<Command> m_command;
-
-            template <typename T1, typename T2, typename T3>
-            friend struct rocRoller::Serialization::MappingTraits;
-        };
+            /**
+             * Remove all SetCoordinate nodes from a control graph of a given kernel graph
+            */
+            void removeSetCoordinates(KernelGraph& kg);
+        }
     }
-} // namespace rocRoller
+}

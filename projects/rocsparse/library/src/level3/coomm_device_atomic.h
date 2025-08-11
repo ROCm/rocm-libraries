@@ -58,7 +58,8 @@ namespace rocsparse
 
         const I row = (gid < nnz) ? rocsparse::nontemporal_load(coo_row_ind + gid) - idx_base : 0;
         const I col = (gid < nnz) ? rocsparse::nontemporal_load(coo_col_ind + gid) - idx_base : 0;
-        const T val = (gid < nnz) ? rocsparse::nontemporal_load(coo_val + gid) : static_cast<T>(0);
+        const T val = (gid < nnz) ? static_cast<T>(rocsparse::nontemporal_load(coo_val + gid))
+                                  : static_cast<T>(0);
 
         for(I l = 0; l < ncol; l += WF_SIZE * LOOPS)
         {
