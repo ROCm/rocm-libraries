@@ -604,11 +604,11 @@ auto GenericSearch(const Solver s,
                                                                  << " >= " << best_time);
                         }
 
-                        if(perf_sols)
-                        {
-                            perf_sols->push_back({current_config.ToString(), elapsed_time});
-                        }
                     }
+                }
+                if(perf_sols)
+                {
+                    perf_sols->push_back({current_config.ToString(), elapsed_time});
                 }
             }
 
