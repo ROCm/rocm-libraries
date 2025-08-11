@@ -29,6 +29,7 @@ PYBIND11_MODULE(origami, m)
         .value("Float8", Origami::DataType::Float8)
         .value("BFloat8", Origami::DataType::BFloat8)
         .value("Float6", Origami::DataType::Float6)
+        .value("BFloat6", Origami::DataType::BFloat6)
         .value("Float4", Origami::DataType::Float4)
         .export_values();
 

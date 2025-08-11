@@ -59,6 +59,7 @@ namespace TensileLite
             Float8BFloat8,
             BFloat8Float8,
             Float6,
+            BFloat6,
             Float4,
             Count,
             None = Count
@@ -107,6 +108,8 @@ namespace TensileLite
             case DataType::BFloat8Float8:
                 return 8;
             case DataType::Float6:
+                return 6;
+            case DataType::BFloat6:
                 return 6;
             case DataType::Float4:
                 return 4;
@@ -159,6 +162,8 @@ namespace TensileLite
                 return "BFloat8Float8";
             case DataType::Float6:
                 return "Float6";
+            case DataType::BFloat6:
+                return "BFloat6";
             case DataType::Float4:
                 return "Float4";
             default:
@@ -193,6 +198,8 @@ namespace TensileLite
                 return DataType::BFloat8;
             if (s == "f6")
                 return DataType::Float6;
+            if (s == "bf6")
+                return DataType::BFloat6;
             if (s == "f4")
                 return DataType::Float4;
             return DataType::None;

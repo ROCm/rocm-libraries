@@ -54,6 +54,9 @@ namespace rocisa
         BFloat8,
         Float8BFloat8,
         BFloat8Float8,
+        Float6,
+        BFloat6,
+        Float4,
         Count,
         None = Count
     };
