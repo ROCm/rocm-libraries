@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.24.4)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
 
-project(hipblaslt VERSION 1.1.0 LANGUAGES CXX C Fortran ASM)
+project(hipblaslt VERSION 1.1.0 LANGUAGES CXX C ASM)
 
 if("${CMAKE_SOURCE_DIR}" STREQUAL "${PROJECT_SOURCE_DIR}")
     set(HIPBLASLT_IS_SUBPROJECT FALSE)
@@ -161,6 +161,23 @@ else()
     set(HIPBLASLT_PYTHON_COMMAND "${Python_EXECUTABLE}")
 endif()
 
+if(HIPBLASLT_ENABLE_MSGPACK)
+    # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
+    # Prefer 6.x (msgpack-cxx)
+    find_package(msgpack-cxx CONFIG)
+    if(msgpack-cxx_FOUND)
+        message(STATUS "Found msgpack-cxx (>=6.x)")
+        set(hipblaslt_msgpack_target "msgpack-cxx")
+    else()
+        # TODO: set minimum version requied for *-cxx library
+        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack)
+        set(hipblaslt_msgpack_target "msgpackc-cxx")
+        message(STATUS "Found msgpack (<=5.x)")
+    endif()
+endif()
+
+add_subdirectory(tensilelite)
+
 if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBRARIES_SUPERBUILD)
     if(HIPBLASLT_ENABLE_FETCH)
         block(SCOPE_FOR VARIABLES)
@@ -185,21 +202,6 @@ if(HIPBLASLT_ENABLE_ROCROLLER AND NOT ROCM_LIBRARIES_SUPERBUILD)
     endif()
 endif()
 
-if(HIPBLASLT_ENABLE_MSGPACK)
-    # See: https://github.com/msgpack/msgpack-c/wiki/Q%26A#how-to-support-both-msgpack-c-c-version-5x-and-6x-
-    # Prefer 6.x (msgpack-cxx)
-    find_package(msgpack-cxx CONFIG)
-    if(msgpack-cxx_FOUND)
-        message(STATUS "Found msgpack-cxx (>=6.x)")
-    else()
-        # TODO: set minimum version requied for *-cxx library
-        find_package(msgpackc-cxx CONFIG REQUIRED NAMES msgpackc-cxx msgpack) 
-        message(STATUS "Found msgpack (<=5.x)")
-    endif()
-endif()
-
-add_subdirectory(tensilelite)
-
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_BUILD_SHARED_LIBS)
         add_library(hipblaslt SHARED)
@@ -210,6 +212,9 @@ if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_link_libraries(hipblaslt PRIVATE roc::rocroller)
         target_compile_definitions(hipblaslt PUBLIC HIPBLASLT_USE_ROCROLLER)
+    endif()
+    if(HIPBLASLT_ENABLE_MSGPACK)
+        target_link_libraries(hipblaslt PRIVATE ${hipblaslt_msgpack_target})
     endif()
     rocm_set_soversion(hipblaslt ${hipblaslt_SOVERSION})
     add_library(roc::hipblaslt ALIAS hipblaslt)
@@ -265,7 +270,6 @@ if(HIPBLASLT_ENABLE_HOST)
     )
     add_subdirectory(library)
 endif()
-
 
 if(HIPBLASLT_ENABLE_DEVICE)
     add_subdirectory(device-library)
@@ -356,18 +360,6 @@ if(NOT CLIENTS_OS)
     rocm_read_os_release(CLIENTS_OS_VERSION VERSION_ID)
 endif()
 
-set(GFORTRAN_RPM "libgfortran4")
-set(GFORTRAN_DEB "libgfortran4")
-if(CLIENTS_OS STREQUAL "centos" OR CLIENTS_OS STREQUAL "rhel")
-    if(CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "8")
-        set(GFORTRAN_RPM "libgfortran")
-    endif()
-elseif(CLIENTS_OS STREQUAL "ubuntu" AND CLIENTS_OS_VERSION VERSION_GREATER_EQUAL "20.04")
-    set(GFORTRAN_DEB "libgfortran5")
-elseif(CLIENTS_OS STREQUAL "mariner" OR CLIENTS_OS STREQUAL "azurelinux")
-    set(GFORTRAN_RPM "gfortran")
-endif()
-
 if(HIPBLASLT_ENABLE_CLIENT)
     rocm_install(
         TARGETS
@@ -413,8 +405,6 @@ if(HIPBLASLT_ENABLE_CLIENT)
     rocm_package_setup_client_component(benchmarks
         DEPENDS
         COMPONENT clients-common
-        DEB "${GFORTRAN_DEB}"
-        RPM "${GFORTRAN_RPM}"
     )
 
 endif()
@@ -432,8 +422,6 @@ if(HIPBLASLT_BUILD_TESTING OR BUILD_TESTING)
     rocm_package_setup_client_component(tests
         DEPENDS
         COMPONENT clients-common
-        DEB "${GFORTRAN_DEB}"
-        RPM "${GFORTRAN_RPM}"
     )
 endif()
 
