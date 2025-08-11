@@ -90,8 +90,8 @@ namespace rocRoller
         InstructionStatus MEMObserver<Derived>::peek(Instruction const& inst) const
         {
             InstructionStatus rv;
-
-            if(isMEMInstruction(inst) && m_incomplete.size() >= m_queueAllotment)
+            const auto* derived = static_cast<const Derived*>(this);
+            if(derived->isMEMInstruction(inst) && m_incomplete.size() >= m_queueAllotment)
             {
                 auto complete  = m_incomplete.front().expectedCompleteCycle;
                 rv.stallCycles = std::max(complete - m_programCycle, 0);
@@ -115,7 +115,8 @@ namespace rocRoller
         template <typename Derived>
         void MEMObserver<Derived>::observe(Instruction const& inst)
         {
-            auto wait = getWait(inst);
+            const auto* derived = static_cast<const Derived*>(this);
+            auto wait = derived->getWait(inst);
             if(wait >= 0)
             {
                 while(queueLen() > wait)
@@ -127,7 +128,7 @@ namespace rocRoller
 
             int instCycles = inst.numExecutedInstructions();
 
-            if(isMEMInstruction(inst))
+            if(derived->isMEMInstruction(inst))
             {
                 while(m_incomplete.size() >= m_queueAllotment)
                     queueShift();

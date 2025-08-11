@@ -172,6 +172,47 @@ namespace MEMObserverTest
                 peekAndSchedule(context, insts[3]);
                 peekAndSchedule(context, insts[4]);
             }
+
+            SECTION("VMEM Instructions with dependency")
+            {
+                auto context = TestContext::ForTarget(arch);
+                auto weights = Scheduling::VMEMObserver::getWeights(context.get());
+
+                if(weights.vmemQueueSize != 3)
+                {
+                    SKIP("Test tailored to vmemQueueSize == 3");
+                }
+
+                auto s    = context.createRegisters(Register::Type::Scalar, DataType::UInt32, 13);
+                auto zero = Register::Value::Literal(0);
+
+                std::vector<Instruction> insts = {
+                    Instruction("buffer_load_dwordx2", {s[1]}, {s[0], zero}, {}, ""),  // pc+=1
+                    Instruction("buffer_load_dwordx2", {s[3]}, {s[2], zero}, {}, ""),  // pc+=1
+                    Instruction("buffer_load_dwordx2", {s[5]}, {s[4], zero}, {}, ""),  // pc+=1
+                    Instruction("buffer_load_dwordx2", {s[7]}, {s[6], zero}, {}, ""),  // pc=inst[0].expected+1, expected=pc+vmemCycles
+
+                    Instruction("buffer_load_dwordx2", {s[8]}, {s[3], zero}, {}, ""),  // pc+=2 (including s_waitcnt)
+
+                    Instruction("buffer_load_dwordx2", {s[10]}, {s[9], zero}, {}, ""), // pc+=1
+                    Instruction("buffer_load_dwordx2", {s[12]}, {s[11], zero}, {}, ""),// pc=inst[3].expected+1
+                };
+
+                peekAndSchedule(context, insts[0]);
+                peekAndSchedule(context, insts[1]);
+                peekAndSchedule(context, insts[2]);
+                peekAndSchedule(context, insts[3], weights.vmemCycles - 2); // inst[0].expected - pc
+                peekAndSchedule(context, insts[4]); // dependency. generate waitcount.
+
+                peekAndSchedule(context, insts[5]);
+                peekAndSchedule(context, insts[6], weights.vmemCycles - 3); // inst[3].expected - pc
+
+                CHECK_THAT(context.output(), ContainsSubstring("CBNW: 0, Inc: 3"));
+                CHECK_THAT(context.output(), ContainsSubstring("CBNW: 1, Inc: 3"));
+
+
+                CHECK_THAT(context.output(), ContainsSubstring("s_waitcnt vmcnt(2)"));
+            }
         }
     }
 }
