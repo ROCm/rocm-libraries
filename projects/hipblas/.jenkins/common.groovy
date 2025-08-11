@@ -3,8 +3,6 @@
 
 def runCompileCommand(platform, project, jobName, boolean sameOrg=false)
 {
-    project.paths.construct_build_prefix()
-
     def getDependenciesCommand = ""
     if (project.installLibraryDependenciesFromCI)
     {
