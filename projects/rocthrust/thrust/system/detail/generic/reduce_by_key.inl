@@ -22,7 +22,6 @@
 #include <thrust/iterator/detail/minimum_system.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/iterator/is_output_iterator.h>
-#include <thrust/detail/type_traits/function_traits.h>
 #include <thrust/transform.h>
 #include <thrust/scatter.h>
 #include <thrust/iterator/zip_iterator.h>

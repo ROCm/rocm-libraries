@@ -31,11 +31,24 @@ import grp
 import os
 import subprocess
 import argparse
+from pathlib import Path
+import sys
 
 dockerfiles = {
     "clang": "docker/dockerfile-ubuntu-clang",
     "gcc": "docker/dockerfile-ubuntu-gcc",
 }
+
+
+def gitTop() -> Path:
+    command = ["git"] + ["rev-parse", "--show-toplevel"]
+    p = subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return Path(p.stdout.strip()).resolve()
 
 
 def parseArgs():
@@ -96,7 +109,7 @@ def parseArgs():
     )
     parser.add_argument(
         "--volumes",
-        default=[os.getcwd() + ":/data"],
+        default=[gitTop().as_posix() + ":/data"],
         action="append",
         help="What volumes to mount to the container. e.g. /source:/dest",
     )

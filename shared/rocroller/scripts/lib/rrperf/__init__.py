@@ -25,6 +25,7 @@
 
 # flake8: noqa: F401
 
+import rrperf.analyze
 import rrperf.autoperf
 import rrperf.args
 import rrperf.cli

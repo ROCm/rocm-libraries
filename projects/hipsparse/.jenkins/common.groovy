@@ -37,7 +37,6 @@ def runTestCommand (platform, project, gfilter)
                 """
 
     platform.runCommand(this, command)
-    junit "${project.paths.project_build_prefix}/build/release/clients/staging/*.xml"
 }
 
 def runCoverageCommand (platform, project, gfilter, String dirmode = "release")

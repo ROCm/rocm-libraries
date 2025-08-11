@@ -28,6 +28,8 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
 
+#include <map>
+
 namespace rocsparse
 {
     template <typename T, typename I, typename X, typename Y>
@@ -56,6 +58,131 @@ namespace rocsparse
                                                     (const I*)x->const_idx_data,
                                                     (Y*)y->values,
                                                     x->idx_base));
+        return rocsparse_status_success;
+    }
+
+    typedef rocsparse_status (*axpby_t)(rocsparse_handle            handle,
+                                        const void*                 alpha,
+                                        rocsparse_const_spvec_descr x,
+                                        const void*                 beta,
+                                        rocsparse_dnvec_descr       y);
+
+    using axpby_tuple = std::
+        tuple<rocsparse_datatype, rocsparse_indextype, rocsparse_datatype, rocsparse_datatype>;
+
+    // clang-format off
+#define AXPBY_CONFIG(T, I, X, Y)                                        \
+    {axpby_tuple(T, I, X, Y),                                           \
+     axpby_template<typename rocsparse::datatype_traits<T>::type_t,     \
+                    typename rocsparse::indextype_traits<I>::type_t,    \
+                    typename rocsparse::datatype_traits<X>::type_t,     \
+                    typename rocsparse::datatype_traits<Y>::type_t>}
+    // clang-format on
+
+    static const std::map<axpby_tuple, axpby_t> s_axpby_dispatch{
+        {AXPBY_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f32_r,
+                      rocsparse_datatype_f32_r),
+         AXPBY_CONFIG(rocsparse_datatype_f64_r,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f64_r,
+                      rocsparse_datatype_f64_r),
+         AXPBY_CONFIG(rocsparse_datatype_f32_c,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f32_c,
+                      rocsparse_datatype_f32_c),
+         AXPBY_CONFIG(rocsparse_datatype_f64_c,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f64_c,
+                      rocsparse_datatype_f64_c),
+
+         AXPBY_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_f32_r,
+                      rocsparse_datatype_f32_r),
+         AXPBY_CONFIG(rocsparse_datatype_f64_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_f64_r,
+                      rocsparse_datatype_f64_r),
+         AXPBY_CONFIG(rocsparse_datatype_f32_c,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_f32_c,
+                      rocsparse_datatype_f32_c),
+         AXPBY_CONFIG(rocsparse_datatype_f64_c,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_f64_c,
+                      rocsparse_datatype_f64_c),
+
+         AXPBY_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r),
+         AXPBY_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i32,
+                      rocsparse_datatype_bf16_r,
+                      rocsparse_datatype_bf16_r),
+         AXPBY_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_f16_r,
+                      rocsparse_datatype_f16_r),
+         AXPBY_CONFIG(rocsparse_datatype_f32_r,
+                      rocsparse_indextype_i64,
+                      rocsparse_datatype_bf16_r,
+                      rocsparse_datatype_bf16_r)}};
+
+    static rocsparse_status axpby_find(axpby_t*            function_,
+                                       rocsparse_datatype  t_type_,
+                                       rocsparse_indextype i_type_,
+                                       rocsparse_datatype  x_type_,
+                                       rocsparse_datatype  y_type_)
+    {
+        const auto& it = rocsparse::s_axpby_dispatch.find(
+            rocsparse::axpby_tuple(t_type_, i_type_, x_type_, y_type_));
+
+        if(it != rocsparse::s_axpby_dispatch.end())
+        {
+            function_[0] = it->second;
+        }
+        // LCOV_EXCL_START
+        else
+        {
+#ifndef NDEBUG
+            std::cout << "invalid precision configuration: "
+                      << "t_type: " << rocsparse::enum_utils::to_string(t_type_) << std::endl
+                      << ", i_type: " << rocsparse::enum_utils::to_string(i_type_) << std::endl
+                      << ", x_type: " << rocsparse::enum_utils::to_string(x_type_) << std::endl
+                      << ", y_type: " << rocsparse::enum_utils::to_string(y_type_) << std::endl;
+
+            std::cout << "available configuration are: " << std::endl;
+            for(const auto& p : rocsparse::s_axpby_dispatch)
+            {
+                const auto& t      = p.first;
+                const auto  t_type = std::get<0>(t);
+                const auto  i_type = std::get<1>(t);
+                const auto  x_type = std::get<2>(t);
+                const auto  y_type = std::get<3>(t);
+                std::cout << std::endl
+                          << std::endl
+                          << "t_type: " << rocsparse::enum_utils::to_string(t_type) << std::endl
+                          << ", i_type: " << rocsparse::enum_utils::to_string(i_type) << std::endl
+                          << ", x_type: " << rocsparse::enum_utils::to_string(x_type) << std::endl
+                          << ", y_type: " << rocsparse::enum_utils::to_string(y_type) << std::endl;
+            }
+#endif
+
+            std::stringstream sstr;
+            sstr << "invalid precision configuration: "
+                 << "t_type: " << rocsparse::enum_utils::to_string(t_type_)
+                 << ", i_type: " << rocsparse::enum_utils::to_string(i_type_)
+                 << ", x_type: " << rocsparse::enum_utils::to_string(x_type_)
+                 << ", y_type: " << rocsparse::enum_utils::to_string(y_type_);
+
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
+                                                   sstr.str().c_str());
+        }
+        // LCOV_EXCL_STOP
+
         return rocsparse_status_success;
     }
 }
@@ -99,100 +226,21 @@ try
     // Check for matching types while we do not support mixed precision computation
     ROCSPARSE_CHECKARG(4, y, (y->data_type != x->data_type), rocsparse_status_not_implemented);
 
-    // half real ; i32
-    if(x->idx_type == rocsparse_indextype_i32 && x->data_type == rocsparse_datatype_f16_r)
+    rocsparse::axpby_t f;
+    if(x->data_type == rocsparse_datatype_f16_r || x->data_type == rocsparse_datatype_bf16_r)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::axpby_find(
+            &f, rocsparse_datatype_f32_r, x->idx_type, x->data_type, y->data_type));
+    }
+    else
     {
         RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::axpby_template<float, int32_t, _Float16, _Float16>)(handle,
-                                                                            alpha,
-                                                                            x,
-                                                                            beta,
-                                                                            y));
-        return rocsparse_status_success;
-    }
-    // single real ; i32
-    if(x->idx_type == rocsparse_indextype_i32 && x->data_type == rocsparse_datatype_f32_r)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::axpby_template<float, int32_t, float, float>)(handle, alpha, x, beta, y));
-        return rocsparse_status_success;
-    }
-    // double real ; i32
-    if(x->idx_type == rocsparse_indextype_i32 && x->data_type == rocsparse_datatype_f64_r)
-    {
-        RETURN_IF_ROCSPARSE_ERROR((
-            rocsparse::axpby_template<double, int32_t, double, double>)(handle, alpha, x, beta, y));
-        return rocsparse_status_success;
-    }
-    // single complex ; i32
-    if(x->idx_type == rocsparse_indextype_i32 && x->data_type == rocsparse_datatype_f32_c)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::axpby_template<rocsparse_float_complex,
-                                       int32_t,
-                                       rocsparse_float_complex,
-                                       rocsparse_float_complex>)(handle, alpha, x, beta, y));
-        return rocsparse_status_success;
+            rocsparse::axpby_find(&f, x->data_type, x->idx_type, x->data_type, y->data_type));
     }
 
-    // double complex ; i32
-    if(x->idx_type == rocsparse_indextype_i32 && x->data_type == rocsparse_datatype_f64_c)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::axpby_template<rocsparse_double_complex,
-                                       int32_t,
-                                       rocsparse_double_complex,
-                                       rocsparse_double_complex>)(handle, alpha, x, beta, y));
-        return rocsparse_status_success;
-    }
-    // half real ; i64
-    if(x->idx_type == rocsparse_indextype_i64 && x->data_type == rocsparse_datatype_f16_r)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::axpby_template<float, int64_t, _Float16, _Float16>)(handle,
-                                                                            alpha,
-                                                                            x,
-                                                                            beta,
-                                                                            y));
-        return rocsparse_status_success;
-    }
-    // single real ; i64
-    if(x->idx_type == rocsparse_indextype_i64 && x->data_type == rocsparse_datatype_f32_r)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::axpby_template<float, int64_t, float, float>)(handle, alpha, x, beta, y));
-        return rocsparse_status_success;
-    }
-    // double real ; i64
-    if(x->idx_type == rocsparse_indextype_i64 && x->data_type == rocsparse_datatype_f64_r)
-    {
-        RETURN_IF_ROCSPARSE_ERROR((
-            rocsparse::axpby_template<double, int64_t, double, double>)(handle, alpha, x, beta, y));
-        return rocsparse_status_success;
-    }
-    // single complex ; i64
-    if(x->idx_type == rocsparse_indextype_i64 && x->data_type == rocsparse_datatype_f32_c)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::axpby_template<rocsparse_float_complex,
-                                       int64_t,
-                                       rocsparse_float_complex,
-                                       rocsparse_float_complex>)(handle, alpha, x, beta, y));
-        return rocsparse_status_success;
-    }
-    // double complex ; i64
-    if(x->idx_type == rocsparse_indextype_i64 && x->data_type == rocsparse_datatype_f64_c)
-    {
-        RETURN_IF_ROCSPARSE_ERROR(
-            (rocsparse::axpby_template<rocsparse_double_complex,
-                                       int64_t,
-                                       rocsparse_double_complex,
-                                       rocsparse_double_complex>)(handle, alpha, x, beta, y));
-        return rocsparse_status_success;
-    }
+    RETURN_IF_ROCSPARSE_ERROR(f(handle, alpha, x, beta, y));
 
-    // LCOV_EXCL_START
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+    return rocsparse_status_success;
 }
 catch(...)
 {

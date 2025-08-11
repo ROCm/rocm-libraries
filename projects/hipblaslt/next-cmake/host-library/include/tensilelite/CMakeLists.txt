@@ -37,7 +37,7 @@ add_subdirectory(analytical)
 
 set(_CMAKE_CURRENT_SOURCE_DIR "${TEMP_TENSILE_HOST_SOURCE_DIR}/include")
 
-target_sources(hipblaslt
+target_sources(tensilelite-host
     PRIVATE
         "${_CMAKE_CURRENT_SOURCE_DIR}/Tensile/AMDGPU.hpp"
         "${_CMAKE_CURRENT_SOURCE_DIR}/Tensile/AMDGPUPredicates.hpp"

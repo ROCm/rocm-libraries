@@ -72,21 +72,21 @@ namespace rocsparse
 
         const void* get_row_map() const;
         void*       get_row_map();
-        void        set_row_map(void*);
+        void**      get_ref_row_map();
         const void* get_diag_ind() const;
         void*       get_diag_ind();
-        void        set_diag_ind(void*);
+        void**      get_ref_diag_ind();
 
         const void* get_transposed_perm() const;
         void*       get_transposed_perm();
-        void        set_transposed_perm(void*);
+        void**      get_ref_transposed_perm();
         const void* get_transposed_row_ptr() const;
         void*       get_transposed_row_ptr();
-        void        set_transposed_row_ptr(void*);
+        void**      get_ref_transposed_row_ptr();
 
         const void* get_transposed_col_ind() const;
         void*       get_transposed_col_ind();
-        void        set_transposed_col_ind(void*);
+        void**      get_ref_transposed_col_ind();
 
         const void* get_row_ptr();
         void        set_row_ptr(const void*);

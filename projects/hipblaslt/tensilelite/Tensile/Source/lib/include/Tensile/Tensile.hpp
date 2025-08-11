@@ -187,6 +187,8 @@ namespace TensileLite
  */
     enum class LazyLoadingInit;
 
+    TENSILE_API std::map<int, std::string> LoadLibraryMapping(std::string const& filename);
+
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
     TENSILE_API std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
                 LoadLibraryFile(std::string const& filename);

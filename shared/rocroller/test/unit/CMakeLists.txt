@@ -1,0 +1,119 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+# TODO: KernelGraphTest
+# TODO: ConversionInstructions
+
+target_sources(arch-gen-tests
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/GPUArchitectureGeneratorTest.cpp"
+)
+target_include_directories(
+    arch-gen-tests
+        PRIVATE
+            "${PROJECT_SOURCE_DIR}/GPUArchitectureGenerator/include"
+)
+target_link_libraries(
+    arch-gen-tests
+        PRIVATE
+            roc::rocroller-interface
+            rocroller::common-test-utilities
+            rocroller::isa-spec-manager
+            GTest::gtest_main
+            GTest::gmock
+            ${BLAS_LIBRARIES}
+)
+
+
+target_link_libraries(rocroller-tests
+    PRIVATE
+        rocroller::common-test-utilities
+        ${BLAS_LIBRARIES}
+        GTest::gtest_main
+        GTest::gmock
+        libdivide::libdivide
+        ${llvm_libs}
+        ${llvm_yaml_libs}
+        ${msgpack_libs}
+)
+
+if(ROCROLLER_ENABLE_LLD)
+    target_link_libraries(rocroller-tests PRIVATE lldELF)
+endif()
+
+target_sources(rocroller-tests
+    PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/ContextFixture.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GPUContextFixture.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GenericContextFixture.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AddStreamKTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AllocatingObserverTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ArgumentLoaderTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ArgumentValueTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ArithmeticTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AssemblerTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/AssertTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/BufferDescriptorTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/CommandTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/CommonSubexpressionElimTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ComponentTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ControlGraphTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ConversionInstructions/Convert_F16_F32.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ConversionTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/CoordinateGraphTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/CopyGeneratorTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/CostTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DataTypesTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/DependencyTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/EnumToStringTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ErrorTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/F6Test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/F8Test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/FP4Test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/FastDivisionTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/FastMultiplicationTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/FileWritingObserverTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMFusion.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GEMMTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GPUArchitectureTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GPUInstructionInfoTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/GeneratorTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HalfPrecisionTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphTest/ConstantPropagation.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphTest/KernelGraphUtils.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphTest/Simplify.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/KernelGraphTest/UpdateParameters.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/KernelIndexTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/KernelOptionsTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/KernelTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LDSTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LDSTileCopyTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LabelTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LockTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LowerExponentialTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MFMAHazardObserverTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MFMAUnitObserverTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MatrixMultiplyTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MemoryInstructionsTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MetaObserverTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/MixedArithmeticTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/OperationTagTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/PermLanesTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/RandomTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/RegisterAllocatorTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/RegisterLivenessObserverTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SchedulerTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ScopeTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ScopeManagerTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SourceMatcherTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/StreamTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/SupportedInstructionObserverTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TileTransposeAdd.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TimerTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/UtilsTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/VariantTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/VectorAddBenchmark.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/WaitCountObserverTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/WaitCountTest.cpp"
+)

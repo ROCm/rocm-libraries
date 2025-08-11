@@ -28,6 +28,7 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 
 template <typename T>
 constexpr auto cast_to_unsigned(T val)
@@ -59,7 +60,7 @@ namespace rocRoller
             LaunchTimeExpressionVisitor(ContextPtr ctx, bool allowNewArgs)
                 : m_context(ctx)
                 , m_allowNewArgs(allowNewArgs)
-                , m_minComplexity(ctx->kernelOptions().minLaunchTimeExpressionComplexity)
+                , m_minComplexity(ctx->kernelOptions()->minLaunchTimeExpressionComplexity)
             {
             }
 
@@ -266,6 +267,8 @@ namespace rocRoller
 
                 AssertFatal(resultVariableType(expr) == resultVariableType(v2),
                             ShowValue(expr),
+                            ShowValue(v0),
+                            ShowValue(v1),
                             ShowValue(v2));
 
                 return v2;

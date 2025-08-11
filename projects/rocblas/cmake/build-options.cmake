@@ -98,7 +98,3 @@ if( BUILD_WITH_TENSILE )
   option( BUILD_WITH_PIP "Use pip to install Python dependencies" ON)
 
 endif()
-
-
-# FOR HANDLING ENABLE/DISABLE OPTIONAL BACKWARD COMPATIBILITY for FILE/FOLDER REORG
-option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)

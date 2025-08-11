@@ -52,16 +52,13 @@ namespace rocRoller
              *
              * LHS and R1HS are stored in registers.  R2HS is the accumulator and can be the same as DEST.
              *
-             * LHS is M x K with B batches.  RHS is K x N with B batches.
+             * LHS is mi.m x mi.k with mi.b batches.  RHS is mi.k x mi.n with mi.b batches.
              */
-            virtual Generator<Instruction> mul(Register::ValuePtr dest,
-                                               Register::ValuePtr lhs,
-                                               Register::ValuePtr r1hs,
-                                               Register::ValuePtr r2hs,
-                                               int                M,
-                                               int                N,
-                                               int                K,
-                                               int                B)
+            virtual Generator<Instruction> mul(Register::ValuePtr  dest,
+                                               Register::ValuePtr  lhs,
+                                               Register::ValuePtr  r1hs,
+                                               Register::ValuePtr  r2hs,
+                                               MatrixMultiplySizes mi)
                 = 0;
         };
 
@@ -85,14 +82,11 @@ namespace rocRoller
                 return std::make_shared<MatrixMultiplyGenerator>(context);
             }
 
-            virtual Generator<Instruction> mul(Register::ValuePtr dest,
-                                               Register::ValuePtr lhs,
-                                               Register::ValuePtr r1hs,
-                                               Register::ValuePtr r2hs,
-                                               int                M,
-                                               int                N,
-                                               int                K,
-                                               int                B) override;
+            virtual Generator<Instruction> mul(Register::ValuePtr  dest,
+                                               Register::ValuePtr  lhs,
+                                               Register::ValuePtr  r1hs,
+                                               Register::ValuePtr  r2hs,
+                                               MatrixMultiplySizes mi) override;
 
         protected:
             ContextPtr m_context;

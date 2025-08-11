@@ -74,7 +74,7 @@ enum fft_precision
     fft_precision_double,
 };
 
-// Used for CLI11 parsing of input gen enum
+// Used for CLI11 parsing of precision enum
 static bool lexical_cast(const std::string& word, fft_precision& precision)
 {
     if(word == "half")
@@ -85,6 +85,28 @@ static bool lexical_cast(const std::string& word, fft_precision& precision)
         precision = fft_precision_double;
     else
         throw std::runtime_error("Invalid precision specified");
+    return true;
+}
+
+enum fft_auto_allocation
+{
+    fft_auto_allocation_on,
+    fft_auto_allocation_off,
+    fft_auto_allocation_default
+};
+
+// Used for CLI11 parsing of auto-allocation enum
+static bool lexical_cast(const std::string& word, fft_auto_allocation& auto_allocation)
+{
+    if(word == "on")
+        auto_allocation = fft_auto_allocation_on;
+    else if(word == "off")
+        auto_allocation = fft_auto_allocation_off;
+    else if(word == "default")
+        auto_allocation = fft_auto_allocation_default;
+    else
+        throw std::runtime_error(
+            "Invalid auto-allocation behavior specified (choose \"on\", \"off\", or \"default\")");
     return true;
 }
 
@@ -491,7 +513,7 @@ public:
     fft_input_generator igen = fft_input_random_generator_host;
 #endif
 
-    size_t workbuffersize = 0;
+    fft_auto_allocation auto_allocate = fft_auto_allocation_default;
 
     enum fft_mp_lib
     {
@@ -599,7 +621,10 @@ public:
             }
         }
 
-        assert(selected_grid[0] * selected_grid[1] * selected_grid[2] == mp_ranks);
+        if(selected_grid[0] * selected_grid[1] * selected_grid[2] != mp_ranks)
+        {
+            throw std::runtime_error("Grid dimensions do not multiply to mp_ranks.");
+        }
 
         fft_grid = {selected_grid[0], selected_grid[1], selected_grid[2]};
     }
@@ -638,7 +663,10 @@ public:
             }
         }
 
-        assert(selected_grid[0] * selected_grid[1] == mp_ranks);
+        if(selected_grid[0] * selected_grid[1] == mp_ranks)
+        {
+            throw std::runtime_error("Grid dimensions do not multiply to mp_ranks.");
+        }
 
         fft_grid = {selected_grid[0], selected_grid[1]};
     }
@@ -772,6 +800,17 @@ public:
         default:
             throw std::runtime_error("Invalid transform type");
         }
+    }
+
+    bool is_inverse() const
+    {
+        return transform_type == fft_transform_type_complex_inverse
+               || transform_type == fft_transform_type_real_inverse;
+    }
+
+    bool is_forward() const
+    {
+        return !is_inverse();
     }
 
     // Convert to string for output.
@@ -1038,6 +1077,12 @@ public:
             ret += std::to_string(multiGPU);
         }
 
+        if(auto_allocate != fft_auto_allocation_default)
+        {
+            ret += "_autoallocation_";
+            ret += (auto_allocate == fft_auto_allocation_on ? "on" : "off");
+        }
+
         return ret;
     }
 
@@ -1196,6 +1241,13 @@ public:
         {
             ++pos;
             multiGPU = std::stoull(vals[pos++]);
+        }
+
+        auto_allocate = fft_auto_allocation_default; // default if unspecified
+        if(pos < vals.size() && vals[pos] == "autoallocation")
+        {
+            ++pos;
+            lexical_cast(vals[pos++], auto_allocate);
         }
     }
 
@@ -1853,6 +1905,56 @@ public:
     {
         return run_callbacks;
     }
+    // checks if the parameters are consistent with a "default" data layout (considering strides and distances)
+    bool is_using_default_layout() const
+    {
+        auto is_zero                = [](const decltype(ioffset)::value_type& i) { return i == 0; };
+        bool default_layout_is_used = std::all_of(ioffset.begin(), ioffset.end(), is_zero)
+                                      && std::all_of(ooffset.begin(), ooffset.end(), is_zero);
+        size_t default_ival = 1;
+        size_t default_oval = 1;
+        default_layout_is_used
+            &= (default_ival == istride.back()) && (default_oval == ostride.back());
+        switch(transform_type)
+        {
+        case fft_transform_type_complex_forward:
+        case fft_transform_type_complex_inverse:
+        {
+            default_ival *= length.back();
+            default_oval *= length.back();
+            break;
+        }
+        case fft_transform_type_real_forward:
+        case fft_transform_type_real_inverse:
+        {
+            const size_t hermitian_symmetric_length = length.back() / 2 + 1;
+            size_t*      ptr_default_real_val       = &default_ival;
+            size_t*      ptr_default_cmplx_val      = &default_oval;
+            if(transform_type == fft_transform_type_real_inverse)
+                std::swap(ptr_default_real_val, ptr_default_cmplx_val);
+            *ptr_default_cmplx_val *= hermitian_symmetric_length;
+            if(placement == fft_placement_inplace)
+                *ptr_default_real_val *= 2 * hermitian_symmetric_length; // padding to be used
+            else
+                *ptr_default_real_val *= length.back();
+            break;
+        }
+        default:
+            throw std::runtime_error("Invalid transform type");
+        }
+        // check strides for multi-dimensional cases
+        for(int stride_idx = static_cast<int>(dim()) - 2; stride_idx >= 0 && default_layout_is_used;
+            stride_idx--)
+        {
+            default_layout_is_used
+                &= (default_ival == istride[stride_idx]) && (default_oval == ostride[stride_idx]);
+            default_ival *= length[stride_idx];
+            default_oval *= length[stride_idx];
+        }
+        // check distances
+        default_layout_is_used &= (idist == default_ival) && (odist == default_oval);
+        return default_layout_is_used;
+    }
 
     // Given a data type and dimensions, fill the buffer, imposing Hermitian symmetry if necessary.
     template <typename Tbuff>
@@ -2160,10 +2262,12 @@ public:
         }
     }
 
-    virtual fft_status set_callbacks(void* load_cb_host,
-                                     void* load_cb_data,
-                                     void* store_cb_host,
-                                     void* store_cb_data)
+    virtual fft_status set_callbacks(void*  load_cb_host,
+                                     void*  load_cb_data,
+                                     void*  store_cb_host,
+                                     void*  store_cb_data,
+                                     size_t load_cb_shared_mem_bytes,
+                                     size_t store_cb_shared_mem_bytes)
     {
         return fft_status_success;
     }
@@ -2194,7 +2298,18 @@ public:
     // Tests that hit this can't fit on the GPU and should be skipped.
     struct work_buffer_alloc_failure : public std::runtime_error
     {
-        work_buffer_alloc_failure(const std::string& s)
+        const size_t attempted_size;
+        work_buffer_alloc_failure(const std::string& s, size_t _attempted_size = 0)
+            : std::runtime_error(s)
+            , attempted_size(_attempted_size)
+        {
+        }
+    };
+
+    // Specific exception type for unimplemented feature(s).
+    struct unimplemented_exception : public std::runtime_error
+    {
+        unimplemented_exception(const std::string& s)
             : std::runtime_error(s)
         {
         }
@@ -2220,20 +2335,22 @@ public:
             throw std::runtime_error("Transform type not forward.");
         }
 
-        length    = params_forward.length;
-        istride   = params_forward.ostride;
-        ostride   = params_forward.istride;
-        nbatch    = params_forward.nbatch;
-        precision = params_forward.precision;
-        placement = params_forward.placement;
-        idist     = params_forward.odist;
-        odist     = params_forward.idist;
-        itype     = params_forward.otype;
-        otype     = params_forward.itype;
-        ioffset   = params_forward.ooffset;
-        ooffset   = params_forward.ioffset;
+        length        = params_forward.length;
+        istride       = params_forward.ostride;
+        ostride       = params_forward.istride;
+        nbatch        = params_forward.nbatch;
+        precision     = params_forward.precision;
+        placement     = params_forward.placement;
+        idist         = params_forward.odist;
+        odist         = params_forward.idist;
+        itype         = params_forward.otype;
+        otype         = params_forward.itype;
+        ioffset       = params_forward.ooffset;
+        ooffset       = params_forward.ioffset;
+        auto_allocate = params_forward.auto_allocate;
 
         run_callbacks = params_forward.run_callbacks;
+        multiGPU      = params_forward.multiGPU;
 
         check_output_strides = params_forward.check_output_strides;
 

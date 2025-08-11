@@ -77,7 +77,7 @@ hipblas-bench supports data-driven benchmarks using a YAML-format specification 
    ./hipblas-bench --yaml <file>.yaml
 
 For example, ``hipblas_smoke.yaml`` is a YAML file used to run a smoke test.
-However, other examples can be found in the `rocBLAS <https://github.com/ROCm/rocBLAS>`_ GitHub repository.
+However, other examples can be found in the `rocBLAS <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_ GitHub repository.
 
 hipblas-test
 ============
@@ -111,7 +111,7 @@ hipblas-test provides support for data-driven testing using a YAML-format test s
    ./hipblas-test --yaml <file>.yaml
 
 As an example, ``hipblas_smoke.yaml`` is a YAML file that is used to run a smoke test.
-Other examples can be found in the `rocBLAS <https://github.com/ROCm/rocBLAS>`_ GitHub repository.
+Other examples can be found in the `rocBLAS <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_ GitHub repository.
 YAML-based tests list function parameter values in the test name, which can be also used for
 test filtering using the ``gtest_filter`` argument.
 To run the provided smoke test, use this command:

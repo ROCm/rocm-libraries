@@ -51,7 +51,9 @@ def runCI =
         platform, project->
 
         commonGroovy = load "${project.paths.project_src_prefix}/.jenkins/common.groovy"
-        commonGroovy.runCompileCommand(platform, project, jobName, false, true, 'all_clients', true) //TODO: Switch last arg back to false after fixing YAML_BACKEND=LLVM
+        String mxDataGeneratorGitURL = params?.ROCROLLER_MXDATAGENERATOR_GIT_URL ?: baseParams?.ROCROLLER_MXDATAGENERATOR_GIT_URL
+        String mxDataGeneratorGitTag = params?.ROCROLLER_MXDATAGENERATOR_GIT_TAG ?: baseParams?.ROCROLLER_MXDATAGENERATOR_GIT_TAG
+        commonGroovy.runCompileCommand(platform, project, jobName, mxDataGeneratorGitURL, mxDataGeneratorGitTag, false, true, 'all_clients', true) //TODO: Switch last arg back to false after fixing YAML_BACKEND=LLVM
     }
 
     def testCommand =
@@ -59,7 +61,9 @@ def runCI =
         platform, project->
 
         commonGroovy = load "${project.paths.project_src_prefix}/.jenkins/common.groovy"
-        commonGroovy.runPerformanceCommand(platform, project)
+        String mxDataGeneratorGitURL = params?.ROCROLLER_MXDATAGENERATOR_GIT_URL ?: baseParams?.ROCROLLER_MXDATAGENERATOR_GIT_URL
+        String mxDataGeneratorGitTag = params?.ROCROLLER_MXDATAGENERATOR_GIT_TAG ?: baseParams?.ROCROLLER_MXDATAGENERATOR_GIT_TAG
+        commonGroovy.runPerformanceCommand(platform, project, mxDataGeneratorGitURL, mxDataGeneratorGitTag)
     }
 
     if (env.CHANGE_ID)
@@ -85,7 +89,10 @@ def rocRollerGetBaseParameters() {
 ci: {
     String urlJobName = auxiliary.getTopJobName(env.BUILD_URL)
 
-    def propertyList = ["enterprise":[pipelineTriggers([cron('0 H(0-5) * * *')])]]
+    def propertyList = [
+        "enterprise":[pipelineTriggers([cron('0 H(0-5) * * *')])],
+        "rocm-libraries":[pipelineTriggers([cron('0 H(0-5) * * *')])]
+    ]
     def additionalParameters = [
         string(
             name: "ROCROLLER_AMDGPU_URL",
@@ -105,31 +112,52 @@ ci: {
             trim: true,
             description: "Specify the specific artifact path for AMDGPU"
         ),
+        string(
+            name: "ROCROLLER_MXDATAGENERATOR_GIT_URL",
+            defaultValue: params?.ROCROLLER_MXDATAGENERATOR_GIT_URL ?: "",
+            trim: true,
+            description: "Specify the specific mxDataGenerator Git URL"
+        ),
+        string(
+            name: "ROCROLLER_MXDATAGENERATOR_GIT_TAG",
+            defaultValue: params?.ROCROLLER_MXDATAGENERATOR_GIT_TAG ?: "",
+            trim: true,
+            description: "Specify the specific mxDataGenerator tag/commit hash"
+        ),
         booleanParam(
             name: "Unique Docker image tag",
             defaultValue: false,
             description: "Whether to tag the built docker image with a unique tag. WARNING: Use sparingly, each unique tag costs significant storage space."
+        ),
+        booleanParam(
+            name: "Build target branch for comparison",
+            defaultValue: true,
+            description: "Clone and build the target branch for performance " +
+                         "comparison (if unchecked, will compare to latest results " +
+                         "from target branch)"
         )
     ]
 
     if(env.CHANGE_ID){
-        propertyList = ["enterprise":[pipelineTriggers([cron('0 1 * * 0')])]]
-        additionalParameters += [
-            booleanParam(
-                name: "Build target branch for comparison",
-                defaultValue: true,
-                description: "Clone and build the target branch for performance " +
-                    "comparison (if unchecked, will compare to latest results " +
-                    "from target branch)"
-            )
+        propertyList = [
+            "enterprise":[pipelineTriggers([cron('0 1 * * 0')])],
+            "rocm-libraries":[pipelineTriggers([cron('0 1 * * 0')])]
         ]
     }
 
     auxiliary.registerAdditionalParameters(additionalParameters)
     propertyList = auxiliary.appendPropertyList(propertyList)
 
-    def jobNameList = ["enterprise":(["rocroller-ubuntu20-clang":['rocroller-compile', 'rocroller-gfx90a'],
-                                  "rocroller-ubuntu20-gcc":['rocroller-compile', 'rocroller-gfx90a']])]
+    def jobNameList = [
+        "enterprise":([
+            "rocroller-ubuntu20-clang":['rocroller-compile', 'rocroller-gfx90a'],
+            "rocroller-ubuntu20-gcc":['rocroller-compile', 'rocroller-gfx90a']
+        ]),
+        "rocm-libraries":([
+            "rocroller-ubuntu20-clang":['rocroller-compile', 'rocroller-gfx90a'],
+            "rocroller-ubuntu20-gcc":['rocroller-compile', 'rocroller-gfx90a']
+        ])
+    ]
     jobNameList = auxiliary.appendJobNameList(jobNameList)
 
     propertyList.each
@@ -143,9 +171,7 @@ ci: {
     {
         jobName, nodeDetails->
         if (urlJobName == jobName)
-            stage(jobName) {
-                runCI(nodeDetails, jobName)
-            }
+            runCI(nodeDetails, jobName)
     }
 
     if(!jobNameList.keySet().contains(urlJobName))

@@ -95,7 +95,13 @@ namespace rocsparse
          BSRMV_ANALYSIS_CONFIG(
              rocsparse_indextype_i64, rocsparse_indextype_i64, rocsparse_datatype_f16_r),
          BSRMV_ANALYSIS_CONFIG(
-             rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_f16_r)}};
+             rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_f16_r),
+         BSRMV_ANALYSIS_CONFIG(
+             rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_bf16_r),
+         BSRMV_ANALYSIS_CONFIG(
+             rocsparse_indextype_i64, rocsparse_indextype_i64, rocsparse_datatype_bf16_r),
+         BSRMV_ANALYSIS_CONFIG(
+             rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_bf16_r)}};
 
     static rocsparse_status bsrmv_analysis_find(bsrmv_analysis_t*   function_,
                                                 rocsparse_indextype i_type_,

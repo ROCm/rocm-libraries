@@ -89,6 +89,7 @@ extern "C" {
 *  <caption id="dense_to_sparse_uniform">Uniform Precisions</caption>
 *  <tr><th>A / B
 *  <tr><td>rocsparse_datatype_f16_r
+*  <tr><td>rocsparse_datatype_bf16_r
 *  <tr><td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f64_r
 *  <tr><td>rocsparse_datatype_f32_c

@@ -11,7 +11,11 @@ hipSPARSELt documentation
 hipSPARSELt is a SPARSE marshalling library that presents a common interface for multiple supported backends.
 For more information, see :doc:`What is hipSPARSELt? <./what-is-hipsparselt>`
 
-The hipSPARSELt public repository is located at `<https://github.com/ROCm/hipSPARSELt>`_.
+The hipSPARSELt public repository is located at `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparselt>`_.
+
+.. note::
+
+   The hipSPARSELt repository for ROCm 6.4 and earlier is located at `<https://github.com/ROCm/hipSPARSELt>`_.
 
 .. grid:: 2
   :gutter: 3
@@ -36,12 +40,13 @@ The hipSPARSELt public repository is located at `<https://github.com/ROCm/hipSPA
 
   .. grid-item-card:: Examples
 
-    * `Client samples <https://github.com/ROCm/hipSPARSELt/tree/develop/clients/samples>`_
+    * `Client samples <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparselt/clients/samples>`_
 
   .. grid-item-card:: API Reference
 
     * :doc:`Supported functions <./reference/supported-functions>`
     * :doc:`Data type support <./reference/data-type-support>`
+    * :doc:`Environment variables <./reference/env-variables>`
     * :doc:`API library <../doxygen/html/index>`
 
 To contribute to the documentation, see `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

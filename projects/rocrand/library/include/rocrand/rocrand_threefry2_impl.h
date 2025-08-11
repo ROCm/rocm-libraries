@@ -135,7 +135,8 @@ public:
         return this->next();
     }
 
-    __forceinline__ __device__ __host__ value next()
+    __forceinline__ __device__ __host__
+    value next()
     {
 #if defined(__HIP_PLATFORM_AMD__)
         value ret = ROCRAND_HIPVEC_ACCESS(m_state.result)[m_state.substate];

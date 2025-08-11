@@ -26,12 +26,14 @@
 
 #pragma once
 
-#include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/BranchGenerator.hpp>
+
+#include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller
@@ -50,7 +52,7 @@ namespace rocRoller
                     "Branch target must be a label.");
 
         auto ctx = m_context.lock();
-        if(ctx->kernelOptions().alwaysWaitBeforeBranch)
+        if(ctx->kernelOptions()->alwaysWaitBeforeBranch)
         {
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait before Branch"));
@@ -103,7 +105,7 @@ namespace rocRoller
             conditionType     = zero ? "0" : "1";
             conditionLocation = "scc";
         }
-        if(context->kernelOptions().alwaysWaitBeforeBranch)
+        if(context->kernelOptions()->alwaysWaitBeforeBranch)
         {
             co_yield Instruction::Wait(
                 WaitCount::Zero(context->targetArchitecture(), "DEBUG: Wait before Branch"));

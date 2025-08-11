@@ -49,17 +49,17 @@ namespace fs = std::experimental::filesystem;
 #endif
 
 template <typename T>
-static constexpr auto precision_letter = "*";
+inline constexpr auto precision_letter = "*";
 template <>
-ROCBLAS_CLANG_STATIC constexpr auto precision_letter<rocblas_half> = "h";
+inline constexpr auto precision_letter<rocblas_half> = "h";
 template <>
-ROCBLAS_CLANG_STATIC constexpr auto precision_letter<float> = "s";
+inline constexpr auto precision_letter<float> = "s";
 template <>
-ROCBLAS_CLANG_STATIC constexpr auto precision_letter<double> = "d";
+inline constexpr auto precision_letter<double> = "d";
 template <>
-ROCBLAS_CLANG_STATIC constexpr auto precision_letter<rocblas_float_complex> = "c";
+inline constexpr auto precision_letter<rocblas_float_complex> = "c";
 template <>
-ROCBLAS_CLANG_STATIC constexpr auto precision_letter<rocblas_double_complex> = "z";
+inline constexpr auto precision_letter<rocblas_double_complex> = "z";
 
 #ifdef WIN32
 int diff_files(std::string path1, std::string path2)

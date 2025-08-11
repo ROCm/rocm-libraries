@@ -41,9 +41,9 @@
     #include "test_warp_scan.cpp"
 #endif
 
-test_suite_type_def(suite_name, name_suffix)
+test_suite_type_def(suite_name, name_suffix);
 
-    typed_test_suite_def(RocprimWarpScanTests, name_suffix, warp_params);
+typed_test_suite_def(RocprimWarpScanTests, name_suffix, warp_params);
 
 typed_test_def(RocprimWarpScanTests, name_suffix, InclusiveScan)
 {

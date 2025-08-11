@@ -23,7 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-
+#ifdef ROCROLLER_USE_LLD
 #include <llvm/BinaryFormat/AMDGPUMetadataVerifier.h>
 #include <llvm/BinaryFormat/MsgPackDocument.h>
 #include <llvm/Object/ELF.h>
@@ -33,16 +33,18 @@
 #include <llvm/Support/Error.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/raw_ostream.h>
-
-#include <rocRoller/Utilities/Error.hpp>
-
 using namespace llvm;
 using namespace llvm::object;
+#endif
+
+#include <rocRoller/Utilities/Error.hpp>
 
 using namespace rocRoller;
 
 std::string rocRoller::readMetaDataFromCodeObject(std::string const& fileName)
 {
+    std::string yaml;
+#ifdef ROCROLLER_USE_LLD
     auto maybeBuffer = MemoryBuffer::getFile(fileName);
     if(!maybeBuffer)
     {
@@ -61,8 +63,6 @@ std::string rocRoller::readMetaDataFromCodeObject(std::string const& fileName)
         Throw<FatalError>("Not an ELF file: ", fileName);
     }
     auto elf = elf64LE->getELFFile();
-
-    std::string yaml;
 
     auto maybeSections = elf.sections();
     if(!maybeSections)
@@ -111,6 +111,7 @@ std::string rocRoller::readMetaDataFromCodeObject(std::string const& fileName)
             break;
         }
     }
+#endif
 
     return yaml;
 }

@@ -186,7 +186,7 @@ private:
 };
 
 struct PerformanceConfigConvCKIgemmGrpFwdActivFused
-    : PerfConfigBase<PerformanceConfigConvCKIgemmGrpFwdActivFused>
+    : PerfConfigBaseCK<PerformanceConfigConvCKIgemmGrpFwdActivFused>
 {
     int index;
     std::string kernel_id;
@@ -250,7 +250,8 @@ struct ConvCKIgemmGrpFwdActivFused final
                 const FusionDescription& fdesc_problem,
                 const PerformanceConfigConvCKIgemmGrpFwdActivFused& config) const override;
     bool MayNeedWorkspace() const override { return true; }
-    size_t GetWorkspaceSize(const FusionContext&, const FusionDescription&) const override;
+    MIOPEN_INTERNALS_EXPORT size_t GetWorkspaceSize(const FusionContext&,
+                                                    const FusionDescription&) const override;
 
 private:
     template <typename DataType>
@@ -258,7 +259,7 @@ private:
 };
 
 struct PerformanceConfigConvCKIgemmGrpFwdBiasActivFused
-    : PerfConfigBase<PerformanceConfigConvCKIgemmGrpFwdBiasActivFused>
+    : PerfConfigBaseCK<PerformanceConfigConvCKIgemmGrpFwdBiasActivFused>
 {
     int index;
     std::string kernel_id;
@@ -322,7 +323,8 @@ struct ConvCKIgemmGrpFwdBiasActivFused final
                 const FusionDescription& fdesc_problem,
                 const PerformanceConfigConvCKIgemmGrpFwdBiasActivFused& config) const override;
     bool MayNeedWorkspace() const override { return true; }
-    size_t GetWorkspaceSize(const FusionContext&, const FusionDescription&) const override;
+    MIOPEN_INTERNALS_EXPORT size_t GetWorkspaceSize(const FusionContext&,
+                                                    const FusionDescription&) const override;
 
 private:
     template <typename DataType>

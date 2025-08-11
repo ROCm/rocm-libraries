@@ -94,7 +94,7 @@ public:
 
   THRUST_EXEC_CHECK_DISABLE
   THRUST_HOST_DEVICE
-  static void deallocate(allocator_type &a, pointer p, size_type n)
+  static void deallocate(allocator_type &a, pointer p, size_type n) noexcept
   {
     superclass::deallocate(a, p, n);
   }
@@ -110,7 +110,7 @@ public:
   THRUST_EXEC_CHECK_DISABLE
   template <typename U>
   THRUST_HOST_DEVICE
-  static void destroy(allocator_type &a, U *p)
+  static void destroy(allocator_type &a, U *p) noexcept
   {
     superclass::destroy(a, p);
   }
@@ -378,13 +378,13 @@ THRUST_HOST_DEVICE
 template<typename Alloc>
 THRUST_HOST_DEVICE
   void allocator_traits<Alloc>
-    ::deallocate(Alloc &a, typename allocator_traits<Alloc>::pointer p, typename allocator_traits<Alloc>::size_type n)
+    ::deallocate(Alloc &a, typename allocator_traits<Alloc>::pointer p, typename allocator_traits<Alloc>::size_type n) noexcept
 {
   struct workaround_warnings
   {
     THRUST_EXEC_CHECK_DISABLE
     static THRUST_HOST_DEVICE
-    void deallocate(Alloc &a, typename allocator_traits<Alloc>::pointer p, typename allocator_traits<Alloc>::size_type n)
+    void deallocate(Alloc &a, typename allocator_traits<Alloc>::pointer p, typename allocator_traits<Alloc>::size_type n) noexcept
     {
       return a.deallocate(p,n);
     }
@@ -425,7 +425,7 @@ template<typename Alloc>
   template<typename T>
   THRUST_HOST_DEVICE
     void allocator_traits<Alloc>
-      ::destroy(allocator_type &a, T *p)
+      ::destroy(allocator_type &a, T *p) noexcept
 {
   return allocator_traits_detail::destroy(a,p);
 }

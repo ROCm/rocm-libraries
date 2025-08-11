@@ -30,9 +30,11 @@
 #include <rocRoller/CommandSolution_fwd.hpp>
 #include <rocRoller/Context.hpp>
 #include <rocRoller/KernelGraph/Constraints.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/ControlFlowArgumentTracer_fwd.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
 #include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateGraph.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Transformer.hpp>
 #include <rocRoller/KernelGraph/KernelGraph_fwd.hpp>
 #include <rocRoller/KernelGraph/Transforms/GraphTransform_fwd.hpp>
 
@@ -54,14 +56,75 @@ namespace rocRoller
          */
         class KernelGraph
         {
-            std::vector<GraphConstraint> m_constraints{
-                &NoDanglingMappings, &SingleControlRoot, &NoRedundantSetCoordinates};
-            std::vector<std::string> m_transforms;
+            std::vector<GraphConstraint> m_constraints{&NoDanglingMappings,
+                                                       &SingleControlRoot,
+                                                       &NoRedundantSetCoordinates,
+                                                       &WalkableControlGraph};
+            std::vector<std::string>     m_transforms;
+
+            std::unordered_map<int, rocRoller::KernelGraph::CoordinateGraph::Transformer>
+                m_transformers;
+
+            /**
+             * @brief Set expression using a ForLoop op in a given transformer
+             *
+             */
+            void setTransformerByForLoopOp(CoordinateGraph::Transformer& transformer,
+                                           int                           forLoopOp);
+
+            /**
+             * @brief Set expression using a SetCoordinate op in a given transformer
+             *
+             */
+            void setTransformerBySetCoordinate(CoordinateGraph::Transformer& transformer,
+                                               int                           setCoordinateOp);
 
         public:
             ControlGraph::ControlGraph       control;
             CoordinateGraph::CoordinateGraph coordinates;
             ControlToCoordinateMapper        mapper;
+
+            /**
+            * Set up the coordinate graph and transducer for existing transformers.
+            */
+            void initializeTransformersForCodeGen(rocRoller::Expression::ExpressionTransducer);
+
+            /**
+            *  Build a transformer for a given operation in control graph if the transformer
+            *  does not exist, otherwise return existing transformer.
+            */
+            CoordinateGraph::Transformer buildTransformer(int op);
+
+            /**
+            *  Build a transformer for a given operation in control graph. If the transformer
+            *  exists, it will be re-built.
+            */
+            CoordinateGraph::Transformer buildTransformer(int op, IgnoreCachePolicy const);
+
+            /**
+            *  Build transformers for all operations in control graph. Rebuild transformers
+            *  if they already exist.
+            */
+            void buildAllTransformers();
+
+            /**
+            *  Set expression of an op's transformer using a given coordinate and expression.
+            */
+            void updateTransformer(int op, int coord, Expression::ExpressionPtr expr);
+
+            std::unordered_map<int, CoordinateGraph::Transformer> const& getAllTransformers() const
+            {
+                return m_transformers;
+            }
+
+            /**
+            *  Set both control and coordinate graphs to be restricted mode.
+            */
+            void setRestricted()
+            {
+                control.setRestricted();
+                coordinates.setRestricted();
+            }
 
             std::string toDOT(bool drawMappings = false, std::string title = "") const;
 
@@ -119,14 +182,24 @@ namespace rocRoller
          *
          * @ingroup KernelGraph
          */
-        KernelGraph translate(CommandPtr);
+        KernelGraph translate(CommandPtr, CommandParametersPtr params = nullptr);
 
         /**
          * Generate assembly from a KernelGraph.
          *
          * @ingroup KernelGraph
          */
-        Generator<Instruction> generate(KernelGraph, AssemblyKernelPtr);
+        Generator<Instruction> generate(KernelGraph graph, AssemblyKernelPtr kernel);
+
+        /**
+         * Testing: Supply a specific ControlFlowArgumentTracer.
+         *
+         * @ingroup KernelGraph
+         * @ingroup Testing
+         */
+        Generator<Instruction> generate(KernelGraph                 graph,
+                                        AssemblyKernelPtr           kernel,
+                                        ControlFlowArgumentTracer&& argTracer);
 
         std::string toYAML(KernelGraph const& g);
         KernelGraph fromYAML(std::string const& str);

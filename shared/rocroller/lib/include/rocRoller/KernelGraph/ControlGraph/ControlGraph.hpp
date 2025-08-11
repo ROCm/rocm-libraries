@@ -54,6 +54,15 @@ namespace rocRoller
      * Each node of the graph, when traversed, will help generate assembly code.
      * It relies on coordinate transform graph expressions.
      *
+     * The control graph should begin with a single Kernel node.
+     *
+     * There are two main categories of edges: Sequence edges and Body-like edges.
+     *
+     * From a given node, each kind of Body-like edge denodes a separate body
+     * of that node.
+     * For example, a Conditional node may have Body edges and Else edges.
+     * The nodes downstream of the Body edges represent the true case, and the
+     * nodes downstream of the Else edges represent the false case.
      */
     namespace KernelGraph::ControlGraph
     {
@@ -231,6 +240,21 @@ namespace rocRoller
             template <CControlEdge Edge, std::convertible_to<int>... Nodes>
             void chain(int a, int b, Nodes... remaining);
 
+            /**
+             *  Check if modifying an element (index) is allowed or not. This
+             *  only comes into effect when the graph is in restricted mode.
+             */
+            virtual bool isModificationAllowed(int index) const override;
+
+            /**
+             *  Set the graph to be in restricted mode. Some operations would
+             *  be disallowed when in restricted mode.
+             */
+            void setRestricted()
+            {
+                m_changesRestricted = true;
+            }
+
         private:
             virtual void clearCache(Graph::GraphModification modification) override;
             void         checkOrderCache() const;
@@ -269,6 +293,8 @@ namespace rocRoller
             mutable std::unordered_map<int, std::set<int>> m_descendentCache;
 
             mutable CacheStatus m_cacheStatus = CacheStatus::Invalid;
+
+            mutable bool m_changesRestricted = false;
         };
 
         std::string name(ControlGraph::Element const& el);

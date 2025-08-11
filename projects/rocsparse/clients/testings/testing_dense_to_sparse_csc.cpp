@@ -325,16 +325,19 @@ void testing_dense_to_sparse_csc(const Arguments& arg)
     template void testing_dense_to_sparse_csc_bad_arg<ITYPE, JTYPE, TYPE>(const Arguments& arg); \
     template void testing_dense_to_sparse_csc<ITYPE, JTYPE, TYPE>(const Arguments& arg)
 INSTANTIATE(int32_t, int32_t, _Float16);
+INSTANTIATE(int32_t, int32_t, rocsparse_bfloat16);
 INSTANTIATE(int32_t, int32_t, float);
 INSTANTIATE(int32_t, int32_t, double);
 INSTANTIATE(int32_t, int32_t, rocsparse_float_complex);
 INSTANTIATE(int32_t, int32_t, rocsparse_double_complex);
 INSTANTIATE(int64_t, int32_t, _Float16);
+INSTANTIATE(int64_t, int32_t, rocsparse_bfloat16);
 INSTANTIATE(int64_t, int32_t, float);
 INSTANTIATE(int64_t, int32_t, double);
 INSTANTIATE(int64_t, int32_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, int32_t, rocsparse_double_complex);
 INSTANTIATE(int64_t, int64_t, _Float16);
+INSTANTIATE(int64_t, int64_t, rocsparse_bfloat16);
 INSTANTIATE(int64_t, int64_t, float);
 INSTANTIATE(int64_t, int64_t, double);
 INSTANTIATE(int64_t, int64_t, rocsparse_float_complex);

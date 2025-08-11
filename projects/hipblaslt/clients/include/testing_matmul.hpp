@@ -742,6 +742,13 @@ auto _silu = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
     return static_cast<decltype(in)>(in_Tc / (1.f + exp(-in_Tc)));
 };
 
+// clamp
+auto _clamp = [](auto in, auto alpha, auto beta) -> decltype(in) {
+  using Tc = float;
+  Tc in_Tc = static_cast<Tc>(in);
+  return static_cast<decltype(in)>(std::max(static_cast<Tc>(alpha), std::min(in_Tc, static_cast<Tc>(beta))));
+};
+
 void testing_matmul_bad_arg(const Arguments& arg)
 {
     const int64_t M = 128;
@@ -1326,6 +1333,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         matD(gemm_count);
     std::vector<std::vector<hipblasLtMatmulDesc_t>> matmul;
     std::vector<hipblasLtEpilogue_t> epilogue(gemm_count, HIPBLASLT_EPILOGUE_DEFAULT);
+    std::vector<float> act0(gemm_count), act1(gemm_count);
 
     std::vector<HipDeviceBuffer>  dA, dB, dC, dD, dE, dBias;
     std::vector<HipDeviceBuffer>* dDp;
@@ -1344,6 +1352,8 @@ void testing_matmul_with_bias(const Arguments& arg,
     std::vector<std::vector<float>> refA, refB;
 
     std::vector<void*> alpha_in(gemm_count);
+
+    bool do_swizzle_a = arg.swizzle_a && isSwizzleSupported(TiA);
 
     // Need to split into two for loop to calculate the rotating buffer
     int64_t totalRotatingSizeNeeded = 0;
@@ -1368,28 +1378,34 @@ void testing_matmul_with_bias(const Arguments& arg,
         do_batched[i]  = (arg.batch_count > 1);
         num_batches[i] = (do_batched[i] ? arg.batch_count : 1);
 
-        stride_a[i] = (do_batched[i] && arg.stride_a[i] >= lda[i] * A_col[i]) ? arg.stride_a[i]
-                                                                              : lda[i] * A_col[i];
+        stride_a[i] = do_batched[i] ? arg.stride_a[i] : lda[i] * A_col[i];
         stride_b[i] = do_batched[i] ? arg.stride_b[i] : ldb[i] * B_col[i];
         stride_c[i] = do_batched[i] ? arg.stride_c[i] : ldc[i] * N[i];
         stride_d[i] = do_batched[i] ? arg.stride_c[i] : ldd[i] * N[i];
         stride_e[i] = do_batched[i] ? arg.stride_e[i] : lde[i] * N[i];
 
-        size_A[i]    = stride_a[i] * num_batches[i];
+        size_A[i]
+            = stride_a[i] == 0 ? lda[i] * A_col[i] * num_batches[i] : stride_a[i] * num_batches[i];
         size_dA[i]   = size_A[i];
         stride_da[i] = stride_a[i];
-        if(arg.swizzle_a && isSwizzleSupported(TiA))
+        if(do_swizzle_a)
         {
+            //TODO:
+            // 1. support stride_a is 0 when swizzle
+            // 2. support --any_stride for hipblaslt-bench when swizzle
+            // 3. support arbitrary stride_a for both hipblaslt-bench and hipblaslt-test when swizzled
+            stride_a[i] = lda[i] * A_col[i];
             stride_da[i] = 0;
             size_t MiM = 16, MiK = 0, __ = 0, PackK = 0;
             calculateKforSwizzling(TiA, arg, MiK, __, PackK);
             size_t K_block = MiK * PackK;
             size_t stride_swizzle
                 = ((M[i] + MiM - 1) / MiM) * MiM * ((K[i] + K_block - 1) / K_block) * K_block;
-            if(do_batched[i] && arg.stride_a[i] >= (int64_t)stride_swizzle)
+            if(do_batched[i] && stride_a[i] > 0 && stride_a[i] != lda[i] * A_col[i])
             {
-                stride_da[i]   = arg.stride_a[i];
-                stride_swizzle = (size_t)arg.stride_a[i];
+                hipblaslt_cerr << "Error stride_a: swizzle_a does not yet support arbitrary stride_a!" << std::endl;
+                stride_da[i]   = stride_a[i];
+                stride_swizzle = (size_t)stride_a[i];
             }
             size_dA[i] = num_batches[i] * stride_swizzle;
         }
@@ -1477,7 +1493,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         CHECK_HIPBLASLT_ERROR(
             hipblasLtMatrixLayoutCreate(&(matD[i]), arg.d_type, M[i], N[i], ldd[i]));
 
-        if(arg.swizzle_a && isSwizzleSupported(TiA))
+        if(do_swizzle_a)
         {
             hipblasLtOrder_t orderA = orderForDatatype(TiA);
             CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
@@ -1563,6 +1579,9 @@ void testing_matmul_with_bias(const Arguments& arg,
             case hipblaslt_activation_type::swish:
                 epilogue[i] = HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT;
                 break;
+            case hipblaslt_activation_type::clamp:
+                epilogue[i] = HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT;
+                break;
             default:
                 epilogue[i] = HIPBLASLT_EPILOGUE_BIAS;
                 break;
@@ -1584,9 +1603,18 @@ void testing_matmul_with_bias(const Arguments& arg,
                 epilogue[i]    = HIPBLASLT_EPILOGUE_SWISH_EXT;
                 epilogue_on[i] = true;
                 break;
+            case hipblaslt_activation_type::clamp:
+                epilogue[i]    = HIPBLASLT_EPILOGUE_CLAMP_EXT;
+                epilogue_on[i] = true;
+                break;
             default:
                 break;
             }
+        }
+        if(epilogue_on[i])
+        {
+          act0[i] = arg.activation_arg1;
+          act1[i] = arg.activation_arg2;
         }
         if(arg.gradient)
         {
@@ -1808,9 +1836,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   dA[i].buf(),
                                   A_row[i],
                                   A_col[i],
-                                  (arg.swizzle_a) ? A_row[i] : lda[i],
+                                  (do_swizzle_a) ? A_row[i] : lda[i],
                                   TiA,
-                                  (arg.swizzle_a) ? A_row[i] * A_col[i] : stride_a[i],
+                                  (do_swizzle_a) ? A_row[i] * A_col[i] : stride_a[i],
                                   num_batches[i]);
 #ifdef HIPBLASLT_USE_ROCROLLER
         }
@@ -1881,7 +1909,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         CHECK_HIP_ERROR(broadcast(dB[i], block_count));
         CHECK_HIP_ERROR(broadcast(dC[i], block_count));
 
-        if(arg.unit_check || arg.norm_check || arg.allclose_check || arg.swizzle_a)
+        if(arg.unit_check || arg.norm_check || arg.allclose_check || do_swizzle_a)
         {
             CHECK_HIP_ERROR(synchronize(hA[i],
                                         dA[i],
@@ -1890,12 +1918,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                                         A_col[i],
                                         lda[i],
                                         realDataTypeSize(TiA),
-                                        arg.swizzle_a));
+                                        do_swizzle_a));
             CHECK_HIP_ERROR(synchronize(hB[i], dB[i]));
             CHECK_HIP_ERROR(synchronize(hC[i], dC[i]));
         }
 
-        if(arg.swizzle_a && isSwizzleSupported(TiA))
+        if(do_swizzle_a)
         {
             HipHostBuffer tmp(TiA, size_dA[i]);
             swizzle_tensor_type(tmp, hA[i], TiA, arg, num_batches[i], M[i], K[i], lda[i], false);
@@ -2043,11 +2071,21 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
         }
         if(epilogue_on[i])
+        {
             EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul[0][i],
                                                                   HIPBLASLT_MATMUL_DESC_EPILOGUE,
                                                                   &(epilogue[i]),
                                                                   sizeof(epilogue[i])),
                                   HIPBLAS_STATUS_SUCCESS);
+            CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(matmul[0][i],
+                                                                  HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
+                                                                  &(act0[i]),
+                                                                  sizeof(act0[i])));
+            CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(matmul[0][i],
+                                                                  HIPBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
+                                                                  &(act1[i]),
+                                                                  sizeof(act1[i])));
+        }
 
         if(arg.use_e)
         {
@@ -2399,6 +2437,12 @@ void testing_matmul_with_bias(const Arguments& arg,
         extproblemtype.setTypeC(arg.c_type);
         extproblemtype.setTypeD(arg.d_type);
         extproblemtype.setTypeCompute(arg.compute_type);
+
+        if(do_swizzle_a)
+        {
+            hipblasLtOrder_t orderA = orderForDatatype(TiA);
+            extproblemtype.setOrderA(orderA);
+        }
     }
     else if(arg.grouped_gemm)
     {
@@ -2509,7 +2553,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                         ldb[0],
                                                                         ldc[0],
                                                                         ldd[0],
-                                                                        stride_a[0],
+                                                                        (do_swizzle_a) ? stride_da[0] : stride_a[0],
                                                                         stride_b[0],
                                                                         stride_c[0],
                                                                         stride_d[0],
@@ -2604,7 +2648,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                            ldb,
                                                                            ldc,
                                                                            ldd,
-                                                                           stride_a,
+                                                                           (do_swizzle_a) ? stride_da : stride_a,
                                                                            stride_b,
                                                                            stride_c,
                                                                            stride_d,
@@ -2702,7 +2746,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                     ldb[0],
                                                                     ldc[0],
                                                                     ldd[0],
-                                                                    stride_a[0],
+                                                                    (do_swizzle_a) ? stride_da[0] : stride_a[0],
                                                                     stride_b[0],
                                                                     stride_c[0],
                                                                     stride_d[0],
@@ -2761,6 +2805,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     for(size_t t = 0; t < 1; t++) // C API not supported yet
                     {
                         size_t tmpWorkspaceSize = 0;
+                        tmpAlgo[j].algo.max_workspace_bytes = max_workspace_size;
                         if(hipblaslt_ext::matmulIsAlgoSupported(handle,
                                                                 matmul[0][0],
                                                                 alpha_in[0],
@@ -2805,7 +2850,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                        ldb,
                                                                        ldc,
                                                                        ldd,
-                                                                       stride_a,
+                                                                       (do_swizzle_a) ? stride_da : stride_a,
                                                                        stride_b,
                                                                        stride_c,
                                                                        stride_d,
@@ -2883,7 +2928,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                     ldb[0],
                                                                     ldc[0],
                                                                     ldd[0],
-                                                                    stride_a[0],
+                                                                    (do_swizzle_a) ? stride_da[0] : stride_a[0],
                                                                     stride_b[0],
                                                                     stride_c[0],
                                                                     stride_d[0],
@@ -2972,7 +3017,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                        ldb,
                                                                        ldc,
                                                                        ldd,
-                                                                       stride_a,
+                                                                       (do_swizzle_a) ? stride_da : stride_a,
                                                                        stride_b,
                                                                        stride_c,
                                                                        stride_d,
@@ -3077,17 +3122,6 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             cpu_time_used = get_time_us_no_sync();
         }
-
-        // For the xf32 xdl math op, cast type of A/B from float to xfloat32 .
-        if(TiA == HIP_R_32F && TiB == HIP_R_32F && To == HIP_R_32F && Talpha == HIP_R_32F)
-            if(arg.compute_type == HIPBLAS_COMPUTE_32F_FAST_TF32)
-                for(int i = 0; i < gemm_count; i++)
-                {
-                    type_to_xdl_math_op_type<hipblasLtXfloat32, float, float>(
-                        static_cast<float*>(hA[i].buf()), size_A[i]);
-                    type_to_xdl_math_op_type<hipblasLtXfloat32, float, float>(
-                        static_cast<float*>(hB[i].buf()), size_B[i]);
-                }
 
 #define epilogue_param                                                                      \
     M[gemmIdx], N[gemmIdx], ldd[gemmIdx],                                                   \
@@ -3222,6 +3256,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       arg.activation_arg1,
                                       arg.activation_arg2,
                                       ::_silu,
+                                      arg.gradient,
+                                      To,
+                                      Talpha);
+                        break;
+                    case hipblaslt_activation_type::clamp:
+                        epilogue_func(epilogue_param,
+                                      hBias_buf,
+                                      Tbias,
+                                      arg.activation_arg1,
+                                      arg.activation_arg2,
+                                      ::_clamp,
                                       arg.gradient,
                                       To,
                                       Talpha);
@@ -3832,6 +3877,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                     break;
                 case hipblaslt_activation_type::swish:
                     flops += silu_gflop_count(M[gemmIdx], N[gemmIdx], Talpha);
+                    break;
+                case hipblaslt_activation_type::clamp:
+                    flops += clamp_gflop_count(M[gemmIdx], N[gemmIdx], Talpha);
                     break;
                 default:
                     break;

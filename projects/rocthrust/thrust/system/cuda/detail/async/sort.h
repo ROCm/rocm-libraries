@@ -35,7 +35,7 @@
 
 #if THRUST_CPP_DIALECT >= 2017
 
-#  if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#  ifdef _CCCL_CUDA_COMPILER
 
 #    include <thrust/system/cuda/config.h>
 
@@ -307,12 +307,13 @@ template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typenam
 auto async_stable_sort(execution_policy<DerivedPolicy>& policy, ForwardIt first, Sentinel last, StrictWeakOrdering comp)
   // A GCC 5 bug requires an explicit trailing return type here, so stick with
   // THRUST_DECLTYPE_RETURNS for now.
-  THRUST_DECLTYPE_RETURNS(thrust::system::cuda::detail::async_stable_sort_n(policy, first, distance(first, last), comp))
+  THRUST_DECLTYPE_RETURNS(
+    thrust::system::cuda::detail::async_stable_sort_n(policy, first, thrust::distance(first, last), comp))
 
 } // namespace cuda_cub
 
 THRUST_NAMESPACE_END
 
-#  endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#  endif // _CCCL_CUDA_COMPILER
 
 #endif

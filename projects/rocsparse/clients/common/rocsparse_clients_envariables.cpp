@@ -44,7 +44,7 @@ static constexpr const char* s_var_bool_names[s_var_bool_size]
        "ROCSPARSE_CLIENTS_TEST_DEBUG_ARGUMENTS",
        "ROCSPARSE_CLIENTS_ROCTX"};
 static constexpr const char* s_var_string_names[s_var_string_size]
-    = {"ROCSPARSE_CLIENTS_MATRICES_DIR", "ROCSPARSE_TEST_DATA"};
+    = {"ROCSPARSE_CLIENTS_MATRICES_DIR", "ROCSPARSE_CLIENTS_TEST_DATA_DIR"};
 static constexpr const char* s_var_bool_descriptions[s_var_bool_size]
     = {"0: disabled, 1: enabled", "0: disabled, 1: enabled"};
 static constexpr const char* s_var_string_descriptions[s_var_string_size]

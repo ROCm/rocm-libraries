@@ -151,26 +151,15 @@ constexpr const char* hip_datatype_to_string(hipDataType type)
 HIPBLASLT_EXPORT
 constexpr const char* hipblas_computetype_to_string(hipblasComputeType_t type)
 {
-    switch(type)
-    {
-    case HIPBLAS_COMPUTE_16F:
-        return "f16_r";
-    case HIPBLAS_COMPUTE_32F:
-        return "f32_r";
-    case HIPBLAS_COMPUTE_32F_FAST_TF32:
-        return "xf32_r";
-    case HIPBLAS_COMPUTE_64F:
-        return "f64_r";
-    case HIPBLAS_COMPUTE_32I:
-        return "i32_r";
-    case HIPBLAS_COMPUTE_32F_FAST_16F:
-        return "f32_f16_r";
-    case HIPBLAS_COMPUTE_32F_FAST_16BF:
-        return "f32_bf16_r";
-    default:
-        return "non-supported compute type";
-    }
-    return "invalid";
+    return 
+        type == HIPBLAS_COMPUTE_16F ? "f16_r" :
+        type == HIPBLAS_COMPUTE_32F ? "f32_r" :
+        type == HIPBLAS_COMPUTE_32F_FAST_TF32 ? "xf32_r" :
+        type == HIPBLAS_COMPUTE_64F ? "f64_r" :
+        type == HIPBLAS_COMPUTE_32I ? "i32_r" :
+        type == HIPBLAS_COMPUTE_32F_FAST_16F ? "f32_f16_r" :
+        type == HIPBLAS_COMPUTE_32F_FAST_16BF ? "f32_bf16_r" :
+        "non-supported compute type";
 }
 
 // clang-format off
@@ -262,6 +251,8 @@ constexpr hipblasLtEpilogue_t string_to_epilogue_type(const std::string& value)
         value == "HIPBLASLT_EPILOGUE_BGRADB" ? HIPBLASLT_EPILOGUE_BGRADB :
         value == "HIPBLASLT_EPILOGUE_SWISH_EXT" ? HIPBLASLT_EPILOGUE_SWISH_EXT :
         value == "HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT" ? HIPBLASLT_EPILOGUE_SWISH_BIAS_EXT :
+        value == "HIPBLASLT_EPILOGUE_CLAMP_EXT" ? HIPBLASLT_EPILOGUE_CLAMP_EXT :
+        value == "HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT" ? HIPBLASLT_EPILOGUE_CLAMP_BIAS_EXT :
         value == "HIPBLASLT_EPILOGUE_DEFAULT" || value == "" ? HIPBLASLT_EPILOGUE_DEFAULT :
         static_cast<hipblasLtEpilogue_t>(0);
 }

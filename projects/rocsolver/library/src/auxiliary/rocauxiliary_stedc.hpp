@@ -1463,33 +1463,15 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 
             // Order the elements in tmpd and zz using a simple parallel selection/bubble sort.
             // This will allow us to find initial intervals for eigenvalue guesses
-            for(int i = 0; i < tsz; ++i)
+            for(int i = 0; i < dd; i++)
             {
-                if(i < dd)
+                for(int j = 2 * iam + i % 2; j < dd - 1; j += 2 * bdm)
                 {
-                    if(i % 2 == 0)
+                    if(tmpd[j] > tmpd[j + 1])
                     {
-                        for(int j = iam; j < dd / 2; j += bdm)
-                        {
-                            if(tmpd[2 * j] > tmpd[2 * j + 1])
-                            {
-                                swap(tmpd[2 * j], tmpd[2 * j + 1]);
-                                swap(zz[2 * j], zz[2 * j + 1]);
-                                swap(per[2 * j], per[2 * j + 1]);
-                            }
-                        }
-                    }
-                    else
-                    {
-                        for(int j = iam; j < (dd - 1) / 2; j += bdm)
-                        {
-                            if(tmpd[2 * j + 1] > tmpd[2 * j + 2])
-                            {
-                                swap(tmpd[2 * j + 1], tmpd[2 * j + 2]);
-                                swap(zz[2 * j + 1], zz[2 * j + 2]);
-                                swap(per[2 * j + 1], per[2 * j + 2]);
-                            }
-                        }
+                        swap(tmpd[j], tmpd[j + 1]);
+                        swap(zz[j], zz[j + 1]);
+                        swap(per[j], per[j + 1]);
                     }
                 }
                 __syncthreads();
@@ -1500,10 +1482,10 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
             // eigenvalues (D - lambda_i) are updated while computing each eigenvalue.
             // This will prevent collapses and division by zero when an eigenvalue
             // is too close to a pole.
-            for(int j = iam + 1; j < sz; j += bdm)
+            for(int i = iam; i < dd; i += bdm)
             {
-                for(int i = 0; i < dd; ++i)
-                    tmpd[i + j * n] = tmpd[i];
+                for(int j = i + n; j < i + sz * n; j += n)
+                    tmpd[j] = tmpd[i];
             }
 
             // finally copy over all diagonal elements in ev. ev will be overwritten
@@ -1523,14 +1505,19 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
                 if(mask[j] == 1)
                 {
                     // find position in the ordered array
-                    int cc = 0;
                     valf = p < 0 ? -ev[j] : ev[j];
-                    for(int jj = 0; jj < dd; ++jj)
+                    int count = dd, cc = 0;
+                    while(count > 0)
                     {
-                        if(tmpd[jj + j * n] == valf)
-                            break;
+                        auto step = count / 2;
+                        auto it = cc + step;
+                        if(tmpd[it + j * n] < valf)
+                        {
+                            cc = ++it;
+                            count -= step + 1;
+                        }
                         else
-                            cc++;
+                            count = step;
                     }
 
                     // computed zero will overwrite 'ev' at the corresponding position.

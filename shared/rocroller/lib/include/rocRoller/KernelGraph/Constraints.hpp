@@ -57,9 +57,10 @@ namespace rocRoller
             }
         };
 
-        ConstraintStatus NoDanglingMappings(const KernelGraph& k);
-        ConstraintStatus SingleControlRoot(const KernelGraph& k);
-        ConstraintStatus NoRedundantSetCoordinates(const KernelGraph& k);
+        ConstraintStatus NoDanglingMappings(KernelGraph const& k);
+        ConstraintStatus SingleControlRoot(KernelGraph const& k);
+        ConstraintStatus NoRedundantSetCoordinates(KernelGraph const& k);
+        ConstraintStatus WalkableControlGraph(KernelGraph const& k);
 
         using GraphConstraint = ConstraintStatus (*)(const KernelGraph& k);
     }

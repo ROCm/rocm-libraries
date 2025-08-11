@@ -146,7 +146,7 @@ namespace rocRoller
         static inline const SettingsOption<Scheduling::SchedulerProcedure> Scheduler{
             "ROCROLLER_SCHEDULER",
             "Scheduler used when scheduling independent instruction streams.",
-            Scheduling::SchedulerProcedure::Sequential,
+            Scheduling::SchedulerProcedure::Priority,
             -1};
 
         static inline const SettingsOption<Scheduling::CostFunction> SchedulerCost{
@@ -184,6 +184,12 @@ namespace rocRoller
             false,
             -1};
 
+        static inline const SettingsOption<bool> NoRegisterLimits{
+            "ROCROLLER_IGNORE_OUT_OF_REGISTERS",
+            "Ignore register count limits for debugging purposes.",
+            false,
+            -1};
+
         static inline const SettingsOption<bool> AllowUnknownInstructions{
             "ROCROLLER_ALLOW_UNKNOWN_INSTRUCTIONS",
             "Whether to allow arbitrary instructions.",
@@ -197,6 +203,13 @@ namespace rocRoller
             false,
             -1};
 
+        static inline const SettingsOption<bool> AuditControlTracers{
+            "ROCROLLER_AUDIT_CONTROL_TRACERS",
+            "Whether to audit predicted use of arguments and/or registers."
+            "Could impact code gen performance.",
+            false,
+            -1};
+
         static inline const SettingsOption<bool> LogGraphs{
             "ROCROLLER_LOG_GRAPHS", "Whether to log graphs after each lowering stage.", true, -1};
 
@@ -207,10 +220,10 @@ namespace rocRoller
             -1};
 
         static inline const SettingsOption<AssemblerType> KernelAssembler{
-            "ROCROLLER_ASSEMBLER", "Which assembler method to use", AssemblerType::Subprocess, -1};
+            "ROCROLLER_ASSEMBLER", "Which assembler method to use", AssemblerType::InProcess, -1};
 
         static inline const SettingsOption<std::string> SubprocessAssemblerPath{
-            "ROCROLLER_SUBPROCESS_ASSEMBLER_PATH", "Path to subprocess assembler", "", -1};
+            "ROCROLLER_DEBUG_ASSEMBLER_PATH", "Path to subprocess assembler", "", -1};
 
         static inline const std::string BitfieldName = "ROCROLLER_DEBUG";
 

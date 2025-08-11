@@ -31,8 +31,13 @@ extern int                    mp_ranks;
 
 static const std::vector<std::vector<size_t>> multi_gpu_sizes = {
     {128, 256},
+    {192, 768},
     {64, 128, 256},
+    {96, 160, 192},
 };
+static const std::vector<size_t>        multi_gpu_batch_range = {10, 1};
+static std::vector<std::vector<size_t>> ioffset_range_zero    = {{0, 0}};
+static std::vector<std::vector<size_t>> ooffset_range_zero    = {{0, 0}};
 
 enum SplitType
 {
@@ -50,7 +55,9 @@ enum SplitType
     PENCIL_3D,
 };
 
-std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType> type)
+std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType> type,
+                                                  fft_auto_allocation            auto_alloc_setting
+                                                  = fft_auto_allocation_default)
 {
     int localDeviceCount = 0;
     (void)hipGetDeviceCount(&localDeviceCount);
@@ -71,24 +78,28 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
     auto params_complex                                        = param_generator_complex(test_prob,
                                                   multi_gpu_sizes,
                                                   precision_range_sp_dp,
-                                                  {1, 10},
+                                                  multi_gpu_batch_range,
                                                   stride_generator(stride_range),
                                                   stride_generator(stride_range),
-                                                  {{0, 0}},
-                                                  {{0, 0}},
-                                                  {fft_placement_inplace, fft_placement_notinplace},
-                                                  false);
+                                                  ioffset_range_zero,
+                                                  ooffset_range_zero,
+                                                  place_range,
+                                                  false,
+                                                  false,
+                                                  auto_alloc_setting);
 
     auto params_real = param_generator_real(test_prob,
                                             multi_gpu_sizes,
                                             precision_range_sp_dp,
-                                            {1, 10},
+                                            multi_gpu_batch_range,
                                             stride_generator(stride_range),
                                             stride_generator(stride_range),
-                                            {{0, 0}},
-                                            {{0, 0}},
+                                            ioffset_range_zero,
+                                            ooffset_range_zero,
                                             {fft_placement_notinplace},
-                                            false);
+                                            false,
+                                            false,
+                                            auto_alloc_setting);
 
     std::vector<fft_params> all_params;
 
@@ -180,7 +191,6 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
                 // in-place transforms require identical input/output layouts
                 if(p.placement == fft_placement_inplace && input_grid != output_grid)
                     continue;
-
                 all_params.push_back(std::move(p_dist));
             }
         }
@@ -225,4 +235,12 @@ INSTANTIATE_TEST_SUITE_P(multi_gpu_3d_pencils,
 INSTANTIATE_TEST_SUITE_P(multi_gpu,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_multi_gpu({})),
+                         accuracy_test::TestName);
+
+// Note: disabled for now due to implementation issues and
+// unimplemented features in hipFFT (to fix first)
+INSTANTIATE_TEST_SUITE_P(DISABLED_various_multi_gpu,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_multi_gpu({},
+                                                                       fft_auto_allocation_off)),
                          accuracy_test::TestName);

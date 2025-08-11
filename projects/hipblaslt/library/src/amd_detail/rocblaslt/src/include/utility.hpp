@@ -44,26 +44,6 @@ inline bool isAligned(const void* pointer, size_t byte_count)
     return reinterpret_cast<uintptr_t>(pointer) % byte_count == 0;
 }
 
-// return precision string for rocblaslt_datatype
-constexpr const char* rocblaslt_datatype_string(hipDataType type)
-{
-    switch(type)
-    {
-    case HIP_R_16F:
-        return "f16_r";
-    case HIP_R_32F:
-        return "f32_r";
-    case HIP_R_16BF:
-        return "b16_r";
-    case HIP_R_32I:
-        return "i32_r";
-    case HIP_R_8I:
-        return "i8_r";
-    default:
-        return "invalidType";
-    }
-}
-
 bool rocblaslt_is_complex_datatype(hipDataType type);
 
 constexpr const char* rocblaslt_compute_type_string(rocblaslt_compute_type type)
@@ -105,49 +85,6 @@ constexpr const char* rocblaslt_compute_type_string(rocblaslt_compute_type type)
     }
 }
 
-constexpr const char* rocblaslt_transpose_letter(hipblasOperation_t op)
-{
-    switch(op)
-    {
-    case HIPBLAS_OP_N:
-        return "N";
-    case HIPBLAS_OP_T:
-        return "T";
-    case HIPBLAS_OP_C:
-        return "C";
-    default:
-        return "invalidTranspose";
-    }
-}
-// Convert rocblaslt_status to string
-constexpr const char* rocblaslt_status_to_string(rocblaslt_status status)
-{
-#define CASE(x) \
-    case x:     \
-        return #x
-    switch(status)
-    {
-        CASE(rocblaslt_status_success);
-        CASE(rocblaslt_status_invalid_handle);
-        CASE(rocblaslt_status_not_implemented);
-        CASE(rocblaslt_status_invalid_pointer);
-        CASE(rocblaslt_status_invalid_size);
-        CASE(rocblaslt_status_memory_error);
-        CASE(rocblaslt_status_internal_error);
-        CASE(rocblaslt_status_invalid_value);
-        CASE(rocblaslt_status_arch_mismatch);
-        CASE(rocblaslt_status_zero_pivot);
-        CASE(rocblaslt_status_not_initialized);
-        CASE(rocblaslt_status_type_mismatch);
-        CASE(rocblaslt_status_requires_sorted_storage);
-        CASE(rocblaslt_status_continue);
-    }
-#undef CASE
-    // We don't use default: so that the compiler warns us if any valid enums are
-    // missing from our switch. If the value is not a valid rocblaslt_status, we
-    // return this string.
-    return "<undefined rocblaslt_status value>";
-}
 template <typename>
 static constexpr char rocblaslt_precision_string[] = "invalid";
 template <>
@@ -375,42 +312,6 @@ __forceinline__ __device__ __host__ T zero_scalar_device_host(const T* xp)
     return static_cast<T>(0);
 }
 
-//
-// Provide some utility methods for enums.
-//
-struct rocblaslt_enum_utils
-{
-    template <typename U>
-    static inline bool is_invalid(U value_);
-};
-
-template <>
-inline bool rocblaslt_enum_utils::is_invalid(rocblaslt_compute_type value_)
-{
-    switch(value_)
-    {
-    case rocblaslt_compute_f32:
-    case rocblaslt_compute_f32_fast_xf32:
-    case rocblaslt_compute_i32:
-        return false;
-    default:
-        return true;
-    }
-};
-
-template <>
-inline bool rocblaslt_enum_utils::is_invalid(rocblaslt_matmul_preference_attributes value_)
-{
-    switch(value_)
-    {
-    case ROCBLASLT_MATMUL_PREF_SEARCH_MODE:
-    case ROCBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES:
-        return false;
-    default:
-        return true;
-    }
-};
-
 inline bool is_grad_enabled(rocblaslt_epilogue value_)
 {
     switch(value_)
@@ -451,6 +352,7 @@ inline bool is_bias_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_BGRADA:
     case ROCBLASLT_EPILOGUE_BGRADB:
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
+    case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
         return true;
     default:
         return false;
@@ -471,21 +373,11 @@ inline bool is_act_enabled(rocblaslt_epilogue value_)
     case ROCBLASLT_EPILOGUE_DGELU_BGRAD:
     case ROCBLASLT_EPILOGUE_SWISH_EXT:
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
+    case ROCBLASLT_EPILOGUE_CLAMP_EXT:
+    case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
         return true;
     case ROCBLASLT_EPILOGUE_DEFAULT:
     case ROCBLASLT_EPILOGUE_BIAS:
-    default:
-        return false;
-    }
-};
-
-inline bool is_biasSrc_AB(rocblaslt_epilogue value_)
-{
-    switch(value_)
-    {
-    case ROCBLASLT_EPILOGUE_BGRADA:
-    case ROCBLASLT_EPILOGUE_BGRADB:
-        return true;
     default:
         return false;
     }

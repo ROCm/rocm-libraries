@@ -242,8 +242,8 @@ namespace GEMMDriverTest
             params->prefetchInFlight              = gemm.prefetchInFlight;
             params->prefetchLDSFactor             = gemm.prefetchLDSFactor;
             params->prefetchMixMemOps             = gemm.prefetchMixMemOps;
-            params->transposeMemoryAccess[LayoutType::MATRIX_A] = gemm.transA == "T";
-            params->transposeMemoryAccess[LayoutType::MATRIX_B] = gemm.transB == "T";
+            params->transposeMemoryAccess.set(LayoutType::MATRIX_A, gemm.transA == "T");
+            params->transposeMemoryAccess.set(LayoutType::MATRIX_B, gemm.transB == "T");
 
             if(gemm.loopOverTiles > 0)
             {

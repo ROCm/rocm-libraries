@@ -348,6 +348,7 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_check_matrix_hyb.cpp
 ../testings/testing_check_spmat.cpp
 ../testings/testing_bsrpad_value.cpp
+rocsparse_test_listeners.cpp
   )
 
 
@@ -402,22 +403,22 @@ target_compile_options(rocsparse-test PRIVATE -ffp-contract=on -mfma -Wno-deprec
 # Internal common header
 target_include_directories(rocsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
 
-# Target link libraries
-target_link_libraries(rocsparse-test PRIVATE GTest::gtest roc::rocsparse hip::host hip::device)
-
 # Add OpenMP if available
-if(OPENMP_FOUND)
-if (NOT WIN32)
-   target_link_libraries(rocsparse-test PRIVATE OpenMP::OpenMP_CXX -Wl,-rpath=${HIP_CLANG_ROOT}/lib)
-  else()
-   target_link_libraries(rocsparse-test PRIVATE libomp)
-  endif()
-endif()
+apply_omp_settings(rocsparse-test)
+
+# Target link libraries
+target_link_libraries(rocsparse-test PRIVATE GTest::gtest roc::rocsparse hip::host hip::device ${ROCSPARSE_CLIENT_LIBS})
 
 if (NOT WIN32)
   if (BUILD_WITH_ROCTX)
-    target_link_libraries(rocsparse-test PRIVATE -lroctx64)
-    target_compile_definitions( rocsparse-test PRIVATE ROCSPARSE_CLIENTS_WITH_ROCTX )
+    if(ROCTRACER_INCLUDE_DIR AND ROCTX_LIBRARY)
+      # Add the include directory
+      target_include_directories(rocsparse-test PRIVATE ${ROCTRACER_INCLUDE_DIR})
+
+      # Link the rocTx lib
+      target_link_libraries(rocsparse-test PRIVATE ${ROCTX_LIBRARY})
+      target_compile_definitions( rocsparse-test PRIVATE ROCSPARSE_CLIENTS_WITH_ROCTX )
+    endif()
   endif()
 endif()
 

@@ -69,7 +69,7 @@ partition(sequential::execution_policy<DerivedPolicy>&, ForwardIterator first, F
   }
 
   // wrap pred
-  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred(pred);
+  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred{pred};
 
   while (wrapped_pred(*first))
   {
@@ -109,7 +109,7 @@ THRUST_HOST_DEVICE ForwardIterator partition(
   }
 
   // wrap pred
-  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred(pred);
+  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred{pred};
 
   while (wrapped_pred(*stencil_first))
   {
@@ -151,7 +151,7 @@ THRUST_HOST_DEVICE ForwardIterator stable_partition(
   }
 
   // wrap pred
-  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred(pred);
+  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred{pred};
 
   using T = typename thrust::iterator_value<ForwardIterator>::type;
 
@@ -193,7 +193,7 @@ THRUST_HOST_DEVICE ForwardIterator stable_partition(
   Predicate pred)
 {
   // wrap pred
-  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred(pred);
+  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred{pred};
 
   using T = typename thrust::iterator_value<ForwardIterator>::type;
 
@@ -203,7 +203,7 @@ THRUST_HOST_DEVICE ForwardIterator stable_partition(
   TempRange temp(exec, first, last);
 
   InputIterator stencil_iter = stencil;
-  for (TempIterator iter = temp.begin(); iter != temp.end(); ++iter, ++stencil_iter)
+  for (TempIterator iter = temp.begin(); iter != temp.end(); ++iter, (void) ++stencil_iter)
   {
     if (wrapped_pred(*stencil_iter))
     {
@@ -215,7 +215,7 @@ THRUST_HOST_DEVICE ForwardIterator stable_partition(
   ForwardIterator middle = first;
   stencil_iter           = stencil;
 
-  for (TempIterator iter = temp.begin(); iter != temp.end(); ++iter, ++stencil_iter)
+  for (TempIterator iter = temp.begin(); iter != temp.end(); ++iter, (void) ++stencil_iter)
   {
     if (!wrapped_pred(*stencil_iter))
     {
@@ -242,7 +242,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partiti
   Predicate pred)
 {
   // wrap pred
-  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred(pred);
+  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred{pred};
 
   for (; first != last; ++first)
   {
@@ -278,9 +278,9 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> stable_partiti
   Predicate pred)
 {
   // wrap pred
-  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred(pred);
+  thrust::detail::wrapped_function<Predicate, bool> wrapped_pred{pred};
 
-  for (; first != last; ++first, ++stencil)
+  for (; first != last; ++first, (void) ++stencil)
   {
     if (wrapped_pred(*stencil))
     {

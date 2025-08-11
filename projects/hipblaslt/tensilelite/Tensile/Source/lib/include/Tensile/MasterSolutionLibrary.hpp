@@ -27,12 +27,15 @@
 #pragma once
 
 #include <chrono>
+#include <filesystem>
 #include <map>
 #include <memory>
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
+
+namespace fs = std::filesystem;
 
 namespace TensileLite
 {
@@ -51,6 +54,9 @@ namespace TensileLite
         // If lazy loading is used, this may be updated in const functions
         SolutionMap<MySolution>* solutions;
         std::mutex*              solutionsGuard;
+        std::set<std::string>*   loadedFiles;
+
+        void* indexLoadedLibraries;
     };
 
     /**
@@ -84,12 +90,89 @@ namespace TensileLite
                                    ")");
         }
 
+        std::string                   libraryDirectory;
+        std::string                   suffix;
+        std::map<int, std::string>    libraryMapping;
+        mutable std::set<std::string> loadedFiles;
+
+        mutable std::map<std::string, std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>>
+            indexLoadedLibraries;
+
         std::shared_ptr<SolutionLibrary<MyProblem, MySolution>> library;
-        SolutionMap<MySolution>                                 solutions;
+        mutable SolutionMap<MySolution>                         solutions;
         std::string                                             version;
         mutable std::mutex                                      solutionsGuard;
 
         MasterSolutionLibrary() = default;
+
+        bool initLibraryMapping(const std::string& tensileLibPath)
+        {
+            fs::path path(tensileLibPath);
+            libraryDirectory = path.parent_path().string();
+            suffix           = path.extension().string();
+            path             = fs::path(libraryDirectory) / "TensileLiteLibrary_lazy_Mapping.dat";
+
+            // libraryMapping
+            libraryMapping = LoadLibraryMapping(path.string());
+            if(libraryMapping.empty())
+            {
+                std::cout << "No library mapping found in " << libraryDirectory << std::endl;
+                return false;
+            }
+            return true;
+        }
+
+        void loadLibrary(const int index) const
+        {
+            auto it = libraryMapping.upper_bound(index);
+            if(it != libraryMapping.begin())
+            {
+                --it;
+                std::string filePrefix = it->second;
+                // load the file here directly and push the library for later use.
+                {
+                    std::lock_guard<std::mutex> lock(solutionsGuard);
+                    if(loadedFiles.find(filePrefix) != loadedFiles.end())
+                        return;
+                }
+                if(Debug::Instance().printDataInit())
+                    std::cout << "Loading library for index " << index
+                              << " from file: " << filePrefix << std::endl;
+
+                fs::path path(libraryDirectory);
+                path = path / (filePrefix + suffix);
+
+                auto newLibrary = LoadLibraryFile<MyProblem, MySolution>(path.string());
+                auto mLibrary
+                    = static_cast<MasterSolutionLibrary<MyProblem, MySolution>*>(newLibrary.get());
+
+                using std::begin;
+                using std::end;
+
+                std::lock_guard<std::mutex> lock(solutionsGuard);
+                if(loadedFiles.find(filePrefix) != loadedFiles.end())
+                    return;
+                // Push to cache
+                indexLoadedLibraries[filePrefix] = mLibrary->library;
+
+                std::transform(begin(mLibrary->solutions),
+                               end(mLibrary->solutions),
+                               std::inserter(solutions, end(solutions)),
+                               [this, filePrefix](auto& i) {
+                                   i.second->codeObjectFilename = filePrefix + ".co";
+                                   return i;
+                               });
+                loadedFiles.insert(filePrefix);
+
+                if(Debug::Instance().printCodeObjectInfo())
+                    std::cout << "load placeholder library " << path << std::endl
+                              << mLibrary->solutions.size() << " solutions loaded" << std::endl;
+            }
+            else
+            {
+                std::cerr << "No library found for index " << index << std::endl;
+            }
+        }
 
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
                                                                Hardware const&  hardware,
@@ -111,6 +194,7 @@ namespace TensileLite
         virtual std::shared_ptr<MySolution> getSolutionByIndex(Hardware const& hardware,
                                                                const int       index) const override
         {
+            loadLibrary(index);
             if(solutions.find(index) == solutions.end())
             {
                 return std::shared_ptr<MySolution>();

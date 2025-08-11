@@ -26,6 +26,9 @@
 
 #pragma once
 
+#include "KernelOptions_fwd.hpp"
+
+#include <memory>
 #include <ostream>
 #include <string>
 
@@ -43,64 +46,34 @@ namespace rocRoller
     const std::string NUMWGS  = "numWGs";
     const std::string WGM     = "WGM";
 
-    struct KernelOptions
+    class KernelOptions
     {
-        LogLevel logLevel = LogLevel::Verbose;
+    public:
+        KernelOptions();
+        // cppcheck-suppress noExplicitConstructor
+        KernelOptions(KernelOptionValues&& other);
 
-        bool alwaysWaitAfterLoad         = false;
-        bool alwaysWaitAfterStore        = false;
-        bool alwaysWaitBeforeBranch      = false;
-        bool alwaysWaitZeroBeforeBarrier = false;
+        KernelOptions(KernelOptions const& other);
+        KernelOptions(KernelOptions&& other);
 
-        bool preloadKernelArguments = true;
+        KernelOptions& operator=(KernelOptions const& other);
+        KernelOptions& operator=(KernelOptions&& other);
 
-        unsigned int maxACCVGPRs      = 256;
-        unsigned int maxSGPRs         = 102;
-        unsigned int maxVGPRs         = 256;
-        unsigned int loadLocalWidth   = 4;
-        unsigned int loadGlobalWidth  = 8;
-        unsigned int storeLocalWidth  = 4;
-        unsigned int storeGlobalWidth = 4;
+        KernelOptions& operator=(KernelOptionValues const& other);
+        KernelOptions& operator=(KernelOptionValues&& other);
 
-        bool assertWaitCntState = true;
+        ~KernelOptions();
 
-        bool setNextFreeVGPRToMax = false;
+        KernelOptionValues* operator->();
+        KernelOptionValues& operator*();
 
-        /**
-         * These two are expected to become permanently enabled;
-         */
-
-        /**
-         * If enabled, when adding a kernel argument, we will check all currently existing
-         * arguments for one with an equivalent expression. If one exists, no new argument is
-         * added and we will return the existing one instead.
-         */
-        bool deduplicateArguments = true;
-
-        /**
-         * If enabled, command arguments are not necessarily added as kernel arguments.  We
-         * instead depend on the CleanArguments and other passes to add all necessary kernel
-         * arguments.
-         */
-        bool lazyAddArguments = true;
-
-        /**
-         * The minimum complexity of an expression before we will add a kernel argument to
-         * calculate its value on the CPU before launch.  This is a very rough heuristic for
-         * now, and doesn't (yet) take into account different datatypes or different
-         * architectures.
-         *
-         * Magic division includes a subexpression of complexity 8, so if this number is <= 8,
-         * there will be a fourth kernel argument for every magic division denominator.
-         *
-         * Increasing this value could decrease SGPR pressure; decreasing it could speed up a
-         * kernel if there are enough available SGPRs.
-         */
-        int minLaunchTimeExpressionComplexity = 10;
-
-        AssertOpKind assertOpKind = AssertOpKind::NoOp;
+        KernelOptionValues const* operator->() const;
+        KernelOptionValues const& operator*() const;
 
         std::string          toString() const;
         friend std::ostream& operator<<(std::ostream&, const KernelOptions&);
+
+    private:
+        std::unique_ptr<KernelOptionValues> m_values;
     };
 }

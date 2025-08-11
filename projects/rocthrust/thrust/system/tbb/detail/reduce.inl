@@ -48,12 +48,12 @@ struct body
 
   // note: we only initalize sum with init to avoid calling OutputType's default constructor
   body(RandomAccessIterator first, OutputType init, BinaryFunction binary_op)
-    : first(first), sum(init), first_call(true), binary_op(binary_op)
+    : first(first), sum(init), first_call(true), binary_op{binary_op}
   {}
 
   // note: we only initalize sum with b.sum to avoid calling OutputType's default constructor
   body(body& b, ::tbb::split)
-    : first(b.first), sum(b.sum), first_call(true), binary_op(b.binary_op)
+    : first(b.first), sum(b.sum), first_call(true), binary_op{b.binary_op}
   {}
 
   template <typename Size>

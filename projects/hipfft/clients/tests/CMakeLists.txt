@@ -32,6 +32,13 @@ else( )
     "Install path prefix, prepended onto install directories" )
 endif( )
 
+# Dependencies
+
+find_package( ROCmCMakeBuildTools REQUIRED CONFIG PATHS /opt/rocm )
+include(ROCMInstallTargets)
+list( APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../cmake )
+
+
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user
 # specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
@@ -42,12 +49,18 @@ endif()
 
 project( hipfft-clients-tests LANGUAGES CXX )
 
+if( NOT HIPFFT_BUILD_SCOPE )
+  find_package( hipfft REQUIRED CONFIG PATHS )
+endif()
 
 find_package( Boost REQUIRED)
 
 set( Boost_USE_STATIC_LIBS OFF )
 
+
 find_package( FFTW 3.0 REQUIRED MODULE COMPONENTS FLOAT DOUBLE )
+
+set( BUILD_WITH_LIB "ROCM" CACHE STRING "Build ${PROJECT_NAME} with ROCM or CUDA libraries" )
 
 set( THREADS_PREFER_PTHREAD_FLAG ON )
 find_package( Threads REQUIRED )
@@ -84,7 +97,7 @@ if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
   if( WIN32 )
     find_package( HIP CONFIG REQUIRED )
   else()
-    find_package( HIP MODULE REQUIRED )
+    find_package( hip REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hip/ )
   endif()
 endif()
 
@@ -98,6 +111,14 @@ endif()
 string( CONCAT TESTS_OUT_DIR "${PROJECT_BINARY_DIR}" ${TESTS_OUT_DIR} )
 
 option( BUILD_CLIENTS_TESTS_OPENMP "Build tests with OpenMP" ON )
+if( BUILD_CLIENTS_TESTS_OPENMP AND NOT BUILD_WITH_LIB STREQUAL "CUDA" )
+  # Attempt to find a config version, which provides openmp_LIB_DIR.
+  find_package( OpenMP CONFIG PATHS "${HIP_CLANG_ROOT}/lib/cmake" )
+  if( NOT OPENMP_FOUND OR NOT DEFINED ${openmp_LIB_DIR} )
+     # Fall-back to module mode.
+     find_package( OpenMP REQUIRED )
+  endif()
+endif()
 
 foreach( target ${TEST_TARGETS} )
   set_target_properties( ${target} PROPERTIES
@@ -140,30 +161,15 @@ foreach( target ${TEST_TARGETS} )
     target_compile_definitions( ${target} PUBLIC _CUFFT_BACKEND )
   endif()
 
-  if( BUILD_CLIENTS_TESTS_OPENMP )
-    if( BUILD_WITH_LIB STREQUAL "CUDA" )
-      message( STATUS "OpenMP is not supported on CUDA, building tests without it" )
-    else()
-      target_compile_options( ${target} PRIVATE -DBUILD_CLIENTS_TESTS_OPENMP )
-      if(NOT (CMAKE_CXX_COMPILER MATCHES ".*hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+"))
-        target_compile_options( ${target} PRIVATE -fopenmp )
-        target_link_libraries( ${target} PRIVATE -fopenmp -L${HIP_CLANG_ROOT}/lib -Wl,-rpath=${HIP_CLANG_ROOT}/lib )
-        target_include_directories( ${target} PRIVATE ${HIP_CLANG_ROOT}/include )
-      else()
-        if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-          target_compile_options( ${target} PRIVATE -fopenmp=libomp )
-          target_link_options( ${target} PRIVATE -fopenmp=libomp )
-        endif()
-      endif()
-    endif()
-  endif()
 
   target_include_directories( ${target}
     PRIVATE
     $<BUILD_INTERFACE:${Boost_INCLUDE_DIRS}>
     $<BUILD_INTERFACE:${FFTW_INCLUDE_DIRS}>
     $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/include>
+    if( HIPFFT_BUILD_SCOPE )
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/include>
+    endif()
   )
 
   target_link_libraries( ${target}
@@ -171,6 +177,18 @@ foreach( target ${TEST_TARGETS} )
     hip::hipfft
     ${FFTW_LIBRARIES}
   )
+  
+  if( BUILD_CLIENTS_TESTS_OPENMP )
+    if( BUILD_WITH_LIB STREQUAL "CUDA" )
+      message( STATUS "OpenMP is not supported on CUDA, building tests without it" )
+    else()
+      if( DEFINED ${openmp_LIB_DIR} )
+        set_target_properties( ${target} PROPERTIES BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}" )
+        set_target_properties( ${target} PROPERTIES INSTALL_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}" )
+      endif()
+      target_link_libraries( ${target} PRIVATE OpenMP::OpenMP_CXX )
+    endif()
+  endif()
 
   if( HIPFFT_MPI_ENABLE )
     target_link_libraries( ${target}
@@ -186,6 +204,8 @@ foreach( target ${TEST_TARGETS} )
 
   rocm_install(TARGETS ${target} COMPONENT tests)
 endforeach()
+
+find_package( GTest 1.11.0 )
 
 if( GTEST_FOUND )
   target_include_directories( hipfft-test PRIVATE $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}> )
@@ -224,7 +244,7 @@ if (WIN32)
 endif()
 
 option(BUILD_CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)
-set(COVERAGE_TEST_OPTIONS "--smoketest" CACHE STRING "Command line arguments for hipfft-test when generating a code coverage report")
+set(COVERAGE_TEST_OPTIONS "--smoketest;--gtest_filter=-*call*" CACHE STRING "Command line arguments for hipfft-test when generating a code coverage report (Note: an additional run of hipfft-test targeting multi_gpu* and callback* tests is always executed and coverage results are aggregated)")
 if (BUILD_CODE_COVERAGE)
   add_custom_target(
     code_cov_tests
@@ -232,6 +252,7 @@ if (BUILD_CODE_COVERAGE)
     COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
     COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/hipfft-coverage_%p.profraw" GTEST_LISTENER=NO_PASS_LINE_IN_LOG $<TARGET_FILE:hipfft-test> --precompile=./clients/staging/hipfft-test-precompile.db ${COVERAGE_TEST_OPTIONS}
+    COMMAND ${CMAKE_COMMAND} -E env LLVM_PROFILE_FILE="./coverage-report/profraw/hipfft-coverage_%p.profraw" GTEST_LISTENER=NO_PASS_LINE_IN_LOG $<TARGET_FILE:hipfft-test> --precompile=./clients/staging/hipfft-test-precompile-multi_gpu-plus-callback.db --gtest_filter=multi_gpu*:callback*
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 

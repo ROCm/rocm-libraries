@@ -26,7 +26,8 @@
 
 #pragma once
 
-#include "ScaledMatrixMultiply_fwd.hpp"
+#include <rocRoller/CodeGen/Arithmetic/MatrixMultiply_fwd.hpp>
+#include <rocRoller/CodeGen/Arithmetic/ScaledMatrixMultiply_fwd.hpp>
 
 #include <memory>
 #include <tuple>
@@ -48,12 +49,12 @@ namespace rocRoller
             static const std::string Basename;
 
             /**
-             * Performs matrix multiplication: dest = matA * matB + matC
+             * Performs matrix multiplication: dest = scale(scaleA, matA) * scale(scaleB, matB) + matC
              * using matrix instructions with scaleA and scaleB.
              *
              * matA and matB are stored in registers.  matC is the accumulator and can be the same as dest.
              *
-             * matA is M x K with B batches.  matB is K x N with B batches.
+             * matA is mi.m x mi.k with mi.b batches.  matB is mi.k x mi.n with mi.b batches.
              */
             virtual Generator<Instruction> mul(Register::ValuePtr  dest,
                                                Register::ValuePtr  matA,
@@ -61,9 +62,7 @@ namespace rocRoller
                                                Register::ValuePtr  matC,
                                                Register::ValuePtr  scaleA,
                                                Register::ValuePtr  scaleB,
-                                               int                 M,
-                                               int                 N,
-                                               int                 K,
+                                               MatrixMultiplySizes mi,
                                                std::optional<uint> maybeScaleBlockSize)
                 = 0;
         };
@@ -111,9 +110,7 @@ namespace rocRoller
                                                Register::ValuePtr  matC,
                                                Register::ValuePtr  scaleA,
                                                Register::ValuePtr  scaleB,
-                                               int                 M,
-                                               int                 N,
-                                               int                 K,
+                                               MatrixMultiplySizes mi,
                                                std::optional<uint> maybeScaleBlockSize) override;
 
         protected:

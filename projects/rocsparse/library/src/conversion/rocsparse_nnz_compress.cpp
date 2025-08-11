@@ -35,7 +35,6 @@ namespace rocsparse
     template <rocsparse_int BLOCK_SIZE,
               rocsparse_int SEGMENTS_PER_BLOCK,
               rocsparse_int SEGMENT_SIZE,
-              rocsparse_int WF_SIZE,
               typename T>
     ROCSPARSE_KERNEL(BLOCK_SIZE)
     void nnz_compress_kernel(rocsparse_int        m,
@@ -45,7 +44,7 @@ namespace rocsparse
                              rocsparse_int* __restrict__ nnz_per_row,
                              T threshold)
     {
-        rocsparse::nnz_compress_device<BLOCK_SIZE, SEGMENTS_PER_BLOCK, SEGMENT_SIZE, WF_SIZE>(
+        rocsparse::nnz_compress_device<BLOCK_SIZE, SEGMENTS_PER_BLOCK, SEGMENT_SIZE>(
             m, idx_base_A, csr_val_A, csr_row_ptr_A, nnz_per_row, threshold);
     }
 }
@@ -135,213 +134,113 @@ rocsparse_status rocsparse::nnz_compress_template(rocsparse_handle          hand
     // A wavefront is divided into segments of size 2, 4, 8, 16, or 32 threads (or 64 in the case of 64
     // thread wavefronts) depending on the mean number of elements per CSR matrix row. Each row in the
     // matrix is then handled by a single segment.
-    if(handle->wavefront_size == 32)
+    if(mean_nnz_per_row < 4)
     {
-        if(mean_nnz_per_row < 4)
-        {
-            constexpr rocsparse_int segments_per_block = block_size / 2;
-            rocsparse_int           grid_size = (m + segments_per_block - 1) / segments_per_block;
+        constexpr rocsparse_int segments_per_block = block_size / 2;
+        rocsparse_int           grid_size = (m + segments_per_block - 1) / segments_per_block;
 
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::nnz_compress_kernel<block_size, segments_per_block, 2, 32>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                stream,
-                m,
-                descr_A->base,
-                csr_val_A,
-                csr_row_ptr_A,
-                nnz_per_row,
-                tol);
-        }
-        else if(mean_nnz_per_row < 8)
-        {
-            constexpr rocsparse_int segments_per_block = block_size / 4;
-            rocsparse_int           grid_size = (m + segments_per_block - 1) / segments_per_block;
-
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::nnz_compress_kernel<block_size, segments_per_block, 4, 32>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                stream,
-                m,
-                descr_A->base,
-                csr_val_A,
-                csr_row_ptr_A,
-                nnz_per_row,
-                tol);
-        }
-        else if(mean_nnz_per_row < 16)
-        {
-            constexpr rocsparse_int segments_per_block = block_size / 8;
-            rocsparse_int           grid_size = (m + segments_per_block - 1) / segments_per_block;
-
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::nnz_compress_kernel<block_size, segments_per_block, 8, 32>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                stream,
-                m,
-                descr_A->base,
-                csr_val_A,
-                csr_row_ptr_A,
-                nnz_per_row,
-                tol);
-        }
-        else if(mean_nnz_per_row < 32)
-        {
-            constexpr rocsparse_int segments_per_block = block_size / 16;
-            rocsparse_int           grid_size = (m + segments_per_block - 1) / segments_per_block;
-
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::nnz_compress_kernel<block_size, segments_per_block, 16, 32>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                stream,
-                m,
-                descr_A->base,
-                csr_val_A,
-                csr_row_ptr_A,
-                nnz_per_row,
-                tol);
-        }
-        else
-        {
-            constexpr rocsparse_int segments_per_block = block_size / 32;
-            rocsparse_int           grid_size = (m + segments_per_block - 1) / segments_per_block;
-
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::nnz_compress_kernel<block_size, segments_per_block, 32, 32>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                stream,
-                m,
-                descr_A->base,
-                csr_val_A,
-                csr_row_ptr_A,
-                nnz_per_row,
-                tol);
-        }
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::nnz_compress_kernel<block_size, segments_per_block, 2>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            stream,
+            m,
+            descr_A->base,
+            csr_val_A,
+            csr_row_ptr_A,
+            nnz_per_row,
+            tol);
     }
-    else if(handle->wavefront_size == 64)
+    else if(mean_nnz_per_row < 8)
     {
-        if(mean_nnz_per_row < 4)
-        {
-            constexpr rocsparse_int segments_per_block = block_size / 2;
-            rocsparse_int           grid_size = (m + segments_per_block - 1) / segments_per_block;
+        constexpr rocsparse_int segments_per_block = block_size / 4;
+        rocsparse_int           grid_size = (m + segments_per_block - 1) / segments_per_block;
 
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::nnz_compress_kernel<block_size, segments_per_block, 2, 64>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                stream,
-                m,
-                descr_A->base,
-                csr_val_A,
-                csr_row_ptr_A,
-                nnz_per_row,
-                tol);
-        }
-        else if(mean_nnz_per_row < 8)
-        {
-            constexpr rocsparse_int segments_per_block = block_size / 4;
-            rocsparse_int           grid_size = (m + segments_per_block - 1) / segments_per_block;
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::nnz_compress_kernel<block_size, segments_per_block, 4>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            stream,
+            m,
+            descr_A->base,
+            csr_val_A,
+            csr_row_ptr_A,
+            nnz_per_row,
+            tol);
+    }
+    else if(mean_nnz_per_row < 16)
+    {
+        constexpr rocsparse_int segments_per_block = block_size / 8;
+        rocsparse_int           grid_size = (m + segments_per_block - 1) / segments_per_block;
 
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::nnz_compress_kernel<block_size, segments_per_block, 4, 64>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                stream,
-                m,
-                descr_A->base,
-                csr_val_A,
-                csr_row_ptr_A,
-                nnz_per_row,
-                tol);
-        }
-        else if(mean_nnz_per_row < 16)
-        {
-            constexpr rocsparse_int segments_per_block = block_size / 8;
-            rocsparse_int           grid_size = (m + segments_per_block - 1) / segments_per_block;
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::nnz_compress_kernel<block_size, segments_per_block, 8>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            stream,
+            m,
+            descr_A->base,
+            csr_val_A,
+            csr_row_ptr_A,
+            nnz_per_row,
+            tol);
+    }
+    else if(mean_nnz_per_row < 32)
+    {
+        constexpr rocsparse_int segments_per_block = block_size / 16;
+        rocsparse_int           grid_size = (m + segments_per_block - 1) / segments_per_block;
 
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::nnz_compress_kernel<block_size, segments_per_block, 8, 64>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                stream,
-                m,
-                descr_A->base,
-                csr_val_A,
-                csr_row_ptr_A,
-                nnz_per_row,
-                tol);
-        }
-        else if(mean_nnz_per_row < 32)
-        {
-            constexpr rocsparse_int segments_per_block = block_size / 16;
-            rocsparse_int           grid_size = (m + segments_per_block - 1) / segments_per_block;
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::nnz_compress_kernel<block_size, segments_per_block, 16>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            stream,
+            m,
+            descr_A->base,
+            csr_val_A,
+            csr_row_ptr_A,
+            nnz_per_row,
+            tol);
+    }
+    else if(mean_nnz_per_row < 64 || handle->wavefront_size == 32)
+    {
+        constexpr rocsparse_int segments_per_block = block_size / 32;
+        rocsparse_int           grid_size = (m + segments_per_block - 1) / segments_per_block;
 
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::nnz_compress_kernel<block_size, segments_per_block, 16, 64>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                stream,
-                m,
-                descr_A->base,
-                csr_val_A,
-                csr_row_ptr_A,
-                nnz_per_row,
-                tol);
-        }
-        else if(mean_nnz_per_row < 64)
-        {
-            constexpr rocsparse_int segments_per_block = block_size / 32;
-            rocsparse_int           grid_size = (m + segments_per_block - 1) / segments_per_block;
-
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::nnz_compress_kernel<block_size, segments_per_block, 32, 64>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                stream,
-                m,
-                descr_A->base,
-                csr_val_A,
-                csr_row_ptr_A,
-                nnz_per_row,
-                tol);
-        }
-        else
-        {
-            constexpr rocsparse_int segments_per_block = block_size / 64;
-            rocsparse_int           grid_size = (m + segments_per_block - 1) / segments_per_block;
-
-            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-                (rocsparse::nnz_compress_kernel<block_size, segments_per_block, 64, 64>),
-                dim3(grid_size),
-                dim3(block_size),
-                0,
-                stream,
-                m,
-                descr_A->base,
-                csr_val_A,
-                csr_row_ptr_A,
-                nnz_per_row,
-                tol);
-        }
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::nnz_compress_kernel<block_size, segments_per_block, 32>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            stream,
+            m,
+            descr_A->base,
+            csr_val_A,
+            csr_row_ptr_A,
+            nnz_per_row,
+            tol);
     }
     else
     {
-        return rocsparse_status_arch_mismatch;
+        constexpr rocsparse_int segments_per_block = block_size / 64;
+        rocsparse_int           grid_size = (m + segments_per_block - 1) / segments_per_block;
+
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+            (rocsparse::nnz_compress_kernel<block_size, segments_per_block, 64>),
+            dim3(grid_size),
+            dim3(block_size),
+            0,
+            stream,
+            m,
+            descr_A->base,
+            csr_val_A,
+            csr_row_ptr_A,
+            nnz_per_row,
+            tol);
     }
 
     rocsparse_int* dnnz_C;

@@ -21,7 +21,8 @@
 #include <thrust/sequence.h>
 #include <thrust/transform_reduce.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(PermutationIteratorTests, FullTestsParams);
 

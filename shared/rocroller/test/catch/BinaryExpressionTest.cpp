@@ -229,4 +229,52 @@ namespace ExpressionTest
         }
     }
 
+    TEST_CASE("Run ConvertPropagation kernel binary",
+              "[expression][expression-transformation][gpu]")
+    {
+        using InputType           = int64_t;
+        using ResultType          = int32_t;
+        constexpr auto inputType  = TypeInfo<InputType>::Var.dataType;
+        constexpr auto resultType = TypeInfo<ResultType>::Var.dataType;
+
+        using CPUExpressionFunc = std::function<ResultType(InputType, InputType)>;
+
+        auto [gpu_expr, cpu_expr] = GENERATE(
+            as<std::pair<BinaryExpressionKernel::ExpressionFunc, CPUExpressionFunc>>{},
+            std::make_pair([](auto a, auto b) { return Expression::convert(resultType, a + b); },
+                           [](auto a, auto b) { return static_cast<ResultType>(a + b); }),
+            std::make_pair(
+                [](auto a, auto b) { return Expression::convert(resultType, a + a * b); },
+                [](auto a, auto b) { return static_cast<ResultType>(a + a * b); }),
+            std::make_pair(
+                [](auto a, auto b) {
+                    return Expression::convert(resultType,
+                                               a + Expression::convert(resultType, a * b));
+                },
+                [](auto a, auto b) {
+                    return static_cast<ResultType>(a + static_cast<ResultType>(a * b));
+                }),
+            std::make_pair(
+                [](auto a, auto b) { return Expression::convert(resultType, a - a * b); },
+                [](auto a, auto b) { return static_cast<ResultType>(a - a * b); }));
+
+        BinaryExpressionKernel kernel(
+            TestContext::ForTestDevice().get(), gpu_expr, resultType, inputType, inputType);
+
+        auto result = make_shared_device<int32_t>();
+
+        for(auto a : TestValues::int64Values)
+        {
+            for(auto b : TestValues::int64Values)
+            {
+                CAPTURE(a, b);
+
+                int32_t r = cpu_expr(a, b);
+
+                kernel({}, result.get(), a, b);
+
+                CHECK_THAT(result, HasDeviceScalarEqualTo(r));
+            }
+        }
+    }
 }

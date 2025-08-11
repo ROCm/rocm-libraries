@@ -139,7 +139,7 @@ namespace hip_rocprim
 // ADL entry point.
 template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typename T, typename BinaryOp>
 auto async_reduce(execution_policy<DerivedPolicy>& policy, ForwardIt first, Sentinel last, T init, BinaryOp op)
-  THRUST_RETURNS(thrust::system::hip::detail::async_reduce_n(policy, first, distance(first, last), init, op))
+  THRUST_RETURNS(thrust::system::hip::detail::async_reduce_n(policy, first, thrust::distance(first, last), init, op))
 
 } // namespace hip_rocprim
 ///////////////////////////////////////////////////////////////////////////////
@@ -228,7 +228,7 @@ template <typename DerivedPolicy, typename ForwardIt, typename Sentinel, typenam
 auto async_reduce_into(
   execution_policy<DerivedPolicy>& policy, ForwardIt first, Sentinel last, OutputIt output, T init, BinaryOp op)
   THRUST_RETURNS(
-    thrust::system::hip::detail::async_reduce_into_n(policy, first, distance(first, last), output, init, op))
+    thrust::system::hip::detail::async_reduce_into_n(policy, first, thrust::distance(first, last), output, init, op))
 
 } // namespace hip_rocprim
 

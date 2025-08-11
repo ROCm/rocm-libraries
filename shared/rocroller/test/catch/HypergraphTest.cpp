@@ -145,10 +145,34 @@ namespace HypergraphTest
     }
 
     using myHypergraph = Graph::Hypergraph<TestDimension, TestTransform>;
+    using myCalmGraph  = Graph::Hypergraph<TestDimension, TestTransform, false>;
+
+    TEST_CASE("Calm graph find edge", "[hypergraph]")
+    {
+        myCalmGraph g;
+        auto        n0 = g.addElement(TestUser{});
+        auto        n1 = g.addElement(TestUser{});
+        auto        n2 = g.addElement(TestUser{});
+        auto        n3 = g.addElement(TestUser{});
+
+        auto e0 = g.addElement(TestSplit{}, {n0}, {n1});
+        auto e1 = g.addElement(TestSplit{}, {n0}, {n2});
+        auto e2 = g.addElement(TestSplit{}, {n1}, {n3});
+        auto e3 = g.addElement(TestSplit{}, {n3}, {n0});
+
+        CHECK(g.findEdge(n0, n1) == e0);
+        CHECK(g.findEdge(n0, n2) == e1);
+        CHECK(g.findEdge(n1, n3) == e2);
+        CHECK(g.findEdge(n3, n0) == e3);
+
+        CHECK(g.findEdge(n0, n0) == std::nullopt);
+        CHECK(g.findEdge(n0, n3) == std::nullopt);
+        CHECK(g.findEdge(n1, n2) == std::nullopt);
+        CHECK(g.findEdge(n3, n2) == std::nullopt);
+    }
 
     TEST_CASE("Basic Hypergraph", "[kernel-graph]")
     {
-
         myHypergraph g;
 
         auto u0  = g.addElement(TestUser{});

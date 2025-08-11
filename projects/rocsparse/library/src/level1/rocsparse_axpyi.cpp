@@ -127,11 +127,13 @@ rocsparse_status rocsparse::axpyi_template(rocsparse_handle     handle,
         YTYPE*               y,                                                      \
         rocsparse_index_base idx_base);
 
+INSTANTIATE(float, int32_t, rocsparse_bfloat16, rocsparse_bfloat16);
 INSTANTIATE(float, int32_t, _Float16, _Float16);
 INSTANTIATE(float, int32_t, float, float);
 INSTANTIATE(double, int32_t, double, double);
 INSTANTIATE(rocsparse_float_complex, int32_t, rocsparse_float_complex, rocsparse_float_complex);
 INSTANTIATE(rocsparse_double_complex, int32_t, rocsparse_double_complex, rocsparse_double_complex);
+INSTANTIATE(float, int64_t, rocsparse_bfloat16, rocsparse_bfloat16);
 INSTANTIATE(float, int64_t, _Float16, _Float16);
 INSTANTIATE(float, int64_t, float, float);
 INSTANTIATE(double, int64_t, double, double);

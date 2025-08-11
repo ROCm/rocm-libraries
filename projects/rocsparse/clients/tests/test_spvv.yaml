@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -93,6 +93,16 @@ Tests:
   transA: [rocsparse_operation_none]
 
 - name: spvv
+  category: quick
+  function: spvv
+  indextype: *i32_i64
+  precision: *bfloat16_bfloat16_float32_xyt_precision
+  M: [746, 982]
+  nnz: [213]
+  baseA: [rocsparse_index_base_zero]
+  transA: [rocsparse_operation_none]
+
+- name: spvv
   category: pre_checkin
   function: spvv
   indextype: *i32_i64
@@ -119,6 +129,16 @@ Tests:
   precision: *float16_float16_float32_xyt_precision
   M: [1423, 3425, 26578, 55678]
   nnz: [444, 632, 999]
+  baseA: [rocsparse_index_base_zero]
+  transA: [rocsparse_operation_none]
+
+- name: spvv
+  category: pre_checkin
+  function: spvv
+  indextype: *i32_i64
+  precision: *bfloat16_bfloat16_float32_xyt_precision
+  M: [27385, 87124]
+  nnz: [2365, 7891]
   baseA: [rocsparse_index_base_zero]
   transA: [rocsparse_operation_none]
 

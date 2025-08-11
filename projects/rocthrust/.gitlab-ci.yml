@@ -227,7 +227,7 @@ build:windows:
       -D GPU_TARGETS=$GPU_TARGET
       -D BUILD_TEST=ON
       -D BUILD_EXAMPLES=OFF
-      -D BUILD_BENCHMARKS=OFF
+      -D BUILD_BENCHMARK=OFF
       -D CMAKE_CXX_FLAGS=-Wno-deprecated-declarations
       -D CMAKE_CXX_COMPILER:FILEPATH="${env:HIP_PATH}/bin/clang++.exe"
       -D CMAKE_INSTALL_PREFIX:PATH="$CI_PROJECT_DIR/build/install"
@@ -436,7 +436,7 @@ build:cuda-and-omp:
   tags:
     - build
   variables:
-    CCCL_GIT_BRANCH: v2.6.0
+    CCCL_GIT_BRANCH: v2.7.0
     CCCL_DIR: ${CI_PROJECT_DIR}/cccl
   needs: []
   script:
@@ -444,6 +444,7 @@ build:cuda-and-omp:
     # Replace CCCL Thrust headers with rocThrust headers
     - rm -R $CCCL_DIR/thrust/thrust
     - cp -r $CI_PROJECT_DIR/thrust $CCCL_DIR/thrust
+    - cp $CI_PROJECT_DIR/testing/type_traits.cu $CCCL_DIR/thrust/testing
     # Build tests and examples from CCCL Thrust
     - cmake
       -G Ninja

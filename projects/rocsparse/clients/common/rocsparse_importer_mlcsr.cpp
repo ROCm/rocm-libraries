@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -201,6 +201,10 @@ INSTANTIATE_TIJ(_Float16, int32_t, int32_t);
 INSTANTIATE_TIJ(_Float16, int64_t, int32_t);
 INSTANTIATE_TIJ(_Float16, int64_t, int64_t);
 
+INSTANTIATE_TIJ(rocsparse_bfloat16, int32_t, int32_t);
+INSTANTIATE_TIJ(rocsparse_bfloat16, int64_t, int32_t);
+INSTANTIATE_TIJ(rocsparse_bfloat16, int64_t, int64_t);
+
 INSTANTIATE_TIJ(float, int32_t, int32_t);
 INSTANTIATE_TIJ(float, int64_t, int32_t);
 INSTANTIATE_TIJ(float, int64_t, int64_t);
@@ -222,6 +226,9 @@ INSTANTIATE_TI(int8_t, int64_t);
 
 INSTANTIATE_TI(_Float16, int32_t);
 INSTANTIATE_TI(_Float16, int64_t);
+
+INSTANTIATE_TI(rocsparse_bfloat16, int32_t);
+INSTANTIATE_TI(rocsparse_bfloat16, int64_t);
 
 INSTANTIATE_TI(float, int32_t);
 INSTANTIATE_TI(float, int64_t);

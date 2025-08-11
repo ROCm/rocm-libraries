@@ -138,3 +138,52 @@ inline bool is_hmm_enabled()
 
     return hmm_enabled;
 }
+
+namespace rocsparse_clients
+{
+    struct archnames
+    {
+        static constexpr const char* const gfx90a  = "gfx90a";
+        static constexpr const char* const gfx942  = "gfx942";
+        static constexpr const char* const gfx803  = "gfx803";
+        static constexpr const char* const gfx900  = "gfx900";
+        static constexpr const char* const gfx906  = "gfx906";
+        static constexpr const char* const gfx908  = "gfx908";
+        static constexpr const char* const gfx950  = "gfx950";
+        static constexpr const char* const gfx1030 = "gfx1030";
+        static constexpr const char* const gfx1100 = "gfx1100";
+        static constexpr const char* const gfx1101 = "gfx1101";
+        static constexpr const char* const gfx1102 = "gfx1102";
+        static constexpr const char* const gfx1151 = "gfx1151";
+        static constexpr const char* const gfx1200 = "gfx1200";
+        static constexpr const char* const gfx1201 = "gfx1201";
+    };
+
+    inline bool archname_from(const char* archname, const char* name)
+    {
+        return (0 == strncmp(name, archname, strlen(name)));
+    }
+
+    template <typename... P>
+    inline bool archname_from(const char* archname, const char* name, P... p)
+    {
+        if(0 == strncmp(name, archname, strlen(name)))
+        {
+            return true;
+        }
+        return rocsparse_clients::archname_from(archname, std::forward<P>(p)...);
+    }
+
+    template <typename... P>
+    inline bool current_arch_from(P... p)
+    {
+        int             dev;
+        hipDeviceProp_t prop;
+        std::ignore = hipGetDevice(&dev);
+        std::ignore = hipGetDeviceProperties(&prop, dev);
+        return rocsparse_clients::archname_from(prop.gcnArchName, std::forward<P>(p)...);
+    }
+}
+
+#define ROCSPARSE_DEBUG_VERBOSE_ON rocsparse_enable_debug_verbose()
+#define ROCSPARSE_DEBUG_VERBOSE_OFF rocsparse_disable_debug_verbose()

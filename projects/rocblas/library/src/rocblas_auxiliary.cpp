@@ -897,6 +897,11 @@ struct XnackMode<PROP, void_t<decltype(PROP::gcnArchName)>>
     }
 };
 
+int rocblas_internal_get_arch(rocblas_handle handle)
+{
+    return handle->getArch();
+}
+
 bool rocblas_internal_tensile_supports_ldc_ne_ldd(rocblas_handle handle)
 {
     return handle->getArch() >= 906;

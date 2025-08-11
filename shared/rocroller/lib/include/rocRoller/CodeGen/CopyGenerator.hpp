@@ -58,6 +58,19 @@ namespace rocRoller
                                           EnumBitset<Register::Type> types) const;
 
         /**
+         *  Prepare the LHS and RHS operands of a commutative instruction.
+         *  Currently we only handle the case that if RHS is a literal,
+         *  swap it with LHS or move it to a new VGPR.
+         *
+         *  TODO: enhance this to use GPUInstructionInfo to figure out the allowed operand types.
+         *
+         */
+        Generator<Instruction> ensureTypeCommutative(EnumBitset<Register::Type> lhsTypes,
+                                                     Register::ValuePtr&        lhs,
+                                                     EnumBitset<Register::Type> rhsTypes,
+                                                     Register::ValuePtr&        rhs) const;
+
+        /**
          * Copy `src` registers to `dest` registers.
          */
         Generator<Instruction>

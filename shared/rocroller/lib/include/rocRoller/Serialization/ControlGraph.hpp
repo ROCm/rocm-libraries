@@ -273,13 +273,34 @@ namespace rocRoller
             using iot = IOTraits<IO>;
             static void mapping(IO& io, KernelGraph::ControlGraph::ComputeIndex& op, Context&)
             {
+                static_assert(sizeof(op) == 16);
                 iot::mapRequired(io, "forward", op.forward);
+                iot::mapRequired(io, "isDirect2LDS", op.isDirect2LDS);
                 iot::mapRequired(io, "valueType", op.valueType);
                 iot::mapRequired(io, "offsetType", op.offsetType);
                 iot::mapRequired(io, "strideType", op.strideType);
             }
 
             static void mapping(IO& io, KernelGraph::ControlGraph::ComputeIndex& op)
+            {
+                AssertFatal((std::same_as<EmptyContext, Context>));
+
+                Context ctx;
+                mapping(io, op, ctx);
+            }
+        };
+
+        template <typename IO, typename Context>
+        struct MappingTraits<KernelGraph::ControlGraph::Deallocate, IO, Context>
+        {
+            using iot = IOTraits<IO>;
+            static void mapping(IO& io, KernelGraph::ControlGraph::Deallocate& op, Context&)
+            {
+                if(!iot::outputting(io) || !op.arguments.empty())
+                    iot::mapOptional(io, "arguments", op.arguments);
+            }
+
+            static void mapping(IO& io, KernelGraph::ControlGraph::Deallocate& op)
             {
                 AssertFatal((std::same_as<EmptyContext, Context>));
 
@@ -392,12 +413,17 @@ namespace rocRoller
             using iot = IOTraits<IO>;
             static void mapping(IO& io, KernelGraph::ControlGraph::TensorContraction& op, Context&)
             {
+                static_assert(sizeof(op) == 160);
+
                 iot::mapRequired(io, "aDims", op.aDims);
                 iot::mapRequired(io, "bDims", op.bDims);
                 iot::mapRequired(io, "scaleModeA", op.scaleModeA);
                 iot::mapRequired(io, "scaleModeB", op.scaleModeB);
                 iot::mapRequired(io, "scaleStridesA", op.scaleStridesA);
                 iot::mapRequired(io, "scaleStridesB", op.scaleStridesB);
+                iot::mapRequired(io, "scalePreShuffledTileA", op.scalePreShuffledTileA);
+                iot::mapRequired(io, "scalePreShuffledTileB", op.scalePreShuffledTileB);
+                iot::mapRequired(io, "accType", op.accType);
             }
 
             static void mapping(IO& io, KernelGraph::ControlGraph::TensorContraction& op)

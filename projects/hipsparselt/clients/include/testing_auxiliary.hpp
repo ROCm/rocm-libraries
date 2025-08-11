@@ -258,6 +258,44 @@ void testing_aux_mat_init_structured_bad_arg(const Arguments& arg)
                                                                 HIPSPARSELT_SPARSITY_50_PERCENT),
                             HIPSPARSE_STATUS_NOT_SUPPORTED);
 #endif
+
+    // The row and column must be mulitples of num_elements.
+    int num_elements = 8;
+    switch(arg.a_type)
+    {
+    case HIP_R_8I:
+#if HIP_FP8_TYPE_OCP
+    case HIP_R_8F_E4M3:
+    case HIP_R_8F_E5M2:
+#endif
+        num_elements = 16;
+        break;
+    default:
+        break;
+    }
+
+    EXPECT_HIPSPARSE_STATUS(hipsparseLtStructuredDescriptorInit(handle,
+                                                                &m_descr,
+                                                                num_elements * 4 + 4,
+                                                                col,
+                                                                ld,
+                                                                16,
+                                                                arg.a_type,
+                                                                HIPSPARSE_ORDER_COL,
+                                                                HIPSPARSELT_SPARSITY_50_PERCENT),
+                            HIPSPARSE_STATUS_NOT_SUPPORTED);
+
+    // Chcek unsupported datatype
+    EXPECT_HIPSPARSE_STATUS(hipsparseLtStructuredDescriptorInit(handle,
+                                                                &m_descr,
+                                                                row,
+                                                                col,
+                                                                ld,
+                                                                16,
+                                                                HIP_R_64F,
+                                                                HIPSPARSE_ORDER_COL,
+                                                                HIPSPARSELT_SPARSITY_50_PERCENT),
+                            HIPSPARSE_STATUS_NOT_SUPPORTED);     
 }
 
 void testing_aux_mat_dense_init(const Arguments& arg)
@@ -639,19 +677,6 @@ void testing_aux_matmul_init_bad_arg(const Arguments& arg)
         HIPSPARSE_STATUS_INVALID_VALUE);
 #endif
 
-    hipDataType tmpDataType;
-    auto        get_diff_datatype = [&](hipDataType type) {
-        switch(type)
-        {
-        case HIP_R_16BF:
-            return HIP_R_16F;
-        default:
-            return HIP_R_16BF;
-        }
-    };
-
-    tmpDataType = get_diff_datatype(arg.b_type);
-
     hipsparselt_local_mat_descr matA_(
         hipsparselt_matrix_type_structured, handle, K, N, ldb, HIP_R_32F, HIPSPARSE_ORDER_COL);
     EXPECT_HIPSPARSE_STATUS(matA_.status(), HIPSPARSE_STATUS_SUCCESS);
@@ -671,6 +696,28 @@ void testing_aux_matmul_init_bad_arg(const Arguments& arg)
             handle, &m_descr, opA, opB, matA, matB, matCS_, matD, arg.compute_type),
         HIPSPARSE_STATUS_INVALID_VALUE);
 
+    // Only one of the A or B can be structured sparsity matrix
+    hipsparselt_local_mat_descr matBS(
+        hipsparselt_matrix_type_structured, handle, K, N, ldb, arg.b_type, HIPSPARSE_ORDER_COL);
+    EXPECT_HIPSPARSE_STATUS(matBS.status(), HIPSPARSE_STATUS_SUCCESS);
+    EXPECT_HIPSPARSE_STATUS(
+        hipsparseLtMatmulDescriptorInit(
+            handle, &m_descr, opA, opB, matA, matBS, matC, matD, arg.compute_type),
+        HIPSPARSE_STATUS_NOT_SUPPORTED);
+
+    //
+    hipDataType tmpDataType;
+    auto        get_diff_datatype = [&](hipDataType type) {
+        switch(type)
+        {
+        case HIP_R_16BF:
+            return HIP_R_16F;
+        default:
+            return HIP_R_16BF;
+        }
+    };
+
+    tmpDataType = get_diff_datatype(arg.b_type);
     hipsparselt_local_mat_descr matB_(
         hipsparselt_matrix_type_dense, handle, K, N, ldb, tmpDataType, HIPSPARSE_ORDER_COL);
     EXPECT_HIPSPARSE_STATUS(matB_.status(), HIPSPARSE_STATUS_SUCCESS);
@@ -849,6 +896,14 @@ void testing_aux_matmul_set_attr_bad_arg(const Arguments& arg)
         hipsparseLtMatmulDescSetAttribute(
             handle, matmul, HIPSPARSELT_MATMUL_BIAS_STRIDE, &bias_stride, sizeof(bias_stride)),
         HIPSPARSE_STATUS_INVALID_VALUE);
+
+#ifdef __HIP_PLATFORM_AMD__
+        char bias_type;
+        EXPECT_HIPSPARSE_STATUS(
+            hipsparseLtMatmulDescSetAttribute(
+                handle, matmul, HIPSPARSELT_MATMUL_BIAS_TYPE, &bias_type, sizeof(char)),
+            HIPSPARSE_STATUS_INVALID_VALUE);
+#endif
 }
 
 void testing_aux_matmul_get_attr_bad_arg(const Arguments& arg)

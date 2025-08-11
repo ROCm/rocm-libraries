@@ -109,18 +109,18 @@ namespace rocRoller
             case Register::Type::Accumulator:
             {
                 auto const maxACCVGPRs = rv->m_targetArch.HasCapability(GPUCapability::HasAccCD)
-                                             ? kernelOpts.maxACCVGPRs
+                                             ? kernelOpts->maxACCVGPRs
                                              : 0;
                 rv->m_allocators[i] = std::make_shared<Register::Allocator>(regType, maxACCVGPRs);
                 break;
             }
             case Register::Type::Vector:
                 rv->m_allocators[i]
-                    = std::make_shared<Register::Allocator>(regType, kernelOpts.maxVGPRs);
+                    = std::make_shared<Register::Allocator>(regType, kernelOpts->maxVGPRs);
                 break;
             case Register::Type::Scalar:
                 rv->m_allocators[i]
-                    = std::make_shared<Register::Allocator>(regType, kernelOpts.maxSGPRs);
+                    = std::make_shared<Register::Allocator>(regType, kernelOpts->maxSGPRs);
                 break;
             default:
                 // We do not allocate other types of register representation

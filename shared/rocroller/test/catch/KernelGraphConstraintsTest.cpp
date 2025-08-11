@@ -210,3 +210,85 @@ SCENARIO("NoDanglingMappings constraint works", "[kernel-graph]")
         }
     }
 }
+
+SCENARIO("WalkableControlGraph constraint works", "[kernel-graph]")
+{
+    using namespace rocRoller;
+    namespace kg = rocRoller::KernelGraph;
+    namespace cg = kg::ControlGraph;
+    using namespace Catch::Matchers;
+
+    GIVEN("A valid control graph")
+    {
+        kg::KernelGraph g;
+
+        auto kernel = g.control.addElement(cg::Kernel());
+
+        auto assign1 = g.control.addElement(cg::Assign{});
+        auto assign2 = g.control.addElement(cg::Assign{});
+
+        auto cond = g.control.addElement(cg::ConditionalOp{});
+
+        auto ifAssign    = g.control.addElement(cg::Assign{});
+        auto elseAssign  = g.control.addElement(cg::Assign{});
+        auto afterAssign = g.control.addElement(cg::Assign{});
+
+        g.control.addElement(cg::Body{}, {kernel}, {assign1});
+        g.control.addElement(cg::Body{}, {kernel}, {assign2});
+        g.control.addElement(cg::Body{}, {kernel}, {cond});
+        g.control.addElement(cg::Body{}, {kernel}, {afterAssign});
+
+        g.control.addElement(cg::Sequence{}, {assign1}, {cond});
+        g.control.addElement(cg::Sequence{}, {cond}, {afterAssign});
+
+        g.control.addElement(cg::Body{}, {cond}, {ifAssign});
+        g.control.addElement(cg::Else{}, {cond}, {elseAssign});
+
+        THEN("The constraint passes.")
+        {
+            auto rv = g.checkConstraints({&kg::WalkableControlGraph});
+
+            CAPTURE(rv.explanation);
+            CHECK(rv.satisfied);
+        }
+
+        WHEN("An invalid edge is added")
+        {
+            g.control.addElement(cg::Sequence{}, {ifAssign}, {afterAssign});
+
+            THEN("The constraint fails.")
+            {
+                auto rv = g.checkConstraints({&kg::WalkableControlGraph});
+
+                CAPTURE(rv.explanation);
+                CHECK_FALSE(rv.satisfied);
+            }
+        }
+
+        WHEN("A cycle is added")
+        {
+            g.control.addElement(cg::Sequence{}, {afterAssign}, {assign1});
+
+            THEN("The constraint fails.")
+            {
+                auto rv = g.checkConstraints({&kg::WalkableControlGraph});
+
+                CAPTURE(rv.explanation);
+                CHECK_FALSE(rv.satisfied);
+            }
+        }
+
+        WHEN("A self cycle is added")
+        {
+            g.control.addElement(cg::Sequence{}, {afterAssign}, {afterAssign});
+
+            THEN("The constraint fails.")
+            {
+                auto rv = g.checkConstraints({&kg::WalkableControlGraph});
+
+                CAPTURE(rv.explanation);
+                CHECK_FALSE(rv.satisfied);
+            }
+        }
+    }
+}

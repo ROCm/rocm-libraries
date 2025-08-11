@@ -105,7 +105,6 @@ endif( )
 set( hipblas_test_common
   ../common/utility.cpp
   ../common/cblas_interface.cpp
-  ../common/clients_common.cpp
   ../common/norm.cpp
   ../common/unit.cpp
   ../common/near.cpp
@@ -152,6 +151,8 @@ target_compile_options(hipblas-test PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_C
 target_compile_definitions( hipblas-test PRIVATE ${COMMON_DEFINES} )
 
 target_link_libraries( hipblas-test PRIVATE ${BLAS_LIBRARY} ${COMMON_LINK_LIBS} )
+apply_omp_settings( hipblas-test )
+
 if (NOT WIN32)
     target_link_libraries( hipblas-test PRIVATE stdc++fs )
 endif()

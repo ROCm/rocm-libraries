@@ -44,9 +44,9 @@ option(CODE_COVERAGE "Enable code coverage" OFF)
 option(BUILD_HIPSTDPAR_TEST "Build hipstdpar tests" OFF)
 option(BUILD_HIPSTDPAR_TEST_WITH_TBB "Build hipstdpar tests with TBB" OFF)
 option(BUILD_EXAMPLES "Build examples" OFF)
-option(BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(BUILD_BENCHMARK "Build benchmark" OFF)
 option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
-cmake_dependent_option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF BUILD_BENCHMARKS OFF)
+cmake_dependent_option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF BUILD_BENCHMARK OFF)
 option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON BUILD_TEST OFF)
@@ -55,6 +55,10 @@ option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg wit
 
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
+
+# Allow the user to optionally select offset type dispatch to fixed 32 or 64 bit types
+set(THRUST_DISPATCH_TYPE "Dynamic" CACHE STRING "Select Thrust offset type dispatch." FORCE)
+set_property(CACHE THRUST_DISPATCH_TYPE PROPERTY STRINGS "Dynamic" "Force32bit" "Force64bit")
 
 #Adding CMAKE_PREFIX_PATH
 list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm ${ROCM_PATH} )
@@ -165,7 +169,7 @@ math(EXPR rocthrust_VERSION_NUMBER "${rocthrust_VERSION_MAJOR} * 100000 + ${roct
 # Thrust (with HIP backend)
 add_subdirectory(thrust)
   
-if(BUILD_TEST OR BUILD_BENCHMARKS OR BUILD_HIPSTDPAR_TEST)
+if(BUILD_TEST OR BUILD_BENCHMARK OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_component(clients)
 endif()
 
@@ -194,9 +198,9 @@ if(BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()
 
-# Benchmarks
-if(BUILD_BENCHMARKS)
-  add_subdirectory(benchmarks)
+# Benchmark
+if(BUILD_BENCHMARK)
+  add_subdirectory(benchmark)
 endif()
 
 #Create header wrapper for backward compatibility

@@ -28,6 +28,8 @@
 
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
 
+#include <rocRoller/KernelGraph/ControlGraph/ControlFlowArgumentTracer_fwd.hpp>
+
 namespace rocRoller::KernelGraph
 {
     class LastRWTracer : public ControlFlowRWTracer
@@ -38,13 +40,7 @@ namespace rocRoller::KernelGraph
         {
         }
 
-        /**
-         * @brief Return call-stack control operation.
-         *
-         * The return value is a deque of body-parents of the control
-         * node.
-         */
-        std::deque<int> controlStack(int control) const;
+        using ControlStack = std::deque<int>;
 
         /**
          * @brief Return operations that read/write coordinate last.
@@ -52,10 +48,16 @@ namespace rocRoller::KernelGraph
          * Returns a map where the keys are coordinate tags, and the
          * value is a set with all of the control nodes that touch the
          * coordinate last.
-         *
-         * @return std::map<int, std::set<int>>
          */
-        std::map<int, std::set<int>> lastRWLocations() const;
+        std::unordered_map<int, std::set<int>> lastRWLocations() const;
+
+        std::unordered_map<std::string, std::set<int>>
+            lastArgLocations(ControlFlowArgumentTracer const& argTracer) const;
+
+    private:
+        template <typename Key>
+        std::unordered_map<Key, std::set<int>> getLastLocationsFromControlStacks(
+            std::unordered_map<Key, std::vector<ControlStack>> const& controlStacks) const;
     };
 
 }

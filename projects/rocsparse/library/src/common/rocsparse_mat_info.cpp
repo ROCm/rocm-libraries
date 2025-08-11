@@ -45,6 +45,16 @@ void _rocsparse_mat_info::set_bsrmv_info(rocsparse_bsrmv_info value)
     this->bsrmv_info = value;
 }
 
+void _rocsparse_mat_info::set_sorted_coo2csr_info(rocsparse::sorted_coo2csr_info_t* value)
+{
+    this->m_sorted_coo2csr_info = value;
+}
+
+rocsparse::sorted_coo2csr_info_t* _rocsparse_mat_info::get_sorted_coo2csr_info()
+{
+    return this->m_sorted_coo2csr_info;
+}
+
 _rocsparse_mat_info::~_rocsparse_mat_info()
 {
     // Uncouple shared meta data
@@ -201,6 +211,16 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
     if(this->bsrmv_info != nullptr)
     {
         delete this->bsrmv_info;
+    }
+
+    rocsparse::sorted_coo2csr_info_t* sorted_coo2csr_info = this->get_sorted_coo2csr_info();
+    if(sorted_coo2csr_info != nullptr)
+    {
+        hipStream_t default_stream = 0;
+        std::ignore                = sorted_coo2csr_info->free_memory(default_stream);
+
+        delete sorted_coo2csr_info;
+        this->set_sorted_coo2csr_info(nullptr);
     }
 }
 

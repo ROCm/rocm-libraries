@@ -92,8 +92,9 @@ namespace rocRoller
         static Instruction Wait(WaitCount const& wait);
         static Instruction Wait(WaitCount&& wait);
 
-        static Instruction Lock(Scheduling::Dependency const& dependency, std::string comment);
-        static Instruction Unlock(std::string comment);
+        static Instruction Lock(Scheduling::Dependency dependency, std::string comment = "");
+        static Instruction Unlock(Scheduling::Dependency dependency, std::string comment = "");
+        static Instruction Unlock(std::string comment = "");
 
         /**
          * This instruction will be considered to write `reg` even though it
@@ -167,8 +168,8 @@ namespace rocRoller
         void        toStream(std::ostream&, LogLevel level) const;
         std::string toString(LogLevel level) const;
 
-        constexpr int          getLockValue() const;
-        Scheduling::Dependency getDependency() const;
+        constexpr Scheduling::LockOperation getLockValue() const;
+        constexpr Scheduling::Dependency    getDependency() const;
 
         std::string const&                                 getOpCode() const;
         std::array<std::string, Instruction::MaxModifiers> getModifiers() const;
@@ -178,11 +179,16 @@ namespace rocRoller
             return m_nopCount;
         }
 
-        Instruction lock(Scheduling::Dependency const& dependency, std::string comment);
-        Instruction unlock(std::string comment);
+        Instruction& lock(Scheduling::Dependency dependency, std::string comment = "");
+        Instruction& unlock(Scheduling::Dependency dependency, std::string comment = "");
+        Instruction& unlock(std::string comment = "");
 
         void                    addControlOp(int id);
         std::vector<int> const& controlOps() const;
+        std::optional<int>      innerControlOp() const;
+
+        std::string const& referencedArg() const;
+        void               setReferencedArg(std::string arg);
 
         void addAllocation(std::shared_ptr<Register::Allocation> alloc);
         void addWaitCount(WaitCount const& wait);
@@ -273,7 +279,10 @@ namespace rocRoller
 
         std::string m_opcode;
 
-        Scheduling::Dependency m_dependency = Scheduling::Dependency::None;
+        std::string m_referencedArg;
+
+        Scheduling::LockOperation m_lockOp     = Scheduling::LockOperation::None;
+        Scheduling::Dependency    m_dependency = Scheduling::Dependency::None;
 
         std::array<Register::ValuePtr, MaxDstRegisters> m_inoutDsts;
         std::array<Register::ValuePtr, MaxDstRegisters> m_dst;

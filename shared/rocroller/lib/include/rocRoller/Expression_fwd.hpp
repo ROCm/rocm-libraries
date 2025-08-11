@@ -75,10 +75,12 @@ namespace rocRoller
 
         struct MagicMultiple;
         struct MagicShifts;
-        struct MagicSign;
+        struct MagicShiftAndSign;
         struct Negate;
 
         struct RandomNumber;
+
+        struct ToScalar;
 
         struct BitFieldExtract;
 
@@ -122,13 +124,14 @@ namespace rocRoller
             // --- Unary Operations ---
             MagicMultiple,
             MagicShifts,
-            MagicSign,
+            MagicShiftAndSign,
             Negate,
             BitwiseNegate,
             LogicalNot,
             Exponential2,
             Exponential,
             RandomNumber,
+            ToScalar,
             BitFieldExtract,
 
             // --- Ternary Operations ---

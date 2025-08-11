@@ -121,6 +121,7 @@ set(HEADER_FILES
   internal/generic/hipsparse_spsv.h
   internal/generic/hipsparse_spvv.h
   # Auxiliary
+  hipsparse-bfloat16.h
   hipsparse-types.h
   hipsparse-auxiliary.h
   hipsparse-generic-types.h
@@ -149,7 +150,7 @@ set(CMAKE_Fortran_MODULE_DIRECTORY ${PROJECT_BINARY_DIR}/include/hipsparse)
 add_library(hipsparse_fortran OBJECT ${hipsparse_fortran_source})
 
 # Target compile options
-target_compile_options(hipsparse_fortran PRIVATE -std=f2003 -ffree-form -cpp)
+target_compile_options(hipsparse_fortran PRIVATE -ffree-form -cpp)
 endif()
 
 # Create hipSPARSE library

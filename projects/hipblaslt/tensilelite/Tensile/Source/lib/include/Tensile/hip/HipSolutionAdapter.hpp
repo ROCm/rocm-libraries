@@ -50,6 +50,8 @@ namespace TensileLite
                 return m_name;
             }
 
+            void codeObjectDir(std::string codeObjectDir);
+
             hipError_t loadCodeObjectFile(std::string const& path);
 
             hipError_t initializeLazyLoading(std::string architecture, std::string codeObjectDir);

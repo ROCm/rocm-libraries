@@ -73,8 +73,10 @@ endif()
 
 
 target_link_libraries( rocblas-bench PRIVATE ${COMMON_LINK_LIBS} )
+apply_omp_settings( rocblas-bench )
 if( BUILD_WITH_TENSILE )
   target_link_libraries( rocblas-gemm-tune PRIVATE ${COMMON_LINK_LIBS} )
+  apply_omp_settings( rocblas-gemm-tune )
 endif()
 
 target_compile_options(rocblas-bench PRIVATE $<$<COMPILE_LANGUAGE:CXX>:${COMMON_CXX_OPTIONS}>)

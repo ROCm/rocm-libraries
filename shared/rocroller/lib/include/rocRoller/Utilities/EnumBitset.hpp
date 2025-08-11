@@ -61,8 +61,12 @@ namespace rocRoller
          */
         constexpr static EnumBitset All();
 
-        constexpr bool           operator[](Enum val) const;
-        typename Base::reference operator[](Enum val);
+        constexpr bool operator[](Enum val) const;
+
+        /**
+         * @brief Sets the taget enum to a value
+         */
+        void set(Enum target, bool value = true);
 
     private:
         static constexpr size_t initialValue(std::initializer_list<Enum> items);

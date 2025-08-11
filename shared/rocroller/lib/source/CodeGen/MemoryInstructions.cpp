@@ -243,7 +243,7 @@ namespace rocRoller
                               {offsetModifier},
                               concatenate("Transpose load local data ", comment)));
 
-        if(ctx->kernelOptions().alwaysWaitAfterLoad)
+        if(ctx->kernelOptions()->alwaysWaitAfterLoad)
             co_yield Instruction::Wait(
                 WaitCount::Zero(ctx->targetArchitecture(), "DEBUG: Wait after load"));
     }

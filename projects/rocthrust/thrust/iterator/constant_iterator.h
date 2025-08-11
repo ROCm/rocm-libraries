@@ -140,7 +140,7 @@ public:
    *       value returned by \c Incrementable's null constructor. For example,
    *       when <tt>Incrementable == int</tt>, \c 0.
    */
-  THRUST_HOST_DEVICE constant_iterator(value_type const& v, incrementable const& i = incrementable())
+  THRUST_HOST_DEVICE constexpr constant_iterator(value_type const& v, incrementable const& i = incrementable())
       : super_t(base_iterator(i))
       , m_value(v)
   {}

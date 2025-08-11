@@ -14,7 +14,7 @@ subtrees:
 
 - caption: Examples
   entries:
-  - url: https://github.com/ROCm/hipRAND/tree/develop/python/hiprand/examples
+  - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/hiprand/python/hiprand/examples
     title: Examples
 
 - caption: API reference

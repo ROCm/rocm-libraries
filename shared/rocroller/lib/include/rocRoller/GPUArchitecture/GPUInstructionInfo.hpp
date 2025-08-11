@@ -226,6 +226,7 @@ namespace rocRoller
 
         static bool isScalar(std::string const& inst);
         static bool isSMEM(std::string const& inst);
+        static bool isSBarrier(std::string const& opCode);
         static bool isSControl(std::string const& inst);
         static bool isSALU(std::string const& inst);
         static bool isIntInst(std::string const& inst);

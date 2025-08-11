@@ -50,7 +50,7 @@ THRUST_HOST_DEVICE OutputIterator set_difference(
   StrictWeakOrdering comp)
 {
   // wrap comp
-  thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp(comp);
+  thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp{comp};
 
   while (first1 != last1 && first2 != last2)
   {
@@ -90,7 +90,7 @@ THRUST_HOST_DEVICE OutputIterator set_intersection(
   StrictWeakOrdering comp)
 {
   // wrap comp
-  thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp(comp);
+  thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp{comp};
 
   while (first1 != last1 && first2 != last2)
   {
@@ -130,7 +130,7 @@ THRUST_HOST_DEVICE OutputIterator set_symmetric_difference(
   StrictWeakOrdering comp)
 {
   // wrap comp
-  thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp(comp);
+  thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp{comp};
 
   while (first1 != last1 && first2 != last2)
   {
@@ -172,7 +172,7 @@ THRUST_HOST_DEVICE OutputIterator set_union(
   StrictWeakOrdering comp)
 {
   // wrap comp
-  thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp(comp);
+  thrust::detail::wrapped_function<StrictWeakOrdering, bool> wrapped_comp{comp};
 
   while (first1 != last1 && first2 != last2)
   {

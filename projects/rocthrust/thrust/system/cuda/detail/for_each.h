@@ -28,7 +28,7 @@
 
 #include <thrust/detail/config.h>
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_NVCC
+#ifdef _CCCL_CUDA_COMPILER
 #  include <thrust/system/cuda/config.h>
 
 #  include <thrust/detail/function.h>
@@ -72,7 +72,7 @@ template <class Derived, class Input, class Size, class UnaryOp>
 Input THRUST_FUNCTION for_each_n(execution_policy<Derived>& policy, Input first, Size count, UnaryOp op)
 {
   using wrapped_t = thrust::detail::wrapped_function<UnaryOp, void>;
-  wrapped_t wrapped_op(op);
+  wrapped_t wrapped_op{op};
 
   cuda_cub::parallel_for(policy, for_each_f<Input, wrapped_t>(first, wrapped_op), count);
 

@@ -23,6 +23,8 @@
 
 #include <thrust/detail/config.h>
 
+#include <thrust/type_traits/is_trivially_relocatable.h>
+
 #if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
 #  include <cuda/std/utility>
 #elif defined(__has_include)
@@ -117,6 +119,11 @@ inline _CCCL_HOST_DEVICE
 }
 
 using _CUDA_VSTD::get;
+
+template <typename T, typename U>
+struct proclaim_trivially_relocatable<pair<T, U>>
+    : ::cuda::std::conjunction<is_trivially_relocatable<T>, is_trivially_relocatable<U>>
+{};
 
 /*! \} // pair
  */

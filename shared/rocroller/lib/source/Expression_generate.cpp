@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <numeric>
+#include <queue>
 
 #include <rocRoller/AssemblyKernelArgument.hpp>
 #include <rocRoller/CommonSubexpressionElim.hpp>
@@ -39,7 +40,9 @@
 #include <rocRoller/CodeGen/Arithmetic/MultiplyAdd.hpp>
 #include <rocRoller/CodeGen/Arithmetic/ScaledMatrixMultiply.hpp>
 #include <rocRoller/CodeGen/CopyGenerator.hpp>
+#include <rocRoller/CodeGen/GenerateNodes.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/CommandArgument.hpp>
 #include <rocRoller/Scheduling/Scheduler.hpp>
 #include <rocRoller/Utilities/RTTI.hpp>
@@ -190,13 +193,13 @@ namespace rocRoller
              * value has been consumed.
              */
             Generator<Instruction> prepareSourceOperands(std::vector<Register::ValuePtr>& results,
-                                                         bool&                      schedulerLocked,
+                                                         int&                       schedulerLocked,
                                                          std::vector<ExpressionPtr> exprs)
             {
                 std::vector<char>       done(exprs.size(), false);
                 std::vector<ResultType> resultTypes(exprs.size());
                 results         = std::vector<Register::ValuePtr>(exprs.size(), nullptr);
-                schedulerLocked = false;
+                schedulerLocked = 0;
 
                 auto sprUses = [] {
                     std::unordered_map<Register::Type, size_t> m;
@@ -279,7 +282,7 @@ namespace rocRoller
                         }
 
                         sprStores--;
-                        schedulerLocked = true;
+                        schedulerLocked++;
 
                         switch(regType)
                         {
@@ -308,7 +311,7 @@ namespace rocRoller
                 {
                     auto sccExprIdx = maybeSccExprIdx.value();
                     sprStores--;
-                    schedulerLocked = true;
+                    schedulerLocked++;
                     co_yield Instruction::Lock(Scheduling::Dependency::SCC,
                                                "Expression temporary in special register (SCC)");
                     co_yield call(results[sccExprIdx], exprs[sccExprIdx]);
@@ -519,7 +522,7 @@ namespace rocRoller
             operator()(Register::ValuePtr& dest, T const& expr)
             {
                 co_yield Instruction::Comment(toString(expr));
-                bool                            schedulerLocked = false;
+                int                             schedulerLocked = 0;
                 std::vector<Register::ValuePtr> results;
                 std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.rhs};
 
@@ -535,8 +538,11 @@ namespace rocRoller
 
                 co_yield generateArithmeticBinary(dest, expr, results[0], results[1], resType);
 
-                if(schedulerLocked)
+                while(schedulerLocked > 0)
+                {
+                    schedulerLocked--;
                     co_yield Instruction::Unlock("Expression temporary in special register");
+                }
             }
 
             /*
@@ -556,7 +562,7 @@ namespace rocRoller
                         T,
                         SRConvert<DataType::FP8>> || std::is_same_v<T, SRConvert<DataType::BF8>>);
 
-                bool                            schedulerLocked = false;
+                int                             schedulerLocked = 0;
                 std::vector<Register::ValuePtr> results;
                 std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.rhs};
 
@@ -576,8 +582,11 @@ namespace rocRoller
                         dest->element({i}), results[0]->element({i}), results[1]->element({0}));
                 }
 
-                if(schedulerLocked)
+                while(schedulerLocked > 0)
+                {
+                    schedulerLocked--;
                     co_yield Instruction::Unlock("Expression temporary in special register");
+                }
             }
 
             template <typename T>
@@ -586,7 +595,7 @@ namespace rocRoller
             operator()(Register::ValuePtr& dest, T const& expr)
             {
                 co_yield Instruction::Comment(toString(expr));
-                bool                            schedulerLocked = false;
+                int                             schedulerLocked = 0;
                 std::vector<Register::ValuePtr> results;
                 std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.rhs};
 
@@ -603,8 +612,11 @@ namespace rocRoller
                 co_yield generateComparisonOrLogicalBinary(
                     dest, expr, results[0], results[1], resType);
 
-                if(schedulerLocked)
+                while(schedulerLocked > 0)
+                {
+                    schedulerLocked--;
                     co_yield Instruction::Unlock("Expression temporary in special register");
+                }
             }
 
             template <CTernary Operation>
@@ -612,7 +624,7 @@ namespace rocRoller
                 !CTernaryMixed<Operation> && CKernelExecuteTime<Operation>) Generator<Instruction>
             operator()(Register::ValuePtr& dest, Operation const& expr)
             {
-                bool                            schedulerLocked = false;
+                int                             schedulerLocked = 0;
                 std::vector<Register::ValuePtr> results;
                 std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.r1hs, expr.r2hs};
 
@@ -658,15 +670,18 @@ namespace rocRoller
                     co_yield generateOp<Operation>(dest->element({k}), lhsVal, r1hsVal, r2hsVal);
                 }
 
-                if(schedulerLocked)
+                while(schedulerLocked > 0)
+                {
+                    schedulerLocked--;
                     co_yield Instruction::Unlock("Expression temporary in special register");
+                }
             }
 
             template <CTernaryMixed Operation>
             requires CKernelExecuteTime<Operation> Generator<Instruction>
             operator()(Register::ValuePtr& dest, Operation const& expr)
             {
-                bool                            schedulerLocked = false;
+                int                             schedulerLocked = 0;
                 std::vector<Register::ValuePtr> results;
                 std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.r1hs, expr.r2hs};
 
@@ -697,13 +712,16 @@ namespace rocRoller
                 //If dest, results have multiple elements, handled inside generateOp
                 co_yield generateOp<Operation>(dest, results[0], results[1], results[2]);
 
-                if(schedulerLocked)
+                while(schedulerLocked > 0)
+                {
+                    schedulerLocked--;
                     co_yield Instruction::Unlock("Expression temporary in special register");
+                }
             }
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, Conditional const& expr)
             {
-                bool                            schedulerLocked = false;
+                int                             schedulerLocked = 0;
                 std::vector<Register::ValuePtr> results;
                 std::vector<ExpressionPtr>      subExprs{expr.lhs, expr.r1hs, expr.r2hs};
 
@@ -736,15 +754,18 @@ namespace rocRoller
                         dest->element({k}), cond->element({k}), lhsVal, rhsVal, expr);
                 }
 
-                if(schedulerLocked)
+                while(schedulerLocked > 0)
+                {
+                    schedulerLocked--;
                     co_yield Instruction::Unlock("Expression temporary in special register");
+                }
             }
 
             template <CUnary Operation>
             requires CKernelExecuteTime<Operation> Generator<Instruction>
             operator()(Register::ValuePtr& dest, Operation const& expr)
             {
-                bool                            schedulerLocked = false;
+                int                             schedulerLocked = 0;
                 std::vector<Register::ValuePtr> results;
                 std::vector<ExpressionPtr>      subExprs{expr.arg};
 
@@ -845,14 +866,16 @@ namespace rocRoller
                     }
                 }
 
-                if(schedulerLocked)
+                while(schedulerLocked > 0)
+                {
+                    schedulerLocked--;
                     co_yield Instruction::Unlock("Expression temporary in special register");
+                }
             }
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, MatrixMultiply expr)
             {
                 Register::ValuePtr lhs, r1hs, r2hs;
-                int                M, N, K, B;
 
                 AssertFatal(std::holds_alternative<WaveTilePtr>(*expr.lhs)
                                 && std::holds_alternative<WaveTilePtr>(*expr.r1hs),
@@ -867,10 +890,8 @@ namespace rocRoller
                             ShowValue(atile.sizes[1]),
                             ShowValue(btile.sizes[0]));
 
-                M    = atile.sizes[0];
-                N    = btile.sizes[1];
-                K    = atile.sizes[1];
-                B    = 1;
+                InstructionGenerators::MatrixMultiplySizes mi{
+                    .m = atile.sizes[0], .n = btile.sizes[1], .k = atile.sizes[1], .b = 1};
                 lhs  = atile.vgpr;
                 r1hs = btile.vgpr;
 
@@ -883,7 +904,8 @@ namespace rocRoller
 
                 if(dest == nullptr)
                 {
-                    auto const accRegCount = M * N * B / m_context->kernel()->wavefront_size();
+                    auto const accRegCount
+                        = mi.m * mi.n * mi.b / m_context->kernel()->wavefront_size();
 
                     auto const& arch    = m_context->targetArchitecture();
                     auto const  regType = arch.HasCapability(GPUCapability::HasAccCD)
@@ -902,7 +924,7 @@ namespace rocRoller
                     = Component::Get<rocRoller::InstructionGenerators::MatrixMultiply>(m_context);
 
                 r2hs = std::get<Register::ValuePtr>(*expr.r2hs);
-                co_yield mm->mul(dest, lhs, r1hs, r2hs, M, N, K, B);
+                co_yield mm->mul(dest, lhs, r1hs, r2hs, mi);
             }
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, BitFieldExtract const& expr)
@@ -928,9 +950,8 @@ namespace rocRoller
                             ShowValue(atile.sizes[1]),
                             ShowValue(btile.sizes[0]));
 
-                auto M  = atile.sizes[0];
-                auto N  = btile.sizes[1];
-                auto K  = atile.sizes[1];
+                InstructionGenerators::MatrixMultiplySizes mi{
+                    .m = atile.sizes[0], .n = btile.sizes[1], .k = atile.sizes[1], .b = 1};
                 auto rA = atile.vgpr;
                 auto rB = btile.vgpr;
 
@@ -955,7 +976,7 @@ namespace rocRoller
 
                 if(dest == nullptr)
                 {
-                    auto const accRegCount = M * N / m_context->kernel()->wavefront_size();
+                    auto const accRegCount = mi.m * mi.n / m_context->kernel()->wavefront_size();
 
                     dest = Register::Value::Placeholder(
                         m_context,
@@ -974,7 +995,7 @@ namespace rocRoller
                     auto idx                   = 1;
                     auto computeScaleBlockSize = rocRoller::overloaded{
                         [&](WaveTilePtr const& tile) -> std::optional<uint> {
-                            return K / tile->sizes[idx];
+                            return mi.k / tile->sizes[idx];
                         },
                         [&](Register::ValuePtr const& reg) -> std::optional<uint> {
                             return std::nullopt;
@@ -1004,7 +1025,7 @@ namespace rocRoller
                                             arch.target().toString()));
                 }
 
-                co_yield smm->mul(dest, rA, rB, rC, rScaleA, rScaleB, M, N, K, maybeScaleBlockSize);
+                co_yield smm->mul(dest, rA, rB, rC, rScaleA, rScaleB, mi, maybeScaleBlockSize);
             }
 
             Generator<Instruction> operator()(Register::ValuePtr& dest, WaveTilePtr const& expr)
@@ -1116,48 +1137,70 @@ namespace rocRoller
                                                 CodeGeneratorVisitor& visitor,
                                                 ContextPtr            context)
         {
+            auto const& options = context->kernelOptions();
+
+            if(Log::getLogger()->should_log(LogLevel::Trace))
+            {
+                co_yield Instruction::Comment(toDOT(tree));
+                co_yield Instruction::Comment(statistics(tree));
+            }
+
             tree.back().reg = dest;
 
-            std::set<int> metDeps;
-            while(metDeps.size() < tree.size())
-            {
-                std::set<int> tmpMetDeps;
+            auto proc      = Settings::getInstance()->get(Settings::Scheduler);
+            auto cost      = Settings::getInstance()->get(Settings::SchedulerCost);
+            auto scheduler = Component::GetNew<Scheduling::Scheduler>(proc, cost, context);
 
-                auto proc      = Settings::getInstance()->get(Settings::Scheduler);
-                auto cost      = Settings::getInstance()->get(Settings::SchedulerCost);
-                auto scheduler = Component::GetNew<Scheduling::Scheduler>(proc, cost, context);
-                std::vector<Generator<Instruction>> schedulable;
-                for(int i = 0; i < tree.size(); i++)
-                {
-                    if(!metDeps.contains(i)
-                       && std::includes(metDeps.begin(),
-                                        metDeps.end(),
-                                        tree.at(i).deps.begin(),
-                                        tree.at(i).deps.end()))
-                    {
-                        if(!(tree.at(i).reg
-                             && tree.at(i).reg->regType() == Register::Type::Literal))
-                        {
-                            schedulable.push_back(visitor.call(tree.at(i).reg, tree.at(i).expr));
-                        }
-                        tmpMetDeps.insert(i);
-                    }
-                }
+            auto nodes = iota<int>(0, tree.size()).to<std::set>();
 
-                co_yield (*scheduler)(schedulable);
+            std::set<int> completedNodes;
 
-                for(int i = 0; i < tree.size() - 1; i++)
-                {
-                    if(tmpMetDeps.contains(i))
-                    {
-                        tree.at(i).expr = nullptr;
-                        tree.at(i).reg  = nullptr;
-                    }
-                }
+            auto generateNode = [&](int idx) -> Generator<Instruction> {
+                auto& node = tree.at(idx);
 
-                AssertFatal(!tmpMetDeps.empty(), ShowValue(tree.size()), ShowValue(metDeps.size()));
-                metDeps.insert(tmpMetDeps.begin(), tmpMetDeps.end());
-            }
+                if(node.reg == nullptr || node.reg->regType() != Register::Type::Literal)
+                    co_yield visitor.call(node.reg, node.expr);
+
+                node.expr = nullptr;
+
+                // Don't clear the last register as that is the destination for the expression.
+                if(idx + 1 != tree.size())
+                    node.reg = nullptr;
+            };
+
+            auto nodeIsReady = [&](int idx) -> bool {
+                return std::ranges::includes(completedNodes, tree.at(idx).deps);
+            };
+
+            auto nodeCategory = [&](int idx) -> Register::Type { return tree.at(idx).regType(); };
+
+            auto categoryLimit = [&options](Register::Type category) -> size_t {
+                if(category == Register::Type::Literal)
+                    return std::numeric_limits<int>::max();
+                return options->maxConcurrentSubExpressions;
+            };
+
+            auto comparePriorities = [&](int a, int b) {
+                auto const& nodeA = tree.at(a);
+                auto const& nodeB = tree.at(b);
+
+                return std::make_tuple(nodeA.distanceFromRoot, nodeA.deps.size(), -a)
+                       < std::make_tuple(nodeB.distanceFromRoot, nodeB.deps.size(), -b);
+            };
+
+            co_yield generateNodes<int, Register::Type>(scheduler,
+                                                        nodes,
+                                                        completedNodes,
+                                                        generateNode,
+                                                        nodeIsReady,
+                                                        nodeCategory,
+                                                        categoryLimit,
+                                                        comparePriorities);
+
+            AssertFatal(completedNodes.size() == tree.size(),
+                        ShowValue(completedNodes.size()),
+                        ShowValue(tree.size()));
+
             dest = tree.back().reg;
         }
 
@@ -1185,6 +1228,7 @@ namespace rocRoller
             }
 
             expr = lowerBitfieldValues(expr);
+
             // Replace kernel args with registers.
             co_yield replaceKernelArgs(context, expr, expr);
 

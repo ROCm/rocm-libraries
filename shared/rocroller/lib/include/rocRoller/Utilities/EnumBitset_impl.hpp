@@ -76,9 +76,9 @@ namespace rocRoller
     }
 
     template <CCountedEnum Enum>
-    inline typename EnumBitset<Enum>::Base::reference EnumBitset<Enum>::operator[](Enum val)
+    void EnumBitset<Enum>::set(Enum target, bool value)
     {
-        return (*this)[static_cast<size_t>(val)];
+        std::bitset<static_cast<size_t>(Enum::Count)>::set(static_cast<size_t>(target), value);
     }
 
     template <CCountedEnum Enum>

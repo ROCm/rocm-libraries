@@ -99,9 +99,9 @@ For more information, run the command with the ``--help`` option. The output of 
    --algo_method <value>              Use different algorithm search API. Options: heuristic, all, index.                 (Default value is: heuristic)
    --solution_index <value>           Used with --algo_method 2.  Specify solution index to use in benchmark.             (Default value is: -1)
    --requested_solution <value>       Requested solution num. Set to -1 to get all solutions. Only valid when algo_method is set to heuristic.  (Default value is: 1)
-   --activation_type <value>          Options: none, gelu, relu, swish                                                    (Default value is: none)
-   --activation_arg1 <value>          Reserved.                                                                           (Default value is: 0)
-   --activation_arg2 <value>          Reserved.                                                                           (Default value is: inf)
+   --activation_type <value>          Options: none, gelu, relu, swish, clamp                                             (Default value is: none)
+   --activation_arg1 <value>          First extra argument for activation function if needed.                             (Default value is: 0)
+   --activation_arg2 <value>          Second extra argument for activation function if needed.                            (Default value is: inf)
    --bias_type <value>                Precision of bias vector.Options: f16_r,bf16_r,f32_r,default(same with D type)
    --bias_source <value>              Choose bias source: a, b, d                                                         (Default value is: d)
    --bias_vector                      Apply bias vector

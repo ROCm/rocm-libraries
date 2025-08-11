@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (c) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,10 +38,12 @@ constexpr auto hipsparselt_type2datatype()
         return HIP_R_16BF;
     if(std::is_same<T, char>{})
         return HIP_R_8I;
-    if(std::is_same<T, __hip_fp8_e4m3>{})
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
+    if(std::is_same<T, hipsparselt_fp8_e4m3>{})
         return HIP_R_8F_E4M3;
-    if(std::is_same<T, __hip_fp8_e5m2>{})
+    if(std::is_same<T, hipsparselt_fp8_e5m2>{})
         return HIP_R_8F_E5M2;
+#endif
     return HIP_R_16F; // testing purposes we default to f32 ex
 }
 
@@ -128,16 +130,40 @@ auto hipsparselt_spmm_dispatch(const Arguments& arg)
         {
             return TEST<int8_t, hip_bfloat16, int32_t, float>{}(arg);
         }
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
         else if(Ti == HIP_R_8F_E4M3 && To == HIP_R_32F && Tc == HIPSPARSELT_COMPUTE_32F
                 && TBias == HIP_R_32F)
         {
-            return TEST<__hip_fp8_e4m3, float, float, float>{}(arg);
+            return TEST<hipsparselt_fp8_e4m3, float, float, float>{}(arg);
         }
         else if(Ti == HIP_R_8F_E5M2 && To == HIP_R_32F && Tc == HIPSPARSELT_COMPUTE_32F
                 && TBias == HIP_R_32F)
         {
-            return TEST<__hip_fp8_e5m2, float, float, float>{}(arg);
+            return TEST<hipsparselt_fp8_e5m2, float, float, float>{}(arg);
         }
+#ifdef __HIP_PLATFORM_NVIDIA__
+        else if(Ti == HIP_R_8F_E4M3 && To == HIP_R_16F && Tc == HIPSPARSELT_COMPUTE_32F
+                && TBias == HIP_R_16F)
+        {
+            return TEST<hipsparselt_fp8_e4m3, __half, float, __half>{}(arg);
+        }
+        else if(Ti == HIP_R_8F_E4M3 && To == HIP_R_16BF && Tc == HIPSPARSELT_COMPUTE_32F
+                && TBias == HIP_R_16BF)
+        {
+            return TEST<hipsparselt_fp8_e4m3, hip_bfloat16, float, hip_bfloat16>{}(arg);
+        }
+        else if(Ti == HIP_R_8F_E5M2 && To == HIP_R_16F && Tc == HIPSPARSELT_COMPUTE_32F
+                && TBias == HIP_R_16F)
+        {
+            return TEST<hipsparselt_fp8_e5m2, __half, float, __half>{}(arg);
+        }
+        else if(Ti == HIP_R_8F_E5M2 && To == HIP_R_16BF && Tc == HIPSPARSELT_COMPUTE_32F
+                && TBias == HIP_R_16BF)
+        {
+            return TEST<hipsparselt_fp8_e5m2, hip_bfloat16, float, hip_bfloat16>{}(arg);
+        }
+#endif
+#endif
     }
     return TEST<void>{}(arg);
 }

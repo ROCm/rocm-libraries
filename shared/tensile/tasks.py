@@ -1,4 +1,5 @@
 from invoke.tasks import task
+import os
 
 dir = "build_hostlibtest"
 
@@ -11,7 +12,7 @@ def cmake_configure(c, coverage):
             "-DCMAKE_BUILD_TYPE=Debug "
             "-DCMAKE_CXX_COMPILER=amdclang++ "
             '-DCMAKE_CXX_FLAGS="-D__HIP_HCC_COMPAT_MODE__=1" '
-            "-DTensile_CPU_THREADS=8 "
+            "-DTensile_CPU_THREADS=16 "
             "-DTensile_ROOT=`pwd`/Tensile "
             "-DTensile_VERBOSE=1 "
             f"-DTENSILE_ENABLE_COVERAGE={cov}"
@@ -48,3 +49,39 @@ def hostlibtest(c, clean=False, configure=False, build=False, run=False, coverag
         cmake_build(c)
     if run:
         run_tests(c, coverage)
+
+@task(
+    help={
+        "clean": "Remove the client build directory before building.",
+        "configure": "Run CMake configuration for the client.",
+        "build": "Compile the tensile-client executable.",
+        "build_type": "CMake build type (e.g. Release, Debug).",
+        "gpu_targets": "Comma-separated list of GPU targets (e.g. gfx90a,gfx1101)."
+    }
+)
+def build_client(c, clean=False, configure=True, build=True, build_type="Release", gpu_targets="all"):
+    client_build_dir = "build/client"
+
+    if clean and os.path.exists(client_build_dir):
+        c.run(f"rm -rf {client_build_dir}")
+
+    if configure:
+        os.makedirs(client_build_dir, exist_ok=True)
+        
+        cmake_cmd = [
+            "cmake",
+            "-S", "next-cmake",
+            "-B", client_build_dir,
+            "-DCMAKE_PREFIX_PATH=/opt/rocm",
+            "-DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++",
+            f"-DCMAKE_BUILD_TYPE={build_type}",
+            "-DTENSILE_ENABLE_CLIENT=ON",
+            "-DTENSILE_ENABLE_HOST=ON",
+            "-DTENSILE_ENABLE_DEVICE=OFF",
+            f"-DGPU_TARGETS={gpu_targets}"
+        ]
+
+        c.run(" ".join(cmake_cmd))
+
+    if build:
+        c.run(f"cmake --build {client_build_dir} --parallel")

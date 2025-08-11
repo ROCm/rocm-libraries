@@ -388,6 +388,21 @@ namespace rocRoller
 
     std::string readMetaDataFromCodeObject(std::string const& fileName);
 
+    template <typename Variant, typename Alternative, size_t Index = 0>
+    consteval size_t variantIndex()
+    {
+        static_assert(Index < std::variant_size_v<Variant>);
+
+        if constexpr(std::same_as<Alternative, std::variant_alternative_t<Index, Variant>>)
+        {
+            return Index;
+        }
+        else
+        {
+            return variantIndex<Variant, Alternative, Index + 1>();
+        }
+    }
+
     /**
      * @}
      */
@@ -436,6 +451,7 @@ namespace std
         stream << "}";
         return stream;
     }
+
 }
 
 #include <rocRoller/Utilities/Utils_impl.hpp>

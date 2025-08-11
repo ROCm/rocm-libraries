@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,7 +38,7 @@ namespace
     // aux
     // ----------------------------------------------------------------------------
 
-    struct aux_testing: hipblaslt_test_valid
+    struct aux_testing : hipblaslt_test_valid
     {
         void operator()(const Arguments& arg)
         {
@@ -92,6 +92,30 @@ namespace
                 testing_aux_matmul_pref_init(arg);
             else if(!strcmp(arg.function, "aux_matmul_alg_null_matmul"))
                 testing_aux_matmul_alg_null_matmul(arg);
+            else if(!strcmp(arg.function, "aux_matmul_bad_ws_size"))
+                testing_aux_matmul_bad_ws_size(arg);
+#ifdef CODE_COVERAGE
+            else if(!strcmp(arg.function, "aux_auxiliary_func"))
+                testing_aux_auxiliary_func(arg);
+            else if(!strcmp(arg.function, "aux_float8_func"))
+                testing_aux_float8_func(arg);
+            else if(!strcmp(arg.function, "aux_hipblaslt_ext_op_func"))
+                testing_aux_hipblaslt_ext_op_func(arg);
+            else if(!strcmp(arg.function, "aux_rocblaslt_utility_func"))
+                testing_aux_rocblaslt_utility_func(arg);
+            else if(!strcmp(arg.function, "aux_status_func"))
+                testing_aux_status_func(arg);
+            else if(!strcmp(arg.function, "aux_hipblaslt_func"))
+                testing_aux_hipblaslt_func(arg);
+            else if(!strcmp(arg.function, "aux_tensile_host_func"))
+                testing_aux_tensile_host_func(arg);
+            else if(!strcmp(arg.function, "aux_tuple_helper_equal_func"))
+                testing_aux_tuple_helper_equal_func(arg);
+            else if(!strcmp(arg.function, "aux_rocblaslt_rocroller_host_func"))
+                testing_aux_rocblaslt_rocroller_host_func(arg);
+#endif
+            else if(!strcmp(arg.function, "aux_mat_copy"))
+                testing_aux_mat_copy(arg);
             else
                 FAIL() << "Internal error: Test called with unknown function: " << arg.function;
         }
@@ -131,8 +155,21 @@ namespace
                    || !strcmp(arg.function, "aux_matmul_plan_init_bad_arg")
                    || !strcmp(arg.function, "aux_matmul_plan_init")
                    || !strcmp(arg.function, "aux_matmul_alg_null_matmul")
+                   || !strcmp(arg.function, "aux_matmul_bad_ws_size")
                    || !strcmp(arg.function, "aux_matmul_pref_get_attr_bad_arg")
-                   || !strcmp(arg.function, "aux_matmul_pref_get_attr");
+                   || !strcmp(arg.function, "aux_matmul_pref_get_attr")
+#ifdef CODE_COVERAGE
+                   || !strcmp(arg.function, "aux_auxiliary_func")
+                   || !strcmp(arg.function, "aux_float8_func")
+                   || !strcmp(arg.function, "aux_hipblaslt_ext_op_func")
+                   || !strcmp(arg.function, "aux_rocblaslt_utility_func")
+                   || !strcmp(arg.function, "aux_status_func")
+                   || !strcmp(arg.function, "aux_hipblaslt_func")
+                   || !strcmp(arg.function, "aux_tensile_host_func")
+                   || !strcmp(arg.function, "aux_tuple_helper_equal_func")
+                   || !strcmp(arg.function, "aux_rocblaslt_rocroller_host_func")
+#endif
+                   || !strcmp(arg.function, "aux_mat_copy");
         }
 
         // Google Test name suffix based on parameters

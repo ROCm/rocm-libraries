@@ -34,6 +34,7 @@
 #include <rocRoller/Context.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Utilities/Error.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 
 namespace rocRoller
 {
@@ -398,6 +399,60 @@ namespace rocRoller
         }
 
         co_yield copy(dest, src);
+    }
+
+    inline Generator<Instruction>
+        CopyGenerator::ensureTypeCommutative(EnumBitset<Register::Type> lhsTypes,
+                                             Register::ValuePtr&        lhs,
+                                             EnumBitset<Register::Type> rhsTypes,
+                                             Register::ValuePtr&        rhs) const
+
+    {
+        //
+        // If rhs is a literal/constant but the rhs operand type does not allow literal/constant,
+        // either
+        //  - Swap rhs with lhs if lhs supports that operand type
+        //  - Move rhs to a new VGPR
+        //
+        auto const rhsRegType = rhs->regType();
+        if(rhsRegType == Register::Type::Literal)
+        {
+            if(rhsTypes[Register::Type::Literal])
+                co_return;
+
+            auto context = m_context.lock();
+
+            //
+            // Return if Constant is supported and rhs is a Constant (a subset of Literal)
+            //
+            if(rhsTypes[Register::Type::Constant]
+               && context->targetArchitecture().isSupportedConstantValue(rhs))
+                co_return;
+
+            if(lhsTypes[Register::Type::Literal]
+               or (lhsTypes[Register::Type::Constant]
+                   && context->targetArchitecture().isSupportedConstantValue(rhs)))
+            {
+                AssertFatal(
+                    (lhs->regType() != Register::Type::Literal
+                     && lhs->regType() != Register::Type::Constant),
+                    ShowValue(rhs),
+                    ShowValue(lhs),
+                    "Can not process two literal sources (consider simplifying expression)");
+
+                std::swap(lhs, rhs);
+            }
+            else
+            {
+                //
+                // Move RHS to a new VGPR
+                //
+                Register::ValuePtr vgpr = rhs;
+                rhs                     = Register::Value::Placeholder(
+                    context, Register::Type::Vector, vgpr->variableType(), 1);
+                co_yield context->copier()->copy(rhs, vgpr, "");
+            }
+        }
     }
 
     inline Generator<Instruction> CopyGenerator::pack(Register::ValuePtr              dest,

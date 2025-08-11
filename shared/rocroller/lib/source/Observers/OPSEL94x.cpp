@@ -42,7 +42,7 @@ namespace rocRoller
             {
                 for(auto const& mod : inst.getModifiers())
                 {
-                    if(mod.rfind("op_sel", 0) == 0)
+                    if(mod.starts_with("op_sel"))
                         return true;
                 }
             }

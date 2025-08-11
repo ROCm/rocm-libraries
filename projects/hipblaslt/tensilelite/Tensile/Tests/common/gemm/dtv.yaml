@@ -3,7 +3,7 @@ TestParameters:
 
 GlobalParameters:
   NumElementsToValidate: -1
-  MinimumRequiredVersion: 4.14.0
+  MinimumRequiredVersion: 5.0.0
   PrintLevel: 1
   #PrintSolutionRejectionReason: True
   Device: 0

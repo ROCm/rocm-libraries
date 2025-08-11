@@ -68,9 +68,10 @@ public:
     static hostbuf_t make_nonowned(T* p, size_t size_bytes = 0)
     {
         hostbuf_t ret;
-        ret.owned = false;
-        ret.buf   = p;
-        ret.bsize = ret.bsize_track = size_bytes;
+        ret.owned       = false;
+        ret.buf         = p;
+        ret.bsize       = size_bytes;
+        ret.bsize_track = 0;
         return ret;
     }
 
@@ -138,10 +139,10 @@ public:
     {
         if(buf != nullptr)
         {
-            total_used_mem -= bsize_track;
-
             if(owned)
             {
+                total_used_mem -= bsize_track;
+
 #ifdef WIN32
                 _aligned_free(buf);
 #else

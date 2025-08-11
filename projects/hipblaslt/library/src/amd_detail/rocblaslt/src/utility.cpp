@@ -228,14 +228,14 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
         return "MATMUL_DESC_AMAX_D_POINTER";
     case ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE:
         return "MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE";
-    case ROCBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT:
-        return "MATMUL_DESC_A_SCALE_POINTER_VEC";
-    case ROCBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT:
-        return "MATMUL_DESC_B_SCALE_POINTER_VEC";
     case ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT:
         return "MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT";
     case ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT:
         return "MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT";
+    case ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT:
+        return "MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT";
+    case ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT:
+        return "MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT";
     default:
         return "Invalid";
     }
@@ -315,6 +315,10 @@ const char* rocblaslt_epilogue_to_string(rocblaslt_epilogue epilogue)
         return "EPILOGUE_SWISH_EXT";
     case ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT:
         return "EPILOGUE_SWISH_BIAS_EXT";
+    case ROCBLASLT_EPILOGUE_CLAMP_EXT:
+        return "EPILOGUE_CLAMP_EXT";
+    case ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT:
+        return "EPILOGUE_CLAMP_BIAS_EXT";
     default:
         return "Invalid epilogue";
     }

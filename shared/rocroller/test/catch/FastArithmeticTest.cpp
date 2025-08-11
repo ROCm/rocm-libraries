@@ -334,18 +334,18 @@ TEST_CASE("fastMultiplication and fastDivision lead into combineShifts",
     SECTION("Repeated division is combined.")
     {
         auto exp = argExp / literal(2u) / literal(16u);
-        CHECK_THAT(fast(exp), IdenticalTo(argExp >> literal(5u)));
+        CHECK_THAT(fast(exp), IdenticalTo(logicalShiftR(argExp, literal(5u))));
     }
 
     SECTION("Division is combined with shift.")
     {
         auto exp = (argExp / literal(8u)) >> literal(2u);
-        CHECK_THAT(fast(exp), IdenticalTo(argExp >> literal(5u)));
+        CHECK_THAT(fast(exp), IdenticalTo(logicalShiftR(argExp, literal(5u))));
     }
 
     SECTION("Shift is combined with division.")
     {
         auto exp = (argExp >> literal(8u)) / literal(2u);
-        CHECK_THAT(fast(exp), IdenticalTo(argExp >> literal(9u)));
+        CHECK_THAT(fast(exp), IdenticalTo(logicalShiftR(argExp, literal(9u))));
     }
 }

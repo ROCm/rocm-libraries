@@ -66,7 +66,7 @@ namespace TransposeLoadsTest
         void generate() override
         {
             AssertFatal(((m_unalignedVGPRs && m_elementBits == 6) || !m_unalignedVGPRs),
-                        "Unaligned VGPRs are only allowed with B6 tranpose loads!");
+                        "Unaligned VGPRs are only allowed with B6 transpose loads!");
 
             auto const& arch = m_context->targetArchitecture();
 

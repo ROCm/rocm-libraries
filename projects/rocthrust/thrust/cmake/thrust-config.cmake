@@ -213,6 +213,10 @@ function(thrust_create_target target_name)
     target_compile_definitions(${target_name} INTERFACE "THRUST_IGNORE_DEPRECATED_CPP_11")
   endif()
 
+  if (TCT_IGNORE_DEPRECATED_CPP_14)
+    target_compile_definitions(${target_name} INTERFACE "THRUST_IGNORE_DEPRECATED_CPP_14")
+  endif()
+
   if (TCT_IGNORE_DEPRECATED_COMPILER)
     target_compile_definitions(${target_name} INTERFACE "THRUST_IGNORE_DEPRECATED_COMPILER")
   endif()
@@ -621,6 +625,12 @@ function(thrust_fixup_omp_target omp_target)
     )
   endif()
 endfunction()
+
+if (THRUST_DISPATCH_TYPE STREQUAL "Force32bit")
+list(APPEND COMPILE_OPTIONS "THRUST_FORCE_32_BIT_OFFSET_TYPE")
+elseif (THRUST_DISPATCH_TYPE STREQUAL "Force64bit")
+list(APPEND COMPILE_OPTIONS "THRUST_FORCE_64_BIT_OFFSET_TYPE")
+endif()
 
 # This must be a macro instead of a function to ensure that backends passed to
 # find_package(Thrust COMPONENTS [...]) have their full configuration loaded

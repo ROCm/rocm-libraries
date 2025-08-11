@@ -24,7 +24,7 @@ template <typename GemmConfig,
           typename CLayout,
           bool Persistent,
           typename CDEElementWise>
-float gemm(const ck_tile::GemmHostArgs</*NumDTensor = 0*/>& args, const ck_tile::stream_config& s)
+float gemm(const ck_tile::GemmHostArgs& args, const ck_tile::stream_config& s)
 
 {
     if constexpr(Persistent)
@@ -210,6 +210,11 @@ int run_gemm_example(int argc, char* argv[])
     else if(data_type == "bf8")
     {
         return run_gemm_example_prec_type<ck_tile::bf8_t, ck_tile::bf8_t, ck_tile::half_t>(
+            a_layout, b_layout, argc, argv);
+    }
+    else if(data_type == "i8")
+    {
+        return run_gemm_example_prec_type<ck_tile::int8_t, ck_tile::int8_t, int32_t>(
             a_layout, b_layout, argc, argv);
     }
     else if(data_type == "pk_int4_t")

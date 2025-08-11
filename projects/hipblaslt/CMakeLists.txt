@@ -244,7 +244,7 @@ else()
     if (TENSILE_VERSION)
       find_package(Tensile ${TENSILE_VERSION} EXACT REQUIRED HIP LLVM OpenMP PATHS "${INSTALLED_TENSILE_PATH}")
     else()
-      find_package(Tensile 4.33.0 EXACT REQUIRED HIP LLVM OpenMP PATHS "${INSTALLED_TENSILE_PATH}")
+      find_package(Tensile 5.0.0 EXACT REQUIRED HIP LLVM OpenMP PATHS "${INSTALLED_TENSILE_PATH}")
     endif()
 
     # setup hipblaslt defines used for both the library and clients
@@ -422,6 +422,7 @@ if(BUILD_CODE_COVERAGE)
   target_compile_options(hipblaslt PRIVATE
     -fprofile-instr-generate
     -fcoverage-mapping
+    -fvisibility=default
   )
 
   target_link_options(hipblaslt PUBLIC
@@ -466,12 +467,12 @@ if(BUILD_CODE_COVERAGE)
 
     COMMAND ${LLVM_COV_EXECUTABLE}
             report
-            -object ./library/libhipblaslt-d.so.0.15
+            -object ./library/libhipblaslt-d.so.${hipblaslt_SOVERSION}
             -instr-profile=./coverage_test.profdata
             --ignore-filename-regex=.*/build/debug/.*
     COMMAND ${LLVM_COV_EXECUTABLE}
             show
-            -object ./library/libhipblaslt-d.so.0.15
+            -object ./library/libhipblaslt-d.so.${hipblaslt_SOVERSION}
             -instr-profile=./coverage_test.profdata
             -format=html -output-dir=coverage-report
             --ignore-filename-regex=.*/build/debug/.*

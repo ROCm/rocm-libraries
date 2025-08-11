@@ -146,7 +146,7 @@ public:
   /*! Default constructor initializes this \p counting_iterator's counter to
    * `Incrementable{}`.
    */
-  THRUST_HOST_DEVICE counting_iterator()
+  THRUST_HOST_DEVICE constexpr counting_iterator()
       : super_t(Incrementable{})
   {}
 

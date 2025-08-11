@@ -60,6 +60,7 @@
 #include <hip/hip_runtime.h>
 
 #include <stdlib.h>
+#include <string.h>
 
 #define MTGP_MEXP 11213
 #define MTGP_N 351

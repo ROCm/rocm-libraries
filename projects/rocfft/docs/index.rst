@@ -38,6 +38,7 @@ The rocFFT public repository is located at `<https://github.com/ROCm/rocFFT>`_.
     * :doc:`Load and store callbacks <./how-to/load-store-callbacks>`
     * :doc:`Use runtime compilation <./how-to/runtime-compilation>`
     * :doc:`Distribute transforms <./how-to/distributed-transforms>`
+    * :doc:`Enable logging <./how-to/enabling-logging>`
 
   .. grid-item-card:: Samples
 

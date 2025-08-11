@@ -45,7 +45,7 @@ void rocsparse_matrix_factory_tridiagonal<T, I, J>::init_csr(std::vector<I>&    
                                                              rocsparse_fill_mode    uplo,
                                                              rocsparse_storage_mode storage)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     switch(matrix_type)
     {
@@ -107,7 +107,7 @@ void rocsparse_matrix_factory_tridiagonal<T, I, J>::init_coo(std::vector<I>&    
                                                              rocsparse_fill_mode    uplo,
                                                              rocsparse_storage_mode storage)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     switch(matrix_type)
     {
@@ -173,7 +173,7 @@ void rocsparse_matrix_factory_tridiagonal<T, I, J>::init_gebsr(std::vector<I>&  
                                                                rocsparse_fill_mode    uplo,
                                                                rocsparse_storage_mode storage)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_init_gebsr_tridiagonal(bsr_row_ptr,
                                      bsr_col_ind,
@@ -209,6 +209,10 @@ template struct rocsparse_matrix_factory_tridiagonal<int8_t, int64_t, int64_t>;
 template struct rocsparse_matrix_factory_tridiagonal<_Float16, int32_t, int32_t>;
 template struct rocsparse_matrix_factory_tridiagonal<_Float16, int64_t, int32_t>;
 template struct rocsparse_matrix_factory_tridiagonal<_Float16, int64_t, int64_t>;
+
+template struct rocsparse_matrix_factory_tridiagonal<rocsparse_bfloat16, int32_t, int32_t>;
+template struct rocsparse_matrix_factory_tridiagonal<rocsparse_bfloat16, int64_t, int32_t>;
+template struct rocsparse_matrix_factory_tridiagonal<rocsparse_bfloat16, int64_t, int64_t>;
 
 template struct rocsparse_matrix_factory_tridiagonal<float, int32_t, int32_t>;
 template struct rocsparse_matrix_factory_tridiagonal<float, int64_t, int32_t>;

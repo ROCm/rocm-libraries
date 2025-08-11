@@ -228,7 +228,7 @@ namespace rocsparse
                 // Broadcast the update of the start_C to all threads in the seegment. Choose the last
                 // segment lane since that it contains the number of entries in the compressed sparse
                 // row (even if its predicate is false).
-                start_C += __shfl(
+                start_C += rocsparse::shfl(
                     static_cast<int>(count_previous_nnzs), SEGMENT_SIZE - 1, SEGMENT_SIZE);
             }
         }

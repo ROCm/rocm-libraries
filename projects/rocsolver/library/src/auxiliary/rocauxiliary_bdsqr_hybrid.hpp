@@ -33,6 +33,7 @@
 
 #pragma once
 
+#include "common_host_helpers.hpp"
 #include "lapack_host_functions.hpp"
 #include "rocauxiliary_lasr.hpp"
 #include "rocsolver_hybrid_storage.hpp"
@@ -52,7 +53,7 @@ static void swap_template(rocblas_handle handle,
                           I const incy,
                           hipStream_t stream)
 {
-    auto nthreads = warpSize * 2;
+    auto nthreads = get_device_warp_size() * 2;
     auto nblocks = (n - 1) / nthreads + 1;
 
     ROCSOLVER_LAUNCH_KERNEL((swap_kernel<T, I>), dim3(nblocks, 1, 1), dim3(nthreads, 1, 1), 0,
@@ -70,7 +71,7 @@ static void rot_template(rocblas_handle handle,
                          S const s,
                          hipStream_t stream)
 {
-    auto nthreads = warpSize * 2;
+    auto nthreads = get_device_warp_size() * 2;
     auto nblocks = (n - 1) / nthreads + 1;
 
     ROCSOLVER_LAUNCH_KERNEL((rot_kernel<S, T, I>), dim3(nblocks, 1, 1), dim3(nthreads, 1, 1), 0,
@@ -85,7 +86,7 @@ static void scal_template(rocblas_handle handle,
                           I const incx,
                           hipStream_t stream)
 {
-    auto nthreads = warpSize * 2;
+    auto nthreads = get_device_warp_size() * 2;
     auto nblocks = (n - 1) / nthreads + 1;
 
     ROCSOLVER_LAUNCH_KERNEL((scal_kernel<S, T, I>), dim3(nblocks, 1, 1), dim3(nthreads, 1, 1), 0,

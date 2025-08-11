@@ -88,6 +88,11 @@ target_link_libraries(hipsolver PRIVATE
   $<BUILD_INTERFACE:hipsolver-common> # https://gitlab.kitware.com/cmake/cmake/-/issues/15415
 )
 
+if(BUILD_CODE_COVERAGE)
+  target_compile_options(hipsolver PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(hipsolver PUBLIC -fprofile-instr-generate)
+endif()
+
 add_armor_flags(hipsolver "${ARMOR_LEVEL}")
 
 if(WIN32)

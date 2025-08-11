@@ -128,3 +128,27 @@ constexpr double silu_gflop_count(int64_t m, int64_t n, hipDataType type)
         return silu_gflop_count<float>(m, n);
     }
 }
+
+template <typename T>
+constexpr double clamp_gflop_count(int64_t m, int64_t n)
+{
+    return (2.0 * m * n) / 1e9;
+}
+
+constexpr double clamp_gflop_count(int64_t m, int64_t n, hipDataType type)
+{
+    switch(type)
+    {
+    case HIP_R_32F:
+        return clamp_gflop_count<float>(m, n);
+    case HIP_R_64F:
+        return clamp_gflop_count<double>(m, n);
+    case HIP_R_16F:
+        return clamp_gflop_count<hipblasLtHalf>(m, n);
+    case HIP_R_32I:
+        return clamp_gflop_count<int32_t>(m, n);
+    default:
+        hipblaslt_cerr << "Error type in clamp_gflop_count()" << std::endl;
+        return clamp_gflop_count<float>(m, n);
+    }
+}

@@ -54,100 +54,6 @@ THRUST_NAMESPACE_BEGIN
  *  \{
  */
 
-/*! \cond
- */
-
-namespace detail
-{
-
-template <typename T, std::size_t Align>
-struct complex_storage;
-
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && (THRUST_GCC_VERSION >= 40800)
-// C++11 implementation, excluding GCC 4.7, which doesn't have `alignas`.
-template <typename T, std::size_t Align>
-struct complex_storage
-{
-  struct alignas(Align) type
-  {
-    T x;
-    T y;
-  };
-};
-#elif (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) \
-  || ((THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_GCC) && (THRUST_GCC_VERSION < 40600))
-// C++03 implementation for MSVC and GCC <= 4.5.
-//
-// We have to implement `aligned_type` with specializations for MSVC
-// and GCC 4.2 and older because they require literals as arguments to
-// their alignment attribute.
-
-#  if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC)
-// MSVC implementation.
-#    define THRUST_DEFINE_COMPLEX_STORAGE_SPECIALIZATION(X) \
-      template <typename T>                                 \
-      struct complex_storage<T, X>                          \
-      {                                                     \
-        __declspec(align(X)) struct type                    \
-        {                                                   \
-          T x;                                              \
-          T y;                                              \
-        };                                                  \
-      };                                                    \
-      /**/
-#  else
-// GCC <= 4.2 implementation.
-#    define THRUST_DEFINE_COMPLEX_STORAGE_SPECIALIZATION(X) \
-      template <typename T>                                 \
-      struct complex_storage<T, X>                          \
-      {                                                     \
-        struct type                                         \
-        {                                                   \
-          T x;                                              \
-          T y;                                              \
-        } __attribute__((aligned(X)));                      \
-      };                                                    \
-      /**/
-#  endif
-
-// The primary template is a fallback, which doesn't specify any alignment.
-// It's only used when T is very large and we're using an older compilers
-// which we have to fully specialize each alignment case.
-template <typename T, std::size_t Align>
-struct complex_storage
-{
-  T x;
-  T y;
-};
-
-THRUST_DEFINE_COMPLEX_STORAGE_SPECIALIZATION(1);
-THRUST_DEFINE_COMPLEX_STORAGE_SPECIALIZATION(2);
-THRUST_DEFINE_COMPLEX_STORAGE_SPECIALIZATION(4);
-THRUST_DEFINE_COMPLEX_STORAGE_SPECIALIZATION(8);
-THRUST_DEFINE_COMPLEX_STORAGE_SPECIALIZATION(16);
-THRUST_DEFINE_COMPLEX_STORAGE_SPECIALIZATION(32);
-THRUST_DEFINE_COMPLEX_STORAGE_SPECIALIZATION(64);
-THRUST_DEFINE_COMPLEX_STORAGE_SPECIALIZATION(128);
-
-#  undef THRUST_DEFINE_COMPLEX_STORAGE_SPECIALIZATION
-#else
-// C++03 implementation for GCC > 4.5, Clang, PGI, ICPC, and xlC.
-template <typename T, std::size_t Align>
-struct complex_storage
-{
-  struct type
-  {
-    T x;
-    T y;
-  } __attribute__((aligned(Align)));
-};
-#endif
-
-} // end namespace detail
-
-/*! \endcond
- */
-
 /*! \p complex is the Thrust equivalent to <tt>std::complex</tt>. It is
  *  functionally identical to it, but can also be used in device code which
  *  <tt>std::complex</tt> currently cannot.
@@ -426,7 +332,26 @@ public:
   }
 
 private:
-  typename detail::complex_storage<T, sizeof(T) * 2>::type data;
+/**
+ * @brief Storage of two \p complex numbers.
+ */
+#if defined(__CUDACC__) && ((__CUDACC_VER_MAJOR__ < 11) || (__CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ < 7))
+  struct __align__(sizeof(T) * 2) storage
+#elif (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_ICC)
+  struct storage
+#else
+  struct alignas(sizeof(T) * 2) storage
+#endif
+  {
+    T x; /**< @brief The first \p complex. */
+    T y; /**< @brief The second \p complex. */
+  }
+#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_ICC)
+  __attribute__((aligned(sizeof(T) * 2)))
+#endif
+
+  ;
+  storage data;
 };
 
 /* --- General Functions --- */

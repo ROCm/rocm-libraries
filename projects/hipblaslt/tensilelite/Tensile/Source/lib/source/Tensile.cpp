@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -49,6 +49,11 @@ namespace TensileLite
     TENSILE_API SolutionAdapter::~SolutionAdapter() = default;
 
 #ifdef TENSILE_DEFAULT_SERIALIZATION
+    std::map<int, std::string> LoadLibraryMapping(std::string const& filename)
+    {
+        return MessagePackLoadLibraryMapping(filename);
+    }
+
     template <typename MyProblem, typename MySolution>
     std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
         LoadLibraryFile(std::string const& filename)

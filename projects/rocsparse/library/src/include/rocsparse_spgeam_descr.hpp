@@ -51,6 +51,8 @@ protected:
     rocsparse_datatype     compute_datatype;
     rocsparse_operation    op_A;
     rocsparse_operation    op_B;
+    const void*            scalar_A;
+    const void*            scalar_B;
 
     float m_local_host_alpha_value[4];
     float m_local_host_beta_value[4];
@@ -65,6 +67,8 @@ public:
         , compute_datatype((rocsparse_datatype)-1)
         , op_A((rocsparse_operation)-1)
         , op_B((rocsparse_operation)-1)
+        , scalar_A(nullptr)
+        , scalar_B(nullptr)
     {
     }
 
@@ -93,6 +97,17 @@ public:
     {
         return this->op_B;
     }
+
+    const void* get_scalar_A() const
+    {
+        return this->scalar_A;
+    }
+
+    const void* get_scalar_B() const
+    {
+        return this->scalar_B;
+    }
+
     rocsparse_datatype get_scalar_datatype() const
     {
         return this->scalar_datatype;
@@ -110,6 +125,7 @@ public:
     {
         this->alg = value;
     }
+
     void set_operation_A(rocsparse_operation value)
     {
         this->op_A = value;
@@ -118,6 +134,16 @@ public:
     {
         this->op_B = value;
     }
+
+    void set_scalar_A(const void* value)
+    {
+        this->scalar_A = value;
+    }
+    void set_scalar_B(const void* value)
+    {
+        this->scalar_B = value;
+    }
+
     void set_scalar_datatype(rocsparse_datatype value)
     {
         this->scalar_datatype = value;
@@ -127,13 +153,8 @@ public:
         this->compute_datatype = value;
     }
 
-    rocsparse_status csrgeam_allocate_descr_memory(rocsparse_handle handle,
-                                                   int64_t          m,
-                                                   int64_t          n,
-                                                   const void*      alpha,
-                                                   int64_t          nnz_A,
-                                                   const void*      beta,
-                                                   int64_t          nnz_B);
+    rocsparse_status csrgeam_allocate_descr_memory(
+        rocsparse_handle handle, int64_t m, int64_t n, int64_t nnz_A, int64_t nnz_B);
 
     rocsparse_status csrgeam_copy_row_pointer(rocsparse_handle          handle,
                                               int64_t                   m,

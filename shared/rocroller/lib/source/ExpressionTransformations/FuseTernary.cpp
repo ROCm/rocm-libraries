@@ -121,7 +121,11 @@ namespace rocRoller
                     }
                 }
 
-                return std::make_shared<Expression>(expr);
+                auto cpy = expr;
+                cpy.lhs  = lhs;
+                cpy.rhs  = rhs;
+
+                return std::make_shared<Expression>(cpy);
             }
 
             template <CValue Value>

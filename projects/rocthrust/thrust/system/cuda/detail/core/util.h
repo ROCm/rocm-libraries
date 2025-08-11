@@ -39,6 +39,8 @@
 #include <thrust/system/system_error.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
+#include <type_traits>
+
 #include <nv/target>
 
 THRUST_NAMESPACE_BEGIN
@@ -214,7 +216,7 @@ struct temp_storage_size
 };
 
 template <class Agent>
-struct temp_storage_size<Agent, ::cuda::std::__void_t<typename Agent::TempStorage>>
+struct temp_storage_size<Agent, ::cuda::std::void_t<typename Agent::TempStorage>>
 {
   static constexpr std::size_t value = sizeof(typename Agent::TempStorage);
 };

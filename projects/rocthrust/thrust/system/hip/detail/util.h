@@ -216,7 +216,8 @@ hipError_t THRUST_HIP_HOST_FUNCTION trivial_copy_to_device(Type* dst, Type const
 }
 
 template <class Policy, class Type>
-THRUST_HOST_DEVICE hipError_t trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t count)
+THRUST_RUNTIME_FUNCTION hipError_t
+trivial_copy_device_to_device(Policy& policy, Type* dst, Type const* src, size_t count)
 {
   hipError_t status = hipSuccess;
   if (count == 0)

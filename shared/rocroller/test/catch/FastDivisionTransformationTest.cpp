@@ -29,6 +29,7 @@
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
 
 #include "CustomMatchers.hpp"
@@ -43,92 +44,13 @@
 
 namespace FastDivisionTest
 {
-
-    template <typename T>
-    auto getMagicMultiple(T x, rocRoller::ContextPtr ctx = nullptr)
+    auto getMagicMultiple(auto x)
     {
         using namespace rocRoller;
         namespace Ex = Expression;
+        auto expr    = magicMultiple(Ex::literal(x));
 
-        Ex::ExpressionPtr expr;
-
-        if constexpr(std::same_as<T, Ex::ExpressionPtr>)
-        {
-            expr = x;
-        }
-        else
-        {
-            expr = Ex::literal(x);
-        }
-
-        expr = magicMultiple(expr);
-
-        if(ctx)
-        {
-            return ctx->kernel()->findArgumentForExpression(expr);
-        }
-        else
-        {
-            return std::make_shared<Ex::Expression>(evaluate(expr));
-        }
-    }
-
-    template <typename T>
-    auto getMagicShifts(T x, rocRoller::ContextPtr ctx = nullptr)
-    {
-        using namespace rocRoller;
-        namespace Ex = Expression;
-
-        Ex::ExpressionPtr expr;
-
-        if constexpr(std::same_as<T, Ex::ExpressionPtr>)
-        {
-            expr = x;
-        }
-        else
-        {
-            expr = Ex::literal(x);
-        }
-
-        expr = magicShifts(expr);
-
-        if(ctx)
-        {
-            return ctx->kernel()->findArgumentForExpression(expr);
-        }
-        else
-        {
-            return std::make_shared<Ex::Expression>(evaluate(expr));
-        }
-    }
-
-    template <typename T>
-    auto getMagicSign(T x, rocRoller::ContextPtr ctx = nullptr)
-    {
-        using namespace rocRoller;
-        namespace Ex = Expression;
-
-        Ex::ExpressionPtr expr;
-
-        if constexpr(std::same_as<T, Ex::ExpressionPtr>)
-        {
-            expr = x;
-        }
-        else
-        {
-            expr = Ex::literal(x);
-        }
-
-        expr = magicSign(expr);
-
-        if(ctx)
-        {
-            return ctx->kernel()->findArgumentForExpression(expr);
-        }
-        else
-        {
-            return std::make_shared<Ex::Expression>(evaluate(expr));
-        }
+        return Ex::literal(evaluate(expr));
     }
 
     TEST_CASE("FastDivision ExpressionTransformation works for constant expressions.",
@@ -137,9 +59,9 @@ namespace FastDivisionTest
         using namespace rocRoller;
         namespace Ex = Expression;
 
-        auto context = TestContext::ForDefaultTarget({.minLaunchTimeExpressionComplexity = 49});
+        auto context = TestContext::ForDefaultTarget({{.minLaunchTimeExpressionComplexity = 49}});
 
-        auto command = std::make_shared<rocRoller::Command>();
+        auto command = std::make_shared<Command>();
 
         auto aTag = command->allocateTag();
         auto a    = command
@@ -184,7 +106,7 @@ namespace FastDivisionTest
             auto mulPlusB = multiplyHigh(b, getMagicMultiple(-5)) + b;
             CHECK_THAT(expr_fast,
                        EquivalentTo((((mulPlusB + ((mulPlusB >> Ex::literal(31)) & Ex::literal(4)))
-                                      >> Ex::literal(2))
+                                      >> Ex::literal(2u))
                                      ^ Ex::literal(-1))
                                     + Ex::literal(1)));
         }
@@ -211,7 +133,7 @@ namespace FastDivisionTest
         using namespace rocRoller;
         namespace Ex = Expression;
 
-        auto context = TestContext::ForDefaultTarget({.minLaunchTimeExpressionComplexity = 49});
+        auto context = TestContext::ForDefaultTarget({{.minLaunchTimeExpressionComplexity = 49}});
 
         auto command = std::make_shared<rocRoller::Command>();
 
@@ -241,9 +163,7 @@ namespace FastDivisionTest
         auto expr_fast = fastDivision(expr, context.get());
 
         {
-            auto mul   = getMagicMultiple(b_signed, context.get());
-            auto shift = getMagicShifts(b_signed, context.get());
-            auto sign  = getMagicSign(b_signed, context.get());
+            auto [mul, shift, sign] = getMagicMultipleShiftAndSign(b_signed, context.get());
 
             auto mulPlusA = a + multiplyHigh(a, mul);
 
@@ -263,8 +183,7 @@ namespace FastDivisionTest
         expr_fast = fastDivision(expr, context.get());
 
         {
-            auto mul   = getMagicMultiple(b_unsigned, context.get());
-            auto shift = getMagicShifts(b_unsigned, context.get());
+            auto [mul, shift, sign] = getMagicMultipleShiftAndSign(b_unsigned, context.get());
 
             auto mulHigh = multiplyHigh(a_unsigned, mul);
 
@@ -280,7 +199,7 @@ namespace FastDivisionTest
         using namespace rocRoller;
         namespace Ex = Expression;
 
-        auto context = TestContext::ForDefaultTarget({.minLaunchTimeExpressionComplexity = 49});
+        auto context = TestContext::ForDefaultTarget({{.minLaunchTimeExpressionComplexity = 49}});
 
         auto command = std::make_shared<Command>();
 
@@ -348,7 +267,7 @@ namespace FastDivisionTest
         using namespace rocRoller;
         namespace Ex = Expression;
 
-        auto context = TestContext::ForDefaultTarget({.minLaunchTimeExpressionComplexity = 49});
+        auto context = TestContext::ForDefaultTarget({{.minLaunchTimeExpressionComplexity = 49}});
 
         auto command = std::make_shared<Command>();
 

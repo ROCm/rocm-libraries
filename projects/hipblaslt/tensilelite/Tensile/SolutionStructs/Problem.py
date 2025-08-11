@@ -595,6 +595,32 @@ _HPATypes = [
     ("B8F8N", "F8N", "S"),
 ]
 
+def problemTypeToEnum(problemType):
+  problemType["DataType"] = \
+          problemType["DataType"].value
+  problemType["DataTypeA"] = \
+          problemType["DataTypeA"].value
+  problemType["DataTypeB"] = \
+          problemType["DataTypeB"].value
+  problemType["DataTypeE"] = \
+          problemType["DataTypeE"].value
+  problemType["DataTypeAmaxD"] = \
+          problemType["DataTypeAmaxD"].value
+  problemType["DestDataType"] = \
+          problemType["DestDataType"].value
+  problemType["ComputeDataType"] = \
+          problemType["ComputeDataType"].value
+  problemType["BiasDataTypeList"] = \
+          [btype.value for btype in problemType["BiasDataTypeList"]]
+  problemType["ActivationComputeDataType"] = \
+          problemType["ActivationComputeDataType"].value
+  problemType["ActivationType"] = \
+          problemType["ActivationType"].value
+  problemType["F32XdlMathOp"] = \
+      problemType["F32XdlMathOp"].value
+  if "DataTypeMetadata" in problemType:
+      problemType["DataTypeMetadata"] = \
+          problemType["DataTypeMetadata"].value
 
 class ProblemType(Mapping):
   ########################################

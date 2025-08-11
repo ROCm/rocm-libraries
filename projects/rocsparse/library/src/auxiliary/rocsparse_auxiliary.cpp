@@ -5024,6 +5024,25 @@ try
 
     switch(input)
     {
+    case rocsparse_spgeam_input_scalar_alpha:
+    {
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(void*),
+                           rocsparse_status_invalid_size);
+        descr->set_scalar_A(data);
+        return rocsparse_status_success;
+    }
+    case rocsparse_spgeam_input_scalar_beta:
+    {
+        ROCSPARSE_CHECKARG(4,
+                           data_size_in_bytes,
+                           data_size_in_bytes != sizeof(void*),
+                           rocsparse_status_invalid_size);
+        descr->set_scalar_B(data);
+        return rocsparse_status_success;
+    }
+
     case rocsparse_spgeam_input_alg:
     {
         ROCSPARSE_CHECKARG(4,

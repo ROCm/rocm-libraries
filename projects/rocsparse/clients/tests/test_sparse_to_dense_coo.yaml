@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -40,17 +40,39 @@ Tests:
   M: [22, 54, 167]
   N: [12, 33, 77, 201]
   denseld: [100, 256]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  order: [rocsparse_order_row, rocsparse_order_column]
+  baseA: *all_rocsparse_index_base
+  order: *all_rocsparse_order
+
+- name: sparse_to_dense_coo
+  category: quick
+  function: sparse_to_dense_coo
+  indextype: *i32_i64
+  precision: *half_precision
+  M: [512]
+  N: [756]
+  denseld: [1000]
+  baseA: *all_rocsparse_index_base
+  order: *all_rocsparse_order
 
 - name: sparse_to_dense_coo
   category: pre_checkin
   function: sparse_to_dense_coo
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [-1, 0, 531, 1000]
-  N: [-3, 0, 241, 1000]
+  M: [0, 531, 1000]
+  N: [0, 241, 1000]
   denseld: [100, 1000, 2000]
+  baseA: [rocsparse_index_base_zero]
+  order: [rocsparse_order_row, rocsparse_order_column]
+
+- name: sparse_to_dense_coo
+  category: pre_checkin
+  function: sparse_to_dense_coo
+  indextype: *i32_i64
+  precision: *brain_half_precision
+  M: [1200]
+  N: [1200]
+  denseld: [2000]
   baseA: [rocsparse_index_base_zero]
   order: [rocsparse_order_row, rocsparse_order_column]
 
@@ -61,7 +83,7 @@ Tests:
   precision: *single_double_precisions
   M: [2000, 4000]
   N: [2000, 4000]
-  denseld: [ 8000 ]
+  denseld: [8000]
   baseA: [rocsparse_index_base_one]
   order: [rocsparse_order_row, rocsparse_order_column]
 
@@ -73,6 +95,6 @@ Tests:
   precision: *single_only_precisions
   M: [2]
   N: [2]
-  denseld: [ 2400000000 ]
+  denseld: [2400000000]
   baseA: [rocsparse_index_base_one]
   order: [rocsparse_order_row, rocsparse_order_column]

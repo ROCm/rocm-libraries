@@ -1,5 +1,6 @@
 /*
  *  Copyright 2008-2018 NVIDIA Corporation
+ *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -31,6 +32,8 @@
 #include <thrust/sequence_access.h>
 
 #include <initializer_list>
+#include <iterator>
+#include <type_traits>
 #include <vector>
 
 THRUST_NAMESPACE_BEGIN
@@ -70,13 +73,13 @@ public:
    */
   explicit vector_base(const Alloc& alloc);
 
-  /*! This constructor creates a vector_base with default-constructed
+  /*! This constructor creates a vector_base with value-initialized
    *  elements.
    *  \param n The number of elements to create.
    */
   explicit vector_base(size_type n);
 
-  /*! This constructor creates a vector_base with default-constructed
+  /*! This constructor creates a vector_base with value-initialized
    *  elements.
    *  \param n The number of elements to create.
    *  \param alloc The allocator to use by this vector_base.
@@ -181,7 +184,10 @@ public:
    *  \param first The beginning of the range.
    *  \param last The end of the range.
    */
-  template <typename InputIterator>
+  template <typename InputIterator,
+            std::enable_if_t<std::is_convertible<typename std::iterator_traits<InputIterator>::iterator_category,
+                                                 std::input_iterator_tag>::value,
+                             int> = 0>
   vector_base(InputIterator first, InputIterator last);
 
   /*! This constructor builds a vector_base from a range.
@@ -189,7 +195,10 @@ public:
    *  \param last The end of the range.
    *  \param alloc The allocator to use by this vector_base.
    */
-  template <typename InputIterator>
+  template <typename InputIterator,
+            std::enable_if_t<std::is_convertible<typename std::iterator_traits<InputIterator>::iterator_category,
+                                                 std::input_iterator_tag>::value,
+                             int> = 0>
   vector_base(InputIterator first, InputIterator last, const Alloc& alloc);
 
   /*! The destructor erases the elements.
@@ -203,7 +212,7 @@ public:
    *  This method will resize this vector_base to the specified number of
    *  elements. If the number is smaller than this vector_base's current
    *  size this vector_base is truncated, otherwise this vector_base is
-   *  extended and new elements are default constructed.
+   *  extended and new elements are value initialized.
    */
   void resize(size_type new_size);
 
@@ -492,7 +501,7 @@ private:
   template <typename ForwardIterator>
   void range_init(ForwardIterator first, ForwardIterator last, thrust::random_access_traversal_tag);
 
-  void default_init(size_type n);
+  void value_init(size_type n);
 
   void fill_init(size_type n, const T& x);
 
@@ -505,7 +514,7 @@ private:
   template <typename InputIteratorOrIntegralType>
   void insert_dispatch(iterator position, InputIteratorOrIntegralType n, InputIteratorOrIntegralType x, true_type);
 
-  // this method appends n default-constructed elements at the end
+  // this method appends n value-initialized elements at the end
   void append(size_type n);
 
   // this method performs insertion from a fill value

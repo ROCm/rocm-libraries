@@ -182,6 +182,8 @@ typedef enum rocblaslt_epilogue_
     ROCBLASLT_EPILOGUE_BGRADB         = 512,
     ROCBLASLT_EPILOGUE_SWISH_EXT      = 65536,
     ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT = 65540,
+    ROCBLASLT_EPILOGUE_CLAMP_EXT      = 131072,
+    ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT = 131076,
 } rocblaslt_epilogue;
 
 /*! \ingroup types_module
@@ -364,8 +366,8 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_B_SCALE_MODE               = 32,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT   = 100,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,
-    ROCBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT,
-    ROCBLASLT_MATMUL_DESC_B_SCALE_POINTER_VEC_EXT,
+    ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
+    ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
     ROCBLASLT_MATMUL_DESC_MAX,
 } rocblaslt_matmul_desc_attributes;
 
@@ -538,6 +540,8 @@ struct RocblasltContractionProblem
     void*              amaxD;
     void*              workspace;
     size_t             workspaceSize;
+    float              act0;
+    float              act1;
 
     hipStream_t stream;
     void*       Synchronizer;
@@ -602,6 +606,8 @@ struct RocblasltContractionProblem
                                 void*                  amaxD,
                                 void*                  workspace,
                                 size_t                 workspaceSize,
+                                float                  act0,
+                                float                  act1,
                                 hipStream_t            stream,
                                 void*                  Synchronizer,
                                 bool                   swizzleA,
@@ -628,6 +634,8 @@ namespace rocblaslt
         hipDataType            type_c;
         hipDataType            type_d;
         rocblaslt_compute_type type_compute;
+        hipblasLtOrder_t       order_a;
+        hipblasLtOrder_t       order_b;
     };
 
     class RocGemmEpilogueV2
@@ -642,6 +650,8 @@ namespace rocblaslt
             = RocblasltContractionProblem::ScalingFormat::None;
         RocblasltContractionProblem::ScalingFormat scaling_b_type
             = RocblasltContractionProblem::ScalingFormat::None;
+        float                                      act0 = 0.f;
+        float                                      act1 = 0.f;
     };
 
     class RocTuningV2

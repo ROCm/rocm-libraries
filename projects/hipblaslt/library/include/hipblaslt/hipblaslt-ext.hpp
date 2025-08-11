@@ -134,6 +134,8 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setTypeD(hipDataType type); //!< Set the D matrix datatype.
         HIPBLASLT_EXPORT void
             setTypeCompute(hipblasComputeType_t type); //!< Set the compute datatype.
+        HIPBLASLT_EXPORT void setOrderA(hipblasLtOrder_t order); //!< Set the A martix data order.
+        HIPBLASLT_EXPORT void setOrderB(hipblasLtOrder_t order); //!< Set the B matrix data order.
 
         HIPBLASLT_EXPORT hipblasOperation_t   getOpA() const; //!< The A matrix transpose.
         HIPBLASLT_EXPORT hipblasOperation_t   getOpB() const; //!< The B matrix transpose.
@@ -142,6 +144,8 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT hipDataType          getTypeC() const; //!< The C matrix datatype.
         HIPBLASLT_EXPORT hipDataType          getTypeD() const; //!< The D matrix datatype.
         HIPBLASLT_EXPORT hipblasComputeType_t getTypeCompute() const; //!< The compute datatype.
+        HIPBLASLT_EXPORT hipblasLtOrder_t     getOrderA() const; //!< The A matrix data order.
+        HIPBLASLT_EXPORT hipblasLtOrder_t     getOrderB() const; //!< The B matrix data order.
     };
 
     [[deprecated("GemmProblemTypeV2 is deprecated, use GemmProblemType instead.")]]
@@ -182,6 +186,8 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void
             setScalingBType(hipblasLtMatmulMatrixScale_t
                                 scalingBType); //!< Only works if DataTypeA = DataTypeB = FP8.
+        HIPBLASLT_EXPORT void setAct0(float act0); //!< Set first extra argument for activation function.
+        HIPBLASLT_EXPORT void setAct1(float act1); //!< Set second extra argument for activation function.
 
         HIPBLASLT_EXPORT hipblasLtEpilogue_t
                                      getMode() const; //!< The mode of epilogue. Default is gemm.
@@ -197,6 +203,8 @@ namespace hipblaslt_ext
             const; //!< 0 is scalar, 1 is vector. Only works if DataTypeA = DataTypeB = FP8.
         HIPBLASLT_EXPORT hipblasLtMatmulMatrixScale_t getScalingBType()
             const; //!< 0 is scalar, 1 is vector. Only works if DataTypeA = DataTypeB = FP8.
+        HIPBLASLT_EXPORT float getAct0(); //!< first extra argument for activation function.
+        HIPBLASLT_EXPORT float getAct1(); //!< second extra argument for activation function.
     private:
         friend Gemm;
         friend GroupedGemm;

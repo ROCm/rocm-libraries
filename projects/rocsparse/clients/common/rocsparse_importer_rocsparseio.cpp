@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -117,6 +117,11 @@ template <>
 inline rocsparseio_type type_tconvert<_Float16>()
 {
     return rocsparseio_type_float16;
+};
+template <>
+inline rocsparseio_type type_tconvert<rocsparse_bfloat16>()
+{
+    return rocsparseio_type_bfloat16;
 };
 template <>
 inline rocsparseio_type type_tconvert<float>()
@@ -289,6 +294,7 @@ rocsparse_status rocsparse_importer_rocsparseio::import_sparse_coo(I* row_ind, I
 
             case rocsparseio_type_int8:
             case rocsparseio_type_float16:
+            case rocsparseio_type_bfloat16:
             case rocsparseio_type_float32:
             case rocsparseio_type_float64:
             case rocsparseio_type_complex32:
@@ -318,6 +324,12 @@ rocsparse_status rocsparse_importer_rocsparseio::import_sparse_coo(I* row_ind, I
             case rocsparseio_type_float16:
             {
                 rocsparse_importer_copy_mixed_arrays(NNZ, val, (const _Float16*)tmp_val);
+                break;
+            }
+
+            case rocsparseio_type_bfloat16:
+            {
+                rocsparse_importer_copy_mixed_arrays(NNZ, val, (const rocsparse_bfloat16*)tmp_val);
                 break;
             }
 
@@ -498,6 +510,7 @@ rocsparse_status rocsparse_importer_rocsparseio::import_sparse_gebsx(I* ptr, J* 
 
             case rocsparseio_type_int8:
             case rocsparseio_type_float16:
+            case rocsparseio_type_bfloat16:
             case rocsparseio_type_float32:
             case rocsparseio_type_float64:
             case rocsparseio_type_complex32:
@@ -524,6 +537,7 @@ rocsparse_status rocsparse_importer_rocsparseio::import_sparse_gebsx(I* ptr, J* 
             }
             case rocsparseio_type_int8:
             case rocsparseio_type_float16:
+            case rocsparseio_type_bfloat16:
             case rocsparseio_type_float32:
             case rocsparseio_type_float64:
             case rocsparseio_type_complex32:
@@ -555,6 +569,13 @@ rocsparse_status rocsparse_importer_rocsparseio::import_sparse_gebsx(I* ptr, J* 
             {
                 rocsparse_importer_copy_mixed_arrays(
                     NNZB * row_block_dim * col_block_dim, val, (const _Float16*)tmp_val);
+                break;
+            }
+
+            case rocsparseio_type_bfloat16:
+            {
+                rocsparse_importer_copy_mixed_arrays(
+                    NNZB * row_block_dim * col_block_dim, val, (const rocsparse_bfloat16*)tmp_val);
                 break;
             }
 
@@ -716,6 +737,7 @@ rocsparse_status rocsparse_importer_rocsparseio::import_sparse_csx(I* ptr, J* in
 
             case rocsparseio_type_int8:
             case rocsparseio_type_float16:
+            case rocsparseio_type_bfloat16:
             case rocsparseio_type_float32:
             case rocsparseio_type_float64:
             case rocsparseio_type_complex32:
@@ -742,6 +764,7 @@ rocsparse_status rocsparse_importer_rocsparseio::import_sparse_csx(I* ptr, J* in
             }
             case rocsparseio_type_int8:
             case rocsparseio_type_float16:
+            case rocsparseio_type_bfloat16:
             case rocsparseio_type_float32:
             case rocsparseio_type_float64:
             case rocsparseio_type_complex32:
@@ -771,6 +794,12 @@ rocsparse_status rocsparse_importer_rocsparseio::import_sparse_csx(I* ptr, J* in
             case rocsparseio_type_float16:
             {
                 rocsparse_importer_copy_mixed_arrays(NNZ, val, (const _Float16*)tmp_val);
+                break;
+            }
+
+            case rocsparseio_type_bfloat16:
+            {
+                rocsparse_importer_copy_mixed_arrays(NNZ, val, (const rocsparse_bfloat16*)tmp_val);
                 break;
             }
 
@@ -839,6 +868,10 @@ INSTANTIATE_TIJ(_Float16, int32_t, int32_t);
 INSTANTIATE_TIJ(_Float16, int64_t, int32_t);
 INSTANTIATE_TIJ(_Float16, int64_t, int64_t);
 
+INSTANTIATE_TIJ(rocsparse_bfloat16, int32_t, int32_t);
+INSTANTIATE_TIJ(rocsparse_bfloat16, int64_t, int32_t);
+INSTANTIATE_TIJ(rocsparse_bfloat16, int64_t, int64_t);
+
 INSTANTIATE_TIJ(float, int32_t, int32_t);
 INSTANTIATE_TIJ(float, int64_t, int32_t);
 INSTANTIATE_TIJ(float, int64_t, int64_t);
@@ -860,6 +893,9 @@ INSTANTIATE_TI(int8_t, int64_t);
 
 INSTANTIATE_TI(_Float16, int32_t);
 INSTANTIATE_TI(_Float16, int64_t);
+
+INSTANTIATE_TI(rocsparse_bfloat16, int32_t);
+INSTANTIATE_TI(rocsparse_bfloat16, int64_t);
 
 INSTANTIATE_TI(float, int32_t);
 INSTANTIATE_TI(float, int64_t);

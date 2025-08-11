@@ -40,9 +40,11 @@ namespace rocRoller
     {
     public:
         explicit KernelArguments(bool log = true, size_t bytes = 0);
-        virtual ~KernelArguments();
 
         void reserve(size_t bytes, size_t count);
+
+        template <CScaleType T>
+        void writeValue(size_t offset, T value);
 
         template <typename T>
         void writeValue(size_t offset, T value);
@@ -119,6 +121,9 @@ namespace rocRoller
                       "Enum for fields of Arg tuple doesn't match size of tuple.");
 
         void alignTo(size_t alignment);
+
+        template <CScaleType T>
+        void append(std::string const& argName, T value, bool bound);
 
         template <typename T>
         void append(std::string const& argName, T value, bool bound);

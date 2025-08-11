@@ -103,7 +103,7 @@ correct:         true
 rnorm:           2.5e-05
 ...
 """
-    assert cmd[0] == "bin/client/rocRoller_gemm"
+    assert cmd[0] == "client/rocroller-gemm"
     yaml_file = None
     for arg in cmd:
         if arg.startswith("--yaml"):

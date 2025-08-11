@@ -106,7 +106,6 @@ namespace rocRoller
         inline void Allocator::allocate(AllocationPtr alloc)
         {
             auto registers = findFree(alloc->registerCount(), alloc->options());
-
             AssertFatal(!registers.empty(),
                         "No more ",
                         m_regType,

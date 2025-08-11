@@ -32,8 +32,8 @@ Definitions:
     - { alpha:   0.0, beta:   1.0, alphai:  0.0, betai: 1.0 }
 
   - &alpha_beta_range_checkin
-    - { alpha: -99.0, beta:   1.5, alphai:  0.0, betai: 0.3 }
-    - { alpha:   2.0, beta: -99.0, alphai:  0.5, betai: 0.3 }
+    - { alpha: 0.0, beta:   1.5, alphai:  0.0, betai: 0.3 }
+    - { alpha:   2.0, beta: 0.0, alphai:  0.5, betai: 0.3 }
     - { alpha:   3.0, beta:   1.7, alphai: -0.5, betai: 0.8 }
 
   - &alpha_beta_range_nightly
@@ -48,13 +48,9 @@ Tests:
 
 - name: spgeam_csr_extra
   category: pre_checkin
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none]
-  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  baseC: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  spgeam_alg: [rocsparse_spgeam_alg_default]
-  hardware: [gfx90a]
+  baseA: *all_rocsparse_index_base
+  baseB: *all_rocsparse_index_base
+  baseC: *all_rocsparse_index_base
   function: spgeam_csr_extra
 
 # C = alpha * A + beta * B

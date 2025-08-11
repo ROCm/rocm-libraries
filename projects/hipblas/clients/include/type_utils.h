@@ -191,13 +191,13 @@ inline int64_t hipblas_abs(const int64_t& x)
 /* =============================================================================================== */
 /* Complex / real helpers.                                                                         */
 template <typename T>
-static constexpr bool is_complex = false;
+inline constexpr bool is_complex = false;
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr bool is_complex<std::complex<float>> = true;
+inline constexpr bool is_complex<std::complex<float>> = true;
 
 template <>
-HIPBLAS_CLANG_STATIC constexpr bool is_complex<std::complex<double>> = true;
+inline constexpr bool is_complex<std::complex<double>> = true;
 
 // Get base types from complex types.
 template <typename T>

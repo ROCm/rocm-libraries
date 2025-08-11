@@ -3,30 +3,59 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## rocThrust 4.1.0 for ROCm 7.1
+
+### Added
+
+* Added a new CMake option `-DSQLITE_USE_SYSTEM_PACKAGE` to allow SQLite to be provided by the system.
+
 ## rocThrust 4.0.0 for ROCm 7.0
 
 ### Changed
 
 * Updated the required version of Google Benchmark from 1.8.0 to 1.9.0.
+* Drop `c++14` support for rocthrust.
+* Renamed `cpp14_required.h` to `cpp_version_check.h`
+* Refactored `test_header.hpp` into separte modules `test_param_fixtures.hpp`, `test_real_assertions.hpp`, `test_imag_assertions.hpp`, and `test_utils.hpp`.
+  * This is done to prevent unit tests from having access to modules that they're not testing. This will improve the accuracy of code coverage reports.
+
+### Added
+* Additional unit tests for:
+  * binary_search
+  * complex
+  * c99math
+  * catrig
+  * ccosh
+  * cexp
+  * clog
+  * csin
+  * csqrt
+  * ctan
+* Added `test_param_fixtures.hpp` to store all the parameters for typed test suites.
+* Added `test_real_assertions.hpp` to handle unit test assertions for real numbers.
+* Added `test_imag_assertions.hpp` to handle unit test assertions for imaginary numbers.
+* `clang++` is now used to compile google benchmarks on Windows.
+* Added gfx950 support.
+* Merged changes from upstream CCCL/thrust 2.6.0
 
 ### Removed
 
 * `device_malloc_allocator.h` has been removed. This header file was unused and should not impact users.
 * Removed C++14 support, only C++17 is supported.
+* `test_header.hpp` has been removed. The `HIP_CHECK` function, as well as the `test` and `inter_run_bwr` namespaces, have been moved to `test_utils.hpp`.
+* `test_assertions.hpp` has been split into `test_real_assertions.hpp` and `test_imag_assertions.hpp`.
 
 ### Upcoming changes
 
 * `thrust::device_malloc_allocator` is deprecated as of this version. It will be removed in an upcoming version.
 
-## rocThrust 3.4.0 for ROCm 6.5
+### Resolved issues
 
-### Added
-
-* Added gfx950 support.
-* Merged changes from upstream CCCL/thrust 2.6.0
+* Fixed an issue with internal calls to unqualified `distance()` which would be ambigious due to also visibile implementation through ADL.
 
 ### Known Issues
 * The order of the values being compared by thrust::exclusive_scan_by_key and thrust::inclusive_scan_by_key can change between runs when integers are being compared. This can cause incorrect output when a non-commutative operator such as division is being used.
+
 ## rocThrust 3.3.0 for ROCm 6.4
 
 ### Added

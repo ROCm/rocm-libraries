@@ -49,6 +49,7 @@ Datatypes:
         relu: 1
         gelu: 2
         swish: 3
+        clamp: 4
   - hipblaslt_bias_source:
       bases: [ c_int ]
       attr:
@@ -251,6 +252,8 @@ Real precisions 2 bytes: &real_precisions_2b
   - *hpa_bf16_precision
 
 Real precisions swizzle support: &real_precisions_swizzleA_support
+  - &fp16_precision_dst_fp32_swizzleA
+    { a_type: f16_r, b_type: f16_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r, swizzle_a: true}
   - &fp16_precision_dst_fp16_swizzleA
     { a_type: f16_r, b_type: f16_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scale_type: f32_r, swizzle_a: true}
   - &bf16_precision_dst_bf16_swizzleA
@@ -517,6 +520,7 @@ Arguments:
   - scale_type: hipDataType
   - initialization: hipblaslt_initialization
   - gpu_arch: c_char*16
+  - gpu_arch_exclude: c_char*16
   - pad: c_uint32
   - grouped_gemm: c_int32
   - threads: c_uint16
@@ -620,6 +624,7 @@ Defaults:
   streams: 0
   devices: 0
   gpu_arch: ''
+  gpu_arch_exclude: ''
   norm_check: 0
   allclose_check: 0
   unit_check: 1
