@@ -929,14 +929,7 @@ namespace TensileLite
     inline void ContractionSolution::calculateAutoGSU(Problem const&  problem,
                                                       Hardware const* hardware) const
     {
-        // Temporal remove until the cache mechanism is fixed
-        // autoGSU is already calculated
-        // if(autoGSU != 0)
-        // {
-        //     return;
-        // }
-
-        // original GSU is not -1
+        // if original GSU is not -1
         if(sizeMapping.globalSplitU != -1)
         {
             autoGSU = sizeMapping.globalSplitU;
