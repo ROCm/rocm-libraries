@@ -54,5 +54,10 @@ namespace rocRoller
             m_tag = tag;
         }
 
+        std::strong_ordering BaseOperation::operator<=>(BaseOperation const& other) const
+        {
+            return m_tag <=> other.m_tag;
+        }
+
     }
 }
