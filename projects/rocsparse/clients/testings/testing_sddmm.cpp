@@ -159,5 +159,8 @@ INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
 INSTANTIATE_MIXED(int32_t, int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int64_t, int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int64_t, int64_t, _Float16, _Float16, float, float);
+INSTANTIATE_MIXED(int32_t, int32_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_MIXED(int64_t, int32_t, _Float16, _Float16, _Float16, float);
+INSTANTIATE_MIXED(int64_t, int64_t, _Float16, _Float16, _Float16, float);
 
 void testing_sddmm_extra(const Arguments& arg) {}
