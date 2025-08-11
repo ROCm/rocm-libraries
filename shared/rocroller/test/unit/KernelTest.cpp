@@ -408,6 +408,7 @@ amdhsa.kernels:
             const auto dstRegCount = 192;
             const auto count
                 = dstRegCount / instrDwords; // number of instructions put one after another
+            const bool write = true; // else read
 
             auto dst = Register::Value::Placeholder(
                 m_context,
@@ -418,6 +419,7 @@ amdhsa.kernels:
                     .contiguousChunkWidth = Register::FULLY_CONTIGUOUS,
                     .alignment            = alignment,
                 });
+            co_yield dst->allocate();
 
             auto lds = Register::Value::AllocateLDS(
                 m_context,
@@ -426,11 +428,11 @@ amdhsa.kernels:
                                                        GPUCapability::MaxLdsSize)
                                                    / 4),
                          workgroupSize * strideMultiplier * instrDwords));
-            auto ldsOffset = Register::Value::Placeholder(
+            auto ldsWithOffset = Register::Value::Placeholder(
                 m_context, Register::Type::Vector, DataType::Int32, 1);
             auto workitemIndex = m_context->kernel()->workitemIndex()[0];
             co_yield Expression::generate(
-                ldsOffset,
+                ldsWithOffset,
                 Expression::literal(lds->getLDSAllocation()->offset())
                     + workitemIndex->expression()
                           * Expression::literal((4 * strideMultiplier * alignment)
@@ -446,11 +448,22 @@ amdhsa.kernels:
 
             for(int i = 0; i < count * instrDwords; i += alignment)
             {
-                co_yield m_context->mem()->loadLocal(
-                    dst->subset(Generated(iota(i, i + instrDwords))),
-                    ldsOffset,
-                    0,
-                    4 * instrDwords);
+                if(write)
+                {
+                    co_yield m_context->mem()->storeLocal(
+                        ldsWithOffset,
+                        dst->subset(Generated(iota(i, i + instrDwords))),
+                        0,
+                        4 * instrDwords);
+                }
+                else
+                {
+                    co_yield m_context->mem()->loadLocal(
+                        dst->subset(Generated(iota(i, i + instrDwords))),
+                        ldsWithOffset,
+                        0,
+                        4 * instrDwords);
+                }
             }
 
             co_yield Instruction::Wait(WaitCount::Zero(m_context->targetArchitecture()));

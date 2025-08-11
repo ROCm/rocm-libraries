@@ -22,7 +22,6 @@ for (( i=1; i<=32; i*=2 )); do
 
         ROCPROF=/opt/rocm/bin/rocprofv3
 
-        export HSA_CU_MASK=1
         export ROCROLLER_BUILD_DIR=./
         export ROCROLLER_SAVE_ASSEMBLY=1
         # EXE="../scripts/rrperf run --suite fp4_target_d2lds_mi16x16x128_pf4x1_wgm"
