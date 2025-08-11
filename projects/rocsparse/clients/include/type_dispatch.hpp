@@ -899,15 +899,19 @@ auto rocsparse_ijabct_sddmm_dispatch(const Arguments& arg)
 
     const auto T = arg.compute_type;
 
-    bool f16r_case = (A == rocsparse_datatype_f16_r && A == B && A == C && A == T);
-    bool f32r_case = (A == rocsparse_datatype_f32_r && A == B && A == C && A == T);
-    bool f64r_case = (A == rocsparse_datatype_f64_r && A == B && A == C && A == T);
-    bool f32c_case = (A == rocsparse_datatype_f32_c && A == B && A == C && A == T);
-    bool f64c_case = (A == rocsparse_datatype_f64_c && A == B && A == C && A == T);
+    const bool f16r_case = (A == rocsparse_datatype_f16_r && A == B && A == C && A == T);
+    const bool f32r_case = (A == rocsparse_datatype_f32_r && A == B && A == C && A == T);
+    const bool f64r_case = (A == rocsparse_datatype_f64_r && A == B && A == C && A == T);
+    const bool f32c_case = (A == rocsparse_datatype_f32_c && A == B && A == C && A == T);
+    const bool f64c_case = (A == rocsparse_datatype_f64_c && A == B && A == C && A == T);
 
-    bool f16r_f16r_f32r_f32r_case
+    const bool f16r_f16r_f32r_f32r_case
         = (A == rocsparse_datatype_f16_r && B == rocsparse_datatype_f16_r
            && C == rocsparse_datatype_f32_r && T == rocsparse_datatype_f32_r);
+
+    const bool f16r_f16r_f16r_f32r_case
+        = (A == rocsparse_datatype_f16_r && B == rocsparse_datatype_f16_r
+           && C == rocsparse_datatype_f16_r && T == rocsparse_datatype_f32_r);
 
 #define DISPATCH_TEST(ITYPE, JTYPE)                                               \
     if(f16r_case)                                                                 \
@@ -943,6 +947,10 @@ auto rocsparse_ijabct_sddmm_dispatch(const Arguments& arg)
     else if(f16r_f16r_f32r_f32r_case)                                             \
     {                                                                             \
         return TEST<ITYPE, JTYPE, _Float16, _Float16, float, float>{}(arg);       \
+    }                                                                             \
+    else if(f16r_f16r_f16r_f32r_case)                                             \
+    {                                                                             \
+        return TEST<ITYPE, JTYPE, _Float16, _Float16, _Float16, float>{}(arg);    \
     }
 
     switch(I)
