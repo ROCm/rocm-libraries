@@ -101,6 +101,8 @@ For more information, see :doc:`Use Stream-K with hipBLASLt <../how-to/how-to-us
         | Controls hipBLASLt kernel selection strategy for GEMM operations.
       - | 0: Default (standard tuned libraries, no Stream-K)
         | 2: Stream-K (enables Stream-K library for consistent performance)
+        | This variable has no effect on the AMD Instinct™ MI350 series. Stream-K is always used.
+
 
     * - | ``TENSILE_STREAMK_DYNAMIC_GRID``
         | Controls Stream-K dynamic grid size selection behavior.
