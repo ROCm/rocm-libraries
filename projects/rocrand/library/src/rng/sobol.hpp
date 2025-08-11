@@ -48,6 +48,7 @@
 #include <cstdint>
 #include <type_traits>
 #include <utility>
+#include <iostream>
 
 namespace rocrand_impl::host
 {
@@ -450,6 +451,7 @@ private:
         {
             return status;
         }
+
         const hipError_t error = hipMemcpy(*scramble_constants,
                                            get_scramble_constants_ptr(),
                                            sizeof(constant_type) * SCRAMBLED_SOBOL_DIM,
@@ -494,27 +496,17 @@ private:
     template<bool IsDevice = system_type::is_device(), bool IsScrambled = Scrambled>
     std::enable_if_t<IsDevice && IsScrambled> deallocate()
     {
-        hipError_t error;
-
-        error = hipFree(m_direction_vectors);
-        if(error != hipErrorInvalidValue)
+        hipError_t m_dir_error = hipFree(m_direction_vectors);
+        hipError_t m_scram_error = hipFree(m_scramble_constants);
+        if((m_dir_error != hipErrorInvalidValue) && (m_scram_error != hipErrorInvalidValue))
         {
             // hipErrorInvalidValue is thrown when hipFree tries to call an already
             // deallocated section of memory. This may occur when 'hipDeviceReset()' is
             // used before the current class' deconstructor is called.
             return;
         }
-        ROCRAND_HIP_FATAL_ASSERT(error);
-
-        error = hipFree(m_scramble_constants);
-        if(error != hipErrorInvalidValue)
-        {
-            // hipErrorInvalidValue is thrown when hipFree tries to call an already
-            // deallocated section of memory. This may occur when 'hipDeviceReset()' is
-            // used before the current class' deconstructor is called.
-            return;
-        }
-        ROCRAND_HIP_FATAL_ASSERT(error);
+        ROCRAND_HIP_FATAL_ASSERT(m_dir_error);
+        ROCRAND_HIP_FATAL_ASSERT(m_scram_error);
     }
 };
 
@@ -539,12 +531,13 @@ public:
                              hipStream_t        stream = 0)
         : base_type(order, offset, stream)
     {
+
         rocrand_status status = get_constants().get_direction_vectors(&m_direction_vectors);
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             throw status;
         }
-        status = get_constants().get_direction_vectors(&m_scramble_constants);
+        status = get_constants().get_scramble_constants(&m_scramble_constants);
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             throw status;
