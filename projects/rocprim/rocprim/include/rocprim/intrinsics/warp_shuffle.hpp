@@ -81,7 +81,7 @@ warp_shuffle_op(const T& input, ShuffleOp&& op)
 
 }
 
-template<class T, int dpp_ctrl, int row_mask = 0xf, int bank_mask = 0xf, bool bound_ctrl = false>
+template<class T, int dpp_ctrl, int row_mask = 0xf, int bank_mask = 0xf, bool bound_ctrl = true>
 ROCPRIM_DEVICE ROCPRIM_INLINE
 T warp_move_dpp(const T& input)
 {
