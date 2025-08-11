@@ -219,7 +219,7 @@ target_include_directories(rocsparse-bench PRIVATE $<BUILD_INTERFACE:${CMAKE_CUR
 apply_omp_settings(rocsparse-bench)
 
 # Target link libraries
-target_link_libraries(rocsparse-bench PRIVATE roc::rocsparse hip::host hip::device ${COMMON_LINK_LIBS})
+target_link_libraries(rocsparse-bench PRIVATE roc::rocsparse hip::host hip::device ${ROCSPARSE_CLIENT_LIBS})
 if (rocsparseio_FOUND)
   target_link_libraries(rocsparse-bench PRIVATE roc::rocsparseio)
 endif()

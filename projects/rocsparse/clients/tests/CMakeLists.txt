@@ -404,10 +404,10 @@ target_compile_options(rocsparse-test PRIVATE -ffp-contract=on -mfma -Wno-deprec
 target_include_directories(rocsparse-test PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
 
 # Add OpenMP if available
-apply_omp_settings(rocsparse-bench)
+apply_omp_settings(rocsparse-test)
 
 # Target link libraries
-target_link_libraries(rocsparse-test PRIVATE GTest::gtest roc::rocsparse hip::host hip::device ${COMMON_LINK_LIBS})
+target_link_libraries(rocsparse-test PRIVATE GTest::gtest roc::rocsparse hip::host hip::device ${ROCSPARSE_CLIENT_LIBS})
 
 if (NOT WIN32)
   if (BUILD_WITH_ROCTX)
