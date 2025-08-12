@@ -23,8 +23,8 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/device/device_partition.hpp"
 #include "identity_iterator.hpp"
+#include <hipcub/device/device_partition.hpp>
 
 #include "test_utils_data_generation.hpp"
 

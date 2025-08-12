@@ -22,8 +22,8 @@
 
 #include "experimental/sparse_matrix.hpp"
 
-#include "hipcub/device/device_spmv.hpp"
-#include "hipcub/util_allocator.hpp"
+#include <hipcub/device/device_spmv.hpp>
+#include <hipcub/util_allocator.hpp>
 
 #include "common_test_header.hpp"
 #include "test_utils_assertions.hpp"

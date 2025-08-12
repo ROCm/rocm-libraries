@@ -23,7 +23,7 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/util_type.hpp"
+#include <hipcub/util_type.hpp>
 
 template<class Value>
 struct params

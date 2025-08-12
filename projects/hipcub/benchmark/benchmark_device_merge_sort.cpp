@@ -23,8 +23,8 @@
 #include "common_benchmark_header.hpp"
 
 // HIP API
-#include "hipcub/device/device_merge_sort.hpp"
-#include "hipcub/hipcub.hpp"
+#include <hipcub/device/device_merge_sort.hpp>
+#include <hipcub/hipcub.hpp>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 32 << 20;

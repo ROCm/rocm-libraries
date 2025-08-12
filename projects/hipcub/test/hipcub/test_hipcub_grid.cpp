@@ -29,16 +29,15 @@
 
 #include "common_test_header.hpp"
 
-#include "hipcub/block/block_reduce.hpp"
-#include "hipcub/thread/thread_operators.hpp"
+#include <hipcub/block/block_reduce.hpp>
+#include <hipcub/thread/thread_operators.hpp>
 
-#include "hipcub/grid/grid_barrier.hpp"
-#include "hipcub/grid/grid_even_share.hpp"
-#include "hipcub/grid/grid_queue.hpp"
+#include <hipcub/grid/grid_barrier.hpp>
+#include <hipcub/grid/grid_even_share.hpp>
+#include <hipcub/grid/grid_queue.hpp>
 
-__global__ void KernelGridBarrier(
-    hipcub::GridBarrier global_barrier,
-    int iterations)
+__global__
+void KernelGridBarrier(hipcub::GridBarrier global_barrier, int iterations)
 {
     for (int i = 0; i < iterations; i++)
     {

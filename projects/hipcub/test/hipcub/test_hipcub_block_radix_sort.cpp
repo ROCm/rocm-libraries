@@ -23,11 +23,11 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_radix_sort.hpp"
-#include "hipcub/block/block_store.hpp"
 #include "test_utils_custom_test_types.hpp"
 #include "test_utils_sort_comparator.hpp"
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_radix_sort.hpp>
+#include <hipcub/block/block_store.hpp>
 
 #include <cstdint>
 

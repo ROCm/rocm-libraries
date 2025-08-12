@@ -29,9 +29,9 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/device/device_histogram.hpp"
-#include "hipcub/iterator/counting_input_iterator.hpp"
-#include "hipcub/iterator/transform_input_iterator.hpp"
+#include <hipcub/device/device_histogram.hpp>
+#include <hipcub/iterator/counting_input_iterator.hpp>
+#include <hipcub/iterator/transform_input_iterator.hpp>
 
 // rows, columns, (row_stride - columns * Channels)
 std::vector<std::tuple<size_t, size_t, size_t>> get_dims()

@@ -22,9 +22,9 @@
 
 #include "common_benchmark_header.hpp"
 
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_run_length_decode.hpp"
-#include "hipcub/block/block_store.hpp"
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_run_length_decode.hpp>
+#include <hipcub/block/block_store.hpp>
 
 #ifndef DEFAULT_N
 const size_t DEFAULT_N = 1024 * 1024 * 32;

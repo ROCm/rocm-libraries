@@ -31,11 +31,11 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/block/block_exchange.hpp"
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_radix_rank.hpp"
-#include "hipcub/block/block_store.hpp"
-#include "hipcub/util_type.hpp"
+#include <hipcub/block/block_exchange.hpp>
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_radix_rank.hpp>
+#include <hipcub/block/block_store.hpp>
+#include <hipcub/util_type.hpp>
 
 #include <bitset>
 #include <numeric>
