@@ -37,10 +37,14 @@
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_data_bilinear.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_data_scale.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_backward_data.hpp>
+#include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/conv/heuristics/ai_candidate_selection.hpp>
+#include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS_AI_HEUR)
 
 namespace miopen {
 namespace solver {
@@ -180,21 +184,21 @@ struct CKArgs
         }
 
         filter_strides   = {ProblemInterpreter::GetAdjustedConvolutionStrideD(problem),
-                          ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
-                          ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
+                            ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
+                            ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
         filter_dilations = {ProblemInterpreter::GetAdjustedConvolutionDilationD(problem),
                             ProblemInterpreter::GetAdjustedConvolutionDilationH(problem),
                             ProblemInterpreter::GetAdjustedConvolutionDilationW(problem)};
         lPadding         = {ProblemInterpreter::GetInputLeftPadD(problem),
-                    ProblemInterpreter::GetInputLeftPadH(problem),
-                    ProblemInterpreter::GetInputLeftPadW(problem)};
+                            ProblemInterpreter::GetInputLeftPadH(problem),
+                            ProblemInterpreter::GetInputLeftPadW(problem)};
         rPadding         = {ProblemInterpreter::GetAdjustedInputRightPadD(problem),
-                    ProblemInterpreter::GetAdjustedInputRightPadH(problem),
-                    ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
+                            ProblemInterpreter::GetAdjustedInputRightPadH(problem),
+                            ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
     }
 
-    CKArgs(const CKArgs&) = default;
-    CKArgs(CKArgs&&)      = default;
+    CKArgs(const CKArgs&)            = default;
+    CKArgs(CKArgs&&)                 = default;
     CKArgs& operator=(const CKArgs&) = default;
 
     template <typename ConvPtr>
@@ -402,12 +406,87 @@ bool ConvHipImplicitGemm3DGroupBwdXdlops::CheckCKApplicability(
 #endif
 
 void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
-    [[maybe_unused]] const ProblemDescription& problem)
+    const miopen::ExecutionContext& ctx, const ProblemDescription& problem)
 {
     index     = 0;
     kernel_id = "";
+    split_k   = 0; // split_k is not used in this solver, but it is required by the interface
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+    if(&ctx != &GetDummyCtx() &&
+       !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_BWD_XDLOPS_AI_HEUR))
+    {
+        bool ai_success         = false;
+        std::string solver_name = "ConvHipImplicitGemm3DGroupBwdXdlops";
+
+        switch(problem.GetInDataType())
+        {
+        case miopenHalf: {
+            auto fill_valid_kernels =
+                [=](const miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
+                return miopen::solver::FillValidKernelsIDs<DeviceOpGBwdDefaultPtrs<ck::half_t>,
+                                                           CKArgs<ck::half_t>>(problem);
+            };
+            ai_success =
+                miopen::solver::conv::RunParameterPredictionModel<ck::half_t>(ctx,
+                                                                              problem,
+                                                                              valid_kernels,
+                                                                              index,
+                                                                              split_k,
+                                                                              kernel_id,
+                                                                              fill_valid_kernels,
+                                                                              solver_name);
+            break;
+        }
+        case miopenFloat: {
+            auto fill_valid_kernels =
+                [=](const miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
+                return miopen::solver::FillValidKernelsIDs<DeviceOpGBwdDefaultPtrs<float>,
+                                                           CKArgs<float>>(problem);
+            };
+            ai_success =
+                miopen::solver::conv::RunParameterPredictionModel<float>(ctx,
+                                                                         problem,
+                                                                         valid_kernels,
+                                                                         index,
+                                                                         split_k,
+                                                                         kernel_id,
+                                                                         fill_valid_kernels,
+                                                                         solver_name);
+            break;
+        }
+        case miopenBFloat16: {
+            auto fill_valid_kernels =
+                [=](const miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
+                return miopen::solver::FillValidKernelsIDs<DeviceOpGBwdDefaultPtrs<ck::bhalf_t>,
+                                                           CKArgs<ck::bhalf_t>>(problem);
+            };
+            ai_success =
+                miopen::solver::conv::RunParameterPredictionModel<ck::bhalf_t>(ctx,
+                                                                               problem,
+                                                                               valid_kernels,
+                                                                               index,
+                                                                               split_k,
+                                                                               kernel_id,
+                                                                               fill_valid_kernels,
+                                                                               solver_name);
+            break;
+        }
+        default: break;
+        }
+
+        if(ai_success)
+        {
+            MIOPEN_LOG_I("AI heuristics successfully selected kernel: " << kernel_id);
+            return;
+        }
+        else
+        {
+            MIOPEN_LOG_I("AI heuristics failed, falling back to default initialization");
+        }
+    }
+#endif
     switch(problem.GetInDataType())
     {
     case miopenHalf: Init<ck::half_t>(problem); break;
@@ -428,7 +507,7 @@ bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::SetNextValue(
 {
     if(valid_kernels.empty())
     {
-        HeuristicInit(problem);
+        HeuristicInit(GetDummyCtx(), problem);
         assert(!valid_kernels.empty());
         return true;
     }
@@ -475,10 +554,10 @@ bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::operator==(
 
 PerformanceConfigHipImplicitGemm3DGroupBwdXdlops
 ConvHipImplicitGemm3DGroupBwdXdlops::GetDefaultPerformanceConfig(
-    const ExecutionContext&, const ProblemDescription& problem) const
+    const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
     PerformanceConfigHipImplicitGemm3DGroupBwdXdlops pp;
-    pp.HeuristicInit(problem);
+    pp.HeuristicInit(ctx, problem);
     return pp;
 }
 

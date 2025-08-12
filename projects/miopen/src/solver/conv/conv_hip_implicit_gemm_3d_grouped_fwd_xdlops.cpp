@@ -37,10 +37,13 @@
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_forward_bilinear.hpp>
 #include <ck/library/tensor_operation_instance/gpu/grouped_convolution_forward_scale.hpp>
 #include "ck/library/tensor_operation_instance/gpu/grouped_convolution_forward.hpp"
+#include <miopen/conv/heuristics/ai_heuristics.hpp>
+#include <miopen/conv/heuristics/ai_candidate_selection.hpp>
+#include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
-MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE);
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR)
 
 namespace miopen {
 namespace solver {
@@ -174,21 +177,21 @@ struct CKArgs
         }
 
         filter_strides   = {ProblemInterpreter::GetAdjustedConvolutionStrideD(problem),
-                          ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
-                          ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
+                            ProblemInterpreter::GetAdjustedConvolutionStrideH(problem),
+                            ProblemInterpreter::GetAdjustedConvolutionStrideW(problem)};
         filter_dilations = {ProblemInterpreter::GetAdjustedConvolutionDilationD(problem),
                             ProblemInterpreter::GetAdjustedConvolutionDilationH(problem),
                             ProblemInterpreter::GetAdjustedConvolutionDilationW(problem)};
         lPadding         = {ProblemInterpreter::GetInputLeftPadD(problem),
-                    ProblemInterpreter::GetInputLeftPadH(problem),
-                    ProblemInterpreter::GetInputLeftPadW(problem)};
+                            ProblemInterpreter::GetInputLeftPadH(problem),
+                            ProblemInterpreter::GetInputLeftPadW(problem)};
         rPadding         = {ProblemInterpreter::GetAdjustedInputRightPadD(problem),
-                    ProblemInterpreter::GetAdjustedInputRightPadH(problem),
-                    ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
+                            ProblemInterpreter::GetAdjustedInputRightPadH(problem),
+                            ProblemInterpreter::GetAdjustedInputRightPadW(problem)};
     }
 
-    CKArgs(const CKArgs&)     = default;
-    CKArgs(CKArgs&&) noexcept = default;
+    CKArgs(const CKArgs&)            = default;
+    CKArgs(CKArgs&&) noexcept        = default;
     CKArgs& operator=(const CKArgs&) = default;
 
     template <typename ConvPtr>
@@ -361,69 +364,7 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::Init(const ProblemDescrip
             FillValidKernelsIDs<DeviceOpGFwdDefaultPtrs<DataType>, CKArgs<DataType>>(problem);
         break;
     }
-    index = 0;
-
-    auto find_kernel = [&valid_kernels = std::as_const(valid_kernels)](
-                           const std::size_t& index, const std::string& kernel_id) -> std::size_t {
-        // Check if valid_kernels[index] equals kernel_id.
-        if(index < valid_kernels.size() && valid_kernels[index] == kernel_id)
-            return index;
-
-        // Linear search for kernel_id in valid_kernels.
-        auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_id);
-        if(it != valid_kernels.end())
-            return static_cast<std::size_t>(it - valid_kernels.begin());
-
-        // Not found: return 0
-        MIOPEN_LOG_E("Not found :" << index << "-" << kernel_id);
-        return 0;
-    };
-
-    // for BF16 and FP16
-    index = env::value(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE);
-    if(index == 0 && problem.GetInChannels() > 8 && problem.GetGroupCount() == 1 &&
-       problem.GetAlphaBetaCase() == DEFAULT)
-    {
-        int K = problem.GetOutChannels();
-        if(problem.GetInDataType() == miopenBFloat16)
-        {
-            if(K < 64)
-            {
-                index =
-                    find_kernel(38,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
-                                "<256, 64, 64, 64, Default, 32, 32, 1, 1, 8, 8, 8, 1, 1, "
-                                "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
-            }
-            else
-            {
-                index =
-                    find_kernel(30,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
-                                "<256, 128, 128, 64, Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, "
-                                "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
-            }
-        }
-        else if(problem.GetInDataType() == miopenHalf)
-        {
-            if(K < 64)
-            {
-                index =
-                    find_kernel(57,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
-                                "<64, 16, 16, 128, Default, 16, 16, 1, 1, 8, 8, 4, 1, 1, "
-                                "BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v1>");
-            }
-            else
-            {
-                index =
-                    find_kernel(31,
-                                "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
-                                "<256, 128, 128, 64, Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, "
-                                "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
-            }
-        }
-    }
+    index     = 0;
     kernel_id = valid_kernels[index];
 }
 
@@ -460,12 +401,86 @@ bool ConvHipImplicitGemm3DGroupFwdXdlops::CheckCKApplicability(
 #endif
 
 void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
-    [[maybe_unused]] const ProblemDescription& problem)
+    const miopen::ExecutionContext& ctx, const ProblemDescription& problem)
 {
     index     = 0;
     kernel_id = "";
+    split_k   = 0; // split_k is not used in this solver, but it is required by the interface
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+#if MIOPEN_ENABLE_AI_KERNEL_TUNING
+    if(&ctx != &GetDummyCtx() &&
+       !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR))
+    {
+        bool ai_success         = false;
+        std::string solver_name = "ConvHipImplicitGemm3DGroupFwdXdlops";
+
+        switch(problem.GetInDataType())
+        {
+        case miopenHalf: {
+            auto fill_valid_kernels =
+                [=](const miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
+                return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdDefaultPtrs<ck::half_t>,
+                                                           CKArgs<ck::half_t>>(problem);
+            };
+            ai_success =
+                miopen::solver::conv::RunParameterPredictionModel<ck::half_t>(ctx,
+                                                                              problem,
+                                                                              valid_kernels,
+                                                                              index,
+                                                                              split_k,
+                                                                              kernel_id,
+                                                                              fill_valid_kernels,
+                                                                              solver_name);
+            break;
+        }
+        case miopenFloat: {
+            auto fill_valid_kernels =
+                [=](const miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
+                return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdDefaultPtrs<float>,
+                                                           CKArgs<float>>(problem);
+            };
+            ai_success =
+                miopen::solver::conv::RunParameterPredictionModel<float>(ctx,
+                                                                         problem,
+                                                                         valid_kernels,
+                                                                         index,
+                                                                         split_k,
+                                                                         kernel_id,
+                                                                         fill_valid_kernels,
+                                                                         solver_name);
+            break;
+        }
+        case miopenBFloat16: {
+            auto fill_valid_kernels =
+                [=](const miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
+                return miopen::solver::FillValidKernelsIDs<DeviceOpGFwdDefaultPtrs<ck::bhalf_t>,
+                                                           CKArgs<ck::bhalf_t>>(problem);
+            };
+            ai_success =
+                miopen::solver::conv::RunParameterPredictionModel<ck::bhalf_t>(ctx,
+                                                                               problem,
+                                                                               valid_kernels,
+                                                                               index,
+                                                                               split_k,
+                                                                               kernel_id,
+                                                                               fill_valid_kernels,
+                                                                               solver_name);
+            break;
+        }
+        default: break;
+        }
+        if(ai_success)
+        {
+            MIOPEN_LOG_I("AI heuristics successfully selected kernel: " << kernel_id);
+            return;
+        }
+        else
+        {
+            MIOPEN_LOG_I("AI heuristics failed, falling back to default initialization");
+        }
+    }
+#endif
     switch(problem.GetInDataType())
     {
     case miopenHalf: Init<ck::half_t>(problem); break;
@@ -486,13 +501,8 @@ bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::SetNextValue(
 {
     if(valid_kernels.empty())
     {
-        HeuristicInit(problem);
+        HeuristicInit(GetDummyCtx(), problem);
         assert(!valid_kernels.empty());
-        if(index != 0)
-        {
-            index     = 0;
-            kernel_id = valid_kernels[index];
-        }
         return true;
     }
     if((index + 1) < valid_kernels.size())
@@ -538,10 +548,10 @@ bool PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::operator==(
 
 PerformanceConfigHipImplicitGemm3DGroupFwdXdlops
 ConvHipImplicitGemm3DGroupFwdXdlops::GetDefaultPerformanceConfig(
-    const ExecutionContext&, const ProblemDescription& problem) const
+    const ExecutionContext& ctx, const ProblemDescription& problem) const
 {
     PerformanceConfigHipImplicitGemm3DGroupFwdXdlops pp;
-    pp.HeuristicInit(problem);
+    pp.HeuristicInit(ctx, problem);
     return pp;
 }
 
@@ -606,34 +616,6 @@ bool ConvHipImplicitGemm3DGroupFwdXdlops::IsApplicable(
     }
 #endif
     return false;
-}
-
-float ConvHipImplicitGemm3DGroupFwdXdlops::GetWti(
-    const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
-{
-    decltype(auto) xDesc = problem.GetIn();
-    decltype(auto) wDesc = problem.GetWeights();
-
-    if(xDesc.GetType() == miopenHalf || xDesc.GetType() == miopenBFloat16)
-    {
-        std::size_t in_n, in_c, w_x, w_y, w_d;
-        std::tie(in_n, in_c)    = tie_pick<0, 1>()(xDesc.GetLengths());
-        std::tie(w_x, w_y, w_d) = tie_pick<2, 3, 4>()(wDesc.GetLengths());
-        // For cases where the filter shape is not 1x1x1 and the input channel (in_c) is greater
-        // than 8, CK's implementation offers better performance.
-        if((w_x == 1 && w_y == 1 && w_d == 1) == false)
-        {
-            if(in_c < 8 && in_n < 4)
-            {
-                return 0.00002; // force disable
-            }
-            else
-            {
-                return 1.0; // force enable
-            }
-        }
-    }
-    return 0.02f;
 }
 
 ConvSolution ConvHipImplicitGemm3DGroupFwdXdlops::GetSolution(
