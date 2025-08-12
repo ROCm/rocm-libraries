@@ -895,9 +895,6 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysValuesWithValidItems)
     T*           host_keys_input   = new T[size];
     T*           host_values_input = new T[size];
 
-    T* host_keys_expected   = new T[size];
-    T* host_values_expected = new T[size];
-
     T* device_keys_input;
     T* device_values_input;
     HIP_CHECK(hipMalloc(&device_keys_input, sizeof(T) * size));

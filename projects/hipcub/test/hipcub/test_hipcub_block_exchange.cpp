@@ -1103,7 +1103,6 @@ TYPED_TEST(HipcubBlockExchangeTests, StripedToBlockedOneParam)
     HIP_CHECK(hipSetDevice(device_id));
 
     using type        = typename TestFixture::params::type;
-    using output_type = typename TestFixture::params::output_type;
 
     constexpr size_t block_size       = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
@@ -1196,7 +1195,6 @@ TYPED_TEST(HipcubBlockExchangeTests, BlockedToStripedOneParam)
     HIP_CHECK(hipSetDevice(device_id));
 
     using type        = typename TestFixture::params::type;
-    using output_type = typename TestFixture::params::output_type;
 
     constexpr size_t block_size       = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
@@ -1843,7 +1841,6 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedGuardedNoOutputParam)
         device_input,
         device_ranks);
 
-    type* host_output = new type[size];
     HIP_CHECK(hipMemcpy(host_input, device_input, sizeof(type) * size, hipMemcpyDeviceToHost));
 
     for(size_t i = 0; i < size; i++)
