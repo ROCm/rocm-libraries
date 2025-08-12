@@ -48,7 +48,6 @@
 #include <cstdint>
 #include <type_traits>
 #include <utility>
-#include <iostream>
 
 namespace rocrand_impl::host
 {
@@ -537,7 +536,7 @@ public:
         {
             throw status;
         }
-        status = get_constants().get_scramble_constants(&m_scramble_constants);
+        status = get_constants().get_direction_vectors(&m_scramble_constants);
         if(status != ROCRAND_STATUS_SUCCESS)
         {
             throw status;
