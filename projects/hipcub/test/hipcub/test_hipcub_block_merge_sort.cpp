@@ -23,9 +23,9 @@
 #include "common_test_header.hpp"
 
 // hipcub API
-#include "hipcub/block/block_load.hpp"
-#include "hipcub/block/block_merge_sort.hpp"
-#include "hipcub/block/block_store.hpp"
+#include <hipcub/block/block_load.hpp>
+#include <hipcub/block/block_merge_sort.hpp>
+#include <hipcub/block/block_store.hpp>
 
 #include <algorithm>
 #include <string>

@@ -27,8 +27,8 @@
 #include "test_utils_thread_operators.hpp"
 
 // hipcub API
-#include "hipcub/device/device_reduce.hpp"
-#include "hipcub/iterator/constant_input_iterator.hpp"
+#include <hipcub/device/device_reduce.hpp>
+#include <hipcub/iterator/constant_input_iterator.hpp>
 
 #include <bitset>
 
