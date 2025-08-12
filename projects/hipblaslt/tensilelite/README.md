@@ -65,7 +65,7 @@ TENSILELITE_CLIENT_ARGS="--build-type Debug --gpu-targets gfx90a --clean" tox -e
 * `TENSILELITE_ENABLE_HOST`: Enables generation of tensilelite host (default: `ON`)
 * `TENSILELITE_ENABLE_CLIENT`: Enables generation of tensilelite client application (default: `OFF`)
 * `TENSILELITE_ENABLE_AUTOBUILD`: Build the tensilelite host library tests (default: `OFF`)
-* `TENSILELITE_BUILD_TESTING`: Build tensilelite host library tests (default: `ON`)
+* `TENSILELITE_BUILD_TESTING`: Build tensilelite host library tests (default: `OFF`)
 * `GPU_TARGETS:` Semicolon separated list of gfx targets to build
 
 ## How to Rebuild Object Codes Directly from Assembly
