@@ -110,11 +110,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
     Variable global_idx{"global_idx", "unsigned int"};
     Variable transpose_idx{"transpose_idx", "unsigned int"};
 
-    Variable len_1_2{"len_1_2", "unsigned int"};
-    Variable len_1_2_3{"len_1_2_3", "unsigned int"};
-    Variable len_pp_factors_curr_prod{"len_pp_factors_curr_prod", "unsigned int"};
-    Variable len_pp_factors_other_prod{"len_pp_factors_other_prod", "unsigned int"};
-
     std::vector<unsigned int> launcher_lengths() override
     {
         return params.parent_length;
@@ -469,12 +464,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
             tmp_stmts += StoreGlobal{
                 buf,
                 CallExpr{"local_transpose_pp_length" + std::to_string(length) + "_device",
-                         {offset_tile_wbuf(i),
-                          lengths,
-                          len_1_2,
-                          len_1_2_3,
-                          len_pp_factors_curr_prod,
-                          len_pp_factors_other_prod}},
+                         {offset_tile_wbuf(i)}},
                 lds_complex[offset_tile_rlds(i)]};
 
         stmts += CommentLines{
@@ -696,12 +686,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
             = "local_transpose_pp_length" + std::to_string(length) + "_device";
 
         Function f{function_name};
-        f.arguments   = ArgumentList{global_idx,
-                                   lengths,
-                                   len_1_2,
-                                   len_1_2_3,
-                                   len_pp_factors_curr_prod,
-                                   len_pp_factors_other_prod};
+        f.arguments   = ArgumentList{global_idx};
         f.return_type = "unsigned int";
         f.qualifier   = "__device__";
 
