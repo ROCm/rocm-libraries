@@ -605,6 +605,25 @@ void rank_with_prefix_sum_kernel(const KeyType* keys_input,
     }
 }
 
+#if defined(_GLIBCXX_RELEASE) && (GLIBCXX_RELEASE < 9)
+
+/**
+ * name this function fall_back_exclusive_scan to prevent
+ * ambiguous name error 
+ */
+template <typename It, typename OutIt, typename T>
+void fall_back_exclusive_scan(It first, It last, OutIt out, T init)
+{
+    // Fallback implementation for exclusive scan if gcc version is < 9
+    for (; first != last; ++first)
+    {
+        *out++ = init;
+        init += *first;
+    }
+}
+
+#endif // (_GLIBCXX_RELEASE) && (GLIBCXX_RELEASE < 9)
+
 template<typename TestFixture, RadixRankAlgorithm Algorithm>
 void test_radix_rank_with_prefix_sum_output()
 {
@@ -703,10 +722,17 @@ void test_radix_rank_with_prefix_sum_output()
 
                     ++histogram[bit_rep];
                 }
-                std::exclusive_scan(histogram.begin(),
-                                    histogram.end(),
-                                    pfs_expected.begin() + pfs_offset,
-                                    0);
+                #if defined(_GLIBCXX_RELEASE) && (GLIBCXX_RELEASE >= 9)
+                    std::exclusive_scan(histogram.begin(),
+                                        histogram.end(),
+                                        pfs_expected.begin() + pfs_offset,
+                                        0);
+                #else
+                    fall_back_exclusive_scan(histogram.begin(),
+                                        histogram.end(),
+                                        pfs_expected.begin() + pfs_offset,
+                                        0);
+                #endif
             }
 
             // Preparing device
