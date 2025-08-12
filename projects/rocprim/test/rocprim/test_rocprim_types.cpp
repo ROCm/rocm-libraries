@@ -67,19 +67,19 @@ TYPED_TEST(DoubleBufferTest, TestDoubleBuffer)
 
     // Test default construction
     rocprim::double_buffer<T> db_default;
-    test_utils::assert_eq(db_default.current(), static_cast<T*>(nullptr));
-    test_utils::assert_eq(db_default.alternate(), static_cast<T*>(nullptr));
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(db_default.current(), static_cast<T*>(nullptr)));
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(db_default.alternate(), static_cast<T*>(nullptr)));
 
     // Test current buffer
-    test_utils::assert_eq(this->db.current(), &this->value1);
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(this->db.current(), &this->value1));
 
     // Test alternate buffer
-    test_utils::assert_eq(this->db.alternate(), &this->value2);
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(this->db.alternate(), &this->value2));
 
     // Test swap buffers
     this->db.swap();
-    test_utils::assert_eq(this->db.current(), &this->value2);
-    test_utils::assert_eq(this->db.alternate(), &this->value1);
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(this->db.current(), &this->value2));
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(this->db.alternate(), &this->value1));
 }
 
 template<typename T>
@@ -99,18 +99,18 @@ TYPED_TEST(FutureValueTest, TestFutureValue)
 
     // Test const future value
     const auto cfv = this->fv;
-    test_utils::assert_eq(static_cast<T>(cfv), this->value);
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(static_cast<T>(cfv), this->value));
 
     // Test value access
     this->value = get_random_full_range<T>();
-    test_utils::assert_eq(static_cast<TypeParam>(this->fv), this->value);
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(static_cast<TypeParam>(this->fv), this->value));
 
     // Test plain input value
     T val = get_random_full_range<T>();
-    test_utils::assert_eq(rocprim::detail::get_input_value(val), val);
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(rocprim::detail::get_input_value(val), val));
 
     // Test future input value
-    test_utils::assert_eq(rocprim::detail::get_input_value(this->fv), this->value);
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(rocprim::detail::get_input_value(this->fv), this->value));
 }
 
 template<class K, class V>
@@ -150,8 +150,8 @@ TYPED_TEST(KeyValuePairTest, TestKeyValuePair)
     kv_type kv2{k, v};
 
     // Test value access
-    test_utils::assert_eq(kv1.key, k);
-    test_utils::assert_eq(kv1.value, v);
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(kv1.key, k));
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(kv1.value, v));
 
     K k_diff;
     V v_diff;
@@ -208,8 +208,8 @@ TYPED_TEST(UninitializedArrayTest, EmplaceConstructsCorrectValue)
     {
         V  val = get_random_full_range<V>();
         V& ref = this->ua.emplace(i, val); // Emplace construction
-        test_utils::assert_eq(ref, val); // Same value by reference
-        test_utils::assert_eq(this->ua.get_unsafe_array()[i], val); // Same value in array
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(ref, val)); // Same value by reference
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(this->ua.get_unsafe_array()[i], val)); // Same value in array
     }
 
     // Test memory consistency
@@ -217,8 +217,8 @@ TYPED_TEST(UninitializedArrayTest, EmplaceConstructsCorrectValue)
     this->ua.emplace(0, v0);
 
     auto& arr = this->ua.get_unsafe_array();
-    test_utils::assert_eq(&arr[0], &this->ua.get_unsafe_array()[0]); // Same address
-    test_utils::assert_eq(arr[0], v0); // Same content
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(&arr[0], &this->ua.get_unsafe_array()[0])); // Same address
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(arr[0], v0)); // Same content
 
     for(unsigned int i = 0; i < TestFixture::Count; ++i)
     {
@@ -230,6 +230,6 @@ TYPED_TEST(UninitializedArrayTest, EmplaceConstructsCorrectValue)
     auto&                         arr_moved = moved.get_unsafe_array();
     for(unsigned int i = 0; i < TestFixture::Count; ++i)
     {
-        test_utils::assert_eq(arr_moved[i], V(i + 1));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(arr_moved[i], V(i + 1)));
     }
 }

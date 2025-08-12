@@ -41,6 +41,9 @@ Definitions:
     - { transA: C, transB: N }
     - { transA: C, transB: C }
 
+  - &swizzleA_strideA_support
+    - {}
+    - { stride_a: 0 }
 
 Tests:
 - name: matmul_bad_arg
@@ -850,6 +853,7 @@ Tests:
   category: pre_checkin
   function:
     matmul: *real_precisions_swizzleA_support
+  arguments: *swizzleA_strideA_support
   M: [128, 129]
   N: [128, 129]
   K: [128, 129]
@@ -867,6 +871,7 @@ Tests:
   category: pre_checkin
   function:
     matmul: *real_precisions_swizzleA_support
+  arguments: *swizzleA_strideA_support
   M: [128, 129]
   N: [128, 129]
   K: [128, 129]

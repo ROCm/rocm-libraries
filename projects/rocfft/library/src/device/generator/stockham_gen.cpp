@@ -21,6 +21,7 @@
 #include <functional>
 using namespace std::placeholders;
 
+#include "../../../../shared/arithmetic.h"
 #include "../../../../shared/precision_type.h"
 #include "generator.h"
 #include "stockham_gen.h"
@@ -47,7 +48,8 @@ struct GeneratedLauncher
     GeneratedLauncher(StockhamKernel&                  kernel,
                       const std::string&               scheme,
                       const std::string&               pp_child_scheme,
-                      const std::vector<unsigned int>& pp_factors,
+                      const std::vector<unsigned int>& pp_factors_curr,
+                      const std::vector<unsigned int>& pp_factors_other,
                       const unsigned int&              pp_current_dim,
                       const unsigned int&              pp_off_dim,
                       bool                             double_precision,
@@ -55,7 +57,8 @@ struct GeneratedLauncher
                       const std::string&               sbrc_transpose_type)
         : scheme(scheme)
         , pp_child_scheme(pp_child_scheme)
-        , pp_factors(pp_factors)
+        , pp_factors_curr(pp_factors_curr)
+        , pp_factors_other(pp_factors_other)
         , pp_current_dim(pp_current_dim)
         , pp_off_dim(pp_off_dim)
         , lengths(kernel.launcher_lengths())
@@ -72,7 +75,8 @@ struct GeneratedLauncher
 
     std::string               scheme;
     std::string               pp_child_scheme;
-    std::vector<unsigned int> pp_factors;
+    std::vector<unsigned int> pp_factors_curr;
+    std::vector<unsigned int> pp_factors_other;
     unsigned int              pp_current_dim;
     unsigned int              pp_off_dim;
     std::vector<unsigned int> lengths;
@@ -127,7 +131,8 @@ struct GeneratedLauncher
         add_member("sbrc_transpose_type", quote_str(sbrc_transpose_type));
         add_member("double_precision", double_precision ? "true" : "false");
         add_member("pp_child_scheme", quote_str(pp_child_scheme));
-        add_member("pp_factors", vec_to_list(pp_factors));
+        add_member("pp_factors_curr", vec_to_list(pp_factors_curr));
+        add_member("pp_factors_other", vec_to_list(pp_factors_other));
         add_member("pp_current_dim", std::to_string(pp_current_dim));
         add_member("pp_off_dim", std::to_string(pp_off_dim));
 
@@ -148,7 +153,8 @@ void make_launcher(const std::vector<unsigned int>& precision_types,
                    const std::vector<LaunchSuffix>& launcher_suffixes,
                    StockhamKernel&                  kernel,
                    const std::string&               pp_child_scheme,
-                   const std::vector<unsigned int>& pp_factors,
+                   const std::vector<unsigned int>& pp_factors_curr,
+                   const std::vector<unsigned int>& pp_factors_other,
                    const unsigned int&              pp_current_dim,
                    const unsigned int&              pp_off_dim,
                    std::vector<GeneratedLauncher>&  generated_launchers)
@@ -160,7 +166,8 @@ void make_launcher(const std::vector<unsigned int>& precision_types,
             generated_launchers.emplace_back(kernel,
                                              launcher.scheme,
                                              pp_child_scheme,
-                                             pp_factors,
+                                             pp_factors_curr,
+                                             pp_factors_other,
                                              pp_current_dim,
                                              pp_off_dim,
                                              precision_type == rocfft_precision_double,
@@ -252,7 +259,8 @@ void stockham_partial_pass_variants(const std::string&               kernel_name
                           {{"pp_stoc", specs1.scheme, "", ""}},
                           kernelRR,
                           "CS_KERNEL_STOCKHAM_PP",
-                          params_1.factors_off_dim,
+                          params_1.pp_factors_curr,
+                          params_1.pp_factors_other,
                           params_1.current_dim,
                           params_1.off_dim,
                           launchers);
@@ -262,7 +270,8 @@ void stockham_partial_pass_variants(const std::string&               kernel_name
                           {{"pp_sbcc", specs2.scheme, "", ""}},
                           kernelCC,
                           "CS_KERNEL_STOCKHAM_PP_BLOCK_CC",
-                          params_2.factors_off_dim,
+                          params_2.pp_factors_curr,
+                          params_2.pp_factors_other,
                           params_2.current_dim,
                           params_2.off_dim,
                           launchers);
@@ -274,7 +283,8 @@ void stockham_partial_pass_variants(const std::string&               kernel_name
                           {{"pp_sbcc", specs1.scheme, "", ""}},
                           kernelCC,
                           "CS_KERNEL_STOCKHAM_PP_BLOCK_CC",
-                          params_1.factors_off_dim,
+                          params_1.pp_factors_curr,
+                          params_1.pp_factors_other,
                           params_1.current_dim,
                           params_1.off_dim,
                           launchers);
@@ -284,7 +294,8 @@ void stockham_partial_pass_variants(const std::string&               kernel_name
                           {{"pp_stoc", specs2.scheme, "", ""}},
                           kernelRR,
                           "CS_KERNEL_STOCKHAM_PP",
-                          params_2.factors_off_dim,
+                          params_2.pp_factors_curr,
+                          params_2.pp_factors_other,
                           params_2.current_dim,
                           params_2.off_dim,
                           launchers);
@@ -335,6 +346,7 @@ void stockham_variants(const std::string&            kernel_name,
                       kernel,
                       "CS_NONE",
                       std::vector<unsigned int>(),
+                      std::vector<unsigned int>(),
                       0,
                       0,
                       launchers);
@@ -346,6 +358,7 @@ void stockham_variants(const std::string&            kernel_name,
                       {{"sbcc", specs.scheme, "", ""}},
                       kernel,
                       "CS_NONE",
+                      std::vector<unsigned int>(),
                       std::vector<unsigned int>(),
                       0,
                       0,
@@ -397,6 +410,7 @@ void stockham_variants(const std::string&            kernel_name,
                       kernel,
                       "CS_NONE",
                       std::vector<unsigned int>(),
+                      std::vector<unsigned int>(),
                       0,
                       0,
                       launchers);
@@ -409,6 +423,7 @@ void stockham_variants(const std::string&            kernel_name,
                       {{"sbcr", specs.scheme, "", ""}},
                       kernel,
                       "CS_NONE",
+                      std::vector<unsigned int>(),
                       std::vector<unsigned int>(),
                       0,
                       0,
@@ -424,6 +439,7 @@ void stockham_variants(const std::string&            kernel_name,
             launchers.emplace_back(fused2d,
                                    specs.scheme,
                                    "CS_NONE",
+                                   std::vector<unsigned int>(),
                                    std::vector<unsigned int>(),
                                    0,
                                    0,
@@ -535,8 +551,7 @@ void validate_pp_length(const StockhamPartialPassParams& pp_params,
                         const std::vector<unsigned int>& factors)
 
 {
-    unsigned int length_curr
-        = std::accumulate(factors.begin(), factors.end(), 1, std::multiplies<unsigned int>());
+    unsigned int length_curr = product(factors.begin(), factors.end());
 
     auto curr_dim = pp_params.current_dim;
     if(length_curr != pp_params.parent_length[curr_dim])
@@ -548,13 +563,12 @@ void validate_pp_length(const StockhamPartialPassParams& pp_params,
 void validate_pp_off_dim_length(const StockhamPartialPassParams& pp_params_1,
                                 const StockhamPartialPassParams& pp_params_2)
 {
-    auto off_factors_all = pp_params_1.factors_off_dim;
+    auto off_factors_all = pp_params_1.pp_factors_curr;
     off_factors_all.insert(off_factors_all.end(),
-                           pp_params_2.factors_off_dim.begin(),
-                           pp_params_2.factors_off_dim.end());
+                           pp_params_2.pp_factors_curr.begin(),
+                           pp_params_2.pp_factors_curr.end());
 
-    unsigned int length_off_dim = std::accumulate(
-        off_factors_all.begin(), off_factors_all.end(), 1, std::multiplies<unsigned int>());
+    unsigned int length_off_dim = product(off_factors_all.begin(), off_factors_all.end());
 
     if(pp_params_1.parent_length[pp_params_1.off_dim]
        != pp_params_2.parent_length[pp_params_2.off_dim])
@@ -575,17 +589,19 @@ void validate_pp_grid_params(const StockhamPartialPassParams& params_1,
         if((params_1.current_dim == 0 && params_2.current_dim == 2)
            || (params_1.current_dim == 2 && params_2.current_dim == 0))
         {
-            // SBRR needs tpb to be at least max(pp_factors),
+            // SBRR needs tpb to be prod(pp_factors),
             // so that it has the required off-dim data in LDS
-            // to perform partial pass
+            // to perform partial passes
             auto tpb_sbrr = (params_1.current_dim == 0 && params_2.current_dim == 2)
                                 ? specs_1.workgroup_size / specs_1.threads_per_transform
                                 : specs_2.workgroup_size / specs_2.threads_per_transform;
-            if(tpb_sbrr < *std::max_element(params_1.factors_off_dim.begin(),
-                                            params_1.factors_off_dim.end()))
+
+            auto prod_factors_off_dim
+                = product(params_1.pp_factors_curr.begin(), params_1.pp_factors_curr.end());
+            if(tpb_sbrr != prod_factors_off_dim)
             {
                 throw std::runtime_error("CS_KERNEL_STOCKHAM_PP requires transform-per-block "
-                                         "to be at least max(pp_factors)");
+                                         "to be prod(pp_factors)");
             }
         }
         // SBCC_PP + SBCC_PP
@@ -720,13 +736,17 @@ int main()
             StockhamGeneratorSpecs specs1(factors1, {}, precisions, workgroup_size[0], scheme);
             specs1.direct_to_from_reg    = direct_to_from_reg[0];
             specs1.threads_per_transform = threads_per_transform[0];
+            specs1.wgs_is_derived        = true;
 
             StockhamGeneratorSpecs specs2(factors2, {}, precisions, workgroup_size[1], scheme);
             specs2.direct_to_from_reg    = direct_to_from_reg[1];
             specs2.threads_per_transform = threads_per_transform[1];
+            specs2.wgs_is_derived        = true;
 
-            StockhamPartialPassParams pp_params_1(parent_length, dims[0], off_dim, pp_factors1);
-            StockhamPartialPassParams pp_params_2(parent_length, dims[1], off_dim, pp_factors2);
+            StockhamPartialPassParams pp_params_1(
+                parent_length, dims[0], off_dim, pp_factors1, pp_factors2);
+            StockhamPartialPassParams pp_params_2(
+                parent_length, dims[1], off_dim, pp_factors2, pp_factors1);
 
             validate_pp_length(pp_params_1, factors1);
             validate_pp_length(pp_params_2, factors2);

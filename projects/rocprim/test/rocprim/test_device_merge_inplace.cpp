@@ -91,7 +91,7 @@ TEST(RocprimDeviceMergeInplaceTests, Basic)
     h_data = d_data.load();
     d_data.free_manually();
 
-    test_utils::assert_eq(h_data, h_expected);
+    ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(h_data, h_expected));
 }
 
 struct small_sizes
