@@ -49,6 +49,11 @@ namespace ai {
 namespace tuning {
 namespace candidate_selection {
 
+struct CandidateSelectionResult
+{
+    int kernel_index; // Index of the original kernel in the input list
+    int split_k;      // The selected split_k value
+};
 // --- CandidateSelectionMetadata ---------------------------------------------
 
 CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
@@ -128,6 +133,15 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
     else
     {
         MIOPEN_THROW("Metadata file does not contain 'kernel_str_mapping' section");
+    }
+
+    if(metadata.contains("split_k_values"))
+    {
+        split_k_values_ = metadata["split_k_values"].get<std::vector<int>>();
+    }
+    else
+    {
+        split_k_values_ = {1}; // Default to 1 if not specified
     }
 }
 
@@ -210,6 +224,11 @@ CandidateSelectionMetadata::sequence_encodings() const
     return sequence_encodings_;
 }
 float CandidateSelectionMetadata::GetMissingValueToken() const { return missing_value_token_; }
+
+const std::vector<int>& CandidateSelectionMetadata::GetSplitKValues() const
+{
+    return split_k_values_;
+}
 
 // --- CandidateSelectionModel ------------------------------------------------
 
@@ -439,10 +458,12 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
     return encoded_candidates;
 }
 
-int ModelSelectBestCandidate(const std::string& arch,
-                             const std::string& solver,
-                             const std::map<std::string, float>& features,
-                             const std::vector<std::vector<std::string>>& valid_kernel_params)
+CandidateSelectionResult
+ModelSelectBestCandidate(const std::string& arch,
+                         const std::string& solver,
+                         const std::map<std::string, float>& features,
+                         const std::vector<std::vector<std::string>>& valid_kernel_params,
+                         const bool use_split_k)
 {
     try
     {
@@ -450,7 +471,33 @@ int ModelSelectBestCandidate(const std::string& arch,
         // debug: show that we successfully retrieved the model
         MIOPEN_LOG_I2("Retrieved CandidateSelectionModel for arch: " << arch
                                                                      << ", solver: " << solver);
-        const auto& encoded_candidates = EncodeKernelParams(valid_kernel_params, model.metadata());
+        std::vector<std::vector<std::string>> expanded_params = valid_kernel_params;
+        std::vector<std::pair<int, int>> mapping_pairs;
+        std::vector<int> heuristic_indexes;
+        for(size_t i = 0; i < valid_kernel_params.size(); ++i)
+            heuristic_indexes.push_back(static_cast<int>(i));
+
+        if(use_split_k)
+        {
+            // std::vector<int> split_ks = GenerateSplitK(128); // TODO: make configurable
+            // get split_k values from metadata
+            const auto& split_ks = model.metadata().GetSplitKValues();
+            std::vector<std::vector<std::string>> expanded_params;
+
+            // Expand kernel params with split_k and keep mapping
+            std::tie(expanded_params, mapping_pairs) =
+                ExpandKernelParamsWithSplitK(valid_kernel_params, heuristic_indexes, split_ks);
+        }
+        else
+        {
+
+            // If split_k is 0, we do not expand, just use the original kernels
+            for(int heuristic_index : heuristic_indexes)
+            {
+                mapping_pairs.emplace_back(heuristic_index, 1); // Default split_k of 1
+            }
+        }
+        const auto& encoded_candidates = EncodeKernelParams(expanded_params, model.metadata());
 
         if(encoded_candidates.empty())
         {
@@ -465,18 +512,20 @@ int ModelSelectBestCandidate(const std::string& arch,
 
         if(best_idx >= 0 && best_idx < static_cast<int>(valid_kernel_params.size()))
         {
-            return best_idx;
+            int original_index = mapping_pairs[best_idx].first;
+            int split_k_value  = mapping_pairs[best_idx].second;
+            return CandidateSelectionResult{original_index, split_k_value};
         }
         else
         {
             MIOPEN_LOG_W("Invalid candidate index returned: " << best_idx);
-            return -1;
+            return CandidateSelectionResult{-1, 0};
         }
     }
     catch(const miopen::Exception& ex)
     {
         MIOPEN_LOG_I2("[Warning] Candidate selection model failed: " << ex.what());
-        return -1;
+        return CandidateSelectionResult{-1, 0};
     }
     catch(const std::exception& ex)
     {

@@ -62,6 +62,7 @@ public:
     const std::vector<std::string>& output_params() const { return output_params_; }
     const std::map<std::string, std::map<std::string, int>>& sequence_encodings() const;
     float GetMissingValueToken() const;
+    const std::vector<int>& GetSplitKValues() const;
 
 private:
     // Internal mappings and encodings
@@ -76,6 +77,7 @@ private:
     std::map<std::string, std::string> constants_sequence_;
     std::map<std::string, std::map<std::string, std::string>> kernel_str_mapping_;
     float missing_value_token_;
+    std::vector<int> split_k_values_;
 };
 
 class CandidateSelectionModel
@@ -107,7 +109,8 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
 int ModelSelectBestCandidate(const std::string& arch,
                              const std::string& solver,
                              const std::map<std::string, float>& features,
-                             const std::vector<std::vector<std::string>>& valid_kernel_params);
+                             const std::vector<std::vector<std::string>>& valid_kernel_params,
+                             const bool use_split_k);
 
 } // namespace candidate_selection
 } // namespace tuning
