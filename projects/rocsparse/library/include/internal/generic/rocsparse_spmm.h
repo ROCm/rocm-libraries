@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -73,8 +73,8 @@ extern "C" {
 *  sparse matrix \f$op(A)\f$ while the computation stage can be repeatedly used with different \f$B\f$ and \f$C\f$ matrices.
 *  Once all calls to \p rocsparse_spmm are complete, the temporary buffer can be deallocated.
 *
-*  As noted above, both \f$B\f$ and \f$C\f$ can be in row or column order (this includes mixing the order so that \f$B\f$ is 
-*  row order and \f$C\f$ is column order and vice versa). For best performance, use row order for both \f$B\f$ and \f$C\f$ as 
+*  As noted above, both \f$B\f$ and \f$C\f$ can be in row or column order (this includes mixing the order so that \f$B\f$ is
+*  row order and \f$C\f$ is column order and vice versa). For best performance, use row order for both \f$B\f$ and \f$C\f$ as
 *  this provides the best memory access.
 *
 *  \p rocsparse_spmm supports multiple different algorithms. These algorithms have different trade offs depending on the sparsity
@@ -137,13 +137,14 @@ extern "C" {
 *  \par Mixed precisions:
 *  <table>
 *  <caption id="spmm_mixed">Mixed Precisions</caption>
-*  <tr><th>A / B                   <th>C                        <th>compute_type
-*  <tr><td>rocsparse_datatype_i8_r <td>rocsparse_datatype_i32_r <td>rocsparse_datatype_i32_r
-*  <tr><td>rocsparse_datatype_i8_r <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
-*  <tr><td>rocsparse_datatype_f16_r <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
+*  <tr><th>A / B                     <th>C                        <th>compute_type
+*  <tr><td>rocsparse_datatype_i8_r   <td>rocsparse_datatype_i32_r <td>rocsparse_datatype_i32_r
+*  <tr><td>rocsparse_datatype_i8_r   <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_f16_r  <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
+*  <tr><td>rocsparse_datatype_bf16_r <td>rocsparse_datatype_f32_r <td>rocsparse_datatype_f32_r
 *  </table>
 *
-*  \p rocsparse_spmm supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index precisions 
+*  \p rocsparse_spmm supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index precisions
 *  for storing the row pointer and column indices arrays of the sparse matrices.
 *
 *  \p rocsparse_spmm also supports batched computation for CSR and COO matrices. There are three supported batch modes:
@@ -194,7 +195,7 @@ extern "C" {
 *  All algorithms perform best when using row ordering for the dense \f$B\f$ and \f$C\f$ matrices
 *
 *  \note
-*  The sparse matrix formats currently supported are: \ref rocsparse_format_coo, \ref rocsparse_format_csr, 
+*  The sparse matrix formats currently supported are: \ref rocsparse_format_coo, \ref rocsparse_format_csr,
 *  \ref rocsparse_format_csc, \ref rocsparse_format_bsr, and \ref rocsparse_format_bell.
 *
 *  \note
@@ -377,7 +378,7 @@ extern "C" {
 *      rocsparse_destroy_spmat_descr(mat_A);
 *      rocsparse_destroy_dnmat_descr(mat_B);
 *      rocsparse_destroy_dnmat_descr(mat_C);
-* 
+*
 *      rocsparse_destroy_handle(handle);
 *  \endcode
 *

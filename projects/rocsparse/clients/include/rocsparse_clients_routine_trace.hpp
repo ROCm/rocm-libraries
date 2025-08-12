@@ -44,7 +44,7 @@ namespace rocsparse_clients
             roctxRangePop();
         }
     };
-#define ROCSPARSE_CLIENTS_ROCTX_TRACE rocsparse_clients::internal_roctx roctx(__FUNCTION__);
+#define ROCSPARSE_CLIENTS_ROCTX_TRACE rocsparse_clients::internal_roctx roctx(__FUNCTION__)
 #else
 #define ROCSPARSE_CLIENTS_ROCTX_TRACE
 #endif

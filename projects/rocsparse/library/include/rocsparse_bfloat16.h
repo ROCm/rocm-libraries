@@ -101,9 +101,18 @@ struct ROCSPARSE_EXPORT rocsparse_bfloat16
         }
     }
 
-    __host__ __device__ rocsparse_bfloat16 operator=(float a)
+    __host__ __device__ rocsparse_bfloat16& operator=(float a)
     {
-        return rocsparse_bfloat16(a);
+
+        union
+        {
+            float    fp32;
+            uint32_t int32;
+        } u = {a};
+
+        // u.fp32 = a;
+        data = static_cast<uint16_t>(u.int32 >> 16);
+        return *this;
     }
 
     // zero extend lower 16 bits of bfloat16 to convert to IEEE float

@@ -44,7 +44,7 @@ namespace rocsparse
         T xr = x_val[idx];
         T yr = y[i];
 
-        x_val[idx] = c * xr + s * yr;
-        y[i]       = c * yr - s * xr;
+        x_val[idx] = rocsparse::fma<T>(c, xr, s * yr);
+        y[i]       = rocsparse::fma<T>(c, yr, -s * xr);
     }
 }

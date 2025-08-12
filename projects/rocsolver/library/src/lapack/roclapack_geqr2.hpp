@@ -40,6 +40,131 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+template <int MAX_THDS, typename T, typename I, typename S, typename U>
+ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) geqr2_kernel_small(const I m,
+                                                                     const I n,
+                                                                     U AA,
+                                                                     const rocblas_stride shiftA,
+                                                                     const I lda,
+                                                                     const rocblas_stride strideA,
+                                                                     S* diagA,
+                                                                     const rocblas_stride strideD,
+                                                                     T* tauA,
+                                                                     const rocblas_stride strideP)
+{
+    I bid = blockIdx.z;
+    I tid = threadIdx.x;
+
+    // select batch instance
+    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    S* diag = load_ptr_batch<S>(diagA, bid, 0, strideD);
+    T* tau = load_ptr_batch<T>(tauA, bid, 0, strideP);
+
+    // shared variables
+    extern __shared__ double lmem[];
+    T* a = reinterpret_cast<T*>(lmem);
+    T* w = reinterpret_cast<T*>(a + m * n);
+    T* tmptau = reinterpret_cast<T*>(w + n);
+    T* sval = reinterpret_cast<T*>(tmptau + 1);
+
+    T* x;
+
+    I dim = std::min(m, n); // total number of pivots
+
+    // load A to lds
+    for(I i = tid % (MAX_THDS / 2); i < m; i += (MAX_THDS / 2))
+    {
+        const auto tidy = tid / (MAX_THDS / 2);
+        for(I j = tidy; j < n; j += 2)
+        {
+            a[i + j * m] = A[i + j * lda];
+        }
+    }
+
+    __syncthreads();
+
+    // main loop running forwards (for each column)
+    for(rocblas_int j = 0; j < dim; ++j)
+    {
+        I mm = m - j;
+        I nn = n - j;
+
+        // ----- 1. generate Householder reflector to annihilate A(j+1:m-1,j) -----
+        // load A(j:m-1,j) into x
+        x = a + j + j * m;
+
+        // larfg
+        T norm2 = 0;
+        for(I i = tid; i < mm - 1; i += MAX_THDS)
+            norm2 += x[i + 1] * conj(x[i + 1]);
+
+        // reduce squared entries to find squared norm of x
+        norm2 += shift_left(norm2, 1);
+        norm2 += shift_left(norm2, 2);
+        norm2 += shift_left(norm2, 4);
+        norm2 += shift_left(norm2, 8);
+        norm2 += shift_left(norm2, 16);
+        if(warpSize > 32)
+            norm2 += shift_left(norm2, 32);
+        if(tid % warpSize == 0)
+            sval[tid / warpSize] = norm2;
+        __syncthreads();
+        if(tid == 0)
+        {
+            for(I k = 1; k < MAX_THDS / warpSize; k++)
+                norm2 += sval[k];
+
+            // set tau, beta, and put scaling factor into sval[0]
+            run_set_taubeta<T>(tmptau, &norm2, x, diag + j);
+
+            tau[j] = tmptau[0];
+            sval[0] = norm2;
+
+            tmptau[0] = conj(tmptau[0]);
+        }
+        __syncthreads();
+
+        // scale x by scaling factor
+        for(I i = tid; i < mm - 1; i += MAX_THDS)
+            x[i + 1] *= sval[0];
+        __syncthreads();
+
+        // ----- 2. compute w = tau'*v'*A -----
+        // gemv
+        for(I i = tid; i < nn - 1; i += MAX_THDS)
+        {
+            T temp = 0;
+            T* Atmp = a + j + j * m;
+            for(I jj = 0; jj < mm; jj++)
+                temp += Atmp[jj + (i + 1) * m] * conj(x[jj]);
+            w[i] = tmptau[0] * temp;
+        }
+        __syncthreads();
+
+        // ----- 3. apply the Householder reflector to A as a rank-1 update: A = A - v*w -----
+        // ger
+        for(I i = tid; i < mm; i += MAX_THDS)
+        {
+            T* Atmp = a + j + j * m;
+            for(I jj = 0; jj < nn - 1; jj++)
+            {
+                Atmp[i + (jj + 1) * m] = Atmp[i + (jj + 1) * m] - x[i] * w[jj];
+            }
+        }
+        __syncthreads();
+    }
+
+    // write lds back to A
+    for(I i = tid % (MAX_THDS / 2); i < m; i += (MAX_THDS / 2))
+    {
+        const auto tidy = tid / (MAX_THDS / 2);
+        for(I j = tidy; j < n; j += 2)
+        {
+            A[i + j * lda] = a[i + j * m];
+        }
+    }
+}
+
 template <bool BATCHED, typename T, typename I>
 void rocsolver_geqr2_getMemorySize(const I m,
                                    const I n,
@@ -129,10 +254,27 @@ rocblas_status rocsolver_geqr2_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    I dim = std::min(m, n); // total number of pivots
+    // get device prop
+    int device;
+    HIP_CHECK(hipGetDevice(&device));
+    hipDeviceProp_t props;
+    HIP_CHECK(hipGetDeviceProperties(&props, device));
 
+    I dim = std::min(m, n); // total number of pivots
     for(I j = 0; j < dim; ++j)
     {
+        I mm = m - j;
+        I nn = n - j;
+
+        const size_t lmemsize = ((256 / props.warpSize) + mm + nn + 1 + mm * nn) * sizeof(T);
+        if(lmemsize <= props.sharedMemPerBlock && nn == mm)
+        {
+            ROCSOLVER_LAUNCH_KERNEL((geqr2_kernel_small<256, T>), dim3(1, 1, batch_count), dim3(256),
+                                    lmemsize, stream, mm, nn, A, shiftA + idx2D(j, j, lda), lda,
+                                    strideA, (S*)diag + j, dim, ipiv + j, strideP);
+            break;
+        }
+
         // generate Householder reflector to work on column j
         rocsolver_larfg_template<T>(handle, m - j, A, shiftA + idx2D(j, j, lda), (S*)diag, j, dim,
                                     A, shiftA + idx2D(std::min(j + 1, m - 1), j, lda), (I)1, strideA,

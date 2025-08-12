@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -137,6 +137,14 @@ class UNGBR_FORTRAN : public ORGBR_UNGBR<API_FORTRAN>
 {
 };
 
+class ORGBR_COMPAT : public ORGBR_UNGBR<API_COMPAT>
+{
+};
+
+class UNGBR_COMPAT : public ORGBR_UNGBR<API_COMPAT>
+{
+};
+
 // non-batch tests
 
 TEST_P(ORGBR, __float)
@@ -179,6 +187,26 @@ TEST_P(UNGBR_FORTRAN, __double_complex)
     run_tests<rocblas_double_complex>();
 }
 
+TEST_P(ORGBR_COMPAT, __float)
+{
+    run_tests<float>();
+}
+
+TEST_P(ORGBR_COMPAT, __double)
+{
+    run_tests<double>();
+}
+
+TEST_P(UNGBR_COMPAT, __float_complex)
+{
+    run_tests<rocblas_float_complex>();
+}
+
+TEST_P(UNGBR_COMPAT, __double_complex)
+{
+    run_tests<rocblas_double_complex>();
+}
+
 // INSTANTIATE_TEST_SUITE_P(daily_lapack,
 //                          ORGBR,
 //                          Combine(ValuesIn(large_size_range), ValuesIn(store_range)));
@@ -209,4 +237,20 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          UNGBR_FORTRAN,
+                         Combine(ValuesIn(size_range), ValuesIn(store_range)));
+
+// INSTANTIATE_TEST_SUITE_P(daily_lapack,
+//                          ORGBR_COMPAT,
+//                          Combine(ValuesIn(large_size_range), ValuesIn(store_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         ORGBR_COMPAT,
+                         Combine(ValuesIn(size_range), ValuesIn(store_range)));
+
+// INSTANTIATE_TEST_SUITE_P(daily_lapack,
+//                          UNGBR_COMPAT,
+//                          Combine(ValuesIn(large_size_range), ValuesIn(store_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         UNGBR_COMPAT,
                          Combine(ValuesIn(size_range), ValuesIn(store_range)));

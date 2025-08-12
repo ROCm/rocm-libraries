@@ -66,7 +66,9 @@ namespace rocRoller
                     rv << "_" << t;
 
                 if(scaleSkipPermlane)
-                    rv << "_PRE_SW";
+                {
+                    rv << "_PreSW_AB";
+                }
 
                 return rv.str();
             }

@@ -270,6 +270,8 @@ types:
   scale_B: None
   scaleType_B: None
   scaleBlockSize: 0
+  scaleShuffleTileA: []
+  scaleShuffleTileB: []
   scaleSkipPermlane: false
 streamK: false
 streamKTwoTile: false
@@ -327,6 +329,8 @@ types:
   scale_B: None
   scaleType_B: None
   scaleBlockSize: 0
+  scaleShuffleTileA: []
+  scaleShuffleTileB: []
   scaleSkipPermlane: false
 loadLDSScale_A: false
 loadLDSScale_B: false
@@ -382,6 +386,8 @@ types:
   scale_B: None
   scaleType_B: None
   scaleBlockSize: 0
+  scaleShuffleTileA: []
+  scaleShuffleTileB: []
   scaleSkipPermlane: false
 loadLDSScale_A: false
 loadLDSScale_B: false
