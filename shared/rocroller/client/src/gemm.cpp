@@ -314,29 +314,28 @@ namespace rocRoller::Client::GEMMClient
         {
             auto summary = commandKernel->memoryTrace(runtimeArgs);
             std::cout << summary.toString() << std::endl;
+            return result;
         }
-        else
-        {
-            // Benchmark runs
-            for(int outer = 0; outer < runParams.numOuter; ++outer)
-            {
-                // Warmup runs
-                for(int i = 0; i < runParams.numWarmUp; ++i)
-                {
-                    commandKernel->launchKernel(runtimeArgs);
-                }
 
-                HIP_TIMER(t_kernel, "GEMM", runParams.numInner);
-                for(int inner = 0; inner < runParams.numInner; ++inner)
-                {
-                    commandKernel->launchKernel(runtimeArgs, t_kernel, inner);
-                }
-                HIP_SYNC(t_kernel);
-                t_kernel->sleep(50);
-                auto nanoseconds = t_kernel->allNanoseconds();
-                result.kernelExecute.insert(
-                    result.kernelExecute.end(), nanoseconds.begin(), nanoseconds.end());
+        // Benchmark runs
+        for(int outer = 0; outer < runParams.numOuter; ++outer)
+        {
+            // Warmup runs
+            for(int i = 0; i < runParams.numWarmUp; ++i)
+            {
+                commandKernel->launchKernel(runtimeArgs);
             }
+
+            HIP_TIMER(t_kernel, "GEMM", runParams.numInner);
+            for(int inner = 0; inner < runParams.numInner; ++inner)
+            {
+                commandKernel->launchKernel(runtimeArgs, t_kernel, inner);
+            }
+            HIP_SYNC(t_kernel);
+            t_kernel->sleep(50);
+            auto nanoseconds = t_kernel->allNanoseconds();
+            result.kernelExecute.insert(
+                result.kernelExecute.end(), nanoseconds.begin(), nanoseconds.end());
         }
         double totalTime = 0;
         for(auto ke : result.kernelExecute)
