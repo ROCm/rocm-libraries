@@ -895,7 +895,7 @@ inline bool GetUseSinglePredictEnv()
         std::lock_guard<std::mutex> lock(mtx);
         if(!initialized)
         {
-            const char* env = std::getenv("MIOPEN_AI_FDEEP_USE_SINGLE_PREDICT");
+            const char* env = std::getenv("MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT");
             cached          = env != nullptr && std::string(env) == "1";
             initialized     = true;
         }
