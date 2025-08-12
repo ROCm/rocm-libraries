@@ -1361,7 +1361,7 @@ class Solution(collections.abc.Mapping):
       if (state["MIWaveTile"][1] % state["VectorWidthB"]) != 0:
         reject(state, printRejectionReason, "MIWaveTile0(%u) should be multiple of VectorWidthB(%u)" % (state["MIWaveTile"][1], state["VectorWidthB"]))
         return
-
+      
     if len(problemType["IndicesSummation"]) > 1:
       # not supported with multiple summations, bug is maybe something with
       # how stagger iteration is wrapped when unroll loop exits
@@ -1425,6 +1425,17 @@ class Solution(collections.abc.Mapping):
         break
     if "ValidDepthU" in state:
       del state["ValidDepthU"]
+
+    if (
+      state["DepthU"] == state["MatrixInstK"] and state["PrefetchGlobalRead"] and not state["1LDSBuffer"]
+      and (state["MIWaveTile"][0] > 2  and state["MIWaveTile"][1] > 2)
+      and (state["MIWaveTile"][0] % 2 == 0 and state["MIWaveTile"][1] % 2 == 0)
+    ):
+      state["ForceUnrollSubIter"] = True
+      state["numSubTiles"] = 2 
+    else:
+      state["ForceUnrollSubIter"] = False
+      state["numSubTiles"] = 1 
 
     # 0: Normal mode. Hardware applies all of the normal data dependency checks
     # 1: Full expert mode (not suppoeted yet). Disable hardware checks against: VA_VDST, VA_SDST, VA_SSRC, VA_VCC, VM_VSRC and SA_SDST.

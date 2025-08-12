@@ -208,6 +208,7 @@ class LocalReadMFMA(LocalRead):
     """
     def __call__(self, writer, kernel, bufferIdx, iui, epsi, tP):
         imod = Module("LocalReadDo%s_I%s" % (tP["tensorChar"],iui))
+        subTileIdx = writer.states.SubTileIdx
 
         tc = tP["tensorChar"]
         if tc == "A":
@@ -227,6 +228,7 @@ class LocalReadMFMA(LocalRead):
 
         vectorWidth  = kernel["VectorWidth%s"%tc]
 
+        numSubTiles = kernel["numSubTiles"]
         MIWaveGroupShape = [ kernel["MatrixInstM"] * kernel["MatrixInstBM"] * kernel["MIWaveGroup"][0] * kernel["VectorWidthA"], \
                             kernel["MatrixInstN"] * kernel["MatrixInstBN"] * kernel["MIWaveGroup"][1] * kernel["VectorWidthB"]]
 
@@ -290,6 +292,9 @@ class LocalReadMFMA(LocalRead):
 
         maxLDSConstOffset = writer.states.regCaps["maxLDSConstOffset"]
         valufIdx = 0
+        eIdxCnt = numReadsPerVector//numSubTiles
+        eIdxStart = subTileIdx * (numReadsPerVector//numSubTiles)
+        valufIdx = eIdxStart * blockWidth *numReadsPerUnroll
         if enableLDSTr:
             numberMTilesPerWave = kernel["MIWaveTile"][tile01]
             highBits = 0
@@ -312,7 +317,7 @@ class LocalReadMFMA(LocalRead):
                 localReadCode.add(LocalReadX(dst=destVgpr, src=srcAddr, ds=ds, comment=comment))
         else:
             for vIdx in range(0, numVectorsPerTile):
-                for eIdx in range(0, numReadsPerVector):
+                for eIdx in range(eIdxStart, (eIdxStart + eIdxCnt)):
                     valuiIdx = int(valufIdx)
                     baseValuiIdx = valuiIdx
                     localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc,valuiIdx)))
