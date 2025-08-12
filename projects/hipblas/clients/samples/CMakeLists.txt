@@ -58,7 +58,7 @@ target_compile_options(hipblas-example-c PRIVATE -I${HIP_INCLUDE_DIRS})
 #set_source_files_properties(example_sgemm_strided_batched.cpp PROPERTIES COMPILE_FLAGS "-std=c++11")
 
 if( NOT TARGET hipblas )
-  find_package( hipblas CONFIG PATHS ${ROCM_PATH}/hipblas )
+  find_package( hipblas CONFIG PATHS ${HIPBLAS_LIBRARY_DIR} )
   if( NOT hipblas_FOUND )
     message( FATAL_ERROR "hipBLAS is a required dependency and is not found; try adding rocblas path to CMAKE_PREFIX_PATH")
   endif( )
