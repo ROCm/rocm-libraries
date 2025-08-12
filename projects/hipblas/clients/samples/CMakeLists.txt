@@ -36,12 +36,10 @@ if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*/amd
 endif( )
 
 if(NOT WIN32)
-    add_executable( hipblas-example-sscal-fortran example_sscal_fortran.F90 $<TARGET_OBJECTS:hipblas_fortran>)
-    add_executable( hipblas-example-gemmEx-fortran example_gemm_ex_fortran.F90 $<TARGET_OBJECTS:hipblas_fortran>)
-    target_link_libraries( hipblas-example-sscal-fortran  PRIVATE hipblas_fortran_client )
-    target_link_libraries( hipblas-example-gemmEx-fortran PRIVATE hipblas_fortran_client )
+  add_executable( hipblas-example-sscal-fortran example_sscal_fortran.F90 $<TARGET_OBJECTS:hipblas_fortran_client>)
+  add_executable( hipblas-example-gemmEx-fortran example_gemm_ex_fortran.F90 $<TARGET_OBJECTS:hipblas_fortran_client>)
 
-    set( sample_list_fortran hipblas-example-sscal-fortran hipblas-example-gemmEx-fortran )
+  set( sample_list_fortran hipblas-example-sscal-fortran hipblas-example-gemmEx-fortran )
 endif()
 
 if(HIP_PLATFORM STREQUAL amd)

@@ -113,7 +113,11 @@ set( hipblas_test_common
   ${BLIS_CPP}
 )
 
-add_executable( hipblas-test ${hipblas_test_source} ${hipblas_solver_test_source} ${hipblas_test_common} )
+if(NOT WIN32)
+  add_executable( hipblas-test ${hipblas_test_source} ${hipblas_solver_test_source} ${hipblas_test_common} $<TARGET_OBJECTS:hipblas_fortran_client> )
+elseif()
+  add_executable( hipblas-test ${hipblas_test_source} ${hipblas_solver_test_source} ${hipblas_test_common} )
+endif()
 
 target_include_directories( hipblas-test
   PRIVATE
