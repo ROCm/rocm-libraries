@@ -36,6 +36,21 @@ The hipBLASLt input and output types are listed in the following table.
       - 32-bit real signed integer.
 
     * 
+      - ``HIP_R_4F_E2M1``
+      - N/A
+      - 4-bit real float4 precision floating-point
+
+    * 
+      - ``HIP_R_6F_E2M3``
+      - N/A
+      - 6-bit real float6 precision floating-point
+
+    * 
+      - ``HIP_R_6F_E3M2``
+      - N/A
+      - 6-bit real bfloat6 precision floating-point
+
+    * 
       - ``HIP_R_8F_E4M3_FNUZ``
       - ``hipblaslt_f8_fnuz``
       - 8-bit real float8 precision floating-point
@@ -43,6 +58,16 @@ The hipBLASLt input and output types are listed in the following table.
     * 
       - ``HIP_R_8F_E5M2_FNUZ``
       - ``hipblaslt_bf8_fnuz``
+      - 8-bit real bfloat8 precision floating-point
+
+    * 
+      - ``HIP_R_8F_E4M3``
+      - ``hipblaslt_f8``
+      - 8-bit real float8 precision floating-point
+
+    * 
+      - ``HIP_R_8F_E5M2``
+      - ``hipblaslt_bf8``
       - 8-bit real bfloat8 precision floating-point
 
     * 
