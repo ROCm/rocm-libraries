@@ -48,16 +48,16 @@ namespace rocRoller
             }
 
             template <CCommandArgumentValue LHS, CCommandArgumentValue RHS>
-                requires CCanEvaluateBinary<TheEvaluator, LHS, RHS>
-            CommandArgumentValue operator()(LHS const& lhs, RHS const& rhs) const
+            requires CCanEvaluateBinary<TheEvaluator, LHS, RHS>
+                CommandArgumentValue operator()(LHS const& lhs, RHS const& rhs) const
             {
                 auto evaluator = static_cast<TheEvaluator const*>(this);
                 return evaluator->evaluate(lhs, rhs);
             }
 
             template <CCommandArgumentValue LHS, CCommandArgumentValue RHS>
-                requires(!CCanEvaluateBinary<TheEvaluator, LHS, RHS>)
-            CommandArgumentValue operator()(LHS const& lhs, RHS const& rhs) const
+            requires(!CCanEvaluateBinary<TheEvaluator, LHS, RHS>) CommandArgumentValue
+                operator()(LHS const& lhs, RHS const& rhs) const
             {
                 if constexpr(CHasTypeInfo<LHS> && CHasTypeInfo<RHS>)
                 {
@@ -87,26 +87,29 @@ namespace rocRoller
                 return std::visit(*this, lhs, rhs);
             }
 
-        /**
+            /**
          * For example, CCanAdd which satisifes pairs of types that can be added.
          */
-#define CAN_OPERATE_CONCEPT(name, op)     \
-    template <typename LHS, typename RHS> \
-    concept CCan##name = requires(LHS lhs, RHS rhs) { lhs op rhs; }
+#define CAN_OPERATE_CONCEPT(name, op)               \
+    template <typename LHS, typename RHS>           \
+    concept CCan##name = requires(LHS lhs, RHS rhs) \
+    {                                               \
+        lhs op rhs;                                 \
+    }
 
-        /**
+            /**
          * Declares a BinaryEvaluatorVisitor that can be defined solely by a single binary expression.
          */
-#define BINARY_EVALUATOR_VISITOR(name, op)                                             \
-    template <>                                                                        \
-    struct OperationEvaluatorVisitor<name> : public BinaryEvaluatorVisitor<name>       \
-    {                                                                                  \
-        template <CCommandArgumentValue LHS, CCommandArgumentValue RHS>                \
-            requires CCan                                                              \
-        ##name<LHS, RHS> constexpr auto evaluate(LHS const& lhs, RHS const& rhs) const \
-        {                                                                              \
-            return lhs op rhs;                                                         \
-        }                                                                              \
+#define BINARY_EVALUATOR_VISITOR(name, op)                                          \
+    template <>                                                                     \
+    struct OperationEvaluatorVisitor<name> : public BinaryEvaluatorVisitor<name>    \
+    {                                                                               \
+        template <CCommandArgumentValue LHS, CCommandArgumentValue RHS>             \
+        requires CCan##name<LHS, RHS> constexpr auto evaluate(LHS const& lhs,       \
+                                                              RHS const& rhs) const \
+        {                                                                           \
+            return lhs op rhs;                                                      \
+        }                                                                           \
     }
 
 #define SIMPLE_BINARY_OP(name, op) \

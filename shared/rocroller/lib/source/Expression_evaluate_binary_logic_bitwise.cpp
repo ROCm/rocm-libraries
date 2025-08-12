@@ -24,7 +24,6 @@
  *
  *******************************************************************************/
 
-
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/Expression_evaluate_detail.hpp>
 #include <rocRoller/Expression_evaluate_detail_binary.hpp>

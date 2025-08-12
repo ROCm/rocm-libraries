@@ -48,8 +48,7 @@ namespace rocRoller
             template <CCommandArgumentValue LHS,
                       CCommandArgumentValue R1HS,
                       CCommandArgumentValue R2HS>
-                requires CCanEvaluateTernary<TheEvaluator, LHS, R1HS, R2HS>
-            CommandArgumentValue
+            requires CCanEvaluateTernary<TheEvaluator, LHS, R1HS, R2HS> CommandArgumentValue
                 operator()(LHS const& lhs, R1HS const& r1hs, R2HS const& r2hs) const
             {
                 auto evaluator = static_cast<TheEvaluator const*>(this);
@@ -59,8 +58,7 @@ namespace rocRoller
             template <CCommandArgumentValue LHS,
                       CCommandArgumentValue R1HS,
                       CCommandArgumentValue R2HS>
-                requires(!CCanEvaluateTernary<TheEvaluator, LHS, R1HS, R2HS>)
-            CommandArgumentValue
+            requires(!CCanEvaluateTernary<TheEvaluator, LHS, R1HS, R2HS>) CommandArgumentValue
                 operator()(LHS const& lhs, R1HS const& r1hs, R2HS const& r2hs) const
             {
                 Throw<FatalError>("Type mismatch for expression: ",

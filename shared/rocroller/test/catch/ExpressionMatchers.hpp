@@ -59,22 +59,22 @@ namespace ExpressionMatchers
             if(equivalent(result, m_reference, m_properties))
                 return true;
 
-                if(m_transformation)
-                {
-                    auto transformedReference = m_transformation(m_reference);
-                    auto transformedResult = m_transformation(result);
+            if(m_transformation)
+            {
+                auto transformedReference = m_transformation(m_reference);
+                auto transformedResult    = m_transformation(result);
 
-                    if(equivalent(result, transformedReference, m_properties))
-                        return true;
+                if(equivalent(result, transformedReference, m_properties))
+                    return true;
 
-                    if(equivalent(transformedResult, m_reference, m_properties))
-                        return true;
+                if(equivalent(transformedResult, m_reference, m_properties))
+                    return true;
 
-                    if(equivalent(transformedResult, transformedReference, m_properties))
-                        return true;
-                }
+                if(equivalent(transformedResult, transformedReference, m_properties))
+                    return true;
+            }
 
-                return false;
+            return false;
         }
 
         std::string describe() const override
@@ -144,7 +144,8 @@ inline auto EquivalentTo(rocRoller::Expression::ExpressionPtr       expr,
 inline auto SimplifiesTo(rocRoller::Expression::ExpressionPtr       expr,
                          rocRoller::Expression::AlgebraicProperties props
                          = rocRoller::Expression::AlgebraicProperties::All(),
-                        rocRoller::Expression::ExpressionTransducer xform = rocRoller::Expression::simplify)
+                         rocRoller::Expression::ExpressionTransducer xform
+                         = rocRoller::Expression::simplify)
 {
     return ExpressionMatchers::EquivalentExpressionMatcher(expr, props, xform);
 }

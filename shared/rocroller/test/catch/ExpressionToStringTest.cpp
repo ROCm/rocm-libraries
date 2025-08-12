@@ -76,7 +76,8 @@ namespace ExpressionTest
             auto expr11 = Expression::fuseTernary((a << b) + b);
             auto expr12 = expr3 != expr7;
 
-            auto expr13 = Expression::positionalArgument(2, Register::Type::Vector, DataType::Int64);
+            auto expr13
+                = Expression::positionalArgument(2, Register::Type::Vector, DataType::Int64);
             auto expr14 = expr13 + expr1;
 
             SECTION("toString()")

@@ -45,9 +45,9 @@ namespace rocRoller
             template <CTernary TernaryExp>
             CommandArgumentValue operator()(TernaryExp const& expr)
             {
-                auto arg1      = call(expr.lhs);
-                auto arg2      = call(expr.r1hs);
-                auto arg3      = call(expr.r2hs);
+                auto arg1 = call(expr.lhs);
+                auto arg2 = call(expr.r1hs);
+                auto arg3 = call(expr.r2hs);
                 return evaluateOp(expr, arg1, arg2, arg3);
             }
 
@@ -55,15 +55,15 @@ namespace rocRoller
             CommandArgumentValue operator()(BinaryExp const& expr)
             {
                 // TODO: Short-circuit logic
-                auto lhs       = call(expr.lhs);
-                auto rhs       = call(expr.rhs);
+                auto lhs = call(expr.lhs);
+                auto rhs = call(expr.rhs);
                 return evaluateOp(expr, lhs, rhs);
             }
 
             template <CUnary UnaryExp>
             CommandArgumentValue operator()(UnaryExp const& expr)
             {
-                auto arg       = call(expr.arg);
+                auto arg = call(expr.arg);
                 return evaluateOp(expr, arg);
             }
 
