@@ -420,59 +420,27 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
         bool ai_success         = false;
         std::string solver_name = "ConvHipImplicitGemm3DGroupBwdXdlops";
 
+        auto run_ai_heuristics = [&](auto CKDataType) {
+            using T = decltype(CKDataType);
+            auto fill_valid_kernels =
+                [=](const miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
+                return miopen::solver::FillValidKernelsIDs<DeviceOpGBwdDefaultPtrs<T>, CKArgs<T>>(
+                    problem);
+            };
+            return miopen::solver::conv::RunParameterPredictionModel<T>(ctx,
+                                                                        problem,
+                                                                        valid_kernels,
+                                                                        index,
+                                                                        split_k,
+                                                                        kernel_id,
+                                                                        fill_valid_kernels,
+                                                                        solver_name);
+        };
         switch(problem.GetInDataType())
         {
-        case miopenHalf: {
-            auto fill_valid_kernels =
-                [=](const miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
-                return miopen::solver::FillValidKernelsIDs<DeviceOpGBwdDefaultPtrs<ck::half_t>,
-                                                           CKArgs<ck::half_t>>(problem);
-            };
-            ai_success =
-                miopen::solver::conv::RunParameterPredictionModel<ck::half_t>(ctx,
-                                                                              problem,
-                                                                              valid_kernels,
-                                                                              index,
-                                                                              split_k,
-                                                                              kernel_id,
-                                                                              fill_valid_kernels,
-                                                                              solver_name);
-            break;
-        }
-        case miopenFloat: {
-            auto fill_valid_kernels =
-                [=](const miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
-                return miopen::solver::FillValidKernelsIDs<DeviceOpGBwdDefaultPtrs<float>,
-                                                           CKArgs<float>>(problem);
-            };
-            ai_success =
-                miopen::solver::conv::RunParameterPredictionModel<float>(ctx,
-                                                                         problem,
-                                                                         valid_kernels,
-                                                                         index,
-                                                                         split_k,
-                                                                         kernel_id,
-                                                                         fill_valid_kernels,
-                                                                         solver_name);
-            break;
-        }
-        case miopenBFloat16: {
-            auto fill_valid_kernels =
-                [=](const miopen::conv::ProblemDescription& problem) -> std::vector<std::string> {
-                return miopen::solver::FillValidKernelsIDs<DeviceOpGBwdDefaultPtrs<ck::bhalf_t>,
-                                                           CKArgs<ck::bhalf_t>>(problem);
-            };
-            ai_success =
-                miopen::solver::conv::RunParameterPredictionModel<ck::bhalf_t>(ctx,
-                                                                               problem,
-                                                                               valid_kernels,
-                                                                               index,
-                                                                               split_k,
-                                                                               kernel_id,
-                                                                               fill_valid_kernels,
-                                                                               solver_name);
-            break;
-        }
+        case miopenHalf: ai_success = run_ai_heuristics(ck::half_t{}); break;
+        case miopenFloat: ai_success = run_ai_heuristics(float{}); break;
+        case miopenBFloat16: ai_success = run_ai_heuristics(ck::bhalf_t{}); break;
         default: break;
         }
 
