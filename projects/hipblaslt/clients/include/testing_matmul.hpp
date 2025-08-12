@@ -1390,22 +1390,19 @@ void testing_matmul_with_bias(const Arguments& arg,
         stride_da[i] = stride_a[i];
         if(do_swizzle_a)
         {
-            //TODO:
-            // 1. support stride_a is 0 when swizzle
-            // 2. support --any_stride for hipblaslt-bench when swizzle
-            // 3. support arbitrary stride_a for both hipblaslt-bench and hipblaslt-test when swizzled
-            stride_a[i] = lda[i] * A_col[i];
-            stride_da[i] = 0;
             size_t MiM = 16, MiK = 0, __ = 0, PackK = 0;
             calculateKforSwizzling(TiA, arg, MiK, __, PackK);
             size_t K_block = MiK * PackK;
-            size_t stride_swizzle
+            int64_t stride_swizzle
                 = ((M[i] + MiM - 1) / MiM) * MiM * ((K[i] + K_block - 1) / K_block) * K_block;
-            if(do_batched[i] && stride_a[i] > 0 && stride_a[i] != lda[i] * A_col[i])
+            if(do_batched[i] && stride_a[i] != 0)
             {
-                hipblaslt_cerr << "Error stride_a: swizzle_a does not yet support arbitrary stride_a!" << std::endl;
-                stride_da[i]   = stride_a[i];
-                stride_swizzle = (size_t)stride_a[i];
+                stride_da[i] = stride_swizzle;
+
+                //TODO: support arbitrary stride_a for both hipblaslt-bench and hipblaslt-test when swizzled
+                if(stride_a[i] != lda[i] * A_col[i] && stride_a[i] != stride_swizzle)
+                    hipblaslt_cerr << "Warning: swizzle_a does not yet support arbitrary stride_a!"
+                                   << std::endl;
             }
             size_dA[i] = num_batches[i] * stride_swizzle;
         }
@@ -1838,7 +1835,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   A_col[i],
                                   (do_swizzle_a) ? A_row[i] : lda[i],
                                   TiA,
-                                  (do_swizzle_a) ? A_row[i] * A_col[i] : stride_a[i],
+                                  (do_swizzle_a && stride_a[i] != 0) ? A_row[i] * A_col[i]
+                                                                     : stride_a[i],
                                   num_batches[i]);
 #ifdef HIPBLASLT_USE_ROCROLLER
         }
