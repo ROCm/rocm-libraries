@@ -8,8 +8,9 @@ Building and installing hipCUB on Windows
 
 You can use ``rmake.py`` to build and install hipCUB on Microsoft Windows. You can also use `CMake <./hipCUB-install-with-cmake.html>`_ if you want more build and installation options. 
 
+:doc:`Clone the hipCUB project <./hipCUB-install-overview>`. ``rmake.py`` will be located in the ``hipcub`` root directory. 
 
-``rmake.py`` is located in the ``hipCUB`` root directory. To build and install hipCUB with ``rmake.py``, run:
+To build and install hipCUB with ``rmake.py``, run:
 
 .. code:: shell
 

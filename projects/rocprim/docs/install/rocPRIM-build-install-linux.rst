@@ -8,15 +8,10 @@ Installing rocPRIM on Linux
 
 rocPRIM is installed on Linux using CMake. CMake is also used to build rocPRIM examples, tests, and benchmarks.
 
-The rocPRIM source code is available from the `rocPRIM GitHub Repository <https://github.com/ROCm/rocPRIM>`_. 
-
-Use a branch that matches the version of ROCm installed on your system.
-
-After cloning rocPRIM, create the ``build`` directory under the ``rocPRIM`` directory. Change directory to ``build``.
+Create the ``build`` directory under the :doc:`cloned <./rocPRIM-install-overview>` ``rocprim`` directory. Change directory to ``build``.
 
 .. code:: shell
     
-    cd rocPRIM
     mkdir build
     cd build
 
