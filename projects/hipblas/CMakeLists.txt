@@ -114,10 +114,6 @@ if(HIP_PLATFORM STREQUAL nvidia)
 endif()
 
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
-if(BUILD_CODE_COVERAGE)
-  #add_compile_options(-fprofile-arcs -ftest-coverage)
-  #add_link_options(--coverage)
-endif()
 
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 if(BUILD_ADDRESS_SANITIZER)
