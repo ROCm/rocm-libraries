@@ -151,7 +151,7 @@ namespace rocRoller
             }
 
             m_streamToStack[streamId].push(dep);
-            m_depToStream.emplace(dep, streamId);
+            m_depToStream.insert_or_assign(dep, streamId);
             m_locks.insert(dep);
 
             if(isNonPreemptibleDependency(dep))
