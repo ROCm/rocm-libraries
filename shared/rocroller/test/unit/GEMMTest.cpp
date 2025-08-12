@@ -817,6 +817,7 @@ namespace GEMMDriverTest
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
 
+                res.ok = false;
                 if(!res.ok)
                 {
                     std::filesystem::path base
@@ -833,12 +834,42 @@ namespace GEMMDriverTest
                     std::ofstream asmFile(asmFilePath);
                     std::ofstream valuesFile(valuesFilePath);
 
-                    std::cout << asmFilePath << std::endl;
-                    std::cout << valuesFilePath << std::endl;
+                    if(!asmFile.is_open() || !valuesFile.is_open())
+                    {
+                        Log::error("Failed to open output files for writing");
+                        break;
+                    }
+
+                    Log::info("Assembly file written to: {}", asmFilePath.string());
+                    Log::info("Values file written to: {}", valuesFilePath.string());
 
                     asmFile << commandKernel.getInstructions() << std::endl;
+                    valuesFile << fmt::format("RNorm is {} (acceptable {}, iteration {})",
+                                              res.relativeNormL2,
+                                              res.acceptableError.relativeL2Tolerance,
+                                              iteration)
+                               << std::endl;
 
-                    const auto logMatrix
+                    valuesFile << "Diffs:\n";
+                    for(size_t i = 0; i < M; i++)
+                    {
+                        for(size_t j = 0; j < N; j++)
+                        {
+                            auto a = d_result[i * N + j];
+                            auto b = h_result[i * N + j];
+                            if((a - b) * (a - b) / (b * b)
+                               > res.acceptableError.relativeL2Tolerance)
+                            {
+                                valuesFile << std::setw(8) << i << std::setw(8) << j //
+                                           << std::setw(16) << std::scientific << a //
+                                           << std::setw(16) << std::scientific << b //
+                                           << std::setw(16) << std::scientific << a - b //
+                                           << std::endl;
+                            }
+                        }
+                    }
+
+                    const auto logMatrixFloats
                         = [&valuesFile](
                               const auto& name, const auto& matrix, const auto I, const auto J) {
                               const auto floatMatrix = unpackToFloat(matrix);
@@ -859,29 +890,27 @@ namespace GEMMDriverTest
                               valuesFile << std::endl;
                           };
 
-                    logMatrix("A", hostA, K, M);
-                    logMatrix("B", hostB, N, K);
-                    logMatrix("C", hostC, M, N);
-                    logMatrix("D", d_result, M, N);
+                    valuesFile << "Values as floats:\n";
+                    logMatrixFloats("A", hostA, K, M);
+                    logMatrixFloats("B", hostB, N, K);
+                    logMatrixFloats("C", hostC, M, N);
+                    logMatrixFloats("D", d_result, M, N);
 
-                    valuesFile << "Diff\n";
-                    for(size_t i = 0; i < M; i++)
-                    {
-                        for(size_t j = 0; j < N; j++)
+                    const auto logBytes = [&valuesFile](const auto& name, const auto& vector) {
+                        for(const auto& v : vector)
                         {
-                            auto a = d_result[i * N + j];
-                            auto b = h_result[i * N + j];
-                            if((a - b) * (a - b) / (b * b)
-                               > res.acceptableError.relativeL2Tolerance)
-                            {
-                                valuesFile << std::setw(8) << i << std::setw(8) << j //
-                                           << std::setw(16) << std::scientific << a //
-                                           << std::setw(16) << std::scientific << b //
-                                           << std::setw(16) << std::scientific << a - b //
-                                           << std::endl;
-                            }
+                            const char* bytes = reinterpret_cast<const char*>(&v);
+                            valuesFile.write(bytes, sizeof(v));
                         }
-                    }
+                    };
+
+                    valuesFile << "Values as bytes:\n";
+                    logBytes("A", hostA);
+                    logBytes("ScaleA", hostScaleA);
+                    logBytes("B", hostB);
+                    logBytes("ScaleB", hostScaleB);
+                    logBytes("C", hostC);
+                    logBytes("D", d_result);
                 }
                 EXPECT_TRUE(res.ok) << res.message();
             }
