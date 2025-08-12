@@ -63,7 +63,7 @@ template<class Config,
          typename InputIt,
          typename OutputIt,
          typename BinaryFunction>
-inline hipError_t launch_adjacent_difference_for_arch(
+inline hipError_t launch_adjacent_difference(
     detail::target_arch                                       arch,
     const InputIt                                             input,
     const OutputIt                                            output,
@@ -203,14 +203,8 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 
             start = std::chrono::steady_clock::now();
         }
-        // adjacent_difference_kernel<config, InPlace, Right><<<>>>(input + offset,
-        //                                                          output + offset,
-        //                                                          size,
-        //                                                          op,
-        //                                                          previous_values + starting_block,
-        //                                                          starting_block);
 
-        hipError_t launch_err = launch_adjacent_difference_for_arch<config, InPlace, Right>(
+        hipError_t launch_err = launch_adjacent_difference<config, InPlace, Right>(
             target_arch,
             input + offset,
             output + offset,
@@ -221,7 +215,7 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
             current_blocks,
             block_size,
             0,
-            0);
+            stream);
 
         if(launch_err != hipSuccess)
         {

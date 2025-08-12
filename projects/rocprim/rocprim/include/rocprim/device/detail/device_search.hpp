@@ -255,7 +255,7 @@ void search_kernel_shared_impl(InputIterator1 input,
 template<class Config, class InputIterator1, class InputIterator2, class BinaryFunction>
 struct search_impl_kernels
 {
-    inline static hipError_t search_kernel_shared(detail::target_arch arch,
+    inline static hipError_t launch_search_shared(detail::target_arch arch,
                                                   InputIterator1 input,
                                                   InputIterator2 keys,
                                                   size_t*        output,
@@ -280,7 +280,7 @@ struct search_impl_kernels
         return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
     }
 
-    inline static hipError_t search_kernel(detail::target_arch arch,
+    inline static hipError_t launch_search(detail::target_arch arch,
                                            InputIterator1 input,
                                            InputIterator2 keys,
                                            size_t*        output,
@@ -305,7 +305,7 @@ struct search_impl_kernels
         return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
     }
 
-    inline static hipError_t search_kernel_shared(detail::target_arch arch,
+    inline static hipError_t launch_search_shared(detail::target_arch arch,
                                                   reverse_iterator<InputIterator1> input,
                                                   reverse_iterator<InputIterator2> keys,
                                                   size_t*                          output,
@@ -330,7 +330,7 @@ struct search_impl_kernels
         return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
     }
 
-    inline static hipError_t search_kernel(detail::target_arch arch,
+    inline static hipError_t launch_search(detail::target_arch arch,
                                            reverse_iterator<InputIterator1> input,
                                            reverse_iterator<InputIterator2> keys,
                                            size_t*                          output,
@@ -450,7 +450,7 @@ hipError_t search_impl(void*          temporary_storage,
             {
                 start_timer();
                 hipError_t launch_err
-                    = search_kernels::search_kernel_shared(target_arch,
+                    = search_kernels::launch_search_shared(target_arch,
                                                            input,
                                                            keys,
                                                            tmp_output,
@@ -471,7 +471,7 @@ hipError_t search_impl(void*          temporary_storage,
             else
             {
                 start_timer();
-                hipError_t launch_err = search_kernels::search_kernel_shared(
+                hipError_t launch_err = search_kernels::launch_search_shared(
                     target_arch,
                     rocprim::make_reverse_iterator(input + size),
                     rocprim::make_reverse_iterator(keys + keys_size),
@@ -497,7 +497,7 @@ hipError_t search_impl(void*          temporary_storage,
             {
                 start_timer();
                 hipError_t launch_err
-                    = search_kernels::search_kernel(target_arch,
+                    = search_kernels::launch_search(target_arch,
                                                     input,
                                                     keys,
                                                     tmp_output,
@@ -518,7 +518,7 @@ hipError_t search_impl(void*          temporary_storage,
             else
             {
                 start_timer();
-                hipError_t launch_err = search_kernels::search_kernel(
+                hipError_t launch_err = search_kernels::launch_search(
                     target_arch,
                     rocprim::make_reverse_iterator(input + size),
                     rocprim::make_reverse_iterator(keys + keys_size),

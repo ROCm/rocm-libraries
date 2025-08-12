@@ -52,13 +52,13 @@ struct find_first_of_impl_kernels
 
     template<typename ArchConfig>
     static ROCPRIM_DEVICE
-    void find_first_of_kernel(InputIterator1           input,
-                              InputIterator2           keys,
-                              size_t*                  output,
-                              size_t                   size,
-                              size_t                   keys_size,
-                              ordered_block_id<size_t> ordered_bid,
-                              BinaryFunction           compare_function)
+    void find_first_of_kernel_impl(InputIterator1           input,
+                                   InputIterator2           keys,
+                                   size_t*                  output,
+                                   size_t                   size,
+                                   size_t                   keys_size,
+                                   ordered_block_id<size_t> ordered_bid,
+                                   BinaryFunction           compare_function)
     {
         constexpr find_first_of_config_params params = ArchConfig::params;
 
@@ -235,7 +235,7 @@ hipError_t find_first_of_impl(void*          temporary_storage,
     {
         auto kernel = [=] __device__ (auto arch_config)
         {
-            find_first_of_kernels::template find_first_of_kernel<decltype(arch_config)>(
+            find_first_of_kernels::template find_first_of_kernel_impl<decltype(arch_config)>(
                 input,
                 keys,
                 tmp_output,

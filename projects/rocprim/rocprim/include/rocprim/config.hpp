@@ -146,10 +146,6 @@
     #define ROCPRIM_MAX_ATOMIC_SIZE 16
 #endif
 
-#if !defined(ROCPRIM_EXPERIMENTAL_SPIRV) || !ROCPRIM_EXPERIMENTAL_SPIRV
-    #define ROCPRIM_EXPERIMENTAL_SPIRV 0
-#endif
-
 // DPP is supported only after Volcanic Islands (GFX8+)
 // Only defined when support is present, in contrast to ROCPRIM_DETAIL_USE_DPP, which should be
 // always defined

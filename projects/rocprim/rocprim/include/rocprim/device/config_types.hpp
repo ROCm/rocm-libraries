@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <atomic>
 #include <limits>
+#include <optional>
 #include <type_traits>
 
 #include <cassert>
@@ -178,7 +179,7 @@ enum class target_arch : unsigned int
 
 /**
  * \brief Checks if the first `n` characters of `rhs` are equal to `lhs`
- *
+ * 
  * \param lhs the string to compare against
  * \param rhs the string to compare with
  * \param n length of the substring of `rhs` to chceck
@@ -261,7 +262,7 @@ constexpr arch::wavefront::target arch_wavefront_size(const target_arch target_a
 {
     switch(target_arch)
     {
-        case target_arch::unknown: return arch::wavefront::target::dynamic;
+        case target_arch::unknown: return arch::wavefront::get_target();
         case target_arch::gfx803: return arch::wavefront::target::size64;
         case target_arch::gfx900: return arch::wavefront::target::size64;
         case target_arch::gfx906: return arch::wavefront::target::size64;
@@ -277,6 +278,25 @@ constexpr arch::wavefront::target arch_wavefront_size(const target_arch target_a
         // Unreachable
         case target_arch::invalid: return arch::wavefront::target::dynamic;
     }
+}
+
+/**
+ * \brief Get the current architecture in device compilation.
+ * 
+ * This function will always return `unknown` when called from the host, host could should instead
+ * call host_target_arch to query the current device from the HIP API.
+ * 
+ * \return target_arch the architecture currently being compiled for on the device.
+ */
+constexpr target_arch device_target_arch()
+{
+#if defined(__amdgcn_processor__) && !defined(ROCPRIM_EXPERIMENTAL_SPIRV)
+    // The terminating zero is not counted in the length of the string
+    return get_target_arch_from_name(__amdgcn_processor__,
+                                     sizeof(__amdgcn_processor__) - sizeof('\0'));
+#else
+    return target_arch::unknown;
+#endif
 }
 
 template<typename Config, target_arch Arch>
@@ -341,7 +361,7 @@ void trampoline(Kernel kernel)
 {
     using ArchConfig = target_config<Config, Arch>;
 
-#ifndef ROCPRIM_EXPERIMENTAL_SPIRV
+#if !defined(ROCPRIM_TARGET_SPIRV) || ROCPRIM_TARGET_SPIRV == 0
     if constexpr(Arch == device_target_arch())
 #endif
     {
@@ -409,29 +429,14 @@ hipError_t launch_kernel(target_arch arch,
     return hipGetLastError();
 }
 
-/**
- * \brief Get the current architecture in device compilation.
- *
- * This function will always return `unknown` when called from the host, host could should instead
- * call host_target_arch to query the current device from the HIP API.
- *
- * \return target_arch the architecture currently being compiled for on the device.
- */
-constexpr target_arch device_target_arch()
-{
-#if defined(__amdgcn_processor__) && !defined(ROCPRIM_EXPERIMENTAL_SPIRV)
-    // The terminating zero is not counted in the length of the string
-    return get_target_arch_from_name(__amdgcn_processor__,
-                                     sizeof(__amdgcn_processor__) - sizeof('\0'));
+#ifdef ROCPRIM_EXPERIMENTAL_SPIRV
+template<class Config, bool ForceUnknownArch = true>
 #else
-    return target_arch::unknown;
+template<class Config, bool ForceUnknownArch = false>
 #endif
-}
-
-template<class Config, bool IgnoreConfig>
 auto dispatch_target_arch([[maybe_unused]] const target_arch target_arch)
 {
-    if constexpr(!IgnoreConfig)
+    if constexpr(!ForceUnknownArch)
     {
         switch(target_arch)
         {
@@ -465,46 +470,6 @@ auto dispatch_target_arch([[maybe_unused]] const target_arch target_arch)
         }
     }
     return Config::template architecture_config<target_arch::unknown>::params;
-}
-
-// Wrapper that forces a Conf to use the params for ForcedArch.
-template<target_arch ForcedArch, class Conf, class PartitionConfigParams>
-struct force_arch_config
-{
-    template<target_arch Arch>
-    struct architecture_config
-    {
-        static constexpr PartitionConfigParams params
-            = Conf::template architecture_config<ForcedArch>::params;
-    };
-};
-
-template<typename F>
-inline hipError_t generic_dispatch_target_arch(detail::target_arch target_arch, F&& f)
-{
-    using ta = detail::target_arch;
-
-    switch(target_arch)
-    {
-        case ta::unknown: return f.template operator()<ta::unknown>();
-        case ta::gfx803: return f.template operator()<ta::gfx803>();
-        case ta::gfx900: return f.template operator()<ta::gfx900>();
-        case ta::gfx906: return f.template operator()<ta::gfx906>();
-        case ta::gfx908: return f.template operator()<ta::gfx908>();
-        case ta::gfx90a: return f.template operator()<ta::gfx90a>();
-        case ta::gfx942: return f.template operator()<ta::gfx942>();
-        case ta::gfx1030: return f.template operator()<ta::gfx1030>();
-        case ta::gfx1100: return f.template operator()<ta::gfx1100>();
-        case ta::gfx1102: return f.template operator()<ta::gfx1102>();
-        case ta::gfx1200: return f.template operator()<ta::gfx1200>();
-        case ta::gfx1201: return f.template operator()<ta::gfx1201>();
-        case ta::invalid:
-            assert(false && "Invalid target architecture");
-            return hipErrorInvalidValue;
-    }
-
-    assert(false && "Unhandled target_arch.");
-    return hipErrorInvalidValue;
 }
 
 template<typename Config>

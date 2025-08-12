@@ -22,7 +22,7 @@ For example, with hipcc:
 
     hipcc -DROCPRIM_EXPERIMENTAL_SPIRV=1 --offload-arch=amdgcnspirv
 
-For example, with cmake:
+For example, with CMake:
 
 .. code:: shell
 
@@ -35,6 +35,8 @@ For example, with cmake:
     
     Setting ``ROCPRIM_EXPERIMENTAL_SPIRV`` will disable all config dispatching.
 
+
+When consuming rocPRIM via its CMake package, the ``ROCPRIM_EXPERIMENTAL_SPIRV`` macro is set automatically. In this case, you only need to specify the GPU targets ``-DGPU_TARGETS="amdgcnspirv"`` when compiling rocPRIM.
 
 When targeting SPIR-V, the hardware wavefront size (also known as warp size) is not known
 at compile time. 

@@ -52,15 +52,15 @@ template<class Config,
          class InputIt,
          class OutputIt,
          class UnaryOp>
-inline hipError_t launch_transform_for_arch(detail::target_arch arch,
-                                            InputIt             in,
-                                            OutputIt            out,
-                                            size_t              n,
-                                            UnaryOp             op,
-                                            dim3                grid,
-                                            dim3                block,
-                                            size_t              shmem,
-                                            hipStream_t         stream)
+inline hipError_t launch_transform(detail::target_arch arch,
+                                   InputIt             in,
+                                   OutputIt            out,
+                                   size_t              n,
+                                   UnaryOp             op,
+                                   dim3                grid,
+                                   dim3                block,
+                                   size_t              shmem,
+                                   hipStream_t         stream)
 {
     auto kernel = [=] __device__ (auto arch_config)
     {
@@ -141,16 +141,15 @@ inline hipError_t transform_impl(InputIterator     input,
             start = std::chrono::steady_clock::now();
         }
 
-        hipError_t launch_err
-            = launch_transform_for_arch<config, IsPointer, result_type>(target_arch,
-                                                                        input + offset,
-                                                                        output + offset,
-                                                                        current_size,
-                                                                        transform_op,
-                                                                        current_blocks,
-                                                                        block_size,
-                                                                        0,
-                                                                        stream);
+        hipError_t launch_err = launch_transform<config, IsPointer, result_type>(target_arch,
+                                                                                 input + offset,
+                                                                                 output + offset,
+                                                                                 current_size,
+                                                                                 transform_op,
+                                                                                 current_blocks,
+                                                                                 block_size,
+                                                                                 0,
+                                                                                 stream);
 
         if(launch_err != hipSuccess)
         {
