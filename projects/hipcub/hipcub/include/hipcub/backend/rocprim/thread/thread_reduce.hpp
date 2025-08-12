@@ -70,8 +70,8 @@ AccumType ThreadReduceSequential(const InputType& input, ReductionOp reduction_o
 
 // This function is not used, it is just here for compatibility
 template<typename AccumType, typename InputType, typename ReductionOp>
-[[nodiscard]] [[deprecated("This function is an internal API, it's not recommended to use it "
-                           "directly.")]]
+[[nodiscard]] [[deprecated("This function is an internal API, using it directly is not "
+                           "recommended.")]]
 __device__ __forceinline__
 AccumType ThreadReduceBinaryTree(const InputType& input, ReductionOp reduction_op)
 {
@@ -89,8 +89,8 @@ AccumType ThreadReduceBinaryTree(const InputType& input, ReductionOp reduction_o
 }
 
 template<typename AccumType, typename InputType, typename ReductionOp>
-[[nodiscard]] [[deprecated("This function is an internal API, it's not recommended to use it "
-                           "directly.")]]
+[[nodiscard]] [[deprecated("This function is an internal API, using it directly is not "
+                           "recommended.")]]
 __device__ __forceinline__
 AccumType ThreadReduceTernaryTree(const InputType& input, ReductionOp reduction_op)
 {
