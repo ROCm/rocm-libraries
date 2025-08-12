@@ -159,9 +159,8 @@ if (WIN32)
 endif()
 
 if(BUILD_CODE_COVERAGE)
-  #target_compile_options(-fprofile-instr-generate -fcoverage-mapping)
-  target_compile_options( hipblas PRIVATE -fprofile-arcs -ftest-coverage )
-  target_link_libraries( hipblas PRIVATE --coverage -lgcov)
+  target_compile_options(hipblas PRIVATE -g -O0 -fprofile-instr-generate -fcoverage-mapping)
+  target_link_options(hipblas PUBLIC -fprofile-instr-generate)
 endif()
 
 # Package that helps me set visibility for function names exported from shared library
