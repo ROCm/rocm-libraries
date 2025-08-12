@@ -21,6 +21,8 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ExecutableKernel_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ExpressionTransformations.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression_evaluate_detail.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression_evaluate_detail_binary.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelArguments.hpp"

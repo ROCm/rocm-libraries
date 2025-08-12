@@ -106,20 +106,27 @@ namespace rocRoller
             MultiplyHigh,
             Divide,
             Modulo,
+
             ShiftL,
             LogicalShiftR,
             ArithmeticShiftR,
+
             BitwiseAnd,
             BitwiseOr,
             BitwiseXor,
+            LogicalAnd,
+            LogicalOr,
+
             GreaterThan,
             GreaterThanEqual,
             LessThan,
             LessThanEqual,
             Equal,
             NotEqual,
-            LogicalAnd,
-            LogicalOr,
+
+            // --- Stochastic Rounding Convert (also binary) ---
+            SRConvert<DataType::FP8>,
+            SRConvert<DataType::BF8>,
 
             // --- Unary Operations ---
             MagicMultiple,
@@ -133,25 +140,17 @@ namespace rocRoller
             RandomNumber,
             ToScalar,
             BitFieldExtract,
+            Convert,
 
             // --- Ternary Operations ---
             AddShiftL,
             ShiftLAdd,
             MatrixMultiply,
             Conditional,
-
-            // --- TernaryMixed Operations ---
             MultiplyAdd,
 
             // ---Quinary Operation(s) ---
             ScaledMatrixMultiply,
-
-            // --- Convert Operations ---
-            Convert,
-
-            // --- Stochastic Rounding Convert ---
-            SRConvert<DataType::FP8>,
-            SRConvert<DataType::BF8>,
 
             // --- Values ---
             PositionalArgument,

@@ -1201,6 +1201,7 @@ namespace rocRoller
     DeclareEnumTypeInfo(Bool32, Bool32);
     DeclareEnumTypeInfo(Bool64, Bool64);
     DeclareEnumTypeInfo(E8M0, E8M0);
+    DeclareEnumTypeInfo(E8M0x4, E8M0x4);
 
 #undef DeclareEnumTypeInfo
 
