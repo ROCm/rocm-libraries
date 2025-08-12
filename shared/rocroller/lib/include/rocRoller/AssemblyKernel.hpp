@@ -135,6 +135,7 @@ namespace rocRoller
 
         AssemblyKernelArgument const& findArgument(std::string const& name) const;
         bool                          hasArgument(std::string const& name) const;
+        void                          resetArguments();
 
         /**
          * If a kernel argument exists with an expression equivalent to `exp`, return an
