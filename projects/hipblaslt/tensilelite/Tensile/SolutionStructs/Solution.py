@@ -762,13 +762,16 @@ class Solution(collections.abc.Mapping):
     numBytesAB = state["ProblemType"]["DataType%s"%tc].numBytes()
     numBytesPerLoad = state["GlobalReadVectorWidth%s"%tc] * numBytesAB
 
-    # so far, numBytesAB<4 case, TLU=False only (continue with False)
-    if numBytesAB < 4 and state["ProblemType"]["TLU%c"%tc]:
-      return False
+    MT = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
+
+    if not math.log(MT,2).is_integer():
+      # so far, numBytesAB<4 case, TLU=False only (continue with False)
+      if numBytesAB < 4 and state["ProblemType"]["TLU%c"%tc]:
+        return False
 
     # x2 DTL is not supported
     if numBytesPerLoad == 8:
-      reject(state, printRejectionReason, "can't use DirectToLds with b64 buffer load")
+      printWarning("can't use DirectToLds with b64 buffer load, using non DirectToLds version instead")
       return False
 
     if numBytesPerLoad == 16 and not canDTLx4:
@@ -1532,7 +1535,7 @@ class Solution(collections.abc.Mapping):
                 ldsPadA = state["VectorWidthA"]
           else:
             if state["DirectToLdsA"]:
-              ldsPadA = max(lrvw, optPadA)
+              ldsPadA = max(lrvw, optPadA) if not state["ProblemType"]["TLUA"] else 0
             else:
               ldsPadA = max(state["GlobalReadVectorWidthA"],optPadA)
           assert(ldsPadA >= 0)
@@ -1555,7 +1558,7 @@ class Solution(collections.abc.Mapping):
                 ldsPadB = state["VectorWidthB"]
           else:
             if state["DirectToLdsB"]:
-              ldsPadB = max(lrvw, optPadB)
+              ldsPadB = max(lrvw, optPadB) if not state["ProblemType"]["TLUB"] else 0
             else:
               ldsPadB = max(state["GlobalReadVectorWidthB"],optPadB)
           assert(ldsPadB >= 0)
@@ -1577,6 +1580,10 @@ class Solution(collections.abc.Mapping):
                 ldsPadM = 0
           assert(ldsPadM >= 0)
 
+        if state["DirectToLdsA"] and state["ProblemType"]["TLUA"]:
+          ldsPadA = 0
+        if state["DirectToLdsB"] and state["ProblemType"]["TLUB"]:
+          ldsPadB = 0
         # set ldsPadA,B=0 for DirectToVgpr
         if state["DirectToVgprA"]:
           ldsPadA = 0
