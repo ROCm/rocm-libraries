@@ -3071,22 +3071,6 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     returnedAlgoCount = heuristicResult.size();
 
-    if(returnedAlgoCount == 0)
-    {
-        int             deviceId;
-        hipDeviceProp_t deviceProperties;
-        static_cast<void>(hipGetDevice(&deviceId));
-        static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-        //workaround before known_bug work
-        if((gpu_arch_match(deviceProperties.gcnArchName, "11?")
-            || gpu_arch_match(deviceProperties.gcnArchName, "12?"))
-           && (arg.gradient || arg.grouped_gemm))
-        {
-            hipblaslt_cerr << "No Solution Found!!" << std::endl;
-            return;
-        }
-    }
-
     CHECK_SOLUTION_FOUND(returnedAlgoCount);
 
     dWorkspace = new device_vector<unsigned char>(workspace_size * block_count, 1, HMM);
