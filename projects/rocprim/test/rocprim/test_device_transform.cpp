@@ -596,6 +596,9 @@ TEST(RocprimDeviceTransformTests, UnalignedPointer)
             // Check if output values are as expected
             ASSERT_NO_FATAL_FAILURE(
                 test_utils::assert_near(output, expected, test_utils::precision<T>));
+
+            HIP_CHECK(hipFree(d_unaligned));
+            HIP_CHECK(hipFree(d_input));
         }
     }
 }
