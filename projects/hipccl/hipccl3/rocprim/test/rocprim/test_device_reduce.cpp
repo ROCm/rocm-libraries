@@ -464,8 +464,8 @@ TYPED_TEST(RocprimDeviceReduceTests, ReduceArgMinimum)
             const auto output = d_output.load();
 
             // Check if output values are as expected
-            test_utils::assert_eq(output[0].key, expected.key);
-            test_utils::assert_eq(output[0].value, expected.value);
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].key, expected.key));
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output[0].value, expected.value));
 
             if (TestFixture::use_graphs)
             {

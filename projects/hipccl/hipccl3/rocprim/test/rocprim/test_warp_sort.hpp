@@ -114,7 +114,7 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, Sort)
         // Read from device memory
         output = d_output.load();
 
-        test_utils::assert_eq(output, expected);
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
     }
 
 }
@@ -230,7 +230,7 @@ typed_test_def(RocprimWarpSortShuffleBasedTests, name_suffix, SortKeyInt)
             i = j;
         }
 
-        test_utils::assert_eq(output_key, expected_key);
-        test_utils::assert_eq(output_value, expected_value);
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output_key, expected_key));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output_value, expected_value));
     }
 }
