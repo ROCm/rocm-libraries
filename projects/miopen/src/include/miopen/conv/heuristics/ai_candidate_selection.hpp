@@ -61,7 +61,7 @@ public:
     const std::vector<std::string>& input_params() const { return input_params_; }
     const std::vector<std::string>& output_params() const { return output_params_; }
     const std::map<std::string, std::map<std::string, int>>& sequence_encodings() const;
-    float GetNanToken() const;
+    float GetMissingValueToken() const;
 
 private:
     // Internal mappings and encodings
@@ -75,7 +75,7 @@ private:
     std::map<std::string, std::string> constants_features_;
     std::map<std::string, std::string> constants_sequence_;
     std::map<std::string, std::map<std::string, std::string>> kernel_str_mapping_;
-    float nan_token_;
+    float missing_value_token_;
 };
 
 class CandidateSelectionModel

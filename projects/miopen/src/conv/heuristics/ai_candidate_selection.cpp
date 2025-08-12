@@ -111,13 +111,13 @@ CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
         MIOPEN_THROW("Metadata file does not contain 'constants' section");
     }
 
-    if(metadata.contains("nantoken"))
+    if(metadata.contains("missing_value_token"))
     {
-        nan_token_ = metadata["nantoken"].get<float>();
+        missing_value_token_ = metadata["missing_value_token"].get<float>();
     }
     else
     {
-        MIOPEN_THROW("Metadata file does not contain 'nantoken' section");
+        MIOPEN_THROW("Metadata file does not contain 'missing_value_token' section");
     }
 
     if(metadata.contains("kernel_str_mapping"))
@@ -209,7 +209,7 @@ CandidateSelectionMetadata::sequence_encodings() const
 {
     return sequence_encodings_;
 }
-float CandidateSelectionMetadata::GetNanToken() const { return nan_token_; }
+float CandidateSelectionMetadata::GetMissingValueToken() const { return missing_value_token_; }
 
 // --- CandidateSelectionModel ------------------------------------------------
 
@@ -315,9 +315,9 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
                    const CandidateSelectionMetadata& metadata)
 {
     std::vector<std::vector<float>> encoded_candidates;
-    const auto& output_params      = metadata.output_params();
-    const auto& sequence_encodings = metadata.sequence_encodings();
-    const float nan_token_encoding = metadata.GetNanToken();
+    const auto& output_params          = metadata.output_params();
+    const auto& sequence_encodings     = metadata.sequence_encodings();
+    const float missing_value_encoding = metadata.GetMissingValueToken();
 
     for(const auto& candidate : valid_kernel_params)
     {
@@ -343,7 +343,7 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
             if(metadata.GetOutputConstant(param_name).has_value())
                 continue;
 
-            float value = nan_token_encoding;
+            float value = missing_value_encoding;
 
             auto val_it = param_value_map.find(param_name);
             if(val_it != param_value_map.end())
@@ -353,7 +353,7 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
                 // Handle "nan" token
                 if(param_value == "nan")
                 {
-                    value = nan_token_encoding;
+                    value = missing_value_encoding;
                 }
                 else
                 {
@@ -419,7 +419,7 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
                                               << param_value
                                               << "' of output parameter: " << param_name);
                                 MIOPEN_LOG_WE("setting it to the NaN value");
-                                value = nan_token_encoding;
+                                value = missing_value_encoding;
                             }
                         }
                         else
@@ -430,7 +430,7 @@ EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_par
                     }
                 }
             }
-            // If not present, value remains nan_token_encoding
+            // If not present, value remains missing_value_encoding
             encoded.push_back(value);
         }
         encoded_candidates.push_back(encoded);
