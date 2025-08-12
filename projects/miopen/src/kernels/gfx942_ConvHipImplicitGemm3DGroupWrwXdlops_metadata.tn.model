@@ -35,6 +35,16 @@
         "019_NumGroupsToMerge"
     ],
     "num_output_params": 20,
+    "split_k_values": [
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64,
+        128
+    ],
     "kernel_str_mapping": {
         "DeviceGroupedConvBwdWeight_Xdl_CShuffle": {
             "0": "000_kernel_name",
