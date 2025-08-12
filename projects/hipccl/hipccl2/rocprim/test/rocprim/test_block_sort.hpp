@@ -158,8 +158,8 @@ void TestSortKeyValue()
             i = j;
         }
 
-        test_utils::assert_eq(output_key, expected_key);
-        test_utils::assert_eq(output_value, expected_value);
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output_key, expected_key));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output_value, expected_value));
     }
 }
 
@@ -234,7 +234,7 @@ void TestSortKey(std::vector<size_t> sizes)
             // Reading results back
             output = device_key_output.load();
 
-            test_utils::assert_eq(output, expected);
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output, expected));
         }
     }
 }
@@ -329,7 +329,7 @@ void TestSortStableKey(std::vector<size_t> sizes)
                                  binary_op);
             }
 
-            test_utils::assert_eq(tuples, expected);
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(tuples, expected));
         }
     }
 }

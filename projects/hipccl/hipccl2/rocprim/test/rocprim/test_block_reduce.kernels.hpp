@@ -121,7 +121,7 @@ struct static_run_algo
         // Verifying results
         if(check_equal)
         {
-            test_utils::assert_eq(output_reductions, expected_reductions);
+            ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output_reductions, expected_reductions));
         }
         else
         {
@@ -301,7 +301,7 @@ void test_block_reduce_input_arrays()
         output_reductions = device_output_reductions.load();
 
         // Verifying results
-        test_utils::assert_eq(output_reductions, expected_reductions);
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(output_reductions, expected_reductions));
     }
 
 }
