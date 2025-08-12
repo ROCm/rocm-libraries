@@ -119,9 +119,21 @@ namespace rocRoller
 
             ExpressionPtr operator()(PositionalArgument const& expr)
             {
-                AssertFatal(expr.slot >= 0);
-                AssertFatal(expr.slot < m_arguments.size());
-                return call(m_arguments[expr.slot]);
+                AssertFatal(expr.slot >= 0 && expr.slot < m_arguments.size(), ShowValue(expr.slot));
+
+                auto replacement = m_arguments[expr.slot];
+
+                auto [regType, varType] = resultType(replacement);
+
+                if(regType != expr.regType)
+                    Log::warn("Replacing PositionalArgument({}) expecting {} with {} which is {}.",
+                              expr.slot,
+                              toString(expr.regType),
+                              toString(replacement),
+                              toString(regType));
+                AssertFatal(varType == expr.varType, ShowValue(varType), ShowValue(expr.varType));
+
+                return call(replacement);
             }
 
             template <CValue Value>
