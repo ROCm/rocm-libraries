@@ -8,23 +8,13 @@ namespace rocRoller
     template <typename T, size_t N>
     auto emptySlot(std::array<T, N> const& array)
     {
-        for(auto iter = array.begin(); iter != array.end(); iter++)
-        {
-            if(!*iter)
-                return iter;
-        }
-        return array.end();
+        return std::ranges::find_if(array, [](auto const& slot) { return !slot; });
     }
 
     template <typename T, size_t N>
     auto emptySlot(std::array<T, N>& array)
     {
-        for(auto iter = array.begin(); iter != array.end(); iter++)
-        {
-            if(!*iter)
-                return iter;
-        }
-        return array.end();
+        return std::ranges::find_if(array, [](auto const& slot) { return !slot; });
     }
 
     template <typename T, size_t N>
