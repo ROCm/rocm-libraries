@@ -31,12 +31,8 @@
 #include <miopen/layernorm/invoke_params.hpp>
 #include <miopen/layernorm/utils.hpp>
 #include <miopen/mlo_internal.hpp>
-#include <miopen/generic_search.hpp>
 #include <miopen/layernorm.hpp>
 #include <miopen/target_properties.hpp>
-
-#define DEFAULT_LOCAL_SIZE 64
-#define MAX_LOCAL_SIZE 1024
 
 namespace miopen {
 
@@ -44,133 +40,9 @@ namespace solver {
 
 namespace layernorm {
 
-void PerformanceConfigLayernormBackward::HeuristicInit(
-    const miopen::layernorm::ProblemDescription& problem)
-{
-#if !MIOPEN_BACKEND_HIP
-    std::ignore = problem;
-#else
-    switch(problem.GetXDesc().GetType())
-    {
-    case miopenHalf:
-    case miopenFloat:
-    case miopenBFloat16: local_size = 1; break;
-    case miopenDouble:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz:
-    case miopenInt8:
-    case miopenInt32:
-    case miopenInt64:
-    default: MIOPEN_THROW("Unsupported datatype");
-    }
-#endif
-    initialized = true;
-}
-
-bool PerformanceConfigLayernormBackward::SetNextValue(
-    const miopen::layernorm::ProblemDescription& problem)
-{
-#if !MIOPEN_BACKEND_HIP
-    std::ignore = problem;
-    return false;
-#else
-    if(!initialized)
-    {
-        HeuristicInit(problem);
-    }
-    if(local_size <= 0)
-    {
-        MIOPEN_THROW(miopenStatusInvalidValue, "Local size zero or negative");
-    }
-    if(local_size * 2 <= MAX_LOCAL_SIZE)
-    {
-        local_size *= 2;
-        return true;
-    }
-    return false;
-#endif
-}
-
-bool PerformanceConfigLayernormBackward::IsValidValue() const
-{
-    return local_size > 0 && local_size <= MAX_LOCAL_SIZE;
-}
-
-bool PerformanceConfigLayernormBackward::IsValid(
-    const ExecutionContext&, const miopen::layernorm::ProblemDescription& problem) const
-{
-#if !MIOPEN_BACKEND_HIP
-    std::ignore = problem;
-    return false;
-#else
-    switch(problem.GetXDesc().GetType())
-    {
-    case miopenHalf:
-    case miopenFloat:
-    case miopenBFloat16: return true;
-    case miopenDouble:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz:
-    case miopenInt8:
-    case miopenInt32:
-    case miopenInt64:
-    default: MIOPEN_THROW("Unsupported datatype");
-    }
-    return false;
-#endif
-}
-
-bool PerformanceConfigLayernormBackward::operator==(
-    const PerformanceConfigLayernormBackward& other) const
-{
-    return local_size == other.local_size;
-}
-
-PerformanceConfigLayernormBackward LayernormBackward::GetDefaultPerformanceConfig(
-    const ExecutionContext&, const miopen::layernorm::ProblemDescription& problem) const
-{
-    PerformanceConfigLayernormBackward config;
-    config.HeuristicInit(problem);
-    config.local_size = DEFAULT_LOCAL_SIZE;
-    MIOPEN_LOG_I(config.ToString());
-    return config;
-}
-
-bool LayernormBackward::IsValidPerformanceConfig(
-    const ExecutionContext& context,
-    const miopen::layernorm::ProblemDescription& problem,
-    const PerformanceConfigLayernormBackward& config) const
-{
-    return config.IsValid(context, problem);
-}
-
-PerformanceConfigLayernormBackward
-LayernormBackward::Search(const ExecutionContext& context,
-                          const miopen::layernorm::ProblemDescription& problem,
-                          const AnyInvokeParams& invoke_context) const
-{
-    return GenericSearch(*this, context, problem, invoke_context);
-}
-
-bool LayernormBackward::IsApplicable(const ExecutionContext&,
-                                     const miopen::layernorm::ProblemDescription& problem) const
-{
-    if(!problem.IsSameType())
-        return false;
-    if(!problem.IsSameLength())
-        return false;
-    if(!problem.IsAllPacked())
-        return false;
-    if(!problem.IsRightNormDim())
-        return false;
-    if(!(sizeof_local_memory(problem) <= TargetProperties::GetMaxLocalMemorySize()))
-        return false;
-    return true;
-}
-
 ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
                                             const miopen::layernorm::ProblemDescription& problem,
-                                            const PerformanceConfigLayernormBackward& config) const
+                                            const PerformanceConfigLayernorm& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
