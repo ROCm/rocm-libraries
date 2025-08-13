@@ -88,7 +88,7 @@ The hipBLASLt input and output types are listed in the following table.
 .. note:: 
   
    The ``hipblaslt_f8_fnuz`` and ``hipblaslt_bf8_fnuz`` data types are only
-   supported on the gfx94x platform. The ``hipblaslt_f8`` and ``hipblaslt_bf8`` data types are only
+   supported on the gfx942 platform. The ``hipblaslt_f8`` and ``hipblaslt_bf8`` data types are only
    supported on the gfx950 and gfx12 platforms.
 
 The hipBLASLt compute modes are listed in the following table.
