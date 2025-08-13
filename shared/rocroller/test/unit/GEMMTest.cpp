@@ -817,7 +817,6 @@ namespace GEMMDriverTest
                           res.acceptableError.relativeL2Tolerance,
                           iteration);
 
-                res.ok = false;
                 if(!res.ok)
                 {
                     std::filesystem::path base
@@ -897,20 +896,17 @@ namespace GEMMDriverTest
                     logMatrixFloats("D", d_result, M, N);
 
                     const auto logBytes = [&valuesFile](const auto& name, const auto& vector) {
+                        valuesFile << name << std::endl;
                         for(const auto& v : vector)
                         {
-                            const char* bytes = reinterpret_cast<const char*>(&v);
-                            valuesFile.write(bytes, sizeof(v));
+                            valuesFile << +v << std::endl;
                         }
+                        valuesFile << std::endl;
                     };
 
-                    valuesFile << "Values as bytes:\n";
-                    logBytes("A", hostA);
+                    valuesFile << "Scales:\n";
                     logBytes("ScaleA", hostScaleA);
-                    logBytes("B", hostB);
                     logBytes("ScaleB", hostScaleB);
-                    logBytes("C", hostC);
-                    logBytes("D", d_result);
                 }
                 EXPECT_TRUE(res.ok) << res.message();
             }
