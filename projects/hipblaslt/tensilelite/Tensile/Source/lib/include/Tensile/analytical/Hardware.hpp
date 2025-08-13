@@ -64,6 +64,11 @@ namespace TensileLite
             None = Count
         };
 
+        inline DataType intToDataType(int dt)
+        {
+            return (DataType)dt;
+        }
+
         inline int dataTypeToBits(DataType type)
         {
             switch(type)
