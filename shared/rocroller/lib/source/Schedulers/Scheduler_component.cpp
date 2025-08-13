@@ -24,9 +24,12 @@
  *
  *******************************************************************************/
 
+#include <rocRoller/Scheduling/CooperativeScheduler.hpp>
 #include <rocRoller/Scheduling/PriorityScheduler.hpp>
+#include <rocRoller/Scheduling/RandomScheduler.hpp>
 #include <rocRoller/Scheduling/RoundRobinScheduler.hpp>
 #include <rocRoller/Scheduling/Scheduler.hpp>
+#include <rocRoller/Scheduling/SequentialScheduler.hpp>
 #include <rocRoller/Utilities/Component.hpp>
 
 namespace rocRoller
@@ -35,8 +38,14 @@ namespace rocRoller
     void Component::ComponentFactory<Scheduling::Scheduler>::registerImplementations()
     {
         Component::ComponentFactory<Scheduling::Scheduler>::registerComponent<
+            Scheduling::CooperativeScheduler>();
+        Component::ComponentFactory<Scheduling::Scheduler>::registerComponent<
             Scheduling::PriorityScheduler>();
         Component::ComponentFactory<Scheduling::Scheduler>::registerComponent<
+            Scheduling::RandomScheduler>();
+        Component::ComponentFactory<Scheduling::Scheduler>::registerComponent<
             Scheduling::RoundRobinScheduler>();
+        Component::ComponentFactory<Scheduling::Scheduler>::registerComponent<
+            Scheduling::SequentialScheduler>();
     }
 }
