@@ -80,57 +80,114 @@ std::vector<std::vector<std::string>> GenerateValidKernelParams(
     return valid_kernel_params;
 }
 
-TEST_F(CandidateSelectionTest, FilesExist)
+struct FilesExistParams
 {
+    std::string arch;
+    std::string solver;
+};
+class CPU_FilesExist : public ::testing::TestWithParam<FilesExistParams>
+{
+};
+TEST_P(CPU_FilesExist, FilesExist)
+{
+    auto params        = GetParam();
     auto db_path       = miopen::GetSystemDbPath();
-    auto input_encoder = db_path / (arch + "_" + solver + "_input_encoder.tn.model");
+    auto input_encoder = db_path / (params.arch + "_" + params.solver + "_input_encoder.tn.model");
     auto kernel_config_encoder =
-        db_path / (arch + "_" + solver + "_kernel_config_encoder.tn.model");
-    auto metadata = db_path / (arch + "_" + solver + "_metadata.tn.model");
+        db_path / (params.arch + "_" + params.solver + "_kernel_config_encoder.tn.model");
+    auto metadata = db_path / (params.arch + "_" + params.solver + "_metadata.tn.model");
 
     ASSERT_TRUE(miopen::fs::exists(input_encoder)) << "Input encoder file missing!";
     ASSERT_TRUE(miopen::fs::exists(kernel_config_encoder)) << "Kernel config encoder file missing!";
     ASSERT_TRUE(miopen::fs::exists(metadata)) << "Metadata file missing!";
 }
+INSTANTIATE_TEST_SUITE_P(CPU_,
+                         CPU_FilesExist,
+                         ::testing::Values(FilesExistParams{
+                             "gfx942", "ConvHipImplicitGemm3DGroupWrwXdlops"}));
 
-TEST_F(CandidateSelectionTest, MetadataAndModelInit)
+struct MetadataAndModelInitParams
 {
+    std::string arch;
+    std::string solver;
+};
+class CPU_MetadataAndModelInit : public ::testing::TestWithParam<MetadataAndModelInitParams>
+{
+};
+TEST_P(CPU_MetadataAndModelInit, MetadataAndModelInit)
+{
+    auto params = GetParam();
     ASSERT_NO_THROW({
-        CandidateSelectionMetadata meta(arch, solver);
-        CandidateSelectionModel model(arch, solver);
+        CandidateSelectionMetadata meta(params.arch, params.solver);
+        CandidateSelectionModel model(params.arch, params.solver);
     });
 }
+INSTANTIATE_TEST_SUITE_P(CPU_,
+                         CPU_MetadataAndModelInit,
+                         ::testing::Values(MetadataAndModelInitParams{
+                             "gfx942", "ConvHipImplicitGemm3DGroupWrwXdlops"}));
 
-TEST_F(CandidateSelectionTest, ModelCaching)
+struct ModelCachingParams
 {
-    auto& model1 = GetCandidateSelectionModel(arch, solver);
-    auto& model2 = GetCandidateSelectionModel(arch, solver);
+    std::string arch;
+    std::string solver;
+};
+class CPU_ModelCaching : public ::testing::TestWithParam<ModelCachingParams>
+{
+};
+TEST_P(CPU_ModelCaching, ModelCaching)
+{
+    auto params  = GetParam();
+    auto& model1 = GetCandidateSelectionModel(params.arch, params.solver);
+    auto& model2 = GetCandidateSelectionModel(params.arch, params.solver);
     ASSERT_EQ(&model1, &model2)
         << "GetCandidateSelectionModel did not return the same cached object!";
 }
-
-TEST_F(CandidateSelectionTest, EncodeInputFeatures)
+INSTANTIATE_TEST_SUITE_P(CPU_,
+                         CPU_ModelCaching,
+                         ::testing::Values(ModelCachingParams{
+                             "gfx942", "ConvHipImplicitGemm3DGroupWrwXdlops"}));
+struct EncodeInputFeaturesParams
 {
-    CandidateSelectionModel model(arch, solver);
-    CandidateSelectionMetadata meta(arch, solver);
-
-    // Initialize features as a map with all input_params set to 1.0f
+    std::string arch;
+    std::string solver;
+};
+class CPU_EncodeInputFeatures : public ::testing::TestWithParam<EncodeInputFeaturesParams>
+{
+};
+TEST_P(CPU_EncodeInputFeatures, EncodeInputFeatures)
+{
+    auto params = GetParam();
+    CandidateSelectionModel model(params.arch, params.solver);
+    CandidateSelectionMetadata meta(params.arch, params.solver);
     std::map<std::string, float> features;
     for(const auto& name : meta.input_params())
     {
         features[name] = 1.0f;
     }
-
     auto encoded = model.EncodeInputFeatures(features);
     ASSERT_FALSE(encoded.empty()) << "EncodeInputFeatures returned empty vector!";
 }
-TEST_F(CandidateSelectionTest, EncodeKernelConfigs)
+INSTANTIATE_TEST_SUITE_P(CPU_,
+                         CPU_EncodeInputFeatures,
+                         ::testing::Values(EncodeInputFeaturesParams{
+                             "gfx942", "ConvHipImplicitGemm3DGroupWrwXdlops"}));
+
+struct EncodeKernelConfigsParams
 {
-    CandidateSelectionModel model(arch, solver);
-    CandidateSelectionMetadata meta(arch, solver);
+    std::string arch;
+    std::string solver;
+};
+class CPU_EncodeKernelConfigs : public ::testing::TestWithParam<EncodeKernelConfigsParams>
+{
+};
+TEST_P(CPU_EncodeKernelConfigs, EncodeKernelConfigs)
+{
+    auto params = GetParam();
+    CandidateSelectionModel model(params.arch, params.solver);
+    CandidateSelectionMetadata meta(params.arch, params.solver);
     size_t feature_size = meta.output_params().size() - meta.GetConstantOutputIndices().size();
     std::vector<std::vector<float>> encoded_candidates(100, std::vector<float>(feature_size, 2.0f));
-
     auto encoded = model.EncodeKernelConfigs(encoded_candidates);
     ASSERT_FALSE(encoded.empty()) << "EncodeKernelConfigs returned empty vector!";
     for(const auto& vec : encoded)
@@ -138,30 +195,40 @@ TEST_F(CandidateSelectionTest, EncodeKernelConfigs)
         ASSERT_FALSE(vec.empty()) << "EncodeKernelConfigs returned a candidate with empty vector!";
     }
 }
+INSTANTIATE_TEST_SUITE_P(CPU_,
+                         CPU_EncodeKernelConfigs,
+                         ::testing::Values(EncodeKernelConfigsParams{
+                             "gfx942", "ConvHipImplicitGemm3DGroupWrwXdlops"}));
 
-TEST_F(CandidateSelectionTest, EncodeInputFeaturesEdgeCases)
+struct EncodeInputFeaturesEdgeCasesParams
 {
-    CandidateSelectionModel model(arch, solver);
-    CandidateSelectionMetadata meta(arch, solver);
+    std::string arch;
+    std::string solver;
+};
+class CPU_EncodeInputFeaturesEdgeCases
+    : public ::testing::TestWithParam<EncodeInputFeaturesEdgeCasesParams>
+{
+};
+TEST_P(CPU_EncodeInputFeaturesEdgeCases, EncodeInputFeaturesEdgeCases)
+{
+    auto params = GetParam();
+    CandidateSelectionModel model(params.arch, params.solver);
+    CandidateSelectionMetadata meta(params.arch, params.solver);
 
-    // Empty input
     std::map<std::string, float> empty_features;
     EXPECT_THROW(model.EncodeInputFeatures(empty_features), std::exception);
 
-    // Input larger than expected (extra keys)
     std::map<std::string, float> long_features;
     for(const auto& name : meta.input_params())
     {
         long_features[name] = 1.0f;
     }
-    long_features["extra_param"] = 2.0f; // Add an extra key
-    // Should not throw, extra keys are ignored
+    long_features["extra_param"] = 2.0f;
     EXPECT_NO_THROW({
         auto encoded = model.EncodeInputFeatures(long_features);
         ASSERT_FALSE(encoded.empty());
     });
 
-    // Input containing constants (if any constants are defined)
     if(!meta.GetConstantInputIndices().empty())
     {
         std::map<std::string, float> features;
@@ -180,111 +247,232 @@ TEST_F(CandidateSelectionTest, EncodeInputFeaturesEdgeCases)
         });
     }
 }
+INSTANTIATE_TEST_SUITE_P(CPU_,
+                         CPU_EncodeInputFeaturesEdgeCases,
+                         ::testing::Values(EncodeInputFeaturesEdgeCasesParams{
+                             "gfx942", "ConvHipImplicitGemm3DGroupWrwXdlops"}));
 
-TEST_F(CandidateSelectionTest, EncodeKernelConfigsEdgeCases)
+struct EncodeKernelConfigsEdgeCasesParams
 {
-    CandidateSelectionModel model(arch, solver);
-    CandidateSelectionMetadata meta(arch, solver);
+    std::string arch;
+    std::string solver;
+};
+class CPU_EncodeKernelConfigsEdgeCases
+    : public ::testing::TestWithParam<EncodeKernelConfigsEdgeCasesParams>
+{
+};
+TEST_P(CPU_EncodeKernelConfigsEdgeCases, EncodeKernelConfigsEdgeCases)
+{
+    auto params = GetParam();
+    CandidateSelectionModel model(params.arch, params.solver);
+    CandidateSelectionMetadata meta(params.arch, params.solver);
     size_t feature_size = meta.output_params().size() - meta.GetConstantOutputIndices().size();
 
-    // Empty input
     std::vector<std::vector<float>> empty_candidates;
     EXPECT_THROW(model.EncodeKernelConfigs(empty_candidates), std::exception);
 
-    // Candidate with wrong size (too short)
     std::vector<std::vector<float>> candidates_short(1, std::vector<float>(feature_size - 1, 2.0f));
     EXPECT_THROW(model.EncodeKernelConfigs(candidates_short), std::exception);
 
-    // Candidate with wrong size (too long)
     std::vector<std::vector<float>> candidates_long(1, std::vector<float>(feature_size + 1, 2.0f));
     EXPECT_THROW(model.EncodeKernelConfigs(candidates_long), std::exception);
 }
+INSTANTIATE_TEST_SUITE_P(CPU_,
+                         CPU_EncodeKernelConfigsEdgeCases,
+                         ::testing::Values(EncodeKernelConfigsEdgeCasesParams{
+                             "gfx942", "ConvHipImplicitGemm3DGroupWrwXdlops"}));
 
-TEST_F(CandidateSelectionTest, KernelStrMappingUnknownKernelThrows)
+struct KernelStrMappingUnknownKernelThrowsParams
 {
-    CandidateSelectionMetadata meta(arch, solver);
+    std::string arch;
+    std::string solver;
+};
+class CPU_KernelStrMappingUnknownKernelThrows
+    : public ::testing::TestWithParam<KernelStrMappingUnknownKernelThrowsParams>
+{
+};
+TEST_P(CPU_KernelStrMappingUnknownKernelThrows, KernelStrMappingUnknownKernelThrows)
+{
+    auto params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
     EXPECT_THROW(meta.GetKernelStrMapping("unknown_kernel_name"), std::exception);
 }
+INSTANTIATE_TEST_SUITE_P(CPU_,
+                         CPU_KernelStrMappingUnknownKernelThrows,
+                         ::testing::Values(KernelStrMappingUnknownKernelThrowsParams{
+                             "gfx942", "ConvHipImplicitGemm3DGroupWrwXdlops"}));
 
-TEST_F(CandidateSelectionTest, OutputConstantRetrieval)
+struct OutputConstantRetrievalParams
 {
-    CandidateSelectionMetadata meta(arch, solver);
-    // Try known and unknown output param names
+    std::string arch;
+    std::string solver;
+};
+class CPU_OutputConstantRetrieval : public ::testing::TestWithParam<OutputConstantRetrievalParams>
+{
+};
+TEST_P(CPU_OutputConstantRetrieval, OutputConstantRetrieval)
+{
+    auto params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
     if(!meta.output_params().empty())
     {
         auto known = meta.GetOutputConstant(meta.output_params()[0]);
-        // Should be either a value or nullopt, but not throw
         SUCCEED();
     }
     auto unknown = meta.GetOutputConstant("nonexistent_param");
     EXPECT_EQ(unknown, std::nullopt);
 }
+INSTANTIATE_TEST_SUITE_P(CPU_,
+                         CPU_OutputConstantRetrieval,
+                         ::testing::Values(OutputConstantRetrievalParams{
+                             "gfx942", "ConvHipImplicitGemm3DGroupWrwXdlops"}));
 
-TEST_F(CandidateSelectionTest, InputOutputParamIndexThrows)
+struct InputOutputParamIndexThrowsParams
 {
-    CandidateSelectionMetadata meta(arch, solver);
+    std::string arch;
+    std::string solver;
+};
+class CPU_InputOutputParamIndexThrows
+    : public ::testing::TestWithParam<InputOutputParamIndexThrowsParams>
+{
+};
+TEST_P(CPU_InputOutputParamIndexThrows, InputOutputParamIndexThrows)
+{
+    auto params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
     EXPECT_THROW(meta.GetInputParamIndex("nonexistent_param"), std::exception);
     EXPECT_THROW(meta.GetOutputParamIndex("nonexistent_param"), std::exception);
 }
-
-TEST_F(CandidateSelectionTest, EncodeKernelParamsBadValueThrows)
+INSTANTIATE_TEST_SUITE_P(CPU_,
+                         CPU_InputOutputParamIndexThrows,
+                         ::testing::Values(InputOutputParamIndexThrowsParams{
+                             "gfx942", "ConvHipImplicitGemm3DGroupWrwXdlops"}));
+struct EncodeKernelParamsBadValueThrowsParams
 {
-    CandidateSelectionMetadata meta(arch, solver);
-    std::vector<std::vector<std::string>> bad_params = {{kernel_name, "nonexistent_value", "nan"}};
+    std::string arch;
+    std::string solver;
+    std::string kernel_name;
+};
+class CPU_EncodeKernelParamsBadValueThrows
+    : public ::testing::TestWithParam<EncodeKernelParamsBadValueThrowsParams>
+{
+};
+TEST_P(CPU_EncodeKernelParamsBadValueThrows, EncodeKernelParamsBadValueThrows)
+{
+    auto params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    std::vector<std::vector<std::string>> bad_params = {
+        {params.kernel_name, "nonexistent_value", "nan"}};
     EXPECT_THROW(EncodeKernelParams(bad_params, meta), std::exception);
 }
+INSTANTIATE_TEST_SUITE_P(CPU_,
+                         CPU_EncodeKernelParamsBadValueThrows,
+                         ::testing::Values(EncodeKernelParamsBadValueThrowsParams{
+                             "gfx942",
+                             "ConvHipImplicitGemm3DGroupWrwXdlops",
+                             "DeviceGroupedConvBwdWeight_Xdl_CShuffle"}));
 
-TEST_F(CandidateSelectionTest, SelectBestCandidateValid)
+struct SelectBestCandidateValidParams
 {
-    CandidateSelectionModel model(arch, solver);
-    CandidateSelectionMetadata meta(arch, solver);
-
-    // Initialize features as a map with all input_params set to 1.0f
+    std::string arch;
+    std::string solver;
+    std::string kernel_name;
+};
+class CPU_SelectBestCandidateValid : public ::testing::TestWithParam<SelectBestCandidateValidParams>
+{
+};
+TEST_P(CPU_SelectBestCandidateValid, SelectBestCandidateValid)
+{
+    auto params = GetParam();
+    CandidateSelectionModel model(params.arch, params.solver);
+    CandidateSelectionMetadata meta(params.arch, params.solver);
     std::map<std::string, float> features;
     for(const auto& name : meta.input_params())
     {
         features[name] = 1.0f;
     }
-    auto encoded_features = model.EncodeInputFeatures(features);
-
-    auto valid_kernel_params = GenerateValidKernelParams(meta, kernel_name, 3);
+    auto encoded_features    = model.EncodeInputFeatures(features);
+    auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
     auto encoded_candidates  = EncodeKernelParams(valid_kernel_params, meta);
     auto encoded_configs     = model.EncodeKernelConfigs(encoded_candidates);
-
-    int idx = model.SelectBestCandidateIdx(encoded_features, encoded_configs);
+    int idx                  = model.SelectBestCandidateIdx(encoded_features, encoded_configs);
     ASSERT_GE(idx, 0);
     ASSERT_LT(idx, static_cast<int>(valid_kernel_params.size()));
 }
+INSTANTIATE_TEST_SUITE_P(CPU_,
+                         CPU_SelectBestCandidateValid,
+                         ::testing::Values(SelectBestCandidateValidParams{
+                             "gfx942",
+                             "ConvHipImplicitGemm3DGroupWrwXdlops",
+                             "DeviceGroupedConvBwdWeight_Xdl_CShuffle"}));
 
-TEST_F(CandidateSelectionTest, SelectBestCandidateEmptyInput)
+struct SelectBestCandidateEmptyInputParams
 {
-    CandidateSelectionModel model(arch, solver);
+    std::string arch;
+    std::string solver;
+};
+class CPU_SelectBestCandidateEmptyInput
+    : public ::testing::TestWithParam<SelectBestCandidateEmptyInputParams>
+{
+};
+TEST_P(CPU_SelectBestCandidateEmptyInput, SelectBestCandidateEmptyInput)
+{
+    auto params = GetParam();
+    CandidateSelectionModel model(params.arch, params.solver);
     std::vector<float> encoded_features;
     std::vector<std::vector<float>> encoded_configs;
     EXPECT_THROW(model.SelectBestCandidateIdx(encoded_features, encoded_configs), std::exception);
 }
+INSTANTIATE_TEST_SUITE_P(CPU_,
+                         CPU_SelectBestCandidateEmptyInput,
+                         ::testing::Values(SelectBestCandidateEmptyInputParams{
+                             "gfx942", "ConvHipImplicitGemm3DGroupWrwXdlops"}));
 
-TEST_F(CandidateSelectionTest, ModelSelectBestCandidate)
+struct ModelSelectBestCandidateParams
 {
-    CandidateSelectionMetadata meta(arch, solver);
-    // Initialize features as a map with all input_params set to 1.0f
+    std::string arch;
+    std::string solver;
+    std::string kernel_name;
+};
+class CPU_ModelSelectBestCandidate : public ::testing::TestWithParam<ModelSelectBestCandidateParams>
+{
+};
+TEST_P(CPU_ModelSelectBestCandidate, ModelSelectBestCandidate)
+{
+    auto params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
     std::map<std::string, float> features;
     for(const auto& name : meta.input_params())
     {
         features[name] = 1.0f;
     }
-    auto valid_kernel_params = GenerateValidKernelParams(meta, kernel_name, 3);
+    auto valid_kernel_params = GenerateValidKernelParams(meta, params.kernel_name, 3);
     auto result              = ModelSelectBestCandidate(
-        arch, solver, features, valid_kernel_params, /*use_split_k=*/false);
+        params.arch, params.solver, features, valid_kernel_params, /*use_split_k=*/false);
     ASSERT_GE(result.kernel_index, 0);
     ASSERT_LT(result.kernel_index, static_cast<int>(valid_kernel_params.size()));
 }
+INSTANTIATE_TEST_SUITE_P(CPU_,
+                         CPU_ModelSelectBestCandidate,
+                         ::testing::Values(ModelSelectBestCandidateParams{
+                             "gfx942",
+                             "ConvHipImplicitGemm3DGroupWrwXdlops",
+                             "DeviceGroupedConvBwdWeight_Xdl_CShuffle"}));
 
-TEST_F(CandidateSelectionTest, ExpandKernelParamsWithSplitK)
+struct ExpandKernelParamsWithSplitKParams
 {
+    int split_k;
+};
+class CPU_ExpandKernelParamsWithSplitK
+    : public ::testing::TestWithParam<ExpandKernelParamsWithSplitKParams>
+{
+};
+TEST_P(CPU_ExpandKernelParamsWithSplitK, ExpandKernelParamsWithSplitK)
+{
+    auto params                                   = GetParam();
     std::vector<std::vector<std::string>> kernels = {{"typeA", "p1"}, {"typeB", "p2"}};
     std::vector<int> indexes                      = {0, 1};
-    std::vector<int> split_ks                     = GenerateSplitK(8);
+    std::vector<int> split_ks                     = GenerateSplitK(params.split_k);
     auto [expanded, mapping] = ExpandKernelParamsWithSplitK(kernels, indexes, split_ks);
 
     ASSERT_EQ(expanded.size(), 8u);
@@ -309,13 +497,25 @@ TEST_F(CandidateSelectionTest, ExpandKernelParamsWithSplitK)
         ASSERT_EQ(mapping[i], expected_mapping[i]);
     }
 }
+INSTANTIATE_TEST_SUITE_P(CPU_,
+                         CPU_ExpandKernelParamsWithSplitK,
+                         ::testing::Values(ExpandKernelParamsWithSplitKParams{8}));
 
-TEST_F(CandidateSelectionTest, ExpandKernelParamsWithSplitKFunctionality)
+struct ExpandKernelParamsWithSplitKFunctionalityParams
 {
+    int split_k;
+};
+class CPU_ExpandKernelParamsWithSplitKFunctionality
+    : public ::testing::TestWithParam<ExpandKernelParamsWithSplitKFunctionalityParams>
+{
+};
+TEST_P(CPU_ExpandKernelParamsWithSplitKFunctionality, ExpandKernelParamsWithSplitKFunctionality)
+{
+    auto params                                   = GetParam();
     std::vector<std::vector<std::string>> kernels = {
         {"DeviceGroupedConvBwdWeight_Xdl_CShuffle", "p1"}};
     std::vector<int> indexes  = {0};
-    std::vector<int> split_ks = GenerateSplitK(8);
+    std::vector<int> split_ks = GenerateSplitK(params.split_k);
     auto [expanded, mapping]  = ExpandKernelParamsWithSplitK(kernels, indexes, split_ks);
 
     ASSERT_EQ(expanded.size(), split_ks.size());
@@ -328,3 +528,6 @@ TEST_F(CandidateSelectionTest, ExpandKernelParamsWithSplitKFunctionality)
         ASSERT_EQ(mapping[i].second, split_ks[i]);
     }
 }
+INSTANTIATE_TEST_SUITE_P(CPU_,
+                         CPU_ExpandKernelParamsWithSplitKFunctionality,
+                         ::testing::Values(ExpandKernelParamsWithSplitKFunctionalityParams{8}));
