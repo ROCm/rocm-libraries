@@ -125,13 +125,17 @@ namespace rocRoller
 
                 auto [regType, varType] = resultType(replacement);
 
-                if(regType != expr.regType)
-                    Log::warn("Replacing PositionalArgument({}) expecting {} with {} which is {}.",
+                if(regType != expr.regType || varType != expr.varType)
+                    Log::warn("Type mismatch for PositionalArgument({}):\n"
+                              "expecting ({}, {})\n"
+                              "with argument {}\n"
+                              "which is ({},{}).",
                               expr.slot,
                               toString(expr.regType),
+                              toString(expr.varType),
                               toString(replacement),
-                              toString(regType));
-                AssertFatal(varType == expr.varType, ShowValue(varType), ShowValue(expr.varType));
+                              toString(regType),
+                              toString(varType));
 
                 return call(replacement);
             }
