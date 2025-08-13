@@ -85,6 +85,12 @@ The hipBLASLt input and output types are listed in the following table.
       - ``hipblasLtFloat``
       - 32-bit real single precision floating-point
 
+.. note:: 
+  
+   The ``hipblaslt_f8_fnuz`` and ``hipblaslt_bf8_fnuz`` data types are only
+   supported on the gfx94x platform. The ``hipblaslt_f8`` and ``hipblaslt_bf8`` data types are only
+   supported on the gfx950 platform.
+
 The hipBLASLt compute modes are listed in the following table.
 
 .. list-table::
@@ -131,11 +137,6 @@ hipBLASLt GEMM operation equation:
 
 Where :math:`op( )` refers to in-place operations, such as transpose and
 non-transpose, and :math:`alpha` and :math:`beta` are scalars.
-
-.. note:: 
-  
-  The ``hipblaslt_f8_fnuz`` and ``hipblaslt_bf8_fnuz`` data types are only
-  supported on the gfx94x platform.
 
 
 .. list-table:: Supported data types
