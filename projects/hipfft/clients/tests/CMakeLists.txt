@@ -117,6 +117,12 @@ if( BUILD_CLIENTS_TESTS_OPENMP AND NOT BUILD_WITH_LIB STREQUAL "CUDA" )
   if( NOT OPENMP_FOUND OR NOT DEFINED ${openmp_LIB_DIR} )
      # Fall-back to module mode.
      find_package( OpenMP REQUIRED )
+     set( BUILD_RPATH "${HIP_CLANG_ROOT}/lib" )
+     set( INSTALL_RPATH "$ORIGIN/../llvm/lib" )
+  else()
+     set( BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}" )
+     set( INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}" )
+
   endif()
 endif()
 
@@ -125,6 +131,15 @@ foreach( target ${TEST_TARGETS} )
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     )
+
+    if( BUILD_CLIENTS_TESTS_OPENMP )
+      set_target_properties( ${TEST_TARGETS} PROPERTIES
+         BUILD_RPATH "${BUILD_RPATH}"
+      )
+      set_target_properties( ${TEST_TARGETS} PROPERTIES
+        INSTALL_RPATH "${INSTALL_RPATH}"
+      )
+    endif()
 
   if( BUILD_WITH_LIB STREQUAL "ROCM" )
     target_compile_options( ${target} PRIVATE ${WARNING_FLAGS} )
