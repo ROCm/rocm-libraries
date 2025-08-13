@@ -217,8 +217,8 @@ void testStreamCaptureWithAtomics()
     ASSERT_EQ(h_data, num_launches * num_blocks * num_threads);
 
     // Clean up
-    HIP_CHECK(hipStreamDestroy(stream));
     HIP_CHECK(hipFreeAsync(d_data, stream));
+    HIP_CHECK(hipStreamDestroy(stream));
     HIP_CHECK(hipGraphDestroy(graph));
     HIP_CHECK(hipGraphExecDestroy(instance));
 }
