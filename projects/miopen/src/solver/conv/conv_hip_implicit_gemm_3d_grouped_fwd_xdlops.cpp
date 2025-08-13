@@ -586,6 +586,35 @@ bool ConvHipImplicitGemm3DGroupFwdXdlops::IsApplicable(
     return false;
 }
 
+float ConvHipImplicitGemm3DGroupFwdXdlops::GetWti(
+    const ExecutionContext&, const miopen::conv::ProblemDescription& problem) const
+{
+    decltype(auto) xDesc = problem.GetIn();
+    decltype(auto) wDesc = problem.GetWeights();
+
+    if(xDesc.GetType() == miopenHalf || xDesc.GetType() == miopenBFloat16)
+    {
+        std::size_t in_n, in_c, w_x, w_y, w_d;
+        std::tie(in_n, in_c)    = tie_pick<0, 1>()(xDesc.GetLengths());
+        std::tie(w_x, w_y, w_d) = tie_pick<2, 3, 4>()(wDesc.GetLengths());
+        // For cases where the filter shape is not 1x1x1 and the input channel (in_c) is greater
+        // than 8, CK's implementation offers better performance.
+        if((w_x == 1 && w_y == 1 && w_d == 1) == false)
+        {
+            if(in_c < 8 && in_n < 4)
+            {
+                return 0.00002; // force disable
+            }
+            else
+            {
+                return 1.0; // force enable
+            }
+        }
+    }
+    return 0.02f;
+}
+
+
 ConvSolution ConvHipImplicitGemm3DGroupFwdXdlops::GetSolution(
     [[maybe_unused]] const ExecutionContext& ctx,
     [[maybe_unused]] const ProblemDescription& problem,
