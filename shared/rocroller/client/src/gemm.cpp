@@ -818,9 +818,7 @@ namespace rocRoller::Client::GEMMClient
                 codeObjectPath.replace_extension(".co");
 
                 {
-                    //
                     // Output RunParameters into a YAML file
-                    //
                     std::filesystem::path yamlRunParams{basePath};
                     auto                  stem              = yamlRunParams.stem();
                     std::filesystem::path yamlRunParamsPath = stem.string() + "_runParameters.yaml";
@@ -1284,7 +1282,7 @@ int main(int argc, const char* argv[])
     app.add_option("--workgroupMappingValue",
                    runParams.workgroupMappingValue,
                    "Workgroup mapping value. Default: -1")
-        ->check(CLI::Range(-1, -1) | CLI::PositiveNumber);
+        ->check(CLI::IsMember({-1}) | CLI::PositiveNumber);
 
     app.add_flag(
         "--workgroupRemapXCC", solution.workgroupRemapXCC, "Use an XCC-aware workgroup remapping.");
@@ -1483,9 +1481,7 @@ int main(int argc, const char* argv[])
         auto path = std::filesystem::path(loadRunParamsPath);
         path.replace_extension(".yaml");
 
-        //
         // Load RunParameters from a specified YAML file
-        //
         runParams = Serialization::readYAMLFile<rocRoller::Client::RunParameters>(path);
     }
 
@@ -1498,10 +1494,8 @@ int main(int argc, const char* argv[])
             yamlPath = std::filesystem::path{io.loadCOPath};
         yamlPath.replace_extension(".yaml");
 
-        //
         // YAML file does not have the workgroupMappingValue used to generate the kernel.
         // Instead, the workgroupMappingValue specified by users in benchmarking will be used.
-        //
         solution = Serialization::readYAMLFile<rocRoller::Client::GEMMClient::SolutionParameters>(
             yamlPath);
 
