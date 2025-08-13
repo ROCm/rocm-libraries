@@ -49,7 +49,6 @@ namespace ai {
 namespace tuning {
 namespace candidate_selection {
 
-
 // --- CandidateSelectionMetadata ---------------------------------------------
 
 CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
@@ -526,7 +525,7 @@ ModelSelectBestCandidate(const std::string& arch,
 
         const int best_idx = model.SelectBestCandidateIdx(encoded_features, encoded_configs);
 
-        if(best_idx >= 0 && best_idx < static_cast<int>(valid_kernel_params.size()))
+        if(best_idx >= 0)
         {
             int original_index = mapping_pairs[best_idx].first;
             int split_k_value  = mapping_pairs[best_idx].second;

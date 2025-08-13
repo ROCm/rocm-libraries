@@ -195,8 +195,6 @@ std::vector<int> GenerateSplitK(int max_split_k)
     return split_ks;
 }
 
-
-
 // Main template implementation
 template <typename DataType>
 bool RunParameterPredictionModel(
@@ -237,9 +235,16 @@ bool RunParameterPredictionModel(
 
         if(result.kernel_index >= 0 && result.kernel_index < static_cast<int>(valid_kernels.size()))
         {
-            index     = result.kernel_index;
-            split_k   = result.split_k;
-            kernel_id = valid_kernels[index];
+            index   = result.kernel_index;
+            split_k = result.split_k;
+            if(use_split_k)
+            {
+                kernel_id = valid_kernels[index] + "+" + std::to_string(split_k);
+            }
+            else
+            {
+                kernel_id = valid_kernels[index];
+            }
             return true;
         }
         MIOPEN_LOG_I("AI prediction returned invalid kernel index, falling back");
