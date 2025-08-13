@@ -106,7 +106,12 @@ std::vector<std::vector<float>>
 EncodeKernelParams(const std::vector<std::vector<std::string>>& valid_kernel_params,
                    const CandidateSelectionMetadata& metadata);
 
-int ModelSelectBestCandidate(const std::string& arch,
+struct CandidateSelectionResult
+{
+    int kernel_index; // Index of the original kernel in the input list
+    int split_k;      // The selected split_k value
+};
+CandidateSelectionResult ModelSelectBestCandidate(const std::string& arch,
                              const std::string& solver,
                              const std::map<std::string, float>& features,
                              const std::vector<std::vector<std::string>>& valid_kernel_params,

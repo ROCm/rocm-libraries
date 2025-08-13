@@ -416,7 +416,7 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
             MIOPEN_LOG_I("AI heuristics failed, falling back to default initialization");
         }
     }
-}
+
 #endif
 
 // Fallback to original initialization

@@ -49,11 +49,7 @@ namespace ai {
 namespace tuning {
 namespace candidate_selection {
 
-struct CandidateSelectionResult
-{
-    int kernel_index; // Index of the original kernel in the input list
-    int split_k;      // The selected split_k value
-};
+
 // --- CandidateSelectionMetadata ---------------------------------------------
 
 CandidateSelectionMetadata::CandidateSelectionMetadata(const std::string& arch,
@@ -303,6 +299,27 @@ int CandidateSelectionModel::SelectBestCandidateIdx(
 
 // --- Factory and Helper Functions -------------------------------------------
 
+// Helper: Expand kernel params with split_k and keep mapping
+std::pair<std::vector<std::vector<std::string>>, std::vector<std::pair<int, int>>>
+ExpandKernelParamsWithSplitK(const std::vector<std::vector<std::string>>& kernels,
+                             const std::vector<int>& indexes,
+                             const std::vector<int>& split_ks)
+{
+    std::vector<std::vector<std::string>> expanded;
+    std::vector<std::pair<int, int>> mapping;
+    for(size_t i = 0; i < kernels.size(); ++i)
+    {
+        for(int split_k : split_ks)
+        {
+            auto candidate = kernels[i];
+            candidate.push_back(std::to_string(split_k));
+            expanded.push_back(candidate);
+            mapping.emplace_back(indexes[i], split_k);
+        }
+    }
+    return {expanded, mapping};
+}
+
 const CandidateSelectionModel& GetCandidateSelectionModel(const std::string& arch,
                                                           const std::string& solver)
 {
@@ -482,7 +499,6 @@ ModelSelectBestCandidate(const std::string& arch,
             // std::vector<int> split_ks = GenerateSplitK(128); // TODO: make configurable
             // get split_k values from metadata
             const auto& split_ks = model.metadata().GetSplitKValues();
-            std::vector<std::vector<std::string>> expanded_params;
 
             // Expand kernel params with split_k and keep mapping
             std::tie(expanded_params, mapping_pairs) =
@@ -502,7 +518,7 @@ ModelSelectBestCandidate(const std::string& arch,
         if(encoded_candidates.empty())
         {
             MIOPEN_LOG_W("No valid encoded candidates available");
-            return -1;
+            return CandidateSelectionResult{-1, 0};
         }
 
         const auto& encoded_features = model.EncodeInputFeatures(features);
@@ -531,7 +547,7 @@ ModelSelectBestCandidate(const std::string& arch,
     {
         MIOPEN_LOG_I2(
             "[Warning] Candidate selection model failed with std exception: " << ex.what());
-        return -1;
+        return CandidateSelectionResult{-1, 0};
     }
 }
 

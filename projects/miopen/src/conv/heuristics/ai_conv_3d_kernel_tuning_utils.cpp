@@ -195,26 +195,7 @@ std::vector<int> GenerateSplitK(int max_split_k)
     return split_ks;
 }
 
-// Helper: Expand kernel params with split_k and keep mapping
-std::pair<std::vector<std::vector<std::string>>, std::vector<std::pair<int, int>>>
-ExpandKernelParamsWithSplitK(const std::vector<std::vector<std::string>>& kernels,
-                             const std::vector<int>& indexes,
-                             const std::vector<int>& split_ks)
-{
-    std::vector<std::vector<std::string>> expanded;
-    std::vector<std::pair<int, int>> mapping;
-    for(size_t i = 0; i < kernels.size(); ++i)
-    {
-        for(int split_k : split_ks)
-        {
-            auto candidate = kernels[i];
-            candidate.push_back(std::to_string(split_k));
-            expanded.push_back(candidate);
-            mapping.emplace_back(indexes[i], split_k);
-        }
-    }
-    return {expanded, mapping};
-}
+
 
 // Main template implementation
 template <typename DataType>
