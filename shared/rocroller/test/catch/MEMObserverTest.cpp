@@ -173,6 +173,35 @@ namespace MEMObserverTest
                 peekAndSchedule(context, insts[4]);
             }
 
+	    SECTION("Instructions with latency affect tracked cycles")
+            {
+                auto context = TestContext::ForTarget(arch);
+                auto s       = context.createRegisters(Register::Type::Scalar, DataType::UInt32, 4);
+                auto v_f16   = context.createRegisters(Register::Type::Vector, DataType::Half, 3);
+                auto a = context.createRegisters(Register::Type::Accumulator, DataType::Float, 2);
+                auto zero = Register::Value::Literal(0);
+
+                std::string const& mfma = "v_mfma_f32_32x32x8f16";
+
+                std::vector<Instruction> insts = {
+                    Instruction("buffer_store_dwordx2", {s[1]}, {s[0], zero}, {}, ""),
+                    Instruction(mfma, {a[0]}, {v_f16[0], v_f16[1], a[0]}, {}, ""),
+                    Instruction(mfma, {a[1]}, {v_f16[1], v_f16[2], a[1]}, {}, ""),
+                    Instruction("buffer_store_dwordx2", {s[3]}, {s[2], zero}, {}, ""),
+                };
+
+                auto const& architecture = context.get()->targetArchitecture();
+                auto        cycles       = architecture.GetInstructionInfo(mfma).getLatency();
+
+                peekAndSchedule(context, insts[0]);
+                peekAndSchedule(context, insts[1]);
+                peekAndSchedule(context, insts[2], cycles); // latency caused by insts[1]
+                peekAndSchedule(context, insts[3]);
+
+                CHECK_THAT(context.output(),
+                           ContainsSubstring("current " + std::to_string(4 + cycles))); // 4 insts + latency
+            }
+
             SECTION("VMEM Instructions with dependency")
             {
                 auto context = TestContext::ForTarget(arch);
