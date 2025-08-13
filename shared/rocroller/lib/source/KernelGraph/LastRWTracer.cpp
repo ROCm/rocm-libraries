@@ -110,9 +110,14 @@ namespace rocRoller::KernelGraph
         std::unordered_map<int, std::vector<std::deque<int>>> controlStacksByCoord;
 
         std::unordered_map<int, std::deque<int>> controlStacksByControl;
+        auto theOne = 435;
 
         for(auto const& x : m_trace)
         {
+            if (x.coordinate == theOne)
+            {
+                // std::cout << "m_trace: coord, control " << x.coordinate << ", " << x.control << std::endl;
+            }
             auto iter = controlStacksByControl.find(x.control);
             if(iter == controlStacksByControl.end())
             {
