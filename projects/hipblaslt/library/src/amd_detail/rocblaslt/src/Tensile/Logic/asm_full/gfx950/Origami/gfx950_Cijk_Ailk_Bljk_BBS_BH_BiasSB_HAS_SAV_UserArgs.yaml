@@ -46911,7 +46911,7 @@
     ForceDisableShadowInit: false
     GlobalReadPerMfma: 1
     GlobalReadVectorWidthA: 1
-    GlobalReadVectorWidthB: 8
+    GlobalReadVectorWidthB: 1
     GlobalSplitU: 1
     GlobalSplitUAlgorithm: MultipleBuffer
     GlobalSplitUCoalesced: false

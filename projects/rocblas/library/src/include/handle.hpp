@@ -297,6 +297,7 @@ public:
      * - Otherwise try when the current architecture is defaulted to hipBLASLt support
      * - Always disable for any `batched` API when the current handle is in stream
      *   capture mode (as hipblaslt batched dispatch does synchronous memory copies)
+     * - batched mode requires env variable opt in as has additional pointer copies
      ******************************************************************************/
     bool tryHipBLASLt(bool batched)
     {
@@ -316,7 +317,20 @@ public:
 
         if(status && batched)
         {
-            status = !is_stream_in_capture_mode();
+            static bool hipblasltEnvBatched = [&] {
+                auto* env_var = getenv("ROCBLAS_USE_HIPBLASLT_BATCHED");
+                if(env_var)
+                {
+                    return strncmp(env_var, "1", 1) == 0;
+                }
+                return false;
+            }();
+
+            // only use for batched when explicitly enabled by env variable
+            if(hipblasltEnvBatched)
+                status = !is_stream_in_capture_mode();
+            else
+                status = false;
         }
 
         return status;
