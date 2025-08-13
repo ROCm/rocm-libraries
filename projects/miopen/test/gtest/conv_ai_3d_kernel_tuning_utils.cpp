@@ -165,36 +165,6 @@ TEST_F(Conv3DKernelTuningUtilsTest, GenerateSplitK)
     ASSERT_EQ(split_ks, expected);
 }
 
-TEST_F(Conv3DKernelTuningUtilsTest, ExpandKernelParamsWithSplitK)
-{
-    std::vector<std::vector<std::string>> kernels = {{"typeA", "p1"}, {"typeB", "p2"}};
-    std::vector<int> indexes                      = {0, 1};
-    std::vector<int> split_ks                     = GenerateSplitK(8);
-    auto [expanded, mapping] = ExpandKernelParamsWithSplitK(kernels, indexes, split_ks);
-
-    ASSERT_EQ(expanded.size(), 8u);
-    ASSERT_EQ(mapping.size(), 8u);
-
-    std::vector<std::vector<std::string>> expected_expanded = {
-        {"typeA", "p1", "1"},
-        {"typeA", "p1", "2"},
-        {"typeA", "p1", "4"},
-        {"typeA", "p1", "8"},
-        {"typeB", "p2", "1"},
-        {"typeB", "p2", "2"},
-        {"typeB", "p2", "4"},
-        {"typeB", "p2", "8"},
-    };
-    std::vector<std::pair<int, int>> expected_mapping = {
-        {0, 1}, {0, 2}, {0, 4}, {0, 8}, {1, 1}, {1, 2}, {1, 4}, {1, 8}};
-
-    for(size_t i = 0; i < expanded.size(); ++i)
-    {
-        ASSERT_EQ(expanded[i], expected_expanded[i]);
-        ASSERT_EQ(mapping[i], expected_mapping[i]);
-    }
-}
-
 TEST_F(Conv3DKernelTuningUtilsTest, CandidateSelectionFilesExist)
 {
     std::string db_path     = miopen::GetSystemDbPath();
@@ -232,25 +202,6 @@ TEST_F(Conv3DKernelTuningUtilsTest, CandidateSelectionModelInitialization)
     catch(const std::exception& ex)
     {
         FAIL() << "Exception during model construction: " << ex.what();
-    }
-}
-
-TEST_F(Conv3DKernelTuningUtilsTest, ExpandKernelParamsWithSplitKFunctionality)
-{
-    std::vector<std::vector<std::string>> kernels = {
-        {"DeviceGroupedConvBwdWeight_Xdl_CShuffle", "p1"}};
-    std::vector<int> indexes  = {0};
-    std::vector<int> split_ks = GenerateSplitK(8);
-    auto [expanded, mapping]  = ExpandKernelParamsWithSplitK(kernels, indexes, split_ks);
-
-    ASSERT_EQ(expanded.size(), split_ks.size());
-    ASSERT_EQ(mapping.size(), split_ks.size());
-    for(size_t i = 0; i < split_ks.size(); ++i)
-    {
-        ASSERT_EQ(expanded[i][0], "DeviceGroupedConvBwdWeight_Xdl_CShuffle");
-        ASSERT_EQ(expanded[i][2], std::to_string(split_ks[i]));
-        ASSERT_EQ(mapping[i].first, 0);
-        ASSERT_EQ(mapping[i].second, split_ks[i]);
     }
 }
 

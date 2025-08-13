@@ -48,11 +48,6 @@ void FillHeuristicKernels(const std::vector<std::string>& valid_kernels,
                           std::vector<int>& indexes,
                           std::vector<std::vector<std::string>>& kernels);
 std::vector<int> GenerateSplitK(int max_split_k);
-std::pair<std::vector<std::vector<std::string>>, std::vector<std::pair<int, int>>>
-ExpandKernelParamsWithSplitK(const std::vector<std::vector<std::string>>& kernels,
-                             const std::vector<int>& indexes,
-                             const std::vector<int>& split_ks);
-
 template <typename DataType>
 bool RunParameterPredictionModel(
     const miopen::ExecutionContext& ctx,
