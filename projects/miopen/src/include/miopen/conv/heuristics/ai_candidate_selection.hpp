@@ -115,7 +115,7 @@ CandidateSelectionResult ModelSelectBestCandidate(const std::string& arch,
                              const std::string& solver,
                              const std::map<std::string, float>& features,
                              const std::vector<std::vector<std::string>>& valid_kernel_params,
-                             const bool use_split_k);
+                             bool use_split_k);
 
 std::pair<std::vector<std::vector<std::string>>, std::vector<std::pair<int, int>>>
 ExpandKernelParamsWithSplitK(const std::vector<std::vector<std::string>>& kernels,
