@@ -60,8 +60,6 @@ status = rocrand_destroy_generator(gen)
 When compiling the source code with a Fortran compiler, the following items should be linked[^1]:
 
 ```shell
-# Compile on an NVCC platform (link CUDA libraries: cuda, cudart).
-gfortran <input-file>.f90 hip_m.f90 rocrand_m.f90  -lrocrand_fortran -lrocrand -lcuda -lcudart
 
 # Compile on an AMD platform (link HIP library: ${HIP_ROOT_DIR}/lib).
 # Note: ${HIP_ROOT_DIR} points to the directory where HIP was installed.

@@ -1353,6 +1353,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     std::vector<void*> alpha_in(gemm_count);
 
+    bool do_swizzle_a = arg.swizzle_a && isSwizzleSupported(TiA);
+
     // Need to split into two for loop to calculate the rotating buffer
     int64_t totalRotatingSizeNeeded = 0;
     for(int i = 0; i < gemm_count; i++)
@@ -1386,24 +1388,21 @@ void testing_matmul_with_bias(const Arguments& arg,
             = stride_a[i] == 0 ? lda[i] * A_col[i] * num_batches[i] : stride_a[i] * num_batches[i];
         size_dA[i]   = size_A[i];
         stride_da[i] = stride_a[i];
-        if(arg.swizzle_a && isSwizzleSupported(TiA))
+        if(do_swizzle_a)
         {
-            //TODO:
-            // 1. support stride_a is 0 when swizzle
-            // 2. support --any_stride for hipblaslt-bench when swizzle
-            // 3. support arbitrary stride_a for both hipblaslt-bench and hipblaslt-test when swizzled
-            stride_a[i] = lda[i] * A_col[i];
-            stride_da[i] = 0;
             size_t MiM = 16, MiK = 0, __ = 0, PackK = 0;
             calculateKforSwizzling(TiA, arg, MiK, __, PackK);
             size_t K_block = MiK * PackK;
-            size_t stride_swizzle
+            int64_t stride_swizzle
                 = ((M[i] + MiM - 1) / MiM) * MiM * ((K[i] + K_block - 1) / K_block) * K_block;
-            if(do_batched[i] && stride_a[i] > 0 && stride_a[i] != lda[i] * A_col[i])
+            if(do_batched[i] && stride_a[i] != 0)
             {
-                hipblaslt_cerr << "Error stride_a: swizzle_a does not yet support arbitrary stride_a!" << std::endl;
-                stride_da[i]   = stride_a[i];
-                stride_swizzle = (size_t)stride_a[i];
+                stride_da[i] = stride_swizzle;
+
+                //TODO: support arbitrary stride_a for both hipblaslt-bench and hipblaslt-test when swizzled
+                if(stride_a[i] != lda[i] * A_col[i] && stride_a[i] != stride_swizzle)
+                    hipblaslt_cerr << "Warning: swizzle_a does not yet support arbitrary stride_a!"
+                                   << std::endl;
             }
             size_dA[i] = num_batches[i] * stride_swizzle;
         }
@@ -1491,7 +1490,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         CHECK_HIPBLASLT_ERROR(
             hipblasLtMatrixLayoutCreate(&(matD[i]), arg.d_type, M[i], N[i], ldd[i]));
 
-        if(arg.swizzle_a && isSwizzleSupported(TiA))
+        if(do_swizzle_a)
         {
             hipblasLtOrder_t orderA = orderForDatatype(TiA);
             CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutSetAttribute(
@@ -1834,9 +1833,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                                   dA[i].buf(),
                                   A_row[i],
                                   A_col[i],
-                                  (arg.swizzle_a) ? A_row[i] : lda[i],
+                                  (do_swizzle_a) ? A_row[i] : lda[i],
                                   TiA,
-                                  (arg.swizzle_a) ? A_row[i] * A_col[i] : stride_a[i],
+                                  (do_swizzle_a && stride_a[i] != 0) ? A_row[i] * A_col[i]
+                                                                     : stride_a[i],
                                   num_batches[i]);
 #ifdef HIPBLASLT_USE_ROCROLLER
         }
@@ -1907,7 +1907,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         CHECK_HIP_ERROR(broadcast(dB[i], block_count));
         CHECK_HIP_ERROR(broadcast(dC[i], block_count));
 
-        if(arg.unit_check || arg.norm_check || arg.allclose_check || arg.swizzle_a)
+        if(arg.unit_check || arg.norm_check || arg.allclose_check || do_swizzle_a)
         {
             CHECK_HIP_ERROR(synchronize(hA[i],
                                         dA[i],
@@ -1916,12 +1916,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                                         A_col[i],
                                         lda[i],
                                         realDataTypeSize(TiA),
-                                        arg.swizzle_a));
+                                        do_swizzle_a));
             CHECK_HIP_ERROR(synchronize(hB[i], dB[i]));
             CHECK_HIP_ERROR(synchronize(hC[i], dC[i]));
         }
 
-        if(arg.swizzle_a && isSwizzleSupported(TiA))
+        if(do_swizzle_a)
         {
             HipHostBuffer tmp(TiA, size_dA[i]);
             swizzle_tensor_type(tmp, hA[i], TiA, arg, num_batches[i], M[i], K[i], lda[i], false);
@@ -2435,6 +2435,12 @@ void testing_matmul_with_bias(const Arguments& arg,
         extproblemtype.setTypeC(arg.c_type);
         extproblemtype.setTypeD(arg.d_type);
         extproblemtype.setTypeCompute(arg.compute_type);
+
+        if(do_swizzle_a)
+        {
+            hipblasLtOrder_t orderA = orderForDatatype(TiA);
+            extproblemtype.setOrderA(orderA);
+        }
     }
     else if(arg.grouped_gemm)
     {
@@ -2545,7 +2551,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                         ldb[0],
                                                                         ldc[0],
                                                                         ldd[0],
-                                                                        stride_a[0],
+                                                                        (do_swizzle_a) ? stride_da[0] : stride_a[0],
                                                                         stride_b[0],
                                                                         stride_c[0],
                                                                         stride_d[0],
@@ -2640,7 +2646,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                            ldb,
                                                                            ldc,
                                                                            ldd,
-                                                                           stride_a,
+                                                                           (do_swizzle_a) ? stride_da : stride_a,
                                                                            stride_b,
                                                                            stride_c,
                                                                            stride_d,
@@ -2738,7 +2744,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                     ldb[0],
                                                                     ldc[0],
                                                                     ldd[0],
-                                                                    stride_a[0],
+                                                                    (do_swizzle_a) ? stride_da[0] : stride_a[0],
                                                                     stride_b[0],
                                                                     stride_c[0],
                                                                     stride_d[0],
@@ -2842,7 +2848,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                        ldb,
                                                                        ldc,
                                                                        ldd,
-                                                                       stride_a,
+                                                                       (do_swizzle_a) ? stride_da : stride_a,
                                                                        stride_b,
                                                                        stride_c,
                                                                        stride_d,
@@ -2920,7 +2926,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                     ldb[0],
                                                                     ldc[0],
                                                                     ldd[0],
-                                                                    stride_a[0],
+                                                                    (do_swizzle_a) ? stride_da[0] : stride_a[0],
                                                                     stride_b[0],
                                                                     stride_c[0],
                                                                     stride_d[0],
@@ -3009,7 +3015,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                                        ldb,
                                                                        ldc,
                                                                        ldd,
-                                                                       stride_a,
+                                                                       (do_swizzle_a) ? stride_da : stride_a,
                                                                        stride_b,
                                                                        stride_c,
                                                                        stride_d,
@@ -3062,22 +3068,6 @@ void testing_matmul_with_bias(const Arguments& arg,
     }
 
     returnedAlgoCount = heuristicResult.size();
-
-    if(returnedAlgoCount == 0)
-    {
-        int             deviceId;
-        hipDeviceProp_t deviceProperties;
-        static_cast<void>(hipGetDevice(&deviceId));
-        static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-        //workaround before known_bug work
-        if((gpu_arch_match(deviceProperties.gcnArchName, "11?")
-            || gpu_arch_match(deviceProperties.gcnArchName, "12?"))
-           && (arg.gradient || arg.grouped_gemm))
-        {
-            hipblaslt_cerr << "No Solution Found!!" << std::endl;
-            return;
-        }
-    }
 
     CHECK_SOLUTION_FOUND(returnedAlgoCount);
 
