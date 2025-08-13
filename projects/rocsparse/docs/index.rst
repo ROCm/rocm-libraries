@@ -16,7 +16,12 @@ The rocSPARSE public repository is located at `<https://github.com/ROCm/rocm-lib
 
 .. note::
 
-   The rocSPARSE repository for ROCm 6.4.2 and earlier is located at `<https://github.com/ROCm/rocSPARSE>`_.
+   The rocSPARSE repository for ROCm 6.4.3 and earlier is located at `<https://github.com/ROCm/rocSPARSE>`_.
+
+.. note::
+   For portability, ROCm provides the `hipSPARSE <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparse>`_ library.
+   hipSPARSE includes a comprehensive, portable interface that supports multiple backends (including rocSPARSE and cuSPARSE).
+   For documentation and examples, see the `hipSPARSE documentation <https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/>`_.
 
 For ROCm code examples, see `<https://github.com/ROCm/rocm-examples>`_.
 

@@ -742,7 +742,6 @@ namespace rocRoller
                             && !m_params->transposeMemoryAccess[LayoutType::MATRIX_B],
                         "Non-TN is not supported by SwizzleScale");
 
-            TIMER(t, "KernelGraph::SwizzleScale");
             auto newGraph = original;
 
             swizzleScaleLoads(newGraph, m_context, NaryArgument::LHS_SCALE);

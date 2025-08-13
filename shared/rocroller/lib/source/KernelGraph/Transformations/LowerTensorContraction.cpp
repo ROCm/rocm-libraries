@@ -28,6 +28,7 @@
 #include <rocRoller/KernelGraph/Transforms/LowerTensorContraction.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Operations/Operations.hpp>
 
@@ -459,6 +460,30 @@ namespace rocRoller
             auto scaleModeA = getScaleMode(info.loadAScale);
             auto scaleModeB = getScaleMode(info.loadBScale);
 
+            {
+                auto expectedSkipValue = false;
+
+                auto contraction = graph.control.get<TensorContraction>(tag).value();
+
+                if(!contraction.scalePreShuffledTileA.empty())
+                {
+                    AssertFatal(
+                        scaleModeA == Operations::ScaleMode::Separate
+                            && scaleModeB == Operations::ScaleMode::Separate
+                            && !contraction.scalePreShuffledTileB.empty(),
+                        "Pre-swizzled inputs must currently be for both A and B or neither.",
+                        ShowValue(scaleModeA),
+                        ShowValue(scaleModeB),
+                        ShowValue(contraction.scalePreShuffledTileB));
+
+                    expectedSkipValue = true;
+                }
+
+                AssertFatal(context->kernelOptions()->scaleSkipPermlane == expectedSkipValue,
+                            ShowValue(context->kernelOptions()->scaleSkipPermlane),
+                            ShowValue(expectedSkipValue));
+            }
+
             auto accumulationCoordSize = getAccumulationLoopSize(graph, a, info.userA);
 
             auto [K, forK] = rangeFor(graph, accumulationCoordSize, rocRoller::KLOOP);
@@ -779,8 +804,6 @@ namespace rocRoller
 
         KernelGraph LowerTensorContraction::apply(KernelGraph const& graph)
         {
-            TIMER(t, "KernelGraph::lowerTensorContraction");
-
             auto contractions = graph.control.getNodes<TensorContraction>().to<std::vector>();
             AssertFatal(contractions.size() <= 1,
                         "More than one TensorContraction not supported yet.");
@@ -809,6 +832,7 @@ namespace rocRoller
 
         ConstraintStatus NoDanglingJammedNumbers(const KernelGraph& graph)
         {
+            TIMER(t, "Constraint::NoDanglingJammedNumbers");
             using GD = rocRoller::Graph::Direction;
 
             ConstraintStatus retval;

@@ -266,8 +266,8 @@ void testing_spmm_batched_csc(const Arguments& arg)
     host_vector<C> hC_gold(batch_count_C * nnz_C);
 
     // Initialize data on CPU
-    rocsparse_init<B>(hB, batch_count_B * nnz_B, 1, 1);
-    rocsparse_init<C>(hC_1, batch_count_C * nnz_C, 1, 1);
+    rocsparse_init<B>(hB, batch_count_B * nnz_B, 1, 1, arg.convert_to_int);
+    rocsparse_init<C>(hC_1, batch_count_C * nnz_C, 1, 1, arg.convert_to_int);
 
     if(arg.convert_to_int)
     {
@@ -448,14 +448,14 @@ void testing_spmm_batched_csc(const Arguments& arg)
               * spmm_gflop_count(N, nnz_A, (I)C_m * (I)C_n, hbeta != static_cast<T>(0));
         double gpu_gflops = get_gpu_gflops(gpu_time_used, gflop_count);
 
-        double gbyte_count = cscmm_batched_gbyte_count<T>(A_n,
-                                                          nnz_A,
-                                                          (I)B_m * (I)B_n,
-                                                          (I)C_m * (I)C_n,
-                                                          batch_count_A,
-                                                          batch_count_B,
-                                                          batch_count_C,
-                                                          hbeta != static_cast<T>(0));
+        double gbyte_count = cscmm_batched_gbyte_count<A, B, C>(A_n,
+                                                                nnz_A,
+                                                                (I)B_m * (I)B_n,
+                                                                (I)C_m * (I)C_n,
+                                                                batch_count_A,
+                                                                batch_count_B,
+                                                                batch_count_C,
+                                                                hbeta != static_cast<T>(0));
         double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
 
         display_timing_info(display_key_t::M,
@@ -522,5 +522,8 @@ INSTANTIATE_MIXED(int64_t, int64_t, int8_t, int8_t, float, float);
 INSTANTIATE_MIXED(int32_t, int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int64_t, int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_MIXED(int64_t, int64_t, _Float16, _Float16, float, float);
+INSTANTIATE_MIXED(int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_MIXED(int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_MIXED(int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 
 void testing_spmm_batched_csc_extra(const Arguments& arg) {}

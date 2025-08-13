@@ -95,6 +95,10 @@ TEST_P(accuracy_test, vs_fftw)
         {
             GTEST_SKIP() << e.msg;
         }
+        catch(const fft_params::unimplemented_exception& e)
+        {
+            GTEST_SKIP() << "Unimplemented exception: " << e.what();
+        }
         catch(ROCFFT_FAIL& e)
         {
             GTEST_FAIL() << e.msg;
