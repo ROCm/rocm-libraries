@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
+ * Copyright (c) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,9 @@
 #include <miopen/filesystem.hpp>
 
 using namespace miopen::solver::conv;
-// Helper function for layout string to code (must match GetFeatures3D)
+
+namespace {
+// Helper: layout string to code (must match GetFeatures3D)
 int LayoutStringToCode(const std::string& layout)
 {
     if(layout == "NCDHW")
@@ -50,7 +52,7 @@ int LayoutStringToCode(const std::string& layout)
     return -1.0; // Unknown
 }
 
-// dummy kernels for testing
+// Dummy kernels for testing
 const std::vector<std::string> dummy_kernels = {
     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,64,64,4,Default,4,2,2,1,4,1,4,1,1,1>",
     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<128,128,32,4,Default,4,2,1,4,4,1,1,1,1,1>",
@@ -76,175 +78,35 @@ const std::vector<std::string> dummy_kernels = {
     "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3<64,16,16,32,Default,8,1,1,1,4,1,4,1,1,2>",
 };
 
-// test version of fill_valid_kernels with a dummy function
+// Dummy fill_valid_kernels for testing
 static std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
     fill_valid_kernels = [](const miopen::conv::ProblemDescription&) { return dummy_kernels; };
 
-class Conv3DKernelTuningUtilsTest : public ::testing::Test
+// Helper: reusable problem description
+miopen::conv::ProblemDescription GetReusableProblemDescription(
+    miopenDataType_t dataType         = miopenFloat,
+    miopen::conv::Direction direction = miopen::conv::Direction::BackwardWeights)
 {
-protected:
-    miopen::Handle handle;
-    miopen::ExecutionContext ctx;
+    std::vector<int> in_lengths      = {1, 512, 11, 130, 66};
+    std::vector<int> weights_lengths = {256, 512, 3, 3, 3};
+    std::vector<int> out_lengths     = {1, 256, 9, 128, 64};
 
-    void SetUp() override { ctx = miopen::ExecutionContext(&handle); }
+    miopen::TensorDescriptor in_desc(dataType, in_lengths);
+    miopen::TensorDescriptor weights_desc(dataType, weights_lengths);
+    miopen::TensorDescriptor out_desc(dataType, out_lengths);
 
-    miopen::conv::ProblemDescription GetReusableProblemDescription(
-        miopenDataType_t dataType         = miopenFloat,
-        miopen::conv::Direction direction = miopen::conv::Direction::BackwardWeights)
-    {
-        std::vector<int> in_lengths      = {1, 512, 11, 130, 66};
-        std::vector<int> weights_lengths = {256, 512, 3, 3, 3};
-        std::vector<int> out_lengths     = {1, 256, 9, 128, 64};
+    std::vector<int> pads              = {0, 0, 0};
+    std::vector<int> strides           = {1, 1, 1};
+    std::vector<int> dilations         = {1, 1, 1};
+    std::vector<int> trans_output_pads = {0, 0, 0};
 
-        miopen::TensorDescriptor in_desc(dataType, in_lengths);
-        miopen::TensorDescriptor weights_desc(dataType, weights_lengths);
-        miopen::TensorDescriptor out_desc(dataType, out_lengths);
+    miopen::ConvolutionDescriptor conv_desc(
+        3, miopenConvolution, miopenPaddingDefault, pads, strides, dilations, trans_output_pads);
 
-        std::vector<int> pads              = {0, 0, 0};
-        std::vector<int> strides           = {1, 1, 1};
-        std::vector<int> dilations         = {1, 1, 1};
-        std::vector<int> trans_output_pads = {0, 0, 0};
-
-        miopen::ConvolutionDescriptor conv_desc(3,
-                                                miopenConvolution,
-                                                miopenPaddingDefault,
-                                                pads,
-                                                strides,
-                                                dilations,
-                                                trans_output_pads);
-
-        return miopen::conv::ProblemDescription(
-            in_desc, weights_desc, out_desc, conv_desc, direction);
-    }
-};
-
-TEST_F(Conv3DKernelTuningUtilsTest, GetFeatures3D_Size)
-{
-    auto problem     = GetReusableProblemDescription();
-    int max_cu       = 304;
-    std::string arch = "gfx942";
-    auto features    = GetFeatures3D(problem, max_cu, arch);
-    ASSERT_EQ(features.size(), 29u) << "Unexpected feature vector size";
+    return miopen::conv::ProblemDescription(in_desc, weights_desc, out_desc, conv_desc, direction);
 }
 
-TEST_F(Conv3DKernelTuningUtilsTest, GetFeatures3D_Directions)
-{
-    int max_cu       = 304;
-    std::string arch = "gfx942";
-    auto problem_fwd = GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::Forward);
-    auto features_fwd = GetFeatures3D(problem_fwd, max_cu, arch);
-
-    auto problem_bwd =
-        GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardData);
-    auto features_bwd = GetFeatures3D(problem_bwd, max_cu, arch);
-
-    auto problem_wrw =
-        GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
-    auto features_wrw = GetFeatures3D(problem_wrw, max_cu, arch);
-
-    ASSERT_EQ(features_fwd.size(), features_bwd.size());
-    ASSERT_EQ(features_fwd.size(), features_wrw.size());
-}
-
-TEST_F(Conv3DKernelTuningUtilsTest, GetKernelAsTokens)
-{
-    auto tokens = GetKernelAsTokens("type<param1,param2>");
-    ASSERT_EQ(tokens.size(), 3u);
-    EXPECT_EQ(tokens[0], "type");
-    EXPECT_EQ(tokens[1], "param1");
-    EXPECT_EQ(tokens[2], "param2");
-
-    auto empty = GetKernelAsTokens("");
-    ASSERT_TRUE(empty.empty());
-}
-
-TEST_F(Conv3DKernelTuningUtilsTest, GenerateSplitK)
-{
-    auto split_ks             = GenerateSplitK(8);
-    std::vector<int> expected = {1, 2, 4, 8};
-    ASSERT_EQ(split_ks, expected);
-}
-
-TEST_F(Conv3DKernelTuningUtilsTest, CandidateSelectionFilesExist)
-{
-    std::string db_path     = miopen::GetSystemDbPath();
-    std::string solver_name = "ConvHipImplicitGemm3DGroupWrwXdlops";
-    std::string arch        = "gfx942";
-
-    auto metadata      = db_path + "/" + arch + "_" + solver_name + "_metadata.tn.model";
-    auto input_encoder = db_path + "/" + arch + "_" + solver_name + "_input_encoder.tn.model";
-    auto kernel_config_encoder =
-        db_path + "/" + arch + "_" + solver_name + "_kernel_config_encoder.tn.model";
-
-    ASSERT_TRUE(miopen::fs::exists(metadata)) << "Missing metadata file: " << metadata;
-    ASSERT_TRUE(miopen::fs::exists(input_encoder))
-        << "Missing input encoder file: " << input_encoder;
-    ASSERT_TRUE(miopen::fs::exists(kernel_config_encoder))
-        << "Missing kernel config encoder file: " << kernel_config_encoder;
-}
-
-TEST_F(Conv3DKernelTuningUtilsTest, CandidateSelectionModelInitialization)
-{
-    std::string arch        = "gfx942";
-    std::string solver_name = "ConvHipImplicitGemm3DGroupWrwXdlops";
-    EXPECT_NO_THROW({
-        miopen::ai::tuning::candidate_selection::CandidateSelectionModel model(arch, solver_name);
-    });
-
-    try
-    {
-        auto& model =
-            miopen::ai::tuning::candidate_selection::GetCandidateSelectionModel(arch, solver_name);
-        const auto& meta = model.metadata();
-        ASSERT_FALSE(meta.input_params().empty());
-        ASSERT_FALSE(meta.output_params().empty());
-    }
-    catch(const std::exception& ex)
-    {
-        FAIL() << "Exception during model construction: " << ex.what();
-    }
-}
-
-TEST_F(Conv3DKernelTuningUtilsTest, RunParameterPredictionModelReturnsValidResult)
-{
-    std::string arch = handle.GetDeviceName();
-    auto problem =
-        GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
-
-    int index = 0, split_k = 1;
-    std::string kernel_id;
-    std::string solver_name = "ConvHipImplicitGemm3DGroupWrwXdlops";
-    std::vector<std::string> valid_kernels;
-
-    bool result = miopen::solver::conv::RunParameterPredictionModel<float>(
-        ctx, problem, valid_kernels, index, split_k, kernel_id, fill_valid_kernels, solver_name);
-
-    ASSERT_TRUE(result);
-    ASSERT_FALSE(kernel_id.empty()); // Optionally check kernel_id was set
-    // for debugging, print out selected kernel_id
-    std::cout << "Selected kernel_id: " << kernel_id << std::endl;
-}
-
-TEST_F(Conv3DKernelTuningUtilsTest, RunParameterPredictionModel_Fallback)
-{
-    // Use a fill_valid_kernels that returns an empty list
-    std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)> empty_kernels =
-        [](const miopen::conv::ProblemDescription&) { return std::vector<std::string>{}; };
-
-    auto problem =
-        GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
-    int index = 0, split_k = 1;
-    std::string kernel_id;
-    std::string solver_name = "ConvHipImplicitGemm3DGroupWrwXdlops";
-    std::vector<std::string> valid_kernels;
-
-    bool result = miopen::solver::conv::RunParameterPredictionModel<float>(
-        ctx, problem, valid_kernels, index, split_k, kernel_id, empty_kernels, solver_name);
-
-    ASSERT_FALSE(result);
-    ASSERT_TRUE(kernel_id.empty());
-}
-
+// Helper: check GetFeatures3D map values
 void CheckGetFeatures3D_MapValues(const std::map<std::string, float>& features,
                                   const miopen::conv::ProblemDescription& problem,
                                   miopen::conv::Direction direction)
@@ -311,25 +173,197 @@ void CheckGetFeatures3D_MapValues(const std::map<std::string, float>& features,
         EXPECT_FLOAT_EQ(features.at(kv.first), kv.second) << "Mismatch for key: " << kv.first;
     }
 }
+} // anonymous namespace
 
-TEST_F(Conv3DKernelTuningUtilsTest, GetFeatures3D_MapValueChecks)
+// ------------------- Test Fixture and Parameterized Tests -------------------
+
+struct Conv3DKernelTuningTestParam
 {
-    int max_cu                                            = 304;
-    std::string arch                                      = "gfx942";
-    const std::vector<miopen::conv::Direction> directions = {
-        miopen::conv::Direction::Forward,
-        miopen::conv::Direction::BackwardData,
-        miopen::conv::Direction::BackwardWeights};
-    for(const auto direction : directions)
+    miopenDataType_t data_type;
+    miopen::conv::Direction direction;
+    std::string test_name;
+};
+
+class GPU_Conv3DKernelTuning_NONE : public ::testing::TestWithParam<Conv3DKernelTuningTestParam>
+{
+protected:
+    miopen::Handle handle;
+    miopen::ExecutionContext ctx;
+
+    void SetUp() override
     {
-        auto problem  = GetReusableProblemDescription(miopenFloat, direction);
-        auto features = GetFeatures3D(problem, max_cu, arch);
-        ASSERT_EQ(features.size(), 29u);
-        CheckGetFeatures3D_MapValues(features, problem, direction);
+        ctx = miopen::ExecutionContext(&handle);
+        // Early skip logic could go here if needed
+    }
+};
+
+static std::vector<Conv3DKernelTuningTestParam> GenFullTestCases()
+{
+    return {
+        {miopenFloat, miopen::conv::Direction::Forward, "Fwd"},
+        {miopenFloat, miopen::conv::Direction::BackwardData, "Bwd"},
+        {miopenFloat, miopen::conv::Direction::BackwardWeights, "Wrw"},
+        {miopenHalf, miopen::conv::Direction::BackwardWeights, "Half"},
+        {miopenBFloat16, miopen::conv::Direction::BackwardWeights, "BFloat16"},
+    };
+}
+
+// Test name generator for parameterized tests
+static std::string
+Conv3DKernelTuningTestName(const ::testing::TestParamInfo<Conv3DKernelTuningTestParam>& info)
+{
+    return info.param.test_name;
+}
+
+// Parameterized test for GetFeatures3D
+TEST_P(GPU_Conv3DKernelTuning_NONE, GetFeatures3D_Properties)
+{
+    const auto& param = GetParam();
+    auto problem      = GetReusableProblemDescription(param.data_type, param.direction);
+    int max_cu        = 304;
+    std::string arch  = "gfx942";
+    auto features     = GetFeatures3D(problem, max_cu, arch);
+    ASSERT_EQ(features.size(), 29u);
+    CheckGetFeatures3D_MapValues(features, problem, param.direction);
+}
+
+// ------------------- Non-Parameterized Tests -------------------
+
+class GPU_Conv3DKernelTuningUtils_NONE : public ::testing::Test
+{
+protected:
+    miopen::Handle handle;
+    miopen::ExecutionContext ctx;
+
+    void SetUp() override { ctx = miopen::ExecutionContext(&handle); }
+};
+
+TEST_F(GPU_Conv3DKernelTuningUtils_NONE, GetFeatures3D_Size)
+{
+    auto problem     = GetReusableProblemDescription();
+    int max_cu       = 304;
+    std::string arch = "gfx942";
+    auto features    = GetFeatures3D(problem, max_cu, arch);
+    ASSERT_EQ(features.size(), 29u) << "Unexpected feature vector size";
+}
+
+TEST_F(GPU_Conv3DKernelTuningUtils_NONE, GetFeatures3D_Directions)
+{
+    int max_cu       = 304;
+    std::string arch = "gfx942";
+    auto problem_fwd = GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::Forward);
+    auto features_fwd = GetFeatures3D(problem_fwd, max_cu, arch);
+
+    auto problem_bwd =
+        GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardData);
+    auto features_bwd = GetFeatures3D(problem_bwd, max_cu, arch);
+
+    auto problem_wrw =
+        GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
+    auto features_wrw = GetFeatures3D(problem_wrw, max_cu, arch);
+
+    ASSERT_EQ(features_fwd.size(), features_bwd.size());
+    ASSERT_EQ(features_fwd.size(), features_wrw.size());
+}
+
+TEST_F(GPU_Conv3DKernelTuningUtils_NONE, GetKernelAsTokens)
+{
+    auto tokens = GetKernelAsTokens("type<param1,param2>");
+    ASSERT_EQ(tokens.size(), 3u);
+    EXPECT_EQ(tokens[0], "type");
+    EXPECT_EQ(tokens[1], "param1");
+    EXPECT_EQ(tokens[2], "param2");
+
+    auto empty = GetKernelAsTokens("");
+    ASSERT_TRUE(empty.empty());
+}
+
+TEST_F(GPU_Conv3DKernelTuningUtils_NONE, GenerateSplitK)
+{
+    auto split_ks             = GenerateSplitK(8);
+    std::vector<int> expected = {1, 2, 4, 8};
+    ASSERT_EQ(split_ks, expected);
+}
+
+TEST_F(GPU_Conv3DKernelTuningUtils_NONE, CandidateSelectionFilesExist)
+{
+    std::string db_path     = miopen::GetSystemDbPath();
+    std::string solver_name = "ConvHipImplicitGemm3DGroupWrwXdlops";
+    std::string arch        = "gfx942";
+
+    auto metadata      = db_path + "/" + arch + "_" + solver_name + "_metadata.tn.model";
+    auto input_encoder = db_path + "/" + arch + "_" + solver_name + "_input_encoder.tn.model";
+    auto kernel_config_encoder =
+        db_path + "/" + arch + "_" + solver_name + "_kernel_config_encoder.tn.model";
+
+    ASSERT_TRUE(miopen::fs::exists(metadata)) << "Missing metadata file: " << metadata;
+    ASSERT_TRUE(miopen::fs::exists(input_encoder))
+        << "Missing input encoder file: " << input_encoder;
+    ASSERT_TRUE(miopen::fs::exists(kernel_config_encoder))
+        << "Missing kernel config encoder file: " << kernel_config_encoder;
+}
+
+TEST_F(GPU_Conv3DKernelTuningUtils_NONE, CandidateSelectionModelInitialization)
+{
+    std::string arch        = "gfx942";
+    std::string solver_name = "ConvHipImplicitGemm3DGroupWrwXdlops";
+    EXPECT_NO_THROW({
+        miopen::ai::tuning::candidate_selection::CandidateSelectionModel model(arch, solver_name);
+    });
+
+    try
+    {
+        auto& model =
+            miopen::ai::tuning::candidate_selection::GetCandidateSelectionModel(arch, solver_name);
+        const auto& meta = model.metadata();
+        ASSERT_FALSE(meta.input_params().empty());
+        ASSERT_FALSE(meta.output_params().empty());
+    }
+    catch(const std::exception& ex)
+    {
+        FAIL() << "Exception during model construction: " << ex.what();
     }
 }
 
-TEST_F(Conv3DKernelTuningUtilsTest, GetFeatures3D_DataTypes)
+TEST_F(GPU_Conv3DKernelTuningUtils_NONE, RunParameterPredictionModelReturnsValidResult)
+{
+    std::string arch = handle.GetDeviceName();
+    auto problem =
+        GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
+
+    int index = 0, split_k = 1;
+    std::string kernel_id;
+    std::string solver_name = "ConvHipImplicitGemm3DGroupWrwXdlops";
+    std::vector<std::string> valid_kernels;
+
+    bool result = miopen::solver::conv::RunParameterPredictionModel<float>(
+        ctx, problem, valid_kernels, index, split_k, kernel_id, fill_valid_kernels, solver_name);
+
+    ASSERT_TRUE(result);
+    ASSERT_FALSE(kernel_id.empty());
+    std::cout << "Selected kernel_id: " << kernel_id << std::endl;
+}
+
+TEST_F(GPU_Conv3DKernelTuningUtils_NONE, RunParameterPredictionModel_Fallback)
+{
+    std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)> empty_kernels =
+        [](const miopen::conv::ProblemDescription&) { return std::vector<std::string>{}; };
+
+    auto problem =
+        GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
+    int index = 0, split_k = 1;
+    std::string kernel_id;
+    std::string solver_name = "ConvHipImplicitGemm3DGroupWrwXdlops";
+    std::vector<std::string> valid_kernels;
+
+    bool result = miopen::solver::conv::RunParameterPredictionModel<float>(
+        ctx, problem, valid_kernels, index, split_k, kernel_id, empty_kernels, solver_name);
+
+    ASSERT_FALSE(result);
+    ASSERT_TRUE(kernel_id.empty());
+}
+
+TEST_F(GPU_Conv3DKernelTuningUtils_NONE, GetFeatures3D_DataTypes)
 {
     int max_cu       = 304;
     std::string arch = "gfx942";
@@ -347,30 +381,25 @@ TEST_F(Conv3DKernelTuningUtilsTest, GetFeatures3D_DataTypes)
     ASSERT_EQ(features_b.at("precision"), static_cast<float>(miopenBFloat16));
 }
 
-TEST_F(Conv3DKernelTuningUtilsTest, FullSolverPathway_ConvHipImplicitGemm3DGroupWrwXdlops)
+// ------------------- Full Solver Pathway Tests -------------------
+
+TEST_F(GPU_Conv3DKernelTuningUtils_NONE, FullSolverPathway_ConvHipImplicitGemm3DGroupWrwXdlops)
 {
-    // Set up the problem and context
     auto problem =
         GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
 
-    // Set device name to gfx942 for the handle/context
     ctx = miopen::ExecutionContext(&handle);
 
-    // Instantiate the solver
     ConvHipImplicitGemm3DGroupWrwXdlops solver;
 
-    // Check applicability
     ASSERT_TRUE(solver.IsApplicable(ctx, problem)) << "Solver not applicable for this problem";
 
-    // Get default performance config
     auto perf_cfg = solver.GetDefaultPerformanceConfig(ctx, problem);
     ASSERT_TRUE(solver.IsValidPerformanceConfig(ctx, problem, perf_cfg))
         << "Invalid performance config";
 
-    // Get solution
     auto solution = solver.GetSolution(ctx, problem, perf_cfg);
 
-    // Check solution validity
     ASSERT_FALSE(solution.construction_params.empty()) << "Solution construction_params is empty";
     ASSERT_TRUE(solution.invoker_factory) << "Solution invoker_factory is not set";
     ASSERT_GE(solution.workspace_sz, 0u) << "Workspace size should be non-negative";
@@ -378,7 +407,7 @@ TEST_F(Conv3DKernelTuningUtilsTest, FullSolverPathway_ConvHipImplicitGemm3DGroup
     std::cout << "Selected CK kernel_id: " << perf_cfg.kernel_id << std::endl;
 }
 
-TEST_F(Conv3DKernelTuningUtilsTest, FullSolverPathway_ConvHipImplicitGemm3DGroupFwdXdlops)
+TEST_F(GPU_Conv3DKernelTuningUtils_NONE, FullSolverPathway_ConvHipImplicitGemm3DGroupFwdXdlops)
 {
     auto problem = GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::Forward);
 
@@ -402,7 +431,7 @@ TEST_F(Conv3DKernelTuningUtilsTest, FullSolverPathway_ConvHipImplicitGemm3DGroup
     std::cout << "Selected FWD CK kernel_id: " << perf_cfg.kernel_id << std::endl;
 }
 
-TEST_F(Conv3DKernelTuningUtilsTest, FullSolverPathway_ConvHipImplicitGemm3DGroupBwdXdlops)
+TEST_F(GPU_Conv3DKernelTuningUtils_NONE, FullSolverPathway_ConvHipImplicitGemm3DGroupBwdXdlops)
 {
     auto problem =
         GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardData);
@@ -426,3 +455,10 @@ TEST_F(Conv3DKernelTuningUtilsTest, FullSolverPathway_ConvHipImplicitGemm3DGroup
 
     std::cout << "Selected BWD CK kernel_id: " << perf_cfg.kernel_id << std::endl;
 }
+
+// ------------------- Instantiate Parameterized Tests -------------------
+
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Conv3DKernelTuning_NONE,
+                         ::testing::ValuesIn(GenFullTestCases()),
+                         Conv3DKernelTuningTestName);
