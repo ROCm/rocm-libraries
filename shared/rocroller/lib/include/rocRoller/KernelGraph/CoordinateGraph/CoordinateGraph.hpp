@@ -116,6 +116,8 @@ namespace rocRoller
          */
         class CoordinateGraph : public Graph::Hypergraph<Dimension, Edge>
         {
+            bool m_changesRestricted = false;
+
         public:
             using Base = Graph::Hypergraph<Dimension, Edge>;
 
@@ -155,6 +157,21 @@ namespace rocRoller
             requires(std::constructible_from<CoordinateGraph::Element, T>) std::optional<T> get(
                 int tag)
             const;
+
+            /**
+             *  Check if modifying an element (index) is allowed or not. This
+             *  only comes into effect when the graph is in restricted mode.
+             */
+            virtual bool isModificationAllowed(int index) const override;
+
+            /**
+             *  Set the graph to be in restricted mode. Some operations would
+             *  be disallowed when in restricted mode.
+             */
+            void setRestricted()
+            {
+                m_changesRestricted = true;
+            }
         };
 
         std::string name(CoordinateGraph::Element const& el);

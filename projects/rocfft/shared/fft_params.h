@@ -614,7 +614,10 @@ public:
             }
         }
 
-        assert(selected_grid[0] * selected_grid[1] * selected_grid[2] == mp_ranks);
+        if(selected_grid[0] * selected_grid[1] * selected_grid[2] != mp_ranks)
+        {
+            throw std::runtime_error("Grid dimensions do not multiply to mp_ranks.");
+        }
 
         fft_grid = {selected_grid[0], selected_grid[1], selected_grid[2]};
     }
@@ -653,7 +656,10 @@ public:
             }
         }
 
-        assert(selected_grid[0] * selected_grid[1] == mp_ranks);
+        if(selected_grid[0] * selected_grid[1] != mp_ranks)
+        {
+            throw std::runtime_error("Grid dimensions do not multiply to mp_ranks.");
+        }
 
         fft_grid = {selected_grid[0], selected_grid[1]};
     }

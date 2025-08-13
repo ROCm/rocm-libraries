@@ -459,6 +459,8 @@ namespace hipsparse
             return CUDA_R_32I;
         case HIP_R_16F:
             return CUDA_R_16F;
+        case HIP_R_16BF:
+            return CUDA_R_16BF;
         case HIP_R_32F:
             return CUDA_R_32F;
         case HIP_R_64F:
@@ -482,6 +484,8 @@ namespace hipsparse
             return HIP_R_32I;
         case CUDA_R_16F:
             return HIP_R_16F;
+        case CUDA_R_16BF:
+            return HIP_R_16BF;
         case CUDA_R_32F:
             return HIP_R_32F;
         case CUDA_R_64F:
