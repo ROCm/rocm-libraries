@@ -274,11 +274,11 @@ TEST_F(CandidateSelectionTest, ModelSelectBestCandidate)
         features[name] = 1.0f;
     }
     auto valid_kernel_params = GenerateValidKernelParams(meta, kernel_name, 3);
-    auto result = ModelSelectBestCandidate(arch, solver, features, valid_kernel_params, /*use_split_k=*/false);
+    auto result              = ModelSelectBestCandidate(
+        arch, solver, features, valid_kernel_params, /*use_split_k=*/false);
     ASSERT_GE(result.kernel_index, 0);
     ASSERT_LT(result.kernel_index, static_cast<int>(valid_kernel_params.size()));
 }
-
 
 TEST_F(CandidateSelectionTest, ExpandKernelParamsWithSplitK)
 {
@@ -310,7 +310,6 @@ TEST_F(CandidateSelectionTest, ExpandKernelParamsWithSplitK)
     }
 }
 
-
 TEST_F(CandidateSelectionTest, ExpandKernelParamsWithSplitKFunctionality)
 {
     std::vector<std::vector<std::string>> kernels = {
@@ -328,11 +327,4 @@ TEST_F(CandidateSelectionTest, ExpandKernelParamsWithSplitKFunctionality)
         ASSERT_EQ(mapping[i].first, 0);
         ASSERT_EQ(mapping[i].second, split_ks[i]);
     }
-}
-
-
-int main(int argc, char** argv)
-{
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
 }

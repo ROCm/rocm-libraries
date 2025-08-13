@@ -503,7 +503,7 @@ TEST_F(Conv3DAIHeuristicsTest, BartTestMIOpenDriverEquivalent)
 
     // Test PredictSolver function (as used by MIOpenDriver)
     // This is the actual function that MIOpenDriver calls
-    MIOPEN_LOG_I2("=== Bart Test: 3D Convolution Solver Predictions ===");
+    MIOPEN_LOG_I2("=== 3D Convolution Solver Predictions ===");
     MIOPEN_LOG_I2("Problem: n=1 c=4 k=8 DHW=8x8x8 filter=3x3x3 stride=3x3x3 pad=0x0x0");
     auto solver_ids = immed_mode::PredictSolver(problem, ctx, "gfx942");
     EXPECT_FALSE(solver_ids.empty()) << "PredictSolver should return solvers";
