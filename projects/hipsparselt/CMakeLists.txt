@@ -33,6 +33,7 @@ option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 # Find CUDA if the user wants a CUDA version.
 option(BUILD_CUDA "Look for CUDA and use that as a backend if found" OFF)
+option(BUILD_USE_LOCAL_TENSILE "Build hipSparseLt with local tensilelite" ON)
 include(CMakeDependentOption)
 cmake_dependent_option(HIPSPARSELT_ENABLE_MARKER "Enable roctx marker in hipSPARSELt" ON "BUILD_SHARED_LIBS" OFF)
 
@@ -196,6 +197,16 @@ else()
 
       if (NOT Tensile_BUILD_ID)
         set(Tensile_BUILD_ID "sha1" CACHE STRING "Build ID Kind for Tensile" FORCE)
+      endif()
+
+      if ( NOT Tensile_TEST_LOCAL_PATH AND BUILD_USE_LOCAL_TENSILE )
+        find_path(TensileLite NAMES tensilelite PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../hipBLASLt")
+        if ( ${TensileLite} STREQUAL "TensileLite-NOTFOUND" )
+          find_path(TensileLite NAMES tensilelite PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt" REQUIRED)
+        endif()
+        set(Tensile_TEST_LOCAL_PATH "${TensileLite}/tensilelite")
+        message(STATUS "Found TensileLite: ${TensileLite}/tensilelite")
+        message(STATUS "Set Tensile_TEST_LOCAL_PATH: ${TensileLite}/tensilelite")
       endif()
 
       include(virtualenv)
