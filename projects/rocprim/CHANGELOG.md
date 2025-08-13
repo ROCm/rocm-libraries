@@ -2,6 +2,15 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM-4.1.0 for ROCm 7.1
+
+### Added
+
+### Removed
+
+### Changed
+* Changed tests to support `ptr-to-const` output in `/test/rocprim/test_device_batch_memcpy.cpp`.
+
 ## rocPRIM 4.0.0 for ROCm 7.0
 
 ### Added
