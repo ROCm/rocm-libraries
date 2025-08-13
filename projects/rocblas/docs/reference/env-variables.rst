@@ -33,7 +33,7 @@ tables.
       - 1
       - :ref:`Control the GEMM backend <rocblas-tensile-hipblaslt>`
       - | **Unset**: GEMM batched default backend.
-        | **0**: Tensile will always used as the GEMM batched backend.
+        | **0**: Tensile is always used as the GEMM batched backend.
         | **1**: hipBLASLt when applicable will be used as the GEMM batched backend, but will fallback to Tensile on problems for which hipBLASLt does not provide a solution or when errors are encountered using the hipBLASLt backend.
 
     * - | ``ROCBLAS_DEVICE_MEMORY_SIZE``
