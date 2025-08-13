@@ -277,10 +277,10 @@ auto test_block_discontinuity()
 
         // Reading results
         const auto heads = device_heads.load_to_unique_ptr();
-        test_utils::assert_eq(heads.get(),
-                              heads.get() + size,
-                              expected_heads.begin(),
-                              expected_heads.end());
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(heads.get(),
+                                                      heads.get() + size,
+                                                      expected_heads.begin(),
+                                                      expected_heads.end()));
     }
 }
 
@@ -362,10 +362,10 @@ auto test_block_discontinuity()
         HIP_CHECK(hipDeviceSynchronize());
 
         const auto tails = device_tails.load_to_unique_ptr();
-        test_utils::assert_eq(tails.get(),
-                              tails.get() + size,
-                              expected_tails.begin(),
-                              expected_tails.end());
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(tails.get(),
+                                                      tails.get() + size,
+                                                      expected_tails.begin(),
+                                                      expected_tails.end()));
     }
 }
 
@@ -465,14 +465,14 @@ auto test_block_discontinuity()
         const auto heads = device_heads.load_to_unique_ptr();
         const auto tails = device_tails.load_to_unique_ptr();
 
-        test_utils::assert_eq(heads.get(),
-                              heads.get() + size,
-                              expected_heads.begin(),
-                              expected_heads.end());
-        test_utils::assert_eq(tails.get(),
-                              tails.get() + size,
-                              expected_tails.begin(),
-                              expected_tails.end());
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(heads.get(),
+                                                      heads.get() + size,
+                                                      expected_heads.begin(),
+                                                      expected_heads.end()));
+        ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(tails.get(),
+                                                      tails.get() + size,
+                                                      expected_tails.begin(),
+                                                      expected_tails.end()));
     }
 }
 

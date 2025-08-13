@@ -9,6 +9,31 @@ using Hardware    = TensileLite::analytical::Hardware;
 
 PYBIND11_MODULE(origami, m)
 {
+    pybind11::enum_<TensileLite::analytical::DataType>(m, "DataType")
+        .value("Float", TensileLite::analytical::DataType::Float)
+        .value("Double", TensileLite::analytical::DataType::Double)
+        .value("ComplexFloat", TensileLite::analytical::DataType::ComplexFloat)
+        .value("ComplexDouble", TensileLite::analytical::DataType::ComplexDouble)
+        .value("Half", TensileLite::analytical::DataType::Half)
+        .value("Int8x4", TensileLite::analytical::DataType::Int8x4)
+        .value("Int32", TensileLite::analytical::DataType::Int32)
+        .value("BFloat16", TensileLite::analytical::DataType::BFloat16)
+        .value("Int8", TensileLite::analytical::DataType::Int8)
+        .value("Int64", TensileLite::analytical::DataType::Int64)
+        .value("XFloat32", TensileLite::analytical::DataType::XFloat32)
+        .value("Float8_fnuz", TensileLite::analytical::DataType::Float8_fnuz)
+        .value("BFloat8_fnuz", TensileLite::analytical::DataType::BFloat8_fnuz)
+        .value("Float8BFloat8_fnuz", TensileLite::analytical::DataType::Float8BFloat8_fnuz)
+        .value("BFloat8Float8_fnuz", TensileLite::analytical::DataType::BFloat8Float8_fnuz)
+        .value("Float8", TensileLite::analytical::DataType::Float8)
+        .value("BFloat8", TensileLite::analytical::DataType::BFloat8)
+        .value("Float8BFloat8", TensileLite::analytical::DataType::Float8BFloat8)
+        .value("BFloat8Float8", TensileLite::analytical::DataType::BFloat8Float8)
+        .export_values();
+
+    m.def("intToDataType",
+          &Origami::intToDataType,
+          "Convert int to DataType.");
 
     pybind11::enum_<Hardware::Architecture>(m, "Architecture")
         .value("gfx942", Hardware::Architecture::gfx942)
