@@ -184,7 +184,7 @@ struct Conv3DKernelTuningTestParam
     std::string test_name;
 };
 
-class GPU_Conv3DKernelTuning_NONE : public ::testing::TestWithParam<Conv3DKernelTuningTestParam>
+class GPU_Conv3DKernelTuning_FP32 : public ::testing::TestWithParam<Conv3DKernelTuningTestParam>
 {
 protected:
     miopen::Handle handle;
@@ -216,7 +216,7 @@ Conv3DKernelTuningTestName(const ::testing::TestParamInfo<Conv3DKernelTuningTest
 }
 
 // Parameterized test for GetFeatures3D
-TEST_P(GPU_Conv3DKernelTuning_NONE, GetFeatures3D_Properties)
+TEST_P(GPU_Conv3DKernelTuning_FP32, GetFeatures3D_Properties)
 {
     const auto& param = GetParam();
     auto problem      = GetReusableProblemDescription(param.data_type, param.direction);
@@ -229,7 +229,7 @@ TEST_P(GPU_Conv3DKernelTuning_NONE, GetFeatures3D_Properties)
 
 // ------------------- Non-Parameterized Tests -------------------
 
-class GPU_Conv3DKernelTuningUtils_NONE : public ::testing::Test
+class GPU_Conv3DKernelTuningUtils_FP32 : public ::testing::Test
 {
 protected:
     miopen::Handle handle;
@@ -238,7 +238,7 @@ protected:
     void SetUp() override { ctx = miopen::ExecutionContext(&handle); }
 };
 
-TEST_F(GPU_Conv3DKernelTuningUtils_NONE, GetFeatures3D_Size)
+TEST_F(GPU_Conv3DKernelTuningUtils_FP32, GetFeatures3D_Size)
 {
     auto problem     = GetReusableProblemDescription();
     int max_cu       = 304;
@@ -247,7 +247,7 @@ TEST_F(GPU_Conv3DKernelTuningUtils_NONE, GetFeatures3D_Size)
     ASSERT_EQ(features.size(), 29u) << "Unexpected feature vector size";
 }
 
-TEST_F(GPU_Conv3DKernelTuningUtils_NONE, GetFeatures3D_Directions)
+TEST_F(GPU_Conv3DKernelTuningUtils_FP32, GetFeatures3D_Directions)
 {
     int max_cu       = 304;
     std::string arch = "gfx942";
@@ -266,7 +266,7 @@ TEST_F(GPU_Conv3DKernelTuningUtils_NONE, GetFeatures3D_Directions)
     ASSERT_EQ(features_fwd.size(), features_wrw.size());
 }
 
-TEST_F(GPU_Conv3DKernelTuningUtils_NONE, GetKernelAsTokens)
+TEST_F(GPU_Conv3DKernelTuningUtils_FP32, GetKernelAsTokens)
 {
     auto tokens = GetKernelAsTokens("type<param1,param2>");
     ASSERT_EQ(tokens.size(), 3u);
@@ -278,14 +278,14 @@ TEST_F(GPU_Conv3DKernelTuningUtils_NONE, GetKernelAsTokens)
     ASSERT_TRUE(empty.empty());
 }
 
-TEST_F(GPU_Conv3DKernelTuningUtils_NONE, GenerateSplitK)
+TEST_F(GPU_Conv3DKernelTuningUtils_FP32, GenerateSplitK)
 {
     auto split_ks             = GenerateSplitK(8);
     std::vector<int> expected = {1, 2, 4, 8};
     ASSERT_EQ(split_ks, expected);
 }
 
-TEST_F(GPU_Conv3DKernelTuningUtils_NONE, CandidateSelectionFilesExist)
+TEST_F(GPU_Conv3DKernelTuningUtils_FP32, CandidateSelectionFilesExist)
 {
     std::string db_path     = miopen::GetSystemDbPath();
     std::string solver_name = "ConvHipImplicitGemm3DGroupWrwXdlops";
@@ -303,7 +303,7 @@ TEST_F(GPU_Conv3DKernelTuningUtils_NONE, CandidateSelectionFilesExist)
         << "Missing kernel config encoder file: " << kernel_config_encoder;
 }
 
-TEST_F(GPU_Conv3DKernelTuningUtils_NONE, CandidateSelectionModelInitialization)
+TEST_F(GPU_Conv3DKernelTuningUtils_FP32, CandidateSelectionModelInitialization)
 {
     std::string arch        = "gfx942";
     std::string solver_name = "ConvHipImplicitGemm3DGroupWrwXdlops";
@@ -325,7 +325,7 @@ TEST_F(GPU_Conv3DKernelTuningUtils_NONE, CandidateSelectionModelInitialization)
     }
 }
 
-TEST_F(GPU_Conv3DKernelTuningUtils_NONE, RunParameterPredictionModelReturnsValidResult)
+TEST_F(GPU_Conv3DKernelTuningUtils_FP32, RunParameterPredictionModelReturnsValidResult)
 {
     std::string arch = handle.GetDeviceName();
     auto problem =
@@ -344,7 +344,7 @@ TEST_F(GPU_Conv3DKernelTuningUtils_NONE, RunParameterPredictionModelReturnsValid
     std::cout << "Selected kernel_id: " << kernel_id << std::endl;
 }
 
-TEST_F(GPU_Conv3DKernelTuningUtils_NONE, RunParameterPredictionModel_Fallback)
+TEST_F(GPU_Conv3DKernelTuningUtils_FP32, RunParameterPredictionModel_Fallback)
 {
     std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)> empty_kernels =
         [](const miopen::conv::ProblemDescription&) { return std::vector<std::string>{}; };
@@ -363,7 +363,7 @@ TEST_F(GPU_Conv3DKernelTuningUtils_NONE, RunParameterPredictionModel_Fallback)
     ASSERT_TRUE(kernel_id.empty());
 }
 
-TEST_F(GPU_Conv3DKernelTuningUtils_NONE, GetFeatures3D_DataTypes)
+TEST_F(GPU_Conv3DKernelTuningUtils_FP32, GetFeatures3D_DataTypes)
 {
     int max_cu       = 304;
     std::string arch = "gfx942";
@@ -383,7 +383,7 @@ TEST_F(GPU_Conv3DKernelTuningUtils_NONE, GetFeatures3D_DataTypes)
 
 // ------------------- Full Solver Pathway Tests -------------------
 
-TEST_F(GPU_Conv3DKernelTuningUtils_NONE, FullSolverPathway_ConvHipImplicitGemm3DGroupWrwXdlops)
+TEST_F(GPU_Conv3DKernelTuningUtils_FP32, FullSolverPathway_ConvHipImplicitGemm3DGroupWrwXdlops)
 {
     auto problem =
         GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardWeights);
@@ -407,7 +407,7 @@ TEST_F(GPU_Conv3DKernelTuningUtils_NONE, FullSolverPathway_ConvHipImplicitGemm3D
     std::cout << "Selected CK kernel_id: " << perf_cfg.kernel_id << std::endl;
 }
 
-TEST_F(GPU_Conv3DKernelTuningUtils_NONE, FullSolverPathway_ConvHipImplicitGemm3DGroupFwdXdlops)
+TEST_F(GPU_Conv3DKernelTuningUtils_FP32, FullSolverPathway_ConvHipImplicitGemm3DGroupFwdXdlops)
 {
     auto problem = GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::Forward);
 
@@ -431,7 +431,7 @@ TEST_F(GPU_Conv3DKernelTuningUtils_NONE, FullSolverPathway_ConvHipImplicitGemm3D
     std::cout << "Selected FWD CK kernel_id: " << perf_cfg.kernel_id << std::endl;
 }
 
-TEST_F(GPU_Conv3DKernelTuningUtils_NONE, FullSolverPathway_ConvHipImplicitGemm3DGroupBwdXdlops)
+TEST_F(GPU_Conv3DKernelTuningUtils_FP32, FullSolverPathway_ConvHipImplicitGemm3DGroupBwdXdlops)
 {
     auto problem =
         GetReusableProblemDescription(miopenFloat, miopen::conv::Direction::BackwardData);
@@ -459,6 +459,6 @@ TEST_F(GPU_Conv3DKernelTuningUtils_NONE, FullSolverPathway_ConvHipImplicitGemm3D
 // ------------------- Instantiate Parameterized Tests -------------------
 
 INSTANTIATE_TEST_SUITE_P(Full,
-                         GPU_Conv3DKernelTuning_NONE,
+                         GPU_Conv3DKernelTuning_FP32,
                          ::testing::ValuesIn(GenFullTestCases()),
                          Conv3DKernelTuningTestName);
