@@ -50,8 +50,6 @@ cmake_dependent_option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for 
 option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 cmake_dependent_option(ENABLE_UPSTREAM_TESTS "Enable upstream (thrust) tests" ON BUILD_TEST OFF)
-#Set the header wrapper OFF by default.
-option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
 
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
@@ -203,18 +201,6 @@ if(BUILD_BENCHMARK)
   add_subdirectory(benchmark)
 endif()
 
-#Create header wrapper for backward compatibility
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_wrap_header_dir(
-    ${CMAKE_SOURCE_DIR}/thrust
-    PATTERNS "*.h" "*.inl" "*.cuh" "*.hpp"
-    HEADER_LOCATION include/thrust
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS rocthrust/${CMAKE_INSTALL_INCLUDEDIR}/thrust
-    OUTPUT_LOCATIONS rocthrust/wrapper/include/thrust
-  )
-endif( )
-  
 set(THRUST_OPTIONS_DEBUG ${THRUST_OPTIONS_WARNINGS})
 set(THRUST_OPTIONS_RELEASE ${THRUST_OPTIONS_WARNINGS})
 
