@@ -27,6 +27,7 @@
 #pragma once
 
 #include <numeric>
+#include <omp.h>
 
 #include <rocRoller/TensorDescriptor.hpp>
 
@@ -515,6 +516,8 @@ namespace rocRoller
         std::vector<T> rv(input.size());
 
         auto count = CoordCount(sizes.begin(), std::prev(sizes.end()));
+
+        AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels())); 
 #pragma omp parallel for
         for(size_t coordNum = 0; coordNum < count; coordNum++)
         {

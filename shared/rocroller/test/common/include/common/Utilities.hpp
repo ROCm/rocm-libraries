@@ -33,6 +33,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <memory>
+#include <omp.h>
 #include <sstream>
 
 #ifdef ROCROLLER_USE_HIP
@@ -44,6 +45,7 @@
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -107,6 +109,8 @@ double normL2(std::vector<T> a)
 {
     double r = 0.0;
 
+    using namespace rocRoller;
+    AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels()));
 #pragma omp parallel for reduction(+ : r)
     for(int i = 0; i < a.size(); ++i)
     {
@@ -122,6 +126,8 @@ double relativeNormL2(std::vector<T> a, std::vector<T> b)
     double d = 0.0;
     double r = 0.0;
 
+    using namespace rocRoller;
+    AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels()));
 #pragma omp parallel for reduction(+ : d, r)
     for(size_t i = 0; i < a.size(); ++i)
     {
@@ -139,6 +145,8 @@ double normInf(std::vector<T> a)
 {
     double r = 0.0;
 
+    using namespace rocRoller;
+    AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels()));
 #pragma omp parallel for reduction(max : r)
     for(int i = 0; i < a.size(); ++i)
     {
@@ -155,6 +163,8 @@ double relativeNormInf(std::vector<T> a, std::vector<T> b)
     double d = 0.0;
     double r = 0.0;
 
+    using namespace rocRoller;
+    AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels()));
 #pragma omp parallel for reduction(max : d, r)
     for(size_t i = 0; i < a.size(); ++i)
     {
@@ -385,6 +395,7 @@ namespace rocRoller
                   beta,
                   transA,
                   transB);
+            AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels()));
 #pragma omp parallel for
             for(std::size_t i = 0; i != floatD.size(); ++i)
             {
@@ -475,6 +486,7 @@ namespace rocRoller
                         scaleBlockSize,
                         scaleTypeA,
                         scaleTypeB);
+            AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels()));
 #pragma omp parallel for
             for(std::size_t i = 0; i != floatD.size(); ++i)
             {

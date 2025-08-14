@@ -195,6 +195,7 @@ namespace SettingsTest
             size_t numUnexpectedLogLevels = 0;
             size_t numIters               = 0;
 
+            AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels()));
 #pragma omp parallel num_threads(numTestThreads) reduction(+ : numUnexpectedLogLevels) \
     reduction(+ : numIters)
             {

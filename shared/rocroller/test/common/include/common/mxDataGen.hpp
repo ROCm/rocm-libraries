@@ -101,6 +101,8 @@ namespace rocRoller
                          const index_t           blockScaling = 1,
                          const DataPattern       pattern      = Bounded)
     {
+        AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels()));
+
         auto sizes   = desc.sizes();
         auto strides = desc.strides();
 
