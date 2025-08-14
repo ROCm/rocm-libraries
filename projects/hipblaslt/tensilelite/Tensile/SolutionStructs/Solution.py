@@ -383,9 +383,9 @@ class Solution(collections.abc.Mapping):
     # i.e. ASEM * BPE % 4 != 0. In this case dword/dwordx4 DTL load will
     # zero out the entire partial 32b read and cause accuracy issues.
     if (asem * bpeA) % 4 != 0:
-      state["NonDTLTailLoopA"] = not state["ProblemType"]["TLUA"]
+      state["NonDTLTailLoopA"] = True
     if (asem * bpeB) % 4 != 0:
-      state["NonDTLTailLoopB"] = not state["ProblemType"]["TLUB"]
+      state["NonDTLTailLoopB"] = True
 
     if (state["ISA"] != (9, 4, 2)) or \
        (state["ProblemType"]["Sparse"]) or \
@@ -764,7 +764,7 @@ class Solution(collections.abc.Mapping):
 
     MT = state["MacroTile0"] if tc == 'A' else state["MacroTile1"]
 
-    if not math.log(MT,2).is_integer():
+    if (MT & (MT-1)) != 0: # Check of MT not power of 2
       # so far, numBytesAB<4 case, TLU=False only (continue with False)
       if numBytesAB < 4 and state["ProblemType"]["TLU%c"%tc]:
         return False
