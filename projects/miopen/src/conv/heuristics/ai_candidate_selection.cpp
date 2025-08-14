@@ -490,6 +490,7 @@ ModelSelectBestCandidate(const std::string& arch,
         std::vector<std::vector<std::string>> expanded_params = valid_kernel_params;
         std::vector<std::pair<int, int>> mapping_pairs;
         std::vector<int> heuristic_indexes;
+        heuristic_indexes.reserve(valid_kernel_params.size()); // Pre-allocate capacity
         for(size_t i = 0; i < valid_kernel_params.size(); ++i)
             heuristic_indexes.push_back(static_cast<int>(i));
 

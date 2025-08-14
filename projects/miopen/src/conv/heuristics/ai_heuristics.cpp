@@ -35,7 +35,9 @@
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK || MIOPEN_ENABLE_AI_KERNEL_TUNING
 #include <fdeep/fdeep.hpp>
 #include <miopen/filesystem.hpp>
-#include <mutex>
+#include <miopen/env.hpp>
+
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
 
 // 3D AI heuristics - now declared properly in header
 // No need for local forward declarations since we include the header
@@ -872,15 +874,6 @@ std::unique_ptr<Model3D> Get3DModel(const std::string& device)
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
 namespace tuning {
 
-inline bool GetUseSinglePredictEnv()
-{
-    static const bool cached = [] {
-        const char* env = std::getenv("MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT");
-        return env != nullptr && std::string(env) == "1";
-    }();
-    return cached;
-}
-
 Metadata::Metadata(const std::string& arch, const std::string& solver)
 {
     const nlohmann::json metadata =
@@ -1144,7 +1137,7 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
 
     // By default, use predict_multi (multi-threaded); use single-threaded loop only if env var is
     // set
-    bool use_single = GetUseSinglePredictEnv();
+    bool use_single = env::enabled(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT);
 
     std::vector<std::vector<float>> result;
     std::vector<fdeep::tensors> inputs_vec;
