@@ -28,8 +28,8 @@ the following table.
       - Full support
 
 
-For more information about data type support for the other ROCm libraries, see 
-:doc:`Data types and precision support page <rocm:reference/precision-support>`. 
+For more information about data type support for the other ROCm libraries, see
+:doc:`Data types and precision support page <rocm:reference/precision-support>`.
 
 Supported input and output types
 ================================
@@ -88,7 +88,7 @@ List of supported input and output types:
   *
     - float32
     - HIP_R_32F
-    - ❌
+    - ✅
     - ✅
   *
     - float64
