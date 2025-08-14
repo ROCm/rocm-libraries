@@ -67,4 +67,5 @@ protected:
                         rocRoller::Register::AllocationOptions allocOptions = {});
 
     rocRoller::KernelOptions m_kernelOptions;
+    int m_originalMaxActiveLevels;
 };

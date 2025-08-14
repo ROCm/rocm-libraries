@@ -54,6 +54,8 @@ void ContextFixture::SetUp()
     auto const* info     = testing::UnitTest::GetInstance()->current_test_info();
     std::string testName = info->name();
 
+    m_originalMaxActiveLevels = omp_get_max_active_levels();
+
     // Ensure all functions that use OpenMP have "OPENMP" as a part of the test name
     // Note: All uses of #pragma omp should include an assertion for omp_get_max_active_levels() >= 1;
     if(testName.find("OPENMP") != std::string::npos)
@@ -64,6 +66,8 @@ void ContextFixture::SetUp()
 
 void ContextFixture::TearDown()
 {
+    omp_set_max_active_levels(m_originalMaxActiveLevels);
+    
     m_context.reset();
     rocRoller::Settings::reset();
     rocRoller::Component::ComponentFactoryBase::ClearAllCaches();
