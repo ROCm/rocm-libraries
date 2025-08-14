@@ -1773,7 +1773,7 @@ class StreamKBasic(StreamK):
         module.add(xccMapping(writer, kernel))
 
         # Workaround for gfx12
-        if writer.states.asmCaps["WorkGroupIdFromTTM"]:
+        if writer.states.archCaps["WorkGroupIdFromTTM"]:
             module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
             module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
@@ -1857,7 +1857,7 @@ class StreamKTwoTileOriginal(StreamK):
         module.add(xccMapping(writer, kernel))
 
         # Workaround for gfx12
-        if writer.states.asmCaps["WorkGroupIdFromTTM"]:
+        if writer.states.archCaps["WorkGroupIdFromTTM"]:
             module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
             module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
@@ -1982,7 +1982,7 @@ class StreamKTwoTileDPFirst(StreamK):
         module.add(xccMapping(writer, kernel))
 
         # Workaround for gfx12
-        if writer.states.asmCaps["WorkGroupIdFromTTM"]:
+        if writer.states.archCaps["WorkGroupIdFromTTM"]:
             module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
             module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
