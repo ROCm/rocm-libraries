@@ -24,6 +24,24 @@
 # The ROCm platform requires Ubuntu 16.04 or Fedora 24, which has cmake 3.5
 cmake_minimum_required(VERSION 3.5 FATAL_ERROR)
 
+function( apply_omp_settings lib_target_ )
+  if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::OpenMP_CXX)
+    set_target_properties( ${lib_target_} PROPERTIES
+      BUILD_RPATH "${HIP_CLANG_ROOT}/lib"
+    )
+    set_target_properties( ${lib_target_} PROPERTIES
+      INSTALL_RPATH "$ORIGIN/../llvm/lib"
+    )
+  elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
+    set_target_properties( ${lib_target_} PROPERTIES
+      BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}"
+    )
+    set_target_properties( ${lib_target_} PROPERTIES
+      INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}"
+    )
+  endif()
+endfunction()
+
 if (rocblas_FOUND)
   message("Build rocSPARSE client with rocBLAS")
   add_compile_options(-DROCSPARSE_WITH_ROCBLAS)
@@ -69,6 +87,24 @@ if ( BUILD_FORTRAN_CLIENTS )
 
 endif()
 
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  # Look for openmp config in ROCm install to populate openmp_LIB_DIR and openmp_LIB_INSTALL_DIR
+  find_package(OpenMP CONFIG PATHS "${HIP_CLANG_ROOT}/lib/cmake")
+endif()
+
+# OpenMP
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
+  set(ROCSPARSE_CLIENT_LIBS "OpenMP::omp")
+  message(STATUS "Found openmp-config.cmake at ${OpenMP_DIR}")
+else()
+  # if it fails to find OpenMP compile and link flags in strange configurations it can just use non-parallel reference computation
+  # if there is no omp.h to find the client compilation will fail and this should be obvious, used to be REQUIRED
+  find_package(OpenMP)
+  if (TARGET OpenMP::OpenMP_CXX)
+    set(ROCSPARSE_CLIENT_LIBS "OpenMP::OpenMP_CXX")
+  endif()
+endif()
+
 # Determine if CXX Compiler is hip-clang
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
   message(STATUS "Using hip-clang to build for amdgpu backend")
@@ -106,18 +142,6 @@ if (CMAKE_CXX_STANDARD EQUAL 14)
   message( DEPRECATION "Builds using the C++14 standard will no longer be supported in the next major release" )
 elseif(NOT CMAKE_CXX_STANDARD EQUAL 17)
   message(FATAL_ERROR "Only C++14 and C++17 are supported")
-endif()
-
-# If OpenMP is available, we can use it to speed up some tests
-find_package(OpenMP QUIET)
-
-if(OPENMP_FOUND)
-  if(NOT TARGET OpenMP::OpenMP_CXX)
-    # OpenMP cmake fix for cmake <= 3.9
-    add_library(OpenMP::OpenMP_CXX IMPORTED INTERFACE)
-    set_property(TARGET OpenMP::OpenMP_CXX PROPERTY INTERFACE_COMPILE_OPTIONS ${OpenMP_CXX_FLAGS})
-    set_property(TARGET OpenMP::OpenMP_CXX PROPERTY INTERFACE_LINK_LIBRARIES ${OpenMP_CXX_FLAGS} Threads::Threads)
-  endif()
 endif()
 
 if(BUILD_CLIENTS_SAMPLES)

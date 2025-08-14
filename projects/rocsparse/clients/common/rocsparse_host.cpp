@@ -5211,7 +5211,7 @@ void rocsparse_host<T, I, J, A, B, C>::cooddmm(rocsparse_operation  transA,
         {
             sum += x[incx * k] * y[incy * k];
         }
-        coo_val_C[s] = coo_val_C[s] * b + a * sum;
+        coo_val_C[s] = b * coo_val_C[s] + a * sum;
     }
 }
 
@@ -5270,7 +5270,7 @@ void rocsparse_host<T, I, J, A, B, C>::cooaosddmm(rocsparse_operation  transA,
         {
             sum += x[incx * k] * y[incy * k];
         }
-        coo_val_C[s] = coo_val_C[s] * b + a * sum;
+        coo_val_C[s] = b * coo_val_C[s] + a * sum;
     }
 }
 
@@ -5332,7 +5332,7 @@ void rocsparse_host<T, I, J, A, B, C>::csrddmm(rocsparse_operation  transA,
             {
                 sum += x[incx * k] * y[incy * k];
             }
-            csr_val_C[at] = csr_val_C[at] * b + a * sum;
+            csr_val_C[at] = b * csr_val_C[at] + a * sum;
         }
     }
 }
@@ -5397,7 +5397,7 @@ void rocsparse_host<T, I, J, A, B, C>::ellddmm(rocsparse_operation  transA,
                 {
                     sum += x[incx * k] * y[incy * k];
                 }
-                ell_val_C[at] = ell_val_C[at] * b + a * sum;
+                ell_val_C[at] = b * ell_val_C[at] + a * sum;
             }
         }
     }
@@ -5461,7 +5461,7 @@ void rocsparse_host<T, I, J, A, B, C>::cscddmm(rocsparse_operation  transA,
             {
                 sum += x[incx * k] * y[incy * k];
             }
-            csr_val_C[at] = csr_val_C[at] * b + a * sum;
+            csr_val_C[at] = b * csr_val_C[at] + a * sum;
         }
     }
 }
@@ -8543,7 +8543,20 @@ void host_bsrpad_value(rocsparse_int m,
 // INSTANTIATE
 
 template struct rocsparse_host<float, int32_t, int32_t, _Float16, _Float16, float>;
+template struct rocsparse_host<float, int32_t, int32_t, _Float16, _Float16, _Float16>;
 template struct rocsparse_host<_Float16, int32_t, int32_t, _Float16, _Float16, _Float16>;
+template struct rocsparse_host<float,
+                               int32_t,
+                               int32_t,
+                               rocsparse_bfloat16,
+                               rocsparse_bfloat16,
+                               float>;
+template struct rocsparse_host<float,
+                               int32_t,
+                               int32_t,
+                               rocsparse_bfloat16,
+                               rocsparse_bfloat16,
+                               rocsparse_bfloat16>;
 template struct rocsparse_host<float, int32_t, int32_t, float, float, float>;
 template struct rocsparse_host<double, int32_t, int32_t, double, double, double>;
 template struct rocsparse_host<rocsparse_float_complex,
@@ -8560,7 +8573,20 @@ template struct rocsparse_host<rocsparse_double_complex,
                                rocsparse_double_complex>;
 
 template struct rocsparse_host<float, int64_t, int32_t, _Float16, _Float16, float>;
+template struct rocsparse_host<float, int64_t, int32_t, _Float16, _Float16, _Float16>;
 template struct rocsparse_host<_Float16, int64_t, int32_t, _Float16, _Float16, _Float16>;
+template struct rocsparse_host<float,
+                               int64_t,
+                               int32_t,
+                               rocsparse_bfloat16,
+                               rocsparse_bfloat16,
+                               float>;
+template struct rocsparse_host<float,
+                               int64_t,
+                               int32_t,
+                               rocsparse_bfloat16,
+                               rocsparse_bfloat16,
+                               rocsparse_bfloat16>;
 template struct rocsparse_host<float, int64_t, int32_t, float, float, float>;
 template struct rocsparse_host<double, int64_t, int32_t, double, double, double>;
 template struct rocsparse_host<rocsparse_float_complex,
@@ -8577,7 +8603,20 @@ template struct rocsparse_host<rocsparse_double_complex,
                                rocsparse_double_complex>;
 
 template struct rocsparse_host<float, int64_t, int64_t, _Float16, _Float16, float>;
+template struct rocsparse_host<float, int64_t, int64_t, _Float16, _Float16, _Float16>;
 template struct rocsparse_host<_Float16, int64_t, int64_t, _Float16, _Float16, _Float16>;
+template struct rocsparse_host<float,
+                               int64_t,
+                               int64_t,
+                               rocsparse_bfloat16,
+                               rocsparse_bfloat16,
+                               float>;
+template struct rocsparse_host<float,
+                               int64_t,
+                               int64_t,
+                               rocsparse_bfloat16,
+                               rocsparse_bfloat16,
+                               rocsparse_bfloat16>;
 template struct rocsparse_host<float, int64_t, int64_t, float, float, float>;
 template struct rocsparse_host<double, int64_t, int64_t, double, double, double>;
 template struct rocsparse_host<rocsparse_float_complex,
@@ -9876,6 +9915,8 @@ INSTANTIATE_IABCT(int32_t, int8_t, int8_t, float, float);
 INSTANTIATE_IABCT(int64_t, int8_t, int8_t, float, float);
 INSTANTIATE_IABCT(int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_IABCT(int64_t, _Float16, _Float16, float, float);
+INSTANTIATE_IABCT(int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_IABCT(int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 INSTANTIATE_IABCT(int32_t, float, float, float, float);
 INSTANTIATE_IABCT(int64_t, float, float, float, float);
 INSTANTIATE_IABCT(int32_t, double, double, double, double);
@@ -9910,6 +9951,9 @@ INSTANTIATE_IJABCT(int64_t, int64_t, int8_t, int8_t, float, float);
 INSTANTIATE_IJABCT(int32_t, int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_IJABCT(int64_t, int32_t, _Float16, _Float16, float, float);
 INSTANTIATE_IJABCT(int64_t, int64_t, _Float16, _Float16, float, float);
+INSTANTIATE_IJABCT(int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_IJABCT(int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
+INSTANTIATE_IJABCT(int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float, float);
 INSTANTIATE_IJABCT(int32_t, int32_t, float, float, float, float);
 INSTANTIATE_IJABCT(int64_t, int32_t, float, float, float, float);
 INSTANTIATE_IJABCT(int64_t, int64_t, float, float, float, float);

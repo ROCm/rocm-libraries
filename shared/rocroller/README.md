@@ -45,7 +45,7 @@ project dependencies are installed in a location discoverable
 by CMake by default. In the event that this is not the case, the
 `CMAKE_PREFIX_PATH` can be used to help CMake find required packages.
 Often, ROCm is installed in `/opt/rocm` so setting the prefix path
-accordingly will ensure ROCm dependencies are locatable. To aide in 
+accordingly will ensure ROCm dependencies are locatable. To aide in
 setting common configurations a `CMakePresets.json` file is provided
 in the project root directory. Two presets are provided with the following
 options:

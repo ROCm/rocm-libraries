@@ -389,9 +389,14 @@ namespace rocRoller
             }
         }
 
-        ConnectWorkgroups::ConnectWorkgroups(CommandParametersPtr params, ContextPtr context)
-            : m_params(params)
-            , m_context(context)
+        ConnectWorkgroups::ConnectWorkgroups(ContextPtr                context,
+                                             std::optional<int>        workgroupMappingDim,
+                                             std::optional<int>        workgroupRemapXCC,
+                                             Expression::ExpressionPtr workgroupMappingValue)
+            : m_context(context)
+            , m_workgroupMappingDim(workgroupMappingDim)
+            , m_workgroupRemapXCC(workgroupRemapXCC)
+            , m_workgroupMappingValue(workgroupMappingValue)
         {
         }
 
@@ -402,17 +407,17 @@ namespace rocRoller
             auto kgraph = original;
             auto info   = getTileSizeInfo(original);
 
-            if(m_params->workgroupMapping)
+            if(m_workgroupMappingDim.has_value())
             {
-                auto [dimension, size] = m_params->workgroupMapping.value();
-                connectWorkgroupsWithMapping(info, kgraph, dimension, size);
+                connectWorkgroupsWithMapping(
+                    info, kgraph, m_workgroupMappingDim.value(), m_workgroupMappingValue);
             }
             else
             {
                 connectWorkgroupsNoMapping(info, kgraph);
             }
 
-            if(m_params->workgroupRemapXCC)
+            if(m_workgroupRemapXCC.has_value())
             {
                 auto const& arch = m_context->targetArchitecture();
                 AssertFatal(arch.HasCapability(GPUCapability::HasXCC),
@@ -421,7 +426,7 @@ namespace rocRoller
                 auto workgroupTags = kgraph.coordinates.getNodes<Workgroup>().to<std::vector>();
                 for(auto workgroupTag : workgroupTags)
                 {
-                    remapWorkgroupXCC(kgraph, workgroupTag, m_params->workgroupRemapXCC.value());
+                    remapWorkgroupXCC(kgraph, workgroupTag, m_workgroupRemapXCC.value());
                 }
             }
 
