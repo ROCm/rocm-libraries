@@ -1278,7 +1278,7 @@ namespace
                                                    params.creation_placement()
                                                            == fft_placement_inplace
                                                        ? plan_creation_input.data()
-                                                       : plan_creation_output.data(), );
+                                                       : plan_creation_output.data());
                     }
                     else
                     {
