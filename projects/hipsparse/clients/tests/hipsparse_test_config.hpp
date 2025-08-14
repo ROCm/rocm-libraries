@@ -1,0 +1,89 @@
+/*! \file */
+/* ************************************************************************
+* Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+*
+* Permission is hereby granted, free of charge, to any person obtaining a copy
+* of this software and associated documentation files (the "Software"), to deal
+* in the Software without restriction, including without limitation the rights
+* to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+* copies of the Software, and to permit persons to whom the Software is
+* furnished to do so, subject to the following conditions:
+*
+* The above copyright notice and this permission notice shall be included in
+* all copies or substantial portions of the Software.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+* THE SOFTWARE.
+*
+* ************************************************************************ */
+#pragma once
+
+#include "hipsparse_test_dispatch_enum.hpp"
+#include "hipsparse_test_numeric_types_enum.hpp"
+
+template <hipsparse_test_dispatch_enum::value_type      DISPATCH,
+          hipsparse_test_numeric_types_enum::value_type NUMERIC_TYPES>
+struct hipsparse_test_config_template
+{
+    static constexpr hipsparse_test_dispatch_enum::value_type      s_dispatch      = DISPATCH;
+    static constexpr hipsparse_test_numeric_types_enum::value_type s_numeric_types = NUMERIC_TYPES;
+};
+
+struct hipsparse_test_config
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::t,
+                                     hipsparse_test_numeric_types_enum::all>
+{
+};
+
+struct hipsparse_test_config_real_only
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::t,
+                                     hipsparse_test_numeric_types_enum::real_only>
+{
+};
+
+struct hipsparse_test_config_complex_only
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::t,
+                                     hipsparse_test_numeric_types_enum::complex_only>
+{
+};
+
+struct hipsparse_test_config_it
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::it,
+                                     hipsparse_test_numeric_types_enum::all>
+{
+};
+
+struct hipsparse_test_config_it_real_only
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::it,
+                                     hipsparse_test_numeric_types_enum::real_only>
+{
+};
+
+struct hipsparse_test_config_it_complex_only
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::it,
+                                     hipsparse_test_numeric_types_enum::complex_only>
+{
+};
+
+struct hipsparse_test_config_ijt
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::ijt,
+                                     hipsparse_test_numeric_types_enum::all>
+{
+};
+
+struct hipsparse_test_config_ijt_real_only
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::ijt,
+                                     hipsparse_test_numeric_types_enum::real_only>
+{
+};
+
+struct hipsparse_test_config_ijt_complex_only
+    : hipsparse_test_config_template<hipsparse_test_dispatch_enum::ijt,
+                                     hipsparse_test_numeric_types_enum::complex_only>
+{
+};

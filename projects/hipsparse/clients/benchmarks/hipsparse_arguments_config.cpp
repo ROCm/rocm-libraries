@@ -43,9 +43,6 @@ hipsparse_arguments_config::hipsparse_arguments_config()
 
         this->batch_count = 1;
 
-        this->filename      = "";
-        this->function_name = "";
-
         this->index_type_I = HIPSPARSE_INDEX_32I;
         this->index_type_J = HIPSPARSE_INDEX_32I;
         this->compute_type = HIP_R_32F;
@@ -104,6 +101,9 @@ hipsparse_arguments_config::hipsparse_arguments_config()
 
 void hipsparse_arguments_config::set_description(options_description& desc)
 {
+    std::string function_name3;
+    std::string filename3;
+
     desc.add_options()("help,h", "produces this help message")
         // clang-format off
     ("sizem,m",
@@ -162,7 +162,7 @@ void hipsparse_arguments_config::set_description(options_description& desc)
      "Batch count (default: 1)")
 
     ("file",
-     value<std::string>(&this->filename)->default_value(""),
+     value<std::string>(&filename3)->default_value(""),
      "read from file with file extension detection.")
 
     ("alpha",
@@ -223,7 +223,7 @@ void hipsparse_arguments_config::set_description(options_description& desc)
      "N = no level data, L = level data, (default = N)")
 
     ("function,f",
-     value<std::string>(&this->function_name)->default_value("axpyi"),
+     value<std::string>(&function_name3)->default_value("axpyi"),
      "SPARSE function to test. Options:\n"
      "  Level1: axpyi, doti, dotci, gthr, gthrz, roti, sctr\n"
      "  Level2: bsrsv2, coomv, csrmv, csrsv, gemvi, hybmv\n"
@@ -331,6 +331,9 @@ void hipsparse_arguments_config::set_description(options_description& desc)
     ("gtsv_alg",
      value<int>(&this->gtsv_alg)->default_value(0),
      "Algorithm for gtsv routine. Possibly choices are thomas: 1, lu: 2, qr: 3, (default 0)");
+
+    strcpy(filename, filename3.c_str());
+    strcpy(function_name, function_name3.c_str());
 }
 
 int hipsparse_arguments_config::parse(int&argc,char**&argv, options_description&desc)
