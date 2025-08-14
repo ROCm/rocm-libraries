@@ -284,7 +284,7 @@ def getDockerImage(Map conf=[:])
     catch(Exception ex)
     {
         echo "Building image..."
-        dockerImage = docker.build("${image}", "${dockerArgs} ${env.WORKSPACE}/${env.REPO_DIR}/.")
+        dockerImage = docker.build("${image}", "${dockerArgs} ${env.WORKSPACE}/${env.REPO_DIR}/Dockerfile.ci")
         withDockerRegistry([ credentialsId: "docker_test_cred", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
             dockerImage.push()
         }
