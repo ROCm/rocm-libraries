@@ -930,7 +930,7 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }
 
-    TEST_P(MatrixMultiplyWMMATestGPU, GPU_MatrixMultiplyABWMMA)
+    TEST_P(MatrixMultiplyWMMATestGPU, GPU_OPENMP_MatrixMultiplyABWMMA)
     {
         const auto [typeAndWaveK, transOp] = std::get<1>(GetParam());
         const auto [typeAB, waveK]         = typeAndWaveK;
@@ -958,7 +958,7 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }
 
-    TEST_P(MatrixMultiplyF16AccWMMATestGPU, GPU_MatrixMultiplyABWMMA)
+    TEST_P(MatrixMultiplyF16AccWMMATestGPU, GPU_OPENMP_MatrixMultiplyABWMMA)
     {
         const auto [typeAndWaveK, transOp] = std::get<1>(GetParam());
         const auto [typeAB, waveK]         = typeAndWaveK;
@@ -1003,7 +1003,7 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }
 
-    TEST_P(MatrixMultiplyMixedWMMATestGPU, GPU_MatrixMultiplyMacroTileMixedWMMA)
+    TEST_P(MatrixMultiplyMixedWMMATestGPU, GPU_OPENMP_MatrixMultiplyMacroTileMixedWMMA)
     {
         const auto [typeA, typeB, waveK, transOp] = std::get<1>(GetParam());
         const auto [transA, transB]               = transOp;
@@ -1048,7 +1048,7 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }
 
-    TEST_P(MatrixMultiplyMixedWMMATestGPU, GPU_MatrixMultiplyABMixedWMMA)
+    TEST_P(MatrixMultiplyMixedWMMATestGPU, GPU_OPENMP_MatrixMultiplyABMixedWMMA)
     {
         const auto [typeA, typeB, waveK, transOp] = std::get<1>(GetParam());
         const auto [transA, transB]               = transOp;
@@ -1206,7 +1206,7 @@ namespace MatrixMultiplyTest
         matrixMultiplyMacroTile<BFloat16, BFloat16, BFloat16>(mfma_m, mfma_n, mfma_k, 1, false);
     }
 
-    TEST_P(MatrixMultiplyTestGPUF16, GPU_MatrixMultiplyMacroTileF16)
+    TEST_P(MatrixMultiplyTestGPUF16, GPU_OPENMP_MatrixMultiplyMacroTileF16)
     {
         auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
 
@@ -1400,7 +1400,7 @@ namespace MatrixMultiplyTest
             matrixMultiplyMacroTile<BF8, BF8, float>(16, 16, 32, 1, true, "T", "N");
     }
 
-    TEST_P(MatrixMultiplyF8F6F4TestGPU, GPU_MatrixMultiplyMacroTileF8F6F4)
+    TEST_P(MatrixMultiplyF8F6F4TestGPU, GPU_OPENMP_MatrixMultiplyMacroTileF8F6F4)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 
@@ -1548,7 +1548,7 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, modifiers), 2);
     }
 
-    TEST_P(MatrixMultiplyMixedTestGPU, GPU_MatrixMultiplyMacroTileMixed)
+    TEST_P(MatrixMultiplyMixedTestGPU, GPU_OPENMP_MatrixMultiplyMacroTileMixed)
     {
         auto [typeA, typeB, MFMAK, transOp] = std::get<1>(GetParam());
 
@@ -1566,12 +1566,12 @@ namespace MatrixMultiplyTest
         matrixMultiplyAB<float, float, float>(32, 32, 2, 1);
     }
 
-    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABFP16)
+    TEST_P(MatrixMultiplyTestGPU, GPU_OPENMP_MatrixMultiplyABFP16)
     {
         matrixMultiplyAB<Half, Half, Half>(32, 32, 8, 1);
     }
 
-    TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyABF8_16x16x32)
+    TEST_P(MatrixMultiplyTestGPUF8, GPU_OPENMP_MatrixMultiplyABF8_16x16x32)
     {
         if(std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8)
             matrixMultiplyAB<FP8, FP8, float>(16, 16, 32, 1);
@@ -1587,7 +1587,7 @@ namespace MatrixMultiplyTest
             matrixMultiplyAB<BF8, BF8, float>(32, 32, 16, 1);
     }
 
-    TEST_P(MatrixMultiplyF8F6F4TestGPU, GPU_MatrixMultiplyABF8F6F4)
+    TEST_P(MatrixMultiplyF8F6F4TestGPU, GPU_OPENMP_MatrixMultiplyABF8F6F4)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 
@@ -1655,7 +1655,7 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, trLoadMnemonic), expectedTrLoads);
     }
 
-    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABC)
+    TEST_P(MatrixMultiplyTestGPU, GPU_OPENMP_MatrixMultiplyABC)
     {
         matrixMultiplyABC<float>(32, 32, 2, 1);
     }
@@ -1788,7 +1788,7 @@ namespace MatrixMultiplyTest
     {
     };
 
-    TEST_P(ScaledMatrixMultiplyMixedTestGPU, GPU_ScaledMatrixMultiplyMacroTileMixed)
+    TEST_P(ScaledMatrixMultiplyMixedTestGPU, GPU_OPENMP_ScaledMatrixMultiplyMacroTileMixed)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
 
@@ -1950,7 +1950,7 @@ namespace MatrixMultiplyTest
             Throw<FatalError>("Invalid type.");
     }
 
-    TEST_P(ScaledMMTest, ScaledMMTestCPU)
+    TEST_P(ScaledMMTest, OPENMP_ScaledMMTestCPU)
     {
         auto [typeA, typeB, scales, MFMAK, transOp] = std::get<1>(GetParam());
 

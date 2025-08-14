@@ -53,7 +53,7 @@ namespace TileTransposeAddTest
         bool c;
     };
 
-    class GPU_TileTransposeAddTest
+    class GPU_OPENMP_TileTransposeAddTest
         : public CurrentGPUContextFixture,
           public ::testing::WithParamInterface<
               std::tuple<bool, bool, bool, size_t, size_t, int, int, int, int>>
@@ -178,7 +178,7 @@ namespace TileTransposeAddTest
         ASSERT_TRUE(res.ok) << res.message();
     }
 
-    TEST_P(GPU_TileTransposeAddTest, GPU_TileTransposeAddTest)
+    TEST_P(GPU_OPENMP_TileTransposeAddTest, GPU_OPENMP_TileTransposeAddTest)
     {
         Transpose transpose
             = {std::get<0>(GetParam()), std::get<1>(GetParam()), std::get<2>(GetParam())};
@@ -193,11 +193,11 @@ namespace TileTransposeAddTest
         TileTransposeAdd(transpose, nx, ny, m, n, t_m, t_n);
     }
 
-    std::vector<GPU_TileTransposeAddTest::ParamType>
-        testableParams(::testing::internal::ParamGenerator<GPU_TileTransposeAddTest::ParamType>
+    std::vector<GPU_OPENMP_TileTransposeAddTest::ParamType>
+        testableParams(::testing::internal::ParamGenerator<GPU_OPENMP_TileTransposeAddTest::ParamType>
                            inputParamGenerator)
     {
-        std::vector<GPU_TileTransposeAddTest::ParamType> retval;
+        std::vector<GPU_OPENMP_TileTransposeAddTest::ParamType> retval;
         for(auto const& param : inputParamGenerator)
         {
             Transpose transpose = {std::get<0>(param), std::get<1>(param), std::get<2>(param)};
@@ -212,8 +212,8 @@ namespace TileTransposeAddTest
     }
 
     INSTANTIATE_TEST_SUITE_P(
-        GPU_TileTransposeAddTest,
-        GPU_TileTransposeAddTest,
+        GPU_OPENMP_TileTransposeAddTest,
+        GPU_OPENMP_TileTransposeAddTest,
         testing::ValuesIn(testableParams(testing::Combine(testing::Bool(),
                                                           testing::Bool(),
                                                           testing::Bool(),

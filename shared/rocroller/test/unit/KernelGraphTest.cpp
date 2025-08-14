@@ -1898,7 +1898,7 @@ namespace KernelGraphTest
         settings->reset();
     }
 
-    TEST_F(KernelGraphTestGPU, GPU_SAXPBYLoadAssembly)
+    TEST_F(KernelGraphTestGPU, GPU_OPENMP_SAXPBYLoadAssembly)
     {
         GPU_SAXPBY(true);
     }
