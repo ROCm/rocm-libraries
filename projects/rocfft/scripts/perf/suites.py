@@ -1046,25 +1046,25 @@ def tuning_suite():
 
 
 def partial_pass():
-    for direction in [-1, 1]:
-        for precision in ['single', 'double']:
-            for place in all_inplaces:
-                for batch in [
-                        1, 2, 5, 10, 15, 20, 25, 50, 75, 100, 150, 200, 250,
-                        500, 750, 1000, 1250, 1500, 1575, 2000, 2500, 3000,
-                        3500, 4000, 4500, 5000, 7500, 10000
-                ]:
+    for length in [(64, 64, 128), (64, 64, 64), (64, 64, 52), (60, 60, 60),
+                   (32, 32, 128), (32, 32, 64), (64, 32, 128)]:
+        for direction in [-1, 1]:
+            for precision in ['single', 'double']:
+                for place in all_inplaces:
+                    for batch in [
+                            1, 5, 20, 50, 100, 200, 500, 1000, 1500, 3000,
+                            5000, 7500, 10000
+                    ]:
 
-                    length = (64, 64, 64)
-                    yield Problem(length,
-                                  tag=mktag("partial_pass", 1, precision,
-                                            direction, place, False),
-                                  nbatch=batch,
-                                  direction=direction,
-                                  inplace=place,
-                                  real=False,
-                                  meta={'ivariable': 'batch'},
-                                  precision=precision)
+                        yield Problem(length,
+                                      tag=mktag("partial_pass", 1, precision,
+                                                direction, place, False),
+                                      nbatch=batch,
+                                      direction=direction,
+                                      inplace=place,
+                                      real=False,
+                                      meta={'ivariable': 'batch'},
+                                      precision=precision)
 
 
 def large_1d_extended():

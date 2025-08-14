@@ -30,6 +30,8 @@
 
 #include <rocRoller/KernelGraph/CoordinateGraph/CoordinateEdgeVisitor.hpp>
 
+#include <rocRoller/Utilities/Settings.hpp>
+
 namespace rocRoller
 {
 
@@ -56,5 +58,26 @@ namespace rocRoller
             return traverse<Graph::Direction::Upstream>(sdims, srcs, dsts, visitor);
         }
 
+        bool CoordinateGraph::isModificationAllowed(int index) const
+        {
+            if(not Settings::getInstance()->get(Settings::EnforceGraphConstraints))
+                return true;
+
+            if(not m_changesRestricted)
+                return true;
+
+            auto const& el = getElement(index);
+
+            if(std::holds_alternative<Edge>(el))
+            {
+                return std::visit(
+                    [](auto&& arg) {
+                        using EdgeType = std::decay_t<decltype(arg)>;
+                        return !(std::is_same_v<EdgeType, CoordinateTransformEdge>);
+                    },
+                    std::get<Edge>(el));
+            }
+            return true;
+        }
     }
 }

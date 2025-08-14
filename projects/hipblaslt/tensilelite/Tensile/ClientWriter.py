@@ -121,7 +121,7 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
 
   clientParametersPaths = []
   splitGSU = False
-  printSolutionRejectionReason = False
+  printSolutionRejectionReason = True
   printIndexAssignmentInfo = False
   for logicFileName in logicFiles:
     (scheduleName, _, problemType, _, exactLogic, newLibrary) \

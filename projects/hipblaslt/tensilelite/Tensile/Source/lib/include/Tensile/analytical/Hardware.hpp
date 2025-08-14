@@ -65,6 +65,11 @@ namespace TensileLite
             None = Count
         };
 
+        inline DataType intToDataType(int dt)
+        {
+            return (DataType)dt;
+        }
+
         inline int dataTypeToBits(DataType type)
         {
             switch(type)
@@ -172,6 +177,39 @@ namespace TensileLite
             return "Invalid";
         }
 
+        inline DataType stringToDatatype(std::string s)
+        {
+            if (s == "f32")
+                return DataType::Float;
+            if (s == "c32")
+                return DataType::ComplexFloat;
+            if (s == "c64")
+                return DataType::ComplexDouble;
+            if (s == "f64")
+                return DataType::Double;
+            if (s == "f16")
+                return DataType::Half;
+            if (s == "i32")
+                return DataType::Int32;
+            if (s == "bf16")
+                return DataType::BFloat16;
+            if (s == "i8")
+                return DataType::Int8;
+            if (s == "xf32")
+                return DataType::XFloat32;
+            if (s == "f8")
+                return DataType::Float8;
+            if (s == "bf8")
+                return DataType::BFloat8;
+            if (s == "f6")
+                return DataType::Float6;
+            if (s == "bf6")
+                return DataType::BFloat6;
+            if (s == "f4")
+                return DataType::Float4;
+            return DataType::None;
+        }
+
         struct MatrixInstruction
         {
             size_t MI_M;
@@ -246,6 +284,7 @@ namespace TensileLite
         public:
             enum class Architecture
             {
+                gfx90a,
                 gfx942,
                 gfx950,
                 Count
@@ -254,7 +293,9 @@ namespace TensileLite
             static Architecture archNameToEnum(const std::string& str)
             {
                 static const std::unordered_map<std::string, Architecture> strToEnumMap
-                    = {{"gfx942", Architecture::gfx942}, {"gfx950", Architecture::gfx950}};
+                    = {{"gfx90a", Architecture::gfx90a},
+                       {"gfx942", Architecture::gfx942},
+                       {"gfx950", Architecture::gfx950}};
 
                 auto it = strToEnumMap.find(str);
                 if(it != strToEnumMap.end())

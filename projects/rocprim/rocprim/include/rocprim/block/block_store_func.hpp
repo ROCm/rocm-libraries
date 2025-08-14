@@ -310,7 +310,7 @@ void block_store_direct_warp_striped(unsigned int   flat_id,
 
     static_assert(detail::is_power_of_two(VirtualWaveSize)
                       && VirtualWaveSize <= arch::wavefront::max_size(),
-                  "VirtualWaveSize must be a power of two and equal or less"
+                  "VirtualWaveSize must be a power of two and equal or less "
                   "than the size of hardware warp.");
     unsigned int thread_id   = detail::logical_lane_id<VirtualWaveSize>();
     unsigned int warp_id     = flat_id / VirtualWaveSize;
@@ -402,7 +402,7 @@ void block_store_direct_warp_striped(unsigned int   flat_id,
 
     static_assert(detail::is_power_of_two(VirtualWaveSize)
                       && VirtualWaveSize <= arch::wavefront::max_size(),
-                  "VirtualWaveSize must be a power of two and equal or less"
+                  "VirtualWaveSize must be a power of two and equal or less "
                   "than the size of hardware warp.");
     assert(VirtualWaveSize <= arch::wavefront::size());
 

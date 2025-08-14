@@ -133,11 +133,23 @@ namespace rocRoller
                         m_tagLoadScaleA   = command->addOperation(
                             rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleA.value()));
 
+                        auto scaleInputA = m_tagLoadScaleA;
+
+                        if(solutionParams.types.scaleSkipPermlane)
+                        {
+                            AssertFatal(solutionParams.types.scaleShuffleTileA.size() == 3,
+                                        ShowValue(solutionParams.types.scaleShuffleTileA));
+
+                            scaleInputA
+                                = command->addOperation(rocRoller::Operations::SubTileTranspose(
+                                    *m_tagLoadScaleA, solutionParams.types.scaleShuffleTileA));
+                        }
+
                         m_tagBlockScaleA = mulInputA
                             = command->addOperation(rocRoller::Operations::BlockScale(
                                 m_tagA,
                                 2,
-                                m_tagLoadScaleA,
+                                scaleInputA,
                                 {1,
                                  static_cast<unsigned long>(solutionParams.types.scaleBlockSize)}));
                     }
@@ -160,11 +172,22 @@ namespace rocRoller
                         m_tagLoadScaleB   = command->addOperation(
                             rocRoller::Operations::T_Load_Tiled(m_tagTensorScaleB.value()));
 
+                        auto scaleInputB = m_tagLoadScaleB;
+
+                        if(solutionParams.types.scaleSkipPermlane)
+                        {
+                            AssertFatal(solutionParams.types.scaleShuffleTileB.size() == 3);
+
+                            scaleInputB
+                                = command->addOperation(rocRoller::Operations::SubTileTranspose(
+                                    *m_tagLoadScaleB, solutionParams.types.scaleShuffleTileB));
+                        }
+
                         m_tagBlockScaleB = mulInputB
                             = command->addOperation(rocRoller::Operations::BlockScale(
                                 m_tagB,
                                 2,
-                                m_tagLoadScaleB,
+                                scaleInputB,
                                 {static_cast<unsigned long>(solutionParams.types.scaleBlockSize),
                                  1}));
                     }

@@ -121,6 +121,7 @@ set(HEADER_FILES
   internal/generic/hipsparse_spsv.h
   internal/generic/hipsparse_spvv.h
   # Auxiliary
+  hipsparse-bfloat16.h
   hipsparse-types.h
   hipsparse-auxiliary.h
   hipsparse-generic-types.h

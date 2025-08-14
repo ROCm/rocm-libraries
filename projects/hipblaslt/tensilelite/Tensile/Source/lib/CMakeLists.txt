@@ -49,6 +49,7 @@ set(tensile_sources  ${tensile_sources}
     source/Utils.cpp
     source/analytical/AnalyticalGemm.cpp
     source/analytical/Hardware.cpp
+    source/analytical/StreamK.cpp
     source/analytical/Utils.cpp
     source/MLPNet.cpp
     )

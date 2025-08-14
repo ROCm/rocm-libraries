@@ -33,6 +33,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ScheduledInstructions.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ScheduledInstructions_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/TensorDescriptor.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/TensorDescriptor_impl.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Assemblers/Assembler.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Assemblers/Assembler_fwd.hpp"
@@ -41,6 +42,7 @@ target_sources(rocroller
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/AddInstruction.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/Annotate.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/Annotate_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/ArgumentLoader.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/ArgumentLoader_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/ArgumentLoader_impl.hpp"
@@ -239,6 +241,8 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/OrderMultiplyNodes.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/PrefetchScale.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/RemoveDuplicates.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/RemoveSetCoordinate.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/RemoveSetCoordinate_details.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/Simplify.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/SwizzleScale.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/UnrollLoops.hpp"

@@ -2,13 +2,16 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.11)
-project(hipblas-common VERSION 1.2.0 LANGUAGES CXX)
+project(hipblas-common LANGUAGES CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(dependencies)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
+
+set(VERSION_STRING "1.3.0")
+rocm_setup_version(VERSION ${VERSION_STRING})
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     if(WIN32)
@@ -50,9 +53,6 @@ set(HIPBLAS_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDI
 )
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
-
-set(VERSION_STRING "1.3.0")
-rocm_setup_version(VERSION ${PROJECT_VERSION})
 
 rocm_create_package(
     NAME hipblas-common

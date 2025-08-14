@@ -133,6 +133,11 @@ Tests:
   alpha: 1
   beta: 0
 
+- name: aux_matmul_bad_ws_size
+  category: pre_checkin
+  function:
+    - aux_matmul_bad_ws_size: *hpa_half_precision
+
 - name: aux_mat_copy
   category: pre_checkin
   function:

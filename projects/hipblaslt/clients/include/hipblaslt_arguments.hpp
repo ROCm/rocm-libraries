@@ -112,6 +112,7 @@ struct Arguments
     // the gpu arch string after "gfx" for which the test is valid,
     // it represents a regular expression.
     char gpu_arch[16];
+    char gpu_arch_exclude[16];
 
     // memory padding for testing write out of bounds
     uint32_t pad;
@@ -179,7 +180,7 @@ struct Arguments
     bool print_kernel_info;
 
     bool flush;
-    int tensile_solution_selection_method;
+    int  tensile_solution_selection_method;
 
     /*************************************************************************
      *                     End Of Arguments                                  *
@@ -229,6 +230,7 @@ struct Arguments
     OPER(scale_type) SEP             \
     OPER(initialization) SEP         \
     OPER(gpu_arch) SEP               \
+    OPER(gpu_arch_exclude) SEP       \
     OPER(pad) SEP                    \
     OPER(grouped_gemm) SEP           \
     OPER(threads) SEP                \
@@ -582,8 +584,7 @@ namespace ArgumentsHelper
               e_##NAME == e_lde ? hipblaslt_argument(-12) :                                 \
               e_##NAME == e_stride_e ? hipblaslt_argument(-13) :                            \
               e_##NAME == e_alpha ? hipblaslt_argument(-14) :                               \
-              e_##NAME == e_beta ? hipblaslt_argument(-15) :                                \
-              e_##NAME == e_rotating ? hipblaslt_argument(-16) : e_##NAME> = \
+              e_##NAME == e_beta ? hipblaslt_argument(-15) : e_##NAME> = \
             [](auto&& func, const Arguments& arg, auto) { func(#NAME, arg.NAME); }
 
     // Specialize apply for each Argument
@@ -862,16 +863,8 @@ namespace ArgumentsHelper
         [](auto&& func, const Arguments& arg, auto T) {
             func("beta", arg.get_beta<decltype(T)>());
         };
-
-    // Specialization for e_rotating
-    template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_rotating> =
-        [](auto&& func, const Arguments& arg, auto T) {
-            if(arg.rotating > 0)
-                func("rotating_buffer", arg.rotating);
-        };
 };
-    // clang-format on
+// clang-format on
 
 #else
 #error "Unsupported C++ version"
