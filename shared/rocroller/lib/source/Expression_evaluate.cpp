@@ -48,7 +48,7 @@ namespace rocRoller
                 auto arg1 = call(expr.lhs);
                 auto arg2 = call(expr.r1hs);
                 auto arg3 = call(expr.r2hs);
-                return evaluateOp(expr, arg1, arg2, arg3);
+                return EvaluateDetail::evaluateOp(expr, arg1, arg2, arg3);
             }
 
             template <CBinary BinaryExp>
@@ -57,14 +57,14 @@ namespace rocRoller
                 // TODO: Short-circuit logic
                 auto lhs = call(expr.lhs);
                 auto rhs = call(expr.rhs);
-                return evaluateOp(expr, lhs, rhs);
+                return EvaluateDetail::evaluateOp(expr, lhs, rhs);
             }
 
             template <CUnary UnaryExp>
             CommandArgumentValue operator()(UnaryExp const& expr)
             {
                 auto arg = call(expr.arg);
-                return evaluateOp(expr, arg);
+                return EvaluateDetail::evaluateOp(expr, arg);
             }
 
             CommandArgumentValue operator()(BitFieldExtract const& expr)
