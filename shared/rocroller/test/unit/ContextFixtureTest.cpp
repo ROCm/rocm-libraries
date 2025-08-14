@@ -24,15 +24,34 @@
  *
  *******************************************************************************/
 
+#include "ContextFixture.hpp"
 #include <common/Utilities.hpp>
 #include <gtest/gtest.h>
 
-TEST(TestEventListeners, OPENMP_HasOPENMPTag)
+class ResourceLockFixtureTest : public ContextFixture
+{
+    rocRoller::ContextPtr createContext()
+    {
+        return nullptr;
+    }
+};
+
+TEST_F(ResourceLockFixtureTest, HasTagInMiddleOPENMP_MiddleYes)
 {
     EXPECT_NO_THROW(normL2(std::vector<int>{1, 2, 3}));
 }
 
-TEST(TestEventListeners, DoesntHaveOpenmpTag)
+TEST_F(ResourceLockFixtureTest, OPENMP_Prefix)
+{
+    EXPECT_NO_THROW(normL2(std::vector<int>{1, 2, 3}));
+}
+
+TEST_F(ResourceLockFixtureTest, GPU_OPENMP_Prefix)
+{
+    EXPECT_NO_THROW(normL2(std::vector<int>{1, 2, 3}));
+}
+
+TEST_F(ResourceLockFixtureTest, NoTag)
 {
     EXPECT_THROW(normL2(std::vector<int>{1, 2, 3}), rocRoller::FatalError);
 }
