@@ -157,8 +157,6 @@ TEST_P(ExtOpSoftmaxTest, softmaxSuccess)
     hipDeviceProp_t deviceProperties;
     static_cast<void>(hipGetDevice(&deviceId));
     static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    if(gpu_arch_match(deviceProperties.gcnArchName, "1[12]\\d{2}"))
-        return;
 
     auto err          = hipMalloc(&gpuInput, m * n * sizeof(float));
     err               = hipMalloc(&gpuOutput, m * n * sizeof(float));
@@ -207,8 +205,6 @@ TEST_P(ExtOpLayerNormTest, layernormSuccess)
     hipDeviceProp_t deviceProperties;
     static_cast<void>(hipGetDevice(&deviceId));
     static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    if(gpu_arch_match(deviceProperties.gcnArchName, "1[12]\\d{2}"))
-        return;
 
     auto err = hipMalloc(&gpuOutput, m * n * sizeof(float));
     err      = hipMalloc(&gpuMean, m * sizeof(float));
@@ -317,8 +313,6 @@ TEST_P(ExtOpAMaxTest, amaxSuccess)
     hipDeviceProp_t deviceProperties;
     static_cast<void>(hipGetDevice(&deviceId));
     static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    if(gpu_arch_match(deviceProperties.gcnArchName, "1[12]\\d{2}"))
-        return;
 
     if(testdata.type == HIP_R_32F && testdata.dtype == HIP_R_32F)
     {

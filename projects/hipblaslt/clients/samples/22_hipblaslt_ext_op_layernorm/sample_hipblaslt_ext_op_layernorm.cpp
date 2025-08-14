@@ -50,11 +50,6 @@ int main()
     hipDeviceProp_t deviceProperties;
     static_cast<void>(hipGetDevice(&deviceId));
     static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    if(gpu_arch_match(deviceProperties.gcnArchName, "1[12]\\d{2}"))
-    {
-        std::cout << "This arch doesn't support Layernorm op yet" << std::endl;
-        return 0;
-    }
 
     LayerNormRunner<float> runnerF32(135, 345);
 
