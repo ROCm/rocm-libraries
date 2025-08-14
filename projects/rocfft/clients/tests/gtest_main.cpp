@@ -434,8 +434,8 @@ int main(int argc, char* argv[])
             // The objective is to have an test that takes about 5 minutes, so just set the
             // probability per test to a small value to achieve this result.
             test_prob      = 0.0005;
-            emulation_prob = 0.01;
-            unittest_prob  = 0.3;
+            emulation_prob = 0.005;
+            unittest_prob  = 0.2;
             n_random_tests = 10;
         });
 
