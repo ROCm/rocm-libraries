@@ -34,10 +34,6 @@
 
 #include <gtest/gtest.h>
 #include <miopen/config.h>
-
-#if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
-
-#include <miopen/conv/heuristics/ai_heuristics.hpp>
 #include <miopen/conv/problem_description.hpp>
 #include <miopen/execution_context.hpp>
 #include <miopen/handle.hpp>
@@ -46,6 +42,9 @@
 #include <miopen/db_path.hpp>
 #include <miopen/filesystem.hpp>
 #include <miopen/logger.hpp>
+
+#if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
+#include <miopen/conv/heuristics/ai_heuristics.hpp>
 
 namespace {
 
@@ -353,4 +352,12 @@ TEST_F(GPU_Conv3D_AIHeuristics_FP32, TestMIOpenDriverEquivalent)
 }
 
 } // namespace
+#else
+
+// Provide stub tests when AI is disabled
+TEST(GPU_Conv3D_AIHeuristics_FP32_Disabled, SkippedWhenAIDisabled)
+{
+    GTEST_SKIP() << "AI heuristics not enabled (MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK=0)";
+}
+
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
