@@ -43,7 +43,6 @@ build_benchmark=false
 rocm_path=/opt/rocm
 build_relocatable=false
 build_address_sanitizer=false
-build_freorg_bkwdcomp=false
 
 # #################################################
 # Parameter parsing
@@ -118,9 +117,6 @@ while true; do
         --address-sanitizer)
             build_address_sanitizer=true
             shift ;;
-        --rm-legacy-include-dir)
-            build_freorg_bkwdcomp=false
-            shift ;;
         --) shift ; break ;;
         *)  echo "Unexpected command line parameter received; aborting";
             exit 1
@@ -168,12 +164,6 @@ if [[ "${build_address_sanitizer}" == true ]]; then
     CFLAGS="${CLFAGS} -fsanitize=address -shared-libasan"
     CXXFLAGS="${CXXFLAGS} -fsanitize=address -shared-libasan"
     LDFLAGS="${LDFLAGS} -fuse-ld=lld -fsanitize=address -shared-libasan"
-fi
-
-if [[ "${build_freorg_bkwdcomp}" == true ]]; then
-    cmake_common_options="$cmake_common_options -DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=ON"
-else
-    cmake_common_options="$cmake_common_options -DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=OFF"
 fi
 
 codecoverage="OFF"

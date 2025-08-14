@@ -42,6 +42,11 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/miopen/**/*'
 
+"project: none":
+- changed-files:
+  - all-globs-to-all-files: '!projects/**/*'
+  - all-globs-to-all-files: '!shared/**/*'
+
 "project: rocblas":
 - changed-files:
   - any-glob-to-any-file: 'projects/rocblas/**/*'

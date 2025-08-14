@@ -158,7 +158,7 @@
     LdsPadA: 0
     LdsPadB: 0
     LdsPadMetadata: 0
-    LocalReadVectorWidth: 2
+    LocalReadVectorWidth: 4
     LocalSplitU: 1
     LocalWritePerMfma: -1
     LocalWriteUseSgprA: false
@@ -241,8 +241,8 @@
     UseSgprForGRO: -1
     Valid: true
     VectorStore: -1
-    VectorWidthA: 2
-    VectorWidthB: 2
+    VectorWidthA: 4
+    VectorWidthB: 4
     WaveSeparateGlobalReadA: 0
     WaveSeparateGlobalReadB: 0
     WaveSeparateGlobalReadMetadata: 0
