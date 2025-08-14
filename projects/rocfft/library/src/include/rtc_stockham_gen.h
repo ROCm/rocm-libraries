@@ -32,26 +32,27 @@
 #include "../device/kernels/common.h"
 
 // generate name for RTC stockham kernel
-std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs& specs,
-                                     const StockhamGeneratorSpecs& specs2d,
-                                     ComputeScheme                 scheme,
-                                     int                           direction,
-                                     rocfft_precision              precision,
-                                     rocfft_result_placement       placement,
-                                     rocfft_array_type             inArrayType,
-                                     rocfft_array_type             outArrayType,
-                                     bool                          unitstride,
-                                     size_t                        largeTwdBase,
-                                     size_t                        largeTwdSteps,
-                                     bool                          largeTwdBatchIsTransformCount,
-                                     DirectRegType                 dir2regMode,
-                                     IntrinsicAccessType           intrinsicMode,
-                                     SBRC_TRANSPOSE_TYPE           transpose_type,
-                                     CallbackType                  cbtype,
-                                     BluesteinFuseType             fuseBlue,
-                                     PartialPassType               ppType,
-                                     const LoadOps&                loadOps,
-                                     const StoreOps&               storeOps);
+std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs&    specs,
+                                     const StockhamGeneratorSpecs&    specs2d,
+                                     ComputeScheme                    scheme,
+                                     int                              direction,
+                                     rocfft_precision                 precision,
+                                     rocfft_result_placement          placement,
+                                     rocfft_array_type                inArrayType,
+                                     rocfft_array_type                outArrayType,
+                                     bool                             unitstride,
+                                     size_t                           largeTwdBase,
+                                     size_t                           largeTwdSteps,
+                                     bool                             largeTwdBatchIsTransformCount,
+                                     DirectRegType                    dir2regMode,
+                                     IntrinsicAccessType              intrinsicMode,
+                                     SBRC_TRANSPOSE_TYPE              transpose_type,
+                                     CallbackType                     cbtype,
+                                     BluesteinFuseType                fuseBlue,
+                                     PartialPassType                  ppType,
+                                     const StockhamPartialPassParams& ppParams,
+                                     const LoadOps&                   loadOps,
+                                     const StoreOps&                  storeOps);
 
 // generate source for RTC stockham kernel.  transforms_per_block may
 // be nullptr, but if non-null, stockham_rtc stores the number of

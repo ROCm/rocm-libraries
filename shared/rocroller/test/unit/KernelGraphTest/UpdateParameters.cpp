@@ -107,7 +107,8 @@ namespace KernelGraphTest
         transforms.push_back(std::make_shared<AddLDS>(params, m_context));
         transforms.push_back(std::make_shared<LowerTile>(params, m_context));
         transforms.push_back(std::make_shared<LowerTensorContraction>(params, m_context));
-        transforms.push_back(std::make_shared<ConnectWorkgroups>(params, m_context));
+        transforms.push_back(std::make_shared<ConnectWorkgroups>(
+            m_context, params->workgroupMappingDim, params->workgroupRemapXCC));
         transforms.push_back(std::make_shared<UpdateWavefrontParameters>(params));
         for(auto& t : transforms)
             kgraph = kgraph.transform(t);
