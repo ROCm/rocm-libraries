@@ -127,7 +127,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
     gtest_discover_tests(
         rocroller-tests
         XML_OUTPUT_DIR ${TEST_REPORT_DIR}
-        TEST_FILTER "-*GPU_*"
+        TEST_FILTER "-*GPU_*:-*OPENMP*"
         DISCOVERY_MODE PRE_TEST
         PROPERTIES
             ENVIRONMENT "${asan_opts}"
@@ -135,8 +135,35 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
     gtest_discover_tests(
         rocroller-tests
         XML_OUTPUT_DIR ${TEST_REPORT_DIR}
-        TEST_FILTER "*GPU_*"
+        TEST_FILTER "*GPU_*:-*OPENMP*"
         PROPERTIES "LABELS" "GPU"
+        DISCOVERY_MODE PRE_TEST
+        PROPERTIES
+            ENVIRONMENT "${asan_opts}"
+    )
+    gtest_discover_tests(
+        rocroller-tests
+        XML_OUTPUT_DIR ${TEST_REPORT_DIR}
+        TEST_FILTER "*OPENMP*:-*GPU_*"
+        DISCOVERY_MODE PRE_TEST
+        PROPERTIES
+            ENVIRONMENT "${asan_opts}"
+            RESOURCE_LOCK "openmp_resource"
+    )
+    gtest_discover_tests(
+        rocroller-tests
+        XML_OUTPUT_DIR ${TEST_REPORT_DIR}
+        TEST_FILTER "*OPENMP*:*GPU_*"
+        PROPERTIES "LABELS" "GPU"
+        DISCOVERY_MODE PRE_TEST
+        PROPERTIES
+            ENVIRONMENT "${asan_opts}"
+            RESOURCE_LOCK "openmp_resource"
+    )
+    gtest_discover_tests(
+        arch-gen-tests
+        XML_OUTPUT_DIR ${TEST_REPORT_DIR}
+        TEST_FILTER "-*OPENMP*"
         DISCOVERY_MODE PRE_TEST
         PROPERTIES
             ENVIRONMENT "${asan_opts}"
@@ -144,9 +171,11 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
     gtest_discover_tests(
         arch-gen-tests
         XML_OUTPUT_DIR ${TEST_REPORT_DIR}
+        TEST_FILTER "*OPENMP*"
         DISCOVERY_MODE PRE_TEST
         PROPERTIES
             ENVIRONMENT "${asan_opts}"
+            RESOURCE_LOCK "openmp_resource"
     )
 
     if(ROCROLLER_ENABLE_CATCH)
@@ -164,7 +193,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
             OUTPUT_SUFFIX ".xml"
             DISCOVERY_MODE PRE_TEST
             EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
-            TEST_SPEC "[gpu]"
+            TEST_SPEC "[gpu] and not [openmp]"
             PROPERTIES "LABELS" "CATCH"
                        "LABELS" "GPU"
                        "ENVIRONMENT" "${asan_opts}"
@@ -177,9 +206,36 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
             OUTPUT_SUFFIX ".xml"
             DISCOVERY_MODE PRE_TEST
             EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
-            TEST_SPEC "~[gpu]"
+            TEST_SPEC "not [gpu] and not [openmp]"
             PROPERTIES "LABELS" "CATCH"
                        "ENVIRONMENT" "${asan_opts}"
+            SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
+        )
+        catch_discover_tests(
+            rocroller-tests-catch
+            REPORTER JUnit
+            OUTPUT_DIR ${TEST_REPORT_DIR}
+            OUTPUT_SUFFIX ".xml"
+            DISCOVERY_MODE PRE_TEST
+            EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
+            TEST_SPEC "[openmp] and not [gpu]"
+            PROPERTIES "LABELS" "CATCH"
+                       "ENVIRONMENT" "${asan_opts}"
+                       "RESOURCE_LOCK" "openmp_resource"
+            SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
+        )
+        catch_discover_tests(
+            rocroller-tests-catch
+            REPORTER JUnit
+            OUTPUT_DIR ${TEST_REPORT_DIR}
+            OUTPUT_SUFFIX ".xml"
+            DISCOVERY_MODE PRE_TEST
+            EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
+            TEST_SPEC "[openmp] and [gpu]"
+            PROPERTIES "LABELS" "CATCH"
+                       "LABELS" "GPU"
+                       "ENVIRONMENT" "${asan_opts}"
+                       "RESOURCE_LOCK" "openmp_resource"
             SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
         )
     endif()
