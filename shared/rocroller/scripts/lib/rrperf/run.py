@@ -117,6 +117,17 @@ def run_problems(
     return result
 
 
+def generate_missing_attr_value(run, attr):
+    """Generate value for an option missing in previous rrperf version."""
+    match attr:
+        case "workgroupMapping":
+            wgm_dim = getattr(run, "workgroupMappingDim")
+            wgm_value = getattr(run, "workgroupMappingValue")
+            return (wgm_dim, wgm_value)
+        case _:
+            raise RuntimeError(f"Cannot handle attribuite missing in previous rrperf version: {attr}")
+
+
 def backcast(generator, build_dir):
     """Reconstruct run objects from `generator` into run objects from previous rrperf version."""
     pdef = build_dir.parent / "scripts" / "lib" / "rrperf" / "problems.py"
@@ -128,7 +139,11 @@ def backcast(generator, build_dir):
         backClass = getattr(module, className, None)
         if backClass is not None:
             backObj = backClass(
-                **{f.name: getattr(run, f.name) for f in fields(backClass)}
+                **{f.name:
+                    getattr(run, f.name)
+                    if hasattr(run, f.name)
+                    else generate_missing_attr_value(run, f.name)
+                    for f in fields(backClass)}
             )
             yield backObj
 

@@ -7,4 +7,3 @@
 #Known bugs:
 #- { function: matmul, grouped_gemm: 1, known_bug_platforms: "gfx1100, gfx1101, gfx1102, gfx1200, gfx1201" }
 #- { function: matmul, gradient: 1, known_bug_platforms: "gfx1100, gfx1101, gfx1102, gfx1200, gfx1201" }
-
