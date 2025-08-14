@@ -218,7 +218,7 @@ def cmake_fin_build_cmd(prefixpath){
 def getDockerImageName(dockerArgs)
 {
     sh "echo ${dockerArgs} > ${env.WORKSPACE}/factors.txt"
-    def image = "${env.MIOPEN_DOCKER_IMAGE_URL}"
+    def image = "${env.MIOPEN_PRIVATE_DOCKER_IMAGE_PROJECT}"
     sh "cd ${env.WORKSPACE}/${env.REPO_DIR}/ && md5sum Dockerfile requirements.txt dev-requirements.txt >> ${env.WORKSPACE}/factors.txt"
     def docker_hash = sh(script: "cd ${env.WORKSPACE} && md5sum factors.txt | awk '{print \$1}' | head -c 6", returnStdout: true)
     sh "rm ${env.WORKSPACE}/factors.txt"
@@ -239,7 +239,13 @@ def getDockerImage(Map conf=[:])
     // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
     def gpu_arch = "gfx908;gfx90a;gfx942" // prebuilt dockers should have all the architectures enabled so one image can be used for all stages
 
-    def dockerArgs = "--build-arg BUILDKIT_INLINE_CACHE=1 --build-arg PREFIX=${prefixpath} --build-arg GPU_ARCHS=\"${gpu_arch}\""
+    def dockerArgs = "--build-arg BUILDKIT_INLINE_CACHE=1 " +
+                     "--build-arg PREFIX=${prefixpath} " +
+                     "--build-arg GPU_ARCHS=\"${gpu_arch}\" " +
+                     "--build-arg ARTF_SERV=${env.ARTF_SERV} " +
+                     "--build-arg ARTF_IMAGE_SUB_URL=${env.MIOPEN_ARTF_IMAGE_SUB_URL} " +
+                     "--build-arg ARTF_IMAGE_NAME=${env.MIOPEN_ARTF_IMAGE_NAME} " +
+                     "--build-arg ARTF_IMAGE_VERSION=${env.MIOPEN_ARTF_IMAGE_VERSION} "
     if(env.CCACHE_HOST)
     {
         def check_host = sh(script:"""(printf "PING\r\n";) | nc -N ${env.CCACHE_HOST} 6379 """, returnStdout: true).trim()
@@ -267,7 +273,9 @@ def getDockerImage(Map conf=[:])
     try{
         echo "Pulling down image: ${image}"
         dockerImage = docker.image("${image}")
-        dockerImage.pull()
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
+            dockerImage.pull()
+        }
     }
     catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
         echo "The job was cancelled or aborted"
@@ -277,7 +285,7 @@ def getDockerImage(Map conf=[:])
     {
         echo "Building image..."
         dockerImage = docker.build("${image}", "${dockerArgs} ${env.WORKSPACE}/${env.REPO_DIR}/.")
-        withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+        withDockerRegistry([ credentialsId: "docker_test_cred", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
             dockerImage.push()
         }
     }
