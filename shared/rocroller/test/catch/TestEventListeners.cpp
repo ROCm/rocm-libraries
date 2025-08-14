@@ -35,23 +35,28 @@
 
 class OpenMPSetupListener : public Catch::EventListenerBase
 {
+private:
+    int originalMaxActiveLevels = 0;
+
 public:
     using Catch::EventListenerBase::EventListenerBase;
 
     void testCaseStarting(Catch::TestCaseInfo const& testInfo) override
     {
+        originalMaxActiveLevels = omp_get_max_active_levels();
+        
         // Ensure all functions that use OpenMP have [openmp] tag
         // Note: All uses of #pragma omp should include an assertion for omp_get_max_active_levels() >= 1;
         if(std::find(testInfo.tags.begin(), testInfo.tags.end(), Catch::Tag("openmp"))
            != testInfo.tags.end())
-        {
-            std::cout << "is openmp " << omp_get_max_active_levels() << std::endl;
             omp_set_max_active_levels(1);
-        }
         else
-        {
             omp_set_max_active_levels(0);
-        }
+    }
+
+    void testCaseEnded(Catch::TestCaseStats const&) override
+    {
+        omp_set_max_active_levels(originalMaxActiveLevels);
     }
 };
 

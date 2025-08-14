@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright 2024-2025 AMD ROCm(TM) Software
+ * Copyright 2025 AMD ROCm(TM) Software
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,12 +27,48 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <common/Utilities.hpp>
+#include <common/mxDataGen.hpp>
+#include <rocRoller/TensorDescriptor.hpp>
+
+using Catch::Matchers::ContainsSubstring;
+
 TEST_CASE("has openmp tag", "[openmp]")
 {
+    SECTION("utilities", "")
+    {
+        REQUIRE_NOTHROW(normL2(std::vector<int>{1, 2, 3}));
+    }
 
+    SECTION("DGenInput", "")
+    {
+        std::vector<float> hostA, hostB, hostC;
+        std::vector<uint8_t> hostScaleA, hostScaleB;
+
+        rocRoller::TensorDescriptor descA(rocRoller::DataType::Float, {64, 32}, "N");
+        rocRoller::TensorDescriptor descB(rocRoller::DataType::Float, {32, 64}, "N");
+        rocRoller::TensorDescriptor descC(rocRoller::DataType::Float, {64, 64}, "N");
+
+        REQUIRE_NOTHROW(rocRoller::DGenInput(12345u, hostA, descA, hostB, descB, hostC, descC, hostScaleA, hostScaleB));
+    }
 }
 
 TEST_CASE("doesn't have openmp tag", "")
 {
-    
+    SECTION("utilities", "")
+    {
+        REQUIRE_THROWS_WITH(normL2(std::vector<int>{1, 2, 3}), ContainsSubstring("omp"));
+    }
+
+    SECTION("DGenInput", "")
+    {
+        std::vector<float> hostA, hostB, hostC;
+        std::vector<uint8_t> hostScaleA, hostScaleB;
+
+        rocRoller::TensorDescriptor descA(rocRoller::DataType::Float, {64, 32}, "N");
+        rocRoller::TensorDescriptor descB(rocRoller::DataType::Float, {32, 64}, "N");
+        rocRoller::TensorDescriptor descC(rocRoller::DataType::Float, {64, 64}, "N");
+
+        REQUIRE_THROWS_WITH(rocRoller::DGenInput(12345u, hostA, descA, hostB, descB, hostC, descC, hostScaleA, hostScaleB), ContainsSubstring("omp"));
+    }
 }

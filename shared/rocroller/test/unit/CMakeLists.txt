@@ -44,6 +44,7 @@ endif()
 target_sources(rocroller-tests
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/ContextFixture.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ContextFixtureTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GPUContextFixture.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/GenericContextFixture.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddStreamKTest.cpp"

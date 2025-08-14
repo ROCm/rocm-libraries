@@ -24,6 +24,8 @@
  *
  *******************************************************************************/
 
+#include <omp.h>
+
 #include "ContextFixture.hpp"
 
 #include <rocRoller/AssemblyKernel.hpp>
@@ -48,6 +50,16 @@ void ContextFixture::SetUp()
     auto settings = Settings::getInstance();
     settings->set(Settings::EnforceGraphConstraints, true);
     settings->set(Settings::AuditControlTracers, true);
+
+    auto const* info     = testing::UnitTest::GetInstance()->current_test_info();
+    std::string testName = info->name();
+
+    // Ensure all functions that use OpenMP have "OPENMP" as a part of the test name
+    // Note: All uses of #pragma omp should include an assertion for omp_get_max_active_levels() >= 1;
+    if(testName.find("OPENMP") != std::string::npos)
+        omp_set_max_active_levels(1);
+    else
+        omp_set_max_active_levels(0);
 }
 
 void ContextFixture::TearDown()
