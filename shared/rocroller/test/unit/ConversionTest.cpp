@@ -637,7 +637,7 @@ namespace rocRollerTest
         convertTo<rocRoller::Half>(srcData, cs, false /* load A in LDS */);
     }
 
-    TEST_F(ConversionTest, GPU_FloatToHalf_LDS)
+    TEST_F(ConversionTest, GPU_OPENMP_FloatToHalf_LDS)
     {
         ConversionSettings cs(256, 512, 16, 8, 4, 4);
         auto               srcData = cs.generateData<float>();
@@ -728,7 +728,7 @@ namespace rocRollerTest
         matrixMultiplyABC<BF8, float, BF8>(16, 16, 32, 1, 2.e-6);
     }
 
-    TEST_F(ConversionTest, GPU_MatrixMultiply_MFMA)
+    TEST_F(ConversionTest, GPU_OPENMP_MatrixMultiply_MFMA)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         // D (Half) = Convert( A (F32) * B (F32) )

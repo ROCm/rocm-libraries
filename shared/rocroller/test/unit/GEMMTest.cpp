@@ -1657,7 +1657,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "ds_read_b128 "), numDSReads);
     }
 
-    TEST_P(GEMMF16TestGPU, GPU_BasicGEMMF16)
+    TEST_P(GEMMF16TestGPU, GPU_OPENMP_BasicGEMMF16)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto [typeAB, MFMAK, transOp] = std::get<1>(GetParam());
@@ -2637,7 +2637,7 @@ namespace GEMMDriverTest
         basicGEMM<FP8, FP8, float>(gemm);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_DwordScaledGEMMMXF8F6F4)
+    TEST_P(GEMMF8F6F4TestGPU, GPU_OPENMP_DwordScaledGEMMMXF8F6F4)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -3163,7 +3163,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_BasicGEMMF8F6F4_Direct2LDS_Prefetch2)
+    TEST_P(GEMMF8F6F4TestGPU, GPU_OPENMP_BasicGEMMF8F6F4_Direct2LDS_Prefetch2)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
 

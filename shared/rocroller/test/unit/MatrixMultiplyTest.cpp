@@ -1579,7 +1579,7 @@ namespace MatrixMultiplyTest
             matrixMultiplyAB<BF8, BF8, float>(16, 16, 32, 1);
     }
 
-    TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyABF8_32x32x16)
+    TEST_P(MatrixMultiplyTestGPUF8, GPU_OPENMP_MatrixMultiplyABF8_32x32x16)
     {
         if(std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8)
             matrixMultiplyAB<FP8, FP8, float>(32, 32, 16, 1);
