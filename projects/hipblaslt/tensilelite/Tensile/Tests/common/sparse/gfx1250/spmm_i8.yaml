@@ -18,11 +18,11 @@ GlobalParameters:
   DataInitTypeB: 2
   DataInitTypeScaleAlphaVec: 1
   PruneSparseMode: 1
-  PrintTensorA: 1
-  PrintTensorB: 1
-  PrintTensorC: 0
-  PrintTensorD: 1
-  PrintTensorRef: 1
+  # PrintTensorA: 1
+  # PrintTensorB: 1
+  # PrintTensorC: 0
+  # PrintTensorD: 1
+  # PrintTensorRef: 1
   # GenerateSourcesAndExit: True
   ROCmAgentEnumeratorPath: rocm_agent_enumerator
 

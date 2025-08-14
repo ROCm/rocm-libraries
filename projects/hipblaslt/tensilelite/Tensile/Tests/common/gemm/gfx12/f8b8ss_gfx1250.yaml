@@ -12,12 +12,10 @@ GlobalParameters:
   PruneSparseMode: 0
   DataInitTypeA: 3
   DataInitTypeB: 3
-  # DataInitTypeD: 2
+  DataInitTypeD: 2
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
-  # PrintTensorA: 1
-  # PrintTensorB: 1
-  # # PrintTensorC: 1
+  # PrintTensorC: 1
   # PrintTensorD: 1
   # PrintTensorRef: 1
   NumWarmups: 0
@@ -29,7 +27,6 @@ GlobalParameters:
   KeepBuildTmp: True
   PrintLevel: 2
   UseGPUTimer: False
-  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
   #######################################
@@ -38,21 +35,17 @@ BenchmarkProblems:
   -
     - # ProblemType, NN
       OperationType: GEMM
-      DataType: i8
-      DestDataType: i
-      ComputeDataType: i
+      DataType: F8B8
+      DestDataType: s
+      ComputeDataType: s
       HighPrecisionAccumulate:  True
       TransposeA: False
       TransposeB: False
       UseBeta: True
       Batched: True
+      Activation: False
       SupportUserArgs: True
       UseBias: 0
-      Activation: True
-      #UseScaleAB: Scalar #SAB
-      UseScaleAlphaVec: 1 #SAV
-      BiasDataTypeList: ['i']
-      ActivationType:  hipblaslt_all
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -60,9 +53,9 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
-          - [16, 16, 64, 1, 1, 2, 2, 2, 2]
-          - [16, 16, 64, 1, 1, 1, 1, 1, 1]
-        - DepthU: [64]
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
+          - [16, 16, 64, 1,  1,  2, 2,  2, 2]
+        - DepthU: [128]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]
@@ -83,7 +76,7 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [1]
-        - SourceSwap: [0]
+        - SourceSwap: [0,1]
         - DirectToVgprSparseMetadata: [0]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
@@ -99,10 +92,8 @@ BenchmarkProblems:
           - Exact: [127, 127, 1, 127]
           - Exact: [128, 128, 1, 128]
           - Exact: [129, 129, 1, 129]
-        - BiasTypeArgs: ['i']
         - ActivationArgs:
           - [Enum: none]
-          - [Enum: relu]
 
   #######################################
   # NT - standard
@@ -110,21 +101,17 @@ BenchmarkProblems:
   -
     - # ProblemType, NT
       OperationType: GEMM
-      DataType: i8
-      DestDataType: i
-      ComputeDataType: i
+      DataType: F8B8
+      DestDataType: s
+      ComputeDataType: s
       HighPrecisionAccumulate:  True
       TransposeA: False
       TransposeB: True
       UseBeta: True
       Batched: True
+      Activation: False
       SupportUserArgs: True
       UseBias: 0
-      Activation: True
-      #UseScaleAB: Scalar #SAB
-      UseScaleAlphaVec: 1 #SAV
-      BiasDataTypeList: ['i']
-      ActivationType:  hipblaslt_all
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -132,8 +119,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
           - [16, 16, 64, 1,  1,  2, 2,  2, 2]
-          - [16, 16, 64, 1,  1,  1, 1,  1, 1]
         - DepthU: [128]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
@@ -155,7 +142,7 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [1]
-        - SourceSwap: [0]
+        - SourceSwap: [0,1]
         - DirectToVgprSparseMetadata: [0]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
@@ -171,32 +158,26 @@ BenchmarkProblems:
           - Exact: [127, 127, 1, 127]
           - Exact: [128, 128, 1, 128]
           - Exact: [129, 129, 1, 129]
-        - BiasTypeArgs: ['i']
         - ActivationArgs:
           - [Enum: none]
-          - [Enum: relu]
-
+          
   #######################################
   # TN - standard
   #######################################
   -
     - # ProblemType, TN
       OperationType: GEMM
-      DataType: i8
-      DestDataType: i
-      ComputeDataType: i
+      DataType: F8B8
+      DestDataType: s
+      ComputeDataType: s
       HighPrecisionAccumulate:  True
       TransposeA: True
       TransposeB: False
       UseBeta: True
       Batched: True
+      Activation: False
       SupportUserArgs: True
       UseBias: 0
-      Activation: True
-      #UseScaleAB: Scalar #SAB
-      UseScaleAlphaVec: 1 #SAV
-      BiasDataTypeList: ['i']
-      ActivationType:  hipblaslt_all
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -204,8 +185,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
           - [16, 16, 64, 1,  1,  2, 2,  2, 2]
-          - [16, 16, 64, 1,  1,  1, 1,  1, 1]
         - DepthU: [128]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
@@ -227,7 +208,7 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [1]
-        - SourceSwap: [0]
+        - SourceSwap: [0,1]
         - DirectToVgprSparseMetadata: [0]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
@@ -243,10 +224,8 @@ BenchmarkProblems:
           - Exact: [127, 127, 1, 127]
           - Exact: [128, 128, 1, 128]
           - Exact: [129, 129, 1, 129]
-        - BiasTypeArgs: ['i']
         - ActivationArgs:
           - [Enum: none]
-          - [Enum: relu]
 
   #######################################
   # TT - standard
@@ -254,21 +233,17 @@ BenchmarkProblems:
   -
     - # ProblemType, TT
       OperationType: GEMM
-      DataType: i8
-      DestDataType: i
-      ComputeDataType: i
+      DataType: F8B8
+      DestDataType: s
+      ComputeDataType: s
       HighPrecisionAccumulate:  True
       TransposeA: True
       TransposeB: True
       UseBeta: True
       Batched: True
+      Activation: False
       SupportUserArgs: True
       UseBias: 0
-      Activation: True
-      #UseScaleAB: Scalar #SAB
-      UseScaleAlphaVec: 1 #SAV
-      BiasDataTypeList: ['i']
-      ActivationType:  hipblaslt_all
 
     - # BenchmarkProblemSizeGroup - Standard
       InitialSolutionParameters:
@@ -276,8 +251,8 @@ BenchmarkProblems:
         - KernelLanguage: ["Assembly"]
       ForkParameters:
         - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
           - [16, 16, 64, 1,  1,  2, 2,  2, 2]
-          - [16, 16, 64, 1,  1,  1, 1,  1, 1]
         - DepthU: [128]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
@@ -299,7 +274,7 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - 1LDSBuffer: [1]
-        - SourceSwap: [0]
+        - SourceSwap: [0,1]
         - DirectToVgprSparseMetadata: [0]
         - WorkGroupMapping: [1]
         - StoreVectorWidth: [-1]
@@ -315,7 +290,5 @@ BenchmarkProblems:
           - Exact: [127, 127, 1, 127]
           - Exact: [128, 128, 1, 128]
           - Exact: [129, 129, 1, 129]
-        - BiasTypeArgs: ['i']
         - ActivationArgs:
           - [Enum: none]
-          - [Enum: relu]

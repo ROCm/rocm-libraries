@@ -3563,7 +3563,7 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["BufferLoad"]:
           module.add(vectorMultiplyBpe(dest, dest, tP["bpeGR"]))
       else:
-          module.add(vectorMultiply64Bpe(dset, dset, tP["bpeGR"]))
+          module.add(vectorMultiply64Bpe(dest, dest, tP["bpeGR"]))
 
       with self.allocTmpSgpr(2) as tmpSgprInfo:
         tmpSgpr = tmpSgprInfo.idx
