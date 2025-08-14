@@ -260,23 +260,6 @@ void mem_inst(nb::module_ m_mem)
         .def("getParams", &rocisa::SMemStoreInstruction::getParams)
         .def("__str__", &rocisa::SMemStoreInstruction::toString);
 
-    nb::class_<rocisa::GlobalStoreInstruction, rocisa::GlobalWriteInstruction>(
-        m_mem, "GlobalStoreInstruction")
-        .def(nb::init<rocisa::InstType,
-                      const std::shared_ptr<rocisa::Container>&,
-                      const std::shared_ptr<rocisa::Container>&,
-                      const std::shared_ptr<rocisa::Container>&,
-                      std::optional<rocisa::FLATModifiers>,
-                      const std::string&>(),
-             nb::arg("instType"),
-             nb::arg("srcData"),
-             nb::arg("base"),
-             nb::arg("soffset"),
-             nb::arg("flat")    = std::nullopt,
-             nb::arg("comment") = "")
-        .def("getParams", &rocisa::GlobalStoreInstruction::getParams)
-        .def("__str__", &rocisa::GlobalStoreInstruction::toString);
-
     nb::class_<rocisa::FLATStoreInstruction, rocisa::GlobalWriteInstruction>(m_mem,
                                                                              "FLATStoreInstruction")
         .def(nb::init<rocisa::InstType,
@@ -734,7 +717,7 @@ void mem_inst(nb::module_ m_mem)
 
     nb::class_<rocisa::BufferStoreB32, rocisa::MUBUFStoreInstruction>(m_mem, "BufferStoreB32")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
-                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const InstructionInput&,
                       std::optional<rocisa::MUBUFModifiers>,
@@ -1330,20 +1313,6 @@ void mem_inst(nb::module_ m_mem)
              nb::arg("comment") = "")
         .def("__deepcopy__",
              [](const rocisa::SStoreB32& self, nb::dict&) { return new rocisa::SStoreB32(self); });
-
-    nb::class_<rocisa::GStoreB32, rocisa::GlobalStoreInstruction>(m_mem, "GStoreB32")
-        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
-                      const std::shared_ptr<rocisa::Container>&,
-                      const InstructionInput&,
-                      std::optional<rocisa::FLATModifiers>,
-                      const std::string&>(),
-             nb::arg("src"),
-             nb::arg("base"),
-             nb::arg("soffset"),
-             nb::arg("flat")    = std::nullopt,
-             nb::arg("comment") = "")
-        .def("__deepcopy__",
-             [](const rocisa::GStoreB32& self, nb::dict&) { return new rocisa::GStoreB32(self); });
 
     nb::class_<rocisa::SStoreB64, rocisa::SMemStoreInstruction>(m_mem, "SStoreB64")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,

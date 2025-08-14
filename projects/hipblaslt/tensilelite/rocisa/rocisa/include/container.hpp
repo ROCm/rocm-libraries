@@ -518,6 +518,19 @@ namespace rocisa
         }
     };
 
+    struct OFF : public Container
+    {
+        std::shared_ptr<Container> clone() const override
+        {
+            return std::make_shared<OFF>(*this);
+        }
+
+        std::string toString() const override
+        {
+            return "off";
+        }
+    };
+
     struct EXEC : public Container
     {
         EXEC(bool setHi = false)

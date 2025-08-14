@@ -22,14 +22,14 @@
 
 from rocisa.enum import CacheScope
 from rocisa.code import Module, Label
-from rocisa.container import vgpr, sgpr, SMEMModifiers, FLATModifiers, replaceHolder, EXEC,\
-    VOP3PModifiers, ContinuousRegister
+from rocisa.container import vgpr, sgpr, SMEMModifiers, MUBUFModifiers, replaceHolder, EXEC,\
+    VOP3PModifiers, ContinuousRegister, OFF
 from rocisa.instruction import SAddCU32, SAddI32, SAddU32, SAndB32, SBarrier, \
     SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, \
     SCmpGtU32, SCmpLeU32, SCmpLtU32, SCmpGeU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, SLoadB32, \
     SMinU32, SMovB32, SMovB64, SMulI32, SNop, SSleep, SStoreB32, SSubU32, \
     SWaitCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VLShiftRightB32, VMovB32, \
-    VReadfirstlaneB32, VCvtBF16toFP32, GStoreB32
+    VReadfirstlaneB32, VCvtBF16toFP32, BufferStoreB32
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
     vectorStaticMultiply, BranchIfNotZero, scalarUInt32DivideAndRemainder
 
@@ -811,11 +811,8 @@ class StreamK(Component):
                     module.add(SMovB32(dst=sgpr(flagSgpr), src=1, comment="flag data"))
                     module.add(SStoreB32(src=sgpr(flagSgpr), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True), comment="set flag"))
                 else:
-                    module.add(VMovB32(dst=vgpr(tmpVgpr), src=1, comment="flag data"))
-                    module.add(VMovB32(dst=vgpr(tmpVgpr+1), src=sgpr(tmpSgpr), comment="move offset"))
-                    module.add(self.maskedGlobalStore(kernel, src=vgpr(tmpVgpr), base=sgpr("AddressFlags", 2), \
-                        soffset=vgpr(tmpVgpr+1), flat=FLATModifiers(glc=True, scope=CacheScope.SCOPE_DEV), \
-                        comment="set flag"))
+                    module.add(VMovB32(dst=vgpr(tmpVgpr), src=1, comment="move 1 to tmpVgpr"))
+                    module.add(self.bufferStoreFlag(writer, src=vgpr(tmpVgpr), soffset=sgpr(tmpSgpr), comment="set flag"))
                 module.add(skipFlagSet)
             module.add(SWaitCnt(kmcnt=0, comment="wait for flag")) # TODO just for testing
 
@@ -826,16 +823,18 @@ class StreamK(Component):
 
         return module
 
-    def maskedGlobalStore(self, kernel, src, base, soffset, flat, comment=""):
-        module = Module("Masked Global Store")
-        waveSize = kernel["WavefrontSize"]
-        activeMask = "0x00000001" if (waveSize == 32) else "0x0000000000000001"
-        fullMask = "0xFFFFFFFF" if (waveSize == 32) else "0xFFFFFFFFFFFFFFFF"
-        SMovBX = SMovB32 if (waveSize == 32) else SMovB64
-        module.add(SMovBX(dst=EXEC(), src=activeMask, comment="Set thread 0"))
-        module.add(GStoreB32(src=src, base=base, soffset=soffset, flat=flat, comment=comment))
-        module.add(SMovBX(dst=EXEC(), src=fullMask, comment="Reset exec mask"))
+    def bufferStoreFlag(self, writer, src, soffset, comment=""):
+        module = Module("Buffer Store Flag")
+        tmpSgprBuffer = writer.sgprPool.checkOutAligned(4, 4, preventOverflow=False)
+        module.add(SMovB64(dst=sgpr(tmpSgprBuffer, 2), src=sgpr("AddressFlags", 2)))
+        module.add(SMovB32(dst=sgpr(tmpSgprBuffer+2), src="BufferOOB"))
+        module.add(SMovB32(dst=sgpr(tmpSgprBuffer+3), src="Srd127_96"))
+        module.add(BufferStoreB32(src=src, vaddr=OFF(), saddr=sgpr(tmpSgprBuffer, 4), soffset=soffset, \
+                                  mubuf=MUBUFModifiers(glc=True, dlc=True, scope=CacheScope.SCOPE_DEV), \
+                                  comment=comment))
         module.add(SWaitCnt(vscnt=0, comment="wait for data store")) #TODO: See if this wait is necessery
+        writer.sgprPool.checkIn(tmpSgprBuffer)
+
         return module
 
     def partialsWriteBatch(self, writer, kernel, ss, batchIdx, applyAlpha, beta, edge, gwvw, atomicW, \
@@ -1774,7 +1773,7 @@ class StreamKBasic(StreamK):
         module.add(xccMapping(writer, kernel))
 
         # Workaround for gfx12
-        if writer.states.asmCaps["HasSCOPEModifier"]:
+        if writer.states.asmCaps["WorkGroupIdFromTTM"]:
             module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
             module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
@@ -1858,7 +1857,7 @@ class StreamKTwoTileOriginal(StreamK):
         module.add(xccMapping(writer, kernel))
 
         # Workaround for gfx12
-        if writer.states.asmCaps["HasSCOPEModifier"]:
+        if writer.states.asmCaps["WorkGroupIdFromTTM"]:
             module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
             module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
@@ -1983,7 +1982,7 @@ class StreamKTwoTileDPFirst(StreamK):
         module.add(xccMapping(writer, kernel))
 
         # Workaround for gfx12
-        if writer.states.asmCaps["HasSCOPEModifier"]:
+        if writer.states.asmCaps["WorkGroupIdFromTTM"]:
             module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
             module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))

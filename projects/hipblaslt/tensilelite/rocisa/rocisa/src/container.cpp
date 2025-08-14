@@ -453,6 +453,14 @@ void init_containers(nb::module_ m)
                  new(&self) rocisa::VOP3PModifiers(std::get<0>(t), std::get<1>(t), std::get<2>(t));
              });
 
+    nb::class_<rocisa::OFF, rocisa::Container>(m_con, "OFF")
+        .def(nb::init<>())
+        .def("__str__", &rocisa::OFF::toString)
+        .def("__deepcopy__",
+             [](const rocisa::OFF& self, nb::dict mamo) { return rocisa::OFF(self); })
+        .def("__getstate__", [](const rocisa::OFF& self) { return std::make_tuple(); })
+        .def("__setstate__", [](rocisa::OFF& self, std::tuple<> t) { new(&self) rocisa::OFF(); });
+
     nb::class_<rocisa::EXEC, rocisa::Container>(m_con, "EXEC")
         .def(nb::init<bool>(), nb::arg("setHi") = false)
         .def("__str__", &rocisa::EXEC::toString)
