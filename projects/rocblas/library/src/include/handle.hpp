@@ -317,17 +317,17 @@ public:
 
         if(status && batched)
         {
-            static bool hipblasltEnvBatched = [&] {
+            static bool hipblasltEnvBatchedDisabled = [&] {
                 auto* env_var = getenv("ROCBLAS_USE_HIPBLASLT_BATCHED");
                 if(env_var)
                 {
-                    return strncmp(env_var, "1", 1) == 0;
+                    return strncmp(env_var, "0", 1) == 0;
                 }
                 return false;
             }();
 
             // only use for batched when explicitly enabled by env variable
-            if(hipblasltEnvBatched)
+            if(!hipblasltEnvBatchedDisabled)
                 status = !is_stream_in_capture_mode();
             else
                 status = false;

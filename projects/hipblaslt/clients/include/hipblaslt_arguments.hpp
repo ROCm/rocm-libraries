@@ -584,8 +584,7 @@ namespace ArgumentsHelper
               e_##NAME == e_lde ? hipblaslt_argument(-12) :                                 \
               e_##NAME == e_stride_e ? hipblaslt_argument(-13) :                            \
               e_##NAME == e_alpha ? hipblaslt_argument(-14) :                               \
-              e_##NAME == e_beta ? hipblaslt_argument(-15) :                                \
-              e_##NAME == e_rotating ? hipblaslt_argument(-16) : e_##NAME> = \
+              e_##NAME == e_beta ? hipblaslt_argument(-15) : e_##NAME> = \
             [](auto&& func, const Arguments& arg, auto) { func(#NAME, arg.NAME); }
 
     // Specialize apply for each Argument
@@ -863,14 +862,6 @@ namespace ArgumentsHelper
     HIPBLASLT_CLANG_STATIC constexpr auto apply<e_beta> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("beta", arg.get_beta<decltype(T)>());
-        };
-
-    // Specialization for e_rotating
-    template <>
-    HIPBLASLT_CLANG_STATIC constexpr auto apply<e_rotating> =
-        [](auto&& func, const Arguments& arg, auto T) {
-            if(arg.rotating > 0)
-                func("rotating_buffer", arg.rotating);
         };
 };
 // clang-format on

@@ -1,4 +1,5 @@
 #include <Tensile/analytical/Hardware.hpp>
+#include <Tensile/analytical/StreamK.hpp>
 #include <Tensile/analytical/Utils.hpp>
 
 #include <pybind11/pybind11.h>
@@ -40,6 +41,23 @@ PYBIND11_MODULE(origami, m)
         .value("gfx950", Hardware::Architecture::gfx950)
         .export_values();
 
+    pybind11::enum_<Origami::DataType>(m, "DataType")
+        .value("Float", Origami::DataType::Float)
+        .value("ComplexFloat", Origami::DataType::ComplexFloat)
+        .value("ComplexDouble", Origami::DataType::ComplexDouble)
+        .value("Double", Origami::DataType::Double)
+        .value("Half", Origami::DataType::Half)
+        .value("Int32", Origami::DataType::Int32)
+        .value("BFloat16", Origami::DataType::BFloat16)
+        .value("Int8", Origami::DataType::Int8)
+        .value("XFloat32", Origami::DataType::XFloat32)
+        .value("Float8", Origami::DataType::Float8)
+        .value("BFloat8", Origami::DataType::BFloat8)
+        .value("Float6", Origami::DataType::Float6)
+        .value("BFloat6", Origami::DataType::BFloat6)
+        .value("Float4", Origami::DataType::Float4)
+        .export_values();
+
     pybind11::class_<Hardware>(m, "Hardware")
         .def(pybind11::init<Hardware::Architecture,
                             size_t,
@@ -70,10 +88,12 @@ PYBIND11_MODULE(origami, m)
           &Hardware::getHardwareForDevice,
           "This gets a hardware object for a device.");
 
+    m.def("datatype_to_bits", &Origami::dataTypeToBits, "Return the number of bits in a datatype");
+    m.def("string_to_datatype", &Origami::stringToDatatype, "Convert a string representation of a datatype into DataType enum");
     m.def("select_best_macro_tile_size",
           &Origami::select_best_macro_tile_size,
           "Get best macro tile sizes.");
-    m.def("select_best_grid_size", &Origami::select_best_grid_size, "Select Best Grid Size");
+    m.def("select_streamk_grid", &Origami::streamk::select_streamk_grid, "Select Best StreamK Grid Size");
     m.def("compute_total_latency", &Origami::compute_total_latency, "compute_total_latency");
     m.def("select_best_wgm", &Origami::select_best_wgm, "Get best workgroup mapping.");
 }
