@@ -176,7 +176,7 @@ namespace rocRoller
     }
 
     inline bool CompareVariableTypesPointersEqual::operator()(VariableType const& lhs,
-                                                       VariableType const& rhs) const
+                                                              VariableType const& rhs) const
     {
         if(lhs.pointerType < rhs.pointerType)
             return true;
@@ -186,7 +186,6 @@ namespace rocRoller
 
         return false;
     }
-
 
     template <typename T,
               DataType    T_DEnum,
