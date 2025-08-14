@@ -629,7 +629,7 @@ namespace rocRollerTest
         EXPECT_TRUE(res.ok) << res.message();
     }
 
-    TEST_F(HalfPrecisionTest, GPU_ExecuteHalfPrecisionAdd)
+    TEST_F(HalfPrecisionTest, GPU_OPENMP_ExecuteHalfPrecisionAdd)
     {
         AddTiles(256, 512, 16, 8, 4, 4);
     }

@@ -960,7 +960,7 @@ namespace GEMMDriverTest
     };
 
     // This test is to ensure each scheduler properly yields insts for a basic GEMM
-    TEST_P(GEMMTestGPU, GPU_BasicGEMM_Schedulers)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMM_Schedulers)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1008,14 +1008,14 @@ namespace GEMMDriverTest
         // Can not compare random insts to others because non-zero chance seed generates such insts
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMM)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMM)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMWorkgroupMapping)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMWorkgroupMapping)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1024,7 +1024,7 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMWorkgroupMappingXCC)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMWorkgroupMappingXCC)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         REQUIRE_ARCH_CAP(GPUCapability::HasXCC);
@@ -1035,7 +1035,7 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMLargerLDS)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMLargerLDS)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1061,7 +1061,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMBetaIsZero)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMBetaIsZero)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1069,7 +1069,7 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMNotSetC)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMNotSetC)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1077,7 +1077,7 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm, false, false, 1, true);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMBetaIsZeroStreamK)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMBetaIsZeroStreamK)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
@@ -1116,11 +1116,11 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMStreamK)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMStreamK)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
+            GTEST_SKIP() << "Skipping GPU_OPENMP_BasicGEMMStreamK test";
         }
 
         GEMMProblem gemm;
@@ -1153,11 +1153,11 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMFP16StreamK)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
+            GTEST_SKIP() << "Skipping GPU_OPENMP_BasicGEMMStreamK test";
         }
 
         GEMMProblem gemm;
@@ -1206,11 +1206,11 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamKSmall)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMFP16StreamKSmall)
     {
         if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
-            GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
+            GTEST_SKIP() << "Skipping GPU_OPENMP_BasicGEMMStreamK test";
         }
 
         GEMMProblem gemm;
@@ -1251,7 +1251,7 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMNoLDSA)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMNoLDSA)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1261,7 +1261,7 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMNoLDSB)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMNoLDSB)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1271,7 +1271,7 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMNoLDSAB)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMNoLDSAB)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1281,7 +1281,7 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMUnrollK)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMUnrollK)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1301,7 +1301,7 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMUnrollKTailLoop)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMUnrollKTailLoop)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1323,7 +1323,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMUnrollKLDS)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMUnrollKLDS)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1337,7 +1337,7 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMUnrollKMoreLDS)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMUnrollKMoreLDS)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1351,7 +1351,7 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMUnrollKMoreLDSA)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMUnrollKMoreLDSA)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1365,7 +1365,7 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMUnrollKMoreLDSB)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMUnrollKMoreLDSB)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1379,7 +1379,7 @@ namespace GEMMDriverTest
         basicGEMM<float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMUnrollKLDSPrefetch)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMUnrollKLDSPrefetch)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1408,7 +1408,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16UnrollKLDSPrefetch)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMFP16UnrollKLDSPrefetch)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1442,7 +1442,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMUnrollKLDSMultiPrefetch)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMUnrollKLDSMultiPrefetch)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1470,7 +1470,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16Prefetch3)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMFP16Prefetch3)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -1539,7 +1539,7 @@ namespace GEMMDriverTest
         basicGEMM<BFloat16, BFloat16, float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMBF16_FP32_16x16x16)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMBF16_FP32_16x16x16)
     {
         GEMMProblem gemm;
         gemm.waveM = 16;
@@ -1583,7 +1583,7 @@ namespace GEMMDriverTest
         basicGEMM<BFloat16, BFloat16, BFloat16>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMBF16_BF16_16x16x16)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMBF16_BF16_16x16x16)
     {
         GEMMProblem gemm;
         gemm.waveM = 16;
@@ -1829,21 +1829,21 @@ namespace GEMMDriverTest
         return gemm;
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP8_NT)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMFP8_NT)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto gemm = setup_GEMMF8_NT();
         basicGEMM<FP8, FP8, float>(gemm);
     }
 
-    TEST_P(GEMMF8TestGPU, GPU_BasicGEMMBF8_16x16x32_NT)
+    TEST_P(GEMMF8TestGPU, GPU_OPENMP_BasicGEMMBF8_16x16x32_NT)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto gemm = setup_GEMMF8_NT();
         basicGEMM<BF8, BF8, float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMConversionFP8_NT)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMConversionFP8_NT)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto gemm = setup_GEMMF8_NT();
@@ -1859,7 +1859,7 @@ namespace GEMMDriverTest
         basicGEMM<BF8, BF8, float, BF8>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMSRConversionFP8_NT)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMSRConversionFP8_NT)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto gemm = setup_GEMMF8_NT();
@@ -1880,7 +1880,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMSRConversionBF8_NT)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMSRConversionBF8_NT)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto gemm = setup_GEMMF8_NT();
@@ -1901,7 +1901,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_ScaledPrefetchGEMMMXF8TN)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_ScaledPrefetchGEMMMXF8TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -2140,7 +2140,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMF8TestGPU, GPU_BasicGEMMFP8_16x16x32_TN)
+    TEST_P(GEMMF8TestGPU, GPU_OPENMP_BasicGEMMFP8_16x16x32_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto gemm = setup_GEMMF8_TN();
@@ -2148,7 +2148,7 @@ namespace GEMMDriverTest
         check_GEMMF8_TN(m_context);
     }
 
-    TEST_P(GEMMF8TestGPU, GPU_BasicGEMMBF8_16x16x32_TN)
+    TEST_P(GEMMF8TestGPU, GPU_OPENMP_BasicGEMMBF8_16x16x32_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         auto gemm = setup_GEMMF8_TN();
@@ -2175,7 +2175,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_SwizzleScaledGEMMMXF4TN)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_SwizzleScaledGEMMMXF4TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -2235,7 +2235,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_SwizzleScaledUnrollGEMMMXF4TN)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_SwizzleScaledUnrollGEMMMXF4TN)
     {
 
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
@@ -2304,7 +2304,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_SwizzleScaledPrefetchGEMMMXF4TN)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_SwizzleScaledPrefetchGEMMMXF4TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -2360,7 +2360,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestGPU, GPU_SwizzleScaledPrefetchLDSGEMMMXF4TN)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_SwizzleScaledPrefetchLDSGEMMMXF4TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -2407,7 +2407,7 @@ namespace GEMMDriverTest
         EXPECT_GT(countSubstring(generatedCode, "ds_read_u8 "), 0);
     }
 
-    TEST_P(GEMMTestGPU, GPU_SwizzleScaledPrefetchD2LGEMMMXF4TN)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_SwizzleScaledPrefetchD2LGEMMMXF4TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -2464,7 +2464,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 10);
     }
 
-    TEST_P(GEMMTestGPU, GPU_SwizzleScaledPrefetchD2LGEMMMXF4TN_192x256)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_SwizzleScaledPrefetchD2LGEMMMXF4TN_192x256)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -2521,7 +2521,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 8);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_SwizzleScaled_Prefetch_GEMMF8F6F4)
+    TEST_P(GEMMF8F6F4TestGPU, GPU_OPENMP_SwizzleScaled_Prefetch_GEMMF8F6F4)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -2608,7 +2608,7 @@ namespace GEMMDriverTest
         EXPECT_GE(countSubstring(generatedCode, "buffer_load_dwordx2 "), 6);
     }
 
-    TEST_P(GEMMTestGPU, GPU_StoreHazardScaledGEMMMXF8TN)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_StoreHazardScaledGEMMMXF8TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -2860,7 +2860,7 @@ namespace GEMMDriverTest
                         numScaleDSLoads);
     }
 
-    TEST_P(GEMMTestGPU, GPU_LargerLDSGEMMFP8_32x32x64_TN)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_LargerLDSGEMMFP8_32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm             = setup_GEMMF8F6F4(32, 32, 64);
@@ -2892,7 +2892,7 @@ namespace GEMMDriverTest
                   numBufferLoadsForAB + numBufferLoadsForC);
     }
 
-    TEST_P(GEMMF8F6F4TestGPU, GPU_ScaledBasicGEMMF8F6F4_Direct2LDS)
+    TEST_P(GEMMF8F6F4TestGPU, GPU_OPENMP_ScaledBasicGEMMF8F6F4_Direct2LDS)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -3015,7 +3015,7 @@ namespace GEMMDriverTest
                         problem.workgroupSizeX * problem.workgroupSizeY);
     }
 
-    TEST_P(GEMMTestGPU, GPU_GEMM_FP8_Direct2LDS_MT256x256x128_MI32x32x64_TN)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_GEMM_FP8_Direct2LDS_MT256x256x128_MI32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm        = setup_GEMMF8F6F4(32, 32, 64);
@@ -3044,7 +3044,7 @@ namespace GEMMDriverTest
                         gemm.workgroupSizeX * gemm.workgroupSizeY);
     }
 
-    TEST_P(GEMMTestGPU, GPU_GEMM_BF8_Direct2LDS_MT256x256x128_MI32x32x64_TN)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_GEMM_BF8_Direct2LDS_MT256x256x128_MI32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm        = setup_GEMMF8F6F4(32, 32, 64);
@@ -3073,7 +3073,7 @@ namespace GEMMDriverTest
                         gemm.workgroupSizeX * gemm.workgroupSizeY);
     }
 
-    TEST_P(GEMMTestGPU, GPU_GEMM_FP4_Direct2LDS_MT256x256x128_MI32x32x64_TN)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_GEMM_FP4_Direct2LDS_MT256x256x128_MI32x32x64_TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
         auto gemm        = setup_GEMMF8F6F4(32, 32, 64);
@@ -3221,7 +3221,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
     }
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed2X2)
+    TEST_P(GEMMJammedTestGPU, GPU_OPENMP_BasicGEMMFP16Jammed2X2)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -3246,7 +3246,7 @@ namespace GEMMDriverTest
         basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed2X1)
+    TEST_P(GEMMJammedTestGPU, GPU_OPENMP_BasicGEMMFP16Jammed2X1)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -3278,7 +3278,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed2X1UnrollK)
+    TEST_P(GEMMJammedTestGPU, GPU_OPENMP_BasicGEMMFP16Jammed2X1UnrollK)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -3310,7 +3310,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed1X2)
+    TEST_P(GEMMJammedTestGPU, GPU_OPENMP_BasicGEMMFP16Jammed1X2)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -3370,7 +3370,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "buffer_store_dwordx4"), 8);
     }
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed1x8)
+    TEST_P(GEMMJammedTestGPU, GPU_OPENMP_BasicGEMMFP16Jammed1x8)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -3393,7 +3393,7 @@ namespace GEMMDriverTest
         basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed1x8UnrollK)
+    TEST_P(GEMMJammedTestGPU, GPU_OPENMP_BasicGEMMFP16Jammed1x8UnrollK)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -3417,7 +3417,7 @@ namespace GEMMDriverTest
 
         basicGEMM<Half>(gemm);
     }
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed2x4)
+    TEST_P(GEMMJammedTestGPU, GPU_OPENMP_BasicGEMMFP16Jammed2x4)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -3445,7 +3445,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "v_pack_b32_f16"), 152);
     }
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed2x4UnrollK)
+    TEST_P(GEMMJammedTestGPU, GPU_OPENMP_BasicGEMMFP16Jammed2x4UnrollK)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -3507,7 +3507,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 3);
     }
 
-    TEST_P(GEMMJammedTestGPU, GPU_BasicGEMMFP16Jammed4x2UnrollK)
+    TEST_P(GEMMJammedTestGPU, GPU_OPENMP_BasicGEMMFP16Jammed4x2UnrollK)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -3538,7 +3538,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(countSubstring(generatedCode, "ds_write_b128"), 12);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16AllLDS)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMFP16AllLDS)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -3563,7 +3563,7 @@ namespace GEMMDriverTest
         basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16_96x256)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMFP16_96x256)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -3588,7 +3588,7 @@ namespace GEMMDriverTest
         basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMStoreDWave)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMStoreDWave)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -3636,7 +3636,7 @@ namespace GEMMDriverTest
         EXPECT_EQ(nonZeroDSReadOffsets(instructions1), std::set<int>{64});
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16AllLDSDebug)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMFP16AllLDSDebug)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
@@ -3661,7 +3661,7 @@ namespace GEMMDriverTest
         basicGEMM<Half>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_ScaledLDSGEMMMXF8TN)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_ScaledLDSGEMMMXF8TN)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
@@ -3795,7 +3795,7 @@ namespace GEMMDriverTest
         basicGEMMMixed(typeA, typeB, problem);
     }
 
-    TEST_P(GEMMTestWMMAGPU, GPU_BasicGEMM)
+    TEST_P(GEMMTestWMMAGPU, GPU_OPENMP_BasicGEMM)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA);
         auto [typeABAndWaveK, transOp] = std::get<1>(GetParam());
@@ -3869,7 +3869,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(MixedGEMMTestWMMAGPU, GPU_BasicGEMM)
+    TEST_P(MixedGEMMTestWMMAGPU, GPU_OPENMP_BasicGEMM)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA);
         auto [typeA, typeB, waveK, transOp] = std::get<1>(GetParam());

@@ -46,7 +46,7 @@ namespace StreamTest
         }
     };
 
-    TEST_F(StreamTest, AsyncStream)
+    TEST_F(StreamTest, GPU_OPENMP_AsyncStream)
     {
         auto const nx = 4096;
 

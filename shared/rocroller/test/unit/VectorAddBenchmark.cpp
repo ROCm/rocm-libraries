@@ -50,7 +50,7 @@ namespace VectorAddBenchmark
         }
     };
 
-    TEST_P(VectorAddBenchmarkGPU, GPU_VectorAddBenchmark_Graph)
+    TEST_P(VectorAddBenchmarkGPU, GPU_OPENMP_VectorAddBenchmark_Graph)
     {
         auto nx = GetParam();
 

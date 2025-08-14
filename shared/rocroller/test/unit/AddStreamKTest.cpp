@@ -343,7 +343,7 @@ namespace AddStreamKTest
     // Result will be: a numWG length array.  The n'th WG will sum
     // the input values in it's local tile-space and store the result
     // in the n'th entry of the output array.
-    TEST_P(GPU_AddStreamKTest, GPU_BasicStreamKLoad)
+    TEST_P(GPU_AddStreamKTest, GPU_OPENMP_BasicStreamKLoad)
     {
         bool twoTile = std::get<1>(GetParam());
         if(twoTile)

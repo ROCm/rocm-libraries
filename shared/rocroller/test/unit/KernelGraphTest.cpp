@@ -1883,12 +1883,12 @@ namespace KernelGraphTest
         }
     }
 
-    TEST_F(KernelGraphTestGPU, GPU_SAXPBY)
+    TEST_F(KernelGraphTestGPU, GPU_OPENMP_SAXPBY)
     {
         GPU_SAXPBY(false);
     }
 
-    TEST_F(KernelGraphTestGPU, GPU_SAXPBYDebug)
+    TEST_F(KernelGraphTestGPU, GPU_OPENMP_SAXPBYDebug)
     {
         // Make sure Debug mode doesn't introduce bad pointer
         // references in observers
@@ -1903,7 +1903,7 @@ namespace KernelGraphTest
         GPU_SAXPBY(true);
     }
 
-    TEST_F(KernelGraphTestGPU, GPU_LeakyRelu)
+    TEST_F(KernelGraphTestGPU, GPU_OPENMP_LeakyRelu)
     {
         auto command = std::make_shared<rocRoller::Command>();
 
@@ -1977,7 +1977,7 @@ namespace KernelGraphTest
         ASSERT_LT(rnorm, 1.e-12);
     }
 
-    TEST_F(KernelGraphTestGPU, GPU_LinearCopy)
+    TEST_F(KernelGraphTestGPU, GPU_OPENMP_LinearCopy)
     {
         auto command = std::make_shared<rocRoller::Command>();
 
@@ -2094,13 +2094,13 @@ namespace KernelGraphTest
         ASSERT_LT(rnorm, 1.e-12) << msg.str();
     }
 
-    TEST_F(KernelGraphTestGPU, GPU_TensorTileCopy)
+    TEST_F(KernelGraphTestGPU, GPU_OPENMP_TensorTileCopy)
     {
         CommandKernelPtr commandKernel;
         CopyStrideOverride<int>(commandKernel);
     }
 
-    TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyColStrideHalf)
+    TEST_F(KernelGraphTestGPU, GPU_OPENMP_TensorTileCopyColStrideHalf)
     {
         CommandKernelPtr commandKernel;
         CopyStrideOverride<Half>(commandKernel, true);
@@ -2125,7 +2125,7 @@ namespace KernelGraphTest
         EXPECT_EQ(numWrite, 4);
     }
 
-    TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyColStrideFloat)
+    TEST_F(KernelGraphTestGPU, GPU_OPENMP_TensorTileCopyColStrideFloat)
     {
         CommandKernelPtr commandKernel;
         CopyStrideOverride<float>(commandKernel, true);
@@ -2150,7 +2150,7 @@ namespace KernelGraphTest
         EXPECT_EQ(numWrite, 4);
     }
 
-    TEST_F(KernelGraphTestGPU, GPU_TensorTileCopyColStrideDouble)
+    TEST_F(KernelGraphTestGPU, GPU_OPENMP_TensorTileCopyColStrideDouble)
     {
         CommandKernelPtr commandKernel;
         CopyStrideOverride<double>(commandKernel, true);
@@ -2175,7 +2175,7 @@ namespace KernelGraphTest
         EXPECT_EQ(numWrite, 4);
     }
 
-    TEST_F(KernelGraphTestGPU, GPU_TensorTileAdd)
+    TEST_F(KernelGraphTestGPU, GPU_OPENMP_TensorTileAdd)
     {
         size_t nx = 256; // tensor size x
         size_t ny = 512; // tensor size y

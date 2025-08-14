@@ -853,7 +853,7 @@ namespace MatrixMultiplyTest
     {
     };
 
-    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTile)
+    TEST_P(MatrixMultiplyTestGPU, GPU_OPENMP_MatrixMultiplyMacroTile)
     {
         matrixMultiplyMacroTile<float, float, float>(32, 32, 2, 1);
     }
@@ -1097,7 +1097,7 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }
 
-    TEST_P(MatrixMultiplyABCWMMATestGPU, GPU_MatrixMultiplyABCF16AccWMMAFP16)
+    TEST_P(MatrixMultiplyABCWMMATestGPU, GPU_OPENMP_MatrixMultiplyABCF16AccWMMAFP16)
     {
         const auto waveK = std::get<1>(GetParam());
         if(waveK == 16)
@@ -1116,7 +1116,7 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }
 
-    TEST_P(MatrixMultiplyABCWMMATestGPU, GPU_MatrixMultiplyABCF16AccWMMABFloat16)
+    TEST_P(MatrixMultiplyABCWMMATestGPU, GPU_OPENMP_MatrixMultiplyABCF16AccWMMABFloat16)
     {
         const auto waveK = std::get<1>(GetParam());
         if(waveK == 16)
@@ -1135,7 +1135,7 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }
 
-    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyMacroTileFP16)
+    TEST_P(MatrixMultiplyTestGPU, GPU_OPENMP_MatrixMultiplyMacroTileFP16)
     {
         matrixMultiplyMacroTile<Half, Half, Half>(32, 32, 8, 1, false);
 
@@ -1275,7 +1275,7 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, trLoadMnemonic), expectedTrLoads);
     }
 
-    TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_16x16x32_NN)
+    TEST_P(MatrixMultiplyTestGPUF8, GPU_OPENMP_MatrixMultiplyMacroTileF8_16x16x32_NN)
     {
         bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
         if(isFP8)
@@ -1333,7 +1333,7 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(numMFMA, 2);
     }
 
-    TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_32x32x16_NN)
+    TEST_P(MatrixMultiplyTestGPUF8, GPU_OPENMP_MatrixMultiplyMacroTileF8_32x32x16_NN)
     {
         bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
         if(isFP8)
@@ -1391,7 +1391,7 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(numMFMA, 2);
     }
 
-    TEST_P(MatrixMultiplyTestGPUF8, GPU_MatrixMultiplyMacroTileF8_16x16x32_TN)
+    TEST_P(MatrixMultiplyTestGPUF8, GPU_OPENMP_MatrixMultiplyMacroTileF8_16x16x32_TN)
     {
         bool const isFP8 = std::get<rocRoller::DataType>(GetParam()) == rocRoller::DataType::FP8;
         if(isFP8)
@@ -1467,7 +1467,7 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, modifiers), 2);
     }
 
-    TEST_P(MatrixMultiplyF8F6F4TestGPU, GPU_ScaledMatrixMultiplyMacroTileF8F6F4)
+    TEST_P(MatrixMultiplyF8F6F4TestGPU, GPU_OPENMP_ScaledMatrixMultiplyMacroTileF8F6F4)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
 
@@ -1561,7 +1561,7 @@ namespace MatrixMultiplyTest
         matrixMultiplyMacroTileMixed(typeA, typeB, wave_m, wave_n, wave_k, 1, true, transA, transB);
     }
 
-    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyAB)
+    TEST_P(MatrixMultiplyTestGPU, GPU_OPENMP_MatrixMultiplyAB)
     {
         matrixMultiplyAB<float, float, float>(32, 32, 2, 1);
     }
@@ -1660,7 +1660,7 @@ namespace MatrixMultiplyTest
         matrixMultiplyABC<float>(32, 32, 2, 1);
     }
 
-    TEST_P(MatrixMultiplyTestGPU, GPU_MatrixMultiplyABCFP16)
+    TEST_P(MatrixMultiplyTestGPU, GPU_OPENMP_MatrixMultiplyABCFP16)
     {
         matrixMultiplyABC<Half>(32, 32, 8, 1);
     }

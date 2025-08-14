@@ -405,7 +405,7 @@ namespace GEMMDriverTest
         }
     };
 
-    TEST_F(GEMMFusionGPU, GPU_GEMMRelu)
+    TEST_F(GEMMFusionGPU, GPU_OPENMP_GEMMRelu)
     {
         GEMMProblem gemm;
         basicGEMMRelu<float>(m_context, gemm);

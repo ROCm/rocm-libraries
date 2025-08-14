@@ -207,14 +207,14 @@ namespace PermLanesTest
         EXPECT_EQ(a_reordered, result);
     }
 
-    TEST_F(PermLanesTest, PermLanesBlockScale16x4GPUTest)
+    TEST_F(PermLanesTest, OPENMP_PermLanesBlockScale16x4GPUTest)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasPermLanes16);
         REQUIRE_ARCH_CAP(GPUCapability::HasPermLanes32);
         executePermLanesBlockScale(m_context, 16, 4);
     }
 
-    TEST_F(PermLanesTest, PermLanesBlockScale32x2GPUTest)
+    TEST_F(PermLanesTest, OPENMP_PermLanesBlockScale32x2GPUTest)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasPermLanes32);
         executePermLanesBlockScale(m_context, 32, 2);
