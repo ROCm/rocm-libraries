@@ -18,6 +18,8 @@ subtrees:
     title: hipBLASLt library organization
   - file: conceptual/hipblaslt-clients
     title: hipBLASLt clients
+  - file: conceptual/optimization-solution-selection
+    title: Optimization and solution selection
 
 - caption: How to
   entries:
