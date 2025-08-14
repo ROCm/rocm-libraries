@@ -127,7 +127,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
     gtest_discover_tests(
         rocroller-tests
         XML_OUTPUT_DIR ${TEST_REPORT_DIR}
-        TEST_FILTER "-*GPU_*"
+        TEST_FILTER "-*GPU_*:*OPENMP_*"
         DISCOVERY_MODE PRE_TEST
         PROPERTIES
             ENVIRONMENT "${asan_opts}"
@@ -135,11 +135,41 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
     gtest_discover_tests(
         rocroller-tests
         XML_OUTPUT_DIR ${TEST_REPORT_DIR}
-        TEST_FILTER "*GPU_*"
-        PROPERTIES "LABELS" "GPU"
+        TEST_FILTER "*GPU_*-*OPENMP_*"
         DISCOVERY_MODE PRE_TEST
         PROPERTIES
+            LABELS "GPU"
             ENVIRONMENT "${asan_opts}"
+    )
+    gtest_discover_tests(
+        rocroller-tests
+        XML_OUTPUT_DIR ${TEST_REPORT_DIR}
+        TEST_FILTER "*OPENMP_*-*GPU_*"
+        DISCOVERY_MODE PRE_TEST
+        PROPERTIES
+            RESOURCE_LOCK "OPENMP"
+            LABELS "OPENMP"
+            ENVIRONMENT "${asan_opts}"
+            LABEL "THIS_DOESNT_SHOW_UP"
+    )
+    gtest_discover_tests(
+        rocroller-tests
+        XML_OUTPUT_DIR ${TEST_REPORT_DIR}
+        TEST_FILTER "*GPU_OPENMP_*"
+        DISCOVERY_MODE PRE_TEST
+        PROPERTIES
+            # You can't pass a semi-colon separated list of labels (unlike everywhere else)
+            # https://gitlab.kitware.com/cmake/cmake/-/issues/17812
+            # 
+            # TODO: Current system works, but should consult a cmake guru for a cleaner solution
+            #
+            # Working RESOURCE_LOCK is validated with `ctest -j32 -L "OPENMP"`, should be a single Start happening at a time (compared to `ctest -j32`)
+            # Tests with `GPU_OPENMP_` show up as well
+            # 
+            # For some reason, the label THIS_DOESNT_SHOW_UP doesn't show up in `ctest --print-labels`,
+            # Perhaps I am misunderstanding how lists work or there's a bug with gtest_discover_tests
+            # 
+            "RESOURCE_LOCK;OPENMP;LABELS;GPU;LABELS;OPENMP;ENVIRONMENT;${asan_opts};LABELS;THIS_DOESNT_SHOW_UP"
     )
     gtest_discover_tests(
         arch-gen-tests
