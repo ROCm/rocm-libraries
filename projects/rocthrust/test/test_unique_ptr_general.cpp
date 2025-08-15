@@ -296,3 +296,28 @@ TEST(UniquePtrGeneralTests, TestUniquePtrObserversExplicitBool)
         }
     }
 }
+
+TEST(UniquePtrGeneralTests, TestUniquePtrObserversGet)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // get() for single object
+    {
+        thrust::device_ptr<int> dev_p = thrust::device_malloc<int>(1);
+        thrust::unique_ptr<int> p(dev_p);
+        const thrust::unique_ptr<int>& const_p = p;
+
+        ASSERT_EQ(p.get(), dev_p);
+        ASSERT_EQ(const_p.get(), dev_p);
+    }
+
+    // // get() for single const object
+    // {
+    //     thrust::device_ptr<const int> dev_p = thrust::device_malloc<const int>(1);
+    //     thrust::unique_ptr<const int> p(dev_p);
+    //     const thrust::unique_ptr<const int>& const_p = p;
+
+    //     ASSERT_EQ(p.get(), dev_p);
+    //     ASSERT_EQ(const_p.get(), dev_p);
+    // }
+}
