@@ -545,18 +545,19 @@ def cast_missing_parameters(result):
         result: a dictionary with parameters (keys) and their values
 
     """
-    if 'workgroupMapping' in result:
+    if "workgroupMapping" in result:
 
-        assert len(result['workgroupMapping']) == 2, \
-               "workgroupMapping should contain a dimension and a value"
+        assert (
+            len(result["workgroupMapping"]) == 2
+        ), "workgroupMapping should contain a dimension and a value"
 
-        wgmDim = result['workgroupMapping'][0]
-        wgmValue = result['workgroupMapping'][1]
+        wgmDim = result["workgroupMapping"][0]
+        wgmValue = result["workgroupMapping"][1]
 
-        del result['workgroupMapping']
+        del result["workgroupMapping"]
 
-        result['workgroupMappingDim'] = wgmDim
-        result['workgroupMappingValue'] = wgmValue
+        result["workgroupMappingDim"] = wgmDim
+        result["workgroupMappingValue"] = wgmValue
 
 
 def load_results(path: pathlib.Path):

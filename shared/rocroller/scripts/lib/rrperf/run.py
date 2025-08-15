@@ -125,7 +125,9 @@ def generate_missing_attr_value(run, attr):
             wgm_value = getattr(run, "workgroupMappingValue")
             return (wgm_dim, wgm_value)
         case _:
-            raise RuntimeError(f"Cannot handle attribuite missing in previous rrperf version: {attr}")
+            raise RuntimeError(
+                f"Cannot handle attribuite missing in previous rrperf version: {attr}"
+            )
 
 
 def backcast(generator, build_dir):
@@ -139,11 +141,14 @@ def backcast(generator, build_dir):
         backClass = getattr(module, className, None)
         if backClass is not None:
             backObj = backClass(
-                **{f.name:
-                    getattr(run, f.name)
-                    if hasattr(run, f.name)
-                    else generate_missing_attr_value(run, f.name)
-                    for f in fields(backClass)}
+                **{
+                    f.name: (
+                        getattr(run, f.name)
+                        if hasattr(run, f.name)
+                        else generate_missing_attr_value(run, f.name)
+                    )
+                    for f in fields(backClass)
+                }
             )
             yield backObj
 
