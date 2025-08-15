@@ -42,14 +42,15 @@ TEST_CASE("has openmp tag", "[openmp]")
 
     SECTION("DGenInput", "")
     {
-        std::vector<float> hostA, hostB, hostC;
+        std::vector<float>   hostA, hostB, hostC;
         std::vector<uint8_t> hostScaleA, hostScaleB;
 
         rocRoller::TensorDescriptor descA(rocRoller::DataType::Float, {64, 32}, "N");
         rocRoller::TensorDescriptor descB(rocRoller::DataType::Float, {32, 64}, "N");
         rocRoller::TensorDescriptor descC(rocRoller::DataType::Float, {64, 64}, "N");
 
-        REQUIRE_NOTHROW(rocRoller::DGenInput(12345u, hostA, descA, hostB, descB, hostC, descC, hostScaleA, hostScaleB));
+        REQUIRE_NOTHROW(rocRoller::DGenInput(
+            12345u, hostA, descA, hostB, descB, hostC, descC, hostScaleA, hostScaleB));
     }
 }
 
@@ -62,13 +63,25 @@ TEST_CASE("doesn't have openmp tag", "")
 
     SECTION("DGenInput", "")
     {
-        std::vector<float> hostA, hostB, hostC;
+        std::vector<float>   hostA, hostB, hostC;
         std::vector<uint8_t> hostScaleA, hostScaleB;
 
         rocRoller::TensorDescriptor descA(rocRoller::DataType::Float, {64, 32}, "N");
         rocRoller::TensorDescriptor descB(rocRoller::DataType::Float, {32, 64}, "N");
         rocRoller::TensorDescriptor descC(rocRoller::DataType::Float, {64, 64}, "N");
 
-        REQUIRE_THROWS_WITH(rocRoller::DGenInput(12345u, hostA, descA, hostB, descB, hostC, descC, hostScaleA, hostScaleB), ContainsSubstring("omp"));
+        REQUIRE_THROWS_WITH(
+            rocRoller::DGenInput(
+                12345u, hostA, descA, hostB, descB, hostC, descC, hostScaleA, hostScaleB),
+            ContainsSubstring("omp"));
     }
+}
+
+TEST_CASE("a test with openmp and gpu tags for but doesn't actually use GPU", "[openmp][gpu]") {
+    // Exists to have at least one test that satisfies
+    // `catch_discover_tests( ... TEST_SPEC "[gpu][openmp]" ... )` in `test/CMakeLists.txt`.
+    // Otherwise `ctest` complains of no tests found.
+    // Not including that `catch_discover_tests` entry can cause the next person to add a [openmp][gpu]
+    // tagged test to not see their test show up, without an obvious reason why.
+    // Maybe removed once a test with tags `[openmp][gpu]` is added.
 }

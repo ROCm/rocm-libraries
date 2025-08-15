@@ -185,7 +185,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
             OUTPUT_SUFFIX ".xml"
             DISCOVERY_MODE PRE_TEST
             EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
-            TEST_SPEC "[gpu]"
+            TEST_SPEC "[gpu]~[openmp]"
             PROPERTIES "LABELS" "CATCH"
                        "LABELS" "GPU"
                        "ENVIRONMENT" "${asan_opts}"
@@ -198,8 +198,37 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
             OUTPUT_SUFFIX ".xml"
             DISCOVERY_MODE PRE_TEST
             EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
-            TEST_SPEC "~[gpu]"
+            TEST_SPEC "~[gpu]~[openmp]"
             PROPERTIES "LABELS" "CATCH"
+                       "ENVIRONMENT" "${asan_opts}"
+            SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
+        )
+        catch_discover_tests(
+            rocroller-tests-catch
+            REPORTER JUnit
+            OUTPUT_DIR ${TEST_REPORT_DIR}
+            OUTPUT_SUFFIX ".xml"
+            DISCOVERY_MODE PRE_TEST
+            EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
+            TEST_SPEC "[gpu][openmp]"
+            PROPERTIES "LABELS" "CATCH"
+                       "LABELS" "GPU"
+                       "LABELS" "OPENMP"
+                       "RESOURCE_LOCK" "OPENMP"
+                       "ENVIRONMENT" "${asan_opts}"
+            SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
+        )
+        catch_discover_tests(
+            rocroller-tests-catch
+            REPORTER JUnit
+            OUTPUT_DIR ${TEST_REPORT_DIR}
+            OUTPUT_SUFFIX ".xml"
+            DISCOVERY_MODE PRE_TEST
+            EXTRA_ARGS "--reporter console::out=-::colour-mode=ansi"
+            TEST_SPEC "~[gpu][openmp]"
+            PROPERTIES "LABELS" "CATCH"
+                       "LABELS" "OPENMP"
+                       "RESOURCE_LOCK" "OPENMP"
                        "ENVIRONMENT" "${asan_opts}"
             SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
         )
