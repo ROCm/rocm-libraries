@@ -277,6 +277,55 @@ TEST(UniquePtrGeneralTests, TestUniquePtrCtorPointer)
     }
 }
 
+TEST(UniquePtrGeneralTests, TestUniquePtrDefaultCtorArray)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // Default constructed array unique_ptr
+    {
+        thrust::unique_ptr<int[]> p;
+        ASSERT_EQ(p, nullptr);
+    }
+}
+
+TEST(UniquePtrGeneralTests, TestUniquePtrMoveCtorArray)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // Move constructor for array
+    {
+        thrust::unique_ptr<int[]> p1 = thrust::make_unique<int[]>(3);
+        int* raw_p1 = p1.get_raw();
+        thrust::unique_ptr<int[]> p2(std::move(p1));
+        ASSERT_EQ(p2.get_raw(), raw_p1);
+        ASSERT_EQ(p1, nullptr); 
+    }
+}
+
+TEST(UniquePtrGeneralTests, TestUniquePtrNullptrCtorArray)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // Array
+    {
+        thrust::unique_ptr<int[]> p(nullptr);
+        ASSERT_EQ(p, nullptr);
+    }
+}
+
+TEST(UniquePtrGeneralTests, TestUniquePtrPointerCtorArray)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // Array, default deleter
+    {
+        thrust::device_ptr<int> dev_p = thrust::device_malloc<int>(5);
+
+        thrust::unique_ptr<int[]> s(dev_p);
+        ASSERT_EQ(s.get(), dev_p);
+    }
+}
+
 // Thrust-specific test for checking if the object destruction is correct.
 TEST(UniquePtrGeneralTests, TestUniquePtrDtorNullptr)
 {
