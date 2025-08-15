@@ -239,3 +239,60 @@ TEST(UniquePtrGeneralTests, TestUniquePtrModifierReset)
         ASSERT_EQ(st, hipErrorInvalidValue);    
     }
 }
+
+TEST(UniquePtrGeneralTests, TestUniquePtrObserversDereference)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    thrust::unique_ptr<int> p = thrust::make_unique<int>(3);
+    ASSERT_EQ(*p, 3);
+}
+
+TEST(UniquePtrGeneralTests, TestUniquePtrObserversExplicitBool)
+{
+    // Single non-null object
+    {
+        thrust::unique_ptr<int> p = thrust::make_unique<int>(1);
+        const thrust::unique_ptr<int>& const_p = p;
+        if (p) 
+        {
+            SUCCEED();
+        } 
+        else
+        {
+            FAIL() << "Non-NULL unique_ptr evaluated to false";
+        }
+
+        if (const_p)
+        {
+            SUCCEED();
+        }
+        else
+        {
+            FAIL() << "Const non-NULL unique_ptr evaluated to false";
+        }
+    }
+
+    // Single null object
+    {
+        thrust::unique_ptr<int> p;
+        const thrust::unique_ptr<int>& const_p = p;
+        if (!p)
+        {
+            SUCCEED();
+        } 
+        else
+        {
+            FAIL() << "NULL unique_ptr evaluated to true";
+        }
+
+        if (!const_p)
+        {
+            SUCCEED();
+        }
+        else
+        {
+            FAIL() << "Const NULL unique_ptr evaluated to true";
+        }
+    }
+}
