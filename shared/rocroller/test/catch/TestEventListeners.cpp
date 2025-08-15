@@ -45,7 +45,7 @@ public:
     {
         originalMaxActiveLevels = omp_get_max_active_levels();
         
-        // Ensure all functions that use OpenMP have [openmp] tag
+        // Ensure all functions that use OpenMP have [OPENMP] tag
         // Note: All uses of #pragma omp should include an assertion for omp_get_max_active_levels() >= 1;
         if(std::find(testInfo.tags.begin(), testInfo.tags.end(), Catch::Tag("openmp"))
            != testInfo.tags.end())

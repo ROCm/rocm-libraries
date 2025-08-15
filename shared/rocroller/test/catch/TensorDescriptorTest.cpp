@@ -249,7 +249,7 @@ TEST_CASE("Specifying a subset of strides works for TensorDescriptor.",
     CHECK(desc.strides() == std::vector<size_t>({5, 20, 100}));
 }
 
-TEST_CASE("ShuffleDims works in the no-op case", "[utils][tensor-descriptor][openmp]")
+TEST_CASE("ShuffleDims works in the no-op case", "[utils][tensor-descriptor][OPENMP]")
 {
     auto dims = GENERATE(Catch::Generators::range(2, 10));
     DYNAMIC_SECTION(fmt::format("dims={}", dims))
@@ -272,7 +272,7 @@ TEST_CASE("ShuffleDims works in the no-op case", "[utils][tensor-descriptor][ope
     }
 }
 
-TEST_CASE("ShuffleDims is reversible", "[utils][tensor-descriptor][openmp]")
+TEST_CASE("ShuffleDims is reversible", "[utils][tensor-descriptor][OPENMP]")
 {
     auto dims = GENERATE(Catch::Generators::range(2, 10));
     DYNAMIC_SECTION(fmt::format("dims={}", dims))

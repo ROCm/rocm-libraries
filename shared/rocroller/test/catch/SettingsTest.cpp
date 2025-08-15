@@ -92,7 +92,7 @@ namespace SettingsTest
         std::map<std::string, std::optional<std::string>> m_envVars;
     };
 
-    TEST_CASE("Basic settings behavior", "[settings][openmp]")
+    TEST_CASE("Basic settings behavior", "[settings][OPENMP]")
     {
         SimpleTest t;
 
