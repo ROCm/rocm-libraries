@@ -216,14 +216,6 @@ endif()
 include(GenerateExportHeader)
 generate_export_header(hipblaslt EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/hipblaslt/hipblaslt-export.h)
 
-if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
-  rocm_wrap_header_file(
-    hipblaslt-version.h hipblaslt-export.h hipblaslt-ext.hpp
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS include hipblaslt/include
-  )
-endif( )
-
 # Install targets
 rocm_install_targets(TARGETS hipblaslt
                      INCLUDE
@@ -277,13 +269,4 @@ else()
   rocm_export_targets(TARGETS roc::hipblaslt
                       PREFIX hipblaslt
                       NAMESPACE roc::)
-endif()
-
-
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
-rocm_install(
-  DIRECTORY
-     "${CMAKE_CURRENT_SOURCE_DIR}/include/hipblaslt"
-      DESTINATION "." )
-message( STATUS "Backward Compatible Sym Link Created for include directories" )
 endif()
