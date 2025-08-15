@@ -184,9 +184,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void adjacent_difference_kernel_impl(
 
     static constexpr adjacent_difference_config_params params = ArchConfig::params;
 
-    static constexpr unsigned int block_size = params.kernel_config.block_size;
-    static constexpr unsigned int items_per_thread
-        = params.kernel_config.items_per_thread;
+    static constexpr unsigned int block_size       = params.kernel_config.block_size;
+    static constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
     static constexpr unsigned int items_per_block  = block_size * items_per_thread;
 
     using block_load_type

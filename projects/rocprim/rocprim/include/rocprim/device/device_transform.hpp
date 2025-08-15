@@ -62,16 +62,15 @@ inline hipError_t launch_transform(detail::target_arch arch,
                                    size_t              shmem,
                                    hipStream_t         stream)
 {
-    auto kernel = [=] __device__ (auto arch_config)
+    auto kernel = [=](auto arch_config)
     {
         constexpr auto params = decltype(arch_config)::params;
 
-        detail::transform_kernel_impl<
-            IsPointer,
-            params.kernel_config.block_size,
-            params.kernel_config.items_per_thread,
-            params.load_type,
-            ResultType>(in, n, out, op);
+        detail::transform_kernel_impl<IsPointer,
+                                      params.kernel_config.block_size,
+                                      params.kernel_config.items_per_thread,
+                                      params.load_type,
+                                      ResultType>(in, n, out, op);
     };
 
     return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
@@ -141,7 +140,7 @@ inline hipError_t transform_impl(InputIterator     input,
             start = std::chrono::steady_clock::now();
         }
 
-        hipError_t launch_err = launch_transform<config, IsPointer, result_type>(target_arch,
+        ROCPRIM_RETURN_ON_ERROR(launch_transform<config, IsPointer, result_type>(target_arch,
                                                                                  input + offset,
                                                                                  output + offset,
                                                                                  current_size,
@@ -149,13 +148,7 @@ inline hipError_t transform_impl(InputIterator     input,
                                                                                  current_blocks,
                                                                                  block_size,
                                                                                  0,
-                                                                                 stream);
-
-        if(launch_err != hipSuccess)
-        {
-            return launch_err;
-        }
-
+                                                                                 stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("transform_kernel", current_size, start);
     }
 
@@ -200,7 +193,7 @@ inline hipError_t transform_impl(InputIterator     input,
 ///
 /// // custom transform function
 /// auto transform_op =
-///     [] __device__ (int a) -> int
+///     [] (int a) -> int
 ///     {
 ///         return a + 5;
 ///     };
@@ -279,7 +272,7 @@ inline hipError_t transform(InputIterator     input,
 ///
 /// // custom transform function
 /// auto transform_op =
-///     [] __device__ (int a, int b) -> int
+///     [] (int a, int b) -> int
 ///     {
 ///         return a + b;
 ///     };
@@ -355,7 +348,7 @@ inline hipError_t transform(InputIterator1    input1,
 ///
 /// // custom transform function
 /// auto transform_op =
-///     [] __device__ (int a, int b, int c) -> int
+///     [] (int a, int b, int c) -> int
 ///     {
 ///         return a + b + c;
 ///     };

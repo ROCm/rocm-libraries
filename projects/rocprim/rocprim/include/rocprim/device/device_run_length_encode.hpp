@@ -113,16 +113,16 @@ inline hipError_t launch_non_trivial(detail::target_arch           arch,
                                      size_t                        shmem,
                                      hipStream_t                   stream)
 {
-    auto kernel = [=] __device__ (auto arch_config)
+    auto kernel = [=](auto arch_config)
     {
-    run_length_encode::non_trivial_kernel_impl<decltype(arch_config), OffsetCountPairType>(
-        input,
-        offsets_output,
-        counts_output,
-        runs_count_output,
-        scan_state,
-        grid_size,
-        size);
+        run_length_encode::non_trivial_kernel_impl<decltype(arch_config), OffsetCountPairType>(
+            input,
+            offsets_output,
+            counts_output,
+            runs_count_output,
+            scan_state,
+            grid_size,
+            size);
     };
 
     return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
@@ -246,24 +246,23 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
                                                 grid_size,
                                                 start);
 
-    with_scan_state(
+    ROCPRIM_RETURN_ON_ERROR(with_scan_state(
         [&](const auto scan_state)
         {
-            hipError_t launch_err
-                = run_length_encode::launch_non_trivial<config, offset_count_pair_type>(
-                    target_arch,
-                    input + 0,
-                    offsets_output,
-                    counts_output,
-                    runs_count_output,
-                    scan_state,
-                    grid_size,
-                    size,
-                    dim3(grid_size),
-                    dim3(block_size),
-                    0,
-                    stream);
-        });
+            return run_length_encode::launch_non_trivial<config, offset_count_pair_type>(
+                target_arch,
+                input + 0,
+                offsets_output,
+                counts_output,
+                runs_count_output,
+                scan_state,
+                grid_size,
+                size,
+                dim3(grid_size),
+                dim3(block_size),
+                0,
+                stream);
+        }));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("run_length_encode::non_trivial_kernel",
                                                 size,
                                                 start);

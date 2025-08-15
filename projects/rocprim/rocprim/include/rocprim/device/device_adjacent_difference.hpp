@@ -76,14 +76,14 @@ inline hipError_t launch_adjacent_difference(
     size_t                                                    shmem,
     hipStream_t                                               stream)
 {
-    auto kernel = [=] __device__ (auto arch_config)
+    auto kernel = [=](auto arch_config)
     {
         adjacent_difference_kernel_impl<decltype(arch_config), InPlace, Right>(input,
-                                                                output,
-                                                                size,
-                                                                op,
-                                                                previous_values,
-                                                                starting_block);
+                                                                               output,
+                                                                               size,
+                                                                               op,
+                                                                               previous_values,
+                                                                               starting_block);
     };
 
     return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
@@ -121,10 +121,10 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
     const detail::adjacent_difference_config_params params
         = detail::dispatch_target_arch<config, false>(target_arch);
 
-    const unsigned int block_size       = params.kernel_config.block_size;
-    const unsigned int items_per_thread = params.kernel_config.items_per_thread;
-    const unsigned int items_per_block  = block_size * items_per_thread;
-    const std::size_t  num_blocks       = ceiling_div(size, items_per_block);
+    const unsigned int block_size          = params.kernel_config.block_size;
+    const unsigned int items_per_thread    = params.kernel_config.items_per_thread;
+    const unsigned int items_per_block     = block_size * items_per_thread;
+    const std::size_t  num_blocks          = ceiling_div(size, items_per_block);
     const std::size_t  num_previous_values = InPlace && num_blocks >= 2 ? num_blocks - 1 : 0;
 
     value_type* previous_values;
@@ -204,18 +204,18 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
             start = std::chrono::steady_clock::now();
         }
 
-        hipError_t launch_err = launch_adjacent_difference<config, InPlace, Right>(
-            target_arch,
-            input + offset,
-            output + offset,
-            size,
-            op,
-            previous_values + starting_block,
-            starting_block,
-            current_blocks,
-            block_size,
-            0,
-            stream);
+        hipError_t launch_err
+            = launch_adjacent_difference<config, InPlace, Right>(target_arch,
+                                                                 input + offset,
+                                                                 output + offset,
+                                                                 size,
+                                                                 op,
+                                                                 previous_values + starting_block,
+                                                                 starting_block,
+                                                                 current_blocks,
+                                                                 block_size,
+                                                                 0,
+                                                                 stream);
 
         if(launch_err != hipSuccess)
         {
@@ -283,7 +283,7 @@ hipError_t adjacent_difference_impl(void* const          temporary_storage,
 ///
 /// // custom binary function
 /// auto binary_op =
-///     [] __device__ (int a, int b) -> int
+///     [] (int a, int b) -> int
 ///     {
 ///         return a - b;
 ///     };
@@ -500,7 +500,7 @@ hipError_t adjacent_difference_inplace(void* const          temporary_storage,
 ///
 /// // custom binary function
 /// auto binary_op =
-///     [] __device__ (int a, int b) -> int
+///     [] (int a, int b) -> int
 ///     {
 ///         return a - b;
 ///     };

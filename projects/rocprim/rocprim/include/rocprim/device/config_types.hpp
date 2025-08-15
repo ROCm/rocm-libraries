@@ -355,7 +355,8 @@ struct target_config
 template<typename Config,
          target_arch Arch,
          class Kernel,
-         template<typename, target_arch> class LaunchSelector>
+         template<typename, target_arch>
+         class LaunchSelector>
 __global__ __launch_bounds__((LaunchSelector<Config, Arch>::block_size))
 void trampoline(Kernel kernel)
 {

@@ -233,7 +233,7 @@ hipError_t find_first_of_impl(void*          temporary_storage,
 
     if(size > 0 && keys_size > 0)
     {
-        auto kernel = [=] __device__ (auto arch_config)
+        auto kernel = [=](auto arch_config)
         {
             find_first_of_kernels::template find_first_of_kernel_impl<decltype(arch_config)>(
                 input,

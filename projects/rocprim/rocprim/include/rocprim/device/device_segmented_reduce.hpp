@@ -183,7 +183,7 @@ inline hipError_t segmented_reduce_impl(void*          temporary_storage,
 ///
 /// // custom reduce function
 /// auto min_op =
-///     [] __device__ (int a, int b) -> int
+///     [] (int a, int b) -> int
 ///     {
 ///         return a < b ? a : b;
 ///     };

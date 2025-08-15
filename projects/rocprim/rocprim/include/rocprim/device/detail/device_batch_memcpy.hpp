@@ -95,7 +95,8 @@ public:
     }
 
     ROCPRIM_DEVICE
-    counter operator+(const counter& other) const
+    counter
+        operator+(const counter& other) const
     {
         counter result{};
 
@@ -424,37 +425,25 @@ private:
     template<class ArchConfig>
     struct non_blev_memcpy
     {
-        ROCPRIM_DEVICE
-        static constexpr batch_memcpy_config_params params
-            = ArchConfig::params;
+        ROCPRIM_DEVICE static constexpr batch_memcpy_config_params params = ArchConfig::params;
 
-        ROCPRIM_DEVICE
-        static constexpr uint32_t block_size
+        ROCPRIM_DEVICE static constexpr uint32_t block_size
             = params.non_blev_batch_memcpy_kernel_config.block_size;
-        ROCPRIM_DEVICE
-        static constexpr uint32_t buffers_per_thread
+        ROCPRIM_DEVICE static constexpr uint32_t buffers_per_thread
             = params.non_blev_batch_memcpy_kernel_config.items_per_thread;
-        ROCPRIM_DEVICE
-        static constexpr uint32_t buffers_per_block
+        ROCPRIM_DEVICE static constexpr uint32_t buffers_per_block
             = buffers_per_thread * block_size;
 
-        ROCPRIM_DEVICE
-        static constexpr uint32_t blev_block_size
+        ROCPRIM_DEVICE static constexpr uint32_t blev_block_size
             = params.blev_batch_memcpy_kernel_config.block_size;
-        ROCPRIM_DEVICE
-        static constexpr uint32_t blev_bytes_per_thread
+        ROCPRIM_DEVICE static constexpr uint32_t blev_bytes_per_thread
             = params.blev_batch_memcpy_kernel_config.items_per_thread;
 
-        ROCPRIM_DEVICE
-        static constexpr uint32_t tlev_bytes_per_thread
+        ROCPRIM_DEVICE static constexpr uint32_t tlev_bytes_per_thread
             = params.tlev_items_per_thread;
 
-        ROCPRIM_DEVICE
-        static constexpr uint32_t blev_buffers_per_thread
-            = buffers_per_thread;
-        ROCPRIM_DEVICE
-        static constexpr uint32_t tlev_buffers_per_thread
-            = buffers_per_thread;
+        ROCPRIM_DEVICE static constexpr uint32_t blev_buffers_per_thread = buffers_per_thread;
+        ROCPRIM_DEVICE static constexpr uint32_t tlev_buffers_per_thread = buffers_per_thread;
 
         using buffer_load_type
             = rocprim::block_load<buffer_size_type,
@@ -971,8 +960,7 @@ public:
                                      blev_buffer_scan_state_type blev_buffer_scan_state,
                                      blev_block_scan_state_type  blev_block_scan_state)
     {
-        ROCPRIM_SHARED_MEMORY
-        typename non_blev_memcpy<ArchConfig>::storage_type temp_storage;
+        ROCPRIM_SHARED_MEMORY typename non_blev_memcpy<ArchConfig>::storage_type temp_storage;
         non_blev_memcpy<ArchConfig>{}.copy(temp_storage.get(),
                                            buffers,
                                            num_buffers,
@@ -1011,8 +999,7 @@ public:
         uint32_t tile_id = flat_block_id;
         while(true)
         {
-            __shared__
-            buffer_offset_type shared_buffer_id;
+            __shared__ buffer_offset_type shared_buffer_id;
 
             rocprim::syncthreads();
 
@@ -1204,7 +1191,7 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
 
     ROCPRIM_RETURN_ON_ERROR(hipSetDevice(device_id));
 
-    auto blev_memcpy_kernel = [=] __device__ (auto arch_config)
+    auto blev_memcpy_kernel = [=](auto arch_config)
     {
         batch_memcpy_impl_type::template blev_memcpy_kernel_impl<decltype(arch_config)>(
             blev_buffers,
@@ -1273,7 +1260,7 @@ static hipError_t batch_memcpy_func(void*              temporary_storage,
             num_blocks);
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("init_tile_state_kernel", num_blocks, start);
 
-    auto non_blev_memcpy_kernel = [=] __device__ (auto arch_config)
+    auto non_blev_memcpy_kernel = [=](auto arch_config)
     {
         batch_memcpy_impl_type::template non_blev_memcpy_kernel_impl<decltype(arch_config)>(
             buffers,

@@ -69,13 +69,12 @@ struct nth_element_onesweep_lookback_state
 
     underlying_type state;
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    explicit nth_element_onesweep_lookback_state(underlying_type state)
+    ROCPRIM_DEVICE ROCPRIM_INLINE explicit nth_element_onesweep_lookback_state(underlying_type state)
         : state(state)
     {}
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    nth_element_onesweep_lookback_state(prefix_flag status, underlying_type value)
+    ROCPRIM_DEVICE ROCPRIM_INLINE nth_element_onesweep_lookback_state(prefix_flag     status,
+                                                                     underlying_type value)
         : state(static_cast<underlying_type>(status) | value)
     {}
 
@@ -165,10 +164,8 @@ inline hipError_t launch_block_sort(detail::target_arch arch,
                                     size_t              shmem,
                                     hipStream_t         stream)
 {
-    auto kernel = [=] __device__ (auto arch_config)
-    {
-        block_sort_kernel_impl<decltype(arch_config)>(keys, size, compare_function);
-    };
+    auto kernel = [=](auto arch_config)
+    { block_sort_kernel_impl<decltype(arch_config)>(keys, size, compare_function); };
 
     return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
 }
@@ -188,8 +185,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void find_splitters_kernel_impl(
 
     using block_sort_key = block_sort<key_type, num_splitters>;
 
-    ROCPRIM_SHARED_MEMORY
-    typename block_sort_key::storage_type storage;
+    ROCPRIM_SHARED_MEMORY typename block_sort_key::storage_type storage;
 
     const unsigned int stride = size / num_splitters;
     const unsigned int idx    = threadIdx.x;
@@ -229,13 +225,13 @@ inline hipError_t
                           size_t                                                   shmem,
                           hipStream_t                                              stream)
 {
-    auto kernel = [=] __device__ (auto arch_config)
+    auto kernel = [=](auto arch_config)
     {
         find_splitters_kernel_impl<decltype(arch_config)>(keys,
-                                                        tree,
-                                                        equality_buckets,
-                                                        size,
-                                                        compare_function);
+                                                          tree,
+                                                          equality_buckets,
+                                                          size,
+                                                          compare_function);
     };
 
     return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
@@ -359,14 +355,14 @@ inline hipError_t
                               size_t         shmem,
                               hipStream_t    stream)
 {
-    auto kernel = [=] __device__ (auto arch_config)
+    auto kernel = [=](auto arch_config)
     {
         count_bucket_sizes_kernel_impl<decltype(arch_config)>(keys,
-                                                            tree,
-                                                            size,
-                                                            buckets,
-                                                            equality_buckets,
-                                                            compare_function);
+                                                              tree,
+                                                              size,
+                                                              buckets,
+                                                              equality_buckets,
+                                                              compare_function);
     };
 
     return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
@@ -430,12 +426,12 @@ inline hipError_t launch_find_nth_element_bucket(detail::target_arch          ar
                                                  hipStream_t                  stream)
 
 {
-    auto kernel = [=] __device__ (auto arch_config)
+    auto kernel = [=](auto arch_config)
     {
         find_nth_element_bucket_kernel_impl<decltype(arch_config)>(buckets,
-                                                                    nth_element_data,
-                                                                    equality_buckets,
-                                                                    rank);
+                                                                   nth_element_data,
+                                                                   equality_buckets,
+                                                                   rank);
     };
 
     return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
@@ -647,7 +643,7 @@ inline hipError_t
                         size_t                                                   shmem,
                         hipStream_t                                              stream)
 {
-    auto kernel = [=] __device__ (auto arch_config)
+    auto kernel = [=](auto arch_config)
     {
         copy_buckets_kernel_impl<decltype(arch_config), NumPartitions>(keys,
                                                                        tree,
@@ -725,7 +721,7 @@ hipError_t
                                                        stream));
 
         start_timer();
-        hipError_t launch_err = launch_find_splitters<Config>(arch,
+        ROCPRIM_RETURN_ON_ERROR(launch_find_splitters<Config>(arch,
                                                               keys,
                                                               tree,
                                                               equality_buckets,
@@ -734,65 +730,49 @@ hipError_t
                                                               1,
                                                               num_splitters,
                                                               0,
-                                                              stream);
-        if(launch_err != hipSuccess)
-        {
-            return launch_err;
-        }
+                                                              stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("find_splitters_kernel", size, start);
 
         start_timer();
-        launch_err = launch_count_bucket_sizes<Config>(arch,
-                                                       keys,
-                                                       tree,
-                                                       size,
-                                                       buckets,
-                                                       equality_buckets,
-                                                       compare_function,
-                                                       num_blocks,
-                                                       num_threads_per_block,
-                                                       0,
-                                                       stream);
-        if(launch_err != hipSuccess)
-        {
-            return launch_err;
-        }
+        ROCPRIM_RETURN_ON_ERROR(launch_count_bucket_sizes<Config>(arch,
+                                                                  keys,
+                                                                  tree,
+                                                                  size,
+                                                                  buckets,
+                                                                  equality_buckets,
+                                                                  compare_function,
+                                                                  num_blocks,
+                                                                  num_threads_per_block,
+                                                                  0,
+                                                                  stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("count_bucket_sizes_kernel", size, start);
 
         start_timer();
-        launch_err = launch_find_nth_element_bucket<Config>(arch,
-                                                            buckets,
-                                                            nth_element_data,
-                                                            equality_buckets,
-                                                            rank,
-                                                            1,
-                                                            num_buckets,
-                                                            0,
-                                                            stream);
-        if(launch_err != hipSuccess)
-        {
-            return launch_err;
-        }
+        ROCPRIM_RETURN_ON_ERROR(launch_find_nth_element_bucket<Config>(arch,
+                                                                       buckets,
+                                                                       nth_element_data,
+                                                                       equality_buckets,
+                                                                       rank,
+                                                                       1,
+                                                                       num_buckets,
+                                                                       0,
+                                                                       stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("find_nth_element_bucket_kernel", size, start);
 
         start_timer();
-        launch_err = launch_copy_buckets<Config, num_partitions>(arch,
-                                                                 keys,
-                                                                 tree,
-                                                                 size,
-                                                                 lookback_states,
-                                                                 nth_element_data,
-                                                                 keys_buffer,
-                                                                 equality_buckets,
-                                                                 compare_function,
-                                                                 num_blocks,
-                                                                 num_threads_per_block,
-                                                                 0,
-                                                                 stream);
-        if(launch_err != hipSuccess)
-        {
-            return launch_err;
-        }
+        ROCPRIM_RETURN_ON_ERROR(launch_copy_buckets<Config, num_partitions>(arch,
+                                                                            keys,
+                                                                            tree,
+                                                                            size,
+                                                                            lookback_states,
+                                                                            nth_element_data,
+                                                                            keys_buffer,
+                                                                            equality_buckets,
+                                                                            compare_function,
+                                                                            num_blocks,
+                                                                            num_threads_per_block,
+                                                                            0,
+                                                                            stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("copy_buckets_kernel", size, start);
 
         // Copy the results in keys_buffer back to the keys
@@ -829,18 +809,14 @@ hipError_t
     }
 
     start_timer();
-    hipError_t launch_err = launch_block_sort<Config>(arch,
+    ROCPRIM_RETURN_ON_ERROR(launch_block_sort<Config>(arch,
                                                       keys,
                                                       size,
                                                       compare_function,
                                                       1,
                                                       stop_recursion_size,
                                                       0,
-                                                      stream);
-    if(launch_err != hipSuccess)
-    {
-        return launch_err;
-    }
+                                                      stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("kernel_block_sort", size, start);
     return hipSuccess;
 }

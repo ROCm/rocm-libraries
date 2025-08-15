@@ -520,7 +520,8 @@ inline hipError_t inclusive_scan(void*             temporary_storage,
 {
     // AccType may be const or a reference. Get the non-const, non-reference type.
     // This is necessary because we may need to assign to instances of this type or create pointers to it.
-    using safe_acc_type = typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
+    using safe_acc_type =
+        typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
 
     // input_type() is a dummy initial value (not used)
     return detail::scan_impl<detail::lookback_scan_determinism::default_determinism,
@@ -727,7 +728,8 @@ inline hipError_t deterministic_inclusive_scan(void*             temporary_stora
 {
     // AccType may be const or a reference. Get the non-const, non-reference type.
     // This is necessary because we may need to assign to instances of this type or create pointers to it.
-    using safe_acc_type = typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
+    using safe_acc_type =
+        typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
 
     return detail::scan_impl<detail::lookback_scan_determinism::deterministic,
                              false,
@@ -855,7 +857,7 @@ inline hipError_t deterministic_inclusive_scan(void*             temporary_stora
 ///
 /// // custom scan function
 /// auto min_op =
-///     [] __device__ (int a, int b) -> int
+///     [] (int a, int b) -> int
 ///     {
 ///         return a < b ? a : b;
 ///     };
@@ -905,7 +907,8 @@ inline hipError_t exclusive_scan(void*               temporary_storage,
 {
     // AccType may be const or a reference. Get the non-const, non-reference type.
     // This is necessary because we may need to assign to instances of this type or create pointers to it.
-    using safe_acc_type = typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
+    using safe_acc_type =
+        typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
 
     return detail::scan_impl<detail::lookback_scan_determinism::default_determinism,
                              true,
@@ -953,7 +956,8 @@ inline hipError_t deterministic_exclusive_scan(void*               temporary_sto
 {
     // AccType may be const or a reference. Get the non-const, non-reference type.
     // This is necessary because we may need to assign to instances of this type or create pointers to it.
-    using safe_acc_type = typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
+    using safe_acc_type =
+        typename std::remove_const<typename std::remove_reference<AccType>::type>::type;
 
     return detail::scan_impl<detail::lookback_scan_determinism::deterministic,
                              true,

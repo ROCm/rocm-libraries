@@ -22,7 +22,6 @@
 #define ROCPRIM_DEVICE_DEVICE_REDUCE_HPP_
 
 #include <algorithm>
-#include <future>
 #include <iostream>
 #include <iterator>
 #include <type_traits>
@@ -56,24 +55,23 @@ template<class Config,
          class InitValueType,
          class BinaryFunction>
 inline hipError_t launch_block_reduce(detail::target_arch arch,
-                                               InputIterator       input,
-                                               const size_t        size,
-                                               OutputIterator      output,
-                                               InitValueType       initial_value,
-                                               BinaryFunction      reduce_op,
-                                               dim3                grid,
-                                               dim3                block,
-                                               size_t              shmem,
-                                               hipStream_t         stream)
+                                      InputIterator       input,
+                                      const size_t        size,
+                                      OutputIterator      output,
+                                      InitValueType       initial_value,
+                                      BinaryFunction      reduce_op,
+                                      dim3                grid,
+                                      dim3                block,
+                                      size_t              shmem,
+                                      hipStream_t         stream)
 {
-    auto kernel = [=] __device__ (auto arch_config)
+    auto kernel = [=](auto arch_config)
     {
-        block_reduce_kernel_impl<decltype(arch_config), WithInitialValue, FitLarger, FitItems, ResultType>(
-            input,
-            size,
-            output,
-            initial_value,
-            reduce_op);
+        block_reduce_kernel_impl<decltype(arch_config),
+                                 WithInitialValue,
+                                 FitLarger,
+                                 FitItems,
+                                 ResultType>(input, size, output, initial_value, reduce_op);
     };
 
     return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
@@ -89,39 +87,41 @@ inline hipError_t launch_block_reduce(detail::target_arch arch,
         auto _end = std::chrono::steady_clock::now();                                        \
         auto _d   = std::chrono::duration_cast<std::chrono::duration<double>>(_end - start); \
         std::cout << " " << _d.count() * 1000 << " ms" << '\n';                              \
-    }                                                                                        \
+    }
 
-#define SINGLE_REDUCE_KERNEL(fit_larger, fit_items)                                       \
-    do                                                                                    \
-    {                                                                                     \
-        detail::target_arch target_arch;                                                  \
-        hipError_t          result = detail::host_target_arch(stream, target_arch);       \
-        if(result != hipSuccess)                                                          \
-        {                                                                                 \
-            return result;                                                                \
-        }                                                                                 \
-        if(debug_synchronous)                                                             \
-        {                                                                                 \
-            start = std::chrono::steady_clock::now();                                     \
-        }                                                                                 \
-                                                                                          \
-        hipError_t launch_err =                                                                        \
-            launch_block_reduce<config, WithInitialValue, fit_larger, fit_items, result_type> \
-                (target_arch,                                                                          \
-                input,                                                                                \
-                size,                                                                                 \
-                output,                                                                               \
-                initial_value,                                                                        \
-                reduce_op,                                                                            \
-                dim3(1),                                                                              \
-                dim3(block_size), 0, stream);                                                         \
-        if(launch_err != hipSuccess)                                                                  \
-        {                                                                                             \
-            return result;                                                                            \
-        }                                                                                             \
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", size, start);              \
-    }                                                                                                 \
-    while(0)                                                                                          \
+#define SINGLE_REDUCE_KERNEL(fit_larger, fit_items)                                              \
+    do                                                                                           \
+    {                                                                                            \
+        detail::target_arch target_arch;                                                         \
+        hipError_t          result = detail::host_target_arch(stream, target_arch);              \
+        if(result != hipSuccess)                                                                 \
+        {                                                                                        \
+            return result;                                                                       \
+        }                                                                                        \
+        if(debug_synchronous)                                                                    \
+        {                                                                                        \
+            start = std::chrono::steady_clock::now();                                            \
+        }                                                                                        \
+                                                                                                 \
+        hipError_t launch_err                                                                    \
+            = launch_block_reduce<config, WithInitialValue, fit_larger, fit_items, result_type>( \
+                target_arch,                                                                     \
+                input,                                                                           \
+                size,                                                                            \
+                output,                                                                          \
+                initial_value,                                                                   \
+                reduce_op,                                                                       \
+                dim3(1),                                                                         \
+                dim3(block_size),                                                                \
+                0,                                                                               \
+                stream);                                                                         \
+        if(launch_err != hipSuccess)                                                             \
+        {                                                                                        \
+            return result;                                                                       \
+        }                                                                                        \
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_reduce_kernel", size, start);         \
+    }                                                                                            \
+    while(0)
 
 template<bool WithInitialValue, // true when inital_value should be used in reduction
          class Config,
@@ -220,13 +220,17 @@ inline hipError_t reduce_impl(void*               temporary_storage,
             {
                 start = std::chrono::steady_clock::now();
             }
-            const hipError_t error = launch_block_reduce<config, false, true, 1, result_type>
-                (target_arch,
-                    input + offset,
-                    current_size,
-                    block_prefixes + i * number_of_blocks_limit,
-                    initial_value,
-                    reduce_op,dim3(current_blocks), dim3(block_size), 0, stream);
+            const hipError_t error = launch_block_reduce<config, false, true, 1, result_type>(
+                target_arch,
+                input + offset,
+                current_size,
+                block_prefixes + i * number_of_blocks_limit,
+                initial_value,
+                reduce_op,
+                dim3(current_blocks),
+                dim3(block_size),
+                0,
+                stream);
 
             if(error != hipSuccess)
             {
@@ -372,7 +376,7 @@ inline hipError_t reduce_impl(void*               temporary_storage,
 ///
 /// // custom reduce function
 /// auto min_op =
-///     [] __device__ (int a, int b) -> int
+///     [] (int a, int b) -> int
 ///     {
 ///         return a < b ? a : b;
 ///     };
@@ -408,7 +412,7 @@ inline hipError_t reduce_impl(void*               temporary_storage,
 /// #include <rocprim/rocprim.hpp>
 ///
 /// auto min_op =
-///     [] __device__ (int a, int b) -> int
+///     [] (int a, int b) -> int
 ///     {
 ///         return a < b ? a : b;
 ///     };
@@ -420,7 +424,7 @@ inline hipError_t reduce_impl(void*               temporary_storage,
 ///
 /// // Use a transform iterator to specifiy a custom accumulator type
 /// auto input_iterator = rocprim::make_transform_iterator(
-///     input, [] __device__ (T in) { return static_cast<int>(in); });
+///     input, [] (T in) { return static_cast<int>(in); });
 ///
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;
@@ -552,7 +556,7 @@ inline hipError_t reduce(void*               temporary_storage,
 ///
 /// // Use a transform iterator to specifiy a custom accumulator type
 /// auto input_iterator = rocprim::make_transform_iterator(
-///     input, [] __device__ (T in) { return static_cast<int>(in); });
+///     input, [] (T in) { return static_cast<int>(in); });
 ///
 /// size_t temporary_storage_size_bytes;
 /// void * temporary_storage_ptr = nullptr;

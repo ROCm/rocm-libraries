@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <type_traits>
 
 #include "../common.hpp"
@@ -104,8 +105,7 @@ inline hipError_t launch_partition(detail::target_arch     arch,
                                                                BlockIdWrapper>;
 
         using VSmemHelperT = detail::vsmem_helper_impl<partition_kernel_impl_t>;
-        ROCPRIM_SHARED_MEMORY
-        typename VSmemHelperT::static_temp_storage_t static_temp_storage;
+        ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
         // Get temporary storage
         typename partition_kernel_impl_t::storage_type& storage
             = VSmemHelperT::get_temp_storage(static_temp_storage, vsmem);
@@ -130,29 +130,54 @@ inline hipError_t launch_partition(detail::target_arch     arch,
     return launch_kernel<Config>(arch, kernel, grid, block, shmem, stream);
 }
 
-template<select_method SelectMethod,
+template<class Config,
+         select_method SelectMethod,
          bool          OnlySelected,
-         class Config,
          class Key,
          class Value,
          class FlagType,
          class OffsetLookbackScanState,
          class BlockIdWrapper>
-inline size_t get_partition_vsmem_size_per_block()
+inline size_t get_partition_vsmem_size_per_block(detail::target_arch arch)
 {
-    using offset_type             = typename OffsetLookbackScanState::value_type;
-    using partition_kernel_impl_t = partition_kernel_impl_<
-        typename Config::template architecture_config<device_target_arch()>,
-        SelectMethod,
-        OnlySelected,
-        Key,
-        Value,
-        FlagType,
-        offset_type,
-        BlockIdWrapper>;
+    using offset_type = typename OffsetLookbackScanState::value_type;
+    std::optional<size_t> vsmem_per_block;
+    for_each_arch(
+        [&](auto arch_tag)
+        {
+            constexpr target_arch Arch = decltype(arch_tag)::value;
+            if(Arch != arch || vsmem_per_block)
+                return;
 
-    using PartitionVSmemHelperT = detail::vsmem_helper_impl<partition_kernel_impl_t>;
-    return PartitionVSmemHelperT::vsmem_per_block;
+            using ArchConfig               = typename Config::template architecture_config<Arch>;
+            using partition_kernel_impl_t  = partition_kernel_impl_<ArchConfig,
+                                                                   SelectMethod,
+                                                                   OnlySelected,
+                                                                   Key,
+                                                                   Value,
+                                                                   FlagType,
+                                                                   offset_type,
+                                                                   BlockIdWrapper>;
+            using partition_vsmem_helper_t = detail::vsmem_helper_impl<partition_kernel_impl_t>;
+
+            vsmem_per_block = partition_vsmem_helper_t::vsmem_per_block;
+        });
+    if(!vsmem_per_block)
+    {
+        using ArchConfig = typename Config::template architecture_config<target_arch::unknown>;
+        using partition_kernel_impl_t  = partition_kernel_impl_<ArchConfig,
+                                                               SelectMethod,
+                                                               OnlySelected,
+                                                               Key,
+                                                               Value,
+                                                               FlagType,
+                                                               offset_type,
+                                                               BlockIdWrapper>;
+        using partition_vsmem_helper_t = detail::vsmem_helper_impl<partition_kernel_impl_t>;
+
+        vsmem_per_block = partition_vsmem_helper_t::vsmem_per_block;
+    }
+    return vsmem_per_block.value();
 }
 
 template<partition_subalgo SubAlgo,
@@ -261,25 +286,26 @@ inline hipError_t partition_impl(void*                       temporary_storage,
     if(use_sleep)
     {
         virtual_shared_memory_size
-            = get_partition_vsmem_size_per_block<method,
+            = get_partition_vsmem_size_per_block<config,
+                                                 method,
                                                  write_only_selected,
-                                                 config,
                                                  key_type,
                                                  value_type,
                                                  flag_type,
                                                  offset_scan_state_with_sleep_type,
-                                                 block_id_wrapper_type>();
+                                                 block_id_wrapper_type>(target_arch);
     }
     else
     {
-        virtual_shared_memory_size = get_partition_vsmem_size_per_block<method,
-                                                                        write_only_selected,
-                                                                        config,
-                                                                        key_type,
-                                                                        value_type,
-                                                                        flag_type,
-                                                                        offset_scan_state_type,
-                                                                        block_id_wrapper_type>();
+        virtual_shared_memory_size
+            = get_partition_vsmem_size_per_block<config,
+                                                 method,
+                                                 write_only_selected,
+                                                 key_type,
+                                                 value_type,
+                                                 flag_type,
+                                                 offset_scan_state_type,
+                                                 block_id_wrapper_type>(target_arch);
     }
     virtual_shared_memory_size *= number_of_blocks;
 
@@ -414,7 +440,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
         if(debug_synchronous)
             start = std::chrono::steady_clock::now();
 
-        hipError_t launch_err = with_scan_state(
+        ROCPRIM_RETURN_ON_ERROR(with_scan_state(
             [&](const auto scan_state)
             {
                 return launch_partition<config, method, write_only_selected>(
@@ -438,11 +464,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                     0,
                     stream,
                     predicates...);
-            });
-        if(launch_err != hipSuccess)
-        {
-            return launch_err;
-        }
+            }));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start);
 
         std::swap(selected_count, prev_selected_count);

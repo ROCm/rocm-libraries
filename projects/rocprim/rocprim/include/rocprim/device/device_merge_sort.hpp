@@ -88,14 +88,13 @@ inline hipError_t launch_block_sort(detail::target_arch  arch,
         using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
         using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
 
-        using sort_impl    = block_sort_impl<key_type,
-                                             value_type,
-                                             params.kernel_config.block_size,
-                                             params.kernel_config.items_per_thread>;
+        using sort_impl = block_sort_impl<key_type,
+                                          value_type,
+                                          params.kernel_config.block_size,
+                                          params.kernel_config.items_per_thread>;
         using VSmemHelperT = detail::vsmem_helper_impl<sort_impl>;
 
-        ROCPRIM_SHARED_MEMORY
-        typename VSmemHelperT::static_temp_storage_t static_temp_storage;
+        ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
 
         typename sort_impl::storage_type& storage
             = VSmemHelperT::get_temp_storage(static_temp_storage, vsmem);
@@ -194,8 +193,7 @@ inline hipError_t launch_device_block_merge_mergepath(detail::target_arch  arch,
                                             params.merge_mergepath_config.items_per_thread>;
 
         using VSmemHelperT = detail::vsmem_helper_impl<merge_impl>;
-        ROCPRIM_SHARED_MEMORY
-        typename VSmemHelperT::static_temp_storage_t static_temp_storage;
+        ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
 
         typename merge_impl::storage_type& storage
             = VSmemHelperT::get_temp_storage(static_temp_storage, vsmem);
@@ -401,7 +399,7 @@ inline hipError_t merge_sort_block_merge_impl(
                 if(debug_synchronous)
                     start = std::chrono::steady_clock::now();
                 // Note: shared memory is not used in this kernel so there is no need to pass vsmem
-                hipError_t launch_err = launch_device_block_merge_mergepath_partition<config>(
+                ROCPRIM_RETURN_ON_ERROR(launch_device_block_merge_mergepath_partition<config>(
                     target_arch,
                     keys_input_,
                     size,
@@ -412,11 +410,7 @@ inline hipError_t merge_sort_block_merge_impl(
                     dim3(merge_partition_number_of_blocks),
                     dim3(merge_partition_block_size),
                     0,
-                    stream);
-                if(launch_err != hipSuccess)
-                {
-                    return launch_err;
-                }
+                    stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(
                     "device_block_merge_mergepath_partition_kernel",
                     merge_num_partitions,
@@ -424,7 +418,7 @@ inline hipError_t merge_sort_block_merge_impl(
 
                 if(debug_synchronous)
                     start = std::chrono::steady_clock::now();
-                launch_err = launch_device_block_merge_mergepath<config>(
+                ROCPRIM_RETURN_ON_ERROR(launch_device_block_merge_mergepath<config>(
                     target_arch,
                     keys_input_,
                     keys_output_,
@@ -440,11 +434,7 @@ inline hipError_t merge_sort_block_merge_impl(
                                        merge_mergepath_block_size),
                     dim3(merge_mergepath_block_size),
                     0,
-                    stream);
-                if(launch_err != hipSuccess)
-                {
-                    return launch_err;
-                }
+                    stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_block_merge_mergepath_kernel",
                                                             size,
                                                             start);
@@ -456,23 +446,19 @@ inline hipError_t merge_sort_block_merge_impl(
                 // As this kernel is only called with small sizes, it is safe to use 32-bit integers
                 // for size and block.
                 // Note: shared memory is not used in this kernel so there is no need to pass vsmem
-                hipError_t launch_err = launch_device_block_merge_oddeven<config>(
-                    target_arch,
-                    keys_input_,
-                    keys_output_,
-                    values_input_,
-                    values_output_,
-                    static_cast<unsigned int>(size),
-                    static_cast<unsigned int>(block),
-                    compare_function,
-                    dim3(merge_oddeven_number_of_blocks),
-                    dim3(merge_oddeven_block_size),
-                    0,
-                    stream);
-                if(launch_err != hipSuccess)
-                {
-                    return launch_err;
-                }
+                ROCPRIM_RETURN_ON_ERROR(
+                    launch_device_block_merge_oddeven<config>(target_arch,
+                                                              keys_input_,
+                                                              keys_output_,
+                                                              values_input_,
+                                                              values_output_,
+                                                              static_cast<unsigned int>(size),
+                                                              static_cast<unsigned int>(block),
+                                                              compare_function,
+                                                              dim3(merge_oddeven_number_of_blocks),
+                                                              dim3(merge_oddeven_block_size),
+                                                              0,
+                                                              stream));
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("device_block_merge_oddeven_kernel",
                                                             size,
                                                             start);
@@ -669,7 +655,7 @@ inline hipError_t merge_sort_block_sort(KeysInputIterator    keys_input,
     if(debug_synchronous)
         start = std::chrono::steady_clock::now();
 
-    hipError_t launch_err = launch_block_sort<config>(
+    ROCPRIM_RETURN_ON_ERROR(launch_block_sort<config>(
         target_arch,
         keys_input,
         keys_output,
@@ -682,13 +668,7 @@ inline hipError_t merge_sort_block_sort(KeysInputIterator    keys_input,
         calculate_grid_dim(sort_number_of_blocks, params.kernel_config.block_size),
         dim3(params.kernel_config.block_size),
         0,
-        stream);
-
-    if(launch_err != hipSuccess)
-    {
-        return launch_err;
-    }
-
+        stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("block_sort_kernel", size, start);
 
     return hipSuccess;
@@ -744,14 +724,15 @@ inline size_t get_merge_sort_vsmem_size(const size_t size)
         = device_params<BlockSortConfig>();
     static constexpr merge_sort_block_merge_config_params bm_params
         = device_params<BlockMergeConfig>();
-    using bs_sort_impl          = block_sort_impl<key_type,
-                                                  value_type,
-                                                  bs_params.kernel_config.block_size,
-                                                  bs_params.kernel_config.items_per_thread>;
-    using bm_sort_impl          = block_merge_impl<key_type,
-                                                   value_type,
-                                                   bm_params.merge_mergepath_config.block_size,
-                                                   bm_params.merge_mergepath_config.items_per_thread>;
+    using bs_sort_impl = block_sort_impl<key_type,
+                                         value_type,
+                                         bs_params.kernel_config.block_size,
+                                         bs_params.kernel_config.items_per_thread>;
+    using bm_sort_impl = block_merge_impl<key_type,
+                                          value_type,
+                                          bm_params.merge_mergepath_config.block_size,
+                                          bm_params.merge_mergepath_config.items_per_thread>;
+
     using BlockSortVSmemHelperT = detail::vsmem_helper_impl<bs_sort_impl>;
     using MergeSortVSmemHelperT = detail::vsmem_helper_impl<bm_sort_impl>;
 

@@ -66,8 +66,7 @@ void segmented_reduce(InputIterator input,
 
     using reduce_type = ::rocprim::block_reduce<ResultType, block_size, params.block_reduce_method>;
 
-    ROCPRIM_SHARED_MEMORY
-    typename reduce_type::storage_type reduce_storage;
+    ROCPRIM_SHARED_MEMORY typename reduce_type::storage_type reduce_storage;
 
     const unsigned int flat_id    = ::rocprim::detail::block_thread_id<0>();
     const unsigned int segment_id = ::rocprim::detail::block_id<0>();

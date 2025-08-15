@@ -196,7 +196,7 @@
 /// Quad size (group of 4 threads)
 #define ROCPRIM_QUAD_SIZE 4u
 
-#if (defined(_MSC_VER) && !defined(__clang__)) || (defined(__GNUC__) && !defined(__clang__))
+#if(defined(_MSC_VER) && !defined(__clang__)) || (defined(__GNUC__) && !defined(__clang__))
     #define ROCPRIM_UNROLL
     #define ROCPRIM_NO_UNROLL
 #else

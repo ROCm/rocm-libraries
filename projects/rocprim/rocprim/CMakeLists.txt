@@ -39,11 +39,6 @@ target_include_directories(rocprim
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-# Workaround to know if targeting SPIR-V on host
-if("amdgcnspirv" IN_LIST GPU_TARGETS)
-  target_compile_definitions(rocprim INTERFACE ROCPRIM_EXPERIMENTAL_SPIRV=1)
-endif()
-
 # This target links against HIP library
 add_library(rocprim_hip INTERFACE)
 target_link_libraries(rocprim_hip INTERFACE rocprim hip::device)

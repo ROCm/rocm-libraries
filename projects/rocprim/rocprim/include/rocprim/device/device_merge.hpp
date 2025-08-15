@@ -111,8 +111,7 @@ inline hipError_t launch_merge(detail::target_arch  arch,
         using merge_kernel_impl_t = merge_kernel_impl_<decltype(arch_config), key_type, value_type>;
 
         using VSmemHelperT = detail::vsmem_helper_impl<merge_kernel_impl_t>;
-        ROCPRIM_SHARED_MEMORY
-        typename VSmemHelperT::static_temp_storage_t static_temp_storage;
+        ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
         // Get temporary storage
         typename merge_kernel_impl_t::storage_type& storage
             = VSmemHelperT::get_temp_storage(static_temp_storage, vsmem);
@@ -146,7 +145,8 @@ inline size_t get_merge_vsmem_size_per_block(detail::target_arch arch)
             using ArchConfig           = typename Config::template architecture_config<Arch>;
             using merge_kernel_impl_t  = merge_kernel_impl_<ArchConfig, Key, Value>;
             using merge_vsmem_helper_t = detail::vsmem_helper_impl<merge_kernel_impl_t>;
-            vsmem_per_block            = merge_vsmem_helper_t::vsmem_per_block;
+
+            vsmem_per_block = merge_vsmem_helper_t::vsmem_per_block;
         });
 
     if(!vsmem_per_block)
@@ -154,7 +154,8 @@ inline size_t get_merge_vsmem_size_per_block(detail::target_arch arch)
         using ArchConfig = typename Config::template architecture_config<target_arch::unknown>;
         using merge_kernel_impl_t  = merge_kernel_impl_<ArchConfig, Key, Value>;
         using merge_vsmem_helper_t = detail::vsmem_helper_impl<merge_kernel_impl_t>;
-        vsmem_per_block            = merge_vsmem_helper_t::vsmem_per_block;
+
+        vsmem_per_block = merge_vsmem_helper_t::vsmem_per_block;
     }
     return vsmem_per_block.value();
 }
@@ -245,7 +246,7 @@ inline hipError_t merge_impl(void*                temporary_storage,
     if(debug_synchronous)
         start = std::chrono::steady_clock::now();
 
-    hipError_t launch_err = launch_partition<config>(target_arch,
+    ROCPRIM_RETURN_ON_ERROR(launch_partition<config>(target_arch,
                                                      index,
                                                      keys_input1,
                                                      keys_input2,
@@ -256,37 +257,28 @@ inline hipError_t merge_impl(void*                temporary_storage,
                                                      partition_blocks,
                                                      half_block,
                                                      0,
-                                                     stream);
-
-    if(launch_err != hipSuccess)
-    {
-        return launch_err;
-    }
+                                                     stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", input1_size, start);
 
     if(debug_synchronous)
         start = std::chrono::steady_clock::now();
 
-    launch_err = launch_merge<config>(target_arch,
-                                      index,
-                                      keys_input1,
-                                      keys_input2,
-                                      keys_output,
-                                      values_input1,
-                                      values_input2,
-                                      values_output,
-                                      input1_size,
-                                      input2_size,
-                                      compare_function,
-                                      detail::vsmem_t{vsmem},
-                                      dim3(number_of_blocks),
-                                      dim3(block_size),
-                                      0,
-                                      stream);
-    if(launch_err != hipSuccess)
-    {
-        return launch_err;
-    }
+    ROCPRIM_RETURN_ON_ERROR(launch_merge<config>(target_arch,
+                                                 index,
+                                                 keys_input1,
+                                                 keys_input2,
+                                                 keys_output,
+                                                 values_input1,
+                                                 values_input2,
+                                                 values_output,
+                                                 input1_size,
+                                                 input2_size,
+                                                 compare_function,
+                                                 detail::vsmem_t{vsmem},
+                                                 dim3(number_of_blocks),
+                                                 dim3(block_size),
+                                                 0,
+                                                 stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("merge_kernel", input1_size, start);
 
     return hipSuccess;

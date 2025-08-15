@@ -122,7 +122,7 @@ inline hipError_t launch_reduce_by_key(detail::target_arch          arch,
                                        size_t                       shmem,
                                        hipStream_t                  stream)
 {
-    auto kernel = [=] __device__ (auto arch_config)
+    auto kernel = [=](auto arch_config)
     {
         reduce_by_key::kernel_impl<decltype(arch_config), Determinism>(keys_input,
                                                                        values_input,
@@ -315,10 +315,10 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
                                                     number_of_blocks_launch,
                                                     start);
 
-        with_scan_state(
+        ROCPRIM_RETURN_ON_ERROR(with_scan_state(
             [&](const auto scan_state)
             {
-                hipError_t launch_err = launch_reduce_by_key<config, Determinism>(
+                return launch_reduce_by_key<config, Determinism>(
                     target_arch,
                     keys_input + offset,
                     values_input + offset,
@@ -337,7 +337,7 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
                     dim3(block_size),
                     0,
                     stream);
-            });
+            }));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reduce_by_key_kernel", current_size, start);
     }
 
