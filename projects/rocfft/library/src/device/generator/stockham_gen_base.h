@@ -636,10 +636,134 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         return f;
     }
 
+    Function generate_pp_device_function()
+    {
+        std::string function_name = "forward_partial_pass_length" + std::to_string(length_pp) + "_"
+                                    + tiling_name() + "_device";
+
+        Function f{function_name};
+        f.arguments = device_arguments();
+        f.templates = device_templates();
+        f.qualifier = "__device__";
+        if(length == 1)
+        {
+            return f;
+        }
+
+        StatementList& body = f.body;
+        body += Declaration{W};
+        body += Declaration{t};
+        body += Declaration{
+            lstride, Ternary{Parens{stride_type == "SB_UNIT"}, Parens{1}, Parens{stride_lds}}};
+        body += Declaration{l_offset};
+
+        for(unsigned int npass = 0; npass < factors_pp.size(); ++npass)
+        {
+            // width is the butterfly width, Radix-n.
+            unsigned int width = factors_pp[npass];
+            // height is how many butterflies per thread will do on average
+            float height = static_cast<float>(length) / width / threads_per_transform;
+
+            unsigned int cumheight = product(
+                factors_pp.begin(),
+                factors_pp.begin() + npass); // cumheight is irrelevant to the above height,
+            // is used for twiddle multiplication and lds writing.
+
+            body += LineBreak{};
+            body += CommentLines{
+                "pass " + std::to_string(npass) + ", width " + std::to_string(width),
+                "using " + std::to_string(threads_per_transform) + " threads we need to do "
+                    + std::to_string(length / width) + " radix-" + std::to_string(width)
+                    + " butterflies",
+                "therefore each thread will do " + std::to_string(height) + " butterflies"};
+
+            auto load_lds  = std::mem_fn(&StockhamKernel::load_lds_generator);
+            auto store_lds = std::mem_fn(&StockhamKernel::store_lds_generator);
+
+            if(npass > 0)
+            {
+                // internal full lds2reg (both linear/nonlinear variants)
+                StatementList lds2reg_full;
+                lds2reg_full += SyncThreads();
+                lds2reg_full
+                    += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5, Component::BOTH),
+                                width,
+                                height,
+                                ThreadGuardMode::GUARD_BY_IF,
+                                true);
+                body += If{Not{lds_is_real}, lds2reg_full};
+
+                auto apply_twiddle = std::mem_fn(&StockhamKernel::apply_twiddle_generator);
+                body += add_work(
+                    std::bind(
+                        apply_twiddle, this, _1, _2, _3, _4, _5, cumheight, factors_pp.front()),
+                    width,
+                    height,
+                    ThreadGuardMode::NO_GUARD);
+            }
+
+            auto butterfly = std::mem_fn(&StockhamKernel::butterfly_generator);
+            body += add_work(std::bind(butterfly, this, _1, _2, _3, _4, _5),
+                             width,
+                             height,
+                             ThreadGuardMode::NO_GUARD);
+
+            if(npass == factors_pp.size() - 1)
+                body += large_twiddles_multiply(width, height, cumheight);
+
+            // internal lds store (half-with-linear and full-with-linear/nonlinear)
+            StatementList reg2lds_full;
+            StatementList reg2lds_half;
+            if(npass < factors_pp.size() - 1)
+            {
+                // linear variant store (half) and load (half)
+                for(auto component : {Component::REAL, Component::IMAG})
+                {
+                    bool isFirstStore = (npass == 0) && (component == Component::REAL);
+                    auto half_width   = factors_pp[npass];
+                    auto half_height
+                        = static_cast<float>(length) / half_width / threads_per_transform;
+                    // minimize sync as possible
+                    if(!isFirstStore)
+                        reg2lds_half += SyncThreads();
+                    reg2lds_half += add_work(
+                        std::bind(store_lds, this, _1, _2, _3, _4, _5, component, cumheight),
+                        half_width,
+                        half_height,
+                        ThreadGuardMode::GUARD_BY_IF);
+
+                    half_width  = factors_pp[npass + 1];
+                    half_height = static_cast<float>(length) / half_width / threads_per_transform;
+                    reg2lds_half += SyncThreads();
+                    reg2lds_half
+                        += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5, component),
+                                    half_width,
+                                    half_height,
+                                    ThreadGuardMode::GUARD_BY_IF);
+                }
+
+                // internal full lds store (both linear/nonlinear variants)
+                if(npass == 0)
+                    reg2lds_full += If{!direct_load_to_reg, {SyncThreads()}};
+                else
+                    reg2lds_full += SyncThreads();
+                reg2lds_full += add_work(
+                    std::bind(store_lds, this, _1, _2, _3, _4, _5, Component::BOTH, cumheight),
+                    width,
+                    height,
+                    ThreadGuardMode::GUARD_BY_IF);
+
+                body += If{Not{lds_is_real}, reg2lds_full};
+                body += Else{reg2lds_half};
+            }
+        }
+        return f;
+    }
+
     Function generate_device_function()
     {
         std::string function_name
-            = "forward_length" + std::to_string(length) + "_" + tiling_name() + "_device";
+            = "forward_full_pass_length" + std::to_string(length) + "_" + tiling_name() + "_device";
 
         Function f{function_name};
         f.arguments = device_arguments();
@@ -864,10 +988,10 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
             templates.set_value(stride_type.name, "lds_linear ? SB_UNIT : SB_NONUNIT");
 
-            body
-                += Call{"forward_length" + std::to_string(length) + "_" + tiling_name() + "_device",
-                        templates,
-                        arguments};
+            body += Call{"forward_full_pass_length" + std::to_string(length) + "_" + tiling_name()
+                             + "_device",
+                         templates,
+                         arguments};
             body += LineBreak{};
         }
 

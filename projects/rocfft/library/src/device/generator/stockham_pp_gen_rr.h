@@ -70,10 +70,8 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
     StockhamPartialPassParams params;
 
-    unsigned int              length_off_dim;
-    unsigned int              max_factor_pp;
-    std::vector<unsigned int> factors_pp;
-    unsigned int              length_pp;
+    unsigned int length_off_dim;
+    unsigned int max_factor_pp;
 
     Variable offset_pp{"offset_pp", "size_t"};
     Variable stride_lds_pp{"stride_lds_pp", "size_t"};
@@ -389,17 +387,19 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
                         pre_post_lds_args};
         stmts += preLoad;
 
-        for(unsigned int npass = 0; npass < factors_pp.size(); ++npass)
-        {
-            unsigned int width  = factors_pp[npass];
-            unsigned int height = transforms_per_block / max_factor_pp;
+        auto device_tmpl = device_call_templates();
+        auto device_args = device_call_arguments(0);
 
-            auto butterfly = std::mem_fn(&StockhamKernel::butterfly_generator);
-            stmts += add_work(std::bind(butterfly, this, _1, _2, _3, _4, _5),
-                              width,
-                              height,
-                              ThreadGuardMode::NO_GUARD);
-        }
+        device_tmpl.set_value(stride_type.name, "SB_UNIT");
+
+        StatementList device;
+
+        device += Call{"forward_partial_pass_length" + std::to_string(length_pp) + "_"
+                           + tiling_name() + "_device",
+                       device_tmpl,
+                       device_args};
+        device += LineBreak{};
+        stmts += device;
 
         TemplateList            pre_twd_mul_tmpl = TemplateList{scalar_type};
         std::vector<Expression> pre_twd_mul_args
@@ -454,7 +454,7 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
     Function generate_global_function() override
     {
-        Function f("forward_length" + std::to_string(length) + "_" + tiling_name());
+        Function f("forward_pp_length" + std::to_string(length) + "_" + tiling_name());
         f.qualifier     = "__global__";
         f.launch_bounds = workgroup_size;
 
@@ -543,10 +543,10 @@ struct StockhamPartialPassKernelRR : public StockhamKernelRR
 
             templates.set_value(stride_type.name, "SB_UNIT");
 
-            body
-                += Call{"forward_length" + std::to_string(length) + "_" + tiling_name() + "_device",
-                        templates,
-                        arguments};
+            body += Call{"forward_full_pass_length" + std::to_string(length) + "_" + tiling_name()
+                             + "_device",
+                         templates,
+                         arguments};
             body += LineBreak{};
         }
 

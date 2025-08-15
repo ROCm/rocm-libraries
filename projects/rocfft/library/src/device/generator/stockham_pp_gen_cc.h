@@ -47,18 +47,18 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                                          bool largeTwdBatchIsTransformCount)
         : StockhamKernelCC(specs, largeTwdBatchIsTransformCount, false)
         , params(params)
-        , factors_pp_curr(params.pp_factors_curr)
         , factors_pp_other(params.pp_factors_other)
 
     {
-        max_factor_pp = *std::max_element(factors_pp_curr.begin(), factors_pp_curr.end());
+        factors_pp    = params.pp_factors_curr;
+        max_factor_pp = *std::max_element(factors_pp.begin(), factors_pp.end());
 
         transforms_per_block_pp = transforms_per_block;
 
         transforms_per_block *= max_factor_pp;
         workgroup_size *= max_factor_pp;
 
-        pp_factors_curr_prod  = product(factors_pp_curr.begin(), factors_pp_curr.end());
+        pp_factors_prod       = product(factors_pp.begin(), factors_pp.end());
         pp_factors_other_prod = product(factors_pp_other.begin(), factors_pp_other.end());
 
         switch(params.off_dim)
@@ -70,6 +70,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         case 1:
             num_blocks_per_batch = (params.parent_length[1] - 1) / transforms_per_block + 1;
             num_blocks_per_batch *= params.parent_length[2];
+            length_pp = params.parent_length[2];
             break;
         case 2:
             throw std::runtime_error(
@@ -87,8 +88,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
     unsigned int transforms_per_block_pp;
     unsigned int max_factor_pp;
 
-    std::vector<unsigned int> factors_pp_curr;
-    unsigned int              pp_factors_curr_prod;
+    unsigned int pp_factors_prod;
 
     std::vector<unsigned int> factors_pp_other;
     unsigned int              pp_factors_other_prod;
@@ -194,7 +194,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         auto store_lds = std::mem_fn(&StockhamPartialPassKernelCC::store_pp_step_3_4_lds_generator);
         // last pass of store (partial-pass)
-        unsigned int width  = factors_pp_curr.back();
+        unsigned int width  = factors_pp.back();
         float        height = static_cast<float>(length) / width / threads_per_transform;
         body += SyncThreads();
         body += add_work(std::bind(store_lds, this, _1, _2, _3, _4, _5),
@@ -243,7 +243,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         auto load_lds = std::mem_fn(&StockhamPartialPassKernelCC::load_lds_step_3_4_generator);
         // first pass of load (partial-pass)
-        unsigned int width  = factors_pp_curr[0];
+        unsigned int width  = factors_pp[0];
         float        height = static_cast<float>(length) / width / threads_per_transform;
         body += SyncThreads();
         body += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5),
@@ -293,13 +293,13 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         stmts += LineBreak{};
 
-        stmts += Assign{batch, block_id / (plength / pp_factors_curr_prod)};
+        stmts += Assign{batch, block_id / (plength / pp_factors_prod)};
 
         stmts += Assign{transform,
                         tile_index * transforms_per_block_pp + thread_id / threads_per_transform};
         stmts += Assign{stride_lds, (length + get_lds_padding())};
 
-        stmts += MultiplyAssign(stride_lds, Literal{pp_factors_curr_prod});
+        stmts += MultiplyAssign(stride_lds, Literal{pp_factors_prod});
 
         stmts += Declaration{
             in_bound,
@@ -314,19 +314,18 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         stmts += Declaration(tid_hor_pp,
                              thread_id % transforms_per_block_pp
-                                 + lengths[1] * (thread % pp_factors_curr_prod));
-        stmts
-            += Declaration(thread_pp, thread_id / (transforms_per_block_pp * pp_factors_curr_prod));
+                                 + lengths[1] * (thread % pp_factors_prod));
+        stmts += Declaration(thread_pp, thread_id / (transforms_per_block_pp * pp_factors_prod));
 
         stmts += Declaration(
             offset_pp,
-            offset + Parens(offset / lengths[1]) * (lengths[1] * pp_factors_curr_prod - lengths[1])
+            offset + Parens(offset / lengths[1]) * (lengths[1] * pp_factors_prod - lengths[1])
                 + batch * stride[dim]);
         stmts += Declaration(offset_tid_hor, offset_pp + tid_hor_pp * stride[1]);
 
         stmts += Assign{transform,
                         tile_index * transforms_per_block_pp
-                            + thread_id / (threads_per_transform * pp_factors_curr_prod)};
+                            + thread_id / (threads_per_transform * pp_factors_prod)};
 
         stmts += Assign{offset_lds,
                         Ternary{lds_linear,
@@ -699,7 +698,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         auto len_1_2_3 = len_1 * len_2 * len_3;
         auto len_1_2   = len_1 * len_2;
 
-        auto len_pp_factors_curr_prod  = pp_factors_curr_prod * len_2;
+        auto len_pp_factors_prod       = pp_factors_prod * len_2;
         auto len_pp_factors_other_prod = pp_factors_other_prod * len_2;
 
         body += Declaration{transpose_idx, global_idx % len_1_2_3};
@@ -707,9 +706,9 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         body += Assign{
             transpose_idx,
             Parens{transpose_idx % len_2}
-                + Parens{Parens{Parens{transpose_idx % (len_pp_factors_curr_prod)} / len_2}
+                + Parens{Parens{Parens{transpose_idx % (len_pp_factors_prod)} / len_2}
                          * len_pp_factors_other_prod}
-                + Parens{Parens{Parens{transpose_idx % len_1_2} / len_pp_factors_curr_prod} * len_2}
+                + Parens{Parens{Parens{transpose_idx % len_1_2} / len_pp_factors_prod} * len_2}
                 + Parens{Parens{transpose_idx / len_1_2} * len_1_2}};
 
         body += Assign{transpose_idx, transpose_idx + Parens{global_idx / len_1_2_3} * len_1_2_3};
@@ -725,7 +724,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
         stmts += Declaration{stride_lds_pp, Literal{1}};
 
-        unsigned int width  = factors_pp_curr[0];
+        unsigned int width  = factors_pp[0];
         unsigned int height = length / width / threads_per_transform;
         stmts += Declaration{offset_lds_pp, thread_id * Literal{width * height}};
 
@@ -739,9 +738,9 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                         pre_post_lds_args};
         stmts += preLoad;
 
-        for(unsigned int npass = 0; npass < factors_pp_curr.size(); ++npass)
+        for(unsigned int npass = 0; npass < factors_pp.size(); ++npass)
         {
-            unsigned int pass_width = factors_pp_curr[npass];
+            unsigned int pass_width = factors_pp[npass];
             unsigned int pass_height
                 = static_cast<float>(length) / pass_width / threads_per_transform;
 
@@ -752,7 +751,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
                               ThreadGuardMode::NO_GUARD);
         }
 
-        width  = factors_pp_curr.back();
+        width  = factors_pp.back();
         height = length / width / threads_per_transform;
         stmts += Assign{offset_lds_pp, thread_id * Literal{width * height}};
 
@@ -830,7 +829,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
     Function generate_device_function()
     {
         std::string function_name
-            = "forward_pp_length" + std::to_string(length) + "_" + tiling_name() + "_device";
+            = "forward_full_pass_length" + std::to_string(length) + "_" + tiling_name() + "_device";
 
         Function f{function_name};
         f.arguments = device_arguments();
@@ -1047,7 +1046,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
 
             templates.set_value(stride_type.name, "lds_linear ? SB_UNIT : SB_NONUNIT");
 
-            body += Call{"forward_pp_length" + std::to_string(length) + "_" + tiling_name()
+            body += Call{"forward_full_pass_length" + std::to_string(length) + "_" + tiling_name()
                              + "_device",
                          templates,
                          arguments};

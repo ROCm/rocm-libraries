@@ -420,7 +420,7 @@ struct StockhamKernelFused2D : public StockhamKernelRR
 
             auto templates = device_call_templates();
             templates.set_value(stride_type.name, "SB_1ST");
-            body += Call{"forward_length" + std::to_string(length0) + "_SBRR_device",
+            body += Call{"forward_full_pass_length" + std::to_string(length0) + "_SBRR_device",
                          templates,
                          device_call_arguments(0)};
             body += LineBreak{};
@@ -520,7 +520,7 @@ struct StockhamKernelFused2D : public StockhamKernelRR
             auto arguments2 = device_call_arguments(0);
             if(factors != kernel1.factors)
                 arguments2[3] = twiddles + length0 - factors.front();
-            body += Call{"forward_length" + std::to_string(length1) + "_SBRR_device",
+            body += Call{"forward_full_pass_length" + std::to_string(length1) + "_SBRR_device",
                          templates2,
                          arguments2};
             body += LineBreak{};
