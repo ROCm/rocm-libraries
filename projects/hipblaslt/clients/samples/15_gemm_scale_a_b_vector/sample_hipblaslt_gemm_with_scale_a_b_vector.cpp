@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -148,7 +148,7 @@ void simpleGemmScaleAB(hipblasLtHandle_t  handle,
                                               &max_workspace_size,
                                               sizeof(max_workspace_size)));
 
-    const int                        request_solutions = 5;
+    const int                        request_solutions = 1;
     hipblasLtMatmulHeuristicResult_t heuristicResult[request_solutions];
     int                              returnedAlgoCount = 0;
     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulAlgoGetHeuristic(handle,
@@ -165,6 +165,14 @@ void simpleGemmScaleAB(hipblasLtHandle_t  handle,
     if(returnedAlgoCount == 0)
     {
         std::cerr << "No valid solution found!" << std::endl;
+        CHECK_HIP_ERROR(hipFree(d_scale_a_vec));
+        CHECK_HIP_ERROR(hipFree(d_scale_b_vec));
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matA));
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matB));
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matC));
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matD));
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));
+        CHECK_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceDestroy(pref));
         return;
     }
 
