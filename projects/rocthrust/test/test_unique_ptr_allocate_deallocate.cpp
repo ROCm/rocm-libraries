@@ -65,3 +65,83 @@ TEST(UniquePtrAllocDeallocTests, TestUniquePtrDltr)
     hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
     ASSERT_EQ(st, hipErrorInvalidValue);
 }
+
+TEST(UniquePtrAllocDeallocTests, TestUniquePtrCmp)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // Pointers of same type
+    {
+        thrust::unique_ptr<int> p1 = thrust::make_unique<int>(1);
+        thrust::unique_ptr<int> p2 = thrust::make_unique<int>(2);
+
+        int* ptr1 = p1.get_raw();
+        int* ptr2 = p2.get_raw();
+
+        ASSERT_EQ((p1 == p2), (ptr1 == ptr2));
+        ASSERT_EQ((p1 != p2), (ptr1 != ptr2));
+        ASSERT_EQ((p1 < p2), (ptr1 < ptr2));
+        ASSERT_EQ((p1 <= p2), (ptr1 <= ptr2));
+        ASSERT_EQ((p1 > p2), (ptr1 > ptr2));
+        ASSERT_EQ((p1 >= p2), (ptr1 >= ptr2));
+    }
+
+    // Pointers of different type
+    {
+        thrust::unique_ptr<int>   p1 = thrust::make_unique<int>(1);
+        thrust::unique_ptr<float> p2 = thrust::make_unique<float>(2.2);
+
+        int*   ptr1 = p1.get_raw();
+        float* ptr2 = p2.get_raw();
+
+        ASSERT_EQ((p1 == p2), (static_cast<void*>(ptr1) == static_cast<void*>(ptr2)));
+        ASSERT_EQ((p1 != p2), (static_cast<void*>(ptr1) != static_cast<void*>(ptr2)));
+        ASSERT_EQ((p1 < p2), (static_cast<void*>(ptr1) < static_cast<void*>(ptr2)));
+        ASSERT_EQ((p1 <= p2), (static_cast<void*>(ptr1) <= static_cast<void*>(ptr2)));
+        ASSERT_EQ((p1 > p2), (static_cast<void*>(ptr1) > static_cast<void*>(ptr2)));
+        ASSERT_EQ((p1 >= p2), (static_cast<void*>(ptr1) >= static_cast<void*>(ptr2)));
+    }
+
+    // Default-constructed pointers of same type
+    {
+        const thrust::unique_ptr<int> p1;
+        const thrust::unique_ptr<int> p2;
+
+        ASSERT_EQ(p1, p2);
+    }
+
+    // Default-constructed pointers of different type
+    {
+        const thrust::unique_ptr<int>   p1;
+        const thrust::unique_ptr<float> p2;
+
+        ASSERT_EQ(p1, p2);
+    }
+}
+
+TEST(UniquePtrAllocDeallocTests, TestUniquePtrNullptr)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // Test with a non-null unqiue_ptr
+    {
+        const thrust::unique_ptr<int> p = thrust::make_unique<int>(1);
+
+        ASSERT_NE(p, nullptr);
+        ASSERT_LT(nullptr, p);
+        ASSERT_LE(nullptr, p);
+        ASSERT_GT(p, nullptr);
+        ASSERT_GE(p, nullptr);
+    }
+
+    // Test with null unique_ptr
+    {
+        const thrust::unique_ptr<int> p;
+
+        ASSERT_EQ(p, nullptr);
+        ASSERT_LE(p, nullptr);
+        ASSERT_LE(nullptr, p);
+        ASSERT_GE(p, nullptr);
+        ASSERT_GE(nullptr, p);
+    }
+}
