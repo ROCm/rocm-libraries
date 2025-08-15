@@ -7,8 +7,12 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Added
 
 * Added `get_sreg_lanemask_lt`, `get_sreg_lanemask_le`, `get_sreg_lanemask_gt` and `get_sreg_lanemask_ge`.
+* Added `rocprim::transform_output_iterator` and `rocprim::make_transform_output_iterator`.
+
+### Removed
 
 ### Changed
+
 * Changed tests to support `ptr-to-const` output in `/test/rocprim/test_device_batch_memcpy.cpp`.
 
 ### Upcoming changes
