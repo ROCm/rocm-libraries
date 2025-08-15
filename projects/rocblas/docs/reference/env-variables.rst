@@ -57,6 +57,13 @@ tables.
       - | **0**: Disable
         | **1**: Enable
 
+    * - | ``ROCBLAS_BENCH_STREAM_SYNC``
+        | Benchmark timing based on ``hipStreamSynchronize``, otherwise uses default ``hipEvent_t`` based timing.
+      - 0
+      - :ref:`rocblas_bench_stream_sync`
+      - | **0**: Disable
+        | **1**: Enable
+
 Logging environment variables
 --------------------------------------------------------------------------------
 
