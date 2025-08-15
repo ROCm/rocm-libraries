@@ -57,7 +57,7 @@ To build hipFFT from source, follow these steps:
 
 #. Build hipFFT:
 
-   To show all build options, run these commands:
+   To show all build options, run these commands from the ``rocm-libraries/projects/hipfft`` directory:
 
    .. code-block:: shell
 

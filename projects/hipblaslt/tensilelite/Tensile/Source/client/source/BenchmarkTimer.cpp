@@ -261,7 +261,8 @@ namespace TensileLite
                     throw std::runtime_error(
                         "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
                 }
-                size_t flopsInProblem = flopCount;
+                // avoid zero division
+                size_t flopsInProblem = flopCount != 0 ? flopCount : 1;
                 enqueuesByFlops       = CeilDivide(m_minFlopsPerSync, flopsInProblem);
             }
 
