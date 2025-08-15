@@ -33,7 +33,7 @@
 
 using Catch::Matchers::ContainsSubstring;
 
-TEST_CASE("has openmp tag", "[OPENMP]")
+TEST_CASE("has openmp tag", "[openmp]")
 {
     SECTION("utilities", "")
     {
