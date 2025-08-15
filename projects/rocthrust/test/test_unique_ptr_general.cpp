@@ -192,3 +192,50 @@ TEST(UniquePtrGeneralTests, TestUniquePtrModifierRelease)
         ASSERT_EQ(st, hipErrorInvalidValue);
     }
 }
+
+TEST(UniquePtrGeneralTests, TestUniquePtrModifierReset)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // reset(new pointer) for single object
+    void *raw_addr = nullptr;
+    {
+        thrust::unique_ptr<int> p = thrust::make_unique<int>(1);
+
+        thrust::device_ptr<int> new_p = thrust::device_malloc<int>(1);
+
+        p.reset(new_p);
+        ASSERT_EQ(p.get(), new_p);
+
+        raw_addr = static_cast<void*>(p.get_raw());
+    }
+    size_t dummy = 0;
+    hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
+    ASSERT_EQ(st, hipErrorInvalidValue);
+
+    // reset(nullptr) for single object
+    raw_addr = nullptr;
+    {
+        thrust::unique_ptr<int> p = thrust::make_unique<int>(1);
+        raw_addr = static_cast<void*>(p.get_raw());
+
+        p.reset(nullptr);
+        ASSERT_EQ(p, nullptr);
+            
+        st = hipMemPtrGetInfo(raw_addr, &dummy);
+        ASSERT_EQ(st, hipErrorInvalidValue);
+    }
+
+    // reset() for single object
+    raw_addr = nullptr;
+    {
+        thrust::unique_ptr<int> p = thrust::make_unique<int>(1);
+        raw_addr = static_cast<void*>(p.get_raw());
+
+        p.reset();
+        ASSERT_EQ(p, nullptr);
+            
+        st = hipMemPtrGetInfo(raw_addr, &dummy);
+        ASSERT_EQ(st, hipErrorInvalidValue);    
+    }
+}
