@@ -56,7 +56,7 @@ namespace rocsparse
     rocsparse_status
         scale_array(rocsparse_handle handle, I length, const T* scalar_device_host, A* array);
 
-    template <typename I, typename T>
+    template <typename I, typename A, typename T>
     rocsparse_status scale_2d_array(rocsparse_handle handle,
                                     I                m,
                                     I                n,
@@ -64,7 +64,7 @@ namespace rocsparse
                                     int64_t          batch_count,
                                     int64_t          stride,
                                     const T*         scalar_device_host,
-                                    T*               array,
+                                    A*               array,
                                     rocsparse_order  order);
 
     template <typename I, typename J>

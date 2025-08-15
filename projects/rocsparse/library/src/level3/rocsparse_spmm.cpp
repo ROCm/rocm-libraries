@@ -262,161 +262,20 @@ namespace rocsparse
         // LCOV_EXCL_STOP
     }
 
-
-
-
-
-    rocsparse_status spmm_csr_dispatch(rocsparse_handle            handle,
-                                   rocsparse_operation         trans_A,
-                                   rocsparse_operation         trans_B,
-                                   const void*                 alpha,
-                                   rocsparse_const_spmat_descr mat_A,
-                                   rocsparse_const_dnmat_descr mat_B,
-                                   const void*                 beta,
-                                   const rocsparse_dnmat_descr mat_C,
-                                   rocsparse_spmm_alg          alg,
-                                   rocsparse_spmm_stage        stage,
-                                   size_t*                     buffer_size,
-                                   void*                       temp_buffer)
-    {
-    }
-
-//     typedef enum rocsparse_spmm_alg_
-// {
-//     rocsparse_spmm_alg_default = 0, /**< Default SpMM algorithm for the given format. */
-//     rocsparse_spmm_alg_csr, /**< SpMM algorithm for CSR format using row split and shared memory. */
-//     rocsparse_spmm_alg_coo_segmented, /**< SpMM algorithm for COO format using segmented scan. */
-//     rocsparse_spmm_alg_coo_atomic, /**< SpMM algorithm for COO format using atomics. */
-//     rocsparse_spmm_alg_csr_row_split, /**< SpMM algorithm for CSR format using row split and shfl. */
-//     rocsparse_spmm_alg_csr_merge, /**< SpMM algorithm for CSR format using nnz split algorithm. Is the same as rocsparse_spmm_alg_csr_nnz_split. */
-//     rocsparse_spmm_alg_coo_segmented_atomic, /**< SpMM algorithm for COO format using segmented scan and atomics. */
-//     rocsparse_spmm_alg_bell, /**< SpMM algorithm for Blocked ELL format. */
-//     rocsparse_spmm_alg_bsr, /**< SpMM algorithm for BSR format. */
-//     rocsparse_spmm_alg_csr_merge_path, /**< SpMM algorithm for CSR format using merge path algorithm. */
-//     rocsparse_spmm_alg_csr_nnz_split
-//     = rocsparse_spmm_alg_csr_merge /**< SpMM algorithm for CSR format using nnz split algorithm. */
-// } rocsparse_spmm_alg;
-
-    rocsparse_status spmm_format(rocsparse_handle            handle,
-                                   rocsparse_operation         trans_A,
-                                   rocsparse_operation         trans_B,
-                                   const void*                 alpha,
-                                   rocsparse_const_spmat_descr mat_A,
-                                   rocsparse_const_dnmat_descr mat_B,
-                                   const void*                 beta,
-                                   const rocsparse_dnmat_descr mat_C,
-                                   rocsparse_spmm_alg          alg,
-                                   rocsparse_spmm_stage        stage,
-                                   size_t*                     buffer_size,
-                                   void*                       temp_buffer)
-    {
-        switch(mat_A->format)
-        {
-        case rocsparse_format_csr:
-        {
-            switch(mat_A->format)
-            {
-            case rocsparse_spmm_alg_csr_row_split:
-            {
-                rocsparse::spmm_csr_row_split();
-            }
-            case rocsparse_spmm_alg_csr_nnz_split:
-            {
-                rocsparse::spmm_csr_nnz_split();
-            }
-            case rocsparse_spmm_alg_csr_merge_path:
-            {
-                rocsparse::spmm_csr_merge_path();
-            }
-            }
-        }
-
-        case rocsparse_format_csc:
-        {
-            spmm_csc_alg_dispatch();
-        }
-
-        case rocsparse_format_coo:
-        {
-            spmm_coo_alg_dispatch();
-        }
-
-        case rocsparse_format_bell:
-        {
-            spmm_bell_alg_dispatch();
-        }
-
-        case rocsparse_format_bsr:
-        {
-            spmm_bsr_alg_dispatch();
-        }
-
-        case rocsparse_format_coo_aos:
-        case rocsparse_format_ell:
-        {
-            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
-        }
-            // LCOV_EXCL_START
-        }
-
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-        // LCOV_EXCL_STOP
-    }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    template <typename T, typename I, typename J, typename A, typename B, typename C>
-    rocsparse_status spmm_template(rocsparse_handle            handle,
-                                   rocsparse_operation         trans_A,
-                                   rocsparse_operation         trans_B,
-                                   const void*                 alpha,
-                                   rocsparse_const_spmat_descr mat_A,
-                                   rocsparse_const_dnmat_descr mat_B,
-                                   const void*                 beta,
-                                   const rocsparse_dnmat_descr mat_C,
-                                   rocsparse_spmm_alg          alg,
-                                   rocsparse_spmm_stage        stage,
-                                   size_t*                     buffer_size,
-                                   void*                       temp_buffer)
+    rocsparse_status spmm(rocsparse_handle            handle,
+                          rocsparse_operation         trans_A,
+                          rocsparse_operation         trans_B,
+                          rocsparse_datatype          alpha_type,
+                          const void*                 alpha,
+                          rocsparse_const_spmat_descr mat_A,
+                          rocsparse_const_dnmat_descr mat_B,
+                          rocsparse_datatype          beta_type,
+                          const void*                 beta,
+                          const rocsparse_dnmat_descr mat_C,
+                          rocsparse_spmm_alg          alg,
+                          rocsparse_spmm_stage        stage,
+                          size_t*                     buffer_size,
+                          void*                       temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
 
@@ -427,78 +286,90 @@ namespace rocsparse
             rocsparse_csrmm_alg csrmm_alg;
             RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmm_alg2csrmm_alg(alg, csrmm_alg)));
 
-            const J m = (J)mat_A->rows;
-            const J n = (J)mat_C->cols;
-            const J k = (J)mat_A->cols;
+            const int64_t m = mat_A->rows;
+            const int64_t n = mat_C->cols;
+            const int64_t k = mat_A->cols;
 
             switch(stage)
             {
             case rocsparse_spmm_stage_buffer_size:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::csrmm_buffer_size_template<T>(handle,
-                                                             trans_A,
-                                                             csrmm_alg,
-                                                             m,
-                                                             n,
-                                                             k,
-                                                             (I)mat_A->nnz,
-                                                             mat_A->descr,
-                                                             (const A*)mat_A->const_val_data,
-                                                             (const I*)mat_A->const_row_data,
-                                                             (const J*)mat_A->const_col_data,
-                                                             buffer_size));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_buffer_size(
+                    handle,
+                    trans_A,
+                    csrmm_alg,
+                    m,
+                    n,
+                    k,
+                    mat_A->nnz,
+                    mat_A->descr,
+                    alpha_type, // Double check if I really need to pass compute type to buffer size
+                    mat_A->data_type,
+                    mat_A->const_val_data,
+                    mat_A->row_type,
+                    mat_A->const_row_data,
+                    mat_A->col_type,
+                    mat_A->const_col_data,
+                    buffer_size));
                 return rocsparse_status_success;
             }
             case rocsparse_spmm_stage_preprocess:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::csrmm_analysis_template<T>(handle,
-                                                          trans_A,
-                                                          csrmm_alg,
-                                                          m,
-                                                          n,
-                                                          k,
-                                                          (I)mat_A->nnz,
-                                                          mat_A->descr,
-                                                          (const A*)mat_A->const_val_data,
-                                                          (const I*)mat_A->const_row_data,
-                                                          (const J*)mat_A->const_col_data,
-                                                          temp_buffer));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_analysis(handle,
+                                                                    trans_A,
+                                                                    csrmm_alg,
+                                                                    m,
+                                                                    n,
+                                                                    k,
+                                                                    mat_A->nnz,
+                                                                    mat_A->descr,
+                                                                    mat_A->data_type,
+                                                                    mat_A->const_val_data,
+                                                                    mat_A->row_type,
+                                                                    mat_A->const_row_data,
+                                                                    mat_A->col_type,
+                                                                    mat_A->const_col_data,
+                                                                    temp_buffer));
                 return rocsparse_status_success;
             }
             case rocsparse_spmm_stage_compute:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::csrmm_template(handle,
-                                              trans_A,
-                                              trans_B,
-                                              csrmm_alg,
-                                              m,
-                                              n,
-                                              k,
-                                              (I)mat_A->nnz,
-                                              (J)mat_A->batch_count,
-                                              mat_A->offsets_batch_stride,
-                                              mat_A->columns_values_batch_stride,
-                                              (const T*)alpha,
-                                              mat_A->descr,
-                                              (const A*)mat_A->const_val_data,
-                                              (const I*)mat_A->const_row_data,
-                                              (const J*)mat_A->const_col_data,
-                                              (const B*)mat_B->const_values,
-                                              mat_B->ld,
-                                              (J)mat_B->batch_count,
-                                              mat_B->batch_stride,
-                                              mat_B->order,
-                                              (const T*)beta,
-                                              (C*)mat_C->values,
-                                              mat_C->ld,
-                                              (J)mat_C->batch_count,
-                                              mat_C->batch_stride,
-                                              mat_C->order,
-                                              temp_buffer,
-                                              false));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm(handle,
+                                                           trans_A,
+                                                           trans_B,
+                                                           csrmm_alg,
+                                                           m,
+                                                           n,
+                                                           k,
+                                                           mat_A->nnz,
+                                                           mat_A->batch_count,
+                                                           mat_A->offsets_batch_stride,
+                                                           mat_A->columns_values_batch_stride,
+                                                           alpha_type,
+                                                           alpha,
+                                                           mat_A->descr,
+                                                           mat_A->data_type,
+                                                           mat_A->const_val_data,
+                                                           mat_A->row_type,
+                                                           mat_A->const_row_data,
+                                                           mat_A->col_type,
+                                                           mat_A->const_col_data,
+                                                           mat_B->data_type,
+                                                           mat_B->const_values,
+                                                           mat_B->ld,
+                                                           mat_B->batch_count,
+                                                           mat_B->batch_stride,
+                                                           mat_B->order,
+                                                           beta_type,
+                                                           beta,
+                                                           mat_C->data_type,
+                                                           mat_C->values,
+                                                           mat_C->ld,
+                                                           mat_C->batch_count,
+                                                           mat_C->batch_stride,
+                                                           mat_C->order,
+                                                           temp_buffer,
+                                                           false));
                 return rocsparse_status_success;
             }
             }
@@ -509,77 +380,88 @@ namespace rocsparse
             rocsparse_csrmm_alg csrmm_alg;
             RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmm_alg2csrmm_alg(alg, csrmm_alg)));
 
-            const J m = (J)mat_A->rows;
-            const J n = (J)mat_C->cols;
-            const J k = (J)mat_A->cols;
+            const int64_t m = mat_A->rows;
+            const int64_t n = mat_C->cols;
+            const int64_t k = mat_A->cols;
 
             switch(stage)
             {
             case rocsparse_spmm_stage_buffer_size:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::cscmm_buffer_size_template<T>(handle,
-                                                             trans_A,
-                                                             csrmm_alg,
-                                                             m,
-                                                             n,
-                                                             k,
-                                                             (I)mat_A->nnz,
-                                                             mat_A->descr,
-                                                             (const A*)mat_A->const_val_data,
-                                                             (const I*)mat_A->const_col_data,
-                                                             (const J*)mat_A->const_row_data,
-                                                             buffer_size));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmm_buffer_size(handle,
+                                                                       trans_A,
+                                                                       csrmm_alg,
+                                                                       m,
+                                                                       n,
+                                                                       k,
+                                                                       mat_A->nnz,
+                                                                       mat_A->descr,
+                                                                       alpha_type,
+                                                                       mat_A->data_type,
+                                                                       mat_A->const_val_data,
+                                                                       mat_A->col_type,
+                                                                       mat_A->const_col_data,
+                                                                       mat_A->row_type,
+                                                                       mat_A->const_row_data,
+                                                                       buffer_size));
                 return rocsparse_status_success;
             }
             case rocsparse_spmm_stage_preprocess:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::cscmm_analysis_template<T>(handle,
-                                                          trans_A,
-                                                          csrmm_alg,
-                                                          m,
-                                                          n,
-                                                          k,
-                                                          (I)mat_A->nnz,
-                                                          mat_A->descr,
-                                                          (const A*)mat_A->const_val_data,
-                                                          (const I*)mat_A->const_col_data,
-                                                          (const J*)mat_A->const_row_data,
-                                                          temp_buffer));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmm_analysis(handle,
+                                                                    trans_A,
+                                                                    csrmm_alg,
+                                                                    m,
+                                                                    n,
+                                                                    k,
+                                                                    mat_A->nnz,
+                                                                    mat_A->descr,
+                                                                    mat_A->data_type,
+                                                                    mat_A->const_val_data,
+                                                                    mat_A->col_type,
+                                                                    mat_A->const_col_data,
+                                                                    mat_A->row_type,
+                                                                    mat_A->const_row_data,
+                                                                    temp_buffer));
                 return rocsparse_status_success;
             }
             case rocsparse_spmm_stage_compute:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::cscmm_template(handle,
-                                              trans_A,
-                                              trans_B,
-                                              csrmm_alg,
-                                              m,
-                                              n,
-                                              k,
-                                              (I)mat_A->nnz,
-                                              (J)mat_A->batch_count,
-                                              mat_A->offsets_batch_stride,
-                                              mat_A->columns_values_batch_stride,
-                                              (const T*)alpha,
-                                              mat_A->descr,
-                                              (const A*)mat_A->const_val_data,
-                                              (const I*)mat_A->const_col_data,
-                                              (const J*)mat_A->const_row_data,
-                                              (const B*)mat_B->const_values,
-                                              mat_B->ld,
-                                              (J)mat_B->batch_count,
-                                              mat_B->batch_stride,
-                                              mat_B->order,
-                                              (const T*)beta,
-                                              (C*)mat_C->values,
-                                              mat_C->ld,
-                                              (J)mat_C->batch_count,
-                                              mat_C->batch_stride,
-                                              mat_C->order,
-                                              temp_buffer));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmm(handle,
+                                                           trans_A,
+                                                           trans_B,
+                                                           csrmm_alg,
+                                                           m,
+                                                           n,
+                                                           k,
+                                                           mat_A->nnz,
+                                                           mat_A->batch_count,
+                                                           mat_A->offsets_batch_stride,
+                                                           mat_A->columns_values_batch_stride,
+                                                           alpha_type,
+                                                           alpha,
+                                                           mat_A->descr,
+                                                           mat_A->data_type,
+                                                           mat_A->const_val_data,
+                                                           mat_A->col_type,
+                                                           mat_A->const_col_data,
+                                                           mat_A->row_type,
+                                                           mat_A->const_row_data,
+                                                           mat_B->data_type,
+                                                           mat_B->const_values,
+                                                           mat_B->ld,
+                                                           mat_B->batch_count,
+                                                           mat_B->batch_stride,
+                                                           mat_B->order,
+                                                           beta_type,
+                                                           beta,
+                                                           mat_C->data_type,
+                                                           mat_C->values,
+                                                           mat_C->ld,
+                                                           mat_C->batch_count,
+                                                           mat_C->batch_stride,
+                                                           mat_C->order,
+                                                           temp_buffer));
                 return rocsparse_status_success;
             }
             }
@@ -590,78 +472,90 @@ namespace rocsparse
             rocsparse_coomm_alg coomm_alg;
             RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmm_alg2coomm_alg(alg, coomm_alg)));
 
-            const I m = (I)mat_A->rows;
-            const I n = (I)mat_C->cols;
-            const I k = (I)mat_A->cols;
+            const int64_t m = mat_A->rows;
+            const int64_t n = mat_C->cols;
+            const int64_t k = mat_A->cols;
 
             switch(stage)
             {
             case rocsparse_spmm_stage_buffer_size:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::coomm_buffer_size_template<T>(handle,
-                                                             trans_A,
-                                                             coomm_alg,
-                                                             m,
-                                                             n,
-                                                             k,
-                                                             mat_A->nnz,
-                                                             (I)mat_C->batch_count,
-                                                             mat_A->descr,
-                                                             (const A*)mat_A->const_val_data,
-                                                             (const I*)mat_A->const_row_data,
-                                                             (const I*)mat_A->const_col_data,
-                                                             buffer_size));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::coomm_buffer_size(handle,
+                                                                       trans_A,
+                                                                       coomm_alg,
+                                                                       m,
+                                                                       n,
+                                                                       k,
+                                                                       mat_A->nnz,
+                                                                       mat_C->batch_count,
+                                                                       mat_A->descr,
+                                                                       alpha_type,
+                                                                       mat_A->data_type,
+                                                                       mat_A->const_val_data,
+                                                                       mat_A->row_type,
+                                                                       mat_A->const_row_data,
+                                                                       mat_A->col_type,
+                                                                       mat_A->const_col_data,
+                                                                       buffer_size));
                 return rocsparse_status_success;
             }
 
             case rocsparse_spmm_stage_preprocess:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::coomm_analysis_template<T>(handle,
-                                                          trans_A,
-                                                          coomm_alg,
-                                                          m,
-                                                          n,
-                                                          k,
-                                                          mat_A->nnz,
-                                                          mat_A->descr,
-                                                          (const A*)mat_A->const_val_data,
-                                                          (const I*)mat_A->const_row_data,
-                                                          (const I*)mat_A->const_col_data,
-                                                          temp_buffer));
-                return rocsparse_status_success;
-            }
-
-            case rocsparse_spmm_stage_compute:
-            {
-                RETURN_IF_ROCSPARSE_ERROR(rocsparse::coomm_template(handle,
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::coomm_analysis(handle,
                                                                     trans_A,
-                                                                    trans_B,
                                                                     coomm_alg,
                                                                     m,
                                                                     n,
                                                                     k,
                                                                     mat_A->nnz,
-                                                                    (I)mat_A->batch_count,
-                                                                    mat_A->batch_stride,
-                                                                    (const T*)alpha,
                                                                     mat_A->descr,
-                                                                    (const A*)mat_A->const_val_data,
-                                                                    (const I*)mat_A->const_row_data,
-                                                                    (const I*)mat_A->const_col_data,
-                                                                    (const B*)mat_B->const_values,
-                                                                    mat_B->ld,
-                                                                    (I)mat_B->batch_count,
-                                                                    mat_B->batch_stride,
-                                                                    mat_B->order,
-                                                                    (const T*)beta,
-                                                                    (C*)mat_C->values,
-                                                                    mat_C->ld,
-                                                                    (I)mat_C->batch_count,
-                                                                    mat_C->batch_stride,
-                                                                    mat_C->order,
+                                                                    mat_A->data_type,
+                                                                    mat_A->const_val_data,
+                                                                    mat_A->row_type,
+                                                                    mat_A->const_row_data,
+                                                                    mat_A->col_type,
+                                                                    mat_A->const_col_data,
                                                                     temp_buffer));
+                return rocsparse_status_success;
+            }
+
+            case rocsparse_spmm_stage_compute:
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::coomm(handle,
+                                                           trans_A,
+                                                           trans_B,
+                                                           coomm_alg,
+                                                           m,
+                                                           n,
+                                                           k,
+                                                           mat_A->nnz,
+                                                           mat_A->batch_count,
+                                                           mat_A->batch_stride,
+                                                           alpha_type,
+                                                           alpha,
+                                                           mat_A->descr,
+                                                           mat_A->data_type,
+                                                           mat_A->const_val_data,
+                                                           mat_A->row_type,
+                                                           mat_A->const_row_data,
+                                                           mat_A->col_type,
+                                                           mat_A->const_col_data,
+                                                           mat_B->data_type,
+                                                           mat_B->const_values,
+                                                           mat_B->ld,
+                                                           mat_B->batch_count,
+                                                           mat_B->batch_stride,
+                                                           mat_B->order,
+                                                           beta_type,
+                                                           beta,
+                                                           mat_C->data_type,
+                                                           mat_C->values,
+                                                           mat_C->ld,
+                                                           mat_C->batch_count,
+                                                           mat_C->batch_stride,
+                                                           mat_C->order,
+                                                           temp_buffer));
                 return rocsparse_status_success;
             }
             }
@@ -674,108 +568,117 @@ namespace rocsparse
 
             switch(stage)
             {
-                //
-                // STAGE BUFFER SIZE
-                //
             case rocsparse_spmm_stage_buffer_size:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::bellmm_template_buffer_size(
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::bellmm_buffer_size(
                     handle,
                     trans_A,
                     trans_B,
                     mat_A->block_dir,
-                    (I)(mat_C->rows / mat_A->block_dim),
-                    (I)mat_C->cols,
+                    (mat_C->rows / mat_A->block_dim),
+                    mat_C->cols,
 
-                    (trans_A == rocsparse_operation_none) ? (I)(mat_A->cols / mat_A->block_dim)
-                                                          : (I)(mat_A->rows / mat_A->block_dim),
+                    (trans_A == rocsparse_operation_none) ? (mat_A->cols / mat_A->block_dim)
+                                                          : (mat_A->rows / mat_A->block_dim),
 
-                    (I)mat_A->ell_cols,
-                    (I)mat_A->block_dim,
-                    (const T*)alpha,
+                    mat_A->ell_cols,
+                    mat_A->block_dim,
+                    alpha_type,
+                    alpha,
                     mat_A->descr,
-                    (const I*)mat_A->const_col_data,
-                    (const A*)mat_A->const_val_data,
-                    (const B*)mat_B->const_values,
+                    mat_A->col_type,
+                    mat_A->const_col_data,
+                    mat_A->data_type,
+                    mat_A->const_val_data,
+                    mat_B->data_type,
+                    mat_B->const_values,
                     mat_B->ld,
                     mat_B->order,
-                    (const T*)beta,
-                    (C*)mat_C->values,
+                    beta_type,
+                    beta,
+                    mat_C->data_type,
+                    mat_C->values,
                     mat_C->ld,
                     mat_C->order,
                     buffer_size)));
                 return rocsparse_status_success;
             }
 
-                //
-                // STAGE PREPROCESS
-                //
             case rocsparse_spmm_stage_preprocess:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::bellmm_template_preprocess(
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::bellmm_preprocess(
                     handle,
                     trans_A,
                     trans_B,
                     mat_A->block_dir,
-                    (I)(mat_C->rows / mat_A->block_dim),
-                    (I)mat_C->cols,
+                    (mat_C->rows / mat_A->block_dim),
+                    mat_C->cols,
 
-                    (trans_A == rocsparse_operation_none) ? (I)(mat_A->cols / mat_A->block_dim)
-                                                          : (I)(mat_A->rows / mat_A->block_dim),
+                    (trans_A == rocsparse_operation_none) ? (mat_A->cols / mat_A->block_dim)
+                                                          : (mat_A->rows / mat_A->block_dim),
 
-                    (I)mat_A->ell_cols,
-                    (I)mat_A->block_dim,
-                    (const T*)alpha,
+                    mat_A->ell_cols,
+                    mat_A->block_dim,
+                    alpha_type,
+                    alpha,
                     mat_A->descr,
-                    (const I*)mat_A->const_col_data,
-                    (const A*)mat_A->const_val_data,
-                    (const B*)mat_B->const_values,
+                    mat_A->col_type,
+                    mat_A->const_col_data,
+                    mat_A->data_type,
+                    mat_A->const_val_data,
+                    mat_B->data_type,
+                    mat_B->const_values,
                     mat_B->ld,
                     mat_B->order,
-                    (const T*)beta,
-                    (C*)mat_C->values,
+                    beta_type,
+                    beta,
+                    mat_C->data_type,
+                    mat_C->values,
                     mat_C->ld,
                     mat_C->order,
                     temp_buffer)));
                 return rocsparse_status_success;
             }
 
-                //
-                // STAGE COMPUTE
-                //
             case rocsparse_spmm_stage_compute:
             {
-                RETURN_IF_ROCSPARSE_ERROR((rocsparse::bellmm_template(
-                    handle,
-                    trans_A,
-                    trans_B,
-                    mat_A->block_dir,
-                    (I)(mat_C->rows / mat_A->block_dim),
-                    (I)mat_C->cols,
+                RETURN_IF_ROCSPARSE_ERROR((rocsparse::bellmm(handle,
+                                                             trans_A,
+                                                             trans_B,
+                                                             mat_A->block_dir,
+                                                             (mat_C->rows / mat_A->block_dim),
+                                                             mat_C->cols,
 
-                    (trans_A == rocsparse_operation_none) ? (I)(mat_A->cols / mat_A->block_dim)
-                                                          : (I)(mat_A->rows / mat_A->block_dim),
+                                                             (trans_A == rocsparse_operation_none)
+                                                                 ? (mat_A->cols / mat_A->block_dim)
+                                                                 : (mat_A->rows / mat_A->block_dim),
 
-                    (I)mat_A->ell_cols,
-                    (I)mat_A->block_dim,
-                    (I)mat_A->batch_count,
-                    mat_A->batch_stride,
-                    (const T*)alpha,
-                    mat_A->descr,
-                    (const I*)mat_A->const_col_data,
-                    (const A*)mat_A->const_val_data,
-                    (const B*)mat_B->const_values,
-                    mat_B->ld,
-                    (I)mat_B->batch_count,
-                    mat_B->batch_stride,
-                    mat_B->order,
-                    (const T*)beta,
-                    (C*)mat_C->values,
-                    mat_C->ld,
-                    (I)mat_C->batch_count,
-                    mat_C->batch_stride,
-                    mat_C->order,
-                    temp_buffer)));
+                                                             mat_A->ell_cols,
+                                                             mat_A->block_dim,
+                                                             mat_A->batch_count,
+                                                             mat_A->batch_stride,
+                                                             alpha_type,
+                                                             alpha,
+                                                             mat_A->descr,
+                                                             mat_A->col_type,
+                                                             mat_A->const_col_data,
+                                                             mat_A->data_type,
+                                                             mat_A->const_val_data,
+                                                             mat_B->data_type,
+                                                             mat_B->const_values,
+                                                             mat_B->ld,
+                                                             mat_B->batch_count,
+                                                             mat_B->batch_stride,
+                                                             mat_B->order,
+                                                             beta_type,
+                                                             beta,
+                                                             mat_C->data_type,
+                                                             mat_C->values,
+                                                             mat_C->ld,
+                                                             mat_C->batch_count,
+                                                             mat_C->batch_stride,
+                                                             mat_C->order,
+                                                             temp_buffer)));
                 return rocsparse_status_success;
             }
             }
@@ -788,80 +691,90 @@ namespace rocsparse
             rocsparse_bsrmm_alg bsrmm_alg;
             RETURN_IF_ROCSPARSE_ERROR((rocsparse::spmm_alg2bsrmm_alg(alg, bsrmm_alg)));
 
-            const J mb = (J)mat_A->rows;
-            const J n  = (J)mat_C->cols;
-            const J kb = (J)mat_A->cols;
+            const int64_t mb = mat_A->rows;
+            const int64_t n  = mat_C->cols;
+            const int64_t kb = mat_A->cols;
 
             switch(stage)
             {
             case rocsparse_spmm_stage_buffer_size:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::bsrmm_buffer_size_template<T>(handle,
-                                                             trans_A,
-                                                             bsrmm_alg,
-                                                             mb,
-                                                             n,
-                                                             kb,
-                                                             (I)mat_A->nnz,
-                                                             mat_A->descr,
-                                                             (const A*)mat_A->const_val_data,
-                                                             (const I*)mat_A->const_row_data,
-                                                             (const J*)mat_A->const_col_data,
-                                                             (J)mat_A->block_dim,
-                                                             buffer_size));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrmm_buffer_size(handle,
+                                                                       trans_A,
+                                                                       bsrmm_alg,
+                                                                       mb,
+                                                                       n,
+                                                                       kb,
+                                                                       mat_A->nnz,
+                                                                       mat_A->descr,
+                                                                       mat_A->data_type,
+                                                                       mat_A->const_val_data,
+                                                                       mat_A->row_type,
+                                                                       mat_A->const_row_data,
+                                                                       mat_A->col_type,
+                                                                       mat_A->const_col_data,
+                                                                       mat_A->block_dim,
+                                                                       buffer_size));
                 return rocsparse_status_success;
             }
             case rocsparse_spmm_stage_preprocess:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::bsrmm_analysis_template<T>(handle,
-                                                          trans_A,
-                                                          bsrmm_alg,
-                                                          mb,
-                                                          n,
-                                                          kb,
-                                                          (I)mat_A->nnz,
-                                                          mat_A->descr,
-                                                          (const A*)mat_A->const_val_data,
-                                                          (const I*)mat_A->const_row_data,
-                                                          (const J*)mat_A->const_col_data,
-                                                          (J)mat_A->block_dim,
-                                                          temp_buffer));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrmm_analysis(handle,
+                                                                    trans_A,
+                                                                    bsrmm_alg,
+                                                                    mb,
+                                                                    n,
+                                                                    kb,
+                                                                    mat_A->nnz,
+                                                                    mat_A->descr,
+                                                                    mat_A->data_type,
+                                                                    mat_A->const_val_data,
+                                                                    mat_A->row_type,
+                                                                    mat_A->const_row_data,
+                                                                    mat_A->col_type,
+                                                                    mat_A->const_col_data,
+                                                                    mat_A->block_dim,
+                                                                    temp_buffer));
                 return rocsparse_status_success;
             }
             case rocsparse_spmm_stage_compute:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::bsrmm_template(handle,
-                                              mat_A->block_dir,
-                                              trans_A,
-                                              trans_B,
-                                              bsrmm_alg,
-                                              mb,
-                                              n,
-                                              kb,
-                                              (I)mat_A->nnz,
-                                              (J)mat_A->batch_count,
-                                              mat_A->offsets_batch_stride,
-                                              mat_A->columns_values_batch_stride,
-                                              (const T*)alpha,
-                                              mat_A->descr,
-                                              (const A*)mat_A->const_val_data,
-                                              (const I*)mat_A->const_row_data,
-                                              (const J*)mat_A->const_col_data,
-                                              (J)mat_A->block_dim,
-                                              (const B*)mat_B->const_values,
-                                              mat_B->ld,
-                                              (J)mat_B->batch_count,
-                                              mat_B->batch_stride,
-                                              mat_B->order,
-                                              (const T*)beta,
-                                              (C*)mat_C->values,
-                                              mat_C->ld,
-                                              (J)mat_C->batch_count,
-                                              mat_C->batch_stride,
-                                              mat_C->order));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::bsrmm(handle,
+                                                           mat_A->block_dir,
+                                                           trans_A,
+                                                           trans_B,
+                                                           bsrmm_alg,
+                                                           mb,
+                                                           n,
+                                                           kb,
+                                                           mat_A->nnz,
+                                                           mat_A->batch_count,
+                                                           mat_A->offsets_batch_stride,
+                                                           mat_A->columns_values_batch_stride,
+                                                           alpha_type,
+                                                           alpha,
+                                                           mat_A->descr,
+                                                           mat_A->data_type,
+                                                           mat_A->const_val_data,
+                                                           mat_A->row_type,
+                                                           mat_A->const_row_data,
+                                                           mat_A->col_type,
+                                                           mat_A->const_col_data,
+                                                           mat_A->block_dim,
+                                                           mat_B->data_type,
+                                                           mat_B->const_values,
+                                                           mat_B->ld,
+                                                           mat_B->batch_count,
+                                                           mat_B->batch_stride,
+                                                           mat_B->order,
+                                                           beta_type,
+                                                           beta,
+                                                           mat_C->data_type,
+                                                           mat_C->values,
+                                                           mat_C->ld,
+                                                           mat_C->batch_count,
+                                                           mat_C->batch_stride,
+                                                           mat_C->order));
                 return rocsparse_status_success;
             }
             }
@@ -877,299 +790,6 @@ namespace rocsparse
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
         // LCOV_EXCL_STOP
-    }
-
-    typedef rocsparse_status (*spmm_template_t)(rocsparse_handle            handle,
-                                                rocsparse_operation         trans_A,
-                                                rocsparse_operation         trans_B,
-                                                const void*                 alpha,
-                                                rocsparse_const_spmat_descr mat_A,
-                                                rocsparse_const_dnmat_descr mat_B,
-                                                const void*                 beta,
-                                                const rocsparse_dnmat_descr mat_C,
-                                                rocsparse_spmm_alg          alg,
-                                                rocsparse_spmm_stage        stage,
-                                                size_t*                     buffer_size,
-                                                void*                       temp_buffer);
-
-    using spmm_template_tuple = std::tuple<rocsparse_datatype,
-                                           rocsparse_indextype,
-                                           rocsparse_indextype,
-                                           rocsparse_datatype,
-                                           rocsparse_datatype,
-                                           rocsparse_datatype>;
-    // clang-format off
-#define SPMM_TEMPLATE_CONFIG(T_, I_, J_, A_, B_, C_)                        \
-    {                                                                       \
-        spmm_template_tuple(T_, I_, J_, A_, B_, C_),                        \
-            spmm_template<typename rocsparse::datatype_traits<T_>::type_t,  \
-                          typename rocsparse::indextype_traits<I_>::type_t, \
-                          typename rocsparse::indextype_traits<J_>::type_t, \
-                          typename rocsparse::datatype_traits<A_>::type_t,  \
-                          typename rocsparse::datatype_traits<B_>::type_t,  \
-                          typename rocsparse::datatype_traits<C_>::type_t>  \
-    }
-#define SPMM_TEMPLATE_CONFIG2(T_, I_, J_, A_, B_, C_)                        \
-    {                                                                       \
-        spmm_template_tuple(T_, I_, J_, A_, B_, C_),                        \
-            spmm_template2<typename rocsparse::datatype_traits<T_>::type_t,  \
-                          typename rocsparse::indextype_traits<I_>::type_t, \
-                          typename rocsparse::indextype_traits<J_>::type_t, \
-                          typename rocsparse::datatype_traits<A_>::type_t,  \
-                          typename rocsparse::datatype_traits<B_>::type_t,  \
-                          typename rocsparse::datatype_traits<C_>::type_t>  \
-    }
-    // clang-format on
-
-    static const std::map<spmm_template_tuple, spmm_template_t> s_spmm_template_dispatch{{
-
-        // Mixed precisions
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_i32_r,
-                             rocsparse_indextype_i32,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_i8_r,
-                             rocsparse_datatype_i8_r,
-                             rocsparse_datatype_i32_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_i32_r,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_i8_r,
-                             rocsparse_datatype_i8_r,
-                             rocsparse_datatype_i32_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_i32_r,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i64,
-                             rocsparse_datatype_i8_r,
-                             rocsparse_datatype_i8_r,
-                             rocsparse_datatype_i32_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i32,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_i8_r,
-                             rocsparse_datatype_i8_r,
-                             rocsparse_datatype_f32_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_i8_r,
-                             rocsparse_datatype_i8_r,
-                             rocsparse_datatype_f32_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i64,
-                             rocsparse_datatype_i8_r,
-                             rocsparse_datatype_i8_r,
-                             rocsparse_datatype_f32_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i32,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_f16_r,
-                             rocsparse_datatype_f16_r,
-                             rocsparse_datatype_f32_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_f16_r,
-                             rocsparse_datatype_f16_r,
-                             rocsparse_datatype_f32_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i64,
-                             rocsparse_datatype_f16_r,
-                             rocsparse_datatype_f16_r,
-                             rocsparse_datatype_f32_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i32,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_bf16_r,
-                             rocsparse_datatype_bf16_r,
-                             rocsparse_datatype_f32_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_bf16_r,
-                             rocsparse_datatype_bf16_r,
-                             rocsparse_datatype_f32_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i64,
-                             rocsparse_datatype_bf16_r,
-                             rocsparse_datatype_bf16_r,
-                             rocsparse_datatype_f32_r),
-
-        // Uniform precisions
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i32,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_f32_r,
-                             rocsparse_datatype_f32_r,
-                             rocsparse_datatype_f32_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_f32_r,
-                             rocsparse_datatype_f32_r,
-                             rocsparse_datatype_f32_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i64,
-                             rocsparse_datatype_f32_r,
-                             rocsparse_datatype_f32_r,
-                             rocsparse_datatype_f32_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f64_r,
-                             rocsparse_indextype_i32,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_f64_r,
-                             rocsparse_datatype_f64_r,
-                             rocsparse_datatype_f64_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f64_r,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_f64_r,
-                             rocsparse_datatype_f64_r,
-                             rocsparse_datatype_f64_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f64_r,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i64,
-                             rocsparse_datatype_f64_r,
-                             rocsparse_datatype_f64_r,
-                             rocsparse_datatype_f64_r),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f64_c,
-                             rocsparse_indextype_i32,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_f64_c,
-                             rocsparse_datatype_f64_c,
-                             rocsparse_datatype_f64_c),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f64_c,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_f64_c,
-                             rocsparse_datatype_f64_c,
-                             rocsparse_datatype_f64_c),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f64_c,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i64,
-                             rocsparse_datatype_f64_c,
-                             rocsparse_datatype_f64_c,
-                             rocsparse_datatype_f64_c),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_c,
-                             rocsparse_indextype_i32,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_f32_c,
-                             rocsparse_datatype_f32_c,
-                             rocsparse_datatype_f32_c),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_c,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_f32_c,
-                             rocsparse_datatype_f32_c,
-                             rocsparse_datatype_f32_c),
-
-        SPMM_TEMPLATE_CONFIG(rocsparse_datatype_f32_c,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i64,
-                             rocsparse_datatype_f32_c,
-                             rocsparse_datatype_f32_c,
-                             rocsparse_datatype_f32_c)}};
-
-    static const std::map<spmm_template_tuple, spmm_template_t> s_spmm_template_dispatch2{{
-
-        // Mixed precisions
-        SPMM_TEMPLATE_CONFIG2(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i32,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_f16_r,
-                             rocsparse_datatype_f16_r,
-                             rocsparse_datatype_f16_r),
-
-        SPMM_TEMPLATE_CONFIG2(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i32,
-                             rocsparse_datatype_f16_r,
-                             rocsparse_datatype_f16_r,
-                             rocsparse_datatype_f16_r),
-
-        SPMM_TEMPLATE_CONFIG2(rocsparse_datatype_f32_r,
-                             rocsparse_indextype_i64,
-                             rocsparse_indextype_i64,
-                             rocsparse_datatype_f16_r,
-                             rocsparse_datatype_f16_r,
-                             rocsparse_datatype_f16_r)}};
-
-    static rocsparse_status spmm_template_find(spmm_template_t*    spmm_function_,
-                                               rocsparse_datatype  compute_type_,
-                                               rocsparse_indextype i_type_,
-                                               rocsparse_indextype j_type_,
-                                               rocsparse_datatype  a_type_,
-                                               rocsparse_datatype  b_type_,
-                                               rocsparse_datatype  c_type_)
-    {
-        const std::map<rocsparse::spmm_template_tuple, rocsparse::spmm_template_t>* dispatch_map;
-        if(c_type_ == rocsparse_datatype_f16_r)
-        {
-            dispatch_map = &s_spmm_template_dispatch2;
-        }
-        else
-        {
-            dispatch_map = &s_spmm_template_dispatch;
-        }
-
-
-
-
-        // const auto& it = rocsparse::s_spmm_template_dispatch.find(rocsparse::spmm_template_tuple(
-        //     compute_type_, i_type_, j_type_, a_type_, b_type_, c_type_));
-
-        // if(it != rocsparse::s_spmm_template_dispatch.end())
-        // {
-        //     spmm_function_[0] = it->second;
-        // }
-        const auto& it = dispatch_map->find(rocsparse::spmm_template_tuple(
-            compute_type_, i_type_, j_type_, a_type_, b_type_, c_type_));
-
-        if(it != dispatch_map->end())
-        {
-            spmm_function_[0] = it->second;
-        }
-        // LCOV_EXCL_START
-        else
-        {
-            std::stringstream sstr;
-            sstr << "invalid precision configuration: "
-                 << "compute_type: " << rocsparse::enum_utils::to_string(compute_type_)
-                 << ", i_type: " << rocsparse::enum_utils::to_string(i_type_)
-                 << ", j_type: " << rocsparse::enum_utils::to_string(j_type_)
-                 << ", a_type: " << rocsparse::enum_utils::to_string(a_type_)
-                 << ", b_type: " << rocsparse::enum_utils::to_string(b_type_)
-                 << ", c_type: " << rocsparse::enum_utils::to_string(c_type_);
-
-            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
-                                                   sstr.str().c_str());
-        }
-        // LCOV_EXCL_STOP
-
-        return rocsparse_status_success;
     }
 }
 
@@ -1249,27 +869,20 @@ try
     }
     }
 
-    rocsparse::spmm_template_t spmm_function;
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmm_template_find(&spmm_function,
-                                                            compute_type,
-                                                            rocsparse::determine_I_indextype(mat_A),
-                                                            rocsparse::determine_J_indextype(mat_A),
-                                                            mat_A->data_type,
-                                                            mat_B->data_type,
-                                                            mat_C->data_type));
-
-    RETURN_IF_ROCSPARSE_ERROR(spmm_function(handle,
-                                            trans_A,
-                                            trans_B,
-                                            alpha,
-                                            mat_A,
-                                            mat_B,
-                                            beta,
-                                            mat_C,
-                                            alg,
-                                            stage,
-                                            buffer_size,
-                                            temp_buffer));
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmm(handle,
+                                              trans_A,
+                                              trans_B,
+                                              compute_type,
+                                              alpha,
+                                              mat_A,
+                                              mat_B,
+                                              compute_type,
+                                              beta,
+                                              mat_C,
+                                              alg,
+                                              stage,
+                                              buffer_size,
+                                              temp_buffer));
 
     return rocsparse_status_success;
     // LCOV_EXCL_START

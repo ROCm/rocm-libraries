@@ -22,7 +22,7 @@
  *
  * ************************************************************************ */
 
-#include "rocsparse_csrmm.hpp"
+#include "rocsparse_cscmm.hpp"
 #include "rocsparse_enum_utils.hpp"
 #include "rocsparse_utility.hpp"
 #include <map>
@@ -30,7 +30,7 @@
 
 namespace rocsparse
 {
-    typedef rocsparse_status (*csrmm_analysis_t)(rocsparse_handle          handle,
+    typedef rocsparse_status (*cscmm_analysis_t)(rocsparse_handle          handle,
                                                  rocsparse_operation       trans_A,
                                                  rocsparse_csrmm_alg       alg,
                                                  int64_t                   m,
@@ -38,83 +38,83 @@ namespace rocsparse
                                                  int64_t                   k,
                                                  int64_t                   nnz,
                                                  const rocsparse_mat_descr descr,
-                                                 const void*               csr_val,
-                                                 const void*               csr_row_ptr,
-                                                 const void*               csr_col_ind,
+                                                 const void*               csc_val,
+                                                 const void*               csc_col_ptr,
+                                                 const void*               csc_row_ind,
                                                  void*                     temp_buffer);
 
-    using csrmm_analysis_tuple
+    using cscmm_analysis_tuple
         = std::tuple<rocsparse_indextype, rocsparse_indextype, rocsparse_datatype>;
 
     // clang-format off
-#define CSRMM_ANALYSIS_CONFIG(I_, J_, A_)                                      \
-    {csrmm_analysis_tuple(I_, J_, A_),                                         \
-     csrmm_analysis_template<typename rocsparse::indextype_traits<I_>::type_t, \
+#define CSCMM_ANALYSIS_CONFIG(I_, J_, A_)                                      \
+    {cscmm_analysis_tuple(I_, J_, A_),                                         \
+     cscmm_analysis_template<typename rocsparse::indextype_traits<I_>::type_t, \
                              typename rocsparse::indextype_traits<J_>::type_t, \
                              typename rocsparse::datatype_traits<A_>::type_t>}
     // clang-format on
 
-    static const std::map<csrmm_analysis_tuple, csrmm_analysis_t> s_csrmm_analysis_dispatch{
+    static const std::map<cscmm_analysis_tuple, cscmm_analysis_t> s_cscmm_analysis_dispatch{
         {// Uniform precisions
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_f32_r),
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_f32_r),
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i64, rocsparse_indextype_i64, rocsparse_datatype_f32_r),
 
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_f64_r),
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_f64_r),
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i64, rocsparse_indextype_i64, rocsparse_datatype_f64_r),
 
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_f32_c),
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_f32_c),
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i64, rocsparse_indextype_i64, rocsparse_datatype_f32_c),
 
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_f64_c),
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_f64_c),
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i64, rocsparse_indextype_i64, rocsparse_datatype_f64_c),
 
          // Mixed precisions
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_i8_r),
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_i8_r),
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i64, rocsparse_indextype_i64, rocsparse_datatype_i8_r),
 
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_f16_r),
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_f16_r),
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i64, rocsparse_indextype_i64, rocsparse_datatype_f16_r),
 
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i32, rocsparse_indextype_i32, rocsparse_datatype_bf16_r),
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i64, rocsparse_indextype_i32, rocsparse_datatype_bf16_r),
-         CSRMM_ANALYSIS_CONFIG(
+         CSCMM_ANALYSIS_CONFIG(
              rocsparse_indextype_i64, rocsparse_indextype_i64, rocsparse_datatype_bf16_r)}};
 
-    static rocsparse_status csrmm_analysis_find(csrmm_analysis_t*   function_,
+    static rocsparse_status cscmm_analysis_find(cscmm_analysis_t*   function_,
                                                 rocsparse_indextype i_type_,
                                                 rocsparse_indextype j_type_,
                                                 rocsparse_datatype  a_type_)
     {
-        const auto& it = rocsparse::s_csrmm_analysis_dispatch.find(
-            rocsparse::csrmm_analysis_tuple(i_type_, j_type_, a_type_));
+        const auto& it = rocsparse::s_cscmm_analysis_dispatch.find(
+            rocsparse::cscmm_analysis_tuple(i_type_, j_type_, a_type_));
 
-        if(it != rocsparse::s_csrmm_analysis_dispatch.end())
+        if(it != rocsparse::s_cscmm_analysis_dispatch.end())
         {
             function_[0] = it->second;
         }
@@ -128,7 +128,7 @@ namespace rocsparse
                       << ", a_type: " << rocsparse::enum_utils::to_string(a_type_) << std::endl;
 
             std::cout << "available configuration are: " << std::endl;
-            for(const auto& p : rocsparse::s_csrmm_analysis_dispatch)
+            for(const auto& p : rocsparse::s_cscmm_analysis_dispatch)
             {
                 const auto& t      = p.first;
                 const auto  i_type = std::get<0>(t);
@@ -157,7 +157,7 @@ namespace rocsparse
     }
 }
 
-rocsparse_status rocsparse::csrmm_analysis(rocsparse_handle          handle,
+rocsparse_status rocsparse::cscmm_analysis(rocsparse_handle          handle,
                                            rocsparse_operation       trans_A,
                                            rocsparse_csrmm_alg       alg,
                                            int64_t                   m,
@@ -165,19 +165,19 @@ rocsparse_status rocsparse::csrmm_analysis(rocsparse_handle          handle,
                                            int64_t                   k,
                                            int64_t                   nnz,
                                            const rocsparse_mat_descr descr,
-                                           rocsparse_datatype        csr_val_datatype,
-                                           const void*               csr_val,
-                                           rocsparse_indextype       csr_row_ptr_indextype,
-                                           const void*               csr_row_ptr,
-                                           rocsparse_indextype       csr_col_ind_indextype,
-                                           const void*               csr_col_ind,
+                                           rocsparse_datatype        csc_val_datatype,
+                                           const void*               csc_val,
+                                           rocsparse_indextype       csc_col_ptr_indextype,
+                                           const void*               csc_col_ptr,
+                                           rocsparse_indextype       csc_row_ind_indextype,
+                                           const void*               csc_row_ind,
                                            void*                     temp_buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
-    rocsparse::csrmm_analysis_t f;
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_analysis_find(
-        &f, csr_row_ptr_indextype, csr_col_ind_indextype, csr_val_datatype));
+    rocsparse::cscmm_analysis_t f;
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmm_analysis_find(
+        &f, csc_col_ptr_indextype, csc_row_ind_indextype, csc_val_datatype));
     RETURN_IF_ROCSPARSE_ERROR(f(
-        handle, trans_A, alg, m, n, k, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, temp_buffer));
+        handle, trans_A, alg, m, n, k, nnz, descr, csc_val, csc_col_ptr, csc_row_ind, temp_buffer));
     return rocsparse_status_success;
 }
