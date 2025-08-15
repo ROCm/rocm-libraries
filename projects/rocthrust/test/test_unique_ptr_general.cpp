@@ -5,6 +5,7 @@
 #include "test_utils.hpp"
 #include <thrust/device_ptr.h>
 #include <thrust/device_malloc.h>
+#include <thrust/device_delete.h>
 
 
 TESTS_DEFINE(UniquePtrGeneralTests, NumericalTestsParams);
@@ -158,6 +159,36 @@ TEST(UniquePtrGeneralTests, TestUniquePtrDtorNullptr)
         }
         size_t dummy = 0;
         hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
+        ASSERT_EQ(st, hipErrorInvalidValue);
+    }
+}
+
+TEST(UniquePtrGeneralTests, TestUniquePtrModifierRelease)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // Single object
+    void* raw_addr = nullptr;
+    size_t sz = 0;
+    {
+        thrust::unique_ptr<int> p = thrust::make_unique<int>(1);
+        int* raw_p = p.get_raw();
+        ASSERT_NE(raw_p, nullptr);
+        
+        hipError_t st = hipMemPtrGetInfo(static_cast<void*>(raw_p), &sz);
+        ASSERT_EQ(st, hipSuccess);
+        ASSERT_GE(sz, sizeof(int));
+
+        thrust::device_ptr<int> released_p = p.release();
+
+        ASSERT_EQ(p, nullptr);
+        ASSERT_EQ(thrust::raw_pointer_cast(released_p), raw_p);
+
+        raw_addr = static_cast<void*>(thrust::raw_pointer_cast(released_p));
+
+        thrust::device_delete(released_p);
+        
+        st = hipMemPtrGetInfo(raw_addr, &sz);
         ASSERT_EQ(st, hipErrorInvalidValue);
     }
 }
