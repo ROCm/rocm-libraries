@@ -112,7 +112,7 @@
     GroupLoadStore: false
     GuaranteeNoPartialA: true
     GuaranteeNoPartialB: true
-    ISA: [11, 5, 0]
+    ISA: [11, 5, 1]
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
