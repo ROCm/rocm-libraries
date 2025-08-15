@@ -377,14 +377,16 @@ class Solution(collections.abc.Mapping):
 
     bpeA = state["ProblemType"]["DataTypeA"].numBytes()
     bpeB = state["ProblemType"]["DataTypeB"].numBytes()
-    asem = state["AssertSummationElementMultiple"]
+    aemA = state["AssertSummationElementMultiple"] if state["ProblemType"]["TLUA"] else state["AssertFree0ElementMultiple"]
+    aemB = state["AssertSummationElementMultiple"] if state["ProblemType"]["TLUB"] else state["AssertFree1ElementMultiple"]
     # For DTL, we use nonDTL loads in tail loop only if
     # a partial 32b read is required to read the last few elements of a row/col of A/B
     # i.e. ASEM * BPE % 4 != 0. In this case dword/dwordx4 DTL load will
     # zero out the entire partial 32b read and cause accuracy issues.
-    if (asem * bpeA) % 4 != 0:
+    # For TLU = 0 we check AF{0,1}EM instead of ASEM.
+    if (aemA * bpeA) % 4 != 0 or not state["BufferLoad"]:
       state["NonDTLTailLoopA"] = True
-    if (asem * bpeB) % 4 != 0:
+    if (aemB * bpeB) % 4 != 0 or not state["BufferLoad"]:
       state["NonDTLTailLoopB"] = True
 
     if (state["ISA"] != (9, 4, 2)) or \

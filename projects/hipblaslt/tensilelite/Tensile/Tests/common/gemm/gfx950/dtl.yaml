@@ -241,6 +241,47 @@ BenchmarkProblems:
           - Exact: [256, 256, 1, 64]
           - Exact: [256, 256, 1, 128]
           - Exact: [256, 256, 1, 320]
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,   1, 1,  1,1 ]
+          - [32, 32, 64, 1,  1,   1, 1,  1,1 ]
+        - WorkGroup:
+          - [16,16,1]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - NumElementsPerBatchStore: [0]
+        - DepthU: [128]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - MIArchVgpr: [0]
+        - LocalWritePerMfma: [-1]
+        - WorkGroupMapping: [1]
+        - ScheduleIterAlg: [3]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - StorePriorityOpt: [0]
+        - VectorStore: [-1]
+        - StoreSyncOpt: [0]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - SourceSwap: [1]#[0, 1]
+        - LocalReadVectorWidth: [8]
+        - DirectToLds: [1]
+        - AssertFree0ElementMultiple: [1, 4]
+        - AssertFree1ElementMultiple: [1, 4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[16,1,32],[16,1,32],[1],[1,1,129]]
 
   ########################################
   # F8HHS TT DTL
