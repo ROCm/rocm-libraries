@@ -8,7 +8,7 @@
 hipBLASLt optimization and solution selection algorithm
 *******************************************************
 
-hipBLASLt includes many optimization features, for example, Stream-K, that can enhance performance across various GEMM regions.
+hipBLASLt includes many `optimization features <https://github.com/ROCm/rocm-libraries/blob/develop/projects/hipblaslt/tensilelite/Tensile/Common/ValidParameters.py>`_.
 These optimization features are integrated into the `TensileLite <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipblaslt/tensilelite>`_ assembly
 kernel generator.
 
@@ -45,4 +45,3 @@ The hipBLASLt solution selection algorithm follows these steps:
    transpose configurations, data types, and other characteristics.
 #. **Heuristics with grid**: hipBLASLt provides a suggested kernel order for a given GEMM size. You can specify the number of
    kernels to search. The default number is one, but searching more kernels can yield better results.
-#. **Algorithm preference search**: This search includes preferences such as split-K, Work Group Mapping (WGM), and other parameters for additional improvement.
