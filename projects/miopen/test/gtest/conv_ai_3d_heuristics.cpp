@@ -140,7 +140,8 @@ protected:
 };
 
 // --- Metadata3D tests ---
-
+// for some reason cppcheck raises a syntax error/warning here, but it compiles fine.
+// cppcheck-suppress syntaxError
 TEST_F(GPU_Conv3DAIHeuristics_FP32, Metadata3D_LoadValidArchitecture)
 {
     conv3d::Metadata3D metadata("gfx942_3d");
