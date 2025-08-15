@@ -5,5 +5,6 @@ target_sources(tensilelite-host
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/AnalyticalGemm.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Hardware.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/StreamK.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Utils.cpp"
 )
