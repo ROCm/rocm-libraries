@@ -3,6 +3,8 @@
 #include "hip/hip_runtime.h"
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
+#include <thrust/device_ptr.h>
+#include <thrust/device_malloc.h>
 
 
 TESTS_DEFINE(UniquePtrGeneralTests, NumericalTestsParams);
@@ -58,7 +60,7 @@ TEST(UniquePtrGeneralTests, TestUnqiuePtrSelfMoveAsgn)
     SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
     // Self-move for single object
-    {   
+    {
         thrust::unique_ptr<int> p = thrust::make_unique<int>(1);
         int* raw_p = p.get_raw();
         p = std::move(p);
@@ -89,5 +91,54 @@ TEST(UniquePtrGeneralTests, TestUniquePtrNullAsgn)
         size_t dummy = 0;
         st = hipMemPtrGetInfo(raw_addr, &dummy);
         ASSERT_EQ(st, hipErrorInvalidValue);
+    }
+}
+
+TEST(UniquePtrGeneralTests, TestUniquePtrDefaultCtor)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // Default constructed unique_ptr
+    {
+        thrust::unique_ptr<int> p;
+        ASSERT_EQ(p, nullptr);
+    }
+}
+
+TEST(UniquePtrGeneralTests, TestUniquePtrMoveCtor)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // Move constructor for single object
+    {
+        thrust::unique_ptr<int> p1 = thrust::make_unique<int>(42);
+        int* raw_p1 = p1.get_raw();
+        thrust::unique_ptr<int> p2(std::move(p1));
+        ASSERT_EQ(p2.get_raw(), raw_p1);
+        ASSERT_EQ(p1, nullptr);
+    }   
+}
+
+TEST(UniquePtrGeneralTests, TestUniquePtrNullptrCtor)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // Single object
+    {
+        thrust::unique_ptr<int> p(nullptr);
+        ASSERT_EQ(p, nullptr);
+    }
+}
+
+TEST(UniquePtrGeneralTests, TestUniquePtrPointerCtor)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // Single object, default deleter
+    {
+        thrust::device_ptr<int> dev_p = thrust::device_malloc<int>(1);
+
+        thrust::unique_ptr<int> s(dev_p);
+        ASSERT_EQ(s.get(), dev_p);
     }
 }
