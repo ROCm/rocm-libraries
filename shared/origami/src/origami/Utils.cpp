@@ -24,8 +24,7 @@
  *
  *******************************************************************************/
 
-#include <Tensile/analytical/Utils.hpp>
-// #include "Utils.hpp"
+#include "origami/Utils.hpp"
 
 #include <algorithm>
 #include <chrono> // For timing
@@ -33,11 +32,8 @@
 #include <iomanip> // For output formatting
 #include <iostream>
 
-namespace TensileLite
+namespace origami
 {
-    namespace analytical
-    {
-
         //
         // Tiebreaker function.
         //
@@ -663,5 +659,4 @@ namespace TensileLite
             return TFLOPS;
         }
 
-    } // namespace analytical
-} // namespace TensileLite
+} // namespace origami

@@ -33,10 +33,8 @@
 
 #include <hip/hip_runtime.h>
 
-namespace TensileLite
+namespace origami
 {
-    namespace analytical
-    {
         enum class DataType : int
         {
             Float,
@@ -506,5 +504,4 @@ namespace TensileLite
             }
         };
 
-    } // namespace analytical
-} // namespace TensileLite
+} // namespace origami

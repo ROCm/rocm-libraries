@@ -26,13 +26,11 @@
 
 #pragma once
 
-#include <Tensile/analytical/Hardware.hpp>
+#include "origami/Hardware.hpp"
 #include <vector>
 
-namespace TensileLite
+namespace origami
 {
-    namespace analytical
-    {
         // Placeholder for compute_reuse_in_block_gemm function.
         // TODO move over L2 hit rate simulation for tie-breaking.
         double compute_reuse_in_block_gemm(size_t                  grid_m,
@@ -238,5 +236,4 @@ namespace TensileLite
                                 size_t          element_size,
                                 bool            debug);
 
-    } // namespace analytical
-} // namespace TensileLite
+} // namespace origami

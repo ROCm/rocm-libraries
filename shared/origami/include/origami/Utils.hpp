@@ -26,19 +26,15 @@
 
 #pragma once
 
-#include <Tensile/analytical/AnalyticalGemm.hpp>
-#include <Tensile/analytical/Hardware.hpp>
+#include "origami/AnalyticalGemm.hpp"
+#include "origami/Hardware.hpp"
 #include <set>
 #include <tuple>
 #include <vector>
-// #include "Hardware.hpp"
-// #include "AnalyticalGemm.hpp"
 #include <functional> // For std::function
 
-namespace TensileLite
+namespace origami
 {
-    namespace analytical
-    {
 
         using ResultTuple = std::tuple<double, // latency
                                        size_t, // MT_M
@@ -144,5 +140,4 @@ namespace TensileLite
                                            double clock_GHz,
                                            bool   debug = false);
 
-    } // namespace analytical
-} // namespace TensileLite
+} // namespace origami
