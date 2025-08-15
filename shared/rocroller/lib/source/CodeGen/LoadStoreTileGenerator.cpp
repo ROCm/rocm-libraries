@@ -297,11 +297,21 @@ namespace rocRoller
             }
 
             auto [targetTag, direction] = *maybeTargetTag;
+            auto theOne = 527;
 
             // Find all required coordinates for the storage node,
             // and filter out Unroll coordinates.
             auto [required, path] = findRequiredCoordinates(targetTag, direction, *m_graph);
             auto unrolls          = filterCoordinates<Unroll>(required, *m_graph);
+
+            if (offsetTag == theOne)
+            {
+                std::cout << "targetTag " << targetTag << std::endl;
+                for (auto value : required)
+                {
+                    std::cout << "required: " << value << std::endl;
+                }
+            }
 
             if(unrolls.size() == 0)
                 return nullptr;
@@ -310,6 +320,10 @@ namespace rocRoller
 
             for(auto const& unroll : unrolls)
             {
+                if (offsetTag == theOne)
+                {
+                std::cout << "unroll " << unroll << std::endl;
+                }
                 // Find the neighbour of the Unroll that:
                 // 1. is in the load/store coordinate transform path
                 // 2. has a Stride edge connected to it
@@ -321,12 +335,20 @@ namespace rocRoller
                     neighbourNodes = m_graph->coordinates.childNodes(unroll).to<std::vector>();
                 for(auto neighbourNode : neighbourNodes)
                 {
+                    if (offsetTag == theOne)
+                    {
+                        std::cout << "neighbourNode " << neighbourNode << std::endl;
+                    }
                     if(path.contains(neighbourNode))
                     {
                         auto neighbourEdges = m_graph->coordinates.getNeighbours(
                             neighbourNode, Graph::opposite(direction));
                         for(auto neighbourEdge : neighbourEdges)
                         {
+                            if (offsetTag == theOne)
+                            {
+                            std::cout << "neighbourEdge " << neighbourEdge << std::endl;
+                            }
                             auto maybeStride = m_graph->coordinates.get<Stride>(neighbourEdge);
                             if(maybeStride
                                && m_context->registerTagManager()->hasExpression(neighbourEdge))
@@ -338,7 +360,12 @@ namespace rocRoller
                 }
 
                 if(!maybeStrideTag)
+                {
+                    if (offsetTag == theOne)
+                        std::cout << "!maybeStrideTag" << std::endl;
                     continue;
+                }
+                    
 
                 auto [strideExpr, strideAttrs]
                     = m_context->registerTagManager()->getExpression(*maybeStrideTag);
