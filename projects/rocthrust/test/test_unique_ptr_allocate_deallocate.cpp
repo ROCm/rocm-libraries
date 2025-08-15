@@ -195,3 +195,24 @@ TEST(UniquePtrAllocDeallocTests, TestMakeUniqueArrayUserType)
         ASSERT_EQ(host_p.val_a, 2);
     }
 }
+
+TEST(UniquePtrAllocDeallocTests, TestUniquePtrDltrArray)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    void *raw_addr = nullptr;
+    size_t sz = 0;
+    {
+        thrust::unique_ptr<A[]> p = thrust::make_unique<A[]>(3);
+        ASSERT_NE(p, nullptr);
+        
+        hipError_t st = hipMemPtrGetInfo(static_cast<void*>(p.get_raw()), &sz);
+        ASSERT_EQ(st, hipSuccess);
+        ASSERT_GE(sz, 3 * sizeof(A));
+
+        raw_addr = static_cast<void*>(p.get_raw());
+    }
+    size_t dummy = 0;
+    hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
+    ASSERT_EQ(st, hipErrorInvalidValue);
+}
