@@ -10,11 +10,16 @@ using Hardware    = TensileLite::analytical::Hardware;
 
 PYBIND11_MODULE(origami, m)
 {
+    pybind11::enum_<Hardware::Architecture>(m, "Architecture")
+        .value("gfx942", Hardware::Architecture::gfx942)
+        .value("gfx950", Hardware::Architecture::gfx950)
+        .export_values();
+
     pybind11::enum_<Origami::DataType>(m, "DataType")
         .value("Float", Origami::DataType::Float)
-        .value("Double", Origami::DataType::Double)
         .value("ComplexFloat", Origami::DataType::ComplexFloat)
         .value("ComplexDouble", Origami::DataType::ComplexDouble)
+        .value("Double", Origami::DataType::Double)
         .value("Half", Origami::DataType::Half)
         .value("Int8x4", Origami::DataType::Int8x4)
         .value("Int32", Origami::DataType::Int32)
@@ -30,16 +35,14 @@ PYBIND11_MODULE(origami, m)
         .value("BFloat8", Origami::DataType::BFloat8)
         .value("Float8BFloat8", Origami::DataType::Float8BFloat8)
         .value("BFloat8Float8", Origami::DataType::BFloat8Float8)
+        .value("Float6", Origami::DataType::Float6)
+        .value("BFloat6", Origami::DataType::BFloat6)
+        .value("Float4", Origami::DataType::Float4)
         .export_values();
 
     m.def("intToDataType",
           &Origami::intToDataType,
           "Convert int to DataType.");
-
-    pybind11::enum_<Hardware::Architecture>(m, "Architecture")
-        .value("gfx942", Hardware::Architecture::gfx942)
-        .value("gfx950", Hardware::Architecture::gfx950)
-        .export_values();
 
     pybind11::class_<Hardware>(m, "Hardware")
         .def(pybind11::init<Hardware::Architecture,
