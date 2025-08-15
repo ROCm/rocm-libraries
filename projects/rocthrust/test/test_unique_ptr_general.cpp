@@ -142,3 +142,22 @@ TEST(UniquePtrGeneralTests, TestUniquePtrPointerCtor)
         ASSERT_EQ(s.get(), dev_p);
     }
 }
+
+TEST(UniquePtrGeneralTests, TestUniquePtrDtorNullptr)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
+    // Single object
+    {
+        void* raw_addr = nullptr;
+        {
+            thrust::unique_ptr<int> p(nullptr);
+            ASSERT_EQ(p, nullptr);
+
+            raw_addr = static_cast<void*>(p.get_raw());
+        }
+        size_t dummy = 0;
+        hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
+        ASSERT_EQ(st, hipErrorInvalidValue);
+    }
+}
