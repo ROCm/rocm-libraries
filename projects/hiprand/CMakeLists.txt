@@ -36,7 +36,7 @@ else()
   set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "Install path prefix, prepended onto install directories")
   list( APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} )
 endif()
-
+message("hello")
 #
 # hipRAND project
 #

@@ -234,6 +234,8 @@ else()
     set(package_name rocrand)
 endif()
 
+message("hello")
+
 set(ROCRAND_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}" CACHE PATH "Path placed into ldconfig file")
 
 rocm_create_package(
