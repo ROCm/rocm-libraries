@@ -266,10 +266,6 @@ namespace rocisa
             {
                 kStr += " offen offset:" + std::to_string(offset12);
             }
-            if(glc || slc || lds || dlc || scope != CacheScope::SCOPE_NONE)
-            {
-                kStr += ",";
-            }
             if(hasGLCModifier && glc)
             {
                 kStr += " " + getGlcBitName(hasGLCModifier);
