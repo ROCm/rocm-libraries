@@ -22,7 +22,6 @@
 # ########################################################################
 
 include(CMakeFindDependencyMacro)
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../../../share/cmake/hipblaslt")
 
 find_dependency(hipblas-common)
 
