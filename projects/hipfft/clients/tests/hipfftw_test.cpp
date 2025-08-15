@@ -435,7 +435,7 @@ namespace
             {
 #ifdef WIN32
                 pinned_host_alloc_was_disabled
-                    = SetEnvironmentVariable("HIPFFTW_BYTE_SIZE_LIMIT_PINNED_HOST_ALLOC", "0") != 0;
+                    = SetEnvironmentVariable("HIPFFTW_BYTE_SIZE_LIMIT_PINNED_HOST_ALLOC", "0");
 #else
                 pinned_host_alloc_was_disabled
                     = setenv("HIPFFTW_BYTE_SIZE_LIMIT_PINNED_HOST_ALLOC", "0", 1) == EXIT_SUCCESS;
@@ -449,8 +449,8 @@ namespace
             if(params.avoid_alloc_kind & alloc_kind_disabler::pageable_host)
             {
 #ifdef WIN32
-                pageable_host_alloc_was_disabled                          = SetEnvironmentVariable(
-                    "HIPFFTW_BYTE_SIZE_LIMIT_PAGEABLE_HOST_ALLOC", "0") ! = 0;
+                pageable_host_alloc_was_disabled
+                    = SetEnvironmentVariable("HIPFFTW_BYTE_SIZE_LIMIT_PAGEABLE_HOST_ALLOC", "0");
 #else
                 pageable_host_alloc_was_disabled
                     = setenv("HIPFFTW_BYTE_SIZE_LIMIT_PAGEABLE_HOST_ALLOC", "0", 1) == EXIT_SUCCESS;
@@ -1418,8 +1418,8 @@ namespace
                 if(num_devices > 1)
                     ret.push_back(hipfftw_data_memory_type::managed_other_device);
             }
-            return ret;
 #endif
+            return ret;
         };
         const static std::vector<hipfftw_data_memory_type> possible_cases = create_possible_cases();
         return possible_cases;
@@ -1713,8 +1713,7 @@ namespace
                                 GTEST_FAIL() << gtest_info.str();
                         }
                         auto other_device_id = hipInvalidDeviceId;
-                        if(mem_type == hipfftw_data_memory_type::managed_other_device
-                           || mem_type == hipfftw_data_memory_type::other_device)
+                        if(is_attached_to_other_device(mem_type))
                         {
                             int num_devices = 0;
                             hip_status      = hipGetDeviceCount(&num_devices);
@@ -1770,8 +1769,7 @@ namespace
                                 GTEST_FAIL() << gtest_info.str();
                         }
 
-                        if(mem_type == hipfftw_data_memory_type::managed_other_device
-                           || mem_type == hipfftw_data_memory_type::other_device)
+                        if(is_attached_to_other_device(mem_type))
                         {
                             hip_status = hipSetDevice(original_device_id);
                             if(hip_status != hipSuccess)
