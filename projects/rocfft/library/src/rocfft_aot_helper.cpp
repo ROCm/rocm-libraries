@@ -301,6 +301,7 @@ void build_stockham_function_pool(CompileQueue& queue)
                                                             cbtype,
                                                             fuseBlue,
                                                             ppType,
+                                                            ppParams,
                                                             {},
                                                             {});
                 std::function<std::string(const std::string&)> generate_src
@@ -692,6 +693,7 @@ void build_solution_kernels(CompileQueue& queue)
                                                             cbtype,
                                                             fuseBlue,
                                                             ppType,
+                                                            ppParams,
                                                             {},
                                                             {});
 
