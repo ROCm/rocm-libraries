@@ -151,6 +151,13 @@ set( kgen_logic_files
      # python code that decides kernel parameters
      ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator.py
      ${CMAKE_SOURCE_DIR}/library/src/device/generator.py
+     ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_lds.py
+     ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbrr.py
+     ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbcc.py
+     ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbcr.py
+     ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_sbrc.py
+     ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_2d_single.py
+     ${CMAKE_SOURCE_DIR}/library/src/device/kernels/configs/config_pp_3d.py
 
      # stockham generator code
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/generator.h
@@ -393,6 +400,11 @@ add_library( rocfft
   ${relative_rocfft_headers_public}
   )
 rocfft_add_coverage_flags( rocfft )
+
+# rocFFT contains default implementations of callback functions that
+# need to be built as relocatable device code
+target_compile_options( rocfft PRIVATE -fgpu-rdc )
+target_link_options( rocfft PRIVATE -fgpu-rdc )
 
 if( ROCFFT_MPI_ENABLE )
   target_compile_definitions(rocfft PRIVATE ROCFFT_MPI_ENABLE)

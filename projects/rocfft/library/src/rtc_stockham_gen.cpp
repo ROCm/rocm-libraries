@@ -43,26 +43,27 @@ using namespace std::placeholders;
 #include "device/kernel-generator-embed.h"
 
 // generate name for RTC stockham kernel
-std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs& specs,
-                                     const StockhamGeneratorSpecs& specs2d,
-                                     ComputeScheme                 scheme,
-                                     int                           direction,
-                                     rocfft_precision              precision,
-                                     rocfft_result_placement       placement,
-                                     rocfft_array_type             inArrayType,
-                                     rocfft_array_type             outArrayType,
-                                     bool                          unitstride,
-                                     size_t                        largeTwdBase,
-                                     size_t                        largeTwdSteps,
-                                     bool                          largeTwdBatchIsTransformCount,
-                                     DirectRegType                 dir2regMode,
-                                     IntrinsicAccessType           intrinsicMode,
-                                     SBRC_TRANSPOSE_TYPE           transpose_type,
-                                     CallbackType                  cbtype,
-                                     BluesteinFuseType             fuseBlue,
-                                     PartialPassType               ppType,
-                                     const LoadOps&                loadOps,
-                                     const StoreOps&               storeOps)
+std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs&    specs,
+                                     const StockhamGeneratorSpecs&    specs2d,
+                                     ComputeScheme                    scheme,
+                                     int                              direction,
+                                     rocfft_precision                 precision,
+                                     rocfft_result_placement          placement,
+                                     rocfft_array_type                inArrayType,
+                                     rocfft_array_type                outArrayType,
+                                     bool                             unitstride,
+                                     size_t                           largeTwdBase,
+                                     size_t                           largeTwdSteps,
+                                     bool                             largeTwdBatchIsTransformCount,
+                                     DirectRegType                    dir2regMode,
+                                     IntrinsicAccessType              intrinsicMode,
+                                     SBRC_TRANSPOSE_TYPE              transpose_type,
+                                     CallbackType                     cbtype,
+                                     BluesteinFuseType                fuseBlue,
+                                     PartialPassType                  ppType,
+                                     const StockhamPartialPassParams& ppParams,
+                                     const LoadOps&                   loadOps,
+                                     const StoreOps&                  storeOps)
 {
     std::string kernel_name = "fft_rtc";
 
@@ -77,10 +78,14 @@ std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs& specs,
         break;
     case PPT_SBCC:
     case PPT_SBRR:
-        kernel_name += "_pp";
+        kernel_name += "_partial_pass";
+        kernel_name += "_parent_len";
+        for(auto f : ppParams.parent_length)
+            kernel_name += "_" + std::to_string(f);
+        break;
     }
 
-    kernel_name += "_len";
+    kernel_name += "_len_";
     kernel_name += std::to_string(specs.length);
     if(scheme == CS_KERNEL_2D_SINGLE)
         kernel_name += "x" + std::to_string(specs2d.length);
@@ -113,7 +118,7 @@ std::string stockham_rtc_kernel_name(const StockhamGeneratorSpecs& specs,
 
     if(specs.static_dim)
     {
-        kernel_name += "_dim";
+        kernel_name += "_dim_";
         kernel_name += std::to_string(specs.static_dim);
     }
 
@@ -407,8 +412,8 @@ std::string stockham_rtc(const StockhamGeneratorSpecs&    specs,
 
         if(ppType != PPT_NONE)
             all_factors.insert(all_factors.end(),
-                               params_pp.factors_off_dim.begin(),
-                               params_pp.factors_off_dim.end());
+                               params_pp.pp_factors_curr.begin(),
+                               params_pp.pp_factors_curr.end());
     }
 
     // generated functions default to forward in-place interleaved.
