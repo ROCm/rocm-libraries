@@ -346,6 +346,25 @@ TEST(UniquePtrGeneralTests, TestUniquePtrDtorNullptr)
     }
 }
 
+TEST(UniquePtrGeneralTests, TestUniquePtrDtorNullptrArray)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
+    // Array
+    {
+        void* raw_addr = nullptr;
+        {
+            thrust::unique_ptr<int[]> p(nullptr);
+            ASSERT_EQ(p, nullptr);
+
+            raw_addr = static_cast<void*>(p.get_raw());
+        }
+        size_t dummy = 0;
+        hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
+        ASSERT_EQ(st, hipErrorInvalidValue);
+    }
+}
+
 // Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.modifiers/release.pass.cpp
 TEST(UniquePtrGeneralTests, TestUniquePtrModifierRelease)
 {
