@@ -23,14 +23,13 @@
 #include "common_test_header.hpp"
 
 // Thread operators fixes for extended float types
+#include "hipcub/config.hpp"
 #include "test_utils_data_generation.hpp"
 #include "test_utils_thread_operators.hpp"
 
 // hipcub API
 #include <hipcub/device/device_reduce.hpp>
 #include <hipcub/iterator/constant_input_iterator.hpp>
-
-#include <bitset>
 
 // Params for tests
 template<class InputType, class OutputType = InputType, bool UseGraphs = false>
@@ -467,12 +466,14 @@ struct ArgMinDispatch
                     NumItemsT       num_items,
                     hipStream_t     stream) const
     {
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         return hipcub::DeviceReduce::ArgMin(d_temp_storage,
                                             temp_storage_bytes,
                                             d_in,
                                             d_out,
                                             num_items,
                                             stream);
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
     }
 };
 
@@ -487,12 +488,14 @@ struct ArgMaxDispatch
                     NumItemsT       num_items,
                     hipStream_t     stream) const
     {
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         return hipcub::DeviceReduce::ArgMax(d_temp_storage,
                                             temp_storage_bytes,
                                             d_in,
                                             d_out,
                                             num_items,
                                             stream);
+        HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
     }
 };
 
