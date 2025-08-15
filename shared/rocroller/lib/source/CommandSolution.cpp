@@ -414,6 +414,7 @@ namespace rocRoller
         transforms.push_back(std::make_shared<KernelGraph::CleanLoops>());
         transforms.push_back(
             std::make_shared<KernelGraph::SwizzleScale>(m_commandParameters, m_context));
+        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(
             std::make_shared<KernelGraph::AddPrefetch>(m_commandParameters, m_context));
         if(m_commandParameters->prefetch && m_commandParameters->prefetchScale)

@@ -40,8 +40,9 @@ namespace rocRoller
         using namespace Expression;
 
         void insertPreLoopLoads(KernelGraph&            graph,
+                                UnrollColouring const&    colouring,
                                 std::vector<int> const& preLoopLoad,
-                                int                     firstLoad)
+                                std::vector<int>        loads)
         {
             auto preNOP = graph.control.addElement(NOP());
             auto prev   = preNOP;
@@ -50,11 +51,35 @@ namespace rocRoller
                 graph.control.addElement(Sequence(), {prev}, {next});
                 prev = next;
             }
-            auto topOp = getTopSetCoordinate(graph, firstLoad);
-            insertBefore(graph, topOp, preNOP, prev);
+
+            std::optional<int> unrollKVal;
+            std::optional<int> prevLoad;
+            std::optional<int> nextLoad;
+            for(auto load : loads)
+            { 
+                auto unrollMap = colouring.operationColour.at(load);
+                auto unrollKDim = graph.mapper.get<Unroll>(load, 2);
+                if(unrollKVal.has_value() && unrollKVal.value() != unrollMap.at(unrollKDim))
+                {
+                    nextLoad = load;
+                    break;
+                }
+                unrollKVal = unrollMap.at(unrollKDim);
+                prevLoad = load; 
+            }
+
+            AssertFatal(prevLoad.has_value() && nextLoad.has_value(), "couldn't find a position to in-loop scale prefetch");
+
+            auto prevTopOp = getTopSetCoordinate(graph, prevLoad.value());
+            auto nextTopOp = getTopSetCoordinate(graph, nextLoad.value());
+            graph.control.addElement(Sequence(), {prevTopOp}, {preNOP});
+            graph.control.addElement(Sequence(), {prev}, {nextTopOp});
+            //auto topOp = getTopSetCoordinate(graph, firstLoad);
+            //insertBefore(graph, topOp, preNOP, prev);
         }
 
         void insertInLoopLoads(KernelGraph&                            graph,
+                               UnrollColouring const&    colouring,
                                std::vector<std::pair<int, int>> const& inLoopLoad,
                                int                                     forLoop)
         {
@@ -67,6 +92,24 @@ namespace rocRoller
                       loopLoads.end(),
                       TopologicalCompare(std::make_shared<KernelGraph>(graph)));
 
+            std::optional<int> unrollKVal;
+            std::optional<int> prevLoad;
+            std::optional<int> nextLoad;
+            for(auto loopLoad : loopLoads)
+            { 
+                auto unrollMap = colouring.operationColour.at(loopLoad);
+                auto unrollKDim = graph.mapper.get<Unroll>(loopLoad, 2);
+                if(unrollKVal.has_value() && unrollKVal.value() != unrollMap.at(unrollKDim))
+                {
+                    nextLoad = loopLoad;
+                    break;
+                }
+                unrollKVal = unrollMap.at(unrollKDim);
+                prevLoad = loopLoad; 
+            }
+
+            AssertFatal(prevLoad.has_value() && nextLoad.has_value(), "couldn't find a position to in-loop scale prefetch");
+
             auto postNOP = graph.control.addElement(NOP());
             auto prev    = postNOP;
             for(auto [loadChain, _ignore] : inLoopLoad)
@@ -74,8 +117,11 @@ namespace rocRoller
                 graph.control.addElement(Sequence(), {prev}, {loadChain});
                 prev = loadChain;
             }
-            auto topOp = getTopSetCoordinate(graph, loopLoads[0]);
-            insertBefore(graph, topOp, postNOP, prev);
+            auto prevTopOp = getTopSetCoordinate(graph, prevLoad.value());
+            auto nextTopOp = getTopSetCoordinate(graph, nextLoad.value());
+            //insertBefore(graph, topOp, postNOP, prev);
+            graph.control.addElement(Sequence(), {prevTopOp}, {postNOP});
+            graph.control.addElement(Sequence(), {prev}, {nextTopOp});
 
             // Update SetCoordinates
             for(auto [loadChain, unrollCoord] : inLoopLoad)
@@ -137,6 +183,8 @@ namespace rocRoller
             auto loads
                 = filter(graph.control.isElemType<LoadTiled>(), graph.control.depthFirstVisit(root))
                       .to<std::vector>();
+
+            auto colouring = colourByUnrollValue(graph);
 
             // sort the loads
             // this brings the first load in the sequence to the front
@@ -232,10 +280,10 @@ namespace rocRoller
                 return;
 
             AssertFatal(!loads.empty());
-            insertPreLoopLoads(graph, preLoopLoad, loads[0]);
+            insertPreLoopLoads(graph, colouring, preLoopLoad, loads);
 
             AssertFatal(forLoop != -1);
-            insertInLoopLoads(graph, inLoopLoad, forLoop);
+            insertInLoopLoads(graph, colouring, inLoopLoad, forLoop);
 
             insertInLoopCopies(graph, inLoopCopy);
         }
