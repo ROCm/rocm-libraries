@@ -110,11 +110,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
     Variable global_idx{"global_idx", "unsigned int"};
     Variable transpose_idx{"transpose_idx", "unsigned int"};
 
-    Variable len_1_2{"len_1_2", "unsigned int"};
-    Variable len_1_2_3{"len_1_2_3", "unsigned int"};
-    Variable len_pp_factors_curr_prod{"len_pp_factors_curr_prod", "unsigned int"};
-    Variable len_pp_factors_other_prod{"len_pp_factors_other_prod", "unsigned int"};
-
     std::vector<unsigned int> launcher_lengths() override
     {
         return params.parent_length;
@@ -469,12 +464,7 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
             tmp_stmts += StoreGlobal{
                 buf,
                 CallExpr{"local_transpose_pp_length" + std::to_string(length) + "_device",
-                         {offset_tile_wbuf(i),
-                          lengths,
-                          len_1_2,
-                          len_1_2_3,
-                          len_pp_factors_curr_prod,
-                          len_pp_factors_other_prod}},
+                         {offset_tile_wbuf(i)}},
                 lds_complex[offset_tile_rlds(i)]};
 
         stmts += CommentLines{
@@ -696,27 +686,28 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
             = "local_transpose_pp_length" + std::to_string(length) + "_device";
 
         Function f{function_name};
-        f.arguments   = ArgumentList{global_idx,
-                                   lengths,
-                                   len_1_2,
-                                   len_1_2_3,
-                                   len_pp_factors_curr_prod,
-                                   len_pp_factors_other_prod};
+        f.arguments   = ArgumentList{global_idx};
         f.return_type = "unsigned int";
         f.qualifier   = "__device__";
 
         StatementList& body = f.body;
 
-        auto len_1 = lengths[2];
-        auto len_2 = lengths[1];
-        auto len_3 = lengths[0];
+        auto len_1 = params.parent_length[2];
+        auto len_2 = params.parent_length[1];
+        auto len_3 = params.parent_length[0];
+
+        auto len_1_2_3 = len_1 * len_2 * len_3;
+        auto len_1_2   = len_1 * len_2;
+
+        auto len_pp_factors_curr_prod  = pp_factors_curr_prod * len_2;
+        auto len_pp_factors_other_prod = pp_factors_other_prod * len_2;
 
         body += Declaration{transpose_idx, global_idx % len_1_2_3};
 
         body += Assign{
             transpose_idx,
             Parens{transpose_idx % len_2}
-                + Parens{Parens{Parens{transpose_idx % len_pp_factors_curr_prod} / len_2}
+                + Parens{Parens{Parens{transpose_idx % (len_pp_factors_curr_prod)} / len_2}
                          * len_pp_factors_other_prod}
                 + Parens{Parens{Parens{transpose_idx % len_1_2} / len_pp_factors_curr_prod} * len_2}
                 + Parens{Parens{transpose_idx / len_1_2} * len_1_2}};
@@ -972,10 +963,6 @@ struct StockhamPartialPassKernelCC : public StockhamKernelCC
         // insert large twiddles
         ArgumentList arglist = StockhamKernel::global_arguments();
         arglist.arguments.insert(arglist.arguments.begin() + 1, large_twiddles);
-        arglist.arguments.insert(arglist.arguments.begin() + 2, len_1_2);
-        arglist.arguments.insert(arglist.arguments.begin() + 3, len_1_2_3);
-        arglist.arguments.insert(arglist.arguments.begin() + 4, len_pp_factors_curr_prod);
-        arglist.arguments.insert(arglist.arguments.begin() + 5, len_pp_factors_other_prod);
         return arglist;
     }
 

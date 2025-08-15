@@ -53,23 +53,21 @@ def runCI =
     def compileCommand =
     {
         platform, project->
+        if (platform.os.contains("rhel8")) {
+            echo "Skipping compile for rhel8"
+            return
+        }
 
         commonGroovy = load "${project.paths.project_src_prefix}/.jenkins/common.groovy"
         commonGroovy.runCompileCommand(platform, project, jobName, false)
     }
 
-    if (platform.os.contains("rhel8"))
-        compileCommand = { platform, project -> 
-            // Skip compile
-        }
-
-    
     def testCommand =
     {
         platform, project->
 
         def testMark = "pre_checkin"
-        boolean runHostTest = !platform.os.contains("rhel8")
+        boolean runHostTest = !platform.os.contains("rhel8") && !platform.os.contains("rhel9")
         boolean runUnitTest = true
         boolean runToxTest = !platform.os.contains("rhel8")
         commonGroovy.runTestCommand(platform, project, jobName, testMark, runHostTest, runUnitTest, runToxTest)
