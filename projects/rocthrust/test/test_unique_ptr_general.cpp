@@ -651,6 +651,31 @@ TEST(UniquePtrGeneralTests, TestUniquePtrObserversGet)
     // }
 }
 
+TEST(UniquePtrGeneralTests, TestUniquePtrObserversGetArray)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // get() for array
+    {
+        thrust::device_ptr<int> dev_p = thrust::device_malloc<int>(10);
+        thrust::unique_ptr<int[]> p(dev_p);
+        const thrust::unique_ptr<int[]>& const_p = p;
+
+        ASSERT_EQ(p.get(), dev_p);
+        ASSERT_EQ(const_p.get(), dev_p);
+    }
+
+    // // get() for const array
+    // {
+    //     thrust::device_ptr<const int> dev_p = thrust::device_new<const int>(10);
+    //     thrust::unique_ptr<const int[]> p(dev_p);
+    //     const thrust::unique_ptr<const int[]>& const_p = p;
+
+    //     ASSERT_EQ(p.get(), dev_p);
+    //     ASSERT_EQ(const_p.get(), dev_p);
+    // }
+}
+
 // Thrust-specific test for testing if thrust::default_delete is correct.
 TEST(UniquePtrGeneralTests, TestUniquePtrUserTypeDefaultDeleter)
 {
