@@ -52,31 +52,27 @@ using namespace miopen;
 using namespace miopen::ai;
 
 // Test suite for 3D convolution AI heuristics (TunaNet3D)
-// Naming: GPU_Conv3D_AIHeuristics_FP32
-class GPU_Conv3D_AIHeuristics_FP32 : public ::testing::Test
+class GPU_Conv3DAIHeuristics_FP32 : public ::testing::Test
 {
 protected:
     miopen::Handle handle;
     miopen::ExecutionContext ctx;
-    bool skip_tests = false;
 
-    GPU_Conv3D_AIHeuristics_FP32() : ctx(&handle) {}
+    GPU_Conv3DAIHeuristics_FP32() : ctx(&handle) {}
 
     void SetUp() override
     {
-        // Early skip if model files don't exist (convention: early exit in SetUp)
-        if(!ModelFilesExist("gfx942_3d"))
-        {
-            skip_tests = true;
-            GTEST_SKIP() << "gfx942_3d model files not found";
-        }
-
         // Check if running on supported GPU arch (e.g., "gfx942")
         std::string device_name = handle.GetDeviceName();
         if(device_name != "gfx942")
         {
-            skip_tests = true;
             GTEST_SKIP() << "Test requires gfx942 GPU, found: " << device_name;
+        }
+
+        // Early skip if model files don't exist (convention: early exit in SetUp)
+        if(!ModelFilesExist("gfx942_3d"))
+        {
+            GTEST_SKIP() << "gfx942_3d model files not found";
         }
     }
 
@@ -145,10 +141,8 @@ protected:
 
 // --- Metadata3D tests ---
 
-TEST_F(GPU_Conv3D_AIHeuristics_FP32, Metadata3D_LoadValidArchitecture)
+TEST_F(GPU_Conv3DAIHeuristics_FP32, Metadata3D_LoadValidArchitecture)
 {
-    if(skip_tests)
-        return;
     conv3d::Metadata3D metadata("gfx942_3d");
     ASSERT_TRUE(metadata.IsValid());
     EXPECT_EQ(metadata.GetArchName(), "gfx942_3d");
@@ -159,10 +153,8 @@ TEST_F(GPU_Conv3D_AIHeuristics_FP32, Metadata3D_LoadValidArchitecture)
     EXPECT_FALSE(metadata.GetSolverMap().empty());
 }
 
-TEST_F(GPU_Conv3D_AIHeuristics_FP32, Metadata3D_EncodeDirection)
+TEST_F(GPU_Conv3DAIHeuristics_FP32, Metadata3D_EncodeDirection)
 {
-    if(skip_tests)
-        return;
     conv3d::Metadata3D metadata("gfx942_3d");
     ASSERT_TRUE(metadata.IsValid());
     auto fwd_encoded = metadata.EncodeDirection(miopen::conv::Direction::Forward);
@@ -173,10 +165,8 @@ TEST_F(GPU_Conv3D_AIHeuristics_FP32, Metadata3D_EncodeDirection)
     EXPECT_NE(bwd_encoded, wrw_encoded);
 }
 
-TEST_F(GPU_Conv3D_AIHeuristics_FP32, Metadata3D_EncodePrecision)
+TEST_F(GPU_Conv3DAIHeuristics_FP32, Metadata3D_EncodePrecision)
 {
-    if(skip_tests)
-        return;
     conv3d::Metadata3D metadata("gfx942_3d");
     ASSERT_TRUE(metadata.IsValid());
     auto fp32_encoded = metadata.EncodePrecision(miopenFloat);
@@ -187,10 +177,8 @@ TEST_F(GPU_Conv3D_AIHeuristics_FP32, Metadata3D_EncodePrecision)
     EXPECT_NE(fp16_encoded, bf16_encoded);
 }
 
-TEST_F(GPU_Conv3D_AIHeuristics_FP32, Metadata3D_EncodeLayouts)
+TEST_F(GPU_Conv3DAIHeuristics_FP32, Metadata3D_EncodeLayouts)
 {
-    if(skip_tests)
-        return;
     conv3d::Metadata3D metadata("gfx942_3d");
     ASSERT_TRUE(metadata.IsValid());
     auto ncdhw_in  = metadata.EncodeInLayout("NCDHW");
@@ -209,28 +197,22 @@ TEST_F(GPU_Conv3D_AIHeuristics_FP32, Metadata3D_EncodeLayouts)
 
 // --- Model3D tests ---
 
-TEST_F(GPU_Conv3D_AIHeuristics_FP32, Get3DModel_SupportedDevice)
+TEST_F(GPU_Conv3DAIHeuristics_FP32, Get3DModel_SupportedDevice)
 {
-    if(skip_tests)
-        return;
     auto model = conv3d::Get3DModel("gfx942");
     ASSERT_NE(model, nullptr);
 }
 
-TEST_F(GPU_Conv3D_AIHeuristics_FP32, Model3D_IsProblemSupported_3DProblem)
+TEST_F(GPU_Conv3DAIHeuristics_FP32, Model3D_IsProblemSupported_3DProblem)
 {
-    if(skip_tests)
-        return;
     auto model = conv3d::Get3DModel("gfx942");
     ASSERT_NE(model, nullptr);
     auto problem3d = Create3DProblem();
     EXPECT_TRUE(model->IsProblemSupported(problem3d, ctx));
 }
 
-TEST_F(GPU_Conv3D_AIHeuristics_FP32, Model3D_IsProblemSupported_2DProblem)
+TEST_F(GPU_Conv3DAIHeuristics_FP32, Model3D_IsProblemSupported_2DProblem)
 {
-    if(skip_tests)
-        return;
     auto model = conv3d::Get3DModel("gfx942");
     ASSERT_NE(model, nullptr);
     miopen::TensorDescriptor inputTensor2D(miopenFloat, {1, 4, 8, 8});
@@ -246,10 +228,8 @@ TEST_F(GPU_Conv3D_AIHeuristics_FP32, Model3D_IsProblemSupported_2DProblem)
     EXPECT_FALSE(model->IsProblemSupported(problem2d, ctx));
 }
 
-TEST_F(GPU_Conv3D_AIHeuristics_FP32, Model3D_Forward_ReturnsValidPredictions)
+TEST_F(GPU_Conv3DAIHeuristics_FP32, Model3D_Forward_ReturnsValidPredictions)
 {
-    if(skip_tests)
-        return;
     auto model = conv3d::Get3DModel("gfx942");
     ASSERT_NE(model, nullptr);
     auto problem = Create3DProblem();
@@ -264,10 +244,8 @@ TEST_F(GPU_Conv3D_AIHeuristics_FP32, Model3D_Forward_ReturnsValidPredictions)
     EXPECT_NE(*max_it, *min_it);
 }
 
-TEST_F(GPU_Conv3D_AIHeuristics_FP32, PredictSolver_3DProblem_ReturnsSolvers)
+TEST_F(GPU_Conv3DAIHeuristics_FP32, PredictSolver_3DProblem_ReturnsSolvers)
 {
-    if(skip_tests)
-        return;
     auto problem = Create3DProblem();
     auto solvers = immed_mode::PredictSolver(problem, ctx, "gfx942");
     EXPECT_FALSE(solvers.empty());
@@ -275,20 +253,16 @@ TEST_F(GPU_Conv3D_AIHeuristics_FP32, PredictSolver_3DProblem_ReturnsSolvers)
         EXPECT_GT(solver_id, 0);
 }
 
-TEST_F(GPU_Conv3D_AIHeuristics_FP32, PredictSolver_3DProblem_UsesCaching)
+TEST_F(GPU_Conv3DAIHeuristics_FP32, PredictSolver_3DProblem_UsesCaching)
 {
-    if(skip_tests)
-        return;
     auto problem  = Create3DProblem();
     auto solvers1 = immed_mode::PredictSolver(problem, ctx, "gfx942");
     auto solvers2 = immed_mode::PredictSolver(problem, ctx, "gfx942");
     EXPECT_EQ(solvers1, solvers2);
 }
 
-TEST_F(GPU_Conv3D_AIHeuristics_FP32, Model3D_DifferentProblemSizes)
+TEST_F(GPU_Conv3DAIHeuristics_FP32, Model3D_DifferentProblemSizes)
 {
-    if(skip_tests)
-        return;
     auto model = conv3d::Get3DModel("gfx942");
     ASSERT_NE(model, nullptr);
     std::vector<std::tuple<int, int, int, int, int>> test_cases = {
@@ -307,7 +281,7 @@ TEST_F(GPU_Conv3D_AIHeuristics_FP32, Model3D_DifferentProblemSizes)
     }
 }
 
-TEST_F(GPU_Conv3D_AIHeuristics_FP32, Metadata3D_OptionalPattern)
+TEST_F(GPU_Conv3DAIHeuristics_FP32, Metadata3D_OptionalPattern)
 {
     conv3d::Metadata3D invalid_metadata("nonexistent");
     EXPECT_FALSE(invalid_metadata.IsValid());
@@ -323,10 +297,8 @@ TEST_F(GPU_Conv3D_AIHeuristics_FP32, Metadata3D_OptionalPattern)
 
 // --- MIOpenDriver-equivalent test ---
 
-TEST_F(GPU_Conv3D_AIHeuristics_FP32, TestMIOpenDriverEquivalent)
+TEST_F(GPU_Conv3DAIHeuristics_FP32, TestMIOpenDriverEquivalent)
 {
-    if(skip_tests)
-        return;
     auto problem    = Create3DProblem(1,
                                    4,
                                    8,
