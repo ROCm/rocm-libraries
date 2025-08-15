@@ -87,6 +87,8 @@ else()
   add_library( hip::hipfftw ALIAS hipfftw )
   list( APPEND HIPFFT_LIBRARY_TARGETS hipfftw )
   list( APPEND HIPFFT_EXPORT_TARGETS hip::hipfftw )
+  # hipfftw.h header uses the same hipfft-export.h as hipfft.h
+  target_compile_definitions( hipfftw PRIVATE hipfft_EXPORTS )
 endif()
 
 set(static_depends)

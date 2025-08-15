@@ -324,7 +324,7 @@ public:
         if(!hipfftw_log_trace || std::atoi(hipfftw_log_trace) <= 0)
         {
 #ifdef WIN32
-            active = SetEnvironmentVariable("HIPFFTW_LOG_EXCEPTIONS", "1") != 0;
+            active = SetEnvironmentVariable("HIPFFTW_LOG_EXCEPTIONS", "1");
 #else
             active = setenv("HIPFFTW_LOG_EXCEPTIONS", "1", 1) == EXIT_SUCCESS;
 #endif
@@ -341,9 +341,9 @@ public:
         if(active)
         {
 #ifdef WIN32
-            SetEnvironmentVariable("HIPFFTW_LOG_EXCEPTIONS", "0");
+            (void)SetEnvironmentVariable("HIPFFTW_LOG_EXCEPTIONS", "0");
 #else
-            setenv("HIPFFTW_LOG_EXCEPTIONS", "0", 1);
+            (void)setenv("HIPFFTW_LOG_EXCEPTIONS", "0", 1);
 #endif
             // restore cerr to its original state
             std::cerr.rdbuf(original_cerr_rdbuf);
@@ -1042,7 +1042,7 @@ public:
             ret << "real_inverse";
             break;
         default:
-            std::runtime_error("unknown type of transform");
+            throw std::runtime_error("unknown type of transform");
         }
 
         // report rank if invalid
@@ -1162,7 +1162,7 @@ public:
         }
         else
         {
-            std::runtime_error("New-array execution functions not implemented yet.");
+            throw std::runtime_error("New-array execution functions not implemented yet.");
         }
     }
 
