@@ -151,14 +151,17 @@ public:
         return Min(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream);
     }
 
-    template<typename InputIteratorT, typename ExtremumOutIteratorT, typename IndexOutIteratorT>
+    template<typename InputIteratorT,
+             typename ExtremumOutIteratorT,
+             typename IndexOutIteratorT,
+             typename NumItemsT>
   HIPCUB_RUNTIME_FUNCTION
     static hipError_t ArgMin(void*                d_temp_storage,
                              size_t&              temp_storage_bytes,
                              InputIteratorT       d_in,
                              ExtremumOutIteratorT d_min_out,
                              IndexOutIteratorT    d_index_out,
-                             ::std::int64_t       num_items,
+                             NumItemsT            num_items,
                              hipStream_t          stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceReduce::ArgMin(d_temp_storage,
@@ -237,14 +240,17 @@ public:
         return Max(d_temp_storage, temp_storage_bytes, d_in, d_out, num_items, stream);
     }
 
-    template<typename InputIteratorT, typename ExtremumOutIteratorT, typename IndexOutIteratorT>
+    template<typename InputIteratorT,
+             typename ExtremumOutIteratorT,
+             typename IndexOutIteratorT,
+             typename NumItemsT>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t ArgMax(void*                d_temp_storage,
                              size_t&              temp_storage_bytes,
                              InputIteratorT       d_in,
                              ExtremumOutIteratorT d_max_out,
                              IndexOutIteratorT    d_index_out,
-                             ::std::int64_t       num_items,
+                             NumItemsT            num_items,
                              hipError_t           stream = 0)
     {
         return hipCUDAErrorTohipError(::cub::DeviceReduce::ArgMax(d_temp_storage,

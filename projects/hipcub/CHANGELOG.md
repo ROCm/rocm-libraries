@@ -5,12 +5,14 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 ## hipCUB-4.1.0 for ROCm 7.1
 
 ### Added
+
 * Add support for large num_items `DeviceScan`, `DevicePartition` and `Reduce::{ArgMin, ArgMax}`.
 * Added tests for large num_items.
 
 ### Removed
 
 ### Changed
+
 * Changed include headers to avoid relative includes that have slipped in.
 
 ## hipCUB-4.0.0 for ROCm 7.0
