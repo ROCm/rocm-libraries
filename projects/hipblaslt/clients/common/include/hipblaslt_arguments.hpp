@@ -863,15 +863,6 @@ namespace ArgumentsHelper
         [](auto&& func, const Arguments& arg, auto T) {
             func("beta", arg.get_beta<decltype(T)>());
         };
-
-
-    // Specialization for e_rotating
-    template <>
-    constexpr auto apply<e_rotating> =
-        [](auto&& func, const Arguments& arg, auto T) {
-            if(arg.rotating > 0)
-                func("rotating_buffer", arg.rotating);
-        };
 };
 // clang-format on
 
