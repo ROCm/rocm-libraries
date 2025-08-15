@@ -10,7 +10,7 @@ Documentation for hipBLAS is available at
 * `--clients-only` build option to only build clients against a prebuilt library
 * gfx1103, gfx1150, gfx1151, gfx1200, and gfx1201 support to clients
 
-## (Unreleased) hipBLAS 3.0.0 for ROCm 7.0.0
+## (Unreleased) hipBLAS 3.0.0
 
 ### Added
 
