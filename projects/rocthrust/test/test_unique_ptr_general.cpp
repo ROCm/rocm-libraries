@@ -65,3 +65,29 @@ TEST(UniquePtrGeneralTests, TestUnqiuePtrSelfMoveAsgn)
         ASSERT_EQ(p.get_raw(), raw_p);
     }
 }
+
+TEST(UniquePtrGeneralTests, TestUniquePtrNullAsgn)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // NULL assignment for single object
+    void* raw_addr = nullptr;
+    size_t sz = 0;
+    {
+        thrust::unique_ptr<int> p = thrust::make_unique<int>(1);
+        ASSERT_NE(p, nullptr);
+
+        hipError_t st = hipMemPtrGetInfo(static_cast<void*>(p.get_raw()), &sz);
+        ASSERT_EQ(st, hipSuccess);
+        ASSERT_GE(sz, sizeof(int));
+        raw_addr = static_cast<void*>(p.get_raw());
+
+        p = nullptr;
+
+        ASSERT_EQ(p, nullptr);
+
+        size_t dummy = 0;
+        st = hipMemPtrGetInfo(raw_addr, &dummy);
+        ASSERT_EQ(st, hipErrorInvalidValue);
+    }
+}
