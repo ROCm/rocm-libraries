@@ -324,12 +324,5 @@ TEST_F(GPU_Conv3DAIHeuristics_FP32, TestMIOpenDriverEquivalent)
 }
 
 } // namespace
-#else
-
-// Provide stub tests when AI is disabled
-TEST(GPU_Conv3D_AIHeuristics_FP32_Disabled, SkippedWhenAIDisabled)
-{
-    GTEST_SKIP() << "AI heuristics not enabled (MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK=0)";
-}
 
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
