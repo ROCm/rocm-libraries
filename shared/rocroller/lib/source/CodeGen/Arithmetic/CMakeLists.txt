@@ -6,6 +6,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/Add.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddShiftL.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ArithmeticGenerator.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ArithmeticGenerator_component.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ArithmeticShiftR.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/BitFieldExtract.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/BitwiseAnd.cpp"
