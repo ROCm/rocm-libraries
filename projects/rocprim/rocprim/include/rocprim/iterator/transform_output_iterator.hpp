@@ -31,14 +31,15 @@ template<typename OutputIterator, typename UnaryFunction>
 class transform_output_iterator_proxy
 {
 public:
-    ROCPRIM_HOST_DEVICE
-    transform_output_iterator_proxy(const OutputIterator& iterator, UnaryFunction func)
+    ROCPRIM_HOST_DEVICE transform_output_iterator_proxy(const OutputIterator& iterator,
+                                                        UnaryFunction         func)
         : it(iterator), f(func)
     {}
 
     template<typename T>
     ROCPRIM_HOST_DEVICE
-    transform_output_iterator_proxy operator=(const T& value)
+    transform_output_iterator_proxy
+        operator=(const T& value)
     {
         *it = f(value);
         return *this;
@@ -80,30 +81,30 @@ public:
     using self_type = transform_output_iterator;
 #endif
 
-    ROCPRIM_HOST_DEVICE
-    inline ~transform_output_iterator()
-        = default;
+    ROCPRIM_HOST_DEVICE inline ~transform_output_iterator() = default;
 
     /// \brief Creates a new transform_output_iterator.
     ///
     /// \param iterator input iterator to iterate over and transform.
     /// \param transform unary function used to transform values obtained
     /// from range pointed by \p iterator.
-    ROCPRIM_HOST_DEVICE
-    inline transform_output_iterator(OutputIterator iterator, UnaryFunction transform)
+    ROCPRIM_HOST_DEVICE inline transform_output_iterator(OutputIterator iterator,
+                                                         UnaryFunction  transform)
         : iterator_(iterator), transform_(transform)
     {}
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
     ROCPRIM_HOST_DEVICE
-    inline transform_output_iterator& operator++()
+    inline transform_output_iterator&
+        operator++()
     {
         iterator_++;
         return *this;
     }
 
     ROCPRIM_HOST_DEVICE
-    inline transform_output_iterator operator++(int)
+    inline transform_output_iterator
+        operator++(int)
     {
         transform_output_iterator old = *this;
         iterator_++;
@@ -111,14 +112,16 @@ public:
     }
 
     ROCPRIM_HOST_DEVICE
-    inline transform_output_iterator& operator--()
+    inline transform_output_iterator&
+        operator--()
     {
         iterator_--;
         return *this;
     }
 
     ROCPRIM_HOST_DEVICE
-    inline transform_output_iterator operator--(int)
+    inline transform_output_iterator
+        operator--(int)
     {
         transform_output_iterator old = *this;
         iterator_--;
@@ -126,87 +129,101 @@ public:
     }
 
     ROCPRIM_HOST_DEVICE
-    inline proxy_type operator*() const
+    inline proxy_type
+        operator*() const
     {
         return proxy_type(iterator_, transform_);
     }
 
     // We can't really define this as '&(*(*this));', se we delete this.
     ROCPRIM_HOST_DEVICE
-    inline pointer operator->() const
+    inline pointer
+        operator->() const
         = delete;
 
     ROCPRIM_HOST_DEVICE
-    inline proxy_type operator[](difference_type distance) const
+    inline proxy_type
+        operator[](difference_type distance) const
     {
         transform_output_iterator i = (*this) + distance;
         return *i;
     }
 
     ROCPRIM_HOST_DEVICE
-    inline transform_output_iterator operator+(difference_type distance) const
+    inline transform_output_iterator
+        operator+(difference_type distance) const
     {
         return transform_output_iterator(iterator_ + distance, transform_);
     }
 
     ROCPRIM_HOST_DEVICE
-    inline transform_output_iterator& operator+=(difference_type distance)
+    inline transform_output_iterator&
+        operator+=(difference_type distance)
     {
         iterator_ += distance;
         return *this;
     }
 
     ROCPRIM_HOST_DEVICE
-    inline transform_output_iterator operator-(difference_type distance) const
+    inline transform_output_iterator
+        operator-(difference_type distance) const
     {
         return transform_output_iterator(iterator_ - distance, transform_);
     }
 
     ROCPRIM_HOST_DEVICE
-    inline transform_output_iterator& operator-=(difference_type distance)
+    inline transform_output_iterator&
+        operator-=(difference_type distance)
     {
         iterator_ -= distance;
         return *this;
     }
 
     ROCPRIM_HOST_DEVICE
-    inline difference_type operator-(transform_output_iterator other) const
+    inline difference_type
+        operator-(transform_output_iterator other) const
     {
         return iterator_ - other.iterator_;
     }
 
     ROCPRIM_HOST_DEVICE
-    inline bool operator==(transform_output_iterator other) const
+    inline bool
+        operator==(transform_output_iterator other) const
     {
         return iterator_ == other.iterator_;
     }
 
     ROCPRIM_HOST_DEVICE
-    inline bool operator!=(transform_output_iterator other) const
+    inline bool
+        operator!=(transform_output_iterator other) const
     {
         return iterator_ != other.iterator_;
     }
 
     ROCPRIM_HOST_DEVICE
-    inline bool operator<(transform_output_iterator other) const
+    inline bool
+        operator<(transform_output_iterator other) const
     {
         return iterator_ < other.iterator_;
     }
 
     ROCPRIM_HOST_DEVICE
-    inline bool operator<=(transform_output_iterator other) const
+    inline bool
+        operator<=(transform_output_iterator other) const
     {
         return iterator_ <= other.iterator_;
     }
 
     ROCPRIM_HOST_DEVICE
-    inline bool operator>(transform_output_iterator other) const
+    inline bool
+        operator>(transform_output_iterator other) const
     {
         return iterator_ > other.iterator_;
     }
 
     ROCPRIM_HOST_DEVICE
-    inline bool operator>=(transform_output_iterator other) const
+    inline bool
+        operator>=(transform_output_iterator other) const
     {
         return iterator_ >= other.iterator_;
     }
@@ -220,17 +237,20 @@ private:
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 template<class InputIterator, class UnaryFunction>
 ROCPRIM_HOST_DEVICE
-inline transform_output_iterator<InputIterator, UnaryFunction> operator+(
-    typename transform_output_iterator<InputIterator, UnaryFunction>::difference_type distance,
-    const transform_output_iterator<InputIterator, UnaryFunction>&                    iterator)
+inline transform_output_iterator<InputIterator, UnaryFunction>
+    operator+(
+        typename transform_output_iterator<InputIterator, UnaryFunction>::difference_type distance,
+        const transform_output_iterator<InputIterator, UnaryFunction>&                    iterator)
 {
     return iterator + distance;
 }
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
 template<typename OutputIterator, typename UnaryFunction>
-transform_output_iterator<OutputIterator, UnaryFunction> ROCPRIM_HOST_DEVICE
-make_transform_output_iterator(OutputIterator out, UnaryFunction func)
+transform_output_iterator<
+    OutputIterator,
+    UnaryFunction> ROCPRIM_HOST_DEVICE make_transform_output_iterator(OutputIterator out,
+                                                                      UnaryFunction  func)
 {
     return transform_output_iterator<OutputIterator, UnaryFunction>(out, func);
 }
