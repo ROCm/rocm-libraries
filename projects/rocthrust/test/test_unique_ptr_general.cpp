@@ -383,6 +383,36 @@ TEST(UniquePtrGeneralTests, TestUniquePtrModifierRelease)
     }
 }
 
+TEST(UniquePtrGeneralTests, TestUniquePtrModifierReleaseArray)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // Array
+    void* raw_addr = nullptr;
+    size_t sz = 0;
+    {
+        thrust::unique_ptr<int[]> p = thrust::make_unique<int[]>(7);
+        int* raw_p = p.get_raw();
+        ASSERT_NE(raw_p, nullptr);
+        
+        hipError_t st = hipMemPtrGetInfo(static_cast<void*>(raw_p), &sz);
+        ASSERT_EQ(st, hipSuccess);
+        ASSERT_GE(sz, 7 * sizeof(int));
+
+        thrust::device_ptr<int> released_p = p.release();
+
+        ASSERT_EQ(p, nullptr);
+        ASSERT_EQ(thrust::raw_pointer_cast(released_p), raw_p);
+
+        raw_addr = static_cast<void*>(thrust::raw_pointer_cast(released_p));
+
+        thrust::device_delete(released_p);
+        
+        st = hipMemPtrGetInfo(raw_addr, &sz);
+        ASSERT_EQ(st, hipErrorInvalidValue);
+    }
+}
+
 // Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.modifiers/reset.pass.cpp
 TEST(UniquePtrGeneralTests, TestUniquePtrModifierReset)
 {
