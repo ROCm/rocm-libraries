@@ -521,6 +521,8 @@ TEST(UniquePtrGeneralTests, TestUniquePtrObserversDereference)
 // Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.observers/explicit_bool.pass.cpp
 TEST(UniquePtrGeneralTests, TestUniquePtrObserversExplicitBool)
 {
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
     // Single non-null object
     {
         thrust::unique_ptr<int> p = thrust::make_unique<int>(1);
@@ -564,6 +566,57 @@ TEST(UniquePtrGeneralTests, TestUniquePtrObserversExplicitBool)
         else
         {
             FAIL() << "Const NULL unique_ptr evaluated to true";
+        }
+    }
+}
+
+TEST(UniquePtrGeneralTests, TestUniquePtrObserversExplicitBoolArray)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+    
+        // Array non-null
+    {
+        thrust::unique_ptr<int[]> p = thrust::make_unique<int[]>(10);
+        const thrust::unique_ptr<int[]>& const_p = p;
+        if (p) 
+        {
+            SUCCEED();
+        } 
+        else
+        {
+            FAIL() << "Non-NULL array unique_ptr evaluated to false";
+        }
+
+        if (const_p)
+        {
+            SUCCEED();
+        }
+        else
+        {
+            FAIL() << "Const non-NULL array unique_ptr evaluated to false";
+        }
+    }
+
+    // Array null
+    {
+        thrust::unique_ptr<int[]> p;
+        const thrust::unique_ptr<int[]>& const_p = p;
+        if (!p) 
+        {
+            SUCCEED();
+        } 
+        else
+        {
+            FAIL() << "NULL array unique_ptr evaluated to true";
+        }
+
+        if (!const_p)
+        {
+            SUCCEED();
+        }
+        else
+        {
+            FAIL() << "Const NULL array unique_ptr evaluated to true";
         }
     }
 }
