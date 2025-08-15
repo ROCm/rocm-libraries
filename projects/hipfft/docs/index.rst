@@ -17,7 +17,11 @@ For more information, see the :ref:`hipfft-overview`.
 .. _rocFFT: https://rocm.docs.amd.com/projects/rocFFT/en/latest/index.html
 .. _cuFFT: https://developer.nvidia.com/cufft
 
-The hipFFT public repository is located at `<https://github.com/ROCm/hipFFT>`_.
+The hipFFT public repository is located at `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipfft>`_.
+
+.. note::
+
+   The hipFFT repository for ROCm 6.4.3 and earlier is located at `<https://github.com/ROCm/hipFFT>`_.
 
 .. grid:: 2
   :gutter: 3
@@ -32,7 +36,7 @@ The hipFFT public repository is located at `<https://github.com/ROCm/hipFFT>`_.
 
   .. grid-item-card:: Examples
 
-    * `hipFFT examples <https://github.com/ROCm/hipFFT/tree/develop/clients/samples>`_
+    * `hipFFT examples <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipfft/clients/samples>`_
 
   .. grid-item-card:: API Reference
 

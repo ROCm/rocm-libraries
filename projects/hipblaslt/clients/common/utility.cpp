@@ -71,7 +71,14 @@ static std::string get_self_path()
         result.resize(result.size() * 2);
     }
 #else
-    return std::string(realpath("/proc/self/exe", 0));
+    char result[PATH_MAX] = {};
+
+    if(realpath("/proc/self/exe", result))
+    {
+        return std::string(result);
+    }
+
+    return std::string();
 #endif
 }
 

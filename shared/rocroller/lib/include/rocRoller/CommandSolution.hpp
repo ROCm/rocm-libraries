@@ -141,8 +141,8 @@ namespace rocRoller
         std::vector<uint> loopOverOutputTilesCoordSizes    = {};
         uint              loopOverOutputTilesIteratedTiles = 0;
 
-        std::optional<std::pair<int, Expression::ExpressionPtr>> workgroupMapping  = {};
-        std::optional<int>                                       workgroupRemapXCC = {};
+        std::optional<int> workgroupMappingDim = {};
+        std::optional<int> workgroupRemapXCC   = {};
 
     private:
         std::map<Operations::OperationTag, KernelGraph::CoordinateGraph::Dimension> m_dimInfo;

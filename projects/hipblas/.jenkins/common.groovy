@@ -3,8 +3,6 @@
 
 def runCompileCommand(platform, project, jobName, boolean sameOrg=false)
 {
-    project.paths.construct_build_prefix()
-
     def getDependenciesCommand = ""
     if (project.installLibraryDependenciesFromCI)
     {
@@ -91,7 +89,7 @@ def runCoverageCommand (platform, project, String cmdDir = "release-debug")
     publishHTML([allowMissing: false,
                 alwaysLinkToLastBuild: false,
                 keepAll: false,
-                reportDir: "${project.paths.project_build_prefix}/build/${cmdDir}/lcoverage",
+                reportDir: "${project.paths.project_build_prefix}/build/${cmdDir}/coverage-report",
                 reportFiles: "index.html",
                 reportName: "Code coverage report",
                 reportTitles: "Code coverage report"])

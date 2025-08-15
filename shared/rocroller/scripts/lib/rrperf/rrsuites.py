@@ -1076,7 +1076,8 @@ def fp4_target_d2lds_mi32x32x64_pf2x1():
 
 def add_wgm(mapping, suite):
     for run in suite:
-        run.workgroupMapping = mapping
+        run.workgroupMappingDim = mapping[0]
+        run.workgroupMappingValue = mapping[1]
         yield run
 
 
