@@ -100,13 +100,15 @@ namespace TensileLite
         // Computes the number of active compute units if there is only one wave and it is partial
         // Otherwise, returns hardware.N_CU
         size_t compute_active_CU(
-            const Hardware& hardware, size_t M, size_t N, size_t MT_M, size_t MT_N);
+            const Hardware& hardware, size_t M, size_t N, size_t batch, size_t MT_M, size_t MT_N);
 
         double compute_memory_latency(const Hardware& hardware,
                                       size_t          M,
                                       size_t          N,
                                       size_t          K,
                                       size_t          batch,
+                                      bool            transA,
+                                      bool            transB,                                      
                                       size_t          MT_M,
                                       size_t          MT_N,
                                       size_t          MT_K,
@@ -216,18 +218,21 @@ namespace TensileLite
                                    size_t          M,
                                    size_t          N,
                                    size_t          K,
-                                   size_t          batch,
+                                   size_t          batch,                                 
+                                   bool            transA,
+                                   bool            transB,
                                    size_t          MT_M,
                                    size_t          MT_N,
                                    size_t          MT_K,
                                    size_t          MI_M,
                                    size_t          MI_N,
                                    size_t          MI_K,
+                                   double          H_mem1,                                   
+                                   int             WGM,
                                    size_t          element_size_A,
                                    size_t          element_size_B,
                                    size_t          element_size_out,
-                                   int             WGM,
-                                   double          H_mem1,
+                                   DataType        miDataType,
                                    bool            debug);
 
         // Check if MT fits in LDS

@@ -124,7 +124,7 @@ namespace TensileLite
             size_t                     N,
             size_t                     K,
             size_t                     batch,
-            Hardware&                  hardware,
+            const Hardware&                  hardware,
             size_t                     MT_M,
             size_t                     MT_N,
             size_t                     MT_K,

@@ -34,12 +34,11 @@
 // Parse Analytical_gtest.yaml to get the test data
 std::vector<MyTestData> parseYamlManually(const std::string& filename)
 {
-
-    std::string YamlfullPath = std::string(YAML_PATH) + "/testlib/source/" + filename;
+    std::string   YamlfullPath = std::string(YAML_PATH) + "/testlib/source/" + filename;
     std::ifstream file(YamlfullPath);
     if(!file)
     {
-        std::cerr << "Failed to open file: " << filename << std::endl;
+        std::cerr << "Failed to open file: " << YamlfullPath << std::endl;
         return {};
     }
 
@@ -79,18 +78,22 @@ std::vector<MyTestData> parseYamlManually(const std::string& filename)
         else if(state == State::Inputs && line.rfind("- {", 0) == 0)
         {
             std::string inner = line.substr(3);
-            if(inner.back() == '}')
+            if(!inner.empty() && inner.back() == '}')
                 inner.pop_back();
 
             std::map<std::string, int> values;
-            int                        expected = 0;
-            std::stringstream          ss(inner);
-            std::string                pair;
+            std::optional<int>         expected;
+            std::optional<int>         expected_gt;
+            std::optional<int>         expected_lt;
+
+            std::stringstream ss(inner);
+            std::string       pair;
             while(std::getline(ss, pair, ','))
             {
                 auto colon = pair.find(':');
                 if(colon == std::string::npos)
                     continue;
+
                 std::string key = pair.substr(0, colon);
                 std::string val = pair.substr(colon + 1);
                 key.erase(0, key.find_first_not_of(" \t"));
@@ -103,6 +106,10 @@ std::vector<MyTestData> parseYamlManually(const std::string& filename)
                     int num = std::stoi(val);
                     if(key == "expected")
                         expected = num;
+                    else if(key == "expected_gt")
+                        expected_gt = num;
+                    else if(key == "expected_lt")
+                        expected_lt = num;
                     else
                         values[key] = num;
                 }
@@ -112,7 +119,8 @@ std::vector<MyTestData> parseYamlManually(const std::string& filename)
                               << std::endl;
                 }
             }
-            current.inputs.push_back(InputWithExpected{values, expected});
+
+            current.inputs.push_back(InputWithExpected{values, expected, expected_gt, expected_lt});
         }
     }
 
@@ -137,12 +145,167 @@ TEST_P(AnalyticalGtest, DynamicDispatch)
     {
         for(const auto& input_case : test.inputs)
         {
-            ComputeLoads(input_case.values.at("M"),
-                         input_case.values.at("N"),
-                         input_case.values.at("K"),
-                         input_case.expected);
+            ComputeLoads(input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.expected);
         }
     }
+    else if(test.name == "EstimateL2Hit")
+    {
+        for(const auto& input_case : test.inputs)
+        {
+            EstimateL2Hit(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
+                          input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.values.at("MT_K"), input_case.values.at("element_size"),
+                          input_case.expected_gt, input_case.expected_lt);
+        }
+    }
+    else if(test.name == "ComputeNumMatrixInstructions")
+    {
+        for(const auto& input_case : test.inputs)
+        {
+            ComputeNumMatrixInstructions(gpuInfo, input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.values.at("MT_K"),
+                          input_case.values.at("MI_M"), input_case.values.at("MI_N"), input_case.values.at("MI_K"), input_case.expected);
+        }
+    }
+    else if(test.name == "ComputeMTComputeLatency")
+    {
+        for(const auto& input_case : test.inputs)
+        {
+            ComputeMTComputeLatency(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"),
+                          input_case.values.at("transA"), input_case.values.at("transB"),input_case.values.at("MT_M"), input_case.values.at("MT_N"), 
+                          input_case.values.at("MT_K"), input_case.values.at("MI_M"), input_case.values.at("MI_N"), input_case.values.at("MI_K"), 
+                          input_case.values.at("element_size_A"), input_case.values.at("element_size_B"), input_case.expected, input_case.expected_gt);
+        }
+    }
+    else if(test.name == "ComputeNumberWaves")
+    {
+        for(const auto& input_case : test.inputs)
+        {
+            ComputeNumberWaves(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("batch"), input_case.values.at("MT_M"),
+                          input_case.values.at("MT_N"), input_case.values.at("split"), input_case.expected);
+        }
+    }
+    else if(test.name == "ComputeActiveCU")
+    {
+        for(const auto& input_case : test.inputs)
+        {
+            ComputeActiveCU(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("batch"), 
+                          input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.expected);
+        }
+    }
+    else if(test.name == "ComputeMemoryLatency")
+    {
+        for(const auto& input_case : test.inputs)
+        {
+            ComputeMemoryLatency(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
+                          input_case.values.at("transA"), input_case.values.at("transB"), input_case.values.at("MT_M"), input_case.values.at("MT_N"), 
+                          input_case.values.at("MT_K"), input_case.values.at("split"), input_case.values.at("hmem"), input_case.values.at("element_size_A"),
+                          input_case.values.at("element_size_B"), input_case.values.at("mx_block_size"));
+        }
+    }
+    else if(test.name == "ComputeTileLatency")
+    {
+        for(const auto& input_case : test.inputs)
+        {
+            ComputeTileLatency(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
+                          input_case.values.at("transA"), input_case.values.at("transB"), input_case.values.at("MT_M"), input_case.values.at("MT_N"), 
+                          input_case.values.at("MT_K"), input_case.values.at("MI_M"), input_case.values.at("MI_N"), input_case.values.at("MI_K"),
+                          input_case.values.at("split"), input_case.values.at("hmem"), input_case.values.at("element_size_A"),
+                          input_case.values.at("element_size_B"), input_case.values.at("element_size_out"), input_case.values.at("mx_block_size"));
+        }
+    }
+    else if(test.name == "ComputeWaveLatency")
+    {
+        for(const auto& input_case : test.inputs)
+        {
+            ComputeWaveLatency(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
+                          input_case.values.at("transA"), input_case.values.at("transB"), input_case.values.at("MT_M"), input_case.values.at("MT_N"), 
+                          input_case.values.at("MT_K"), input_case.values.at("MI_M"), input_case.values.at("MI_N"), input_case.values.at("MI_K"),
+                          input_case.values.at("split"), input_case.values.at("hmem"), input_case.values.at("element_size_A"),
+                          input_case.values.at("element_size_B"), input_case.values.at("element_size_out"), input_case.values.at("mx_block_size"));
+        }
+    }
+    else if(test.name == "ComputeTotalLatency")
+    {
+        for(const auto& input_case : test.inputs)
+        {
+            ComputeTotalLatency(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
+                          input_case.values.at("transA"), input_case.values.at("transB"), input_case.values.at("MT_M"), input_case.values.at("MT_N"), 
+                          input_case.values.at("MT_K"), input_case.values.at("MI_M"), input_case.values.at("MI_N"), input_case.values.at("MI_K"),
+                          input_case.values.at("split"), input_case.values.at("hmem"), input_case.values.at("element_size_A"),
+                          input_case.values.at("element_size_B"), input_case.values.at("element_size_out"), input_case.values.at("WGM"), input_case.values.at("mx_block_size"));
+        }
+    }
+    else if(test.name == "ComputePerfGflops")
+    {
+        for(const auto& input_case : test.inputs)
+        {
+            ComputePerfGflops(input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
+                          input_case.values.at("transA"), input_case.values.at("transB"), input_case.values.at("MT_M"), input_case.values.at("MT_N"), 
+                          input_case.values.at("MT_K"), input_case.values.at("MI_M"), input_case.values.at("MI_N"), input_case.values.at("MI_K"),
+                          input_case.values.at("hmem"), input_case.values.at("element_size_A"), input_case.values.at("element_size_B"), 
+                          input_case.values.at("element_size_out"), input_case.values.at("WGM"));
+        }
+    }
+    else if(test.name == "EstimateMallHit")
+    {
+        for(const auto& input_case : test.inputs)
+        {
+            EstimateMallHit(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
+                          input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.values.at("MT_K"), input_case.expected_gt);
+        }
+    }
+    else if(test.name == "CheckLDSCapacity")
+    {
+        for(const auto& input_case : test.inputs)
+        {
+            CheckLDSCapacity(gpuInfo, input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.values.at("MT_K"), input_case.values.at("element_size"));
+        }
+    }
+    else if(test.name == "HardwareArchEnum")
+    {
+        for(const auto& input_case : test.inputs)
+        {
+            HardwareArchEnum(std::to_string(test.inputs[0].values.at("gpu_arch")));
+        }
+    }
+    else if(test.name == "BestGridSize")
+    {
+        for(const auto& input_case : test.inputs)
+        {
+            BestGridSize(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
+                          input_case.values.at("transA"), input_case.values.at("transB"), input_case.values.at("MT_M"), input_case.values.at("MT_N"), 
+                          input_case.values.at("MT_K"), input_case.values.at("MI_M"), input_case.values.at("MI_N"), input_case.values.at("MI_K"),
+                          input_case.values.at("element_size_A"), input_case.values.at("element_size_B"), input_case.values.at("element_size_out"), 
+                          input_case.values.at("mx_block_size"), input_case.values.at("H_L2"), input_case.values.at("WGM"), 
+                          input_case.values.at("biggest_allowable_split"), input_case.expected_gt);
+        }
+    }
+    else if(test.name == "BestMacroTileSize")
+    {
+        for(const auto& input_case : test.inputs)
+        {
+            BestMacroTileSize(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
+                          input_case.values.at("transA"), input_case.values.at("transB"), input_case.values.at("element_size_A"), 
+                          input_case.values.at("element_size_B"), input_case.values.at("element_size_out"), input_case.values.at("mx_block_size"), 
+                          input_case.values.at("H_L2"), input_case.values.at("WGM"));
+        }
+    }
+    else if(test.name == "BestWGM")
+    {
+        for(const auto& input_case : test.inputs)
+        {
+            BestWGM(gpuInfo, input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), input_case.values.at("batch"),
+                          input_case.values.at("MT_M"), input_case.values.at("MT_N"), input_case.values.at("MT_K"), input_case.values.at("MI_M"), 
+                          input_case.values.at("MI_N"), input_case.values.at("MI_K"), input_case.values.at("element_size"), input_case.values.at("H_L2"));
+        }
+    }
+    else if(test.name == "UtilsTFlopsFromLatency")
+    {
+        for(const auto& input_case : test.inputs)
+        {
+            UtilsTFlopsFromLatency(input_case.values.at("M"), input_case.values.at("N"), input_case.values.at("K"), 
+                          input_case.values.at("latency_cycles"), input_case.values.at("clock_GHz"));
+        }
+    }           
     else
     {
         FAIL() << "Unknown test name: " << test.name;
