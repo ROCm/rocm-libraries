@@ -728,5 +728,3 @@ def getClientExecutablePath():
         "For custom cmake build instructions, please refer to the README in next-cmake."
     )
   return clientExe
-
-  

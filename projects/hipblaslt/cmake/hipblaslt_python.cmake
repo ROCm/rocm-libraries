@@ -47,7 +47,7 @@ function(hipblaslt_configure_bundled_python_command python_binary_dir asan_optio
         "PATH=${_path}"
         "${asan_options}"
         --
-        "${Python_EXECUTABLE}"
+        "${Python3_EXECUTABLE}"
     )
     message(VERBOSE "Python command: ${_python_command}")
     set(HIPBLASLT_PYTHON_COMMAND "${_python_command}" PARENT_SCOPE)
