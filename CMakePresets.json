@@ -2,15 +2,15 @@
     "version": 6,
     "cmakeMinimumRequired": {
         "major": 3,
-        "minor": 21,
-        "patch": 0
+        "minor": 25,
+        "patch": 2
     },
     "configurePresets": [
         {
-            "name": "default-release",
-            "displayName": "Release Build (Default GPU)",
-            "description": "Standard release build with default GPU target",
-            "binaryDir": "${sourceDir}/_build",
+            "name": "opt-rocm:all",
+            "displayName": "Release build (all GPU_TARGETS)",
+            "description": "Standard release build with all GPU_TARGETS",
+            "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
                 "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
@@ -21,6 +21,25 @@
             "environment": {
                 "ROCM_PATH": "/opt/rocm"
             }
+        },
+        {
+            "name": "rocroller",
+            "displayName": "Release build (rocroller)",
+            "description": "Standard release build with rocroller target",
+            "inherits": ["opt-rocm:all"],
+            "cacheVariables": {
+                "ROCM_LIBRARIES_DISABLE_ALL": "ON",
+                "ENABLE_MXDATAGENERATOR": "ON",
+                "ENABLE_ROCROLLER": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "default",
+            "displayName": "Build (Release) default GPU",
+            "description": "Build using the opt-rocm:all configure preset",
+            "configurePreset": "opt-rocm:all"
         }
     ]
 }
