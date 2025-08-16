@@ -16,6 +16,7 @@
                 "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
                 "CMAKE_C_COMPILER": "/opt/rocm/bin/amdclang",
                 "CMAKE_PREFIX_PATH": "/opt/rocm",
+                "CMAKE_INSTALL_PREFIX": "/opt/rocm",
                 "GPU_TARGETS": "all"
             },
             "environment": {
@@ -24,13 +25,51 @@
         },
         {
             "name": "rocroller",
-            "displayName": "Release build (rocroller)",
-            "description": "Standard release build with rocroller target",
             "inherits": ["opt-rocm:all"],
             "cacheVariables": {
                 "ROCM_LIBRARIES_DISABLE_ALL": "ON",
                 "ENABLE_MXDATAGENERATOR": "ON",
                 "ENABLE_ROCROLLER": "ON"
+            }
+        },
+        {
+            "name": "rocrand",
+            "inherits": ["opt-rocm:all"],
+            "cacheVariables": {
+                "ROCM_LIBRARIES_DISABLE_ALL": "ON",
+                "ENABLE_ROCRAND": "ON"
+            }
+        },
+        {
+            "name": "rocprim",
+            "inherits": ["opt-rocm:all"],
+            "cacheVariables": {
+                "ROCM_LIBRARIES_DISABLE_ALL": "ON",
+                "ENABLE_ROCPRIM": "ON"
+            }
+        },
+        {
+            "name": "rocthrust",
+            "inherits": ["opt-rocm:all"],
+            "cacheVariables": {
+                "ROCM_LIBRARIES_DISABLE_ALL": "ON",
+                "ENABLE_ROCTHRUST": "ON"
+            }
+        },
+        {
+            "name": "hipcub",
+            "inherits": ["opt-rocm:all"],
+            "cacheVariables": {
+                "ROCM_LIBRARIES_DISABLE_ALL": "ON",
+                "ENABLE_HIPCUB": "ON"
+            }
+        },
+        {
+            "name": "hiprand",
+            "inherits": ["opt-rocm:all"],
+            "cacheVariables": {
+                "ROCM_LIBRARIES_DISABLE_ALL": "ON",
+                "ENABLE_HIPRAND": "ON"
             }
         }
     ],

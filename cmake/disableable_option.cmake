@@ -1,7 +1,7 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Helper that honours DISABLE_ALL_LIBS and preserves explicit user choices
+# Helper that honours ROCM_LIBRARIES_DISABLE_ALL and preserves explicit user choices
 # Usage:
 #   disableable_option(<option_name> <doc> <default>)
 #
@@ -14,7 +14,7 @@ function(disableable_option _option_name _doc _default)
         return()
     endif()
 
-    if(DISABLE_ALL_LIBS)
+    if(ROCM_LIBRARIES_DISABLE_ALL)
         option(${_option_name} "${_doc}" OFF)
     else()
         option(${_option_name} "${_doc}" ${_default})

@@ -185,11 +185,9 @@ if(HIP_COMPILER STREQUAL "nvcc")
   endif()
 else()
   # rocPRIM (only for ROCm platform)
-  if(NOT DEPENDENCIES_FORCE_DOWNLOAD)
-    # Add default install location for WIN32 and non-WIN32 as hint
-    find_package(rocprim CONFIG QUIET PATHS "${ROCM_ROOT}/lib/cmake/rocprim")
-  endif()
-  if(NOT TARGET roc::rocprim)
+  if(NOT ROCM_LIBRARIES_SUPERBUILD)
+    find_package(rocprim REQUIRED)
+  elseif(HIPCUB_ENABLE_FETCH)
     message(STATUS "rocPRIM not found. Fetching...")
     FetchContent_Declare(
             prim
@@ -203,8 +201,6 @@ else()
     if(NOT TARGET roc::rocprim_hip)
       add_library(roc::rocprim_hip ALIAS rocprim_hip)
     endif()
-  else()
-    find_package(rocprim CONFIG REQUIRED)
   endif()
 endif()
 
