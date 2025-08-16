@@ -78,13 +78,15 @@ def runTestCommand (platform, project)
 {
     String testExclude = platform.jenkinsLabel.contains('compile') ? '-LE GPU' : ''
 
+    def numThreads = 8
+
     def command = """#!/usr/bin/env bash
                 set -ex
                 cd ${project.paths.project_build_prefix}
 
                 pushd build
-                echo Using `nproc` threads for testing.
-                OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 ctest -j 8 --output-on-failure ${testExclude}
+                echo Using ${numThreads} (out of `nproc`) threads for testing.
+                OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 ctest -j ${numThreads} --output-on-failure ${testExclude}
                 export ROCROLLER_BUILD_DIR="\$(pwd)"
                 popd
                 scripts/rrperf generate --suite generate_gfx950 --arch gfx950
