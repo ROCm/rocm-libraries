@@ -85,7 +85,7 @@ def runTestCommand (platform, project)
                 cd ${project.paths.project_build_prefix}
 
                 pushd build
-                echo Using ${numThreads} (out of `nproc`) threads for testing.
+                echo Using ${numThreads} out of `nproc` threads for testing.
                 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 ctest -j ${numThreads} --output-on-failure ${testExclude}
                 export ROCROLLER_BUILD_DIR="\$(pwd)"
                 popd
