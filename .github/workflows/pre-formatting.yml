@@ -16,7 +16,7 @@ jobs:
 #          owner: ${{ github.repository_owner }}
 
       - name: Checkout code (initial)
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
           sparse-checkout: .github
@@ -52,7 +52,7 @@ jobs:
 
       - name: Checkout full repo with changed subtrees
         if: steps.detect.outputs.subtrees
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           ref: refs/pull/${{ github.event.pull_request.number }}/merge
           sparse-checkout: |
