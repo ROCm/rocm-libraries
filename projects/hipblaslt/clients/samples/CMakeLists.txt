@@ -47,6 +47,8 @@ add_executable( sample_hipblaslt_gemm_is_tuned_ext 13_is_tuned_gemm_ext/sample_h
 add_executable( sample_hipblaslt_gemm_tuning_wgm_ext 14_tuning_wgm_gemm_ext/sample_hipblaslt_gemm_tuning_wgm_ext.cpp)
 add_executable( sample_hipblaslt_gemm_with_scale_a_b 15_gemm_scale_a_b/sample_hipblaslt_gemm_with_scale_a_b.cpp)
 add_executable( sample_hipblaslt_gemm_with_scale_a_b_ext 15_gemm_scale_a_b_ext/sample_hipblaslt_gemm_with_scale_a_b_ext.cpp)
+add_executable( sample_hipblaslt_gemm_with_scale_a_b_vector 15_gemm_scale_a_b_vector/sample_hipblaslt_gemm_with_scale_a_b_vector.cpp)
+add_executable( sample_hipblaslt_gemm_swizzleA_with_scale_a_b_vector 15_gemm_scale_a_b_vector/sample_hipblaslt_gemm_swizzleA_with_scale_a_b_vector.cpp)
 add_executable( sample_hipblaslt_groupedgemm_ext 16_gemm_grouped_ext/sample_hipblaslt_groupedgemm_ext.cpp)
 add_executable( sample_hipblaslt_groupedgemm_fixed_mk_ext 17_fixed_mk_gemm_grouped_ext/sample_hipblaslt_groupedgemm_fixed_mk_ext.cpp)
 add_executable( sample_hipblaslt_groupedgemm_get_all_algos_ext 18_get_all_algos_gemm_grouped_ext/sample_hipblaslt_groupedgemm_get_all_algos_ext.cpp)
@@ -89,6 +91,8 @@ set(samples sample_hipblaslt_gemm
             sample_hipblaslt_gemm_tuning_wgm_ext
             sample_hipblaslt_gemm_with_scale_a_b
             sample_hipblaslt_gemm_with_scale_a_b_ext
+            sample_hipblaslt_gemm_with_scale_a_b_vector
+            sample_hipblaslt_gemm_swizzleA_with_scale_a_b_vector
             sample_hipblaslt_groupedgemm_ext
             sample_hipblaslt_groupedgemm_fixed_mk_ext
             sample_hipblaslt_groupedgemm_get_all_algos_ext
