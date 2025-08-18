@@ -32,58 +32,6 @@
 namespace rocRoller
 {
     template <>
-    const std::string BitFieldExtractGenerator<DataType::Half>::Name
-        = "BitFieldExtractGenerator<Half>";
-    template <>
-    const std::string BitFieldExtractGenerator<DataType::BFloat16>::Name
-        = "BitFieldExtractGenerator<BFloat16>";
-    template <>
-    const std::string BitFieldExtractGenerator<DataType::FP8>::Name
-        = "BitFieldExtractGenerator<FP8>";
-    template <>
-    const std::string BitFieldExtractGenerator<DataType::BF8>::Name
-        = "BitFieldExtractGenerator<BF8>";
-    template <>
-    const std::string BitFieldExtractGenerator<DataType::FP6>::Name
-        = "BitFieldExtractGenerator<FP6>";
-    template <>
-    const std::string BitFieldExtractGenerator<DataType::BF6>::Name
-        = "BitFieldExtractGenerator<BF6>";
-    template <>
-    const std::string BitFieldExtractGenerator<DataType::FP4>::Name
-        = "BitFieldExtractGenerator<FP4>";
-    template <>
-    const std::string BitFieldExtractGenerator<DataType::Int8>::Name
-        = "BitFieldExtractGenerator<Int8>";
-    template <>
-    const std::string BitFieldExtractGenerator<DataType::Int16>::Name
-        = "BitFieldExtractGenerator<Int16>";
-    template <>
-    const std::string BitFieldExtractGenerator<DataType::Int32>::Name
-        = "BitFieldExtractGenerator<Int32>";
-    template <>
-    const std::string BitFieldExtractGenerator<DataType::Int64>::Name
-        = "BitFieldExtractGenerator<Int64>";
-    template <>
-    const std::string BitFieldExtractGenerator<DataType::Raw32>::Name
-        = "BitFieldExtractGenerator<Raw32>";
-    template <>
-    const std::string BitFieldExtractGenerator<DataType::UInt8>::Name
-        = "BitFieldExtractGenerator<UInt8>";
-    template <>
-    const std::string BitFieldExtractGenerator<DataType::UInt16>::Name
-        = "BitFieldExtractGenerator<UInt16>";
-    template <>
-    const std::string BitFieldExtractGenerator<DataType::UInt32>::Name
-        = "BitFieldExtractGenerator<UInt32>";
-    template <>
-    const std::string BitFieldExtractGenerator<DataType::UInt64>::Name
-        = "BitFieldExtractGenerator<UInt64>";
-    template <>
-    const std::string BitFieldExtractGenerator<DataType::E8M0>::Name
-        = "BitFieldExtractGenerator<E8M0>";
-
-    template <>
     std::shared_ptr<UnaryArithmeticGenerator<Expression::BitFieldExtract>> GetGenerator(
         Register::ValuePtr dst, Register::ValuePtr arg, Expression::BitFieldExtract const&)
     {

@@ -113,7 +113,7 @@ namespace rocRoller
         Generator<Instruction> generateDouble(Register::ValuePtr dest, Register::ValuePtr arg);
 
     public:
-        static const std::string Name;
+        inline static const std::string Name = "ConvertGenerator";
     };
 
     /**

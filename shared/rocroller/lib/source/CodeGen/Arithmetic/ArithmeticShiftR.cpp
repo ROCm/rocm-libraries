@@ -31,8 +31,6 @@
 
 namespace rocRoller
 {
-    const std::string ArithmeticShiftRGenerator::Name = "ArithmeticShiftRGenerator";
-
     template <>
     std::shared_ptr<BinaryArithmeticGenerator<Expression::ArithmeticShiftR>>
         GetGenerator<Expression::ArithmeticShiftR>(Register::ValuePtr dst,

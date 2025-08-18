@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include "rocRoller/Utilities/Utils.hpp"
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 
 namespace rocRoller
@@ -76,7 +77,11 @@ namespace rocRoller
                                         Register::ValuePtr arg,
                                         Expression::Exponential2 const&);
 
-        static const std::string Name;
+        inline static const std::string Name = concatenate("Exponential2Generator<",
+                                                           typeid(REGISTER_TYPE).hash_code(),
+                                                           ", ",
+                                                           typeid(DATATYPE).hash_code(),
+                                                           ">");
     };
 
     template <>

@@ -26,6 +26,7 @@
 
 #pragma once
 
+#include "rocRoller/Utilities/Utils.hpp"
 #include <rocRoller/CodeGen/Arithmetic/ArithmeticGenerator.hpp>
 
 namespace rocRoller
@@ -82,7 +83,11 @@ namespace rocRoller
                                         Register::ValuePtr rhs,
                                         Expression::Add const&);
 
-        inline static const std::string Name;
+        inline static const std::string Name = concatenate("AddGenerator<",
+                                                           typeid(REGISTER_TYPE).hash_code(),
+                                                           ", ",
+                                                           typeid(DATATYPE).hash_code(),
+                                                           ">");
     };
 
     // Specializations for supported Register Type / DataType combinations

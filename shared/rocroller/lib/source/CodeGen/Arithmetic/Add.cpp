@@ -32,44 +32,6 @@
 
 namespace rocRoller
 {
-    // Register supported components
-    template <>
-    const std::string AddGenerator<Register::Type::Scalar, DataType::Int32>::Name
-        = "AddGenerator<Scalar, Int32>";
-    template <>
-    const std::string AddGenerator<Register::Type::Vector, DataType::Int32>::Name
-        = "AddGenerator<Vector, Int32>";
-    template <>
-    const std::string AddGenerator<Register::Type::M0, DataType::UInt32>::Name
-        = "AddGenerator<M0, UInt32>";
-    template <>
-    const std::string AddGenerator<Register::Type::Scalar, DataType::UInt32>::Name
-        = "AddGenerator<Scalar, UInt32>";
-    template <>
-    const std::string AddGenerator<Register::Type::Vector, DataType::UInt32>::Name
-        = "AddGenerator<Vector, UInt32>";
-    template <>
-    const std::string AddGenerator<Register::Type::Scalar, DataType::Int64>::Name
-        = "AddGenerator<Scalar, Int64>";
-    template <>
-    const std::string AddGenerator<Register::Type::Vector, DataType::Int64>::Name
-        = "AddGenerator<Vector, Int64>";
-    template <>
-    const std::string AddGenerator<Register::Type::Vector, DataType::Half>::Name
-        = "AddGenerator<Vector, Half>";
-    template <>
-    const std::string AddGenerator<Register::Type::Vector, DataType::Halfx2>::Name
-        = "AddGenerator<Vector, Halfx2>";
-    template <>
-    const std::string AddGenerator<Register::Type::Vector, DataType::BFloat16>::Name
-        = "AddGenerator<Vector, BFloat16>";
-    template <>
-    const std::string AddGenerator<Register::Type::Vector, DataType::Float>::Name
-        = "AddGenerator<Vector, Float>";
-    template <>
-    const std::string AddGenerator<Register::Type::Vector, DataType::Double>::Name
-        = "AddGenerator<Vector, Double>";
-
     template <>
     std::shared_ptr<BinaryArithmeticGenerator<Expression::Add>>
         GetGenerator<Expression::Add>(Register::ValuePtr dst,

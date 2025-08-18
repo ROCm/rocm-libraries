@@ -30,8 +30,6 @@
 
 namespace rocRoller
 {
-    const std::string AddShiftLGenerator::Name = "AddShiftLGenerator";
-
     template <>
     std::shared_ptr<TernaryArithmeticGenerator<Expression::AddShiftL>>
         GetGenerator<Expression::AddShiftL>(Register::ValuePtr dst,

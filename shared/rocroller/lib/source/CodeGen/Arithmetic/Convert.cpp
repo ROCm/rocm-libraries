@@ -31,9 +31,6 @@
 
 namespace rocRoller
 {
-    // Register supported components
-    RegisterComponent(ConvertGenerator);
-
     template <>
     std::shared_ptr<UnaryArithmeticGenerator<Expression::Convert>>
         GetGenerator<Expression::Convert>(Register::ValuePtr dst,
