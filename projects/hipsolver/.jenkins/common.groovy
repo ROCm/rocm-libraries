@@ -38,6 +38,7 @@ def runTestCommand(platform, project)
                 """
 
     platform.runCommand(this, command)
+    junit "${project.paths.project_build_prefix}/build/${buildType}/clients/staging/*.xml"
 }
 
 def runPackageCommand(platform, project, jobName, label='')

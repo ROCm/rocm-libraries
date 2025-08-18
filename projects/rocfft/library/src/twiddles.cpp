@@ -217,7 +217,12 @@ protected:
 
         auto numBlocks_N = DivRoundingUp<size_t>(N, blockSize);
 
-        kernel.launch(kargs, dim3(numBlocks_N), dim3(blockSize), 0, deviceProp, stream);
+        kernel.launch(kargs,
+                      dim3(numBlocks_N, numBlocks_N),
+                      dim3(blockSize, blockSize, 1),
+                      0,
+                      deviceProp,
+                      stream);
     }
 
     void launch_half_N_kernel(hipStream_t& stream, T* output, size_t half_N, size_t N)

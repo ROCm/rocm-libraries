@@ -225,9 +225,11 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  \par Mixed precisions:
 *  <table>
 *  <caption id="spmv_mixed">Mixed Precisions</caption>
-*  <tr><th>A / X    <th>Y         <th>compute_type
-*  <tr><td>HIP_R_8I <td>HIP_R_32I <td>HIP_R_32I
-*  <tr><td>HIP_R_8I <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><th>A / X      <th>Y         <th>compute_type
+*  <tr><td>HIP_R_8I   <td>HIP_R_32I <td>HIP_R_32I
+*  <tr><td>HIP_R_8I   <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><td>HIP_R_16F  <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_32F <td>HIP_R_32F
 *  </table>
 *
 *  \par Mixed-regular real precisions
@@ -372,7 +374,7 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *                            vecY,
 *                            HIP_R_32F,
 *                            HIPSPARSE_MV_ALG_DEFAULT,
-*                            &buffer);
+*                            buffer);
 *
 *    // Perform operation
 *    hipsparseSpMV(handle,
@@ -384,7 +386,7 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *                 vecY,
 *                 HIP_R_32F,
 *                 HIPSPARSE_MV_ALG_DEFAULT,
-*                 &buffer);
+*                 buffer);
 *
 *    // Copy device to host
 *    hipMemcpy(hy.data(), dy, sizeof(float) * m, hipMemcpyDeviceToHost);

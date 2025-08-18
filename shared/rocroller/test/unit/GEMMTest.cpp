@@ -471,7 +471,7 @@ namespace GEMMDriverTest
             }
 
             Operations::OperationTag tagWGM;
-            if(gemm.workgroupMapping.first != -1)
+            if(gemm.workgroupMappingDim != -1)
             {
                 tagWGM      = command->allocateTag();
                 auto wgmArg = command->allocateArgument(DataType::Int32,
@@ -508,9 +508,9 @@ namespace GEMMDriverTest
             params->transposeMemoryAccess.set(LayoutType::MATRIX_A, gemm.transA == "T");
             params->transposeMemoryAccess.set(LayoutType::MATRIX_B, gemm.transB == "T");
 
-            if(gemm.workgroupMapping.first != -1)
+            if(gemm.workgroupMappingDim != -1)
             {
-                params->workgroupMapping = {gemm.workgroupMapping.first, nullptr};
+                params->workgroupMappingDim = gemm.workgroupMappingDim;
             }
 
             if(gemm.workgroupRemapXCC)
@@ -688,9 +688,9 @@ namespace GEMMDriverTest
             auto deviceScratch = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
             commandArgs.setArgument(tagScratch, ArgumentType::Value, deviceScratch.get());
 
-            if(gemm.workgroupMapping.first != -1)
+            if(gemm.workgroupMappingDim != -1)
             {
-                commandArgs.setArgument(tagWGM, ArgumentType::Value, gemm.workgroupMapping.second);
+                commandArgs.setArgument(tagWGM, ArgumentType::Value, gemm.workgroupMappingValue);
             }
 
             // Host result
@@ -1090,7 +1090,8 @@ namespace GEMMDriverTest
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
-        gemm.workgroupMapping = {0, 6};
+        gemm.workgroupMappingDim   = 0;
+        gemm.workgroupMappingValue = 6;
         basicGEMM<float>(gemm);
     }
 
@@ -1099,8 +1100,9 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         REQUIRE_ARCH_CAP(GPUCapability::HasXCC);
         GEMMProblem gemm;
-        gemm.workgroupMapping  = {0, 6};
-        gemm.workgroupRemapXCC = true;
+        gemm.workgroupMappingDim   = 0;
+        gemm.workgroupMappingValue = 6;
+        gemm.workgroupRemapXCC     = true;
         basicGEMM<float>(gemm);
     }
 
@@ -2516,7 +2518,8 @@ namespace GEMMDriverTest
         gemm.swizzleScale  = true;
         gemm.prefetchScale = true;
 
-        gemm.workgroupMapping = {0, 2};
+        gemm.workgroupMappingDim   = 0;
+        gemm.workgroupMappingValue = 2;
 
         gemm.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
@@ -2572,7 +2575,8 @@ namespace GEMMDriverTest
         gemm.swizzleScale  = true;
         gemm.prefetchScale = true;
 
-        gemm.workgroupMapping = {0, 2};
+        gemm.workgroupMappingDim   = 0;
+        gemm.workgroupMappingValue = 2;
 
         gemm.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
