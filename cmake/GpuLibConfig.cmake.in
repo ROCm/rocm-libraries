@@ -1,0 +1,7 @@
+@PACKAGE_INIT@
+
+# Find dependencies required by our library
+find_package(hip REQUIRED)
+
+# Include the file that defines the GpuLib::GpuLib imported target
+include("${CMAKE_CURRENT_LIST_DIR}/GpuLibTargets.cmake")
