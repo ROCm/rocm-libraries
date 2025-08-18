@@ -431,11 +431,10 @@ namespace rocRoller::KernelGraph
 
         auto graph = original;
 
-        auto                      tracer = LastRWTracer(graph);
         ControlFlowArgumentTracer argTracer(graph, m_context->kernel());
-
         deleteUnusedArguments(m_context->kernel(), argTracer);
 
+        auto                      tracer = LastRWTracer(graph);
         auto deallocateNodes = addArgumentDeallocates(graph, tracer, argTracer, m_context);
 
         sequenceDeallocatesBeforeOtherNodes(deallocateNodes, graph);
