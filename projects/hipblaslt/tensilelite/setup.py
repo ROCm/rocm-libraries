@@ -28,7 +28,7 @@
 # - creates executables for running benchmarking
 # - installs TensileConfig.cmake so one call find_package(Tensile)
 ################################################################################
-
+from pathlib import Path
 from setuptools import setup
 
 def read_requirements_from_txt():
