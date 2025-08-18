@@ -3087,7 +3087,7 @@ namespace TensileLite
                                     sizeMapping.CUOccupancy,
                                     *(hipAMDGPU->analyticalHardware),
                                     pAMDGPU->skDynamicGrid,
-                                    65535 /*max skGrid as it should fit into a 16-bit register*/);
+                                    32768 /*max skGrid as it should fit into a 16-bit register*/);
         }
         // Limit the CUs Stream-K is launched on either max or the specified,
         // whichever is minimum.
