@@ -47,6 +47,26 @@ struct A_deleter {
     }
 };
 
+template <class T>
+struct A_deleter<T[]> {
+
+    A_deleter(int size = 0): m_size(size) {}
+
+    __host__ void operator()(thrust::device_ptr<T> p) const { 
+        for (size_t i = 0; i < m_size; ++i) {
+            A host_copy = p[i];
+            if (host_copy.arr != nullptr) {
+                thrust::device_delete(host_copy.arr, 10);
+            }
+        }
+
+        thrust::for_each_n(p, m_size, [] __device__(T& x) { x.~T(); });
+        thrust::device_free(p);
+    }
+
+    size_t m_size;
+};
+
 struct GetDeleterTestDeleter
 {
     void operator()(thrust::device_ptr<int>) const {}
@@ -768,6 +788,69 @@ TEST(UniquePtrGeneralTests, TestUniquePtrUserTypeCustomDeleter)
     }
     ASSERT_EQ(*finished, true);
     thrust::device_delete(finished);
+}
+
+TEST(UniquePtrGeneralTests, TestUniquePtrUserTypeDefaultDeleterArray)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    void* raw_addr = nullptr;
+    {
+        thrust::device_ptr<A> dev_ptr = thrust::device_malloc<A>(3);
+        thrust::device_new<A>(dev_ptr, A(), 3);
+
+        thrust::unique_ptr<A[]> p(dev_ptr, 3);
+
+        A host_p0 = p[0];
+        A host_p1 = p[1];
+        A host_p2 = p[2];
+
+        ASSERT_EQ(host_p0.n, 0);
+        ASSERT_EQ(host_p1.n, 0);
+        ASSERT_EQ(host_p2.n, 0);
+        
+        ASSERT_EQ(host_p0.arr, nullptr);
+        ASSERT_EQ(host_p1.arr, nullptr);
+        ASSERT_EQ(host_p2.arr, nullptr);
+
+        raw_addr = static_cast<void*>(p.get_raw());
+    }
+    size_t dummy = 0;
+    hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
+    ASSERT_EQ(st, hipErrorInvalidValue);
+}
+
+TEST(UniquePtrGeneralTests, TestUniquePtrUserTypeCustomDeleterArray)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    void* raw_addr = nullptr;
+    {
+        thrust::device_ptr<A> dev_ptr = thrust::device_malloc<A>(3);
+        thrust::device_new<A>(dev_ptr, A(), 3);
+
+        thrust::unique_ptr<A[], A_deleter<A[]>> p(dev_ptr, 3);
+        p[0] = A(1);
+        p[1] = A(2);
+        p[2] = A(3);
+
+        A host_p0 = p[0];
+        A host_p1 = p[1];
+        A host_p2 = p[2];
+
+        ASSERT_EQ(host_p0.n, 1);
+        ASSERT_EQ(host_p1.n, 2);
+        ASSERT_EQ(host_p2.n, 3);
+
+        ASSERT_NE(host_p0.arr, nullptr);
+        ASSERT_NE(host_p1.arr, nullptr);
+        ASSERT_NE(host_p2.arr, nullptr);
+        
+        raw_addr = static_cast<void*>(thrust::raw_pointer_cast(p.get()));
+    }
+    size_t dummy = 0;
+    hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
+    ASSERT_EQ(st, hipErrorInvalidValue);
 }
 
 // Based on libcxx/test/std/utilities/smartptr/unique.ptr/unique.ptr.class/unique.ptr.observers/get_deleter.pass.cpp
