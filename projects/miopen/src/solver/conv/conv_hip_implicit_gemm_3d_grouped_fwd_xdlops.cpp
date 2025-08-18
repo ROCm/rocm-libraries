@@ -43,6 +43,7 @@
 #endif
 #include <miopen/solver/implicitgemm_ck_util.hpp>
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS)
+MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE);
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR)
 
 namespace miopen {
@@ -408,6 +409,103 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
     split_k   = 0; // split_k is not used in this solver, but it is required by the interface
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    // Check for index override environment variable first to avoid unnecessary AI computation
+    if(env::value(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE) != 0)
+    {
+        // Only apply override for BF16 and FP16 datatypes
+        if(problem.GetInDataType() == miopenBFloat16 || problem.GetInDataType() == miopenHalf)
+        {
+            // Initialize valid_kernels for the override logic
+            switch(problem.GetInDataType())
+            {
+            case miopenHalf: Init<ck::half_t>(problem); break;
+            case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
+            default: break;
+            }
+
+            auto find_kernel = [&valid_kernels = std::as_const(valid_kernels)](
+                                   const std::size_t& index,
+                                   const std::string& kernel_id) -> std::size_t {
+                // Check if valid_kernels[index] equals kernel_id.
+                if(index < valid_kernels.size() && valid_kernels[index] == kernel_id)
+                    return index;
+
+                // Linear search for kernel_id in valid_kernels.
+                auto it = std::find(valid_kernels.begin(), valid_kernels.end(), kernel_id);
+                if(it != valid_kernels.end())
+                    return static_cast<std::size_t>(it - valid_kernels.begin());
+
+                // Not found: return 0
+                MIOPEN_LOG_E("Not found :" << index << "-" << kernel_id);
+                return 0;
+            };
+
+            // Override heuristics for BF16 and FP16 only
+            index = env::value(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_IDX_OVERRIDE);
+            if(index == 0 && problem.GetInChannels() > 8 && problem.GetGroupCount() == 1 &&
+               problem.GetAlphaBetaCase() == DEFAULT)
+            {
+                int K = problem.GetOutChannels();
+                if(problem.GetInDataType() == miopenBFloat16)
+                {
+                    if(K < 64)
+                    {
+                        index = find_kernel(
+                            38,
+                            "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
+                            "<256, 64, 64, 64, Default, 32, 32, 1, 1, 8, 8, 8, 1, 1, "
+                            "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
+                    }
+                    else
+                    {
+                        index = find_kernel(
+                            30,
+                            "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
+                            "<256, 128, 128, 64, Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, "
+                            "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
+                    }
+                }
+                else if(problem.GetInDataType() == miopenHalf)
+                {
+                    if(K < 64)
+                    {
+                        index = find_kernel(
+                            57,
+                            "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
+                            "<64, 16, 16, 128, Default, 16, 16, 1, 1, 8, 8, 4, 1, 1, "
+                            "BlkGemmPipelineScheduler: Interwave, BlkGemmPipelineVersion: v1>");
+                    }
+                    else
+                    {
+                        index = find_kernel(
+                            31,
+                            "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle_V3"
+                            "<256, 128, 128, 64, Default, 32, 32, 2, 2, 8, 8, 8, 1, 1, "
+                            "BlkGemmPipelineScheduler: Intrawave, BlkGemmPipelineVersion: v3>");
+                    }
+                }
+            }
+
+            if(index < valid_kernels.size())
+            {
+                kernel_id = valid_kernels[index];
+                MIOPEN_LOG_I("Index override selected kernel: " << kernel_id << " at index: " << index);
+                return;
+            }
+            else
+            {
+                MIOPEN_LOG_W(
+                    "Index override failed, index "
+                    << index
+                    << " out of range, falling back to AI heuristics or default initialization");
+            }
+        }
+        else
+        {
+            MIOPEN_LOG_I("Index override ignored for datatype other than BF16/FP16, proceeding with AI heuristics or default initialization");
+        }
+    }
+
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     if(&ctx != &GetDummyCtx() &&
        !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_AI_HEUR))
@@ -449,6 +547,7 @@ void PerformanceConfigHipImplicitGemm3DGroupFwdXdlops::HeuristicInit(
         }
     }
 #endif
+
     switch(problem.GetInDataType())
     {
     case miopenHalf: Init<ck::half_t>(problem); break;
@@ -613,7 +712,6 @@ float ConvHipImplicitGemm3DGroupFwdXdlops::GetWti(
     }
     return 0.02f;
 }
-
 
 ConvSolution ConvHipImplicitGemm3DGroupFwdXdlops::GetSolution(
     [[maybe_unused]] const ExecutionContext& ctx,
