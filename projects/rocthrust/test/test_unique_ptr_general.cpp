@@ -8,6 +8,35 @@
 #include <thrust/device_delete.h>
 
 
+class A {
+public:    
+    __host__ __device__ A() : arr(nullptr), n(0) {}
+    __host__ __device__ A(int num): n(num) {
+        arr = thrust::device_new<int>(10);
+    }
+
+    __host__ __device__ int number() { return n; }
+
+    __host__ __device__ ~A() {}
+
+    thrust::device_ptr<int> arr; 
+    int n;
+}; 
+
+template <class T>
+struct A_deleter {
+
+    __host__ void operator()(thrust::device_ptr<T> p) const {
+        A host_copy = *p; 
+        if (host_copy.arr != nullptr) {
+            thrust::device_delete(host_copy.arr, 10);
+        }
+
+        thrust::for_each_n(p, 1, [] __device__(T& x) { x.~T(); });
+        thrust::device_free(p);
+    }
+};
+
 TESTS_DEFINE(UniquePtrGeneralTests, NumericalTestsParams);
 
 TEST(UniquePtrGeneralTests, TestUniquePtrSwap)
@@ -320,4 +349,48 @@ TEST(UniquePtrGeneralTests, TestUniquePtrObserversGet)
     //     ASSERT_EQ(p.get(), dev_p);
     //     ASSERT_EQ(const_p.get(), dev_p);
     // }
+}
+
+TEST(UniquePtrGeneralTests, TestUniquePtrUserTypeDefaultDeleter)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    void* raw_addr = nullptr;
+    {
+        thrust::device_ptr<A> dev_ptr = thrust::device_malloc<A>(1);
+        thrust::device_new<A>(dev_ptr, A(), 1);
+
+        thrust::unique_ptr<A> p(dev_ptr);
+        A host_p = *p;
+
+        ASSERT_EQ(host_p.n, 0);
+        ASSERT_EQ(host_p.arr, nullptr);
+
+        raw_addr = static_cast<void*>(p.get_raw());
+    }
+    size_t dummy = 0;
+    hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
+    ASSERT_EQ(st, hipErrorInvalidValue);
+}
+
+TEST(UniquePtrGeneralTests, TestUniquePtrUserTypeCustomDeleter)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    void* raw_addr = nullptr;
+    {
+        thrust::device_ptr<A> dev_ptr = thrust::device_malloc<A>(1);
+        thrust::device_new<A>(dev_ptr, A(3), 1);
+
+        thrust::unique_ptr<A, A_deleter<A>> p(dev_ptr);
+        A host_p = *p;
+
+        ASSERT_EQ(host_p.n, 3);
+        ASSERT_NE(host_p.arr, nullptr);
+
+        raw_addr = static_cast<void*>(thrust::raw_pointer_cast(p.get()));
+    }
+    size_t dummy = 0;
+    hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
+    ASSERT_EQ(st, hipErrorInvalidValue);
 }
