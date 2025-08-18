@@ -212,13 +212,13 @@ namespace ArgumentTracerTest
         {
             KG::ControlFlowArgumentTracer argTracer(kgraph, context->kernel());
 
-	    //
-	    // Create an additional kernel argument after we've made the arg tracer.
-	    //
-	    std::string const& newArgName = "newArg";
-	    context->kernel()->addArgument({newArgName, DataType::Int64, DataDirection::ReadOnly});
-	    auto newArg = std::make_shared<AssemblyKernelArgument>(
-		    context->kernel()->findArgument(newArgName));
+            //
+            // Create an additional kernel argument after we've made the arg tracer.
+            //
+            std::string const& newArgName = "newArg";
+            context->kernel()->addArgument({newArgName, DataType::Int64, DataDirection::ReadOnly});
+            auto newArg = std::make_shared<AssemblyKernelArgument>(
+                context->kernel()->findArgument(newArgName));
 
             // Modify a random Assign node to access an additional kernel
             // argument after we've made the arg tracer.
@@ -272,27 +272,27 @@ namespace ArgumentTracerTest
         kgraph = rocRollerTest::transform<KG::UpdateWavefrontParameters>(kgraph, commandParameters);
         kgraph = rocRollerTest::transform<KG::CleanArguments>(kgraph, context.get(), command);
 
-	//
-	// Get unused arguments using ControlFlowArgumentTracer for verifying
-	// they will be removed after applying AddDeallocateArguments.
-	//
-	KG::ControlFlowArgumentTracer argTracer(kgraph, context->kernel());
-	auto const& unusedArgs = argTracer.neverReferencedArguments();
+        //
+        // Get unused arguments using ControlFlowArgumentTracer for verifying
+        // they will be removed after applying AddDeallocateArguments.
+        //
+        KG::ControlFlowArgumentTracer argTracer(kgraph, context->kernel());
+        auto const&                   unusedArgs = argTracer.neverReferencedArguments();
 
-	//
-	// Make sure there exists unused arguments
-	//
-	REQUIRE(not unusedArgs.empty());
+        //
+        // Make sure there exists unused arguments
+        //
+        REQUIRE(not unusedArgs.empty());
 
         kgraph = rocRollerTest::transform<KG::AddDeallocateArguments>(kgraph, context.get());
 
-	//
-	// Verify unused arguments are removed by checking an error is thrown when
-	// finding them in the kernel.
-	//
-	for(auto const& arg: unusedArgs)
-	{
+        //
+        // Verify unused arguments are removed by checking an error is thrown when
+        // finding them in the kernel.
+        //
+        for(auto const& arg : unusedArgs)
+        {
             CHECK_THROWS_AS(context->kernel()->findArgument(arg), FatalError);
-	}
+        }
     }
 }
