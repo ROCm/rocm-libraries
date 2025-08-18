@@ -77,7 +77,8 @@ TEST_CASE("doesn't have openmp tag", "")
     }
 }
 
-TEST_CASE("a test with openmp and gpu tags for but doesn't actually use GPU", "[openmp][gpu]") {
+TEST_CASE("a test with openmp and gpu tags for but doesn't actually use GPU", "[openmp][gpu]")
+{
     // Exists to have at least one test that satisfies
     // `catch_discover_tests( ... TEST_SPEC "[gpu][openmp]" ... )` in `test/CMakeLists.txt`.
     // Otherwise `ctest` complains of no tests found.
