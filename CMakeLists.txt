@@ -14,26 +14,24 @@ include(fetch_rocm_cmake)
 # --- Options and cache variables ---
 
 option(ROCM_LIBRARIES_SUPERBUILD "Enable superbuild mode" ON)
-option(ROCM_LIBRARIES_DISABLE_ALL "Disable all libraries" OFF)
 
-# Shared
+option(ROCM_LIBRARIES_DISABLE_ALL "Disable all libraries" OFF)
 disableable_option(ENABLE_MXDATAGENERATOR "Enable mxdatagenerator" ON)
 disableable_option(ENABLE_ROCROLLER "Enable rocroller" ON)
 disableable_option(ENABLE_TENSILE "Enable tensile" OFF)
 disableable_option(ENABLE_HIPBLAS_COMMON "Enable hipblas-common" ON)
 
-# Projects
 disableable_option(ENABLE_ROCBLAS "Enable rocblas" OFF)
 disableable_option(ENABLE_ROCFFT "Enable rocfft" OFF)
 disableable_option(ENABLE_ROCPRIM "Enable rocprim" ON)
 disableable_option(ENABLE_ROCRAND "Enable rocrand" ON)
 disableable_option(ENABLE_ROCSOLVER "Enable rocsolver" OFF)
 disableable_option(ENABLE_ROCSPARSE "Enable rocsparse" OFF)
-disableable_option(ENABLE_ROCTHRUST "Enable rocthrust" ON)
+disableable_option(ENABLE_ROCTHRUST "Enable rocthrust" OFF)
 
-disableable_option(ENABLE_HIPCUB "Enable hipcub" ON)
+disableable_option(ENABLE_HIPCUB "Enable hipcub" OFF)
 disableable_option(ENABLE_HIPFFT "Enable hipfft" OFF)
-disableable_option(ENABLE_HIPRAND "Enable hiprand" ON)
+disableable_option(ENABLE_HIPRAND "Enable hiprand" OFF)
 disableable_option(ENABLE_HIPSOLVER "Enable hipsolver" OFF)
 disableable_option(ENABLE_HIPSPARSE "Enable hipsparse" OFF)
 
@@ -70,35 +68,6 @@ endif()
 if(ENABLE_ROCRAND)
     add_subdirectory_with_message(projects/rocrand EXPECT_TARGET rocrand)
 endif()
-
-if(ENABLE_ROCTHRUST)
-    add_subdirectory_with_message(projects/rocthrust EXPECT_TARGET rocthrust)
-endif()
-
-if(ENABLE_HIPCUB)
-    # NOTE: Currently, hipcub tries to expose the rocm::rocprim target if it isn't already found.
-    # This action should be removed so that rocprim is made an explicit dependency where required.
-    add_subdirectory_with_message(projects/hipcub EXPECT_TARGET hipcub)
-endif()
-
-if(ENABLE_HIPRAND)
-    add_subdirectory_with_message(projects/hiprand EXPECT_TARGET hip::hiprand)
-endif()
-
-block()
-function(get_all_targets _result _dir)
-    get_property(_subdirs DIRECTORY "${_dir}" PROPERTY SUBDIRECTORIES)
-    foreach(_subdir IN LISTS _subdirs)
-        get_all_targets(${_result} "${_subdir}")
-    endforeach()
-
-    get_directory_property(_sub_targets DIRECTORY "${_dir}" BUILDSYSTEM_TARGETS)
-    set(${_result} ${${_result}} ${_sub_targets} PARENT_SCOPE)
-endfunction()
-get_all_targets(TARGETS_IN_DIR ${CMAKE_CURRENT_SOURCE_DIR})
-string(REPLACE ";" "\n" TARGETS_IN_DIR "${TARGETS_IN_DIR}")
-message(STATUS "Targets in directory: ${TARGETS_IN_DIR}")
-endblock()
 
 # --- Projects not yet configured for superbuild ---
 
@@ -137,6 +106,18 @@ if(ENABLE_MIOPEN)
     # add_subdirectory_with_message(projects/miopen EXPECT_TARGET roc::miopen)
 endif()
 
+if(ENABLE_HIPCUB)
+    message(FATAL_ERROR "hipcub is not yet supported in the superbuild")
+    # NOTE: Currently, hipcub tries to expose the rocm::rocprim target if it isn't already found.
+    # This action should be removed so that rocprim is made an explicit dependency where required.
+    # add_subdirectory_with_message(projects/hipcub EXPECT_TARGET hipcub)
+endif()
+
+if(ENABLE_HIPRAND)
+    message(FATAL_ERROR "hiprand is not yet supported in the superbuild")
+    # add_subdirectory_with_message(projects/hiprand EXPECT_TARGET hip::hiprand)
+endif()
+
 if(ENABLE_HIPBLASLT)
     message(FATAL_ERROR "hipblaslt is not yet supported in the superbuild")
     # add_subdirectory_with_message(projects/hipblaslt EXPECT_TARGET roc::hipblaslt)
@@ -165,4 +146,9 @@ endif()
 if(ENABLE_ROCSOLVER)
     message(FATAL_ERROR "rocsolver is not yet supported in the superbuild")
     # add_subdirectory_with_message(projects/rocsolver EXPECT_TARGET roc::rocsolver)
+endif()
+
+if(ENABLE_ROCTHRUST)
+    message(FATAL_ERROR "rocthrust is not yet supported in the superbuild")
+    # add_subdirectory_with_message(projects/rocthrust EXPECT_TARGET rocthrust)
 endif()

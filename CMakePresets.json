@@ -8,16 +8,15 @@
     "configurePresets": [
         {
             "name": "opt-rocm:all",
-            "displayName": "Release build (all GPU_TARGETS)",
-            "description": "Standard release build with all GPU_TARGETS",
+            "displayName": "Release build (all libraries)",
+            "description": "Standard release build for all libraries",
             "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
                 "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
                 "CMAKE_C_COMPILER": "/opt/rocm/bin/amdclang",
                 "CMAKE_PREFIX_PATH": "/opt/rocm",
-                "CMAKE_INSTALL_PREFIX": "/opt/rocm",
-                "GPU_TARGETS": "all"
+                "CMAKE_INSTALL_PREFIX": "/opt/rocm"
             },
             "environment": {
                 "ROCM_PATH": "/opt/rocm"
@@ -33,14 +32,6 @@
             }
         },
         {
-            "name": "rocrand",
-            "inherits": ["opt-rocm:all"],
-            "cacheVariables": {
-                "ROCM_LIBRARIES_DISABLE_ALL": "ON",
-                "ENABLE_ROCRAND": "ON"
-            }
-        },
-        {
             "name": "rocprim",
             "inherits": ["opt-rocm:all"],
             "cacheVariables": {
@@ -49,27 +40,11 @@
             }
         },
         {
-            "name": "rocthrust",
+            "name": "rocrand",
             "inherits": ["opt-rocm:all"],
             "cacheVariables": {
                 "ROCM_LIBRARIES_DISABLE_ALL": "ON",
-                "ENABLE_ROCTHRUST": "ON"
-            }
-        },
-        {
-            "name": "hipcub",
-            "inherits": ["opt-rocm:all"],
-            "cacheVariables": {
-                "ROCM_LIBRARIES_DISABLE_ALL": "ON",
-                "ENABLE_HIPCUB": "ON"
-            }
-        },
-        {
-            "name": "hiprand",
-            "inherits": ["opt-rocm:all"],
-            "cacheVariables": {
-                "ROCM_LIBRARIES_DISABLE_ALL": "ON",
-                "ENABLE_HIPRAND": "ON"
+                "ENABLE_ROCRAND": "ON"
             }
         }
     ],

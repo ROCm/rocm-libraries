@@ -70,16 +70,14 @@ cmake --preset rocroller
 cmake --build --preset default
 ```
 
-If you wish to have granular control over the build, use `-D ROCM_LIBRARIES_DISABLE_ALL=ON` and then selectively re-enable the desired projects and dependencies. For example to build hipblaslt without its preset (not currently supported):
+If you wish to have granular control over the build, use `-D ROCM_LIBRARIES_DISABLE_ALL=ON` and then selectively re-enable the desired projects and dependencies. For example to build rocroller without its preset:
 
 ```bash
 # configure
 cmake -B build -S .                   \
     -D ROCM_LIBRARIES_DISABLE_ALL=ON  \
-    -D ENABLE_HIPBLASLT=ON            \
-    -D ENABLE_HIPBLAS_COMMON=ON       \
-    -D ENABLE_ROCROLLER=ON            \
-    -D ENABLE_MXDATAGENERATOR=ON
+    -D ENABLE_MXDATAGENERATOR=ON      \
+    -D ENABLE_ROCROLLER=ON
 # build
 cmake --build build
 ```
