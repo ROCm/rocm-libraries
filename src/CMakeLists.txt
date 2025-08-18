@@ -21,7 +21,7 @@ endif()
 
 # Generate static lib libGpuThreads.a
 add_library(GpuThreads STATIC gpu/thread.cxx)
-target_include_directories(GpuThreads PUBLIC ${CMAKE_SOURCE_DIR}/inc)
+target_include_directories(GpuThreads PRIVATE ${CMAKE_SOURCE_DIR}/inc)
 
 target_compile_options(GpuThreads PRIVATE "-Werror" "-Wall" "-Wextra" "-Wshadow" "-Wnull-dereference" "-Wold-style-cast" "-Wzero-as-null-pointer-constant" "-Wfloat-equal" "-Wdouble-promotion")
 target_compile_options(GpuThreads PRIVATE "-save-temps=obj" "-O2" "-fgpu-rdc")
