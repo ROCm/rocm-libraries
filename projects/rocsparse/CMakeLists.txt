@@ -197,23 +197,19 @@ endif()
 
 message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
 
-# Find rocprim package
-if(NOT ROCM_LIBRARIES_SUPERBUILD)
-  find_package(rocprim REQUIRED)
-endif()
-
-# Find rocblas package
-if(BUILD_WITH_ROCBLAS)
-  if(NOT ROCM_LIBRARIES_SUPERBUILD)
-    find_package(rocblas 4.1.0 QUIET)
-  endif()
-else()
-  message("-- Build rocSPARSE with rocBLAS is disabled")
-endif()
-
 if( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
   find_package( hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm )
 endif( )
+
+if(NOT ROCM_LIBRARIES_SUPERBUILD)
+  find_package(rocprim REQUIRED)
+
+  if(BUILD_WITH_ROCBLAS)
+      find_package(rocblas 4.1.0 QUIET)
+  else()
+    message("-- Build rocSPARSE with rocBLAS is disabled")
+  endif()
+endif()
 
 # Setup version
 set(VERSION_STRING "4.0.2")
