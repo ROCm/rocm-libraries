@@ -302,43 +302,177 @@ namespace
     //---------------------------------------------------------------------------------------------
     //
 
-    enum class alloc_func_type
+    enum class hipfftw_alloc_func_type
     {
         unspecified,
         real,
         complex
     };
-    bool alloc_func_type_is_valid(alloc_func_type func)
+    bool hipfftw_alloc_func_type_is_valid(hipfftw_alloc_func_type func)
     {
-        return func == alloc_func_type::unspecified || func == alloc_func_type::real
-               || func == alloc_func_type::complex;
+        return func == hipfftw_alloc_func_type::unspecified || func == hipfftw_alloc_func_type::real
+               || func == hipfftw_alloc_func_type::complex;
     }
-    // bit mask to prevent allocation kind(s)
-    enum alloc_kind_disabler : unsigned
+    // bit mask to prevent allocation kind(s), by increasing "rank" to enable meaningful
+    // comparison operators (implicitly defined based on the underlying type)
+    enum hipfftw_alloc_memkind : unsigned
     {
         none          = 0x0,
-        pinned_host   = 0x1 << 0,
-        pageable_host = 0x1 << 1,
-        all           = pinned_host | pageable_host
+        pageable_host = 0x1 << 0,
+        pinned_host   = 0x1 << 1,
+        any           = pageable_host | pinned_host
     };
-    bool alloc_disabler_is_valid(alloc_kind_disabler disabler)
+
+    const std::vector<hipfftw_alloc_memkind> hipfftw_possible_memkinds
+        = {pinned_host, pageable_host};
+    const std::string env_hipfftw_pageable_alloc_limit
+        = "HIPFFTW_BYTE_SIZE_LIMIT_PAGEABLE_HOST_ALLOC";
+    const std::string env_hipfftw_pinned_alloc_limit = "HIPFFTW_BYTE_SIZE_LIMIT_PINNED_HOST_ALLOC";
+
+    bool hipfftw_alloc_kind_is_valid(hipfftw_alloc_memkind kind)
     {
-        return disabler == (disabler & alloc_kind_disabler::all);
+        return kind == (kind & hipfftw_alloc_memkind::any);
     }
+    std::string hipfftw_alloc_kind_to_string(hipfftw_alloc_memkind kind)
+    {
+        if(!hipfftw_alloc_kind_is_valid(kind))
+            throw std::invalid_argument("alloc_kind_to_string: invalid kind");
+        if(kind == hipfftw_alloc_memkind::none)
+            return "none";
+        if(std::find(hipfftw_possible_memkinds.begin(), hipfftw_possible_memkinds.end(), kind)
+           == hipfftw_possible_memkinds.end())
+        {
+            // several values enabled
+            std::string ret;
+            for(auto to_consider : hipfftw_possible_memkinds)
+            {
+                if(!(kind & to_consider))
+                    continue;
+                if(!ret.empty())
+                    ret += "_or_";
+                ret += hipfftw_alloc_kind_to_string(to_consider);
+            }
+            return ret;
+        }
+        // kind is a well-defined value in hipfftw_possible_memkinds
+        switch(kind)
+        {
+        case hipfftw_alloc_memkind::pinned_host:
+            return "pinned_host";
+            break;
+        case hipfftw_alloc_memkind::pageable_host:
+            return "pageable_host";
+            break;
+        default:
+            throw std::runtime_error("alloc_kind_to_string: internal error encountered "
+                                     "(unexpected value for kind)");
+            break;
+        }
+        // unreachable
+    }
+
+    size_t get_hipfftw_allocation_byte_size_limit(hipfftw_alloc_memkind kind)
+    {
+        // kind must be in hipfftw_possible_memkinds
+        if(std::find(hipfftw_possible_memkinds.begin(), hipfftw_possible_memkinds.end(), kind)
+           == hipfftw_possible_memkinds.end())
+        {
+            throw std::invalid_argument("get_hipfftw_allocation_byte_size_limit: invalid kind");
+        }
+        // kind is a well-defined value in hipfftw_possible_memkinds
+        const char* dedicated_env_var_cstr = nullptr;
+        switch(kind)
+        {
+        case hipfftw_alloc_memkind::pinned_host:
+            dedicated_env_var_cstr = env_hipfftw_pinned_alloc_limit.c_str();
+            break;
+        case hipfftw_alloc_memkind::pageable_host:
+            dedicated_env_var_cstr = env_hipfftw_pageable_alloc_limit.c_str();
+            break;
+        default:
+            break;
+        }
+        if(!dedicated_env_var_cstr)
+            throw std::runtime_error(
+                "get_hipfftw_allocation_byte_size_limit: internal error encountered "
+                "(unexpected value for kind)");
+#ifdef WIN32
+        // no more than 8*sizeof(size_t) + 3 characters for valid values
+        // (if variable defined in binary representation "0b[...]")
+        char       tmp[8 * sizeof(size_t) + 3];
+        const auto sz = GetEnvironmentVariableA(dedicated_env_var_cstr, tmp, sizeof(tmp));
+        if(sz == 0 || sz > sizeof(tmp))
+            return std::numeric_limits<size_t>::max();
+#else
+        const char* tmp = std::getenv(dedicated_env_var_cstr);
+        if(!tmp)
+            return std::numeric_limits<size_t>::max();
+#endif
+        return std::stoull(tmp);
+    }
+
+    // self-explanatory
+    // returned bool is true if the limit was successfully set
+    bool set_hipfftw_allocation_byte_size_limit(hipfftw_alloc_memkind kind, size_t limit_to_set)
+    {
+        // kind must be in hipfftw_possible_memkinds
+        if(std::find(hipfftw_possible_memkinds.begin(), hipfftw_possible_memkinds.end(), kind)
+           == hipfftw_possible_memkinds.end())
+        {
+            throw std::invalid_argument("set_hipfftw_allocation_byte_size_limit: invalid kind");
+        }
+        // kind is a well-defined value in hipfftw_possible_memkinds
+        bool       ret        = false;
+        const auto limit_str  = std::to_string(limit_to_set);
+        const auto limit_cstr = limit_str.c_str();
+        switch(kind)
+        {
+        case hipfftw_alloc_memkind::pinned_host:
+#ifdef WIN32
+            ret = SetEnvironmentVariable(env_hipfftw_pinned_alloc_limit.c_str(), limit_cstr);
+#else
+            ret = setenv(env_hipfftw_pinned_alloc_limit.c_str(), limit_cstr, 1) == EXIT_SUCCESS;
+#endif
+            break;
+        case hipfftw_alloc_memkind::pageable_host:
+#ifdef WIN32
+            ret = SetEnvironmentVariable(env_hipfftw_pageable_alloc_limit.c_str(), limit_cstr);
+#else
+            ret = setenv(env_hipfftw_pageable_alloc_limit.c_str(), limit_cstr, 1) == EXIT_SUCCESS;
+#endif
+            break;
+        default:
+            throw std::runtime_error(
+                "set_hipfftw_allocation_byte_size_limit: internal error encountered "
+                "(unexpected value for kind)");
+            break;
+        }
+        return ret;
+    }
+
     template <fft_precision prec>
     struct hipfftw_malloc_params
     {
-        size_t              alloc_arg;
-        alloc_func_type     alloc_func;
-        alloc_kind_disabler avoid_alloc_kind;
+        size_t                  alloc_arg;
+        hipfftw_alloc_func_type alloc_func;
+        hipfftw_alloc_memkind   alloc_kind;
+
+        size_t get_byte_size() const
+        {
+            return alloc_arg
+                   * (alloc_func == hipfftw_alloc_func_type::unspecified
+                          ? sizeof(char)
+                          : (alloc_func == hipfftw_alloc_func_type::real
+                                 ? sizeof(hipfftw_real_t<prec>)
+                                 : sizeof(hipfftw_complex_t<prec>)));
+        }
 
         std::string to_string() const
         {
-            if(alloc_func != alloc_func_type::unspecified && alloc_func != alloc_func_type::real
-               && alloc_func != alloc_func_type::complex)
-                throw std::runtime_error("unknown type of allocation function");
-            if(!alloc_disabler_is_valid(avoid_alloc_kind))
-                throw std::runtime_error("unknown allocation kind(s) to disable");
+            if(!hipfftw_alloc_func_type_is_valid(alloc_func))
+                throw std::runtime_error("invalid type of allocation function");
+            if(!hipfftw_alloc_kind_is_valid(alloc_kind))
+                throw std::runtime_error("invalid allocation kind(s)");
 
             std::string ret;
             if constexpr(prec == fft_precision_single)
@@ -346,17 +480,14 @@ namespace
             else
                 ret += "fftw_";
 
-            if(alloc_func == alloc_func_type::unspecified)
+            if(alloc_func == hipfftw_alloc_func_type::unspecified)
                 ret += "malloc_";
-            else if(alloc_func == alloc_func_type::real)
+            else if(alloc_func == hipfftw_alloc_func_type::real)
                 ret += "alloc_real_";
             else
                 ret += "alloc_complex_";
             ret += std::to_string(alloc_arg);
-            if(avoid_alloc_kind & alloc_kind_disabler::pinned_host)
-                ret += "_disabling_pinned_host";
-            if(avoid_alloc_kind & alloc_kind_disabler::pageable_host)
-                ret += "_disabling_pageable_host";
+            ret += "_alloc_kind_" + hipfftw_alloc_kind_to_string(alloc_kind);
             return ret;
         }
         // for using with insert_into_unique_sorted_params
@@ -377,29 +508,37 @@ namespace
         // testing argument value 0 and a randomly chosen one (max 64MiB in byte size, arbitrarily chosen)
         constexpr size_t max_test_alloc_size = 1ULL << 26;
 
-        const std::vector<alloc_func_type> func_range
-            = {alloc_func_type::unspecified, alloc_func_type::real, alloc_func_type::complex};
-        const std::vector<alloc_kind_disabler> disabler_range = {alloc_kind_disabler::none,
-                                                                 alloc_kind_disabler::pinned_host,
-                                                                 alloc_kind_disabler::pageable_host,
-                                                                 alloc_kind_disabler::all};
+        const std::vector<hipfftw_alloc_func_type> func_range
+            = {hipfftw_alloc_func_type::unspecified,
+               hipfftw_alloc_func_type::real,
+               hipfftw_alloc_func_type::complex};
+        std::vector<hipfftw_alloc_memkind> memkind_range;
+        // add all possible combinations of memory kinds:
+        for(auto kind = static_cast<std::underlying_type<hipfftw_alloc_memkind>::type>(
+                hipfftw_alloc_memkind::none);
+            kind <= static_cast<std::underlying_type<hipfftw_alloc_memkind>::type>(
+                hipfftw_alloc_memkind::any);
+            kind++)
+        {
+            memkind_range.push_back(static_cast<hipfftw_alloc_memkind>(kind));
+        }
 
         hipfftw_malloc_params<prec> to_add;
         for(auto func : func_range)
         {
             size_t max_arg = max_test_alloc_size;
-            if(func == alloc_func_type::real)
+            if(func == hipfftw_alloc_func_type::real)
                 max_arg /= sizeof(hipfftw_real_t<prec>);
-            else if(func == alloc_func_type::complex)
+            else if(func == hipfftw_alloc_func_type::complex)
                 max_arg /= sizeof(hipfftw_complex_t<prec>);
             std::uniform_int_distribution<size_t> arg_rng(1, max_arg);
-            for(auto disabler : disabler_range)
+            for(auto kind : memkind_range)
             {
                 for(auto arg : {size_t(0), arg_rng(get_pseudo_rng())})
                 {
-                    to_add.alloc_arg        = arg;
-                    to_add.alloc_func       = func;
-                    to_add.avoid_alloc_kind = disabler;
+                    to_add.alloc_arg  = arg;
+                    to_add.alloc_func = func;
+                    to_add.alloc_kind = kind;
                     insert_into_unique_sorted_params(ret, to_add);
                 }
             }
@@ -412,81 +551,54 @@ namespace
     {
     protected:
         void* test_allocation = nullptr;
-        bool  pinned_host_alloc_was_disabled;
-        bool  pageable_host_alloc_was_disabled;
+        bool  expect_no_allocation;
+
+        std::map<hipfftw_alloc_memkind, size_t> limits_to_reset_upon_test_completion;
 
         void SetUp() override
         {
             if(test_allocation)
                 GTEST_FAIL() << "Starting from an unclean slate (test_allocation is not nullptr)";
-            pinned_host_alloc_was_disabled   = false;
-            pageable_host_alloc_was_disabled = false;
-
             const hipfftw_malloc_params<prec>& params = this->GetParam();
             // check validity of params
-            if(!alloc_disabler_is_valid(params.avoid_alloc_kind))
-                GTEST_FAIL() << "invalid value for allocation disabler";
-
-            if(!alloc_func_type_is_valid(params.alloc_func))
+            if(!hipfftw_alloc_kind_is_valid(params.alloc_kind))
+                GTEST_FAIL() << "invalid value for allocation kind";
+            if(!hipfftw_alloc_func_type_is_valid(params.alloc_func))
                 GTEST_FAIL() << "unknown allocation function";
 
-            // enable allocation limits, if relevant for the targeted test
-            if(params.avoid_alloc_kind & alloc_kind_disabler::pinned_host)
+            size_t limit_for_alloc_kind = 0;
+            for(auto alloc_kind_candidate : hipfftw_possible_memkinds)
             {
-#ifdef WIN32
-                pinned_host_alloc_was_disabled
-                    = SetEnvironmentVariable("HIPFFTW_BYTE_SIZE_LIMIT_PINNED_HOST_ALLOC", "0");
-#else
-                pinned_host_alloc_was_disabled
-                    = setenv("HIPFFTW_BYTE_SIZE_LIMIT_PINNED_HOST_ALLOC", "0", 1) == EXIT_SUCCESS;
-#endif
-                if(!pinned_host_alloc_was_disabled)
+                if(alloc_kind_candidate & params.alloc_kind)
                 {
-                    GTEST_SKIP()
-                        << "failed to set environment variable disabling pinned host allocation";
+                    limit_for_alloc_kind
+                        = std::max(limit_for_alloc_kind,
+                                   get_hipfftw_allocation_byte_size_limit(alloc_kind_candidate));
+                }
+                else
+                {
+                    limits_to_reset_upon_test_completion[alloc_kind_candidate]
+                        = get_hipfftw_allocation_byte_size_limit(alloc_kind_candidate);
+                    // disable the other possible allocation kind(s) by temporarily
+                    // setting the corresponding byte size limit to 0
+                    if(!set_hipfftw_allocation_byte_size_limit(alloc_kind_candidate, 0))
+                        GTEST_SKIP() << "failed to set environment variable disabling "
+                                     << hipfftw_alloc_kind_to_string(alloc_kind_candidate)
+                                     << " allocation(s) by hipFFTW";
                 }
             }
-            if(params.avoid_alloc_kind & alloc_kind_disabler::pageable_host)
-            {
-#ifdef WIN32
-                pageable_host_alloc_was_disabled
-                    = SetEnvironmentVariable("HIPFFTW_BYTE_SIZE_LIMIT_PAGEABLE_HOST_ALLOC", "0");
-#else
-                pageable_host_alloc_was_disabled
-                    = setenv("HIPFFTW_BYTE_SIZE_LIMIT_PAGEABLE_HOST_ALLOC", "0", 1) == EXIT_SUCCESS;
-#endif
-                if(!pageable_host_alloc_was_disabled)
-                {
-                    GTEST_SKIP()
-                        << "failed to set environment variable disabling pageable host allocation";
-                }
-            }
+            const size_t req_byte_size = params.get_byte_size();
+            expect_no_allocation       = params.alloc_kind == hipfftw_alloc_memkind::none
+                                   || req_byte_size == 0 || req_byte_size > limit_for_alloc_kind;
         }
         void TearDown() override
         {
+            for(auto limit_to_reset : limits_to_reset_upon_test_completion)
+            {
+                // reset all temporarily-modified allocation limits
+                set_hipfftw_allocation_byte_size_limit(limit_to_reset.first, limit_to_reset.second);
+            }
             const hipfftw_funcs<prec>& hipfftw_impl = hipfftw_funcs<prec>::get_instance();
-            // reenable disabled allocation kinds (ignoring returned values below)
-            const std::string no_limit_str = std::to_string(std::numeric_limits<size_t>::max());
-            if(pinned_host_alloc_was_disabled)
-            {
-#ifdef WIN32
-                (void)SetEnvironmentVariable("HIPFFTW_BYTE_SIZE_LIMIT_PINNED_HOST_ALLOC",
-                                             no_limit_str.c_str());
-#else
-                (void)setenv("HIPFFTW_BYTE_SIZE_LIMIT_PINNED_HOST_ALLOC", no_limit_str.c_str(), 1);
-#endif
-            }
-            if(pageable_host_alloc_was_disabled)
-            {
-#ifdef WIN32
-                (void)SetEnvironmentVariable("HIPFFTW_BYTE_SIZE_LIMIT_PAGEABLE_HOST_ALLOC",
-                                             no_limit_str.c_str());
-#else
-                (void)setenv(
-                    "HIPFFTW_BYTE_SIZE_LIMIT_PAGEABLE_HOST_ALLOC", no_limit_str.c_str(), 1);
-#endif
-            }
-
             if(test_allocation && !hipfftw_impl.free.may_be_used())
                 GTEST_FAIL() << "An allocation was created but it can't be freed";
             // note: free should be stable even with nullptr
@@ -537,33 +649,59 @@ namespace
                     = sum_of_cycles
                       + (tail_sz > 0 ? sum_of_integers(max_elem, max_elem + 1 - tail_sz) : 0);
                 if(expected_result_r > max_representable_result
-                   || (params.alloc_func == alloc_func_type::complex
+                   || (params.alloc_func == hipfftw_alloc_func_type::complex
                        && expected_result_i > max_representable_result))
                     throw allocation_test_to_be_skipped("Test cannot reliably check for argument "
                                                         + std::to_string(params.alloc_arg));
 
-                if(params.alloc_func == alloc_func_type::unspecified)
+                if(params.alloc_func == hipfftw_alloc_func_type::unspecified)
                     test_allocation = hipfftw_impl.malloc(params.alloc_arg);
-                else if(params.alloc_func == alloc_func_type::real)
+                else if(params.alloc_func == hipfftw_alloc_func_type::real)
                     test_allocation = hipfftw_impl.alloc_real(params.alloc_arg);
                 else
                     test_allocation = hipfftw_impl.alloc_complex(params.alloc_arg);
 
                 // check that the allocation behaved as expected
-                if(params.avoid_alloc_kind == alloc_kind_disabler::all || params.alloc_arg == 0)
+                if(expect_no_allocation)
                 {
                     if(!test_allocation)
                         throw allocation_test_success();
                     else
                         // no allocation should have happened, nullptr should have been returned
                         throw allocation_test_failed(
-                            "allocation misbehaved for zero-size request or "
-                            "fully-disabled hipfftw allocation");
+                            "An allocation was unexpectedly produced for this test");
                 }
                 if(!test_allocation)
                 {
                     throw allocation_test_failed("allocation failed");
                 }
+                // check that the allocation is of the expected type
+                hipPointerAttribute_t attributes;
+                auto hip_status = hipPointerGetAttributes(&attributes, test_allocation);
+                if(hip_status != hipSuccess)
+                {
+                    ++n_hip_failures;
+                    std::ostringstream gtest_info;
+                    gtest_info << "hipPointerGetAttributes failure with error " << hip_status;
+                    if(skip_runtime_fails)
+                        GTEST_SKIP() << gtest_info.str();
+                    else
+                        GTEST_FAIL() << gtest_info.str();
+                }
+                switch(attributes.type)
+                {
+                case hipMemoryType::hipMemoryTypeHost:
+                    EXPECT_NE(params.alloc_kind & hipfftw_alloc_memkind::pinned_host, 0);
+                    break;
+                case hipMemoryType::hipMemoryTypeUnregistered:
+                    EXPECT_NE(params.alloc_kind & hipfftw_alloc_memkind::pageable_host, 0);
+                    break;
+                default:
+                    GTEST_FAIL() << "Unexpected kind of memory created: attributes.type = "
+                                 << attributes.type;
+                    break;
+                }
+
                 // check that the host can write to the entire allocation
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -571,9 +709,11 @@ namespace
                 for(size_t idx = 0; idx < params.alloc_arg; idx++)
                 {
                     uint8_t val = static_cast<uint8_t>(idx % cycle_sz);
-                    if(params.alloc_func == alloc_func_type::unspecified) // write as uint8_t
+                    if(params.alloc_func
+                       == hipfftw_alloc_func_type::unspecified) // write as uint8_t
                         static_cast<uint8_t*>(test_allocation)[idx] = val;
-                    else if(params.alloc_func == alloc_func_type::real) // write as float/double
+                    else if(params.alloc_func
+                            == hipfftw_alloc_func_type::real) // write as float/double
                         static_cast<hipfftw_real_t<prec>*>(test_allocation)[idx] = val;
                     else // write as complex value of req. precision
                     {
@@ -589,12 +729,12 @@ namespace
 #endif
                 for(size_t idx = 0; idx < params.alloc_arg; idx++)
                 {
-                    if(params.alloc_func == alloc_func_type::unspecified)
+                    if(params.alloc_func == hipfftw_alloc_func_type::unspecified)
                     {
                         // read as uint8_t, accumulate as double
                         result[0] += static_cast<uint8_t*>(test_allocation)[idx];
                     }
-                    else if(params.alloc_func == alloc_func_type::real)
+                    else if(params.alloc_func == hipfftw_alloc_func_type::real)
                     {
                         // read as float/double, accumulate as double
                         result[0] += static_cast<hipfftw_real_t<prec>*>(test_allocation)[idx];
@@ -609,7 +749,8 @@ namespace
                 // validity checks
                 if(result[0] != expected_result_r)
                     throw allocation_test_failed("incorrect result for accumulated real parts");
-                if(params.alloc_func == alloc_func_type::complex && result[1] != expected_result_i)
+                if(params.alloc_func == hipfftw_alloc_func_type::complex
+                   && result[1] != expected_result_i)
                     throw allocation_test_failed(
                         "incorrect result for accumulated imaginary parts");
             }
@@ -646,18 +787,30 @@ namespace
 
             // pinned host allocation is the first-ranked choice of hipfftw
             // check that the execution flow was redirected if disabled
-            if(pinned_host_alloc_was_disabled && params.alloc_arg > 0
-               && exception_logger.is_active())
+            for(auto possible_memkind : hipfftw_possible_memkinds)
             {
-                const auto log_content = exception_logger.get_log();
-                if(log_content.find(
-                       hipfftw_expected_log_instance<hipfftw_internal_exception::flow_redirection>)
-                   == std::string::npos)
+                if(possible_memkind <= params.alloc_kind)
+                    continue;
+                // possible_memkind is higher ranked than the test's targeted kind
+                // flow re-direction must have happened
+                if(test_allocation && exception_logger.is_active())
                 {
-                    GTEST_FAIL() << "No instance of \"" << hipfftw_expected_log_instance<hipfftw_internal_exception::flow_redirection>
-                                 << "\" in log despite disabling pinned host allocation via "
-                                    "environment variable.\nContent of log:\n"
-                                 << log_content;
+                    const auto log_content = exception_logger.get_log();
+                    if(log_content.find(hipfftw_expected_log_instance<
+                                        hipfftw_internal_exception::flow_redirection>)
+                       == std::string::npos)
+                    {
+                        GTEST_FAIL() << "No instance of \""
+                                     << hipfftw_expected_log_instance<
+                                            hipfftw_internal_exception::
+                                                flow_redirection> << "\" in log despite "
+                                     << hipfftw_alloc_kind_to_string(possible_memkind)
+                                     << " allocation kind supposedly "
+                                        "disabled via environment variable.\nContent of log:\n"
+                                     << log_content;
+                    }
+                    else
+                        break;
                 }
             }
         }
@@ -2371,3 +2524,9 @@ INSTANTIATE_TEST_SUITE_P(
     hipfftw_functional_validation_dp,
     ::testing::ValuesIn(params_for_functional_tests<fft_precision_double>(full_suite_size)),
     hipfftw_functional_validation_dp::TestName);
+
+// params_for_functional_tests may return empty vectors for low test probabilities.
+// The following ensures such cases do not make gtest report an error due to uninstantiated
+// hipfftw_functional_validation_{sp,dp}.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(hipfftw_functional_validation_sp);
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(hipfftw_functional_validation_dp);
