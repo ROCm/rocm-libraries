@@ -439,6 +439,9 @@ namespace TensileLite
                     initArray<Float4x2>(initMode, static_cast<Float4x2*>(array), descriptor);
                     break;
 #endif // #ifdef TENSILE_USE_FP4
+                case rocisa::DataType::E8:
+                    initArray<E8>(initMode, static_cast<E8*>(array), descriptor);
+                    break;
                 case rocisa::DataType::Int64:
                 case rocisa::DataType::XFloat32:
                 case rocisa::DataType::ComplexFloat:
@@ -2415,6 +2418,67 @@ namespace TensileLite
 #endif // #ifdef TENSILE_USE_FP4
 
         template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::Zero>()
+        {
+            throw std::runtime_error("Zero not available for E8.");
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::One>()
+        {
+            return E8(1.0f);
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::Two>()
+        {
+            return E8(2.0f);
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::NegOne>()
+        {
+            throw std::runtime_error("-1 not available for E8.");
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::Max>()
+        {
+            return E8(0xfe);
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::DenormMin>()
+        {
+            throw std::runtime_error("DenormMin not available for E8.");
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::DenormMax>()
+        {
+            throw std::runtime_error("DenormMax not available for E8.");
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::NaN>()
+        {
+            return E8(0xff);
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::Inf>()
+        {
+            throw std::runtime_error("Inf not available for E8.");
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::Random>()
+        {
+            return E8(static_cast<uint8_t>((rand() % 7) - 3 + 127));
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::BadInput>()
+        {
+            return E8(0xff);
+        }
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::BadOutput>()
+        {
+            return E8(0xff);
+        }
+
+        template <>
         inline bool DataInitialization::isBadInput<float>(float value)
         {
             return std::isnan(value);
@@ -2515,6 +2579,12 @@ namespace TensileLite
             return false;
         }
 #endif // #ifdef TENSILE_USE_FP4
+
+        template <>
+        inline bool DataInitialization::isBadInput<E8>(E8 value)
+        {
+            return value.data == 0xff;
+        }
 
         template <>
         inline bool DataInitialization::isBadOutput<float>(float value)
@@ -2618,6 +2688,12 @@ namespace TensileLite
             return false;
         }
 #endif // #ifdef TENSILE_USE_FP4
+
+        template <>
+        inline bool DataInitialization::isBadOutput<E8>(E8 value)
+        {
+            return value.data == 0xff;
+        }
 
         template <>
         inline float DataInitialization::getTrigValue<float>(int idx, bool useCos, bool useAbs)
@@ -2758,6 +2834,12 @@ namespace TensileLite
 #endif // #ifdef TENSILE_USE_FP4
 
         template <>
+        inline E8 DataInitialization::getTrigValue<E8>(int idx, bool useCos, bool useAbs)
+        {
+            return E8(getTrigValue<float>(idx, useCos, useAbs));
+        }
+
+        template <>
         inline std::complex<float>
             DataInitialization::getTrigValue<std::complex<float>>(int idx, bool useCos, bool useAbs)
         {
@@ -2838,6 +2920,14 @@ namespace TensileLite
             using UINT_T                = uint8_t;
             static constexpr int NUMSIG = 2;
             static constexpr int NUMEXP = 5;
+        };
+
+        template <>
+        struct FP_PARAM<E8>
+        {
+            using UINT_T                = uint8_t;
+            static constexpr int NUMSIG = 0;
+            static constexpr int NUMEXP = 8;
         };
 
         template <typename T>
@@ -2927,6 +3017,11 @@ namespace TensileLite
 
         template <>
         struct rocm_random_narrow_range<BFloat8_fnuz> : rocm_random<BFloat8_fnuz, -100, 0>
+        {
+        };
+
+        template <>
+        struct rocm_random_narrow_range<E8> : rocm_random<E8, -100, 0>
         {
         };
 
@@ -3082,6 +3177,12 @@ namespace TensileLite
                             rocm_random_narrow_range<float>{}());
         }
 #endif // #ifdef TENSILE_USE_FP4
+
+        template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::RandomNarrow>()
+        {
+            return getValue<E8, InitMode::Random>();
+        }
 
         template <typename T>
         inline T getValueWithUpperLowerBoundFP(double upper = 1.0, double lower = -1.0)
@@ -3248,6 +3349,12 @@ namespace TensileLite
 #endif // #ifdef TENSILE_USE_FP4
 
         template <>
+        inline E8 DataInitialization::getValue<E8, InitMode::RandomNegPosLimited>()
+        {
+            return getValueWithUpperLowerBoundInteger<E8>();
+        }
+
+        template <>
         inline float DataInitialization::ConvertTo<float>(size_t i)
         {
             return static_cast<float>(i);
@@ -3387,6 +3494,12 @@ namespace TensileLite
 #endif // #ifdef TENSILE_USE_FP4
 
         template <>
+        inline E8 DataInitialization::ConvertTo<E8>(size_t i)
+        {
+            return static_cast<E8>(static_cast<float>(i));
+        }
+
+        template <>
         inline float DataInitialization::convertDoubleTo<float>(double value)
         {
             return static_cast<float>(value);
@@ -3522,5 +3635,12 @@ namespace TensileLite
             return Float4x2(float(value), float(value));
         }
 #endif // #ifdef TENSILE_USE_FP4
+
+        template <>
+        inline E8 DataInitialization::convertDoubleTo<E8>(double value)
+        {
+            return static_cast<E8>(static_cast<float>(value));
+        }
+
     } // namespace Client
 } // namespace TensileLite

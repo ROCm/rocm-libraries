@@ -536,6 +536,12 @@ def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryTyp
     if "DataTypeMetadata" in problemTypeState:
         problemTypeState["DataTypeMetadata"] = \
                 problemTypeState["DataTypeMetadata"].value
+    if "DataTypeMXSA" in problemTypeState:
+        problemTypeState["DataTypeMXSA"] = \
+                problemTypeState["DataTypeMXSA"].value
+    if "DataTypeMXSB" in problemTypeState:
+        problemTypeState["DataTypeMXSB"] = \
+                problemTypeState["DataTypeMXSB"].value
     data.append(problemTypeState)
     # solutions
     solutionList = []

@@ -132,6 +132,7 @@ namespace TensileLite
             case rocisa::DataType::BFloat8:
             case rocisa::DataType::Float8BFloat8:
             case rocisa::DataType::BFloat8Float8:
+            case rocisa::DataType::E8:
                 return 8;
             default:
                 throw std::runtime_error("unsupported datatype");
@@ -371,6 +372,7 @@ namespace TensileLite
             case rocisa::DataType::BFloat8:
             case rocisa::DataType::Float8BFloat8:
             case rocisa::DataType::BFloat8Float8:
+            case rocisa::DataType::E8:
                 MiK  = 32;
                 MiKv = 8;
                 break;
@@ -1832,6 +1834,7 @@ namespace TensileLite
 #ifdef TENSILE_USE_FP4
                     case rocisa::DataType::Float4:
 #endif // #ifdef TENSILE_USE_FP4
+                    case rocisa::DataType::E8:
                     case rocisa::DataType::Int64:
                     case rocisa::DataType::XFloat32:
                     case rocisa::DataType::Count:
@@ -2199,6 +2202,8 @@ namespace TensileLite
             inputs->scaleC        = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALEC];
             inputs->scaleD        = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALED];
             inputs->scaleAlphaVec = (void*)ptrs[ContractionProblemGemm::TENSOR::SCALEALPHAVEC];
+            inputs->mxsa          = (void*)ptrs[ContractionProblemGemm::TENSOR::MXSA];
+            inputs->mxsb          = (void*)ptrs[ContractionProblemGemm::TENSOR::MXSB];
             inputs->metadata      = (unsigned char*)ptrs[ContractionProblemGemm::TENSOR::METADATA];
             inputs->Synchronizer  = (void*)ptrs[ContractionProblemGemm::TENSOR::Synchronizer];
             inputs->amaxD         = (void*)ptrs[ContractionProblemGemm::TENSOR::AMAXD];

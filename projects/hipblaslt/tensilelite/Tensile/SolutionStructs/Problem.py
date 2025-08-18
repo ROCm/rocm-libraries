@@ -469,7 +469,12 @@ _defaultProblemType = {
     "SupportUserArgs": True,
     "SwizzleTensorA": False,
     "SwizzleTensorB": False,
-    "MetadataLayout": 0
+    "MetadataLayout": 0,
+    # MX Block
+    "MXBlockA": 0,
+    "MXBlockB": 0,
+    "DataTypeMXSA": "E8",
+    "DataTypeMXSB": "E8",
 }
 
 # The supported typed GEMM, each entry is (Ti, To, Tc).
@@ -628,6 +633,16 @@ def problemTypeToEnum(problemType):
   if "DataTypeMetadata" in problemType:
       problemType["DataTypeMetadata"] = \
           problemType["DataTypeMetadata"].value
+  if "DataTypeMXSA" in problemType:
+      problemType["DataTypeMXSA"] = \
+          problemType["DataTypeMXSA"].value
+  else:
+      problemType["DataTypeMXSA"] = DataTypeEnum.E8
+  if "DataTypeMXSB" in problemType:
+      problemType["DataTypeMXSB"] = \
+          problemType["DataTypeMXSB"].value
+  else:
+      problemType["DataTypeMXSB"] = DataTypeEnum.E8
 
 class ProblemType(Mapping):
   ########################################
@@ -683,6 +698,16 @@ class ProblemType(Mapping):
         else:
           raise Exception("NO compute data type, or dest data type, or data type specified")
           self["DataType"] = DataType(0)
+
+    if "DataTypeMXSA" in config:
+      self["DataTypeMXSA"] = DataType(config["DataTypeMXSA"])
+    else:
+      self["DataTypeMXSA"] = DataType(DataTypeEnum.E8)
+
+    if "DataTypeMXSB" in config:
+      self["DataTypeMXSB"] = DataType(config["DataTypeMXSB"])
+    else:
+      self["DataTypeMXSB"] = DataType(DataTypeEnum.E8)
 
     # Just like DataTypeE is DestDataType by default; DataTypeAmaxD if ComputeDataType by default.
     # So far we don't have to set it in config yamls
@@ -1031,6 +1056,12 @@ class ProblemType(Mapping):
 
     if not self["F32XdlMathOp"].isSingle() and self["DataType"].isSingle():
       name.append("".join(["M", self["F32XdlMathOp"].toChar()]))
+
+    if self["MXBlockA"]:
+      name.append("MXA" + self["DataTypeMXSA"].toChar() + "B" + str(self["MXBlockA"]))
+
+    if self["MXBlockB"]:
+      name.append("MXB" + self["DataTypeMXSB"].toChar() + "B" + str(self["MXBlockB"]))
 
     if self["SwizzleTensorA"]:
       name.append("STA")

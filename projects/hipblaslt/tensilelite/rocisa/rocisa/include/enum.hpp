@@ -57,6 +57,7 @@ namespace rocisa
         Float6,
         BFloat6,
         Float4,
+        E8,
         Count,
         None = Count
     };
@@ -156,6 +157,8 @@ namespace rocisa
             return "BFloat6";
         case DataType::Float4:
             return "Float4";
+        case DataType::E8:
+            return "E8";
         default:
             return "Invalid";
         }

@@ -358,6 +358,12 @@ namespace TensileLite
                 return cast<Accumulator>(Transform<BFloat8_fnuz>::Input(typedPtr[pos], aConjugate));
             }
             break;
+            case rocisa::DataType::E8:
+            {
+                auto typedPtr = static_cast<E8 const*>(voidPtr);
+                return cast<Accumulator>(Transform<E8>::Input(typedPtr[pos], aConjugate));
+            }
+            break;
             case rocisa::DataType::XFloat32:
             case rocisa::DataType::ComplexFloat:
             case rocisa::DataType::ComplexDouble:
@@ -496,6 +502,7 @@ namespace TensileLite
 #ifdef TENSILE_USE_FP4
             case rocisa::DataType::Float4:
 #endif // #ifdef TENSILE_USE_FP4
+            case rocisa::DataType::E8:
                 ;
             }
         }
@@ -553,6 +560,7 @@ namespace TensileLite
 #ifdef TENSILE_USE_FP4
             case rocisa::DataType::Float4:
 #endif // #ifdef TENSILE_USE_FP4
+            case rocisa::DataType::E8:
                 ;
             }
         }
@@ -1399,6 +1407,8 @@ namespace TensileLite
             auto const& c    = problem.c();
             auto const& d    = problem.d();
             auto const& bias = problem.bias();
+            auto const& mxsa = problem.mxsa();
+            auto const& mxsb = problem.mxsb();
 
             bool aConjugate = false;
             bool bConjugate = false;
@@ -1459,6 +1469,8 @@ namespace TensileLite
                 std::vector<int64_t> cCoord(c.dimensions());
                 std::vector<int64_t> dCoord(d.dimensions());
                 std::vector<int64_t> biasCoord(bias.dimensions());
+                std::vector<int64_t> mxsaCoord(mxsa.dimensions());
+                std::vector<int64_t> mxsbCoord(mxsb.dimensions());
                 CoordNumbered(
                     dNum, dCoord.begin(), dCoord.end(), d.sizes().begin(), d.sizes().end());
 
@@ -1472,6 +1484,10 @@ namespace TensileLite
                     cCoord[idx.c] = coord;
                     if(biasCoord.size() > 2)
                         biasCoord[2] = coord;
+                    if(mxsaCoord.size())
+                        mxsaCoord[idx.a] = coord;
+                    if(mxsbCoord.size())
+                        mxsbCoord[idx.a] = coord;
                 }
 
                 for(size_t i = 0; i < problem.freeIndices().size(); i++)
@@ -1482,9 +1498,17 @@ namespace TensileLite
                     cCoord[idx.c] = coord;
 
                     if(idx.isA)
+                    {
                         aCoord[idx.i] = coord;
+                        if(mxsaCoord.size())
+                            mxsaCoord[idx.i] = coord;
+                    }
                     else
+                    {
                         bCoord[idx.i] = coord;
+                        if(mxsbCoord.size())
+                            mxsbCoord[idx.i] = coord;
+                    }
                 }
 
                 Accumulator value(0);
@@ -1513,31 +1537,60 @@ namespace TensileLite
                             if(problem.boundIndices()[i].bMirror)
                                 bCoord[boundIndices[i].b]
                                     = boundSize[i] - bCoord[boundIndices[i].b] - 1;
+
+                            if(problem.mxBlockA())
+                               mxsaCoord[boundIndices[i].a] = aCoord[boundIndices[i].a] / problem.mxBlockA();
+                            if(problem.mxBlockB())
+                               mxsbCoord[boundIndices[i].b] = bCoord[boundIndices[i].b] / problem.mxBlockB();
                         }
 
                         size_t aIndex = a.index(aCoord);
                         size_t bIndex = b.index(bCoord);
+                        size_t mxsaIndex = problem.mxBlockA() ? mxsa.index(mxsaCoord) : 0;
+                        size_t mxsbIndex = problem.mxBlockB() ? mxsb.index(mxsbCoord) : 0;
 
                         auto aStride = problem.a().strides()[boundIndices[0].a];
                         auto bStride = problem.b().strides()[boundIndices[0].b];
+                        auto mxsaStride = problem.mxBlockA() ? mxsa.strides()[boundIndices[0].a] : 0;
+                        auto mxsbStride = problem.mxBlockB() ? mxsb.strides()[boundIndices[0].b] : 0;
 
                         // innermost bound calculation:
-                        for(size_t i = 0; i < boundSize[0]; i++)
+                        size_t innerMXLoop = std::max<size_t>(std::max<size_t>(problem.mxBlockA(), problem.mxBlockB()), 1);
+                        for(size_t i = 0; i < boundSize[0]; i+=innerMXLoop)
                         {
-                            size_t aI
-                                = problem.boundIndices()[0].aMirror ? (boundSize[0] - i - 1) : i;
-                            size_t bI
-                                = problem.boundIndices()[0].bMirror ? (boundSize[0] - i - 1) : i;
+                            Accumulator val(0);
+                            for(size_t j = 0; j<innerMXLoop ; j++)
+                            {
+                                size_t idx = i + j;
+                                size_t aI = boundIndices[0].aMirror ? (boundSize[0] - idx - 1) : idx;
+                                size_t bI = boundIndices[0].bMirror ? (boundSize[0] - idx - 1) : idx;
 
-                            size_t aIdx = aIndex + (aI * aStride);
-                            size_t bIdx = bIndex + (bI * bStride);
-                            value += multiply<Inputs,
-                                              Accumulator,
-                                              MathOpAccum,
-                                              typename Inputs::AType,
-                                              typename Inputs::BType,
-                                              typename Inputs::ComputeInputType>(
-                                problem, inputs, aPtr, bPtr, aIdx, bIdx, aConjugate, bConjugate);
+                                size_t aIdx = aIndex + (aI * aStride);
+                                size_t bIdx = bIndex + (bI * bStride);
+                                val += multiply<Inputs, Accumulator, MathOpAccum,
+                                                  typename Inputs::AType,
+                                                  typename Inputs::BType,
+                                                  typename Inputs::ComputeInputType>(
+                                    problem, inputs, aPtr, bPtr, aIdx, bIdx, aConjugate, bConjugate);
+                            }
+
+                            Accumulator mxScale(1);
+                            if (problem.mxBlockA())
+                            {
+                                size_t mxsaI = (boundIndices[0].aMirror ? (boundSize[0] - i - 1) : i) / problem.mxBlockA();
+                                size_t mxsaIdx = mxsaIndex + (mxsaI * mxsaStride);
+                                Accumulator sa = GetValue<Accumulator>(mxsa.dataType(), inputs.mxsa, mxsaIdx, 0);
+                                mxScale = multiply<Accumulator>(mxScale, sa);
+                            }
+
+                            if (problem.mxBlockB())
+                            {
+                                size_t mxsbI = (boundIndices[0].bMirror ? (boundSize[0] - i - 1) : i) / problem.mxBlockB();
+                                size_t mxsbIdx = mxsbIndex + (mxsbI * mxsbStride);
+                                Accumulator sb = GetValue<Accumulator>(mxsb.dataType(), inputs.mxsb, mxsbIdx, 0);
+                                mxScale = multiply<Accumulator>(mxScale, sb);
+                            }
+                            value += multiply<Accumulator>(val, mxScale);
                         }
                     }
                 }

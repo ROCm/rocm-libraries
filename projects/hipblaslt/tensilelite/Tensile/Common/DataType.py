@@ -35,7 +35,8 @@ def _is8bitFloat(value):
             or value == DataTypeEnum.Float8_fnuz.value \
             or value == DataTypeEnum.BFloat8_fnuz.value \
             or value == DataTypeEnum.Float8BFloat8_fnuz.value \
-            or value == DataTypeEnum.BFloat8Float8_fnuz.value)
+            or value == DataTypeEnum.BFloat8Float8_fnuz.value \
+            or value == DataTypeEnum.E8.value)
 
 @functools.total_ordering
 class DataType:
@@ -245,6 +246,15 @@ class DataType:
             'reg': 0.125,
             'hip': 'tensile_float4x2',
             'isComplex': False
+        },
+        {
+            'enum': DataTypeEnum.E8,
+            'char': 'E8',
+            'nameAbbrev': 'e8',
+            'miOutTypeNameAbbrev': 'f32',
+            'reg': 0.25,
+            'hip': 'ERROR',
+            'isComplex': False,
         },
     ]
     lookup = {}

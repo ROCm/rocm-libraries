@@ -101,6 +101,8 @@ namespace TensileLite
             bool                             m_swizzleTensorA;
             bool                             m_swizzleTensorB;
             int                              m_metadataLayout;
+            int                              m_mxBlockA;
+            int                              m_mxBlockB;
 
             TensorOps m_aOps;
             TensorOps m_bOps;

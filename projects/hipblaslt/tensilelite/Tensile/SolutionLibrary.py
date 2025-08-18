@@ -456,6 +456,11 @@ class MasterSolutionLibrary:
                     else:
                         placeholderName += "_%s"%str(problemType.activationType).upper()
 
+                if problemType.mxBlockA:
+                    placeholderName += ('_MXA' + str(problemType.mxTypeA) + 'B' + str(problemType.mxBlockA))
+                if problemType.mxBlockB:
+                    placeholderName += ('_MXB' + str(problemType.mxTypeB) + 'B' + str(problemType.mxBlockB))
+
                 if problemType.swizzleTensorA:
                     placeholderName += '_STA'
 
