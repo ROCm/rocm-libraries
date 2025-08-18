@@ -276,6 +276,8 @@ namespace LDSCopyTest
         auto updateWavefrontParams = std::make_shared<UpdateWavefrontParameters>(params);
         kgraph                     = kgraph.transform(updateWavefrontParams);
 
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
+
         m_context->schedule(k->preamble());
         m_context->schedule(k->prolog());
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));

@@ -80,7 +80,6 @@ inline void assignAlphaBeta1(const rocblaslt_compute_type& compute_type, void* a
     }
 }
 
-
 inline void heuristicResult_copy(rocblaslt_matmul_heuristic_result* heuristicResultsDest,
                                  rocblaslt_matmul_heuristic_result* heuristicResultsSrc,
                                  size_t&                            maxWorkSpaceBytes,
@@ -328,13 +327,6 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
     bool                   gradient = false;
     bool swizzleA = matA->order != HIPBLASLT_ORDER_COL && matA->order != HIPBLASLT_ORDER_ROW;
     bool swizzleB = matB->order != HIPBLASLT_ORDER_COL && matB->order != HIPBLASLT_ORDER_ROW;
-
-    if(swizzleA && matA->batch_stride == 0)
-    {
-        // If batch_stride has never been assigned for swizzle, set it to the default value
-        // Swizzle is TN: For MatA, ->m (leading Dim) is unrollDim, ->n is tileDim
-        setDefaultSwizzledBatchedStride(matA->order, matA->m, matA->n, matA->batch_stride);
-    }
 
     rocblaslt_status isValid = rocblaslt_matmul_valid_args(matmul_descr,
                                                            dummy_ptr,

@@ -111,8 +111,8 @@ void LeafNode::GetKernelFactors()
 void LeafNode::GetKernelPartialPassFactors()
 {
     auto kernel     = GetKernel();
-    kernelFactorsPP = std::vector<size_t>(kernel.pp_params.factors_off_dim.begin(),
-                                          kernel.pp_params.factors_off_dim.end());
+    kernelFactorsPP = std::vector<size_t>(kernel.pp_params.pp_factors_curr.begin(),
+                                          kernel.pp_params.pp_factors_curr.end());
 
     switch(ppOffDim)
     {
