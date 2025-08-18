@@ -39,6 +39,7 @@
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 
+#include <Tensile/analytical/StreamK.hpp>
 #include <Tensile/analytical/Utils.hpp>
 
 using namespace rocRoller;
@@ -151,6 +152,8 @@ struct GemmKernel
     Operations::OperationTag tagScratch;
     Operations::OperationTag tagSKGrid;
     Operations::OperationTag tagWGM;
+
+    int occupancy;
 };
 
 /**
@@ -652,9 +655,9 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
 
     std::vector<TensileLite::analytical::TileTuple> tile_list = getTileListForKernelType(kernelType);
 
-    size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(kernelType.typeA).elementBits; 
+    size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(kernelType.typeA).elementBits;
     size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(kernelType.typeB).elementBits;
-    size_t elementSizeC_bits = rocRoller::DataTypeInfo::Get(kernelType.typeC).elementBits; 
+    size_t elementSizeC_bits = rocRoller::DataTypeInfo::Get(kernelType.typeC).elementBits;
 
     TensileLite::analytical::DataType dataType;
     if (elementSizeA_bits < elementSizeB_bits)
@@ -733,7 +736,42 @@ int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
                           const RocblasltContractionProblem& prob)
 {
     const TensileLite::analytical::Hardware analaytical_hardware = TensileLite::analytical::Hardware::getHardwareForDevice(0);
-    return analaytical_hardware.N_CU;
+
+    size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeA).elementBits;
+    size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeB).elementBits;
+    size_t elementSizeD_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeD).elementBits;
+    size_t elementSizeAcc = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeAcc).elementBytes;
+
+    TensileLite::analytical::DataType dataType;
+    if (elementSizeA_bits < elementSizeB_bits)
+        dataType = rocroller_type_to_analytical_type(gemm->params->kernelType.typeB);
+    else
+        dataType = rocroller_type_to_analytical_type(gemm->params->kernelType.typeA);
+
+    auto result = TensileLite::analytical::streamk::select_streamk_grid(prob.m,
+        prob.n,
+        prob.k,
+        prob.batch_count,
+        prob.trans_a == HIPBLAS_OP_T,
+        prob.trans_b == HIPBLAS_OP_T,
+        elementSizeA_bits,
+        elementSizeB_bits,
+        elementSizeD_bits,
+        dataType,
+        prob.workspaceSize,
+        gemm->params->workgroupTile.m,
+        gemm->params->workgroupTile.n,
+        gemm->params->workgroupTile.k,
+        gemm->params->machineInstruction.m,
+        gemm->params->machineInstruction.n,
+        gemm->params->machineInstruction.k,
+        DEFAULT_WGM,
+        elementSizeAcc,
+        gemm->occupancy,
+        analaytical_hardware,
+        6);
+
+        return result;
 }
 
 std::pair<int, int> pickWorkgroupSize(std::shared_ptr<SolutionParameters> gemm)
@@ -1363,6 +1401,7 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
     commandKernel->setContext(context);
     commandKernel->setCommandParameters(params);
     commandKernel->generateKernel();
+    commandKernel->loadKernel();
 
     // -------------------------------------------------------------
     // Create GemmKernel
@@ -1396,6 +1435,15 @@ std::shared_ptr<GemmKernel> genGemmKernel(std::shared_ptr<SolutionParameters> ge
         gemmKernel->tagWGM = *tagWGM;
 
     setPredicates(gemmKernel);
+
+    auto flatWorkgroupSize = workgroupSizeX;
+    int occupancy;
+    AssertFatal(
+        hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(
+            &occupancy, commandKernel->getHipFunction(), flatWorkgroupSize, 0)
+        == (hipError_t)HIP_SUCCESS);
+
+    gemmKernel->occupancy = occupancy;
 
     return gemmKernel;
 }
