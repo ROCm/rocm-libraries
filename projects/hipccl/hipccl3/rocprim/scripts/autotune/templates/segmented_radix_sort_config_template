@@ -22,7 +22,7 @@ segmented_radix_sort_config<
 
 {% macro general_case() -%}
 template<unsigned int arch, class key_type, typename value_type, class enable = void>
-struct default_segmented_radix_sort_config : default_segmented_radix_sort_config_base<6, 4>::type
+struct default_segmented_radix_sort_config : default_segmented_radix_sort_config_base<6>::type
 {};
 {%- endmacro %}
 
