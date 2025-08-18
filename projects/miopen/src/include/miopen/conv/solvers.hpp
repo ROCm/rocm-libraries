@@ -4530,6 +4530,7 @@ private:
     void Init(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
+    void InitValidKernels(const miopen::conv::ProblemDescription& problem);
 };
 
 struct ConvHipImplicitGemm3DGroupFwdXdlops final
@@ -4606,6 +4607,7 @@ private:
     void Init(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
+    void InitValidKernels(const miopen::conv::ProblemDescription& problem);
 };
 
 struct ConvHipImplicitGemm3DGroupWrwXdlops final
@@ -4685,6 +4687,7 @@ private:
     void Init(const miopen::conv::ProblemDescription&);
     template <typename DataType>
     bool CheckIsSupportCKArgs(const miopen::conv::ProblemDescription&) const;
+    void InitValidKernels(const miopen::conv::ProblemDescription& problem);
 };
 
 struct ConvHipImplicitGemm3DGroupBwdXdlops final

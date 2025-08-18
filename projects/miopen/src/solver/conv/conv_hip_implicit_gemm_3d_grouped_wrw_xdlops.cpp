@@ -363,6 +363,18 @@ bool ConvHipImplicitGemm3DGroupWrwXdlops::CheckCKApplicability(
         return IsCKApplicable<DeviceOpGBwdWeightDefaultPtrs<DataType>, CKArgs<DataType>>(problem);
     }
 }
+void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::InitValidKernels(
+    const ProblemDescription& problem)
+{
+    switch(problem.GetInDataType())
+    {
+    case miopenHalf: Init<ck::half_t>(problem); break;
+    case miopenFloat: Init<float>(problem); break;
+    case miopenInt8: Init<int8_t>(problem); break;
+    case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
+    default: break; // Unsupported data types - valid_kernels remains empty
+    }
+}
 #endif
 
 void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
@@ -375,7 +387,6 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
 #if MIOPEN_ENABLE_AI_KERNEL_TUNING
     // Try AI heuristics first if enabled
-    std::cerr << "HeuristicInit: AI heuristics enabled" << std::endl;
     if(&ctx != &GetDummyCtx() &&
        !env::disabled(MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_WRW_XDLOPS_AI_HEUR))
     {
@@ -419,19 +430,8 @@ void PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::HeuristicInit(
 
 #endif
 
-// Fallback to original initialization
-switch(problem.GetInDataType())
-{
-case miopenHalf: Init<ck::half_t>(problem); break;
-case miopenFloat: Init<float>(problem); break;
-case miopenInt8: Init<int8_t>(problem); break;
-case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
-case miopenInt64:
-case miopenInt32:
-case miopenFloat8_fnuz:
-case miopenBFloat8_fnuz:
-case miopenDouble: break;
-}
+    // Fallback to original initialization
+    InitValidKernels(problem);
 #endif
 }
 
@@ -441,8 +441,8 @@ bool PerformanceConfigHipImplicitGemm3DGroupWrwXdlops::SetNextValue(
 #if MIOPEN_USE_COMPOSABLEKERNEL
     if(valid_kernels.empty())
     {
-        // feed in dummy context to only perform boilerplate initialization
-        HeuristicInit(GetDummyCtx(), problem);
+        // For generic search, we want all available kernels, not heuristic selection
+        InitValidKernels(problem);
         if(valid_kernels.empty())
         {
             return false;

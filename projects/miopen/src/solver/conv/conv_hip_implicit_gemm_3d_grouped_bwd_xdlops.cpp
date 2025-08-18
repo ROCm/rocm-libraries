@@ -403,6 +403,19 @@ bool ConvHipImplicitGemm3DGroupBwdXdlops::CheckCKApplicability(
     default: return IsCKApplicable<DeviceOpGBwdDefaultPtrs<DataType>, CKArgs<DataType>>(problem);
     }
 }
+
+void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::InitValidKernels(
+    const ProblemDescription& problem)
+{
+    switch(problem.GetInDataType())
+    {
+    case miopenHalf: Init<ck::half_t>(problem); break;
+    case miopenFloat: Init<float>(problem); break;
+    case miopenInt8: Init<int8_t>(problem); break;
+    case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
+    default: break; // Unsupported data types - valid_kernels remains empty
+    }
+}
 #endif
 
 void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
@@ -455,18 +468,8 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
         }
     }
 #endif
-    switch(problem.GetInDataType())
-    {
-    case miopenHalf: Init<ck::half_t>(problem); break;
-    case miopenFloat: Init<float>(problem); break;
-    case miopenInt8: Init<int8_t>(problem); break;
-    case miopenBFloat16: Init<ck::bhalf_t>(problem); break;
-    case miopenInt64:
-    case miopenInt32:
-    case miopenFloat8_fnuz:
-    case miopenBFloat8_fnuz:
-    case miopenDouble: break;
-    }
+    // Fallback to original initialization
+    InitValidKernels(problem);
 #endif
 }
 
@@ -475,7 +478,8 @@ bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::SetNextValue(
 {
     if(valid_kernels.empty())
     {
-        HeuristicInit(GetDummyCtx(), problem);
+        // For generic search, we want all available kernels, not heuristic selection
+        InitValidKernels(problem);
         assert(!valid_kernels.empty());
         return true;
     }
