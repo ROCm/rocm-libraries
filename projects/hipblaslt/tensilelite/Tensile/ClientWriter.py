@@ -595,10 +595,10 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('swizzle-tensor-b', problemType.swizzleTensorB)
         if problemType.mxBlockA:
             param('mx-a-block', problemType.mxBlockA)
-            param('mx-a-type', problemType.mxTypeA.toEnum())
+            param('mx-a-type', problemType.mxTypeA.toName())
         if problemType.mxBlockB:
             param('mx-b-block', problemType.mxBlockB)
-            param('mx-b-type', problemType.mxTypeB.toEnum())
+            param('mx-b-type', problemType.mxTypeB.toName())
 
         if biasTypeArgs:
           for btype in biasTypeArgs.biasTypes:

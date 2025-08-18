@@ -324,7 +324,8 @@ namespace TensileLite
 #endif // #ifdef TENSILE_USE_FP4
 
     template <>
-    struct TypeInfo<E8> : public BaseTypeInfo<E8, rocisa::DataType::E8, 1, false, false>
+    struct TypeInfo<E8>
+        : public BaseTypeInfo<E8, rocisa::DataType::E8, 1, false, false>
     {
     };
 
