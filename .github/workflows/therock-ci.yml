@@ -68,7 +68,7 @@ jobs:
         id: detect
         if: github.event_name == 'pull_request'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           python .github/scripts/pr_detect_changed_subtrees.py \
             --repo "${{ github.repository }}" \
@@ -78,10 +78,10 @@ jobs:
       - name: Determine projects to run
         id: projects
         env:
-          SUBTREES: ${{ steps.detect.outputs.subtrees }}
+          # for testing
+          SUBTREES: "projects/rocprim"
+          # SUBTREES: ${{ steps.detect.outputs.subtrees }}
           PROJECTS: ${{ inputs.projects }}
-          # TODO(geomin12): #590 Enable TheRock CI for forked PRs
-          IS_FORKED_PR: ${{ github.event.pull_request.head.repo.fork == true }}
         run: |
           python .github/scripts/therock_configure_ci.py
 
