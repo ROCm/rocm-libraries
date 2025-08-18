@@ -92,7 +92,7 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "types", params.types);
             iot::mapRequired(io, "scaleValue_A", params.scaleValueA);
             iot::mapRequired(io, "scaleValue_B", params.scaleValueB);
-            iot::mapRequired(io, "workgroupMapping", params.workgroupMapping);
+            iot::mapRequired(io, "workgroupMappingDim", params.workgroupMappingDim);
         }
 
         static void
@@ -111,16 +111,16 @@ namespace rocRoller::Serialization
         static void mapping(IO& io, Client::GEMMClient::Result& result)
         {
             iot::mapRequired(io, "resultType", result.benchmarkResults.resultType);
-            iot::mapRequired(io, "device", result.benchmarkResults.runParams.device);
+            iot::mapRequired(io, "device", result.benchmarkResults.benchmarkParams.device);
 
             flatMap(io, result.problemParams);
             flatMap(io, result.solutionParams);
 
             iot::mapRequired(io, "numWGs", result.benchmarkResults.runParams.numWGs);
 
-            iot::mapRequired(io, "numWarmUp", result.benchmarkResults.runParams.numWarmUp);
-            iot::mapRequired(io, "numOuter", result.benchmarkResults.runParams.numOuter);
-            iot::mapRequired(io, "numInner", result.benchmarkResults.runParams.numInner);
+            iot::mapRequired(io, "numWarmUp", result.benchmarkResults.benchmarkParams.numWarmUp);
+            iot::mapRequired(io, "numOuter", result.benchmarkResults.benchmarkParams.numOuter);
+            iot::mapRequired(io, "numInner", result.benchmarkResults.benchmarkParams.numInner);
 
             iot::mapRequired(io, "kernelGenerate", result.benchmarkResults.kernelGenerate);
             iot::mapRequired(io, "kernelAssemble", result.benchmarkResults.kernelAssemble);
@@ -134,6 +134,24 @@ namespace rocRoller::Serialization
         static void mapping(IO& io, Client::GEMMClient::Result& result, EmptyContext& ctx)
         {
             mapping(io, result);
+        }
+    };
+
+    template <typename IO>
+    struct MappingTraits<Client::RunParameters, IO, EmptyContext>
+    {
+        static const bool flow = false;
+        using iot              = IOTraits<IO>;
+
+        static void mapping(IO& io, Client::RunParameters& params)
+        {
+            iot::mapRequired(io, "workgroupMappingValue", params.workgroupMappingValue);
+            iot::mapRequired(io, "numWGs", params.numWGs);
+        }
+
+        static void mapping(IO& io, Client::RunParameters& params, EmptyContext& ctx)
+        {
+            mapping(io, params);
         }
     };
 
@@ -156,7 +174,7 @@ namespace rocRoller::Serialization
             iot::mapRequired(io, "wave_b", params.waveB);
             iot::mapRequired(io, "workgroup_size_x", params.workgroupSizeX);
             iot::mapRequired(io, "workgroup_size_y", params.workgroupSizeY);
-            iot::mapRequired(io, "workgroupMapping", params.workgroupMapping);
+            iot::mapRequired(io, "workgroupMappingDim", params.workgroupMappingDim);
             iot::mapRequired(io, "workgroupRemapXCC", params.workgroupRemapXCC);
             iot::mapRequired(io, "workgroupRemapXCCValue", params.workgroupRemapXCCValue);
             iot::mapRequired(io, "unroll_x", params.unrollX);

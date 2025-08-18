@@ -74,6 +74,7 @@ set( hipfft-test_source
   accuracy_test_3D.cpp
   accuracy_test_callback.cpp
   multi_device_test.cpp
+  multi_stream_test.cpp
   ../../shared/array_validator.cpp
   )
 
@@ -117,6 +118,12 @@ if( BUILD_CLIENTS_TESTS_OPENMP AND NOT BUILD_WITH_LIB STREQUAL "CUDA" )
   if( NOT OPENMP_FOUND OR NOT DEFINED ${openmp_LIB_DIR} )
      # Fall-back to module mode.
      find_package( OpenMP REQUIRED )
+     set( BUILD_RPATH "${HIP_CLANG_ROOT}/lib" )
+     set( INSTALL_RPATH "$ORIGIN/../llvm/lib" )
+  else()
+     set( BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}" )
+     set( INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}" )
+
   endif()
 endif()
 
@@ -125,6 +132,15 @@ foreach( target ${TEST_TARGETS} )
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     )
+
+    if( BUILD_CLIENTS_TESTS_OPENMP )
+      set_target_properties( ${TEST_TARGETS} PROPERTIES
+         BUILD_RPATH "${BUILD_RPATH}"
+      )
+      set_target_properties( ${TEST_TARGETS} PROPERTIES
+        INSTALL_RPATH "${INSTALL_RPATH}"
+      )
+    endif()
 
   if( BUILD_WITH_LIB STREQUAL "ROCM" )
     target_compile_options( ${target} PRIVATE ${WARNING_FLAGS} )
@@ -214,6 +230,14 @@ else()
   add_dependencies( hipfft-test gtest )
   target_include_directories( hipfft-test PRIVATE hipfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
   target_link_libraries( hipfft-test PRIVATE ${GTEST_LIBRARIES} )
+endif()
+
+# tests have callback functions, which need to be built as relocatable device code
+if( BUILD_WITH_LIB STREQUAL "CUDA" )
+  target_compile_options( hipfft-test PRIVATE -dc )
+else()
+  target_compile_options( hipfft-test PRIVATE -fgpu-rdc )
+  target_link_options( hipfft-test PRIVATE -fgpu-rdc )
 endif()
 
 if(FFTW_MULTITHREAD)

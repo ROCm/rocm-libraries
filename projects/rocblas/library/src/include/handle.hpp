@@ -110,6 +110,10 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
 ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
     rocblas_internal_get_data_ptr(rocblas_handle handle, std::shared_ptr<void>& data_ptr);
 
+// cached device properties for handle device
+ROCBLAS_INTERNAL_EXPORT_NOINLINE const hipDeviceProp_t*
+                                       rocblas_internal_get_device_prop(rocblas_handle handle);
+
 /*******************************************************************************
  * \brief rocblas_handle is a structure holding the rocblas library context.
  * It must be initialized using rocblas_create_handle() and the returned handle mus
@@ -252,6 +256,7 @@ public:
 
     int getMaxSharedMemPerBlock()
     {
+        // TODO review sharedMemPerBlockOptin or use cached device_properties
         int max_mem = -1;
         THROW_IF_HIP_ERROR(hipDeviceGetAttribute(
             &max_mem, hipDeviceAttribute_t(hipDeviceAttributeMaxSharedMemoryPerBlock), device));
@@ -317,17 +322,17 @@ public:
 
         if(status && batched)
         {
-            static bool hipblasltEnvBatched = [&] {
+            static bool hipblasltEnvBatchedDisabled = [&] {
                 auto* env_var = getenv("ROCBLAS_USE_HIPBLASLT_BATCHED");
                 if(env_var)
                 {
-                    return strncmp(env_var, "1", 1) == 0;
+                    return strncmp(env_var, "0", 1) == 0;
                 }
                 return false;
             }();
 
             // only use for batched when explicitly enabled by env variable
-            if(hipblasltEnvBatched)
+            if(!hipblasltEnvBatchedDisabled)
                 status = !is_stream_in_capture_mode();
             else
                 status = false;
@@ -561,6 +566,10 @@ private:
     bool ROCBLAS_EXPORT device_allocator(size_t size);
 #endif
 
+public:
+    hipDeviceProp_t device_properties;
+
+private:
     // Device ID is created at handle creation time and remains in effect for the life of the handle.
     const int device;
 
@@ -569,11 +578,15 @@ private:
     int       archMajor;
     int       archMajorMinor;
 
-    int mWarpSize;
+    const int mWarpSize;
 
     // hipBLASLt handle is created at handle creation time and remains in effect for the life of the handle.
     std::shared_ptr<hipblasLtHandle_t> hipblasLtHandle;
     int                                hipblasltEnvVar = -1;
+
+    // used in constructor initialization list
+    int       getActiveDevice();
+    Processor getActiveArch();
 
     // Opaque smart allocator class to perform device memory allocations
     // clang-format off
