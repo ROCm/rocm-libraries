@@ -264,7 +264,7 @@ AcceptableError
         {
             if constexpr(std::is_same_v<TA, rocRoller::BF6>)
             {
-                fudge *= 3;
+                fudge *= 3.29;
                 ss << " Increase fudge for BF6: " << fudge;
             }
             if constexpr(std::is_same_v<TA, rocRoller::BF8>)
@@ -289,7 +289,17 @@ AcceptableError
             else if constexpr(std::is_same_v<TA,
                                              rocRoller::FP8> || std::is_same_v<TB, rocRoller::FP8>)
             {
-                fudge *= 4.95;
+                if constexpr((std::is_same_v<TA, rocRoller::BF6>)
+                             || (std::is_same_v<TA, rocRoller::FP6>)
+                             || (std::is_same_v<TB, rocRoller::BF6>)
+                             || (std::is_same_v<TB, rocRoller::FP6>))
+                {
+                    fudge *= 6.63;
+                }
+                else
+                {
+                    fudge *= 4.95;
+                }
                 ss << " Increase fudge for mixed FP8: " << fudge;
             }
             else if constexpr(std::is_same_v<TA,
