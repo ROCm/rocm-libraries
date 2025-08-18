@@ -54,8 +54,8 @@ if (ROCPRIM_INSTALL)
 
   rocm_install(
     DIRECTORY
-      "include/"
-      "${PROJECT_BINARY_DIR}/rocprim/include/"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include"
+      "${PROJECT_BINARY_DIR}/rocprim/include"
       DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     FILES_MATCHING
     PATTERN "*.h"
