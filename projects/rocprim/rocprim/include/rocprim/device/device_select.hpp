@@ -67,6 +67,9 @@ namespace detail
 /// a simple pointer type.
 /// \tparam SelectedCountOutputIterator random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
+/// \tparam UsingOrderedBlockId If true, uses an atomic counter to assign block id instead of natural
+/// blockIdx-based ordering.  Can increase performance on MI3xx architectures when using streams. The
+/// default is false.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -125,7 +128,8 @@ template<
     class InputIterator,
     class FlagIterator,
     class OutputIterator,
-    class SelectedCountOutputIterator
+    class SelectedCountOutputIterator,
+    bool UsingOrderedBlockId = false
 >
 inline
 hipError_t select(void * temporary_storage,
@@ -151,20 +155,22 @@ hipError_t select(void * temporary_storage,
     using output_value_iterator_tuple = tuple<::rocprim::empty_type*, ::rocprim::empty_type*>;
     const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
 
-    return detail::partition_impl<detail::partition_subalgo::select_flag, Config, offset_type>(
-        temporary_storage,
-        storage_size,
-        input,
-        no_values,
-        flags,
-        output_tuple,
-        no_output_values,
-        selected_count_output,
-        size,
-        inequality_op_type(),
-        stream,
-        debug_synchronous,
-        unary_predicate_type());
+    return detail::partition_impl<detail::partition_subalgo::select_flag,
+                                 UsingOrderedBlockId,
+                                 Config,
+                                 offset_type>(temporary_storage,
+                                              storage_size,
+                                              input,
+                                              no_values,
+                                              flags,
+                                              output_tuple,
+                                              no_output_values,
+                                              selected_count_output,
+                                              size,
+                                              inequality_op_type(),
+                                              stream,
+                                              debug_synchronous,
+                                              unary_predicate_type());
 }
 
 /// \brief Parallel select primitive for device level using selection operator.
@@ -189,6 +195,9 @@ hipError_t select(void * temporary_storage,
 /// \tparam SelectedCountOutputIterator random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
 /// \tparam UnaryPredicate type of a unary selection predicate.
+/// \tparam UsingOrderedBlockId If true, uses an atomic counter to assign block id instead of natural
+/// blockIdx-based ordering.  Can increase performance on MI3xx architectures when using streams. The
+/// default is false.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -257,8 +266,8 @@ template<
     class InputIterator,
     class OutputIterator,
     class SelectedCountOutputIterator,
-    class UnaryPredicate
->
+    class UnaryPredicate,
+    bool UsingOrderedBlockId = false>
 inline
 hipError_t select(void * temporary_storage,
                   size_t& storage_size,
@@ -284,20 +293,22 @@ hipError_t select(void * temporary_storage,
     using output_value_iterator_tuple = tuple<::rocprim::empty_type*, ::rocprim::empty_type*>;
     const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
 
-    return detail::partition_impl<detail::partition_subalgo::select_predicate, Config, offset_type>(
-        temporary_storage,
-        storage_size,
-        input,
-        no_values,
-        flags,
-        output_tuple,
-        no_output_values,
-        selected_count_output,
-        size,
-        inequality_op_type(),
-        stream,
-        debug_synchronous,
-        predicate);
+    return detail::partition_impl<detail::partition_subalgo::select_predicate,
+                                  UsingOrderedBlockId,
+                                  Config,
+                                  offset_type>(temporary_storage,
+                                               storage_size,
+                                               input,
+                                               no_values,
+                                               flags,
+                                               output_tuple,
+                                               no_output_values,
+                                               selected_count_output,
+                                               size,
+                                               inequality_op_type(),
+                                               stream,
+                                               debug_synchronous,
+                                               predicate);
 }
 
 /// \brief Parallel select primitive for device level using a range of pre-selected flags.
@@ -326,6 +337,9 @@ hipError_t select(void * temporary_storage,
 /// \tparam SelectedCountOutputIterator random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
 /// \tparam UnaryPredicate type of a unary selection predicate.
+/// \tparam UsingOrderedBlockId If true, uses an atomic counter to assign block id instead of natural
+/// blockIdx-based ordering.  Can increase performance on MI3xx architectures when using streams. The
+/// default is false.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -396,7 +410,8 @@ template<class Config = default_config,
          class FlagIterator,
          class OutputIterator,
          class SelectedCountOutputIterator,
-         class UnaryPredicate>
+         class UnaryPredicate,
+         bool  UsingOrderedBlockId = false>
 inline hipError_t select(void*                       temporary_storage,
                          size_t&                     storage_size,
                          InputIterator               input,
@@ -420,6 +435,7 @@ inline hipError_t select(void*                       temporary_storage,
     const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
 
     return detail::partition_impl<detail::partition_subalgo::select_predicated_flag,
+                                  UsingOrderedBlockId,
                                   Config,
                                   offset_type>(temporary_storage,
                                                storage_size,
@@ -459,6 +475,9 @@ inline hipError_t select(void*                       temporary_storage,
 /// \tparam UniqueCountOutputIterator random-access iterator type of the unique_count_output
 /// value used to return number of unique values. It can be a simple pointer type.
 /// \tparam EqualityOp type of an binary operator used to compare values for equality.
+/// \tparam UsingOrderedBlockId If true, uses an atomic counter to assign block id instead of natural
+/// blockIdx-based ordering.  Can increase performance on MI3xx architectures when using streams. The
+/// default is false.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -516,8 +535,8 @@ template<
     class InputIterator,
     class OutputIterator,
     class UniqueCountOutputIterator,
-    class EqualityOp = ::rocprim::equal_to<typename std::iterator_traits<InputIterator>::value_type>
->
+    class EqualityOp = ::rocprim::equal_to<typename std::iterator_traits<InputIterator>::value_type>,
+    bool  UsingOrderedBlockId = false>
 inline
 hipError_t unique(void * temporary_storage,
                   size_t& storage_size,
@@ -546,20 +565,22 @@ hipError_t unique(void * temporary_storage,
     using output_value_iterator_tuple = tuple<::rocprim::empty_type*, ::rocprim::empty_type*>;
     const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
 
-    return detail::partition_impl<detail::partition_subalgo::select_unique, Config, offset_type>(
-        temporary_storage,
-        storage_size,
-        input,
-        no_values,
-        flags,
-        output_tuple,
-        no_output_values,
-        unique_count_output,
-        size,
-        inequality_op,
-        stream,
-        debug_synchronous,
-        unary_predicate_type());
+    return detail::partition_impl<detail::partition_subalgo::select_unique,
+                                 UsingOrderedBlockId,
+                                 Config,
+                                 offset_type>(temporary_storage,
+                                              storage_size,
+                                              input,
+                                              no_values,
+                                              flags,
+                                              output_tuple,
+                                              no_output_values,
+                                              unique_count_output,
+                                              size,
+                                              inequality_op,
+                                              stream,
+                                              debug_synchronous,
+                                              unary_predicate_type());
 }
 
 /// \brief Device-level parallel unique by key primitive.
@@ -590,6 +611,9 @@ hipError_t unique(void * temporary_storage,
 /// \tparam UniqueCountOutputIterator random-access iterator type of the unique_count_output
 /// value used to return number of unique keys and values. It can be a simple pointer type.
 /// \tparam EqualityOp type of an binary operator used to compare keys for equality.
+/// \tparam UsingOrderedBlockId If true, uses an atomic counter to assign block id instead of natural
+/// blockIdx-based ordering.  Can increase performance on MI3xx architectures when using streams. The
+/// default is false.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -615,7 +639,8 @@ template <typename Config = default_config,
           typename OutputValueIterator,
           typename UniqueCountOutputIterator,
           typename EqualityOp
-          = ::rocprim::equal_to<typename std::iterator_traits<KeyIterator>::value_type>>
+          = ::rocprim::equal_to<typename std::iterator_traits<KeyIterator>::value_type>,
+          bool     UsingOrderedBlockId = false>
 inline hipError_t unique_by_key(void*                           temporary_storage,
                                 size_t&                         storage_size,
                                 const KeyIterator               keys_input,
@@ -644,6 +669,7 @@ inline hipError_t unique_by_key(void*                           temporary_storag
     const output_value_iterator_tuple output_value_tuple{values_output, nullptr};
 
     return detail::partition_impl<detail::partition_subalgo::select_unique_by_key,
+                                  UsingOrderedBlockId,
                                   Config,
                                   offset_type>(temporary_storage,
                                                storage_size,

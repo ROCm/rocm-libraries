@@ -114,7 +114,7 @@ auto _clippedrelu = [](auto in, auto arg1, auto arg2) -> decltype(in) {
     if(in > arg1)
         return static_cast<decltype(in)>(std::min(in, arg2));
     else
-        return static_cast<decltype(in)>(0);
+        return static_cast<decltype(in)>(std::min(static_cast<decltype(in)>(0.0), arg2));
 };
 
 auto _gelu = [](auto in, auto arg1, auto /*arg2*/) -> decltype(in) {

@@ -788,11 +788,6 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "DirectToLds does not work with LocalReadVectorWidth > MIInputPerThread")
         return False
 
-    if not state["ProblemType"]["Sparse"] and not(state["ProblemType"]["DataType"].is8bitFloat() and (state["MatrixInstK"] == 64 or state["MatrixInstK"] == 128)):
-      if state["ProblemType"]["DataType"].isBFloat16() and state["AssertSummationElementMultiple"] % (2 * state["GlobalReadVectorWidth%c"%tc]) != 0:
-        reject(state, printRejectionReason, "can't use DirectToLds for BF16 with AssertSummationElementMultiple %u" % state["AssertSummationElementMultiple"])
-        return False
-
     if state["NumThreads"] % state["WavefrontSize"] != 0:
       reject(state, printRejectionReason, "can't use DirectToLds for NumThreads % WavefrontSize != 0")
       return False
@@ -1499,6 +1494,7 @@ class Solution(collections.abc.Mapping):
       def calcLdsPad(lrvw: int, isaInfoMap: Dict[str, IsaInfo]) -> int:
         ldsPadA = state["LdsPadA"]
         ldsPadB = state["LdsPadB"]
+        ldsPadM = state["LdsPadMetadata"]
         optPadA = optPadB = lrvw
         readRegsA = readRegsB = lrvw * state["ProblemType"]["DataType"].numBytes() // 4
         if state["ProblemType"]["Sparse"]:
@@ -1510,7 +1506,7 @@ class Solution(collections.abc.Mapping):
             readRegsA //= 2
         if (not isaInfoMap[isa].asmCaps['HasWMMA']) and (readRegsA > 4 or readRegsB > 4):
           reject(state, "LocalReadVectorWidth results in attemping to read LDS larger than b128, reject")
-          return
+          return ldsPadA, ldsPadB, ldsPadM
         if state["EnableMatrixInstruction"]:
           # for readRegs = 1 or 4, we need to double pad for MI16x16xNx1 to avoid bank conflict.
           if state["MatrixInstB"] == 1 and state["MatrixInstM"] == 16:
@@ -1564,7 +1560,6 @@ class Solution(collections.abc.Mapping):
               ldsPadB = max(state["GlobalReadVectorWidthB"],optPadB)
           assert(ldsPadB >= 0)
 
-        ldsPadM = state["LdsPadMetadata"]
         if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
           optPadM = (optPadB if state["ProblemType"]["Sparse"] == 2 else optPadA) // 4
           grvwM = (state["GlobalReadVectorWidthB"] if state["ProblemType"]["Sparse"] == 2 else state["GlobalReadVectorWidthA"])  // 4
@@ -1698,13 +1693,10 @@ class Solution(collections.abc.Mapping):
         autoLRVW = 0
         if state["LocalReadVectorWidth"] == -1:
           autoLRVW = 1
-          if state["TransposeLDS"] and (not state["DirectToLds"]):
+          if state["TransposeLDS"] or (state["MIInputPerThread"] * state["ProblemType"]["DataType"].numBytes() > 16):
             state["LocalReadVectorWidth"] = 16 // state["ProblemType"]["DataType"].numBytes()
           else:
-            if state["ProblemType"]["Sparse"] and state["MIInputPerThread"] * state["ProblemType"]["DataType"].numBytes() > 16:
-              state["LocalReadVectorWidth"] = 16 // state["ProblemType"]["DataType"].numBytes()
-            else:
-              state["LocalReadVectorWidth"] = state["MIInputPerThread"]
+            state["LocalReadVectorWidth"] = state["MIInputPerThread"]
         else:
           if state["ProblemType"]["Sparse"] and state["MIInputPerThread"] * state["ProblemType"]["DataType"].numBytes() > 16:
             if state["LocalReadVectorWidth"] < state["MIInputPerThread"] // 2:

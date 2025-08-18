@@ -9,7 +9,7 @@ def runCI =
 {
     nodeDetails, jobName ->
 
-    def prj = new rocProject('hipFFT-internal', 'PreCheckin')
+    def prj = new rocProject('hipFFT', 'PreCheckin')
     // customize for project
     prj.libraryDependencies = ['rocRAND','rocFFT']
 

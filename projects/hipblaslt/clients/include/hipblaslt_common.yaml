@@ -520,6 +520,7 @@ Arguments:
   - scale_type: hipDataType
   - initialization: hipblaslt_initialization
   - gpu_arch: c_char*16
+  - gpu_arch_exclude: c_char*16
   - pad: c_uint32
   - grouped_gemm: c_int32
   - threads: c_uint16
@@ -623,6 +624,7 @@ Defaults:
   streams: 0
   devices: 0
   gpu_arch: ''
+  gpu_arch_exclude: ''
   norm_check: 0
   allclose_check: 0
   unit_check: 1

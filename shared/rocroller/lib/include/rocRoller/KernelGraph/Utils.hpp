@@ -694,6 +694,12 @@ namespace rocRoller
 
         std::deque<int> controlStack(int control, KernelGraph const& graph);
         std::deque<int> controlStack(int control, ControlGraph::ControlGraph const& graph);
+
+        /**
+        * @brief Connect all nodes in A with all nodes in B using edge with EdgeType
+        */
+        template <typename EdgeType>
+        void connectAllPairs(std::vector<int> const& A, std::vector<int> const& B, KernelGraph& kg);
     }
 }
 

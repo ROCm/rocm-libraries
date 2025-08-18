@@ -57,7 +57,7 @@ if( NOT ROCmCMakeBuildTools_FOUND )
   include( FetchContent )
 
   FetchContent_Declare( rocm_cmake_local
-    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake-build-tools
+    GIT_REPOSITORY https://github.com/ROCm/rocm-cmake
     GIT_TAG rocm-6.4.1
     GIT_SHALLOW ON
   )

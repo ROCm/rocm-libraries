@@ -2416,6 +2416,18 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         }
 
         auto solution = library->getSolutionByIndex(data->problem, *hardware, *solutionIndex);
+        if(prob.workspaceSize < solution->requiredWorkspaceSize(data->problem, *hardware))
+        {
+            if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+            {
+                std::ostringstream msg;
+                msg << "Input workspace size " << prob.workspaceSize
+                    << " is less than the required workspace size ";
+                msg << solution->requiredWorkspaceSize(data->problem, *hardware) << std::endl;
+                log_info(__func__, msg.str());
+            }
+            return rocblaslt_status_invalid_value;
+        }
 
         if(getenv("HIPBLASLT_BENCH_PERF") != nullptr
            || getenv("HIPBLASLT_BENCH_PERF_ALL") != nullptr)

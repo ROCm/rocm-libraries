@@ -18,14 +18,14 @@
 /projects/hipblas-common/                           @ROCm/hipblas-common-reviewers
 /projects/hipblaslt/                                @ROCm/hipblaslt-reviewers
 /projects/hipcub/                                   @ROCm/prims-rands-reviewers
-/projects/hipfft/                                   @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
+/projects/hipfft/                                   @ROCm/fft-reviewers
 /projects/hiprand/                                  @ROCm/prims-rands-reviewers
 /projects/hipsolver/                                @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd
 /projects/hipsparse/                                @ntrost57 @YvanMokwinski @jsandham
 /projects/hipsparselt/                              @ROCm/hipsparselt-reviewers
 /projects/miopen/                                   @ROCm/miopen-reviewers
 /projects/rocblas/                                  @ROCm/rocblas-reviewers
-/projects/rocfft/                                   @af-ayala @eng-flavio-teixeira @evetsso @feizheng10 @malcolmroberts
+/projects/rocfft/                                   @ROCm/fft-reviewers
 /projects/rocprim/                                  @ROCm/prims-rands-reviewers
 /projects/rocrand/                                  @ROCm/prims-rands-reviewers
 /projects/rocsolver/                                @jzuniga-amd @tfalders @cgmb @qjojo @EdDAzevedo @jmachado-amd @AGonzales-amd
@@ -81,6 +81,12 @@
 /projects/hipcub/**/.readthedocs.yaml               @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 /projects/hipcub/docs/                              @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 
+/projects/hipfft/**/*.md                            @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+/projects/hipfft/**/*.rst                           @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+/projects/hipfft/**/.readthedocs.yaml               @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+/projects/hipfft/docs/                              @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+/projects/hipfft/library/include/                   @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+
 /projects/hiprand/**/*.md                           @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
 /projects/hiprand/**/*.rst                          @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
 /projects/hiprand/**/.readthedocs.yaml              @ROCm/prims-rands-reviewers @ROCm/rands-docs-reviewers
@@ -103,6 +109,12 @@
 /projects/rocblas/**/.readthedocs.yaml              @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
 /projects/rocblas/docs/                             @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
 /projects/rocblas/library/include/                  @ROCm/rocblas-reviewers @ROCm/rocblas-docs-reviewers
+
+/projects/rocfft/**/*.md                            @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+/projects/rocfft/**/*.rst                           @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+/projects/rocfft/**/.readthedocs.yaml               @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+/projects/rocfft/docs/                              @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
+/projects/rocfft/library/include/                   @ROCm/fft-reviewers @ROCm/fft-docs-reviewers
 
 /projects/rocprim/**/*.md                           @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers
 /projects/rocprim/**/*.rst                          @ROCm/prims-rands-reviewers @ROCm/prims-docs-reviewers

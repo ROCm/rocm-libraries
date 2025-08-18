@@ -26,6 +26,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added support for building tests with device-side random data generation, making them finish faster. This requires rocRAND, and is enabled with the `WITH_ROCRAND=ON` build flag.
 * Added tests and documentation to `lookback_scan_state`. It is still in the `detail` namespace.
 
+### Optimizations
+
+* Improved performance of `rocprim::device_select` and `rocprim::device_partition` when using multiple streams on the MI3XX architecture.
+
 ### Changed
 
 * Changed the parameters `long_radix_bits` and `LongRadixBits` from `segmented_radix_sort` to `radix_bits` and `RadixBits` respectively.
