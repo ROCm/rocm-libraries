@@ -67,6 +67,15 @@ Definitions:
     - { M:  16010, N: 16010, lda: 16010, stride_a: 256320100 }
     - { M:  25020, N: 25020, lda: 25020, stride_a: 625000400 }
 
+  - &gemvt_row_vectorized_range
+    # Specific sizes to trigger the gemvt_row_vectorized kernels (m <= n is required)
+    - { M:   128, N:   256, lda:   1024, stride_a:    262144 } # z, m<=128
+    - { M:   512, N:  1024, lda:   2048, stride_a:   2097152 } # d, c, m<=512
+    - { M:  1024, N:  2048, lda:  1024, stride_a:  2097152 } # s, m<=1024
+    - { M:   256, N:   512, lda:   256, stride_a:   131072 } # z, m<=256
+    - { M:  2048, N:  4096, lda:  2048, stride_a:  8388608 } # s, m<=2048
+    - { M:   512, N:   512, lda:   4096, stride_a:   2097152 } # d, c, m<=512
+
   - &incx_incy_range
     - { incx:   2, incy:   1, stride_scale: 1   }
     - { incx:  -1, incy:   2, stride_scale: 1   }
@@ -641,6 +650,20 @@ Tests:
   alpha_beta: *alpha_beta_range_small
   batch_count: [ 3 ]
 
+- name: gemv_row_vectorized_coverage
+  category: pre_checkin
+  function:
+    - gemv
+    - gemv_batched
+    - gemv_strided_batched
+  precision: *single_double_precisions_complex_real
+  transA: [ T, C ]
+  matrix_size: *gemvt_row_vectorized_range
+  incx_incy: *incx_incy_range
+  alpha_beta: *alpha_beta_range
+  batch_count: [ 123, 256 ]
+  gpu_arch: ['90a', '942']
+
 - name: gemv_ILP64
   category: stress
   arguments:
@@ -714,4 +737,5 @@ Tests:
   pointer_mode_host: false
   devices: 4
   repeatability_check: true
+
 ...
