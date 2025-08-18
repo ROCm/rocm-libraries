@@ -46,7 +46,7 @@ if(ROCROLLER_ENABLE_CATCH AND (ROCROLLER_BUILD_TESTING OR BUILD_TESTING))
     if(ROCROLLER_ENABLE_ASAN)
         rocroller_target_configure_sanitizers(rocroller-test-catch PRIVATE)
         set_target_properties(rocroller-tests-catch
-            PROPERTIES 
+            PROPERTIES
                 CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
         )
     endif()
@@ -58,12 +58,12 @@ add_executable(component-test)
 if(ROCROLLER_ENABLE_ASAN)
     rocroller_target_configure_sanitizers(component-test PRIVATE)
     set_target_properties(component-test
-        PROPERTIES 
+        PROPERTIES
             CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
     )
     rocroller_target_configure_sanitizers(rocroller-tests PRIVATE)
     set_target_properties(rocroller-tests
-        PROPERTIES 
+        PROPERTIES
             CROSSCOMPILING_EMULATOR "${CMAKE_COMMAND};-E;env;${asan_opts}"
     )
 endif()
@@ -148,6 +148,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
         DISCOVERY_MODE PRE_TEST
         PROPERTIES
             RESOURCE_LOCK "OPENMP"
+            COST 1
             LABELS "OPENMP"
             ENVIRONMENT "${asan_opts}"
     )
@@ -158,6 +159,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
         DISCOVERY_MODE PRE_TEST
         PROPERTIES
             RESOURCE_LOCK "OPENMP"
+            COST 1
             LABELS "OPENMP"
             LABELS "GPU"
             ENVIRONMENT "${asan_opts}"
@@ -215,6 +217,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
                        "LABELS" "GPU"
                        "LABELS" "OPENMP"
                        "RESOURCE_LOCK" "OPENMP"
+                       "COST" 1
                        "ENVIRONMENT" "${asan_opts}"
             SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
         )
@@ -229,6 +232,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
             PROPERTIES "LABELS" "CATCH"
                        "LABELS" "OPENMP"
                        "RESOURCE_LOCK" "OPENMP"
+                       "COST" 1
                        "ENVIRONMENT" "${asan_opts}"
             SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
         )
