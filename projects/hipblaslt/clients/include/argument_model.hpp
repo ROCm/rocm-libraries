@@ -250,6 +250,15 @@ public:
         if(wgm > 0)
             print("wgm", wgm);
 
+        // Printing rotating buffer even if it is set to default value
+        print("rotating_buffer", arg.rotating);
+
+        // Printing flush even if it is set to default value
+        print("flush", arg.flush);
+
+        // Printing use_gpu_timer even if it is set to default value
+        print("use_gpu_timer", arg.use_gpu_timer);
+
         if(arg.timing)
             log_perf(name_list,
                      value_list,
