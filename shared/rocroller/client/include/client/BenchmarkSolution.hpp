@@ -41,6 +41,7 @@ namespace rocRoller
             int numWarmUp;
             int numOuter;
             int numInner;
+            size_t rotatingBuffSize;
 
             bool check;
             bool visualize;
