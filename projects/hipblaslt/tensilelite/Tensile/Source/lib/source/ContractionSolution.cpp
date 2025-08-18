@@ -747,8 +747,7 @@ namespace TensileLite
                 uint32_t skGridAndTiles = (skGrid << 16) | (skTiles & 0xFFFF);
                 if(skGrid > 65535 || skTiles > 65535)
                 {
-                    std::cerr << "Error: Packing skGrid and skTiles exceeds the capacity of a "
-                              << "32-bit register." << std::endl;
+                    throw std::runtime_error("Packing skGrid and skTiles exceeds the capacity of a 32-bit register.");
                 }
 
                 args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
