@@ -1550,7 +1550,7 @@ namespace GEMMDriverTest
         basicGEMM<BFloat16, BFloat16, float>(gemm);
     }
 
-    TEST_P(GEMMTestGPU, GPU_BasicGEMMBF16_BF16_32x32x4)
+    TEST_P(GEMMTestGPU, GPU_OPENMP_BasicGEMMBF16_BF16_32x32x4)
     {
         GEMMProblem gemm;
         gemm.waveM = 32;
