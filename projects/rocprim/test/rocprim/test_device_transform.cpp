@@ -598,7 +598,6 @@ TEST(RocprimDeviceTransformTests, UnalignedPointer)
                 test_utils::assert_near(output, expected, test_utils::precision<T>));
 
             HIP_CHECK(hipFree(d_unaligned));
-            HIP_CHECK(hipFree(d_input));
         }
     }
 }
