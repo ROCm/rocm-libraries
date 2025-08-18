@@ -80,8 +80,16 @@ namespace mxDataGeneratorTest
         }
     };
 
-    TEMPLATE_TEST_CASE(
-        "Use mxDataGenerator", "[mxDataGenerator][openmp]", FP4, FP6, BF6, FP8, BF8, Half, BFloat16, float)
+    TEMPLATE_TEST_CASE("Use mxDataGenerator",
+                       "[mxDataGenerator][openmp]",
+                       FP4,
+                       FP6,
+                       BF6,
+                       FP8,
+                       BF8,
+                       Half,
+                       BFloat16,
+                       float)
     {
         mxDataGeneratorTest t;
 

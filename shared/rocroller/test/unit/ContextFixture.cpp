@@ -67,7 +67,7 @@ void ContextFixture::SetUp()
 void ContextFixture::TearDown()
 {
     omp_set_max_active_levels(m_originalMaxActiveLevels);
-    
+
     m_context.reset();
     rocRoller::Settings::reset();
     rocRoller::Component::ComponentFactoryBase::ClearAllCaches();

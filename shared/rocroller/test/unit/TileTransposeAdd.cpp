@@ -193,9 +193,9 @@ namespace TileTransposeAddTest
         TileTransposeAdd(transpose, nx, ny, m, n, t_m, t_n);
     }
 
-    std::vector<GPU_OPENMP_TileTransposeAddTest::ParamType>
-        testableParams(::testing::internal::ParamGenerator<GPU_OPENMP_TileTransposeAddTest::ParamType>
-                           inputParamGenerator)
+    std::vector<GPU_OPENMP_TileTransposeAddTest::ParamType> testableParams(
+        ::testing::internal::ParamGenerator<GPU_OPENMP_TileTransposeAddTest::ParamType>
+            inputParamGenerator)
     {
         std::vector<GPU_OPENMP_TileTransposeAddTest::ParamType> retval;
         for(auto const& param : inputParamGenerator)

@@ -517,7 +517,7 @@ namespace rocRoller
 
         auto count = CoordCount(sizes.begin(), std::prev(sizes.end()));
 
-        AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels())); 
+        AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels()));
 #pragma omp parallel for
         for(size_t coordNum = 0; coordNum < count; coordNum++)
         {

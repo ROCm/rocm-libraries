@@ -122,7 +122,8 @@ namespace rocRoller
 
             if(transA)
             {
-        AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels())); 
+                AssertFatal(omp_get_max_active_levels() >= 1,
+                            ShowValue(omp_get_max_active_levels()));
 #pragma omp parallel for
                 for(size_t mk = 0; mk < M * K; ++mk)
                 {
@@ -135,7 +136,8 @@ namespace rocRoller
             }
             else
             {
-        AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels())); 
+                AssertFatal(omp_get_max_active_levels() >= 1,
+                            ShowValue(omp_get_max_active_levels()));
 #pragma omp parallel for
                 for(size_t mk = 0; mk < M * K; ++mk)
                 {
@@ -150,7 +152,7 @@ namespace rocRoller
         else if(AX.size() == 1)
         {
             float aScale = scaleToFloat(scaleTypeA, AX[0]);
-        AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels())); 
+            AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels()));
 #pragma omp parallel for
             for(size_t mk = 0; mk < M * K; ++mk)
             {
@@ -173,7 +175,8 @@ namespace rocRoller
 
             if(transB)
             {
-        AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels())); 
+                AssertFatal(omp_get_max_active_levels() >= 1,
+                            ShowValue(omp_get_max_active_levels()));
 #pragma omp parallel for
                 for(size_t kn = 0; kn < K * N; ++kn)
                 {
@@ -186,7 +189,8 @@ namespace rocRoller
             }
             else
             {
-        AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels())); 
+                AssertFatal(omp_get_max_active_levels() >= 1,
+                            ShowValue(omp_get_max_active_levels()));
 #pragma omp parallel for
                 for(size_t kn = 0; kn < K * N; ++kn)
                 {
@@ -201,7 +205,7 @@ namespace rocRoller
         else if(BX.size() == 1)
         {
             float bScale = scaleToFloat(scaleTypeB, BX[0]);
-        AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels())); 
+            AssertFatal(omp_get_max_active_levels() >= 1, ShowValue(omp_get_max_active_levels()));
 #pragma omp parallel for
             for(size_t kn = 0; kn < K * N; ++kn)
             {
