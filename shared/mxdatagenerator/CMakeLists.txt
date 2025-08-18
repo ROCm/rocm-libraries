@@ -148,13 +148,6 @@ install(
     COMPONENT mxDataGenerator_Development
 )
 
-file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/cmake")
-export(
-  EXPORT mxDataGenerator-targets
-  FILE "${CMAKE_CURRENT_BINARY_DIR}/cmake/mxDataGenerator-targets.cmake"
-  NAMESPACE roc::
-)
-
 install(
     EXPORT mxDataGenerator-targets
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/mxDataGenerator"
@@ -182,3 +175,5 @@ install(
     COMPONENT mxDataGenerator_Docs
     DESTINATION "${CMAKE_INSTALL_DOCDIR}"
 )
+
+export(EXPORT mxDataGenerator-targets FILE mxDataGeneratorConfig.cmake)
