@@ -320,15 +320,23 @@ public:
         : active(false)
         , original_cerr_rdbuf(std::cerr.rdbuf())
     {
-        const char* hipfftw_log_trace = std::getenv("HIPFFTW_LOG_EXCEPTIONS");
-        if(!hipfftw_log_trace || std::atoi(hipfftw_log_trace) <= 0)
-        {
 #ifdef WIN32
+        // no more than 8*sizeof(size_t) + 3 characters for valid values
+        // (if variable defined in binary representation "0b[...]")
+        char       hipfftw_log_trace[8 * sizeof(size_t) + 3];
+        const auto sz = GetEnvironmentVariableA(
+            "HIPFFTW_LOG_EXCEPTIONS", hipfftw_log_trace, sizeof(hipfftw_log_trace));
+        if(sz == 0 || (sz <= sizeof(hipfftw_log_trace) && std::stoull(hipfftw_log_trace) == 0))
+        {
             active = SetEnvironmentVariable("HIPFFTW_LOG_EXCEPTIONS", "1");
-#else
-            active = setenv("HIPFFTW_LOG_EXCEPTIONS", "1", 1) == EXIT_SUCCESS;
-#endif
         }
+#else
+        const char* hipfftw_log_trace = std::getenv("HIPFFTW_LOG_EXCEPTIONS");
+        if(!hipfftw_log_trace || std::stoull(hipfftw_log_trace) == 0)
+        {
+            active = setenv("HIPFFTW_LOG_EXCEPTIONS", "1", 1) == EXIT_SUCCESS;
+        }
+#endif
         if(active)
             std::cerr.rdbuf(buffer.rdbuf());
     }

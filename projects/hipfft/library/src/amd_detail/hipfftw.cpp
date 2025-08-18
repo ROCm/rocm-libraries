@@ -31,6 +31,9 @@
 #include <stdexcept>
 #include <string>
 #include <type_traits>
+#ifdef WIN32
+#include <windows.h> // GetEnvironmentVariableA
+#endif
 
 // anonymous namespace for implementation details
 namespace
@@ -82,8 +85,8 @@ namespace
 
     enum class hipfftw_io_label
     {
-        IN,
-        OUT
+        INPUT_DATA,
+        OUTPUT_DATA
     };
 
     constexpr bool is_real(rocfft_transform_type dft_type)
@@ -116,7 +119,7 @@ namespace
     using hipfftw_user_data_t
         = std::conditional_t<!is_real(dft_type)
                                  || (dft_type == rocfft_transform_type_real_forward
-                                     ^ io == hipfftw_io_label::IN),
+                                     ^ io == hipfftw_io_label::INPUT_DATA),
                              // user data is complex
                              hipfftw_complex_data_t<prec>,
                              // user data is real
@@ -128,7 +131,7 @@ namespace
         if constexpr(!is_real(dft_type))
             return rocfft_array_type_complex_interleaved;
         else if constexpr(dft_type == rocfft_transform_type_real_forward
-                          ^ io == hipfftw_io_label::IN)
+                          ^ io == hipfftw_io_label::INPUT_DATA)
             return rocfft_array_type_hermitian_interleaved;
         else
             return rocfft_array_type_real;
@@ -555,15 +558,15 @@ namespace
                   size_t                rank,
                   typename T,
                   size_t batch_rank>
-        void init(const std::array<T, rank>&                                  lengths_rm,
-                  const std::array<T, rank>&                                  istrides_rm,
-                  const std::array<T, rank>&                                  ostrides_rm,
-                  hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::IN>*  user_in,
-                  hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUT>* user_out,
-                  const std::array<T, batch_rank>&                            batch,
-                  const std::array<T, batch_rank>&                            idist,
-                  const std::array<T, batch_rank>&                            odist,
-                  unsigned                                                    flags)
+        void init(const std::array<T, rank>&                                          lengths_rm,
+                  const std::array<T, rank>&                                          istrides_rm,
+                  const std::array<T, rank>&                                          ostrides_rm,
+                  hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>*  user_in,
+                  hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>* user_out,
+                  const std::array<T, batch_rank>&                                    batch,
+                  const std::array<T, batch_rank>&                                    idist,
+                  const std::array<T, batch_rank>&                                    odist,
+                  unsigned                                                            flags)
         {
             // compile-time validations of template specialization values
             static_assert(1 <= rank && rank <= 3);
@@ -625,11 +628,11 @@ namespace
                 // {k[0], k[1], ..., k[rank - 2], 0} ":= k" and every
                 // {m[0], m[1], .., m[batch_dim-1]} ":= m" (in applicable ranges), the byte offset
                 // on input, i.e.,
-                // sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::IN>)*
+                // sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>)*
                 //      std::inner_product(m.begin(), m.end(), idist.begin(),
                 //                         std::inner_product(k.begin(), k.end(), istrides_rm.begin(), 0))
                 // must be equal to the byte offset on output, i.e.,
-                // sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUT>)*
+                // sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>)*
                 //      std::inner_product(m.begin(), m.end(), odist.begin(),
                 //                         std::inner_product(k.begin(), k.end(), ostrides_rm.begin(), 0)).
                 // This requirement translates into the followng element-wise conditions on
@@ -641,9 +644,12 @@ namespace
                     if(batch[batch_dim] == 1)
                         continue;
                     if(idist[batch_dim]
-                           * sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::IN>)
+                           * sizeof(
+                               hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>)
                        != odist[batch_dim]
-                              * sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUT>))
+                              * sizeof(hipfftw_user_data_t<dft_type,
+                                                           prec,
+                                                           hipfftw_io_label::OUTPUT_DATA>))
                         throw hipfftw_invalid_arg("distances rejected for in-place configuration.");
                 }
                 for(auto dim = 0; dim < rank - 1 /* exclude leading dimension */; dim++)
@@ -651,9 +657,12 @@ namespace
                     if(lengths_rm[dim] == 1)
                         continue;
                     if(istrides_rm[dim]
-                           * sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::IN>)
+                           * sizeof(
+                               hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>)
                        != ostrides_rm[dim]
-                              * sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUT>))
+                              * sizeof(hipfftw_user_data_t<dft_type,
+                                                           prec,
+                                                           hipfftw_io_label::OUTPUT_DATA>))
                     {
                         throw hipfftw_invalid_arg("strides rejected for in-place configuration..");
                     }
@@ -695,9 +704,9 @@ namespace
                     "representable in the chosen integral type are not supported (consider using "
                     "guru64 plan creation functions).");
             }
-            in_bytes = sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::IN>)
+            in_bytes = sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>)
                        * (last_input_element_idx + 1);
-            out_bytes = sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUT>)
+            out_bytes = sizeof(hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>)
                         * (last_output_element_idx + 1);
             if(plan_placement == rocfft_placement_inplace)
             {
@@ -722,8 +731,8 @@ namespace
             }
             if(rocfft_plan_description_set_data_layout(
                    internal_rocfft_desc,
-                   hipfftw_get_array_type<dft_type, hipfftw_io_label::IN>(),
-                   hipfftw_get_array_type<dft_type, hipfftw_io_label::OUT>(),
+                   hipfftw_get_array_type<dft_type, hipfftw_io_label::INPUT_DATA>(),
+                   hipfftw_get_array_type<dft_type, hipfftw_io_label::OUTPUT_DATA>(),
                    nullptr /* in_offsets */,
                    nullptr /* out_offsets */,
                    rank /* in_strides_sizes */,
@@ -786,16 +795,16 @@ namespace
               size_t                rank,
               typename T,
               size_t batch_rank = 1>
-    hipfftw_plan_internal*
-        hipfftw_create_plan(const std::array<T, rank>&                                  lengths_rm,
-                            const std::array<T, rank>&                                  istrides_rm,
-                            const std::array<T, rank>&                                  ostrides_rm,
-                            hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::IN>*  user_in,
-                            hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUT>* user_out,
-                            const std::array<T, batch_rank>&                            batch,
-                            const std::array<T, batch_rank>&                            idist,
-                            const std::array<T, batch_rank>&                            odist,
-                            unsigned                                                    flags)
+    hipfftw_plan_internal* hipfftw_create_plan(
+        const std::array<T, rank>&                                          lengths_rm,
+        const std::array<T, rank>&                                          istrides_rm,
+        const std::array<T, rank>&                                          ostrides_rm,
+        hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>*  user_in,
+        hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>* user_out,
+        const std::array<T, batch_rank>&                                    batch,
+        const std::array<T, batch_rank>&                                    idist,
+        const std::array<T, batch_rank>&                                    odist,
+        unsigned                                                            flags)
     {
         auto ret = std::make_unique<hipfftw_plan_internal>();
         ret->init<dft_type, prec, rank, T, batch_rank>(
@@ -872,10 +881,10 @@ namespace
 
     template <rocfft_transform_type dft_type, rocfft_precision prec, size_t rank>
     hipfftw_plan_internal* hipfftw_create_default_unbatched_plan(
-        const std::array<int, rank>&                                n,
-        hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::IN>*  in,
-        hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUT>* out,
-        unsigned                                                    flags)
+        const std::array<int, rank>&                                        n,
+        hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>*  in,
+        hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>* out,
+        unsigned                                                            flags)
     {
         auto layout_data = hipfftw_get_default_data_layout_info_rm<rank, dft_type>(
             static_cast<void*>(in) == static_cast<void*>(out), n);
@@ -892,11 +901,11 @@ namespace
 
     template <rocfft_transform_type dft_type, rocfft_precision prec>
     hipfftw_plan_internal* hipfftw_create_default_unbatched_plan(
-        int                                                         rank,
-        const int*                                                  n,
-        hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::IN>*  in,
-        hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUT>* out,
-        unsigned                                                    flags)
+        int                                                                 rank,
+        const int*                                                          n,
+        hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>*  in,
+        hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>* out,
+        unsigned                                                            flags)
     {
         if(rank <= 0)
             throw hipfftw_invalid_arg("ranks must be strictly positive.");
@@ -963,15 +972,38 @@ namespace
                                                          prec>(rank, n, in, out, flags);
     }
 
-    bool hipfftw_handler_is_verbose() noexcept
-    try
+    // read the environment variable env_var and convert it to a size_t value.
+    // If the environment variable is not set or if the conversion fails, the default value
+    // is returned.
+    size_t hipfftw_fetch_env_var(const char* env_var, size_t default_val) noexcept
     {
-        const char* env = std::getenv("HIPFFTW_LOG_EXCEPTIONS");
-        return env && std::stoi(env) > 0;
+        try
+        {
+#ifdef WIN32
+            // no more than 8*sizeof(size_t) + 3 characters for valid values
+            // (if variable defined in binary representation "0b[...]")
+            char       tmp[8 * sizeof(size_t) + 3];
+            const auto sz = GetEnvironmentVariableA(env_var, tmp, sizeof(tmp));
+            if(sz == 0 || sz > sizeof(tmp))
+                return default_val;
+#else
+            const char* tmp = std::getenv(env_var);
+            if(!tmp)
+                return default_val;
+#endif
+            const auto ret = std::stoull(tmp);
+            return ret > std::numeric_limits<size_t>::max() ? std::numeric_limits<size_t>::max()
+                                                            : static_cast<size_t>(ret);
+        }
+        catch(...)
+        {
+            return default_val;
+        }
     }
-    catch(...)
+
+    bool hipfftw_handler_is_verbose() noexcept
     {
-        return false;
+        return hipfftw_fetch_env_var("HIPFFTW_LOG_EXCEPTIONS", 0) > 0;
     }
 
     inline void hipfftw_exception_handler(const char* user_facing_function) noexcept
@@ -1049,27 +1081,16 @@ namespace
                       << user_facing_function << "." << std::endl;
     }
 
-    constexpr size_t no_limit = std::numeric_limits<size_t>::max();
     template <hipMemoryType type>
     size_t hipfftw_alloc_host_limit() noexcept
-    try
     {
         static_assert(type == hipMemoryType::hipMemoryTypeHost
                       || type == hipMemoryType::hipMemoryTypeUnregistered);
-        const char* env = nullptr;
+        constexpr size_t no_limit = std::numeric_limits<size_t>::max();
         if constexpr(type == hipMemoryType::hipMemoryTypeHost)
-            env = std::getenv("HIPFFTW_BYTE_SIZE_LIMIT_PINNED_HOST_ALLOC");
+            return hipfftw_fetch_env_var("HIPFFTW_BYTE_SIZE_LIMIT_PINNED_HOST_ALLOC", no_limit);
         else
-            env = std::getenv("HIPFFTW_BYTE_SIZE_LIMIT_PAGEABLE_HOST_ALLOC");
-        if(!env)
-            throw int(); // no limit set
-        const unsigned long long desired_limit = std::stoull(env);
-        return desired_limit > no_limit ? no_limit : static_cast<size_t>(desired_limit);
-    }
-    catch(...)
-    {
-        // no actual limit set, or failed to read it
-        return no_limit;
+            return hipfftw_fetch_env_var("HIPFFTW_BYTE_SIZE_LIMIT_PAGEABLE_HOST_ALLOC", no_limit);
     }
 
     // possible TODO for hipfftw_alloc_host_accessible: consider using hipMallocManaged,
