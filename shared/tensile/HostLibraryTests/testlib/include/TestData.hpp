@@ -26,9 +26,9 @@
 
 #pragma once
 
-#include <Tensile/Singleton.hpp>
 #include <boost/filesystem.hpp>
-#include <memory>
+
+#include <Tensile/Singleton.hpp>
 
 struct TestData : public Tensile::LazySingleton<TestData>
 {
