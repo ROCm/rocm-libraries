@@ -1,0 +1,20 @@
+{
+  "version": {
+    "major": 1,
+    "minor": 0
+  },
+  "local": [
+    {
+      "openmp": [
+        {
+          "id": "0",
+          "slots": 1
+        },
+        {
+          "id": "1",
+          "slots": 1
+        }
+      ]
+    }
+  ]
+}

@@ -147,7 +147,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
         TEST_FILTER "*OPENMP_*-*GPU_*"
         DISCOVERY_MODE PRE_TEST
         PROPERTIES
-            RESOURCE_LOCK "OPENMP"
+            "RESOURCE_GROUPS" "openmp:1"
             COST 1
             LABELS "OPENMP"
             ENVIRONMENT "${asan_opts}"
@@ -158,7 +158,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
         TEST_FILTER "*GPU_OPENMP_*"
         DISCOVERY_MODE PRE_TEST
         PROPERTIES
-            RESOURCE_LOCK "OPENMP"
+            "RESOURCE_GROUPS" "openmp:1"
             COST 1
             LABELS "OPENMP"
             LABELS "GPU"
@@ -216,7 +216,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
             PROPERTIES "LABELS" "CATCH"
                        "LABELS" "GPU"
                        "LABELS" "OPENMP"
-                       "RESOURCE_LOCK" "OPENMP"
+                       "RESOURCE_GROUPS" "openmp:1"
                        "COST" 1
                        "ENVIRONMENT" "${asan_opts}"
             SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
@@ -231,7 +231,7 @@ if(ROCROLLER_ENABLE_TEST_DISCOVERY)
             TEST_SPEC "~[gpu][openmp]"
             PROPERTIES "LABELS" "CATCH"
                        "LABELS" "OPENMP"
-                       "RESOURCE_LOCK" "OPENMP"
+                       "RESOURCE_GROUPS" "openmp:1"
                        "COST" 1
                        "ENVIRONMENT" "${asan_opts}"
             SKIP_REGULAR_EXPRESSION "[1-9][0-9]* skipped" "[1-9][0-9]* SKIPPED"
