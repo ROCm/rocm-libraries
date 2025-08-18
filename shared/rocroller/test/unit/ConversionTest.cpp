@@ -735,7 +735,7 @@ namespace rocRollerTest
         matrixMultiply<float, Half>(32, 32, 2, 1, 2.e-6);
     }
 
-    TEST_F(ConversionTest, GPU_MatrixMultiply_WMMA)
+    TEST_F(ConversionTest, GPU_OPENMP_MatrixMultiply_WMMA)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_f32_16x16x16_f16);
         // Note: the output type of A(Half) * B(Half) is Float

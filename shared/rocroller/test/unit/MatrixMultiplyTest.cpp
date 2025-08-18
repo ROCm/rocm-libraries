@@ -858,7 +858,7 @@ namespace MatrixMultiplyTest
         matrixMultiplyMacroTile<float, float, float>(32, 32, 2, 1);
     }
 
-    TEST_P(MatrixMultiplyWMMATestGPU, GPU_MatrixMultiplyMacroTileWMMA)
+    TEST_P(MatrixMultiplyWMMATestGPU, GPU_OPENMP_MatrixMultiplyMacroTileWMMA)
     {
         const auto [typeAndWaveK, transOp] = std::get<1>(GetParam());
         const auto [typeAB, waveK]         = typeAndWaveK;
@@ -885,7 +885,7 @@ namespace MatrixMultiplyTest
         EXPECT_EQ(countSubstring(generatedCode, wmmaMnemonic), numWMMAs);
     }
 
-    TEST_P(MatrixMultiplyF16AccWMMATestGPU, GPU_MatrixMultiplyMacroTileWMMA)
+    TEST_P(MatrixMultiplyF16AccWMMATestGPU, GPU_OPENMP_MatrixMultiplyMacroTileWMMA)
     {
         const auto [typeAndWaveK, transOp] = std::get<1>(GetParam());
         const auto [dataType, waveK]       = typeAndWaveK;

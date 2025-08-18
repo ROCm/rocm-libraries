@@ -3832,7 +3832,7 @@ namespace GEMMDriverTest
         }
     }
 
-    TEST_P(GEMMTestWMMAF16AccumGPU, GPU_BasicGEMMF16Accum)
+    TEST_P(GEMMTestWMMAF16AccumGPU, GPU_OPENMP_BasicGEMMF16Accum)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasWMMA_F16_ACC);
         auto [dataTypeAndWaveK, transOp] = std::get<1>(GetParam());
