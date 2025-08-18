@@ -32,3 +32,37 @@ add_subdirectory(src)
 if (CMAKE_BUILD_TYPE MATCHES Debug)
   add_subdirectory(test)
 endif()
+ 
+#-----------------------------------------------------------------------------
+# Installation and Packaging Rules
+#-----------------------------------------------------------------------------
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/inc/gpu/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/gpu
+)
+
+install(TARGETS GpuThreads
+    EXPORT GpuLibTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}/gpulib
+)
+
+set(CMAKECONFIG_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR}/cmake/GpuLib)
+
+install(EXPORT GpuLibTargets
+    FILE GpuLibTargets.cmake
+    NAMESPACE GpuLib::
+    DESTINATION ${CMAKECONFIG_INSTALL_DIR}
+)
+
+configure_package_config_file(
+    "cmake/GpuLibConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/GpuLibConfig.cmake"
+    INSTALL_DESTINATION ${CMAKECONFIG_INSTALL_DIR}
+)
+
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/GpuLibConfig.cmake"
+    DESTINATION ${CMAKECONFIG_INSTALL_DIR}
+)
