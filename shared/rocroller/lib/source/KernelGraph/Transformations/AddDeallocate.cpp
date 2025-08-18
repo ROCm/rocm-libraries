@@ -211,6 +211,27 @@ namespace rocRoller::KernelGraph
 
             removeRedundantSequenceEdges(graph);
         }
+
+        void deleteUnusedArguments(AssemblyKernelPtr                kernel,
+                                   ControlFlowArgumentTracer const& argTracer)
+        {
+            auto arguments = kernel->arguments();
+            kernel->resetArguments();
+
+            auto const& neverReferencedArguments = argTracer.neverReferencedArguments();
+
+            auto referencedArgs = arguments | std::views::filter([&](auto const& arg) {
+                                      return !neverReferencedArguments.contains(arg.name);
+                                  });
+
+            for(auto& arg : referencedArgs)
+            {
+                kernel->addArgument({std::move(arg.name),
+                                     arg.variableType,
+                                     arg.dataDirection,
+                                     std::move(arg.expression)});
+            }
+        }
     }
 
     using namespace AddDeallocateDetail;
@@ -402,30 +423,6 @@ namespace rocRoller::KernelGraph
         sequenceDeallocatesBeforeOtherNodes(deallocateNodes, graph);
 
         return graph;
-    }
-
-    void deleteUnusedArguments(AssemblyKernelPtr kernel, ControlFlowArgumentTracer const& argTracer)
-    {
-        auto arguments = kernel->arguments();
-        kernel->resetArguments();
-
-        auto const& neverReferencedArguments = argTracer.neverReferencedArguments();
-
-        auto referencedArgs = arguments | std::views::filter([&](auto const& arg) {
-                                  return !neverReferencedArguments.contains(arg.name);
-                              });
-
-        for(auto& arg : referencedArgs)
-        {
-            // AssemblyKernelArgument
-            kernel->addArgument({std::move(arg.name),
-                                 arg.variableType,
-                                 arg.dataDirection,
-                                 std::move(arg.expression)});
-        }
-
-        if(not neverReferencedArguments.empty())
-            Log::info("delete these args: {}", neverReferencedArguments);
     }
 
     KernelGraph AddDeallocateArguments::apply(KernelGraph const& original)
