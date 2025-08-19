@@ -337,7 +337,7 @@ class AMaxKernelGenerator:
             mod.add(ri.SLoadB64(sgpr("AddressOut", 2),    sgpr("KernelArg", 2),  0))
             mod.add(ri.SLoadB64(sgpr("AddressIn", 2),     sgpr("KernelArg", 2),  8))
             mod.add(ri.SLoadB32(sgpr("SizeLength"),       sgpr("KernelArg", 2),  16))
-        mod.add(ri.SWaitCnt(lgkmcnt=0))
+        mod.add(ri.SWaitCnt(kmcnt=0))
         mod.addSpaceLine()
         mod.addSpaceLine()
         return mod
@@ -357,7 +357,7 @@ class AMaxKernelGenerator:
 
         if self.is_scale: # init inputScale
             mod.add(ri.SLoadB32(sgpr("Scale"), sgpr("AddressScale", 2), 0))
-            mod.add(ri.SWaitCnt(lgkmcnt=0))
+            mod.add(ri.SWaitCnt(kmcnt=0))
             mod.addSpaceLine()
 
         mod.add(ri.SMovB32(sgpr("Src+0"), sgpr("AddressIn+0")))
@@ -463,7 +463,7 @@ class AMaxKernelGenerator:
             mod.addSpaceLine()
             # max operation
             for i in range(0, self.num_load_count): # unroll
-                mod.add(ri.SWaitCnt(vmcnt=(self.num_load_count-i-1)))
+                mod.add(ri.SWaitCnt(vlcnt=(self.num_load_count-i-1)))
                 for j in range(0, self.num_load_size): # dwordx4
                     mod.add(self.max_per_data(i * self.num_load_size + j))
             mod.addSpaceLine()
@@ -508,7 +508,7 @@ class AMaxKernelGenerator:
         with asm_loop(mod, "sum_per_threadx4", "MainLoop"):
             mod.add(ri.BufferLoadB128(vgpr("Value",4), vgpr("Offset"), sgpr("Src",4), 0, MUBUFModifiers(offen=True)))
             mod.addSpaceLine()
-            mod.add(ri.SWaitCnt(vmcnt=0))
+            mod.add(ri.SWaitCnt(vlcnt=0))
             # max operation
             for i in range(0, self.num_load_size): # dwordx4
                 mod.add(self.max_per_data(i))
@@ -571,7 +571,7 @@ class AMaxKernelGenerator:
         with asm_loop(mod, "sum_per_thread", "MainLoop"):
             BufferLoadx1 = self.global_read_inst_type(1)
             mod.add(BufferLoadx1(vgpr("Value"), vgpr("Offset"), sgpr("Src",4), 0, MUBUFModifiers(offen=True)))
-            mod.add(ri.SWaitCnt(vmcnt=0))
+            mod.add(ri.SWaitCnt(vlcnt=0))
             mod.addSpaceLine()
             mod.add(self.max_per_data(0))
             mod.addSpaceLine()
@@ -603,7 +603,7 @@ class AMaxKernelGenerator:
         mod.add(ri.SNop(1))
         BufferLoadx1 = self.global_read_inst_type(1)
         mod.add(BufferLoadx1(vgpr("Value"), vgpr("Offset"), sgpr("Src",4), 0, MUBUFModifiers(offen=True)))
-        mod.add(ri.SWaitCnt(vmcnt=0))
+        mod.add(ri.SWaitCnt(vlcnt=0))
         mod.addSpaceLine()
         mod.add(self.max_per_data(0))
         mod.addSpaceLine()
@@ -643,7 +643,7 @@ class AMaxKernelGenerator:
         mod.add(ri.VLShiftLeftB32(vgpr("Tmp"), 0x2, vgpr("Tmp")))
         mod.addSpaceLine()
         mod.add(ri.DSBPermuteB32(vgpr("OutputB"), vgpr("Tmp"), vgpr("Output")))
-        mod.add(ri.SWaitCnt(lgkmcnt=0))
+        mod.add(ri.SWaitCnt(dscnt=0))
         mod.addSpaceLine()
         mod.add(self.merge_sum())
         mod.add(ri.SLShiftLeftB32(sgpr("Tmp"), 1, sgpr("Tmp")))
@@ -682,7 +682,7 @@ class AMaxKernelGenerator:
         ds = DSModifiers(offset=0)
         DSStorex1 = self.local_write_inst_type(1)
         mod.add(DSStorex1(vgpr("Tmp"), vgpr("Output"), ds))
-        mod.add(ri.SWaitCnt(lgkmcnt=0))
+        mod.add(ri.SWaitCnt(dscnt=0))
         mod.add(ri.SBarrier())
         mod.add(ri.SBranch(label_inter.getLabelName()))
         mod.add(label_lower)
@@ -691,7 +691,7 @@ class AMaxKernelGenerator:
         ds = DSModifiers(offset=0)
         DSLoadx1 = self.local_read_inst_type(1)
         mod.add(DSLoadx1(vgpr("OutputB"), vgpr("Tmp"), ds))
-        mod.add(ri.SWaitCnt(lgkmcnt=0))
+        mod.add(ri.SWaitCnt(dscnt=0))
         mod.add(self.merge_sum())
         mod.add(ri.SBranch(label_inter.getLabelName()))
         mod.add(label_empty)
@@ -713,7 +713,7 @@ class AMaxKernelGenerator:
         ds = DSModifiers(offset=0)
         DSStorex1 = self.local_write_inst_type(1)
         mod.add(DSStorex1(vgpr("Widx"), vgpr("Output"), ds))
-        mod.add(ri.SWaitCnt(lgkmcnt=0))
+        mod.add(ri.SWaitCnt(dscnt=0))
         mod.add(ri.SBarrier())
         mod.add(ri.SBranch(label_end.getLabelName()))
         mod.add(label_lower)
@@ -722,7 +722,7 @@ class AMaxKernelGenerator:
         ds = DSModifiers(offset=0)
         DSLoadx1 = self.local_read_inst_type(1)
         mod.add(DSLoadx1(vgpr("Output"), vgpr("Tmp"), ds))
-        mod.add(ri.SWaitCnt(lgkmcnt=0))
+        mod.add(ri.SWaitCnt(dscnt=0))
         mod.add(label_end)
         mod.addSpaceLine()
         return mod

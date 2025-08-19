@@ -35,6 +35,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/OrderMultiplyNodes.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PrefetchScale.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RemoveDuplicates.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/RemoveSetCoordinate.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Simplify.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SwizzleScale.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/UnrollLoops.cpp"

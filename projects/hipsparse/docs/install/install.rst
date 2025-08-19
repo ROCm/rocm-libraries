@@ -42,7 +42,7 @@ To build hipSPARSE from source, follow the instructions in this section.
 To compile and run hipSPARSE, the `AMD ROCm Platform <https://github.com/ROCm/ROCm>`_ is required.
 The build also requires the following compile-time dependencies:
 
-*  `rocSPARSE <https://github.com/ROCm/rocSPARSE>`_
+*  `rocSPARSE <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsparse>`_
 *  `git <https://git-scm.com/>`_
 *  `CMake <https://cmake.org/>`_ (Version 3.5 or later)
 *  `GoogleTest <https://github.com/google/googletest>`_ (Optional: only required to build the clients)
@@ -50,19 +50,51 @@ The build also requires the following compile-time dependencies:
 Downloading hipSPARSE
 -------------------------
 
-The hipSPARSE source code is available from the `hipSPARSE GitHub <https://github.com/ROCm/hipSPARSE>`_.
-Download the develop branch using these commands:
+The hipSPARSE source code is available from the `hipSPARSE folder <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparse>`_
+of the `rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries>`_.
+Download the develop branch using either a sparse checkout or a full clone of the rocm-libraries repository.
+
+To limit your local checkout to only the hipSPARSE project, configure ``sparse-checkout`` before cloning.
+This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.
+Use the following commands for a sparse checkout:
+
+.. note::
+
+   To include the rocSPARSE dependencies, set the projects for the sparse checkout using
+   ``git sparse-checkout set projects/hipsparse projects/rocsparse``.
 
 .. code-block:: shell
 
-   git clone -b develop https://github.com/ROCm/hipSPARSE.git
-   cd hipSPARSE
+   git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries
+   git sparse-checkout init --cone
+   git sparse-checkout set projects/hipsparse # add projects/rocsparse to include dependencies
+   git checkout develop # or use the branch you want to work with
+
+
+To download the develop branch for all projects in rocm-libraries, use these commands. This process takes
+longer but is recommended for those working with a large number of libraries.
+
+.. code-block:: shell
+
+   git clone -b develop https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries/projects/hipsparse
+
+
+.. note::
+
+   To build ROCm 6.4.2 and earlier, use the hipSPARSE repository at `<https://github.com/ROCm/hipSPARSE>`_.
+   For more information, see the documentation associated with the release you want to build.
 
 Building hipSPARSE using the install script
 -------------------------------------------
 
 It's recommended to use the ``install.sh`` script to install hipSPARSE.
 Here are the steps required to build different packages of the library, including the dependencies and clients.
+
+.. note::
+
+   You can run the ``install.sh`` script from the ``projects/hipsparse`` directory.
 
 Using install.sh to build hipSPARSE with dependencies
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -97,6 +129,10 @@ Building hipSPARSE using individual make commands
 --------------------------------------------------
 
 You can build hipSPARSE using the following commands:
+
+.. note::
+
+   Run these commands from the ``projects/hipsparse`` directory.
 
 .. note::
 
@@ -149,7 +185,7 @@ You can test the installation by running one of the hipSPARSE examples after suc
 .. code-block:: shell
 
       # Navigate to clients binary directory
-      cd hipSPARSE/build/release/clients/staging
+      cd build/release/clients/staging
 
       # Execute hipSPARSE example
       ./example_csrmv 1000

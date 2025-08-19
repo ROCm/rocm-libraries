@@ -30,10 +30,10 @@ The hipSPARSE functionality is organized into the following categories:
 * :ref:`hipsparse_reordering_functions`: Operations on a matrix in sparse format to obtain a reordering.
 * :ref:`hipsparse_generic_functions`: Operations that manipulate sparse matrices.
 
-The source code can be found at `<https://github.com/ROCm/hipSPARSE>`_.
+The source code can be found at `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparse>`_.
 
 .. note::
 
    hipSPARSE focuses on convenience and portability.
    If performance outweighs these factors, it's better to use rocSPARSE directly.
-   The rocSPARSE source code can be found on the `rocSPARSE GitHub <https://github.com/ROCm/rocSPARSE>`_.
+   The rocSPARSE source code can be found on the `rocSPARSE GitHub <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocsparse>`_.

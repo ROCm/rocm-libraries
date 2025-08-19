@@ -148,8 +148,6 @@ namespace rocRoller
 
         KernelGraph InlineIncrements::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::inlineIncrements");
-
             auto graph     = original;
             auto transform = InlineIncrementer();
             transform.stage(graph);

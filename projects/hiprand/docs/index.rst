@@ -12,7 +12,7 @@ The hipRAND library is a wrapper library that lets you easily port NVIDIA CUDA a
 to the HIP layer. It sits between your application and the backend RAND library,
 where it marshals inputs to the backend and results to the application. hipRAND exports an interface that doesn't
 require the client to change, regardless of the chosen backend.
-It uses rocRAND in a ROCm environment and cuRAND in a CUDA environment and provides C, C++, and Python API wrappers.
+It uses rocRAND in a ROCm environment and provides C, C++, and Python API wrappers.
 
 The hipRAND public repository is located at `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/hiprand>`_.
 

@@ -1084,7 +1084,7 @@ bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& prob)
     if constexpr(sizeof(Ti) >= 4)
     {
         // TODO remove after tuning
-        if(rocblas_internal_get_arch(prob.handle) == 950)
+        if(rocblas_internal_get_arch(prob.handle) == 950 && !prob.handle->isHipBLASLtForcedOn())
         {
             return false;
         }

@@ -17,6 +17,7 @@ execute_process(
 
 if(ROCMINFO_EXIT_CODE)
   message(SEND_ERROR "rocminfo exited with ${ROCMINFO_EXIT_CODE}")
+  message(SEND_ERROR ${ROCMINFO_STDOUT})
   message(FATAL_ERROR ${ROCMINFO_STDERR})
 endif()
 
