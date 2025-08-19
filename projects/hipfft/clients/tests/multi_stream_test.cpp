@@ -688,22 +688,22 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
         }
         // Check if the callbacks get invoked within 10 s. If not, the stream set above was likely
         // ignored in the sub_dft operations (integer "times" in us below)
-        size_t           time_waited            = 0;
-        constexpr size_t sleep_time             = 1000; // 1 ms
-        constexpr size_t failure_time_threshold = 10000000; // 10^7 us := 10 s
+        size_t           time_waited_us            = 0;
+        constexpr size_t sleep_time_us             = 1000; // 1 ms
+        constexpr size_t failure_time_threshold_us = 10000000; // 10^7 us := 10 s
         while(std::any_of(stream_is_done.begin(),
                           stream_is_done.end(),
                           [](const decltype(stream_is_done)::value_type& val) { return val == 0; })
-              && time_waited <= failure_time_threshold)
+              && time_waited_us <= failure_time_threshold_us)
         {
 #ifdef WIN32
-            Sleep(sleep_time / 1000);
+            Sleep(sleep_time_us / 1000); // argument in ms
 #else
-            usleep(sleep_time);
+            usleep(sleep_time_us);
 #endif
-            time_waited += sleep_time;
+            time_waited_us += sleep_time_us;
         }
-        if(time_waited > failure_time_threshold)
+        if(time_waited_us > failure_time_threshold_us)
         {
             // The added callback probably was never invoked, i.e., the above set_stream
             // was not taken into consideration by some sub_dft plan.
