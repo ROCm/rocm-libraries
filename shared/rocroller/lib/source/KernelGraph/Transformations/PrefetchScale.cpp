@@ -242,7 +242,6 @@ namespace rocRoller
 
         KernelGraph PrefetchScale::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::SwizzleScale");
             auto newGraph = original;
 
             prefetchScaleLoads(newGraph, m_context);

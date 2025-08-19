@@ -1,0 +1,74 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "default-release",
+      "displayName": "Release Build (Default GPU)",
+      "description": "Standard release build with default GPU target",
+      "binaryDir": "${sourceDir}/_build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
+        "CMAKE_C_COMPILER": "/opt/rocm/bin/amdclang",
+        "CMAKE_PREFIX_PATH": "/opt/rocm",
+        "GPU_TARGETS": "all"
+      },
+      "environment": {
+        "ROCM_PATH": "/opt/rocm"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug Build",
+      "description": "Debug build with debugging symbols and runtime checks",
+      "inherits": "default-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "HIPSPARSELT_BUILD_TESTING": "ON",
+        "HIPSPARSELT_ENABLE_BENCHMARKS": "ON",
+        "HIPSPARSELT_ENABLE_SAMPLES": "ON"
+      }
+    },
+    {
+      "name": "clients-only",
+      "displayName": "Clients Development",
+      "description": "Build with all client applications for testing",
+      "inherits": "debug",
+      "cacheVariables": {
+        "HIPSPARSELT_ENABLE_CLIENT": "ON",
+        "GPU_TARGETS": "all"
+      }
+    },
+    {
+      "name": "coverage",
+      "displayName": "Coverage Build",
+      "description": "Build with coverage enabled",
+      "inherits": "debug",
+      "cacheVariables": {
+        "HIPSPARSELT_BUILD_COVERAGE": "ON",
+        "GPU_TARGETS": "all"
+      }
+    },
+    {
+      "name": "cuda",
+      "displayName": "CUDA Build",
+      "description": "Build with CUDA support",
+      "environment": {
+        "HIP_PLATFORM": "nvidia"
+      },
+      "binaryDir": "${sourceDir}/_build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "HIPSPARSELT_ENABLE_CUDA": "ON",
+        "CMAKE_CXX_COMPILER": "/usr/bin/g++",
+        "CMAKE_CUDA_COMPILER": "/usr/local/cuda/bin/nvcc",
+        "CMAKE_PREFIX_PATH": "/usr/local/cuda;/opt/rocm;/usr/lib/x86_64-linux-gnu"
+      }
+    }
+  ]
+} 

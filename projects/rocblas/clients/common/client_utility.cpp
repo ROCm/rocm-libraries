@@ -35,6 +35,7 @@
 #include <stdexcept>
 #include <stdlib.h>
 #include <thread>
+
 #ifdef BUILD_WITH_HIPBLASLT
 #include <hipblaslt/hipblaslt-ext.hpp>
 #endif
@@ -271,14 +272,57 @@ double get_time_us_sync_device(void)
 /*! \brief  CPU Timer(in microsecond): synchronize with given queue/stream and return wall time */
 double get_time_us_sync(hipStream_t stream)
 {
-    hipStreamSynchronize(stream);
+    static bool oldStreamSync = [&] {
+        // set old mode if env variable is set
+        const char* str_stream_sync
+            = getenv("ROCBLAS_BENCH_STREAM_SYNC"); // windows getenv is fine for static init
+        if(str_stream_sync)
+        {
+            return (strncmp(str_stream_sync, "1", 1) == 0 ? true : false);
+        }
+        return false;
+    }();
 
-    auto now = std::chrono::steady_clock::now();
-    // now.time_since_epoch() is the duration since epoch
-    // which is converted to microseconds
-    auto duration
-        = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-    return (static_cast<double>(duration));
+    if(oldStreamSync)
+    {
+        THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+
+        auto now = std::chrono::steady_clock::now();
+        // now.time_since_epoch() is the duration since epoch
+        // which is converted to microseconds
+        auto duration
+            = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+        return (static_cast<double>(duration));
+    }
+    else
+    {
+        // avoid any stream synchronization overhead on timing
+        static thread_local hipEvent_t start{nullptr};
+        static thread_local hipEvent_t stop{nullptr};
+        if(!start)
+        {
+            THROW_IF_HIP_ERROR(hipEventCreate(&start));
+            THROW_IF_HIP_ERROR(hipEventCreate(&stop));
+            THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+            THROW_IF_HIP_ERROR(hipEventRecord(start, stream));
+
+            return 0.0;
+        }
+        else
+        {
+            THROW_IF_HIP_ERROR(hipEventRecord(stop, stream));
+            THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+
+            float milliseconds = 0;
+            THROW_IF_HIP_ERROR(hipEventElapsedTime(&milliseconds, start, stop));
+            THROW_IF_HIP_ERROR(hipEventDestroy(stop));
+            THROW_IF_HIP_ERROR(hipEventDestroy(start));
+            start = nullptr; // reset start event for next use
+            stop  = nullptr;
+
+            return milliseconds * 1000.0; // convert to microseconds
+        }
+    }
 };
 
 /*! \brief  CPU Timer(in microsecond): no GPU synchronization */

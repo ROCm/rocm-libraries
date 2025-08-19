@@ -81,13 +81,14 @@ namespace rocRoller
                 {
                     if(iterators[i] != seqs[i].end())
                     {
+                        if(!m_lockstate.isSchedulable(*iterators[i], i))
+                            continue;
+
                         yield_seq = true;
-                        co_yield yieldFromStream(iterators[i]);
+                        co_yield yieldFromStream(iterators[i], i);
                     }
                 }
             }
-
-            m_lockstate.isValid(false);
         }
     }
 }
