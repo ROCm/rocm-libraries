@@ -137,8 +137,8 @@ Add the SDK tools to your path with an entry like the following:
 
    %HIP_PATH%\bin
 
-Building using make
---------------------
+Building using the Python script
+---------------------------------
 
 This section describes the steps required to build rocSPARSE using the ``rmake.py`` script. You can build:
 
