@@ -33,7 +33,8 @@
 #include "../../../config.hpp"
 #include "../../../util_deprecated.hpp"
 
-#include "../iterator/tex_ref_input_iterator.hpp"
+#include "../iterator/tex_obj_input_iterator.hpp"
+
 #include "../util_sync.hpp"
 
 #include <chrono>
@@ -61,7 +62,7 @@ struct SpmvParams
     ValueT          alpha;               ///< Alpha multiplicand
     ValueT          beta;                ///< Beta addend-multiplicand
 
-    ::hipcub::TexRefInputIterator<ValueT, 66778899, OffsetT>  t_vector_x;
+    ::hipcub::TexObjInputIterator<ValueT, OffsetT> t_vector_x;
 };
 
 static constexpr uint32_t CsrMVKernel_MaxThreads = 256;
