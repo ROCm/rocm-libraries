@@ -2251,12 +2251,12 @@ class Solution(collections.abc.Mapping):
         return LdsBlockSizePerPad
 
 
-      def calcLdsNumBytesAB(mxTc: str, ldsPad: int, LdsBlockSizePerPad: int) -> int:
+      def calcLdsNumBytesAB(mxTc: str, ldsPad: int, LdsBlockSizePerPad: int):
         tc = mxTc.replace("MXS", "")
         if ("MXS" in mxTc) and (state["ProblemType"]["MXBlock%s"%tc] == 0):
-          return 0, 0
+          return (0, 0)
         if state["DirectToVgpr%s"%mxTc]:
-          return 0, 0
+          return (0, 0)
 
         bpe = state["ProblemType"]["DataType%s"%tc].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["DataType"].numBytes()
         bpe = 1 if ("MXS" in mxTc) else bpe
@@ -2276,10 +2276,10 @@ class Solution(collections.abc.Mapping):
           ldsNumBytes = 0
           ldsNumBytesAligned = 0
 
-        return ldsNumBytes, ldsNumBytesAligned
+        return (ldsNumBytes, ldsNumBytesAligned)
 
 
-      def calcLdsNumBytesM() -> int:
+      def calcLdsNumBytesM():
         if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
           ldsAlign = int(64 / state["ProblemType"]["DataType"].numRegisters())
           bpeAB = state["ProblemType"]["DataType"].numBytes()
@@ -2341,10 +2341,11 @@ class Solution(collections.abc.Mapping):
             ldsBlockSizePerPadB = 0 if padB == 0 else ldsBlockSizePerPadB
             ldsBlockSizePerPadMXSA = 0 if padMXSA == 0 else ldsBlockSizePerPadMXSA
             ldsBlockSizePerPadMXSB = 0 if padMXSB == 0 else ldsBlockSizePerPadMXSB
-            ldsNumBytesA, ldsNumBytesAlignedA = calcLdsNumBytesAB("A", padA, ldsBlockSizePerPadA)
-            ldsNumBytesB, ldsNumBytesAlignedB = calcLdsNumBytesAB("B", padB, ldsBlockSizePerPadB)
-            ldsNumBytesMXSA, ldsNumBytesAlignedMXSA = calcLdsNumBytesAB("MXSA", padMXSA, ldsBlockSizePerPadMXSA) if state["ProblemType"]["MXBlockA"] else 0, 0
-            ldsNumBytesMXSB, ldsNumBytesAlignedMXSB = calcLdsNumBytesAB("MXSB", padMXSB, ldsBlockSizePerPadMXSB) if state["ProblemType"]["MXBlockB"] else 0, 0
+            (ldsNumBytesA, ldsNumBytesAlignedA) = calcLdsNumBytesAB("A", padA, ldsBlockSizePerPadA)
+            (ldsNumBytesB, ldsNumBytesAlignedB) = calcLdsNumBytesAB("B", padB, ldsBlockSizePerPadB)
+            (ldsNumBytesMXSA, ldsNumBytesAlignedMXSA) = calcLdsNumBytesAB("MXSA", padMXSA, ldsBlockSizePerPadMXSA) if state["ProblemType"]["MXBlockA"] else 0, 0
+            (ldsNumBytesMXSB, ldsNumBytesAlignedMXSB) = calcLdsNumBytesAB("MXSB", padMXSB, ldsBlockSizePerPadMXSB) if state["ProblemType"]["MXBlockB"] else 0, 0
+            (ldsNumBytesMetadata, ldsNumBytesAlignedMetadata) = calcLdsNumBytesM()
             ldsNumBytesMetadata, ldsNumBytesAlignedMetadata = calcLdsNumBytesM()
             if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > state["MaxLDS"]:
               state["LocalReadVectorWidth"] //= 2
@@ -3452,21 +3453,25 @@ class Solution(collections.abc.Mapping):
     if (state["UnrollMajorLDSA"] or state["UnrollMajorLDSB"]) and (not state["EnableMatrixInstruction"]) and (not state["UseDotInstruction"]):
         reject(state, printRejectionReason, "UnrollMajorLDS Supports only in EnableMatrixInstruction=1 or dot2 kernel")
 
-    ldsNumBytesA, ldsNumBytesAlignedA = calcLdsNumBytesAB("A", state["LdsPadA"], state["LdsBlockSizePerPadA"])
-    ldsNumBytesB, ldsNumBytesAlignedB = calcLdsNumBytesAB("B", state["LdsPadB"], state["LdsBlockSizePerPadB"])
-    ldsNumBytesMXSA, ldsNumBytesAlignedMXSA = calcLdsNumBytesAB("MXSA", state["LdsPadMXSA"], state["LdsBlockSizePerPadMXSA"]) if state["ProblemType"]["MXBlockA"] else 0, 0
-    ldsNumBytesMXSB, ldsNumBytesAlignedMXSB = calcLdsNumBytesAB("MXSB", state["LdsPadMXSB"], state["LdsBlockSizePerPadMXSB"]) if state["ProblemType"]["MXBlockB"] else 0, 0
-    ldsNumBytesMetadata, ldsNumBytesAlignedMetadata = calcLdsNumBytesM()
-    state["LdsOffsetA_Blk"]=0
-    state["LdsOffsetB_Blk"]=0
-    state["LdsOffsetMetadata_Blk"]=0
+    (ldsNumBytesA, ldsNumBytesAlignedA) = calcLdsNumBytesAB("A", state["LdsPadA"], state["LdsBlockSizePerPadA"])
+    (ldsNumBytesB, ldsNumBytesAlignedB) = calcLdsNumBytesAB("B", state["LdsPadB"], state["LdsBlockSizePerPadB"])
+    (ldsNumBytesMXSA, ldsNumBytesAlignedMXSA) = calcLdsNumBytesAB("MXSA", state["LdsPadMXSA"], state["LdsBlockSizePerPadMXSA"]) if state["ProblemType"]["MXBlockA"] else (0, 0)
+    (ldsNumBytesMXSB, ldsNumBytesAlignedMXSB) = calcLdsNumBytesAB("MXSB", state["LdsPadMXSB"], state["LdsBlockSizePerPadMXSB"]) if state["ProblemType"]["MXBlockB"] else (0, 0)
+    (ldsNumBytesMetadata, ldsNumBytesAlignedMetadata) = calcLdsNumBytesM()
+
+    state["LdsOffsetA_Blk"] = 0
+    state["LdsOffsetB_Blk"] = 0
+    state["LdsOffsetMXSA_Blk"] = 0
+    state["LdsOffsetMXSB_Blk"] = 0
+    state["LdsOffsetMetadata_Blk"] = 0
+
     # todo, can the alignment be a power of 2?
     state["LdsOffsetA"] = 0
     state["LdsNumElementsAlignedA"] = ldsNumBytesAlignedA
+    state["LdsNumElementsAlignedMXSA"] = ldsNumBytesAlignedMXSA
     state["LdsNumElementsAlignedB"] = ldsNumBytesAlignedB
+    state["LdsNumElementsAlignedMXSB"] = ldsNumBytesAlignedMXSB
     state["LdsNumElementsAlignedMetadata"] = ldsNumBytesAlignedMetadata
-    state["ldsNumBytesA"] = ldsNumBytesA
-    state["ldsNumBytesB"] = ldsNumBytesB
     # check for auto DtlPlusLdsBuf
     if state["DtlPlusLdsBuf"] == -1:
       if state["PrefetchGlobalRead"] > 2:
@@ -3507,15 +3512,25 @@ class Solution(collections.abc.Mapping):
         # 1LDSBuffer case, use 2 to calculate ldsNumBytesAB
         numLdsBlk = 2
       state["LdsOffsetA_Blk"] = offsetBlk
-      state["LdsOffsetMetadata_Blk"] = state["LdsOffsetA_Blk"] + state["LdsNumElementsAlignedA"]
+      state["LdsOffsetMXSA_Blk"] = state["LdsOffsetA_Blk"] + state["LdsNumElementsAlignedA"]
+      state["LdsOffsetMXSB_Blk"] = state["LdsOffsetMXSA_Blk"] + state["LdsNumElementsAlignedMXSA"]
+      state["LdsOffsetMetadata_Blk"] = state["LdsOffsetMXSB_Blk"] + state["LdsNumElementsAlignedMXSB"]
       state["LdsOffsetB_Blk"] = state["LdsOffsetMetadata_Blk"] + state["LdsNumElementsAlignedMetadata"]
       ldsNumBytesAB = (numLdsBlk - 2) * offsetBlk + state["LdsOffsetB_Blk"] + ldsNumBytesB
       return ldsNumBytesAB
 
-    if state["PrefetchGlobalRead"]:
-      state["LdsOffsetMetadata"] = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"]
-      state["LdsOffsetB"] = state["LdsOffsetMetadata"] + state["LdsNumElementsAlignedMetadata"]
+    state["ldsNumBytesA"] = ldsNumBytesA
+    state["ldsNumBytesB"] = ldsNumBytesB
+    state["ldsNumBytesMXSA"] = ldsNumBytesMXSA
+    state["ldsNumBytesMXSB"] = ldsNumBytesMXSB
+    state["ldsNumBytesMetadata"] = ldsNumBytesMetadata
 
+    state["LdsOffsetA"] = 0
+    state["LdsOffsetMXSA"] = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"]
+    state["LdsOffsetMXSB"] = state["LdsOffsetMXSA"] + state["LdsNumElementsAlignedMXSA"]
+    state["LdsOffsetMetadata"] = state["LdsOffsetMXSB"] + state["LdsNumElementsAlignedMXSB"]
+    state["LdsOffsetB"] = state["LdsOffsetMetadata"] + state["LdsNumElementsAlignedMetadata"]
+    if state["PrefetchGlobalRead"]:
       offsetBlk = state["LdsOffsetB"] + ldsNumBytesAlignedB
       roundupOffsetBlk = int(2**(math.ceil(math.log(offsetBlk, 2)))) if offsetBlk > 0 else 0
 
@@ -3560,8 +3575,6 @@ class Solution(collections.abc.Mapping):
         state["LdsOffsetB_Blk"] = state["LdsOffsetB"] + ldsNumBytesAlignedB
         ldsNumBytesAB = state["LdsOffsetB_Blk"] + ldsNumBytesB
     else:
-      state["LdsOffsetMetadata"] = ldsNumBytesAlignedA
-      state["LdsOffsetB"] = state["LdsOffsetMetadata"] + ldsNumBytesAlignedMetadata
       ldsNumBytesAB = state["LdsOffsetB"] + ldsNumBytesB
     state["NumLdsBlk"] = numLdsBlk
 
@@ -3603,9 +3616,12 @@ class Solution(collections.abc.Mapping):
       # Should be able to support as long as NO scheduleLocalWrite
       if (not state["ScheduleIterAlg"] == 2) and (not state["ScheduleIterAlg"] == 3) and (state["ScheduleLocalWrite"]):
         reject(state, printRejectionReason, "1LDSBuffer only support SIA2 or SIA3, or SIA1 without SLW")
-      state["LdsOffsetB"] = ldsNumBytesAlignedA
-      state["LdsOffsetMetadata"] = state["LdsOffsetB"] + ldsNumBytesAlignedB
-      ldsNumBytesAB = ldsNumBytesAlignedA + ldsNumBytesAlignedB + ldsNumBytesMetadata
+      state["LdsOffsetA"] = 0
+      state["LdsOffsetMXSA"] = state["LdsOffsetA"] + state["LdsNumElementsAlignedA"]
+      state["LdsOffsetB"] = state["LdsOffsetMXSA"] + state["LdsNumElementsAlignedMXSA"]
+      state["LdsOffsetMXSB"] = state["LdsOffsetB"] + state["LdsNumElementsAlignedB"]
+      state["LdsOffsetMetadata"] = state["LdsOffsetMXSB"] + state["LdsNumElementsAlignedMXSB"]
+      ldsNumBytesAB = state["LdsOffsetMetadata"] + ldsNumBytesMetadata
       state["StoreSwapAddr"] = False
 
     # lds size is the greater of the two
@@ -4091,10 +4107,12 @@ class Solution(collections.abc.Mapping):
       # 40 is based on current SGPR usage, this may need to be tuned in the future:
       numLoadsA = state["NumLoadsCoalescedA"]*state["NumLoadsPerpendicularA"]
       numLoadsB = state["NumLoadsCoalescedB"]*state["NumLoadsPerpendicularB"]
+      numLoadMXSA = state["NumLoadsCoalescedMXSA"]*state["NumLoadsPerpendicularMXSA"] if state["ProblemType"]["MXBlockA"] else 0
+      numLoadMXSB = state["NumLoadsCoalescedMXSB"]*state["NumLoadsPerpendicularMXSB"] if state["ProblemType"]["MXBlockB"] else 0
       numLoadsM = 0
       if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
         numLoadsM = state["NumLoadsCoalescedMetadata"]*state["NumLoadsPerpendicularMetadata"]
-      if numLoadsA + numLoadsB + numLoadsM > 35 or state["ProblemType"]["SwizzleTensorA"] or state["ProblemType"]["SwizzleTensorB"]:
+      if (numLoadsA + numLoadsB + numLoadsM + numLoadMXSA + numLoadMXSB  > 35) or state["ProblemType"]["SwizzleTensorA"] or state["ProblemType"]["SwizzleTensorB"]:
         #print "info: Disabling UseSgprForGRO since predicting too many SGPR will be used"
         state["_UseSgprForGRO"] = 0
       else:
