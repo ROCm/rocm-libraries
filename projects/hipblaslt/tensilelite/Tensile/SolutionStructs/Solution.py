@@ -2204,9 +2204,16 @@ class Solution(collections.abc.Mapping):
         if state["DirectToVgprB"]:
           ldsPadB = 0
 
-        return ldsPadA, ldsPadB, ldsPadM
+        ldsPadMXSA = 0 if (state["LdsPadMXSA"] == -1) else state["LdsPadMXSA"]
+        ldsPadMXSB = 0 if (state["LdsPadMXSB"] == -1) else state["LdsPadMXSB"]
+
+        return ldsPadA, ldsPadB, ldsPadM, ldsPadMXSA, ldsPadMXSB
+
 
       def calcLdsBlockSizePerPad(tc: str, lrvw: int) -> int:
+        if "MXS" in tc:
+            return 0 if (state["LdsBlockSizePerPad%s"%tc] == -1) else state["LdsBlockSizePerPad%s"%tc]
+
         mt = state["MacroTile0"] if ("A" in tc) else state["MacroTile1"]
         LdsBlockSizePerPad = state["LdsBlockSizePerPad%s"%tc]
         tmpBpe = state["ProblemType"]["DataType%s"%tc].numBytes() if state["ConvertAfterDS"] else state["ProblemType"]["DataType"].numBytes()
@@ -2322,13 +2329,19 @@ class Solution(collections.abc.Mapping):
               # if only have 1 iteration with wider local read, reduce LRVW to have better scheduling (at least 2 iterations)
               state["LocalReadVectorWidth"] //= 2
           if state["LocalReadVectorWidth"] // state["MIInputPerThread"] > 1:
-            padA, padB, padM = calcLdsPad(state["LocalReadVectorWidth"], isaInfoMap)
+            padA, padB, padM, padMXSA, padMXSB = calcLdsPad(state["LocalReadVectorWidth"], isaInfoMap)
             ldsBlockSizePerPadA = calcLdsBlockSizePerPad("A", state["LocalReadVectorWidth"])
             ldsBlockSizePerPadB = calcLdsBlockSizePerPad("B", state["LocalReadVectorWidth"])
+            ldsBlockSizePerPadMXSA = calcLdsBlockSizePerPad("MXSA", state["LocalReadVectorWidthMXS"]) if state["ProblemType"]["MXBlockA"] else 0
+            ldsBlockSizePerPadMXSB = calcLdsBlockSizePerPad("MXSB", state["LocalReadVectorWidthMXS"]) if state["ProblemType"]["MXBlockB"] else 0
             ldsBlockSizePerPadA = 0 if padA == 0 else ldsBlockSizePerPadA
             ldsBlockSizePerPadB = 0 if padB == 0 else ldsBlockSizePerPadB
+            ldsBlockSizePerPadMXSA = 0 if padMXSA == 0 else ldsBlockSizePerPadMXSA
+            ldsBlockSizePerPadMXSB = 0 if padMXSB == 0 else ldsBlockSizePerPadMXSB
             ldsNumBytesA, ldsNumBytesAlignedA = calcLdsNumBytesAB("A", padA, ldsBlockSizePerPadA)
             ldsNumBytesB, ldsNumBytesAlignedB = calcLdsNumBytesAB("B", padB, ldsBlockSizePerPadB)
+            ldsNumBytesMXSA, ldsNumBytesAlignedMXSA = calcLdsNumBytesAB("MXSA", padMXSA, ldsBlockSizePerPadMXSA) if state["ProblemType"]["MXBlockA"] else 0, 0
+            ldsNumBytesMXSB, ldsNumBytesAlignedMXSB = calcLdsNumBytesAB("MXSB", padMXSB, ldsBlockSizePerPadMXSB) if state["ProblemType"]["MXBlockB"] else 0, 0
             ldsNumBytesMetadata, ldsNumBytesAlignedMetadata = calcLdsNumBytesM()
             if (ldsNumBytesAlignedA + ldsNumBytesAlignedB) > state["MaxLDS"]:
               state["LocalReadVectorWidth"] //= 2
@@ -2439,6 +2452,22 @@ class Solution(collections.abc.Mapping):
           # TODO: support edge shiftptr to release this constraint.
           if state["ProblemType"]["TLUB"]:
             state["AssertFree1ElementMultiple"] = max(state["AssertFree1ElementMultiple"], state["GlobalReadVectorWidthB"])
+
+      if state["EnableMatrixInstruction"]:
+        if state["ProblemType"]["MXBlockA"]:
+          state["GlobalReadVectorWidthMXSA"] = max(state["MacroTile0"] * state["_DepthUMXSA"] // state["NumThreads"], 1)
+          if state["ProblemType"]["TLUMXSA"]:
+            state["GlobalReadVectorWidthMXSA"] = min(state["GlobalReadVectorWidthMXSA"], state["MacroTile0"])
+          else:
+            state["GlobalReadVectorWidthMXSA"] = min(state["GlobalReadVectorWidthMXSA"], state["_DepthUMXSA"])
+          state["GlobalReadVectorWidthMXSA"] = min(state["GlobalReadVectorWidthMXSA"], 16)
+        if state["ProblemType"]["MXBlockB"]:
+          state["GlobalReadVectorWidthMXSB"] = max(state["MacroTile1"] * state["_DepthUMXSB"] // state["NumThreads"], 1)
+          if state["ProblemType"]["TLUMXSB"]:
+            state["GlobalReadVectorWidthMXSB"] = min(state["GlobalReadVectorWidthMXSB"], state["MacroTile1"])
+          else:
+            state["GlobalReadVectorWidthMXSB"] = min(state["GlobalReadVectorWidthMXSB"], state["_DepthUMXSB"])
+          state["GlobalReadVectorWidthMXSB"] = min(state["GlobalReadVectorWidthMXSB"], 16)
 
       #for tensor swizzling, we calculate pack-k to achieve buffer_load_dwordx4
       for tc in ("A", "B",):
@@ -3098,6 +3127,8 @@ class Solution(collections.abc.Mapping):
       auto_LdsBlockSizePerPadB_for_mix = 1
     state["LdsBlockSizePerPadA"] = calcLdsBlockSizePerPad("A", state["LocalReadVectorWidth"])
     state["LdsBlockSizePerPadB"] = calcLdsBlockSizePerPad("B", state["LocalReadVectorWidth"])
+    state["LdsBlockSizePerPadMXSA"] = calcLdsBlockSizePerPad("MXSA", state["LocalReadVectorWidthMXS"]) if state["ProblemType"]["MXBlockA"] else 0
+    state["LdsBlockSizePerPadMXSB"] = calcLdsBlockSizePerPad("MXSB", state["LocalReadVectorWidthMXS"]) if state["ProblemType"]["MXBlockB"] else 0
 
     if state["LdsBlockSizePerPadMetadata"] == -1:
       state["LdsBlockSizePerPadMetadata"] = state["LdsBlockSizePerPadA"]
@@ -3335,7 +3366,7 @@ class Solution(collections.abc.Mapping):
             state["MinGRIncPerMfma"] = 3
 
     # calculate ldsPad
-    state["LdsPadA"], state["LdsPadB"], state["LdsPadMetadata"] = calcLdsPad(state["LocalReadVectorWidth"], isaInfoMap)
+    state["LdsPadA"], state["LdsPadB"], state["LdsPadMetadata"], state["LdsPadMXSA"], state["LdsPadMXSB"] = calcLdsPad(state["LocalReadVectorWidth"], isaInfoMap)
 
     if state["GlobalReadVectorWidthA"] * state["ProblemType"]["DataType"].numBytes() == 32 and state["LdsPadA"] == 16 // state["ProblemType"]["DataType"].numBytes():
       if auto_LdsBlockSizePerPadA_for_mix:
@@ -3357,6 +3388,8 @@ class Solution(collections.abc.Mapping):
 
     ldsNumBytesA, ldsNumBytesAlignedA = calcLdsNumBytesAB("A", state["LdsPadA"], state["LdsBlockSizePerPadA"])
     ldsNumBytesB, ldsNumBytesAlignedB = calcLdsNumBytesAB("B", state["LdsPadB"], state["LdsBlockSizePerPadB"])
+    ldsNumBytesMXSA, ldsNumBytesAlignedMXSA = calcLdsNumBytesAB("MXSA", state["LdsPadMXSA"], state["LdsBlockSizePerPadMXSA"]) if state["ProblemType"]["MXBlockA"] else 0, 0
+    ldsNumBytesMXSB, ldsNumBytesAlignedMXSB = calcLdsNumBytesAB("MXSB", state["LdsPadMXSB"], state["LdsBlockSizePerPadMXSB"]) if state["ProblemType"]["MXBlockB"] else 0, 0
     ldsNumBytesMetadata, ldsNumBytesAlignedMetadata = calcLdsNumBytesM()
     state["LdsOffsetA_Blk"]=0
     state["LdsOffsetB_Blk"]=0
