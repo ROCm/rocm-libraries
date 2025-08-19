@@ -689,9 +689,53 @@ namespace rocRoller::KernelGraph
                 // Add deferred connections
                 for(auto candidate : candidates)
                 {
+                    auto count = 0;
                     for(auto const& dc : chain.connections)
                     {
                         kgraph.mapper.connect(candidate, dc.coordinate, dc.connectionSpec);
+                    }
+                }
+
+                // Add mapper connections to unroll stride coordinates
+                for (auto const& candidate : candidates)
+                {
+                    auto [target, direction] = getOperationTarget(candidate, kgraph, isDirect2LDS);
+                    auto [required, path]    = findRequiredCoordinates(target, direction, kgraph);
+                    auto unrollCoordinates   = filterCoordinates<Unroll>(required, kgraph);  
+                    auto sdim = 0;
+                    
+                    for (auto const& unroll : unrollCoordinates)
+                    {
+                        // auto const unroll = unrollCoordinates[sdim];
+                        // Find the neighbour of the Unroll that:
+                        // 1. is in the load/store coordinate transform path
+                        // 2. has a Stride edge connected to it
+                        std::optional<int> maybeStrideTag;
+                        std::vector<int>   neighbourNodes;
+                        if(direction == Graph::Direction::Downstream)
+                            neighbourNodes = kgraph.coordinates.parentNodes(unroll).to<std::vector>();
+                        else
+                            neighbourNodes = kgraph.coordinates.childNodes(unroll).to<std::vector>();
+                        
+                        for(auto neighbourNode : neighbourNodes)
+                        {
+                            if(path.contains(neighbourNode))
+                            {
+                                auto neighbourEdges = kgraph.coordinates.getNeighbours(
+                            neighbourNode, Graph::opposite(direction));
+                                for(auto neighbourEdge : neighbourEdges)
+                                {
+                                    auto maybeStride = kgraph.coordinates.get<Stride>(neighbourEdge);
+                                    if(maybeStride)
+                                    {
+                                        maybeStrideTag = neighbourEdge;
+                                        auto unrollStrideConnection = Connections::TypeAndSubDimension{"UnrollStride", sdim};
+                                        kgraph.mapper.connect(candidate, *maybeStrideTag, unrollStrideConnection);
+                                        sdim++;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
