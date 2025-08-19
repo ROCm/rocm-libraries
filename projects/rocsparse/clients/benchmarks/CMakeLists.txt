@@ -40,7 +40,6 @@ set(ROCSPARSE_BENCHMARK_SOURCES
 )
 
 set(ROCSPARSE_CLIENTS_COMMON
-  ../common/rocsparse.cpp
   ../common/utility.cpp
   ../common/rocsparse_reproducibility.cpp
   ../common/rocsparse_reproducibility_test.cpp
@@ -216,19 +215,13 @@ target_compile_options(rocsparse-bench PRIVATE -Wno-deprecated -Wno-unused-comma
 # Internal common header
 target_include_directories(rocsparse-bench PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
 
+# Add OpenMP if available
+apply_omp_settings(rocsparse-bench)
+
 # Target link libraries
-target_link_libraries(rocsparse-bench PRIVATE roc::rocsparse hip::host hip::device)
+target_link_libraries(rocsparse-bench PRIVATE roc::rocsparse hip::host hip::device ${ROCSPARSE_CLIENT_LIBS})
 if (rocsparseio_FOUND)
   target_link_libraries(rocsparse-bench PRIVATE roc::rocsparseio)
-endif()
-
-# Add OpenMP if available
-if(OPENMP_FOUND)
-if (NOT WIN32)
-   target_link_libraries(rocsparse-bench PRIVATE OpenMP::OpenMP_CXX -Wl,-rpath=${HIP_CLANG_ROOT}/lib)
-  else()
-   target_link_libraries(rocsparse-bench PRIVATE libomp)
-  endif()
 endif()
 
 if (NOT WIN32)

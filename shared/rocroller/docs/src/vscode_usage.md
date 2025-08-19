@@ -88,7 +88,7 @@ For gdb debugging, add the following to .vscode/launch.json:
             "name": "rocRoller Tests (gdb)",
             "type": "cppdbg",
             "request": "launch",
-            "program": "/data/build/bin/rocRollerTests",
+            "program": "/data/build/test/rocroller-tests",
             "args": ["--gtest_catch_exceptions=0", "--gtest_break_on_failure"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}/build",

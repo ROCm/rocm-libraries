@@ -37,6 +37,7 @@
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/Transforms/RemoveSetCoordinate.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -108,11 +109,14 @@ namespace AssertTest
             auto assertOp = kgraph.control.addElement(AssertOp{"Assert Test", testRegExpr == one});
 
             auto assignOne = kgraph.control.addElement(Assign{Register::Type::Scalar, one});
+            kgraph.mapper.connect(assignOne, testReg, NaryArgument::DEST);
 
             auto kernelNode = kgraph.control.addElement(Kernel());
             kgraph.control.addElement(Body(), {kernelNode}, {setToZero});
             kgraph.control.addElement(Sequence(), {setToZero}, {assertOp});
             kgraph.control.addElement(Sequence(), {assertOp}, {assignOne});
+
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
             m_context->schedule(rocRoller::KernelGraph::generate(kgraph, k));
 
@@ -166,11 +170,11 @@ namespace AssertTest
                 EXPECT_THAT(output(), testing::HasSubstr("AssertPassed"));
                 if(arch.HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
                 {
-                    EXPECT_THAT(output(), testing::HasSubstr("s_mov_b32 s3, 1"));
+                    EXPECT_THAT(output(), testing::HasSubstr("s_mov_b32 s2, 1"));
                 }
                 else
                 {
-                    EXPECT_THAT(output(), testing::HasSubstr("s_mov_b32 s4, 1"));
+                    EXPECT_THAT(output(), testing::HasSubstr("s_mov_b32 s3, 1"));
                 }
             }
             else
@@ -252,16 +256,24 @@ namespace AssertTest
             m_context->schedule(k->prolog());
             k->setDynamicSharedMemBytes(zero);
 
+            auto                    testReg = kgraph.coordinates.addElement(Linear());
+            Expression::DataFlowTag testRegTag{testReg, Register::Type::Scalar, DataType::UInt32};
+
             int setToZero = kgraph.control.addElement(Assign{Register::Type::Scalar, zero});
 
             auto assertOp = kgraph.control.addElement(AssertOp{"Unconditional Assert"});
 
             auto assignOne = kgraph.control.addElement(Assign{Register::Type::Scalar, one});
 
+            kgraph.mapper.connect(setToZero, testReg, NaryArgument::DEST);
+            kgraph.mapper.connect(assignOne, testReg, NaryArgument::DEST);
+
             auto kernelNode = kgraph.control.addElement(Kernel());
             kgraph.control.addElement(Body(), {kernelNode}, {setToZero});
             kgraph.control.addElement(Sequence(), {setToZero}, {assertOp});
             kgraph.control.addElement(Sequence(), {assertOp}, {assignOne});
+
+            kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
             m_context->schedule(rocRoller::KernelGraph::generate(kgraph, k));
 

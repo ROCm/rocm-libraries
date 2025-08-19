@@ -88,7 +88,9 @@ you build rocBLAS with a different Tensile logic target. See the ``--logic`` com
 Download rocBLAS
 ----------------
 
-The rocBLAS source code, which is the same as the ROCm Linux version, is available from the `rocBLAS GitHub page <https://github.com/ROCm/rocBLAS>`_.
+The rocBLAS source code, which is the same as the ROCm Linux version, is available from the
+`rocBLAS folder <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_
+of the `rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries>`_.
 The ROCm HIP SDK version might appear in the default installation path,
 but you can run the HIP SDK compiler to display the version from the ``bin/`` folder:
 
@@ -101,20 +103,39 @@ For example, the HIP version might be ``5.4.22880-135e1ab4``.
 This corresponds to major release = ``5``, minor release = ``4``, patch = ``22880``, and build identifier ``135e1ab4``.
 The GitHub branches at the rocBLAS site have names like ``release/rocm-rel-major.minor``,
 where the major and minor releases have the same meaning as in the ROCm version.
-To download rocBLAS, use the following command:
+
+
+To download rocBLAS, including all projects in the rocm-libraries repository, use the following commands.
 
 ::
 
-   git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocBLAS.git
-   cd rocBLAS
+   git clone -b release/rocm-rel-x.y https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries/projects/rocblas
 
 Replace ``x.y`` in the above command with the version of HIP SDK installed on your machine.
-For example, if you have HIP 5.5 installed, then use ``-b release/rocm-rel-5.5``.
+For example, if you have HIP 7.0 installed, use ``-b release/rocm-rel-7.0``.
 You can add the SDK tools to your path using an entry like this:
 
 ::
 
    %HIP_PATH%\bin
+
+To limit your local checkout to only the rocBLAS and Tensile projects, configure ``sparse-checkout`` before cloning.
+This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.
+Use the following commands for a sparse checkout:
+
+::
+
+   git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
+   cd rocm-libraries
+   git sparse-checkout init --cone
+   git sparse-checkout set projects/rocblas shared/tensile
+   git checkout develop # or use the branch you want to work with
+
+.. note::
+
+   To build ROCm 6.4 and older, use the rocBLAS repository at `<https://github.com/ROCm/rocBLAS>`_.
+   For more information, see the documentation associated with the release you want to build.
 
 Building rocBLAS
 ----------------
@@ -169,6 +190,9 @@ Building the library dependencies and library
 Common examples of how to use ``rmake.py`` to build the library dependencies and library are
 shown in the table below:
 
+.. note::
+
+   You can run ``rmake.py`` from the ``projects\rocblas`` directory.
 
 .. csv-table::
    :header: "Command","Description"

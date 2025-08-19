@@ -83,7 +83,7 @@ namespace rocRoller
          * Increasing this value could decrease SGPR pressure; decreasing it could speed up a
          * kernel if there are enough available SGPRs.
          */
-        int minLaunchTimeExpressionComplexity = 10;
+        int minLaunchTimeExpressionComplexity = 20;
 
         /**
          * The maximum number of concurrent subexpressions given at once to the scheduler when
@@ -116,7 +116,22 @@ namespace rocRoller
          */
         bool enableFullDivision = false;
 
+        /**
+         * Skip generation of permlane instructions when loading scale data.
+         * This is experimental and requires that the input be specifically
+         * modified, but will show better performance.
+         */
+        bool scaleSkipPermlane = false;
+
+        /**
+         * Which method to use to crash the kernel if an assertion fails.
+         */
         AssertOpKind assertOpKind = AssertOpKind::NoOp;
+
+        /**
+         * Enable/Disable the RemoveSetCoordinate transformation
+         */
+        bool removeSetCoordinate = false;
 
         std::string toString() const;
     };

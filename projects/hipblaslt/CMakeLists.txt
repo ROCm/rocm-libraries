@@ -295,17 +295,6 @@ if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
   set( BUILD_CLIENTS ON )
 endif()
 
-# FOR HANDLING ENABLE/DISABLE OPTIONAL BACKWARD COMPATIBILITY for FILE/FOLDER REORG
-option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
-  rocm_wrap_header_dir(
-    ${CMAKE_SOURCE_DIR}/library/include
-    PATTERNS "*.h"
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS include
-  )
-endif()
-
 # hipBLASLt library
 add_subdirectory( library )
 
@@ -422,6 +411,7 @@ if(BUILD_CODE_COVERAGE)
   target_compile_options(hipblaslt PRIVATE
     -fprofile-instr-generate
     -fcoverage-mapping
+    -fvisibility=default
   )
 
   target_link_options(hipblaslt PUBLIC

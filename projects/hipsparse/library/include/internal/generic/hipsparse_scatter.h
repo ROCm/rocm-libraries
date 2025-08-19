@@ -51,6 +51,7 @@ extern "C" {
 *  <tr><th>X / Y
 *  <tr><td>HIP_R_8I
 *  <tr><td>HIP_R_16F
+*  <tr><td>HIP_R_16BF
 *  <tr><td>HIP_R_32F
 *  <tr><td>HIP_R_64F
 *  <tr><td>HIP_C_32F

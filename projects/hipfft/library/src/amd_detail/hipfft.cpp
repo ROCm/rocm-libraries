@@ -35,15 +35,6 @@
 #include "../../../shared/ptrdiff.h"
 #include "../../../shared/rocfft_hip.h"
 
-#define ROC_FFT_CHECK_ALLOC_FAILED(ret)   \
-    {                                     \
-        auto code = ret;                  \
-        if(code != rocfft_status_success) \
-        {                                 \
-            return HIPFFT_ALLOC_FAILED;   \
-        }                                 \
-    }
-
 #define ROC_FFT_CHECK_INVALID_VALUE(ret)  \
     {                                     \
         auto code = ret;                  \
@@ -403,31 +394,6 @@ try
     *plan = handle;
 
     return hipfftMakePlanMany(
-        *plan, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, nullptr);
-}
-catch(...)
-{
-    return handle_exception();
-}
-
-hipfftResult hipfftPlanMany64(hipfftHandle*  plan,
-                              int            rank,
-                              long long int* n,
-                              long long int* inembed,
-                              long long int  istride,
-                              long long int  idist,
-                              long long int* onembed,
-                              long long int  ostride,
-                              long long int  odist,
-                              hipfftType     type,
-                              long long int  batch)
-try
-{
-    hipfftHandle handle = nullptr;
-    HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&handle));
-    *plan = handle;
-
-    return hipfftMakePlanMany64(
         *plan, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, nullptr);
 }
 catch(...)
@@ -1262,6 +1228,7 @@ try
 
     hipfftHandle p;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
+    p->autoAllocate = false;
     HIP_FFT_CHECK_AND_RETURN(hipfftMakePlan1d(p, nx, type, batch, workSize));
     HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
 
@@ -1282,6 +1249,7 @@ try
 
     hipfftHandle p;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
+    p->autoAllocate = false;
     HIP_FFT_CHECK_AND_RETURN(hipfftMakePlan2d(p, nx, ny, type, workSize));
     HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
 
@@ -1303,6 +1271,7 @@ try
 
     hipfftHandle p;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
+    p->autoAllocate = false;
     HIP_FFT_CHECK_AND_RETURN(hipfftMakePlan3d(p, nx, ny, nz, type, workSize));
     HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
 
@@ -1327,10 +1296,13 @@ hipfftResult hipfftGetSizeMany(hipfftHandle plan,
                                size_t*      workSize)
 try
 {
-    hipfftHandle p;
-    HIP_FFT_CHECK_AND_RETURN(
-        hipfftPlanMany(&p, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch));
-    *workSize = p->workBufferSize;
+    if(workSize == nullptr)
+        return HIPFFT_INVALID_VALUE;
+    hipfftHandle p = nullptr;
+    HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
+    p->autoAllocate = false;
+    HIP_FFT_CHECK_AND_RETURN(hipfftMakePlanMany(
+        p, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, workSize));
     HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
 
     return HIPFFT_SUCCESS;
@@ -1354,10 +1326,13 @@ hipfftResult hipfftGetSizeMany64(hipfftHandle   plan,
                                  size_t*        workSize)
 try
 {
+    if(workSize == nullptr)
+        return HIPFFT_INVALID_VALUE;
     hipfftHandle p = nullptr;
-    HIP_FFT_CHECK_AND_RETURN(hipfftPlanMany64(
-        &p, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch));
-    *workSize = p->workBufferSize;
+    HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
+    p->autoAllocate = false;
+    HIP_FFT_CHECK_AND_RETURN(hipfftMakePlanMany64(
+        p, rank, n, inembed, istride, idist, onembed, ostride, odist, type, batch, workSize));
     HIP_FFT_CHECK_AND_RETURN(hipfftDestroy(p));
 
     return HIPFFT_SUCCESS;
@@ -1835,6 +1810,7 @@ try
 
     hipfftHandle p;
     HIP_FFT_CHECK_AND_RETURN(hipfftCreate(&p));
+    p->autoAllocate = false;
 
     HIP_FFT_CHECK_AND_RETURN(hipfftMakePlanMany_internal(
         p, rank, n, inembed, istride, idist, onembed, ostride, odist, iotype, batch, workSize));

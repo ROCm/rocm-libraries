@@ -31,9 +31,41 @@
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/CommandArguments.hpp>
+#include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
 {
+    /**
+     * [sizeBegin,sizeEnd): A range of values representing sizes of dimensions.
+     * Returns the number of coordinates within that space,
+     * i.e. the product of those values.
+     */
+    template <typename SizeIter>
+    size_t CoordCount(SizeIter sizeBegin, SizeIter sizeEnd);
+
+    /**
+     * [sizeBegin,sizeEnd): A range of values representing sizes of dimensions.
+     * Writes into [coordBegin:coordEnd) the coordinates numbered `num` within
+     * a linearization of all coordinates with earlier values being
+     * faster-moving.
+     */
+    template <typename CoordIter, typename SizeIter>
+    void CoordNumbered(
+        size_t num, CoordIter coordBegin, CoordIter coordEnd, SizeIter sizeBegin, SizeIter sizeEnd);
+
+    /**
+     * If [coordBegin, coordEnd) represents coordinate x within the
+     * linearization, updates it to represent coordinate x+1.
+     * 
+     * If [coordBegin, coordEnd) represents the last coordinate within the
+     * linearization, it will be reset to all 0s and false will be returned.
+     */
+    template <typename CoordIter, typename SizeIter>
+    bool IncrementCoord(CoordIter coordBegin,
+                        CoordIter coordEnd,
+                        SizeIter  sizeBegin,
+                        SizeIter  sizeEnd);
+
     /*
      * Describes a tensor including dimensions, memory layout, and data type.
      * Decoupled from any particular pointer value or memory location.
@@ -41,10 +73,7 @@ namespace rocRoller
     class TensorDescriptor
     {
     public:
-        TensorDescriptor()
-        {
-            this->calculate();
-        }
+        TensorDescriptor();
 
         template <typename IterA, typename IterB>
         TensorDescriptor(DataType t,
@@ -52,201 +81,127 @@ namespace rocRoller
                          IterA    sizesEnd,
                          IterB    stridesBegin,
                          IterB    stridesEnd,
-                         size_t   offset = 0)
-            : m_sizes(sizesBegin, sizesEnd)
-            , m_strides(stridesBegin, stridesEnd)
-            , m_dataType(t)
-            , m_offset(offset)
-        {
-            this->calculate();
-        }
+                         size_t   offset = 0);
 
         template <typename Iter>
-        TensorDescriptor(DataType t, Iter sizesBegin, Iter sizesEnd, size_t offset = 0)
-            : m_sizes(sizesBegin, sizesEnd)
-            , m_dataType(t)
-            , m_offset(offset)
-        {
-            this->calculate();
-        }
+        TensorDescriptor(DataType t, Iter sizesBegin, Iter sizesEnd, size_t offset = 0);
 
-        /*
-        *  Allow directly specifying total number of elements instead of sizes
-        */
+        /**
+         *  Allow directly specifying total number of elements instead of sizes
+         */
         TensorDescriptor(DataType                      t,
                          size_t                        totalLogicalElements,
                          std::initializer_list<size_t> strides,
-                         size_t                        offset = 0)
-            : m_totalLogicalElements(totalLogicalElements)
-            , m_strides(strides)
-            , m_dataType(t)
-            , m_offset(offset)
-        {
-            this->calculate();
-        }
+                         size_t                        offset = 0);
 
-        TensorDescriptor(DataType t, std::initializer_list<size_t> sizes, size_t offset = 0)
-            : m_sizes(sizes)
-            , m_dataType(t)
-            , m_offset(offset)
+        TensorDescriptor(DataType t, std::initializer_list<size_t> sizes, size_t offset = 0);
 
-        {
-            this->calculate();
-        }
+        TensorDescriptor(DataType t, std::vector<size_t> sizes, size_t offset = 0);
 
         TensorDescriptor(DataType                      t,
                          std::initializer_list<size_t> sizes,
                          std::initializer_list<size_t> strides,
-                         size_t                        offset = 0)
-            : m_sizes(sizes)
-            , m_strides(strides)
-            , m_dataType(t)
-            , m_offset(offset)
-        {
-            this->calculate();
-        }
+                         size_t                        offset = 0);
 
-        // Specialized constructor for 2-D tensor (i.e., matrix)
+        TensorDescriptor(DataType            t,
+                         std::vector<size_t> sizes,
+                         std::vector<size_t> strides,
+                         size_t              offset = 0);
+
+        /**
+         * Specialized constructor for 2-D tensor (i.e., matrix)
+         */
         TensorDescriptor(DataType              t,
                          std::array<size_t, 2> sizes,
                          std::string const&    transpose,
-                         size_t                offset = 0)
-            : m_sizes(sizes.begin(), sizes.end())
-            , m_dataType(t)
-            , m_offset(offset)
-        {
-            if(transpose == "T")
-            {
-                m_strides = {m_sizes[1], 1u};
-            }
-            else
-            {
-                m_strides = {1u, m_sizes[0]};
-            }
-            this->calculate();
-        }
+                         size_t                offset = 0);
 
-        void calculate()
-        {
-            if(m_strides.size() < m_sizes.size())
-            {
-                m_strides.resize(m_sizes.size(), UseDefaultStride);
-                if(m_strides[0] == UseDefaultStride)
-                {
-                    m_strides[0] = 1;
-                }
-            }
+        static TensorDescriptor
+            ShuffledNoPadding(DataType t, std::vector<size_t> sizes, std::vector<size_t> dimOrder);
 
-            // Calculate total number of logical elements and update strides
-            if(not m_sizes.empty())
-            {
-                m_totalLogicalElements = m_sizes[0];
-            }
-            for(int i = 1; i < m_sizes.size(); i++)
-            {
-                m_totalLogicalElements *= m_sizes[i];
-                if(m_strides[i] == UseDefaultStride)
-                {
-                    m_strides[i] = m_strides[i - 1] * m_sizes[i - 1];
-                }
-            }
+        static TensorDescriptor ShuffledNoPadding(DataType                      t,
+                                                  std::initializer_list<size_t> sizes,
+                                                  std::vector<size_t>           dimOrder);
 
-            // Calculate total number of allocated elements
-            if(not m_sizes.empty())
-            {
-                m_totalAllocatedElements = 1;
-                for(size_t i = 0; i < m_sizes.size(); i++)
-                    m_totalAllocatedElements += m_strides[i] * (m_sizes[i] - 1);
-            }
-            else
-            {
-                m_totalAllocatedElements = m_totalLogicalElements;
-            }
-            m_totalAllocatedElements += m_offset;
-        }
+        static TensorDescriptor ShuffledNoPadding(DataType                      t,
+                                                  std::vector<size_t>           sizes,
+                                                  std::initializer_list<size_t> dimOrder);
 
-        const size_t size(size_t index) const
-        {
-            return m_sizes[index];
-        }
-        const std::vector<size_t>& sizes() const
-        {
-            return m_sizes;
-        }
-        const size_t stride(size_t index) const
-        {
-            return m_strides[index];
-        }
-        const std::vector<size_t>& strides() const
-        {
-            return m_strides;
-        }
+        static TensorDescriptor ShuffledNoPadding(DataType                      t,
+                                                  std::initializer_list<size_t> sizes,
+                                                  std::initializer_list<size_t> dimOrder);
 
-        size_t offset() const
-        {
-            return m_offset;
-        }
+        inline void calculate();
 
-        size_t dimensions() const
-        {
-            return m_sizes.size();
-        }
-        size_t totalLogicalElements() const
-        {
-            return m_totalLogicalElements;
-        }
-        size_t totalAllocatedElements() const
-        {
-            return m_totalAllocatedElements;
-        }
-        size_t elementBytes() const
-        {
-            return DataTypeInfo::Get(m_dataType).elementBytes;
-        }
+        const size_t size(size_t index) const;
 
-        DataType dataType() const
-        {
-            return m_dataType;
-        }
+        const std::vector<size_t>& sizes() const;
 
-        bool operator==(const TensorDescriptor& rhs) const
-        {
-            return m_dataType == rhs.m_dataType && m_sizes == rhs.m_sizes
-                   && m_strides == rhs.m_strides && m_offset == rhs.m_offset;
-        }
+        const size_t stride(size_t index) const;
 
-        bool operator!=(const TensorDescriptor& rhs) const
-        {
-            return !(*this == rhs);
-        }
+        const std::vector<size_t>& strides() const;
 
-        std::string toString() const
-        {
-            std::ostringstream result;
+        size_t offset() const;
 
-            auto join = [&](std::vector<size_t> const& items) {
-                if(items.empty())
-                    return;
+        size_t dimensions() const;
 
-                result << "(";
-                auto last_item = std::prev(items.end());
-                for(auto iter = items.begin(); iter != last_item; iter++)
-                    result << *iter << ",";
-                result << *last_item << ")";
-            };
+        size_t totalLogicalElements() const;
 
-            result << dimensions() << "-tensor<" << dataType() << "> ";
-            join(m_sizes);
-            join(m_strides);
-            result << " offset: " << m_offset;
-            return result.str();
-        }
+        size_t totalAllocatedElements() const;
+
+        size_t totalAllocatedBytes() const;
+
+        size_t elementBytes() const;
+
+        /**
+         * Returns the number of elements of padding in the given dimension (0 if
+         * unpadded). May be negative if stride is less than size
+         */
+        int64_t dimensionPadding(size_t dim) const;
+
+        /**
+         * Collapses dimensions in the interval [begin, end).
+         *
+         * preconditions:
+         * - end >= begin
+         * - begin < dimensions()
+         * - end <= dimensions()
+         * - dimensions in the interval [begin, end-1) are not padded.
+         *
+         * postconditions:
+         * - dimensions() is diminished by end-begin
+         * - total elements (allocated and logical) remain the same
+         * - dimension 'begin' is the product of all the dimensions in the interval
+         * [begin, end).
+         */
+        void collapseDims(size_t begin, size_t end);
+
+        DataType dataType() const;
+
+        bool operator==(const TensorDescriptor& rhs) const;
+
+        bool operator!=(const TensorDescriptor& rhs) const;
+
+        std::string toString() const;
+
+        template <typename Container>
+        inline size_t index(Container const& indices) const;
+
+        template <typename T>
+        inline size_t index(std::initializer_list<T> indices) const;
+
+        template <std::integral... Ts>
+        inline size_t index(Ts... is) const;
+
+        inline bool incrementCoord(std::vector<size_t>& coord, size_t firstDimension = 0) const;
+
+        TensorDescriptor withNormalizedDimensions() const;
 
         friend std::ostream& operator<<(std::ostream& stream, const TensorDescriptor& t);
 
-    private:
         static inline const size_t UseDefaultStride = -1;
 
+    private:
         std::vector<size_t> m_sizes;
         std::vector<size_t> m_strides;
         size_t              m_offset = 0;
@@ -261,17 +216,24 @@ namespace rocRoller
     inline void setCommandTensorArg(rocRoller::CommandArguments&               commandArgs,
                                     rocRoller::Operations::OperationTag const& tag,
                                     TensorDescriptor&                          desc,
-                                    T                                          value)
-    {
-        commandArgs.setArgument(tag, ArgumentType::Value, value);
-        commandArgs.setArgument(tag, ArgumentType::Limit, desc.totalLogicalElements());
+                                    T                                          value);
 
-        auto const& sizes = desc.sizes();
-        for(size_t i = 0; i < sizes.size(); i++)
-            commandArgs.setArgument(tag, ArgumentType::Size, i, sizes[i]);
+    template <typename T>
+    std::string writeTensor(std::vector<T> const& data, TensorDescriptor desc);
 
-        auto const& strides = desc.strides();
-        for(size_t i = 0; i < strides.size(); i++)
-            commandArgs.setArgument(tag, ArgumentType::Stride, i, (size_t)strides[i]);
-    }
+    /**
+     * `dst` and `src` must be two TensorDescriptors with the same data type
+     * and dimension sizes (i.e. dst.sizes() == src.sizes()). They should have
+     * different strides (or this function is a no-op).
+     * 
+     * `input` must contain data arranged according to `src`.
+     * 
+     * Returns `input` rearranged according to the strides in `dst`.
+     */
+    template <typename T>
+    inline std::vector<T> shuffleDims(std::vector<T> const&   input,
+                                      TensorDescriptor const& dst,
+                                      TensorDescriptor const& src);
 }
+
+#include "TensorDescriptor_impl.hpp"

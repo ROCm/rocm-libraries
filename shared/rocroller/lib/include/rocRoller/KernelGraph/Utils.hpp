@@ -325,6 +325,11 @@ namespace rocRoller
         int duplicateControlNode(KernelGraph& graph, int tag);
 
         /**
+         * @brief Delete a control node from the graph.
+         */
+        void deleteControlNode(KernelGraph& graph, int);
+
+        /**
          * Updates the threadtile size for enabling the use of long dword instructions
          */
         void updateThreadTileForLongDwords(int& t_m,
@@ -689,6 +694,12 @@ namespace rocRoller
 
         std::deque<int> controlStack(int control, KernelGraph const& graph);
         std::deque<int> controlStack(int control, ControlGraph::ControlGraph const& graph);
+
+        /**
+        * @brief Connect all nodes in A with all nodes in B using edge with EdgeType
+        */
+        template <typename EdgeType>
+        void connectAllPairs(std::vector<int> const& A, std::vector<int> const& B, KernelGraph& kg);
     }
 }
 

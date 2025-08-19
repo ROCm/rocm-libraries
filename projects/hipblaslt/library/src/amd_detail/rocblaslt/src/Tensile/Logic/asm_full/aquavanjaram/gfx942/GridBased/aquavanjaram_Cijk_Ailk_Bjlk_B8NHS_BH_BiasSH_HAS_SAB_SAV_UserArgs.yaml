@@ -445,7 +445,7 @@
     _staggerStrideShift: 3
   - 1LDSBuffer: 1
     ActivationAlt: false
-    ActivationFuncCall: false
+    ActivationFuncCall: true
     ActivationFused: true
     AssertAIGreaterThanEqual: -1
     AssertAILessThanEqual: -1

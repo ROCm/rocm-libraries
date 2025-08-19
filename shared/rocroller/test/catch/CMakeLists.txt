@@ -27,11 +27,13 @@ target_sources(rocroller-tests-catch
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/CustomAssertions.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestKernels.cpp"
+
         "${CMAKE_CURRENT_SOURCE_DIR}/AddDeallocateTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AddPrefetchTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AliasDataFlowTagsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/AnnotateInstructionsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ArgumentTracerTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ArithmeticUtilityTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/BenchmarkLDS.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/BinaryExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/BranchGeneratorTest.cpp"
@@ -71,8 +73,10 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/RegisterTagManagerTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RegisterTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ScalarExpressionTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ScaleUtilsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SettingsTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SubDwordExpressionTest.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptorTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TernaryExpressionTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestContext.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestContextTest.cpp"
@@ -84,5 +88,4 @@ target_sources(rocroller-tests-catch
         "${CMAKE_CURRENT_SOURCE_DIR}/WMMAObserverUnitTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/WidenAddrExprTo64bitTest.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/mxDataGeneratorTest.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/ScaleUtilsTest.cpp"
 )

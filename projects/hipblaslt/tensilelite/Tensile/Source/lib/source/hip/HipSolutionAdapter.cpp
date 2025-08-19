@@ -267,21 +267,33 @@ namespace TensileLite
 
         // We should update the constructor to set this to avoid
         // avoid separating construction and initialization
-        void SolutionAdapter::codeObjectDir(std::string codeObjectDir)
+        void SolutionAdapter::codeObjectDir(std::string codeObjDir)
         {
-            if(codeObjectDir.back() != '/');
-                codeObjectDir += '/';
+
+            if(!codeObjDir.empty())
+            {
+                if(codeObjDir.back() != '/')
+                {
+                    codeObjDir += '/';
+                }
+            }
+
             m_access.lock();
-            m_codeObjectDirectory = codeObjectDir;
+            m_codeObjectDirectory = codeObjDir;
             m_access.unlock();
         }
 
         hipError_t SolutionAdapter::initializeLazyLoading(std::string arch,
-                                                          std::string codeObjectDir)
+                                                          std::string codeObjDir)
         {
             //Ensure there's a slash at the end of the path
-            if(codeObjectDir.back() != '/')
-                codeObjectDir += '/';
+            if(!codeObjDir.empty())
+            {
+                if(codeObjDir.back() != '/')
+                {
+                    codeObjDir += '/';
+                }
+            }
 
             //Remove xnack and sramecc qualifiers
             size_t loc = arch.find(":");
@@ -291,7 +303,7 @@ namespace TensileLite
             std::string helperKernelName = std::string("Kernels.so-000-") + arch;
 
             m_access.lock();
-            m_codeObjectDirectory = codeObjectDir;
+            m_codeObjectDirectory = codeObjDir;
 
             //If required code object file hasn't yet been loaded, load it now
             bool loaded = m_loadedCOFiles.find(removeXnack(helperKernelName) + ".hsaco")
@@ -305,10 +317,18 @@ namespace TensileLite
                 for(auto ver : {"", "-xnack-", "-xnack+"})
                 {
                     std::string modifiedCOName = helperKernelName + ver + ".hsaco";
-                    err                        = loadCodeObjectFile(codeObjectDir + modifiedCOName);
+                    err                        = loadCodeObjectFile(codeObjDir + modifiedCOName);
 
                     if(err == hipSuccess)
+                    {
                         return err;
+                    }
+                    else if(err == hipErrorFileNotFound)
+                    {
+                        // We expect that we could fail for cases when we have xnack variations
+                        // so clear hipErrorFileNotFound between iterations.
+                        (void)hipGetLastError();
+                    }
                 }
 
                 return err;

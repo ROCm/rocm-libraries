@@ -37,26 +37,199 @@ namespace TensileLite
 {
     namespace analytical
     {
+        enum class DataType : int
+        {
+            Float,
+            Double,
+            ComplexFloat,
+            ComplexDouble,
+            Half,
+            Int8x4,
+            Int32,
+            BFloat16,
+            Int8,
+            Int64,
+            XFloat32,
+            Float8_fnuz,
+            BFloat8_fnuz,
+            Float8BFloat8_fnuz,
+            BFloat8Float8_fnuz,
+            Float8,
+            BFloat8,
+            Float8BFloat8,
+            BFloat8Float8,
+            Float6,
+            BFloat6,
+            Float4,
+            Count,
+            None = Count
+        };
+
+        inline DataType intToDataType(int dt)
+        {
+            return (DataType)dt;
+        }
+
+        inline int dataTypeToBits(DataType type)
+        {
+            switch(type)
+            {
+            case DataType::Float:
+                return 32;
+            case DataType::Double:
+                return 64;
+            case DataType::ComplexFloat:
+                return 64;
+            case DataType::ComplexDouble:
+                return 128;
+            case DataType::Half:
+                return 16;
+            case DataType::Int8x4:
+                return 32;
+            case DataType::Int32:
+                return 32;
+            case DataType::BFloat16:
+                return 16;
+            case DataType::Int8:
+                return 8;
+            case DataType::Int64:
+                return 64;
+            case DataType::XFloat32:
+                return 32;
+            case DataType::Float8_fnuz:
+                return 8;
+            case DataType::BFloat8_fnuz:
+                return 8;
+            case DataType::Float8BFloat8_fnuz:
+                return 8;
+            case DataType::BFloat8Float8_fnuz:
+                return 8;
+            case DataType::Float8:
+                return 8;
+            case DataType::BFloat8:
+                return 8;
+            case DataType::Float8BFloat8:
+                return 8;
+            case DataType::BFloat8Float8:
+                return 8;
+            case DataType::Float6:
+                return 6;
+            case DataType::BFloat6:
+                return 6;
+            case DataType::Float4:
+                return 4;
+            default:
+                return -1; // Invalid type
+            }
+        }
+
+        inline std::string toString(DataType type)
+        {
+            switch(type)
+            {
+            case DataType::Float:
+                return "Float";
+            case DataType::Double:
+                return "Double";
+            case DataType::ComplexFloat:
+                return "ComplexFloat";
+            case DataType::ComplexDouble:
+                return "ComplexDouble";
+            case DataType::Half:
+                return "Half";
+            case DataType::Int8x4:
+                return "Int8x4";
+            case DataType::Int32:
+                return "Int32";
+            case DataType::BFloat16:
+                return "BFloat16";
+            case DataType::Int8:
+                return "Int8";
+            case DataType::Int64:
+                return "Int64";
+            case DataType::XFloat32:
+                return "XFloat32";
+            case DataType::Float8_fnuz:
+                return "Float8_fnuz";
+            case DataType::BFloat8_fnuz:
+                return "BFloat8_fnuz";
+            case DataType::Float8BFloat8_fnuz:
+                return "Float8BFloat8_fnuz";
+            case DataType::BFloat8Float8_fnuz:
+                return "BFloat8Float8_fnuz";
+            case DataType::Float8:
+                return "Float8";
+            case DataType::BFloat8:
+                return "BFloat8";
+            case DataType::Float8BFloat8:
+                return "Float8BFloat8";
+            case DataType::BFloat8Float8:
+                return "BFloat8Float8";
+            case DataType::Float6:
+                return "Float6";
+            case DataType::BFloat6:
+                return "BFloat6";
+            case DataType::Float4:
+                return "Float4";
+            default:
+                return "Invalid";
+            }
+            return "Invalid";
+        }
+
+        inline DataType stringToDatatype(std::string s)
+        {
+            if (s == "f32")
+                return DataType::Float;
+            if (s == "c32")
+                return DataType::ComplexFloat;
+            if (s == "c64")
+                return DataType::ComplexDouble;
+            if (s == "f64")
+                return DataType::Double;
+            if (s == "f16")
+                return DataType::Half;
+            if (s == "i32")
+                return DataType::Int32;
+            if (s == "bf16")
+                return DataType::BFloat16;
+            if (s == "i8")
+                return DataType::Int8;
+            if (s == "xf32")
+                return DataType::XFloat32;
+            if (s == "f8")
+                return DataType::Float8;
+            if (s == "bf8")
+                return DataType::BFloat8;
+            if (s == "f6")
+                return DataType::Float6;
+            if (s == "bf6")
+                return DataType::BFloat6;
+            if (s == "f4")
+                return DataType::Float4;
+            return DataType::None;
+        }
+
         struct MatrixInstruction
         {
             size_t MI_M;
             size_t MI_N;
             size_t MI_K;
-            size_t element_size;
+            DataType miInputType;
 
             MatrixInstruction()
                 : MI_M(0)
                 , MI_N(0)
                 , MI_K(0)
-                , element_size(0)
+                , miInputType(DataType::Float)
             {
             }
 
-            MatrixInstruction(size_t m, size_t n, size_t k, size_t element_size)
+            MatrixInstruction(size_t m, size_t n, size_t k, DataType miInputType)
                 : MI_M(m)
                 , MI_N(n)
                 , MI_K(k)
-                , element_size(element_size)
+                , miInputType(miInputType)
             {
             }
 
@@ -64,26 +237,26 @@ namespace TensileLite
                 : MI_M(other.MI_M)
                 , MI_N(other.MI_N)
                 , MI_K(other.MI_K)
-                , element_size(other.element_size)
+                , miInputType(other.miInputType)
             {
             }
 
             bool operator<(const MatrixInstruction& other) const
             {
-                return std::tie(MI_M, MI_N, MI_K, element_size)
-                       < std::tie(other.MI_M, other.MI_N, other.MI_K, other.element_size);
+                return std::tie(MI_M, MI_N, MI_K, miInputType)
+                       < std::tie(other.MI_M, other.MI_N, other.MI_K, other.miInputType);
             }
 
             bool operator==(const MatrixInstruction& other) const
             {
                 return MI_M == other.MI_M && MI_N == other.MI_N && MI_K == other.MI_K
-                       && element_size == other.element_size;
+                       && miInputType == other.miInputType;
             }
 
             std::size_t hash() const
             {
                 return std::hash<size_t>()(MI_M) ^ std::hash<size_t>()(MI_N)
-                       ^ std::hash<size_t>()(MI_K) ^ std::hash<size_t>()(element_size);
+                       ^ std::hash<size_t>()(MI_K) ^ std::hash<DataType>()(miInputType);
             }
         };
     }
@@ -111,6 +284,7 @@ namespace TensileLite
         public:
             enum class Architecture
             {
+                gfx90a,
                 gfx942,
                 gfx950,
                 Count
@@ -119,7 +293,9 @@ namespace TensileLite
             static Architecture archNameToEnum(const std::string& str)
             {
                 static const std::unordered_map<std::string, Architecture> strToEnumMap
-                    = {{"gfx942", Architecture::gfx942}, {"gfx950", Architecture::gfx950}};
+                    = {{"gfx90a", Architecture::gfx90a},
+                       {"gfx942", Architecture::gfx942},
+                       {"gfx950", Architecture::gfx950}};
 
                 auto it = strToEnumMap.find(str);
                 if(it != strToEnumMap.end())
@@ -298,7 +474,7 @@ namespace TensileLite
                     const auto& L_MI = kv.second;
 
                     std::cout << "Instruction: MI_M=" << key.MI_M << ", MI_N=" << key.MI_N
-                              << ", MI_K=" << key.MI_K << ", element_size=" << key.element_size
+                              << ", MI_K=" << key.MI_K << ", miInputType=" << toString(key.miInputType)
                               << " bytes\n"
                               << "  -> Latency (L_MI): " << L_MI << "\n";
                 }
@@ -338,10 +514,10 @@ namespace TensileLite
                 std::cout << "===========================\n";
             }
 
-            size_t get_MI_latency(size_t MI_M, size_t MI_N, size_t MI_K, size_t element_size) const
+            size_t get_MI_latency(size_t MI_M, size_t MI_N, size_t MI_K, DataType miInputType) const
             {
                 const auto& instruction_map = INSTRUCTION_MAP.at(arch);
-                auto        key             = MatrixInstruction(MI_M, MI_N, MI_K, element_size);
+                auto        key             = MatrixInstruction(MI_M, MI_N, MI_K, miInputType);
 
                 auto it = instruction_map.find(key);
                 if(it != instruction_map.end())
@@ -351,7 +527,7 @@ namespace TensileLite
                 else
                 {
                     std::cerr << "Warning: Latency not found for MI_M=" << MI_M << ", MI_N=" << MI_N
-                              << ", MI_K=" << MI_K << ", Element_Size=" << element_size
+                              << ", MI_K=" << MI_K << ", miInputType=" << toString(miInputType)
                               << ". Returning latency value of 32 (really slow).\n";
                     return 32 / parallel_MI_CU; // Default latency if instruction is not found
                 }

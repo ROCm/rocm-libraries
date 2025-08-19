@@ -44,26 +44,6 @@ inline bool isAligned(const void* pointer, size_t byte_count)
     return reinterpret_cast<uintptr_t>(pointer) % byte_count == 0;
 }
 
-// return precision string for rocblaslt_datatype
-constexpr const char* rocblaslt_datatype_string(hipDataType type)
-{
-    switch(type)
-    {
-    case HIP_R_16F:
-        return "f16_r";
-    case HIP_R_32F:
-        return "f32_r";
-    case HIP_R_16BF:
-        return "b16_r";
-    case HIP_R_32I:
-        return "i32_r";
-    case HIP_R_8I:
-        return "i8_r";
-    default:
-        return "invalidType";
-    }
-}
-
 bool rocblaslt_is_complex_datatype(hipDataType type);
 
 constexpr const char* rocblaslt_compute_type_string(rocblaslt_compute_type type)
@@ -332,42 +312,6 @@ __forceinline__ __device__ __host__ T zero_scalar_device_host(const T* xp)
     return static_cast<T>(0);
 }
 
-//
-// Provide some utility methods for enums.
-//
-struct rocblaslt_enum_utils
-{
-    template <typename U>
-    static inline bool is_invalid(U value_);
-};
-
-template <>
-inline bool rocblaslt_enum_utils::is_invalid(rocblaslt_compute_type value_)
-{
-    switch(value_)
-    {
-    case rocblaslt_compute_f32:
-    case rocblaslt_compute_f32_fast_xf32:
-    case rocblaslt_compute_i32:
-        return false;
-    default:
-        return true;
-    }
-};
-
-template <>
-inline bool rocblaslt_enum_utils::is_invalid(rocblaslt_matmul_preference_attributes value_)
-{
-    switch(value_)
-    {
-    case ROCBLASLT_MATMUL_PREF_SEARCH_MODE:
-    case ROCBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES:
-        return false;
-    default:
-        return true;
-    }
-};
-
 inline bool is_grad_enabled(rocblaslt_epilogue value_)
 {
     switch(value_)
@@ -434,18 +378,6 @@ inline bool is_act_enabled(rocblaslt_epilogue value_)
         return true;
     case ROCBLASLT_EPILOGUE_DEFAULT:
     case ROCBLASLT_EPILOGUE_BIAS:
-    default:
-        return false;
-    }
-};
-
-inline bool is_biasSrc_AB(rocblaslt_epilogue value_)
-{
-    switch(value_)
-    {
-    case ROCBLASLT_EPILOGUE_BGRADA:
-    case ROCBLASLT_EPILOGUE_BGRADB:
-        return true;
     default:
         return false;
     }

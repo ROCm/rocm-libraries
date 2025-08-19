@@ -516,6 +516,13 @@ namespace rocRoller
             constexpr static inline int  Complexity = 1;
         };
 
+        struct ToScalar : Unary
+        {
+            constexpr static inline auto Type       = Category::Arithmetic;
+            constexpr static inline auto EvalTimes  = EvaluationTimes::All();
+            constexpr static inline int  Complexity = 1;
+        };
+
         struct BitFieldExtract : Unary
         {
             inline BitFieldExtract& copyParams(const BitFieldExtract& other)

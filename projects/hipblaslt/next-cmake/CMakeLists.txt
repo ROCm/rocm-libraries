@@ -268,6 +268,7 @@ if(TENSILELITE_ENABLE_HOST OR HIPBLASLT_ENABLE_HOST)
     target_link_libraries(tensilelite-host 
         PUBLIC
             rocisa::rocisa-cpp
+        PRIVATE
             hip::device
     )
 
@@ -291,8 +292,8 @@ if(HIPBLASLT_ENABLE_HOST)
     target_link_libraries(hipblaslt
         PUBLIC
             roc::${hipblas_target}
-            hip::device
         PRIVATE
+            hip::device
             tensilelite-host
             ${CMAKE_DL_LIBS}
             ${rocTracer}
@@ -386,6 +387,12 @@ if(HIPBLASLT_ENABLE_HOST)
         NAMESPACE roc::
     )
 
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt-config.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/hipblaslt-config.cmake"
+        COPYONLY
+    )
+
     if( LEGACY_HIPBLAS_DIRECT )
         rocm_package_add_dependencies(DEPENDS "hipblas >= 0.50.0")
     else()
@@ -402,8 +409,11 @@ endif()
 
 if(HIPBLASLT_ENABLE_DEVICE)
     if(WIN32)
-        set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}hipblaslt/bin" CACHE PATH "path to tensile library")
+        # Put files used at runtime adjacent to '.dll's and '.exe's in bin/.
+        set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_BINDIR}/hipblaslt" CACHE PATH "path to tensile library")
     else()
+        # Put files used at runtime adjacent to shared libraries ('.so') in
+        # lib/, separate from executables (no extension) in bin/.
         set(HIPBLASLT_TENSILE_LIBRARY_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}${CMAKE_INSTALL_LIBDIR}/hipblaslt" CACHE PATH "path to tensile library")
     endif()
     rocm_install(

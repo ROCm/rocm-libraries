@@ -72,7 +72,8 @@ namespace MemoryTracerTest
         transforms.push_back(std::make_shared<LowerTensorContraction>(params, context.get()));
         transforms.push_back(std::make_shared<Simplify>());
         transforms.push_back(std::make_shared<FuseExpressions>());
-        transforms.push_back(std::make_shared<ConnectWorkgroups>(params, context.get()));
+        transforms.push_back(std::make_shared<ConnectWorkgroups>(
+            context.get(), params->workgroupMappingDim, params->workgroupRemapXCC));
         transforms.push_back(std::make_shared<UnrollLoops>(params, context.get()));
         transforms.push_back(std::make_shared<FuseLoops>());
         transforms.push_back(std::make_shared<RemoveDuplicates>());

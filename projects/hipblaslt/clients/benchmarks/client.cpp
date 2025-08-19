@@ -133,7 +133,7 @@ int run_bench_test(Arguments&         arg,
         int64_t min_stride_c = arg.ldc[i] * arg.N[i];
         int64_t min_stride_d = arg.ldd[i] * arg.N[i];
         int64_t min_stride_e = arg.lde[i] * arg.N[i];
-        if(!any_stride && arg.stride_a[i] < min_stride_a && !arg.swizzle_a)
+        if(!any_stride && arg.stride_a[i] < min_stride_a)
         {
             //hipblaslt_cout << "hipblaslt-bench INFO: stride_a < min_stride_a, set stride_a = "
             //               << min_stride_a << std::endl;
@@ -895,6 +895,7 @@ try
        && (arg.transA != 'T' || arg.transB != 'N'
            || (arg.a_type != string_to_hip_datatype("f16_r")
                && arg.a_type != string_to_hip_datatype("f8_fnuz_r")
+               && arg.a_type != string_to_hip_datatype("f8_r")
                && arg.a_type != string_to_hip_datatype("bf16_r"))))
     {
         hipblaslt_cerr << "For swizzle-A, problem type must be FP16 or BF16 or FP8 TN" << std::endl;

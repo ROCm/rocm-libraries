@@ -5,8 +5,8 @@
       "url": "ROCm/MIOpen",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "tensile",
@@ -37,8 +37,8 @@
       "url": "ROCm/hipBLAS",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "hipblas-common",
@@ -69,8 +69,8 @@
       "url": "ROCm/hipFFT",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "hiprand",
@@ -93,8 +93,8 @@
       "url": "ROCm/hipSPARSE",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "hipsparselt",
@@ -117,8 +117,8 @@
       "url": "ROCm/rocFFT",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rocprim",

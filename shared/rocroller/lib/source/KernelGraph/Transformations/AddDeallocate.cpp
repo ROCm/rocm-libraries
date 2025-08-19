@@ -28,6 +28,7 @@
 #include <vector>
 
 #include <rocRoller/KernelGraph/Transforms/AddDeallocate.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddDeallocate_detail.hpp>
 
 #include <rocRoller/Context.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowArgumentTracer.hpp>
@@ -60,9 +61,7 @@ namespace rocRoller::KernelGraph
             if(not maybeForLoop)
                 return;
 
-            std::vector<int> dependenciesVec(lastRWOps.begin(), lastRWOps.end());
-            std::sort(dependenciesVec.begin(), dependenciesVec.end(), compare);
-            auto lastDependency = dependenciesVec.back();
+            auto lastDependency = std::ranges::max(lastRWOps, compare);
 
             auto downstreamBarriers = filter(original.control.isElemType<Barrier>(),
                                              original.control.depthFirstVisit(lastDependency))
@@ -74,8 +73,7 @@ namespace rocRoller::KernelGraph
                 return;
             }
 
-            std::sort(downstreamBarriers.begin(), downstreamBarriers.end(), compare);
-            dependencies.insert(downstreamBarriers.front());
+            dependencies.insert(std::ranges::min(downstreamBarriers, compare));
         }
 
         std::set<int> getContainingForLoops(std::set<int> controls, KernelGraph const& graph)
@@ -212,51 +210,6 @@ namespace rocRoller::KernelGraph
             }
 
             removeRedundantSequenceEdges(graph);
-        }
-
-        void deleteControlNode(KernelGraph& graph, int nodeIdx)
-        {
-            {
-                auto incomingNodes
-                    = graph.control.getInputNodeIndices<ControlEdge>(nodeIdx).to<std::vector>();
-                for(auto inc : incomingNodes)
-                    graph.control.deleteElement(graph.control.findEdge(inc, nodeIdx).value());
-            }
-
-            {
-                auto outgoingNodes
-                    = graph.control.getOutputNodeIndices<ControlEdge>(nodeIdx).to<std::vector>();
-                for(auto out : outgoingNodes)
-                    graph.control.deleteElement(graph.control.findEdge(nodeIdx, out).value());
-            }
-
-            graph.control.deleteElement(nodeIdx);
-            graph.mapper.purge(nodeIdx);
-        }
-
-        template <CInputRangeOf<int> Range>
-        void mergeDeallocateNodes(KernelGraph& graph, int dstIdx, Range& srcs)
-        {
-            auto dst = graph.control.getNode<Deallocate>(dstIdx);
-
-            auto connectionIdx = graph.mapper.getConnections(dstIdx).size();
-
-            for(int srcIdx : srcs)
-            {
-                auto src = graph.control.getNode<Deallocate>(srcIdx);
-
-                dst.arguments.insert(
-                    dst.arguments.end(), src.arguments.begin(), src.arguments.end());
-
-                for(auto const& c : graph.mapper.getConnections(srcIdx))
-                {
-                    graph.mapper.connect<Dimension>(dstIdx, c.coordinate, connectionIdx);
-                    connectionIdx++;
-                }
-
-                deleteControlNode(graph, srcIdx);
-            }
-            graph.control.setElement(dstIdx, std::move(dst));
         }
     }
 
@@ -441,7 +394,6 @@ namespace rocRoller::KernelGraph
 
     KernelGraph AddDeallocateDataFlow::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::addDeallocateDataFlow");
         rocRoller::Log::getLogger()->debug("KernelGraph::addDeallocateDataFlow()");
 
         auto graph = original;
@@ -455,7 +407,6 @@ namespace rocRoller::KernelGraph
 
     KernelGraph AddDeallocateArguments::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::addDeallocateArguments");
         rocRoller::Log::getLogger()->debug("KernelGraph::addDeallocate()");
 
         auto graph  = original;
@@ -470,7 +421,6 @@ namespace rocRoller::KernelGraph
 
     KernelGraph MergeAdjacentDeallocates::apply(KernelGraph const& original)
     {
-        TIMER(t, "KernelGraph::mergeAdjacentDeallocates");
         rocRoller::Log::getLogger()->debug("KernelGraph::mergeAdjacentDeallocates()");
 
         auto graph = original;

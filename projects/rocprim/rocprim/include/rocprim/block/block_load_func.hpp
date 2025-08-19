@@ -289,14 +289,16 @@ void block_load_direct_striped(unsigned int flat_id,
                                T (&items)[ItemsPerThread],
                                unsigned int valid)
 {
-    InputIterator thread_iter = block_input + flat_id;
     ROCPRIM_UNROLL
     for (unsigned int item = 0; item < ItemsPerThread; item++)
     {
         unsigned int offset = item * BlockSize;
         if (flat_id + offset < valid)
         {
-            items[item] = thread_iter[offset];
+            // Note: Loading data using thread_iter like the other overloads do (thread_iter[offset])
+            // doesn't work here for gfx11xx on Windows due to a compiler bug.
+            // Temporarily load using the approach below until we have a fix.
+            items[item] = block_input[flat_id + offset];
         }
     }
 }
@@ -377,7 +379,7 @@ void block_load_direct_warp_striped(unsigned int  flat_id,
 {
     static_assert(detail::is_power_of_two(VirtualWaveSize)
                       && VirtualWaveSize <= arch::wavefront::max_size(),
-                  "VirtualWaveSize must be a power of two and equal or less"
+                  "VirtualWaveSize must be a power of two and equal or less "
                   "than the size of hardware warp.");
     assert(VirtualWaveSize <= arch::wavefront::size());
 
@@ -467,7 +469,7 @@ void block_load_direct_warp_striped(unsigned int  flat_id,
 {
     static_assert(detail::is_power_of_two(VirtualWaveSize)
                       && VirtualWaveSize <= arch::wavefront::max_size(),
-                  "VirtualWaveSize must be a power of two and equal or less"
+                  "VirtualWaveSize must be a power of two and equal or less "
                   "than the size of hardware warp.");
     assert(VirtualWaveSize <= arch::wavefront::size());
 
@@ -580,7 +582,7 @@ void block_load_direct_warp_striped(unsigned int  flat_id,
 {
     static_assert(detail::is_power_of_two(VirtualWaveSize)
                       && VirtualWaveSize <= arch::wavefront::max_size(),
-                  "VirtualWaveSize must be a power of two and equal or less"
+                  "VirtualWaveSize must be a power of two and equal or less "
                   "than the size of hardware warp.");
     assert(VirtualWaveSize <= arch::wavefront::size());
 
@@ -693,7 +695,7 @@ auto block_load_direct_blocked_cast(unsigned int flat_id,
 {
     static_assert(detail::is_power_of_two(VirtualWaveSize)
                       && VirtualWaveSize <= arch::wavefront::max_size(),
-                  "VirtualWaveSize must be a power of two and equal or less"
+                  "VirtualWaveSize must be a power of two and equal or less "
                   "than the size of hardware warp.");
     assert(VirtualWaveSize <= arch::wavefront::size());
 

@@ -225,12 +225,22 @@ namespace rocRoller
     template <Expression::CUnary Operation>
     Generator<Instruction> generateOp(Register::ValuePtr dst,
                                       Register::ValuePtr arg,
-                                      Operation const&   expr = Operation{})
+                                      Operation const&   expr = Operation{});
+
+    template <Expression::CUnary Operation>
+    Generator<Instruction>
+        generateOp(Register::ValuePtr dst, Register::ValuePtr arg, Operation const& expr)
     {
+        static_assert(!std::same_as<Operation, Expression::ToScalar>);
         auto gen = GetGenerator<Operation>(dst, arg, expr);
         AssertFatal(gen != nullptr, "No generator");
         co_yield gen->generate(dst, arg, expr);
     }
+
+    template <>
+    Generator<Instruction> generateOp<Expression::ToScalar>(Register::ValuePtr          dst,
+                                                            Register::ValuePtr          arg,
+                                                            Expression::ToScalar const& expr);
 
     template <Expression::CBinary Operation>
     std::shared_ptr<BinaryArithmeticGenerator<Operation>> GetGenerator(Register::ValuePtr dst,

@@ -26,6 +26,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added support for building tests with device-side random data generation, making them finish faster. This requires rocRAND, and is enabled with the `WITH_ROCRAND=ON` build flag.
 * Added tests and documentation to `lookback_scan_state`. It is still in the `detail` namespace.
 
+### Optimizations
+
+* Improved performance of `rocprim::device_select` and `rocprim::device_partition` when using multiple streams on the MI3XX architecture.
+
 ### Changed
 
 * Changed the parameters `long_radix_bits` and `LongRadixBits` from `segmented_radix_sort` to `radix_bits` and `RadixBits` respectively.
@@ -93,6 +97,8 @@ when the input or inital type was smaller than the output type.
 * Fixed an issue where `device_segmented_reduce` reported autotuning throughput being 5x lower than it was in reality.
 * Fixed device radix sort not returning the correct required temporary storage when a double buffer contains `nullptr`.
 * Fixed constness of equality operators (`==` and `!=`) in `rocprim::key_value_pair`.
+* Fixed an issue for the comparison operators in `arg_index_iterator` and `texture_cache_iterator`, where `<` and `>` comparators were swapped.
+* Fixed an issue for the `rocprim::thread_reduce` not working correctly with a prefix value.
 
 ### Known issues
 * When using `rocprim::deterministic_inclusive_scan_by_key` and `rocprim::deterministic_exclusive_scan_by_key` the intermediate values can change order on Navi3x

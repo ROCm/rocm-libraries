@@ -162,7 +162,7 @@ add_library(roc::rocroller ALIAS rocroller)
 add_library(rocroller-interface INTERFACE)
 add_library(roc::rocroller-interface ALIAS rocroller-interface)
 
-target_compile_options(rocroller PUBLIC $<BUILD_INTERFACE:-fmacro-prefix-map=${PROJECT_SOURCE_DIR}=rocm-libraries/shared/rocroller>)
+target_compile_options(rocroller PUBLIC $<BUILD_INTERFACE:-fmacro-prefix-map=${PROJECT_SOURCE_DIR}=shared/rocroller>)
 
 if(ROCROLLER_ENABLE_LLD)
     find_package(LLD REQUIRED)

@@ -409,58 +409,67 @@ namespace rocRollerTest
         };
 
         auto ifBlock = [&]() -> Generator<Instruction> {
+            EXPECT_EQ(schedulerA->getLockState().getTopDependency(1), Scheduling::Dependency::VCC);
+            EXPECT_EQ(schedulerB->getLockState().getTopDependency(0), Scheduling::Dependency::VCC);
+            EXPECT_EQ(schedulerC->getLockState().getTopDependency(1), Scheduling::Dependency::None);
+
             co_yield(
                 Inst("(C) If Begin").lock(Scheduling::Dependency::SCC, "(C) Scheduler C Lock"));
 
-            EXPECT_EQ(schedulerA->getLockState().getDependency(), Scheduling::Dependency::Branch);
-            EXPECT_EQ(schedulerB->getLockState().getDependency(), Scheduling::Dependency::VCC);
-            EXPECT_EQ(schedulerC->getLockState().getDependency(), Scheduling::Dependency::SCC);
+            EXPECT_EQ(schedulerA->getLockState().getTopDependency(1), Scheduling::Dependency::SCC);
+            EXPECT_EQ(schedulerB->getLockState().getTopDependency(0), Scheduling::Dependency::SCC);
+            EXPECT_EQ(schedulerC->getLockState().getTopDependency(1), Scheduling::Dependency::SCC);
 
-            co_yield(Inst("+++ Scheduler A Lock Depth: "
-                          + std::to_string(schedulerA->getLockState().getLockDepth())));
-            co_yield(Inst("+++ Scheduler B Lock Depth: "
-                          + std::to_string(schedulerB->getLockState().getLockDepth())));
-            co_yield(Inst("+++ Scheduler C Lock Depth: "
-                          + std::to_string(schedulerC->getLockState().getLockDepth())));
+            co_yield(Inst("+++ Scheduler A Stream 1 Lock Depth: "
+                          + std::to_string(schedulerA->getLockState().getLockDepth(1))));
+            co_yield(Inst("+++ Scheduler B Stream 0 Lock Depth: "
+                          + std::to_string(schedulerB->getLockState().getLockDepth(0))));
+            co_yield(Inst("+++ Scheduler C Stream 1 Lock Depth: "
+                          + std::to_string(schedulerC->getLockState().getLockDepth(1))));
             co_yield(Inst("(C) If Instruction"));
             co_yield(Inst("(C) If End").unlock("(C) Scheduler C Unlock"));
 
-            EXPECT_EQ(schedulerA->getLockState().getDependency(), Scheduling::Dependency::Branch);
-            EXPECT_EQ(schedulerB->getLockState().getDependency(), Scheduling::Dependency::VCC);
-            EXPECT_EQ(schedulerC->getLockState().getDependency(), Scheduling::Dependency::None);
+            EXPECT_EQ(schedulerA->getLockState().getTopDependency(1), Scheduling::Dependency::VCC);
+            EXPECT_EQ(schedulerB->getLockState().getTopDependency(0), Scheduling::Dependency::VCC);
+            EXPECT_EQ(schedulerC->getLockState().getTopDependency(1), Scheduling::Dependency::None);
 
-            co_yield(Inst("+++ Scheduler A Lock Depth: "
-                          + std::to_string(schedulerA->getLockState().getLockDepth())));
-            co_yield(Inst("+++ Scheduler B Lock Depth: "
-                          + std::to_string(schedulerB->getLockState().getLockDepth())));
-            co_yield(Inst("+++ Scheduler C Lock Depth: "
-                          + std::to_string(schedulerC->getLockState().getLockDepth())));
+            co_yield(Inst("+++ Scheduler A Stream 1 Lock Depth: "
+                          + std::to_string(schedulerA->getLockState().getLockDepth(1))));
+            co_yield(Inst("+++ Scheduler B Stream 0 Lock Depth: "
+                          + std::to_string(schedulerB->getLockState().getLockDepth(0))));
+            co_yield(Inst("+++ Scheduler C Stream 1 Lock Depth: "
+                          + std::to_string(schedulerC->getLockState().getLockDepth(1))));
         };
 
         c_sequences.push_back(opB());
         c_sequences.push_back(ifBlock());
 
         auto unroll0 = [&]() -> Generator<Instruction> {
+            EXPECT_EQ(schedulerA->getLockState().getTopDependency(1),
+                      Scheduling::Dependency::Branch);
+            EXPECT_EQ(schedulerB->getLockState().getTopDependency(0), Scheduling::Dependency::None);
+
             co_yield(Inst("(B) Unroll 0 Begin")
                          .lock(Scheduling::Dependency::VCC, "(B) Scheduler B Lock"));
 
-            EXPECT_EQ(schedulerA->getLockState().getDependency(), Scheduling::Dependency::Branch);
-            EXPECT_EQ(schedulerB->getLockState().getDependency(), Scheduling::Dependency::VCC);
+            EXPECT_EQ(schedulerA->getLockState().getTopDependency(1), Scheduling::Dependency::VCC);
+            EXPECT_EQ(schedulerB->getLockState().getTopDependency(0), Scheduling::Dependency::VCC);
 
-            co_yield(Inst("+++ Scheduler A Lock Depth: "
-                          + std::to_string(schedulerA->getLockState().getLockDepth())));
-            co_yield(Inst("+++ Scheduler B Lock Depth: "
-                          + std::to_string(schedulerB->getLockState().getLockDepth())));
+            co_yield(Inst("+++ Scheduler A Stream 1 Lock Depth: "
+                          + std::to_string(schedulerA->getLockState().getLockDepth(1))));
+            co_yield(Inst("+++ Scheduler B Stream 0 Lock Depth: "
+                          + std::to_string(schedulerB->getLockState().getLockDepth(0))));
             co_yield((*schedulerC)(c_sequences));
             co_yield(Inst("(B) Unroll 0 End")).unlock("(B) Scheduler B Unlock");
 
-            EXPECT_EQ(schedulerA->getLockState().getDependency(), Scheduling::Dependency::Branch);
-            EXPECT_EQ(schedulerB->getLockState().getDependency(), Scheduling::Dependency::None);
+            EXPECT_EQ(schedulerA->getLockState().getTopDependency(1),
+                      Scheduling::Dependency::Branch);
+            EXPECT_EQ(schedulerB->getLockState().getTopDependency(0), Scheduling::Dependency::None);
 
-            co_yield(Inst("+++ Scheduler A Lock Depth: "
-                          + std::to_string(schedulerA->getLockState().getLockDepth())));
-            co_yield(Inst("+++ Scheduler B Lock Depth: "
-                          + std::to_string(schedulerB->getLockState().getLockDepth())));
+            co_yield(Inst("+++ Scheduler A Stream 1 Lock Depth: "
+                          + std::to_string(schedulerA->getLockState().getLockDepth(1))));
+            co_yield(Inst("+++ Scheduler B Stream 0 Lock Depth: "
+                          + std::to_string(schedulerB->getLockState().getLockDepth(0))));
         };
 
         auto unroll1 = [&]() -> Generator<Instruction> {
@@ -482,16 +491,17 @@ namespace rocRollerTest
             co_yield(Inst("(A) For Loop Begin")
                          .lock(Scheduling::Dependency::Branch, "(A) Scheduler A Lock"));
 
-            EXPECT_EQ(schedulerA->getLockState().getDependency(), Scheduling::Dependency::Branch);
+            EXPECT_EQ(schedulerA->getLockState().getTopDependency(1),
+                      Scheduling::Dependency::Branch);
 
-            co_yield(Inst("+++ Scheduler A Lock Depth: "
-                          + std::to_string(schedulerA->getLockState().getLockDepth())));
+            co_yield(Inst("+++ Scheduler A Stream 1 Lock Depth: "
+                          + std::to_string(schedulerA->getLockState().getLockDepth(1))));
             co_yield((*schedulerB)(b_sequences));
             co_yield(Inst("(A) For Loop End").unlock("(A) Scheduler A Unlock"));
-            co_yield(Inst("+++ Scheduler A Lock Depth: "
-                          + std::to_string(schedulerA->getLockState().getLockDepth())));
+            co_yield(Inst("+++ Scheduler A Stream 1 Lock Depth: "
+                          + std::to_string(schedulerA->getLockState().getLockDepth(1))));
 
-            EXPECT_EQ(schedulerA->getLockState().getDependency(), Scheduling::Dependency::None);
+            EXPECT_EQ(schedulerA->getLockState().getTopDependency(1), Scheduling::Dependency::None);
         };
 
         a_sequences.push_back(opA());
@@ -500,32 +510,32 @@ namespace rocRollerTest
         m_context->schedule((*schedulerA)(a_sequences));
 
         std::string expected = R"( (A) Op A Begin
-                                    (A) For Loop Begin // (A) Scheduler A Lock
-                                    +++ Scheduler A Lock Depth: 1
-                                    (B) Unroll 0 Begin // (B) Scheduler B Lock
-                                    +++ Scheduler A Lock Depth: 2
-                                    +++ Scheduler B Lock Depth: 1
-                                    (C) Op B Begin
-                                    (C) If Begin // (C) Scheduler C Lock
-                                    +++ Scheduler A Lock Depth: 3
-                                    +++ Scheduler B Lock Depth: 2
-                                    +++ Scheduler C Lock Depth: 1
-                                    (C) If Instruction
-                                    (C) If End // (C) Scheduler C Unlock
-                                    (C) Op B Instruction
-                                    +++ Scheduler A Lock Depth: 2
-                                    (C) Op B End
-                                    +++ Scheduler B Lock Depth: 1
-                                    +++ Scheduler C Lock Depth: 0
-                                    (B) Unroll 0 End // (B) Scheduler B Unlock
+                                    (A) For Loop Begin  // (A) Scheduler A Lock
+                                    +++ Scheduler A Stream 1 Lock Depth: 1
+                                    (B) Unroll 0 Begin  // (B) Scheduler B Lock
                                     (B) Unroll 1 Begin
-                                    +++ Scheduler A Lock Depth: 1
+                                    +++ Scheduler A Stream 1 Lock Depth: 2
                                     (B) Unroll 1 Instruction
-                                    +++ Scheduler B Lock Depth: 0
+                                    +++ Scheduler B Stream 0 Lock Depth: 1
                                     (B) Unroll 1 End
-                                    (A) For Loop End // (A) Scheduler A Unlock
+                                    (C) Op B Begin
+                                    (C) If Begin  // (C) Scheduler C Lock
+                                    +++ Scheduler A Stream 1 Lock Depth: 3
+                                    +++ Scheduler B Stream 0 Lock Depth: 2
+                                    +++ Scheduler C Stream 1 Lock Depth: 1
+                                    (C) If Instruction
+                                    (C) If End  // (C) Scheduler C Unlock
+                                    (C) Op B Instruction
+                                    +++ Scheduler A Stream 1 Lock Depth: 2
+                                    (C) Op B End
+                                    +++ Scheduler B Stream 0 Lock Depth: 1
+                                    +++ Scheduler C Stream 1 Lock Depth: 0
+                                    (B) Unroll 0 End  // (B) Scheduler B Unlock
+                                    +++ Scheduler A Stream 1 Lock Depth: 1
+                                    +++ Scheduler B Stream 0 Lock Depth: 0
+                                    (A) For Loop End  // (A) Scheduler A Unlock
                                     (A) Op A Instruction
-                                    +++ Scheduler A Lock Depth: 0
+                                    +++ Scheduler A Stream 1 Lock Depth: 0
                                     (A) Op A End
                                 )";
 
