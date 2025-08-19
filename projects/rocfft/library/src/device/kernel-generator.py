@@ -259,6 +259,8 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
             if skip_to_next_iter:
                 skip_to_next_iter = False
                 continue
+            if counter_f_pp_2 >= len(pp_functions):
+                break
             # get second pp kernel
             f_pp_2 = pp_functions[counter_f_pp_2]
 

@@ -30,27 +30,6 @@
 
 #include "device/kernel-generator-embed.h"
 
-static StockhamPartialPassParams get_partial_pass_params(const TreeNode&  node,
-                                                         const FFTKernel& kernel)
-{
-    if(node.isPartialPassEnabled())
-    {
-        StockhamPartialPassParams pp_params;
-
-        pp_params.off_dim     = node.ppOffDim;
-        pp_params.current_dim = node.ppCurrDim;
-        pp_params.pp_factors_curr.assign(kernel.pp_params.pp_factors_curr.begin(),
-                                         kernel.pp_params.pp_factors_curr.end());
-        pp_params.pp_factors_other.assign(kernel.pp_params.pp_factors_other.begin(),
-                                          kernel.pp_params.pp_factors_other.end());
-        pp_params.parent_length.assign(node.length.begin(), node.length.end());
-
-        return pp_params;
-    }
-
-    throw std::runtime_error("Invalid scheme for partial pass");
-}
-
 RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&    node,
                                                               const std::string& gpu_arch,
                                                               bool               enable_callbacks)
@@ -108,7 +87,15 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
         specs->ebtype                = node.ebtype;
 
         if(node.isPartialPassEnabled())
-            pp_params = get_partial_pass_params(node, *kernel);
+        {
+            pp_params.off_dim     = node.ppOffDim;
+            pp_params.current_dim = node.ppCurrDim;
+            pp_params.pp_factors_curr.assign(kernel->pp_params.pp_factors_curr.begin(),
+                                             kernel->pp_params.pp_factors_curr.end());
+            pp_params.pp_factors_other.assign(kernel->pp_params.pp_factors_other.begin(),
+                                              kernel->pp_params.pp_factors_other.end());
+            pp_params.parent_length.assign(node.length.begin(), node.length.end());
+        }
 
         break;
     }
@@ -206,6 +193,7 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                                         node.GetCallbackType(enable_callbacks),
                                         node.fuseBlue,
                                         ppType,
+                                        pp_params,
                                         node.loadOps,
                                         node.storeOps);
     };
@@ -256,21 +244,6 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
     if(data.node->scheme == CS_KERNEL_STOCKHAM_BLOCK_CC
        || data.node->scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
         kargs.append_ptr(data.node->twiddles_large);
-    if(data.node->scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC)
-    {
-        auto kernel    = data.node->GetKernel();
-        auto pp_params = get_partial_pass_params(*data.node, kernel);
-        auto pp_factors_curr_prod
-            = product(pp_params.pp_factors_curr.begin(), pp_params.pp_factors_curr.end());
-        auto pp_factors_other_prod
-            = product(pp_params.pp_factors_other.begin(), pp_params.pp_factors_other.end());
-
-        kargs.append_unsigned_int(data.node->length[1] * data.node->length[2]);
-        kargs.append_unsigned_int(data.node->length[0] * data.node->length[1]
-                                  * data.node->length[2]);
-        kargs.append_unsigned_int(data.node->length[1] * pp_factors_curr_prod);
-        kargs.append_unsigned_int(data.node->length[1] * pp_factors_other_prod);
-    }
     if(!hardcoded_dim)
         kargs.append_size_t(data.node->length.size());
     // lengths

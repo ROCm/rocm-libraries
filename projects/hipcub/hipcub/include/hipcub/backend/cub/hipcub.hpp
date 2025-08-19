@@ -85,7 +85,6 @@
 #include <cub/iterator/counting_input_iterator.cuh> // IWYU pragma: export
 #include <cub/iterator/discard_output_iterator.cuh> // IWYU pragma: export
 #include <cub/iterator/tex_obj_input_iterator.cuh> // IWYU pragma: export
-#include <cub/iterator/tex_ref_input_iterator.cuh> // IWYU pragma: export
 #include <cub/iterator/transform_input_iterator.cuh> // IWYU pragma: export
 
 // Thread

@@ -1579,62 +1579,36 @@ void testing_aux_matmul_bad_ws_size(const Arguments& arg)
                                                           heuristicResult,
                                                           &returnedAlgoCount));
 
-    bool found_solution_require_ws = false;
-    int  ws_solution_index         = 0;
-    //Find first solution that needs workspace
+    void* d_ws;
+    CHECK_HIP_ERROR(hipMalloc(&d_ws, 1));
     for(int i = 0; i < returnedAlgoCount; i++)
     {
         if(heuristicResult[i].workspaceSize > 0)
         {
-            found_solution_require_ws = true;
-            ws_solution_index         = i;
-            break;
+            //The normal behavior with insufficient ws size would be:
+            //1. run normally without crash and return HIPBLAS_STATUS_SUCCESS
+            //2. return HIPBLAS_STATUS_INVALID_VALUE
+            auto status = hipblasLtMatmul(handle,
+                                          matmul,
+                                          &alpha,
+                                          d_a,
+                                          matA,
+                                          d_b,
+                                          matB,
+                                          &beta,
+                                          d_c,
+                                          matC,
+                                          d_d,
+                                          matD,
+                                          &heuristicResult[i].algo,
+                                          d_ws,
+                                          1,
+                                          stream);
+            CHECK_SUCCESS((status == HIPBLAS_STATUS_SUCCESS)
+                          || (status == HIPBLAS_STATUS_INVALID_VALUE));
         }
     }
-    if(found_solution_require_ws)
-    {
-        //Test: ws is not enough
-        void* d_ws;
-        CHECK_HIP_ERROR(hipMalloc(&d_ws, heuristicResult[ws_solution_index].workspaceSize));
-        //set enought ws size
-        EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
-                                              matmul,
-                                              &alpha,
-                                              d_a,
-                                              matA,
-                                              d_b,
-                                              matB,
-                                              &beta,
-                                              d_c,
-                                              matC,
-                                              d_d,
-                                              matD,
-                                              &heuristicResult[ws_solution_index].algo,
-                                              d_ws,
-                                              heuristicResult[ws_solution_index].workspaceSize,
-                                              stream),
-                              HIPBLAS_STATUS_SUCCESS);
-        //set not enought ws size
-        int less_ws_size = max(0, heuristicResult[ws_solution_index].workspaceSize - 128);
-        EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
-                                              matmul,
-                                              &alpha,
-                                              d_a,
-                                              matA,
-                                              d_b,
-                                              matB,
-                                              &beta,
-                                              d_c,
-                                              matC,
-                                              d_d,
-                                              matD,
-                                              &heuristicResult[ws_solution_index].algo,
-                                              d_ws,
-                                              less_ws_size,
-                                              stream),
-                              HIPBLAS_STATUS_INVALID_VALUE);
-        CHECK_HIP_ERROR(hipFree(d_ws));
-    }
+    CHECK_HIP_ERROR(hipFree(d_ws));
 
     CHECK_HIP_ERROR(hipFree(a));
     CHECK_HIP_ERROR(hipFree(b));

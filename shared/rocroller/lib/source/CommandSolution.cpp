@@ -386,9 +386,12 @@ namespace rocRoller
                 m_commandParameters->loopOverOutputTilesTopLoop,
                 m_context));
         }
-        if(m_commandParameters->workgroupMapping)
+
+        Expression::ExpressionPtr workgroupMappingValue = nullptr;
+        if(m_commandParameters->workgroupMappingDim.has_value())
         {
             Expression::ExpressionPtr size;
+
             {
                 auto arguments = m_command->getArguments();
                 auto it        = std::find_if(arguments.cbegin(), arguments.cend(), [](auto x) {
@@ -399,10 +402,14 @@ namespace rocRoller
                 size = std::make_shared<Expression::Expression>(*it);
             }
             Expression::enableDivideBy(size, m_context);
-            m_commandParameters->workgroupMapping->second = size;
+
+            workgroupMappingValue = size;
         }
-        transforms.push_back(
-            std::make_shared<KernelGraph::ConnectWorkgroups>(m_commandParameters, m_context));
+        transforms.push_back(std::make_shared<KernelGraph::ConnectWorkgroups>(
+            m_context,
+            m_commandParameters->workgroupMappingDim,
+            m_commandParameters->workgroupRemapXCC,
+            workgroupMappingValue));
         transforms.push_back(
             std::make_shared<KernelGraph::UnrollLoops>(m_commandParameters, m_context));
         if(m_commandParameters->fuseLoops)
