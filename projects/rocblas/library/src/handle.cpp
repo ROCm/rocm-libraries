@@ -71,108 +71,16 @@ extern "C" void rocblas_device_malloc_set_default_memory_size(size_t size)
     t_rocblas_device_malloc_default_memory_size = size;
 }
 
-static inline int getActiveDevice()
-{
-    int device;
-    THROW_IF_HIP_ERROR(hipGetDevice(&device));
-    return device;
-}
-
-static Processor getActiveArch(int deviceId)
-{
-    hipDeviceProp_t deviceProperties;
-    hipGetDeviceProperties(&deviceProperties, deviceId);
-    // strip out xnack/ecc from name
-    std::string deviceFullString(deviceProperties.gcnArchName);
-    std::string deviceString = deviceFullString.substr(0, deviceFullString.find(":"));
-
-    if(deviceString.find("gfx803") != std::string::npos)
-    {
-        return Processor::gfx803;
-    }
-    else if(deviceString.find("gfx900") != std::string::npos)
-    {
-        return Processor::gfx900;
-    }
-    else if(deviceString.find("gfx906") != std::string::npos)
-    {
-        return Processor::gfx906;
-    }
-    else if(deviceString.find("gfx908") != std::string::npos)
-    {
-        return Processor::gfx908;
-    }
-    else if(deviceString.find("gfx90a") != std::string::npos)
-    {
-        return Processor::gfx90a;
-    }
-    else if(deviceString.find("gfx942") != std::string::npos)
-    {
-        return Processor::gfx942;
-    }
-    else if(deviceString.find("gfx950") != std::string::npos)
-    {
-        return Processor::gfx950;
-    }
-    else if(deviceString.find("gfx1010") != std::string::npos)
-    {
-        return Processor::gfx1010;
-    }
-    else if(deviceString.find("gfx1011") != std::string::npos)
-    {
-        return Processor::gfx1011;
-    }
-    else if(deviceString.find("gfx1012") != std::string::npos)
-    {
-        return Processor::gfx1012;
-    }
-    else if(deviceString.find("gfx1030") != std::string::npos)
-    {
-        return Processor::gfx1030;
-    }
-    else if(deviceString.find("gfx1100") != std::string::npos)
-    {
-        return Processor::gfx1100;
-    }
-    else if(deviceString.find("gfx1101") != std::string::npos)
-    {
-        return Processor::gfx1101;
-    }
-    else if(deviceString.find("gfx1102") != std::string::npos)
-    {
-        return Processor::gfx1102;
-    }
-    else if(deviceString.find("gfx1150") != std::string::npos)
-    {
-        return Processor::gfx1150;
-    }
-    else if(deviceString.find("gfx1151") != std::string::npos)
-    {
-        return Processor::gfx1151;
-    }
-    else if(deviceString.find("gfx1200") != std::string::npos)
-    {
-        return Processor::gfx1200;
-    }
-    else if(deviceString.find("gfx1201") != std::string::npos)
-    {
-        return Processor::gfx1201;
-    }
-    return static_cast<Processor>(0);
-}
-
 /*******************************************************************************
  * constructor
  ******************************************************************************/
 _rocblas_handle::_rocblas_handle()
-    : device(getActiveDevice()) // active device is handle device
-    , arch(static_cast<int>(getActiveArch(device)))
+    : device(getActiveDevice()) // getActiveDevice populates device_properties struct
+    , arch(static_cast<int>(getActiveArch()))
+    , mWarpSize(device_properties.warpSize)
 {
     archMajor      = arch / 100; // this may need to switch to string handling in the future
     archMajorMinor = arch / 10;
-
-    THROW_IF_HIP_ERROR(hipDeviceGetAttribute(
-        &mWarpSize, hipDeviceAttribute_t(hipDeviceAttributeWarpSize), device));
 
     //ROCBLAS_STREAM_ORDER_ALLOC
     const char* stream_order_alloc_env = read_env("ROCBLAS_STREAM_ORDER_ALLOC");
@@ -412,6 +320,109 @@ bool _rocblas_handle::device_allocator(size_t size)
 }
 #endif
 
+int _rocblas_handle::getActiveDevice()
+{
+    int deviceId;
+    THROW_IF_HIP_ERROR(hipGetDevice(&deviceId));
+    THROW_IF_HIP_ERROR(hipGetDeviceProperties(&device_properties, deviceId));
+    return deviceId;
+}
+
+Processor _rocblas_handle::getActiveArch()
+{
+    // strip out xnack/ecc from name
+    std::string deviceFullString(device_properties.gcnArchName);
+    std::string deviceString = deviceFullString.substr(0, deviceFullString.find(":"));
+
+    if(deviceString.find("gfx803") != std::string::npos)
+    {
+        return Processor::gfx803;
+    }
+    else if(deviceString.find("gfx900") != std::string::npos)
+    {
+        return Processor::gfx900;
+    }
+    else if(deviceString.find("gfx906") != std::string::npos)
+    {
+        return Processor::gfx906;
+    }
+    else if(deviceString.find("gfx908") != std::string::npos)
+    {
+        return Processor::gfx908;
+    }
+    else if(deviceString.find("gfx90a") != std::string::npos)
+    {
+        return Processor::gfx90a;
+    }
+    else if(deviceString.find("gfx942") != std::string::npos)
+    {
+        return Processor::gfx942;
+    }
+    else if(deviceString.find("gfx950") != std::string::npos)
+    {
+        return Processor::gfx950;
+    }
+    else if(deviceString.find("gfx1010") != std::string::npos)
+    {
+        return Processor::gfx1010;
+    }
+    else if(deviceString.find("gfx1011") != std::string::npos)
+    {
+        return Processor::gfx1011;
+    }
+    else if(deviceString.find("gfx1012") != std::string::npos)
+    {
+        return Processor::gfx1012;
+    }
+    else if(deviceString.find("gfx1030") != std::string::npos)
+    {
+        return Processor::gfx1030;
+    }
+    else if(deviceString.find("gfx1100") != std::string::npos)
+    {
+        return Processor::gfx1100;
+    }
+    else if(deviceString.find("gfx1101") != std::string::npos)
+    {
+        return Processor::gfx1101;
+    }
+    else if(deviceString.find("gfx1102") != std::string::npos)
+    {
+        return Processor::gfx1102;
+    }
+    else if(deviceString.find("gfx1150") != std::string::npos)
+    {
+        return Processor::gfx1150;
+    }
+    else if(deviceString.find("gfx1151") != std::string::npos)
+    {
+        return Processor::gfx1151;
+    }
+    else if(deviceString.find("gfx1200") != std::string::npos)
+    {
+        return Processor::gfx1200;
+    }
+    else if(deviceString.find("gfx1201") != std::string::npos)
+    {
+        return Processor::gfx1201;
+    }
+    return static_cast<Processor>(0);
+}
+
+/*******************************************************************************
+ * Numeric_check initialization
+ ******************************************************************************/
+void _rocblas_handle::init_check_numerics()
+{
+    // set check_numerics from value of environment variable ROCBLAS_CHECK_NUMERICS
+    const char* str_check_numerics_mode = read_env("ROCBLAS_CHECK_NUMERICS");
+    if(str_check_numerics_mode)
+    {
+        check_numerics
+            = static_cast<rocblas_check_numerics_mode>(strtol(str_check_numerics_mode, 0, 0));
+    }
+}
+
 /*******************************************************************************
  * Set the external data packet pointer
  ******************************************************************************/
@@ -444,6 +455,22 @@ try
 catch(...)
 {
     return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
+ * Get the handle cached const hipDeviceProp_t pointer
+ ******************************************************************************/
+ROCBLAS_INTERNAL_EXPORT_NOINLINE
+const hipDeviceProp_t* rocblas_internal_get_device_prop(rocblas_handle handle)
+try
+{
+    if(!handle)
+        return nullptr;
+    return &handle->device_properties;
+}
+catch(...)
+{
+    return nullptr;
 }
 
 /*******************************************************************************
@@ -917,18 +944,4 @@ extern "C" rocblas_status rocblas_get_performance_metric(rocblas_handle         
     }
     else
         return rocblas_status_invalid_pointer;
-}
-
-/*******************************************************************************
- * Numeric_check initialization
- ******************************************************************************/
-void _rocblas_handle::init_check_numerics()
-{
-    // set check_numerics from value of environment variable ROCBLAS_CHECK_NUMERICS
-    const char* str_check_numerics_mode = read_env("ROCBLAS_CHECK_NUMERICS");
-    if(str_check_numerics_mode)
-    {
-        check_numerics
-            = static_cast<rocblas_check_numerics_mode>(strtol(str_check_numerics_mode, 0, 0));
-    }
 }

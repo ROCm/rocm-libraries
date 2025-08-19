@@ -43,7 +43,7 @@ option(BUILD_TEST "Build tests" OFF)
 option(CODE_COVERAGE "Enable code coverage" OFF)
 option(BUILD_HIPSTDPAR_TEST "Build hipstdpar tests" OFF)
 option(BUILD_HIPSTDPAR_TEST_WITH_TBB "Build hipstdpar tests with TBB" OFF)
-option(BUILD_EXAMPLES "Build examples" OFF)
+option(BUILD_EXAMPLE "Build example" OFF)
 option(BUILD_BENCHMARK "Build benchmark" OFF)
 option(DOWNLOAD_ROCPRIM "Download rocPRIM and do not search for rocPRIM package" OFF)
 cmake_dependent_option(DOWNLOAD_ROCRAND "Download rocRAND and do not search for rocRAND package" OFF BUILD_BENCHMARK OFF)
@@ -192,7 +192,7 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
 endif()
 
 # Examples
-if(BUILD_EXAMPLES)
+if(BUILD_EXAMPLE)
   add_subdirectory(examples)
 endif()
 
