@@ -429,129 +429,16 @@ namespace
         // mutables below because possibly modified in new-array execute paths
         mutable hipfftw_data_ptr_bundle<hipfftw_owns_it> in_device;
         mutable hipfftw_data_ptr_bundle<hipfftw_owns_it> out_device;
-        // bundles for non-owned (user's) data pointers, possibly modified in new-array execute paths
-        mutable hipfftw_data_ptr_bundle<!hipfftw_owns_it> input;
-        mutable hipfftw_data_ptr_bundle<!hipfftw_owns_it> output;
+        // bundles for non-owned (user's) data pointers used at plan creation
+        hipfftw_data_ptr_bundle<!hipfftw_owns_it> plan_creation_input;
+        hipfftw_data_ptr_bundle<!hipfftw_owns_it> plan_creation_output;
 
         void execute() const
         {
-            if(!internal_rocfft_plan)
-                throw hipfftw_internal_logic_error(
-                    "the rocfft plan (internal detail to hipfftw) was "
-                    "unexpectedly uninitialized for execution.");
-            if(!input || !output)
-                throw hipfftw_invalid_arg("nullptr(s) cannot be used for execution data pointers.");
-            // in/out may or may not need to be copied to the device
-            const auto input_copy_kind
-                = input.get_copy_kind<hipfftw_memcpy_direction::TO>(device_id);
-            const auto output_copy_kind
-                = output.get_copy_kind<hipfftw_memcpy_direction::FROM>(device_id);
-
-            void* in_exec = input.get_data_ptr();
-            if(input_copy_kind != hipfftw_memcpy_kind::NONE)
-            {
-                auto hip_status = hipMemcpyAsync(in_device.get_data_ptr(),
-                                                 in_exec,
-                                                 in_bytes,
-                                                 static_cast<hipMemcpyKind>(input_copy_kind));
-                if(hip_status != hipSuccess)
-                {
-                    throw hipfftw_runtime_error(
-                        "the input data could not be copied into the GPU input buffer.",
-                        hip_status);
-                }
-                in_exec = in_device.get_data_ptr();
-            }
-            void* out_exec
-                = plan_placement == rocfft_placement_inplace
-                      ? in_exec
-                      : (output_copy_kind != hipfftw_memcpy_kind::NONE ? out_device.get_data_ptr()
-                                                                       : output.get_data_ptr());
-            rocfft_execute(internal_rocfft_plan, &in_exec, &out_exec, internal_rocfft_info);
-            if(output_copy_kind != hipfftw_memcpy_kind::NONE)
-            {
-                auto hip_status = hipMemcpyAsync(output.get_data_ptr(),
-                                                 out_exec,
-                                                 out_bytes,
-                                                 static_cast<hipMemcpyKind>(output_copy_kind));
-                if(hip_status != hipSuccess)
-                {
-                    throw hipfftw_runtime_error(
-                        "the output data could not be copied from the GPU output buffer.",
-                        hip_status);
-                }
-            }
-            if(output.is_host_accessible())
-            {
-                // results must be accessible from the host upon completion
-                hipfftw_raii_event sync_ev;
-                sync_ev.record().sync();
-            }
-            return;
+            internal_execute(plan_creation_input, plan_creation_output);
         }
-
-        void init_rocfft() const
-        {
-            // magic static to handle rocfft setup/cleanup
-            struct rocfft_initializer
-            {
-                rocfft_initializer()
-                {
-                    rocfft_setup();
-                }
-                ~rocfft_initializer()
-                {
-                    rocfft_cleanup();
-                }
-            };
-            static rocfft_initializer init;
-        }
-
-        // NOTE: const-qualified routine modifying mutable members
-        // Motivation: new-array execute path requires const qualifier yet it may need the
-        // input/output bundles to be updated and may need to create the I/O device buffers
-        void update_io_ptr_and_buffers(void* user_in, void* user_out) const
-        {
-            // cannot be called before internal structures were created
-            if(!internal_rocfft_info || !internal_rocfft_desc || !internal_rocfft_plan)
-                throw hipfftw_internal_logic_error(
-                    "rocfft details internal to hipfftw were unexpectedly uninitialized when "
-                    "updating input/output data pointers.");
-            // check that placement requirement is honored by the new user I/O
-            // if internal_rocfft_plan already exists
-            const auto new_io_placement
-                = user_in == user_out ? rocfft_placement_inplace : rocfft_placement_notinplace;
-            if(new_io_placement != plan_placement)
-                throw hipfftw_invalid_arg("the new execution arrays cannot imply a different "
-                                          "placement than what was set at plan's creation.");
-            // possibly modifying mutable members here:
-            input.set(user_in);
-            output.set(user_out);
-
-            // set device I/O buffer, if they're needed
-            // TODO: check if the current device is an APU and simply never use
-            // I/O device buffers in that case
-            if(input.get_copy_kind<hipfftw_memcpy_direction::TO>(device_id)
-               != hipfftw_memcpy_kind::NONE)
-            {
-                if(!in_device)
-                    hipfftw_set_device_allocation(in_device, in_bytes, "input", device_id);
-            }
-            else // in_device is not needed, free resources to minimize device memory footprint
-                in_device.set(nullptr);
-
-            if(input != output
-               && output.get_copy_kind<hipfftw_memcpy_direction::FROM>(device_id)
-                      != hipfftw_memcpy_kind::NONE)
-            {
-                if(!out_device)
-                    hipfftw_set_device_allocation(out_device, out_bytes, "output", device_id);
-            }
-            else // out_device is not needed, free resources to minimize device memory footprint
-                out_device.set(nullptr);
-
-            return;
-        }
+        // TODO:
+        // void execute(new_in, new_out) const {...}
 
         template <rocfft_transform_type dft_type,
                   rocfft_precision      prec,
@@ -617,7 +504,9 @@ namespace
                         "FFTW_PRESERVE_INPUT is not supported for multi-dimensional C2R DFTs.");
                 }
             }
-            plan_placement = static_cast<void*>(user_in) == static_cast<void*>(user_out)
+            plan_creation_input.set(user_in);
+            plan_creation_output.set(user_out);
+            plan_placement = plan_creation_input == plan_creation_output
                                  ? rocfft_placement_inplace
                                  : rocfft_placement_notinplace;
             if(plan_placement == rocfft_placement_inplace)
@@ -784,8 +673,114 @@ namespace
                     throw rocfft_failure(
                         "an error was received from rocfft when setting the plan's work buffer.");
             }
-            // set input and outut pointers and possible device buffers
-            update_io_ptr_and_buffers(user_in, user_out);
+            // default execution uses the I/O data pointer used at creation
+            set_io_device_buffers_for_execution(plan_creation_input, plan_creation_output);
+            return;
+        }
+
+    private:
+        void init_rocfft() const
+        {
+            // magic static to handle rocfft setup/cleanup
+            struct rocfft_initializer
+            {
+                rocfft_initializer()
+                {
+                    rocfft_setup();
+                }
+                ~rocfft_initializer()
+                {
+                    rocfft_cleanup();
+                }
+            };
+            static rocfft_initializer init;
+        }
+
+        // NOTE: const-qualified routine possibly modifying mutable members
+        // Motivation: new-array execute paths require const qualifier yet they may need
+        // to create the I/O device buffers
+        void set_io_device_buffers_for_execution(
+            const hipfftw_data_ptr_bundle<!hipfftw_owns_it>& intended_execute_in,
+            const hipfftw_data_ptr_bundle<!hipfftw_owns_it>& intended_execute_out) const
+        {
+            // TODO: check if the current device is an APU and simply never use
+            // I/O device buffers in that case
+            if(in_device && (plan_placement == rocfft_placement_inplace || out_device))
+            {
+                // buffers are ready to go, nothing to do
+                return;
+            }
+            // set device I/O buffer, if they're needed (possibly modifying mutable members)
+            if(!in_device
+               && intended_execute_in.get_copy_kind<hipfftw_memcpy_direction::TO>(device_id)
+                      != hipfftw_memcpy_kind::NONE)
+            {
+                hipfftw_set_device_allocation(in_device, in_bytes, "input", device_id);
+            }
+
+            if(plan_placement != rocfft_placement_inplace && !out_device
+               && intended_execute_out.get_copy_kind<hipfftw_memcpy_direction::FROM>(device_id)
+                      != hipfftw_memcpy_kind::NONE)
+            {
+                hipfftw_set_device_allocation(out_device, out_bytes, "output", device_id);
+            }
+            return;
+        }
+
+        void internal_execute(const hipfftw_data_ptr_bundle<!hipfftw_owns_it>& exec_in,
+                              const hipfftw_data_ptr_bundle<!hipfftw_owns_it>& exec_out) const
+        {
+            if(!internal_rocfft_plan)
+                throw hipfftw_internal_logic_error("the rocfft plan (internal detail to hipfftw) "
+                                                   "was unexpectedly uninitialized for execution.");
+            if(!exec_in || !exec_out)
+                throw hipfftw_invalid_arg("nullptr(s) cannot be used for execution data pointers.");
+            // in/out may or may not need to be copied to the device
+            const auto input_copy_kind
+                = exec_in.get_copy_kind<hipfftw_memcpy_direction::TO>(device_id);
+            const auto output_copy_kind
+                = exec_out.get_copy_kind<hipfftw_memcpy_direction::FROM>(device_id);
+
+            void* exec_in_ptr = exec_in.get_data_ptr();
+            if(input_copy_kind != hipfftw_memcpy_kind::NONE)
+            {
+                auto hip_status = hipMemcpyAsync(in_device.get_data_ptr(),
+                                                 exec_in_ptr,
+                                                 in_bytes,
+                                                 static_cast<hipMemcpyKind>(input_copy_kind));
+                if(hip_status != hipSuccess)
+                {
+                    throw hipfftw_runtime_error(
+                        "the input data could not be copied into the GPU input buffer.",
+                        hip_status);
+                }
+                exec_in_ptr = in_device.get_data_ptr();
+            }
+            void* exec_out_ptr
+                = plan_placement == rocfft_placement_inplace
+                      ? exec_in_ptr
+                      : (output_copy_kind != hipfftw_memcpy_kind::NONE ? out_device.get_data_ptr()
+                                                                       : exec_out.get_data_ptr());
+            rocfft_execute(internal_rocfft_plan, &exec_in_ptr, &exec_out_ptr, internal_rocfft_info);
+            if(output_copy_kind != hipfftw_memcpy_kind::NONE)
+            {
+                auto hip_status = hipMemcpyAsync(exec_out.get_data_ptr(),
+                                                 exec_out_ptr,
+                                                 out_bytes,
+                                                 static_cast<hipMemcpyKind>(output_copy_kind));
+                if(hip_status != hipSuccess)
+                {
+                    throw hipfftw_runtime_error(
+                        "the output data could not be copied from the GPU output buffer.",
+                        hip_status);
+                }
+            }
+            if(exec_out.is_host_accessible())
+            {
+                // results must be accessible from the host upon completion
+                hipfftw_raii_event sync_ev;
+                sync_ev.record().sync();
+            }
             return;
         }
     };
