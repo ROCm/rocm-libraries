@@ -84,7 +84,7 @@ def runTestCommand (platform, project)
 
                 pushd build
                 echo Using `nproc` threads for testing.
-                ctest -j 7 --resource-spec-file ../test/resource-spec-file.json --output-on-failure ${testExclude}
+                OMP_NUM_THREADS=1 ctest -j 8 --resource-spec-file ../test/resource-spec-file.json --output-on-failure ${testExclude}
                 export ROCROLLER_BUILD_DIR="\$(pwd)"
                 popd
                 scripts/rrperf generate --suite generate_gfx950 --arch gfx950
