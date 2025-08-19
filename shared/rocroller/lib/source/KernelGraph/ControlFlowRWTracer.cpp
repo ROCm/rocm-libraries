@@ -394,8 +394,8 @@ namespace rocRoller::KernelGraph
         // aren't there yet.
         //
 
-        auto init = m_graph.control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
-        generate(init);
+        // auto init = m_graph.control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
+        // generate(init);
 
         auto incr = m_graph.control.getOutputNodeIndices<ForLoopIncrement>(tag).to<std::set>();
         generate(incr);
@@ -413,9 +413,6 @@ namespace rocRoller::KernelGraph
 
     void ControlFlowRWTracer::operator()(Kernel const& op, int tag)
     {
-        auto init = m_graph.control.getOutputNodeIndices<Initialize>(tag).to<std::set>();
-        generate(init);
-
         auto body = m_graph.control.getOutputNodeIndices<Body>(tag).to<std::set>();
         generate(body);
     }
