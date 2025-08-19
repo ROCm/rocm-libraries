@@ -106,9 +106,16 @@ void thread_load_kernel(Type* volatile const device_input, Type* device_output)
     }
     else // index % 8 == 7
     {
+        // TODO: For compatibility, should also change this API in rocm backend
+#ifdef __HIP_PLATFORM_NVIDIA__
+        device_output[index] = hipcub::ThreadLoadVolatilePointer(
+            device_input + index,
+            ::cuda::std::integral_constant<bool, std::is_fundamental<Type>::value>{});
+#else
         device_output[index] = hipcub::ThreadLoadVolatilePointer(
             device_input + index,
             hipcub::Int2Type<std::is_fundamental<Type>::value>());
+#endif
     }
 }
 
@@ -296,9 +303,17 @@ void thread_store_kernel(Type* const device_input, Type* device_output)
     }
     else // index % 7 == 6
     {
+        // TODO: For compatibility, should also change this API in rocm backend
+#ifdef __HIP_PLATFORM_NVIDIA__
+        hipcub::ThreadStoreVolatilePtr(
+            device_output + index,
+            device_input[index],
+            ::cuda::std::integral_constant<bool, std::is_fundamental<Type>::value>{});
+#else
         hipcub::ThreadStoreVolatilePtr(device_output + index,
                                        device_input[index],
                                        hipcub::Int2Type<std::is_fundamental<Type>::value>());
+#endif
     }
 }
 

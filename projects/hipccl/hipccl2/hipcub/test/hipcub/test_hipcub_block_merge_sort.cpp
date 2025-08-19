@@ -458,12 +458,20 @@ void stable_sort_kernel(T* device_input, CompareOp compare_op)
         device_input[offset + i] = input[i];
 }
 
+template<class T>
+struct custom_type_elem_id
+{
+    T      elem;
+    size_t id;
+};
+
 TYPED_TEST(HipcubBlockMergeSort, StableSort)
 {
     constexpr size_t block_size       = TestFixture::params::block_size;
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     using T                           = typename TestFixture::params::key_type;
     using compare_function            = typename TestFixture::params::compare_function;
+    using custom_type                 = custom_type_elem_id<T>;
     constexpr size_t items_per_block  = items_per_thread * block_size;
     constexpr size_t grid_size        = 113;
     const size_t     size             = grid_size * items_per_block;
@@ -473,11 +481,6 @@ TYPED_TEST(HipcubBlockMergeSort, StableSort)
     {
         GTEST_SKIP();
     }
-    struct custom_type
-    {
-        T      elem;
-        size_t id;
-    };
 
     custom_type* host_input    = new custom_type[size];
     custom_type* host_expected = new custom_type[size];
@@ -712,6 +715,7 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysWithValidItems)
     constexpr size_t items_per_thread = TestFixture::params::items_per_thread;
     using compare_function            = typename TestFixture::params::compare_function;
     using T                           = typename TestFixture::params::key_type;
+    using custom_type                 = custom_type_elem_id<T>;
     constexpr int items_per_block     = items_per_thread * block_size;
     constexpr int grid_size           = 113;
 
@@ -721,12 +725,6 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysWithValidItems)
     {
         GTEST_SKIP();
     }
-
-    struct custom_type
-    {
-        T      elem;
-        size_t id;
-    };
 
     constexpr size_t size = grid_size * items_per_block;
 
@@ -895,8 +893,8 @@ TYPED_TEST(HipcubBlockMergeSort, StableSortKeysValuesWithValidItems)
     T*           host_keys_input   = new T[size];
     T*           host_values_input = new T[size];
 
-    T* host_keys_expected   = new T[size];
-    T* host_values_expected = new T[size];
+    [[maybe_unused]] T* host_keys_expected   = new T[size];
+    [[maybe_unused]] T* host_values_expected = new T[size];
 
     T* device_keys_input;
     T* device_values_input;

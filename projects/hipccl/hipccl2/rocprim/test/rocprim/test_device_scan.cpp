@@ -1374,7 +1374,7 @@ TYPED_TEST(RocprimDeviceScanTests, ExclusiveScanByKey)
 template<typename T>
 class single_index_iterator
 {
-private:
+public:
     class conditional_discard_value
     {
     public:

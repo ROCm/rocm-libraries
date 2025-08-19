@@ -29,9 +29,8 @@
 #include "hipcub/iterator/cache_modified_output_iterator.hpp"
 #include "hipcub/iterator/constant_input_iterator.hpp"
 #include "hipcub/iterator/counting_input_iterator.hpp"
-#include "hipcub/iterator/transform_input_iterator.hpp"
 #include "hipcub/iterator/tex_obj_input_iterator.hpp"
-#include "hipcub/iterator/tex_ref_input_iterator.hpp"
+#include "hipcub/iterator/transform_input_iterator.hpp"
 
 #include "hipcub/util_allocator.hpp"
 
@@ -426,7 +425,7 @@ TYPED_TEST(HipcubIteratorTests, TestTexRef)
 
     using T            = typename TestFixture::input_type;
     using CastT        = typename TestFixture::input_type;
-    using IteratorType = hipcub::TexRefInputIterator<T, __LINE__>;
+    using IteratorType = hipcub::TexObjInputIterator<T, std::ptrdiff_t>;
 
     //
     // Test iterator manipulation in kernel
@@ -499,7 +498,7 @@ TYPED_TEST(HipcubIteratorTests, TestTexTransform)
     HIP_CHECK(hipSetDevice(device_id));
 
     using T                   = typename TestFixture::input_type;
-    using TextureIteratorType = hipcub::TexRefInputIterator<T, __LINE__>;
+    using TextureIteratorType = hipcub::TexObjInputIterator<T, std::ptrdiff_t>;
 
     constexpr uint32_t TEST_VALUES = 11000;
 

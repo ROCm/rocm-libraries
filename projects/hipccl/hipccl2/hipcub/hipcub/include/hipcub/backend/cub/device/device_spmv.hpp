@@ -34,7 +34,7 @@
 #include "../../../util_deprecated.hpp"
 
 #include <cub/device/device_spmv.cuh> // IWYU pragma: export
-#include <cub/iterator/tex_ref_input_iterator.cuh> // IWYU pragma: export
+#include <cub/iterator/tex_obj_input_iterator.cuh> // IWYU pragma: export
 
 BEGIN_HIPCUB_NAMESPACE
 
@@ -59,7 +59,7 @@ struct SpmvParams
     ValueT          alpha;               ///< Alpha multiplicand
     ValueT          beta;                ///< Beta addend-multiplicand
 
-    ::cub::TexRefInputIterator<ValueT, 66778899, OffsetT>  t_vector_x;
+    ::cub::TexObjInputIterator<ValueT, OffsetT> t_vector_x;
 };
 
 template<typename ValueT>
