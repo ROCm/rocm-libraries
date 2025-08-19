@@ -688,7 +688,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
             params.push_back({wgt, 1, true});
             while (unrollAmount > 1 && (prob.k % (wgt.k * unrollAmount) != 0))
             {
-                unrollAmount--;
+                unrollAmount = unrollAmount / 2;
             }
 
             params.back().prefetchInFlight = unrollAmount;

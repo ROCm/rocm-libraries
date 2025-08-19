@@ -1320,7 +1320,8 @@ public:
     void run()
     {
         register_sorted_subset(parallel_instance, parallel_instances);
-        benchmark::RunSpecifiedBenchmarks();
+        benchmark::ConsoleReporter cr;
+        benchmark::RunSpecifiedBenchmarks(&cr);
     }
 
 private:
