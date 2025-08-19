@@ -5,15 +5,16 @@
 .. _windows-install:
 
 ********************************************************************
-Installing and building hipSPARSE for Windows
+Installing and building hipSPARSE for Microsoft Windows
 ********************************************************************
 
-This topic describes how to install or build hipSPARSE on Windows by using prebuilt packages or building from source.
+This topic describes how to install or build hipSPARSE on Microsoft Windows by using prebuilt packages or building from source.
+For information on installing and building hipSPARSE on Linux, see :doc:`hipSPARSE for Linux <./install>`.
 
 Prerequisites
 =============
 
-hipSPARSE on Windows requires an AMD HIP SDK enabled platform. It's supported on the
+hipSPARSE on Windows requires an AMD HIP SDK-enabled platform. It's supported on the
 same Windows versions and toolchains that the HIP SDK supports. For more information, see
 :doc:`HIP SDK installation for Windows <rocm-install-on-windows:index>`.
 
@@ -88,14 +89,14 @@ you can run the HIP SDK compiler from the ``bin/`` folder to display the version
 
    hipcc --version
 
-The HIP version has major, minor, and patch fields, possibly followed by a build specific identifier.
+The HIP version number consists of major, minor, and patch fields, and is sometimes followed by a build-specific identifier.
 For example, the HIP version might be ``6.4.22880-135e1ab4``.
 This corresponds to major release ``6``, minor release ``4``, patch ``22880``, and build identifier ``135e1ab4``.
 The rocm-libraries GitHub includes branches with names like ``release/rocm-rel-major.minor``,
 where major and minor have the same meaning as the HIP version.
 
 To limit your local checkout to only the hipSPARSE project, configure ``sparse-checkout`` before cloning.
-This uses the Git partial clone feature (``--filter=blob:none``) to reduce how much data is downloaded.
+This uses the Git partial clone feature (``--filter=blob:none``) to reduce the data download.
 Use the following commands for a sparse checkout:
 
 .. note::

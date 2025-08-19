@@ -9,6 +9,7 @@ Installing and building hipSPARSE for Linux
 *******************************************
 
 This topic explains how to install and build the hipSPARSE library on Linux by using prebuilt packages or building from source.
+For information on installing and building hipSPARSE on Microsoft Windows, see :doc:`hipSPARSE for Windows <./install-windows>`.
 
 Prerequisites
 =============
