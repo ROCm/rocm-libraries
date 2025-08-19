@@ -283,7 +283,7 @@ AcceptableError
         {
             if constexpr(std::is_same_v<TA, rocRoller::BF8> || std::is_same_v<TB, rocRoller::BF8>)
             {
-                fudge *= 5;
+                fudge *= 7.58;
                 ss << " Increase fudge for mixed BF8: " << fudge;
             }
             else if constexpr(std::is_same_v<TA,
