@@ -739,14 +739,21 @@ namespace TensileLite
                     skTiles = min(skTiles, tiles);
                 }
 
+                // If we have reached the maxGridLimit
+                if(skGrid == 65535)
+                {
+                    skTiles = 65535;
+                }
+
                 uint32_t skItersPerWG = skTiles * itersPerTile / skGrid;
                 uint32_t skExtraIters = skTiles * itersPerTile % (skGrid);
 
                 // Pack skGrid and skTiles into a single uint32_t such that the upper 16 bits
                 // represent skGrid and the lower 16 bits represent skTiles
-                uint32_t skGridAndTiles = (skGrid << 16) | (skTiles & 0xFFFF);
+                uint32_t skGridAndTiles = (skGrid << 16) | (skTiles & 0xFFFF);                
                 if(skGrid > 65535 || skTiles > 65535)
                 {
+                    // We should never reach here
                     throw std::runtime_error("Packing skGrid and skTiles exceeds the capacity of a 32-bit register.");
                 }
 
@@ -3022,9 +3029,10 @@ namespace TensileLite
                                           Hardware const& hardware,
                                           size_t          tiles) const
     {
+        uint skGrid = tiles; // Fallback
         const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
         if(streamKDP)
-            return tiles;
+            skGrid = tiles;
 
         // If K==0, run kernel as DP with Alpha=0 to skip main loop and apply beta*c
         size_t z = 1;
@@ -3033,7 +3041,7 @@ namespace TensileLite
             z *= problem.boundSize(i);
         }
         if(z == 0)
-            return tiles;
+            skGrid = tiles;
 
         AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
 
@@ -3043,7 +3051,7 @@ namespace TensileLite
         // User-specified grid size for Stream-K kernel.
         if(pAMDGPU->skFixedGrid > 0)
         {
-            return pAMDGPU->skFixedGrid;
+            skGrid = pAMDGPU->skFixedGrid;
         }
         else if (pAMDGPU->skDynamicGrid > 0)
         {
@@ -3065,49 +3073,56 @@ namespace TensileLite
             analytical::DataType miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
-            return analytical::streamk::select_streamk_grid(x,
-                                    y,
-                                    z,
-                                    batch,
-                                    problem.transA(),
-                                    problem.transB(),
-                                    problem.a().elementBytes() * 8,
-                                    problem.b().elementBytes() * 8,
-                                    problem.c().elementBytes() * 8,
-                                    miDataType,
-                                    problem.workspaceSize(),
-                                    sizeMapping.macroTile.x,
-                                    sizeMapping.macroTile.y,
-                                    sizeMapping.depthU,
-                                    sizeMapping.matrixInstruction[0],
-                                    sizeMapping.matrixInstruction[1],
-                                    sizeMapping.matrixInstruction[2],
-                                    sizeMapping.workGroupMapping,
-                                    sizeMapping.workspaceSizePerElemC,
-                                    sizeMapping.CUOccupancy,
-                                    *(hipAMDGPU->analyticalHardware),
-                                    pAMDGPU->skDynamicGrid,
-                                    32768 /*max skGrid as it should fit into a 16-bit register*/);
+            skGrid = analytical::streamk::select_streamk_grid(x,
+                                                              y,
+                                                              z,
+                                                              batch,
+                                                              problem.transA(),
+                                                              problem.transB(),
+                                                              problem.a().elementBytes() * 8,
+                                                              problem.b().elementBytes() * 8,
+                                                              problem.c().elementBytes() * 8,
+                                                              miDataType,
+                                                              problem.workspaceSize(),
+                                                              sizeMapping.macroTile.x,
+                                                              sizeMapping.macroTile.y,
+                                                              sizeMapping.depthU,
+                                                              sizeMapping.matrixInstruction[0],
+                                                              sizeMapping.matrixInstruction[1],
+                                                              sizeMapping.matrixInstruction[2],
+                                                              sizeMapping.workGroupMapping,
+                                                              sizeMapping.workspaceSizePerElemC,
+                                                              sizeMapping.CUOccupancy,
+                                                              *(hipAMDGPU->analyticalHardware),
+                                                              pAMDGPU->skDynamicGrid);
         }
         // Limit the CUs Stream-K is launched on either max or the specified,
         // whichever is minimum.
         else if(pAMDGPU->skMaxCUs > 0)
         {
-            return min(cuCount, pAMDGPU->skMaxCUs);
+            skGrid = min(cuCount, pAMDGPU->skMaxCUs);
         }
 
         // Multiply the cuCount with a constant factor (c), and launch
         // c * cuCount number of workgroups for Stream-K.
         else if(pAMDGPU->skGridMultiplier > 1)
         {
-            return cuCount * pAMDGPU->skGridMultiplier;
+            skGrid = cuCount * pAMDGPU->skGridMultiplier;
         }
 
         // If no option is specified, launch exactly cuCount worth of workgroups.
         else
         {
-            return cuCount;
+            skGrid = cuCount;
         }
+
+        size_t maxSkGrid = 65535; // We should be able to store it in 16 bits
+        if(skGrid > maxSkGrid)
+        {
+            skGrid = maxSkGrid;
+        }
+        
+        return skGrid;
     }
 
     size_t ContractionSolution::partialTileSize(size_t skGrid) const

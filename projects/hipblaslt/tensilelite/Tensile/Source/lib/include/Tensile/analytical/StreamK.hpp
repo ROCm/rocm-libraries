@@ -56,8 +56,7 @@ namespace TensileLite
                             size_t          workspace_size_per_elem_c,
                             int             occupancy,
                             const Hardware& analytical_hardware,
-                            int             dynamic_grid_version,
-                            size_t          maxGridLimit = 0);
+                            int dynamic_grid_version);
 
         } // namespace streamk
     }

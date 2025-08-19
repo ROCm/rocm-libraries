@@ -250,23 +250,22 @@ namespace TensileLite
                 size_t          workspace_size_per_elem_c,
                 int             occupancy,
                 const Hardware& analytical_hardware,
-                int             dynamic_grid_version,
-                size_t          maxGridLimit)
+                int dynamic_grid_version)
             {
                 size_t cu_count = analytical_hardware.N_CU;
-                size_t tiles    = number_of_output_tiles(mt_m, mt_n, x, y, batch);
-                size_t sk_grid  = tiles;
+                size_t tiles = number_of_output_tiles(mt_m, mt_n, x, y, batch);
 
                 // Dynamically pick the minimum between the cu_count or number of tiles.
                 if(dynamic_grid_version == 1)
                 {
-                    sk_grid = std::min(cu_count, tiles);
+                    return std::min(cu_count, tiles);
                 }
+
                 // Dynamically pick the minimum between the cu_count or number of tiles,
                 // and scale down really large sizes to use fewer CUs for power/energy savings.
                 else if(dynamic_grid_version == 2)
                 {
-                    sk_grid = cu_count;
+                    size_t sk_grid = cu_count;
                     if(tiles > sk_grid)
                     {
                         for(size_t i = 1; i <= 32; i *= 2)
@@ -283,7 +282,7 @@ namespace TensileLite
                         }
                     }
 
-                    sk_grid = std::min(sk_grid, tiles);
+                    return std::min(sk_grid, tiles);
                 }
                 // Dynamically predict the best grid-size by weighing the cost of the fix-up
                 // step and the cost of processing MAC-loop instructions. When the cost of fix-up
@@ -291,51 +290,52 @@ namespace TensileLite
                 // Architecture dependent.
                 else if(dynamic_grid_version == 3)
                 {
-                    sk_grid = analytical::streamk::best_predicted_grid_size(mt_m,
-                                                                            mt_n,
-                                                                            mt_k,
-                                                                            x,
-                                                                            y,
-                                                                            z,
-                                                                            batch,
-                                                                            1,
-                                                                            cu_count);
+                    return analytical::streamk::best_predicted_grid_size(mt_m,
+                                            mt_n,
+                                            mt_k,
+                                            x,
+                                            y,
+                                            z,
+                                            batch,
+                                            1,
+                                            cu_count);
                 }
                 // Fix Stream-K algorithm to function like a Data-parallel schedule
                 // where grid size is equal to the number of output tiles.
                 else if(dynamic_grid_version == 4)
                 {
-                    sk_grid = analytical::streamk::number_of_output_tiles(mt_m, mt_n, x, y, batch);
+                    return analytical::streamk::number_of_output_tiles(
+                    mt_m, mt_n, x, y, batch);
                 }
                 else if(dynamic_grid_version == 5)
                 {
-                    sk_grid = analytical::select_best_grid_size(x,
-                                                                y,
-                                                                z,
-                                                                batch,
-                                                                trans_a,
-                                                                trans_b,
-                                                                analytical_hardware,
-                                                                mt_m,
-                                                                mt_n,
-                                                                mt_k,
-                                                                mi_m,
-                                                                mi_n,
-                                                                mi_k,
-                                                                element_size_A,
-                                                                element_size_B,
-                                                                element_size_out,
-                                                                mi_datatype,
-                                                                0,
-                                                                0.0,
-                                                                false,
-                                                                workgroup_mapping,
-                                                                10);
+                    return analytical::select_best_grid_size(x,
+                                y,
+                                z,
+                                batch,
+                                trans_a,
+                                trans_b,
+                                analytical_hardware,
+                                mt_m,
+                                mt_n,
+                                mt_k,
+                                mi_m,
+                                mi_n,
+                                mi_k,
+                                element_size_A,
+                                element_size_B,
+                                element_size_out,
+                                mi_datatype,
+                                0,
+                                0.0,
+                                false,
+                                workgroup_mapping,
+                                10);
                 }
                 else if(dynamic_grid_version == 6)
                 {
-                    sk_grid = tiles; // Fallback
                     size_t iters_per_tile = std::max(size_t(1), math::safe_ceil_div(z, mt_k));
+                    size_t sk_grid = tiles; // Fallback if no good fractional tile is found
                     size_t tile_size = mt_m * mt_n * workspace_size_per_elem_c;
                     // More tiles than CUs
                     // Distribute tiles evenly across maximum number of CUs
@@ -382,17 +382,13 @@ namespace TensileLite
 
                     if (tiles % sk_grid != 0 && tile_size * sk_grid > workspace_size)
                         sk_grid = tiles;
+                    return sk_grid;
                 }
                 // If no option is specified, launch exactly cu_count worth of workgroups.
                 else
                 {
-                    sk_grid = cu_count;
+                    return cu_count;
                 }
-
-                if(maxGridLimit)
-                    return std::min(sk_grid, maxGridLimit);
-                else
-                    return sk_grid;
             }
         } // namespace streamk
     }
