@@ -3029,7 +3029,7 @@ namespace TensileLite
                                           Hardware const& hardware,
                                           size_t          tiles) const
     {
-        uint skGrid = tiles; // Fallback
+        size_t skGrid = tiles; // Fallback
         const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
         if(streamKDP)
             skGrid = tiles;
