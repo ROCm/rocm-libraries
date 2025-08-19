@@ -848,7 +848,7 @@ std::shared_ptr<SolutionParameters>
     // Swizzle Scale only support in certain situations
     // Swizzle Scale also runs out of registers with FP8
     if (kernelType.scaleAMode != rocRoller::Operations::ScaleMode::Separate || 
-        kernelType.scaleAMode != rocRoller::Operations::ScaleMode::Separate)
+        kernelType.scaleBMode != rocRoller::Operations::ScaleMode::Separate)
     {
         gemm->swizzleScale = false;
         gemm->prefetchScale = false;
@@ -1829,17 +1829,14 @@ rocblaslt_status runGemmKernel(std::shared_ptr<GemmKernel>        gemm,
 
     auto commandArgs = createCommandArguments(gemm, prob, DEFAULT_WGM);
 
-    auto runtimeArgs = commandArgs.runtimeArguments();
-
     // Add scratch space
     if(workSpaceRequired > 0)
     {
         commandArgs.setArgument(
             gemm->tagScratch, ArgumentType::Value, static_cast<unsigned char*>(prob.workspace));
-        runtimeArgs = commandArgs.runtimeArguments();
     }
 
-    runtimeArgs = commandArgs.runtimeArguments();
+    auto runtimeArgs = commandArgs.runtimeArguments();
 
     if(!gemm->commandKernel->matchesPredicates(runtimeArgs, LogLevel::Error))
     {
