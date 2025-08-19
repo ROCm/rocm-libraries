@@ -2553,52 +2553,25 @@ class Solution(collections.abc.Mapping):
       while True: # exit criteria at end
         validDepthU = True
 
-        # how many elements to load
+        # handle global read vector width A
         if state["ProblemType"]["TLUA"]: # NT/NN
           totalElementsCoalescedA = state["MacroTileA"]
-          totalElementsPerpA = depthUA
+          totalElementsPerpA = state["_DepthUA"]
           if state["DirectToVgprA"]:
             totalElementsCoalescedA *= state["MIWaveGroup"][1]
         else: # TN/TT
-          totalElementsCoalescedA = depthUA
+          totalElementsCoalescedA = state["_DepthUA"]
           totalElementsPerpA = state["MacroTileA"]
           if state["DirectToVgprA"]:
             totalElementsPerpA *= state["MIWaveGroup"][1]
 
-        if state["ProblemType"]["TLUB"]: # NT/TT
-          totalElementsCoalescedB = state["MacroTileB"]
-          totalElementsPerpB = depthUB
-          if state["DirectToVgprB"]:
-            totalElementsCoalescedB *= state["MIWaveGroup"][0]
-        else: # TN/NN
-          totalElementsCoalescedB = depthUB
-          totalElementsPerpB = state["MacroTileB"]
-          if state["DirectToVgprB"]:
-            totalElementsPerpB *= state["MIWaveGroup"][0]
-
         if state["GlobalReadVectorWidthA"] > totalElementsCoalescedA:
           reject(state, printRejectionReason, f"GRVWA({state['GlobalReadVectorWidthA']}) > Coaleased({totalElementsCoalescedA})")
 
-        if state["GlobalReadVectorWidthB"] > totalElementsCoalescedB:
-          reject(state, printRejectionReason, f"GRVWB({state['GlobalReadVectorWidthB']}) > Coaleased({totalElementsCoalescedB})")
-
         totalElementsA = totalElementsCoalescedA * totalElementsPerpA
-        totalElementsB = totalElementsCoalescedB * totalElementsPerpB
-        if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
-          if state["ProblemType"]["TLUMetadata"]:
-            totalElementsCoalescedM = state["MacroTileMetadata"]
-            totalElementsPerpM = depthUM
-          else:
-            totalElementsCoalescedM = depthUM
-            totalElementsPerpM = state["MacroTileMetadata"]
-          totalElementsM = totalElementsCoalescedM * totalElementsPerpM
 
         tva = totalElementsA // state["GlobalReadVectorWidthA"]
         if not Solution.setGlobalReadVectorWidth(state, "A", tva, state["GlobalReadVectorWidthA"], printRejectionReason):
-          validDepthU = False
-
-        tvb = totalElementsB // state["GlobalReadVectorWidthB"]
-        if not Solution.setGlobalReadVectorWidth(state, "B", tvb, state["GlobalReadVectorWidthB"], printRejectionReason):
           validDepthU = False
 
         if state["EnableMatrixInstruction"] and state["GlobalReadVectorWidthA"]:
@@ -2620,6 +2593,38 @@ class Solution(collections.abc.Mapping):
               if not Solution.setGlobalReadVectorWidth(state, "A", tva, glvwAlimit, printRejectionReason):
                 validDepthU = False
 
+        GlobalReadVectorWidthA = state["GlobalReadVectorWidthA"]
+        totalVectorsCoalescedA = totalElementsCoalescedA // GlobalReadVectorWidthA
+
+        # handle global read vector width B
+        if state["ProblemType"]["TLUB"]: # NT/TT
+          totalElementsCoalescedB = state["MacroTileB"]
+          totalElementsPerpB = depthUB
+          if state["DirectToVgprB"]:
+            totalElementsCoalescedB *= state["MIWaveGroup"][0]
+        else: # TN/NN
+          totalElementsCoalescedB = depthUB
+          totalElementsPerpB = state["MacroTileB"]
+          if state["DirectToVgprB"]:
+            totalElementsPerpB *= state["MIWaveGroup"][0]
+
+        if state["GlobalReadVectorWidthB"] > totalElementsCoalescedB:
+          reject(state, printRejectionReason, f"GRVWB({state['GlobalReadVectorWidthB']}) > Coaleased({totalElementsCoalescedB})")
+
+        totalElementsB = totalElementsCoalescedB * totalElementsPerpB
+        if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
+          if state["ProblemType"]["TLUMetadata"]:
+            totalElementsCoalescedM = state["MacroTileMetadata"]
+            totalElementsPerpM = depthUM
+          else:
+            totalElementsCoalescedM = depthUM
+            totalElementsPerpM = state["MacroTileMetadata"]
+          totalElementsM = totalElementsCoalescedM * totalElementsPerpM
+
+        tvb = totalElementsB // state["GlobalReadVectorWidthB"]
+        if not Solution.setGlobalReadVectorWidth(state, "B", tvb, state["GlobalReadVectorWidthB"], printRejectionReason):
+          validDepthU = False
+
         if state["EnableMatrixInstruction"] and state["GlobalReadVectorWidthB"]:
           partialB = state["ProblemType"]["TLUB"] and (state["AssertFree1ElementMultiple"] % state["GlobalReadVectorWidthB"] != 0)
           if partialB and not state["UseGeneralizedNLCOneB"]:
@@ -2638,14 +2643,10 @@ class Solution(collections.abc.Mapping):
               if not Solution.setGlobalReadVectorWidth(state, "B", tvb, glvwBlimit, printRejectionReason):
                 validDepthU = False
 
-        if validDepthU and state["KernelLanguage"] == "Assembly":
-          if isaInfoMap[state["ISA"]].archCaps["HasEccHalf"]:
-            if state["ProblemType"]["DataType"].numRegisters() == 0.5 and (not state["ProblemType"]["HighPrecisionAccumulate"]) \
-               and (not state["ProblemType"]["DataTypeA"].isSingle()) and (not state["ProblemType"]["DataTypeB"].isSingle()):
-                if state["GlobalReadVectorWidthA"] == 1 or state["GlobalReadVectorWidthB"] == 1:
-                  reject(state, printRejectionReason, "HalfEcc requires HPA if glvw = 1")
-                  break
+        GlobalReadVectorWidthB = state["GlobalReadVectorWidthB"]
+        totalVectorsCoalescedB = totalElementsCoalescedB // GlobalReadVectorWidthB
 
+        # handle global read vector width M
         if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
           grvw = 1
           vw = 1
@@ -2661,7 +2662,6 @@ class Solution(collections.abc.Mapping):
             if state["GlobalReadVectorWidthA"] % 4 != 0:
               reject(state, printRejectionReason, "Sparse A requires GRVWA %% 4 == 0, current GRVWA is %u"%state["GlobalReadVectorWidthA"])
               break
-
 
           tvm = totalElementsM // grvw
 
@@ -2691,16 +2691,18 @@ class Solution(collections.abc.Mapping):
                 if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, glvwMlimit, printRejectionReason):
                   validDepthU = False
 
+        if validDepthU and state["KernelLanguage"] == "Assembly":
+          if isaInfoMap[state["ISA"]].archCaps["HasEccHalf"]:
+            if state["ProblemType"]["DataType"].numRegisters() == 0.5 and (not state["ProblemType"]["HighPrecisionAccumulate"]) \
+               and (not state["ProblemType"]["DataTypeA"].isSingle()) and (not state["ProblemType"]["DataTypeB"].isSingle()):
+                if state["GlobalReadVectorWidthA"] == 1 or state["GlobalReadVectorWidthB"] == 1:
+                  reject(state, printRejectionReason, "HalfEcc requires HPA if glvw = 1")
+                  break
+
         if state["ProblemType"]["Sparse"] and state["DirectToVgprSparseMetadata"]:
           if state["VectorWidthA"] > 1 or state["VectorWidthB"] > 1 :
             reject(state, printRejectionReason, "Not implement DTVSM with VW>1")
             break
-
-        # Now convert elements to vectors based on GlobalReadVectorWidth
-        GlobalReadVectorWidthA = state["GlobalReadVectorWidthA"]
-        GlobalReadVectorWidthB = state["GlobalReadVectorWidthB"]
-        totalVectorsCoalescedA = totalElementsCoalescedA // GlobalReadVectorWidthA
-        totalVectorsCoalescedB = totalElementsCoalescedB // GlobalReadVectorWidthB
 
         extraComment = ""
         if validDepthU:
