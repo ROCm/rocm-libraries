@@ -145,6 +145,11 @@ void Arguments::init()
     {
         wgm_vector[i] = -1;
     }
+    skgrid_vector[0] = 0;
+    for(int32_t i = 0; i < MAX_SUPPORTED_NUM_PROBLEMS; i++)
+    {
+        skgrid_vector[i] = -1;
+    }
 
     print_solution_found = false;
     flush                = false;

@@ -169,6 +169,7 @@ public:
                   const Arguments&            arg,
                   uint32_t                    splitK,
                   uint32_t                    wgm,
+                  uint32_t                    skgrid,
                   double                      gpu_us,
                   double                      flush_us,
                   double                      gflops,
@@ -249,6 +250,8 @@ public:
             print("splitK", splitK);
         if(wgm > 0)
             print("wgm", wgm);
+        if(skgrid > 0)
+            print("stream-k grid", skgrid);
 
         // Printing rotating buffer even if it is set to default value
         print("rotating_buffer", arg.rotating);

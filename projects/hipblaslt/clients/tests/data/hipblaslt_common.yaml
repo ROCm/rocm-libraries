@@ -568,6 +568,7 @@ Arguments:
   - skip_slow_solution_ratio: c_float
   - gsu_vector: c_int32*32
   - wgm_vector: c_int32*32
+  - skgrid_vector: c_int32*32
   - print_solution_found: c_bool
   - print_kernel_info: c_bool
   - flush: c_bool
@@ -676,6 +677,7 @@ Defaults:
   skip_slow_solution_ratio: 0.0
   gsu_vector: 0
   wgm_vector: 0
+  skgrid_vector: 0
   print_solution_found: false
   print_kernel_info: false
   flush: false

@@ -412,6 +412,7 @@ namespace hipblaslt_ext
     public:
         uint16_t splitK = 0;
         int16_t  wgm    = 0;
+        uint16_t  skgrid = 0;
     };
 
     GemmTuning::GemmTuning()
@@ -445,6 +446,11 @@ namespace hipblaslt_ext
         pimpl->wgm = wgm;
     }
 
+    void GemmTuning::setSKGrid(uint16_t skgrid)
+    {
+        pimpl->skgrid = skgrid;
+    }
+
     uint16_t GemmTuning::getSplitK() const
     {
         return pimpl->splitK;
@@ -453,6 +459,11 @@ namespace hipblaslt_ext
     int16_t GemmTuning::getWgm() const
     {
         return pimpl->wgm;
+    }
+
+    uint16_t GemmTuning::getSKGrid() const
+    {
+        return pimpl->skgrid;
     }
 
     class GemmInputs::GemmInputsImpl

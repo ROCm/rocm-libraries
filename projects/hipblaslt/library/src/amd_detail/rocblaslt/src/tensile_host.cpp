@@ -757,6 +757,8 @@ namespace
             problem.getParams().gsu() ? std::to_string(problem.getParams().gsu()) : "",
             problem.getParams().wgm() ? "--wgm" : "",
             problem.getParams().wgm() ? std::to_string(problem.getParams().wgm()) : "",
+            problem.getParams().skgrid() ? "--skgrid" : "",
+            problem.getParams().skgrid() ? std::to_string(problem.getParams().skgrid()) : "",
             "--compute_type",
             tensileComputeInputType_to_bench_string(problem.computeType(),
                                                     problem.f32XdlMathOp(),
@@ -1075,6 +1077,9 @@ namespace
                                                : "",
             problem.gemms[0].getParams().wgm() ? "--wgm" : "",
             problem.gemms[0].getParams().wgm() ? std::to_string(problem.gemms[0].getParams().wgm())
+                                               : "",
+            problem.gemms[0].getParams().skgrid() ? "--skgrid" : "",
+            problem.gemms[0].getParams().skgrid() ? std::to_string(problem.gemms[0].getParams().skgrid())
                                                : "",
             "--compute_type",
             tensileComputeInputType_to_bench_string(problem.gemms[0].computeType(),
@@ -2739,6 +2744,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             {
                 data->problem.setParams().setGSU(tuning->gsu);
                 data->problem.setParams().setWgm(tuning->wgm);
+                data->problem.setParams().setSKGrid(tuning->skgrid);
                 std::stringstream ss;
                 if(!solution->checkInternalArgumentsSupport(data->problem, ss, true))
                 {
@@ -2784,6 +2790,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             {
                 data->problem.gemms[0].setParams().setGSU(tuning->gsu);
                 data->problem.gemms[0].setParams().setWgm(tuning->wgm);
+                data->problem.gemms[0].setParams().setSKGrid(tuning->skgrid);
                 std::stringstream ss;
                 if(!solution->checkInternalArgumentsSupport(data->problem.gemms[0], ss, true))
                 {
@@ -2795,6 +2802,7 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 {
                     data->problem.gemms[i].setParams().setGSU(tuning->gsu);
                     data->problem.gemms[i].setParams().setWgm(tuning->wgm);
+                    data->problem.gemms[i].setParams().setSKGrid(tuning->skgrid);
                 }
             }
             else
@@ -3562,6 +3570,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         {
             tensile_prob.setParams().setGSU(tuning->gsu);
             tensile_prob.setParams().setWgm(tuning->wgm);
+            tensile_prob.setParams().setSKGrid(tuning->skgrid);
             std::stringstream ss;
             if(!solution->checkInternalArgumentsSupport(tensile_prob, ss, true))
             {
@@ -3647,6 +3656,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
         {
             tensile_prob.gemms[0].setParams().setGSU(tuning->gsu);
             tensile_prob.gemms[0].setParams().setWgm(tuning->wgm);
+            tensile_prob.gemms[0].setParams().setSKGrid(tuning->skgrid);
             std::stringstream ss;
             if(!solution->checkInternalArgumentsSupport(tensile_prob.gemms[0], ss, true))
             {
@@ -3658,6 +3668,7 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle       handle,
             {
                 tensile_prob.gemms[i].setParams().setGSU(tuning->gsu);
                 tensile_prob.gemms[i].setParams().setWgm(tuning->wgm);
+                tensile_prob.gemms[i].setParams().setSKGrid(tuning->skgrid);
             }
         }
         else
@@ -3895,6 +3906,7 @@ std::string getKernelNameFromData(rocblaslt_handle             handle,
 
     int                                        gsu = 0;
     int                                        wgm = 0;
+    int                                     skgrid = 0;
     std::vector<TensileLite::KernelInvocation> kernels;
 
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
@@ -3903,6 +3915,7 @@ std::string getKernelNameFromData(rocblaslt_handle             handle,
         kernels                               = data->kernels;
         gsu                                   = data->problem.getParams().gsu();
         wgm                                   = data->problem.getParams().wgm();
+        skgrid                                = data->problem.getParams().skgrid();
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {
@@ -3940,6 +3953,7 @@ std::string getSolutionNameFromData(rocblaslt_handle             handle,
 
     int gsu           = 0;
     int wgm           = 0;
+    int skgrid   = 0;
     int solutionIndex = -1;
 
     std::shared_ptr<TensileLite::Hardware> hardware;
@@ -3952,6 +3966,7 @@ std::string getSolutionNameFromData(rocblaslt_handle             handle,
         solutionIndex                         = data->algoIndex;
         gsu                                   = data->problem.getParams().gsu();
         wgm                                   = data->problem.getParams().wgm();
+        skgrid                                = data->problem.getParams().skgrid();
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {
@@ -3960,6 +3975,7 @@ std::string getSolutionNameFromData(rocblaslt_handle             handle,
         solutionIndex = data->algoIndex;
         gsu           = data->problem.gemms[0].getParams().gsu();
         wgm           = data->problem.gemms[0].getParams().wgm();
+        skgrid        = data->problem.gemms[0].getParams().skgrid();
     }
     if(solutionIndex == -1)
         return "";

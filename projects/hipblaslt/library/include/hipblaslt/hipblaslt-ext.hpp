@@ -233,9 +233,13 @@ namespace hipblaslt_ext
         HIPBLASLT_EXPORT void setWgm(
             int16_t
                 wgm); //!< Set the value of workgroup mapping, 0 is off (use the workgroup mapping inside the solution).
+        HIPBLASLT_EXPORT void setSKGrid(
+            uint16_t
+                skgrid); //!< Set the value of stream-K grid, 0 is off (use the skgrid mapping inside the solution or from env variable).
 
         HIPBLASLT_EXPORT uint16_t getSplitK() const; //!< Value of splitK.
         HIPBLASLT_EXPORT int16_t  getWgm() const; //!< Value of workgroup mapping.
+        HIPBLASLT_EXPORT uint16_t getSKGrid() const; //!< Value of Stream-K Grid.
     private:
         friend GemmInstance;
         class GemmTuningImpl;

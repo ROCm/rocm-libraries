@@ -1963,6 +1963,23 @@ Tests:
   beta: 2.0
   unit_check: 1
 
+- name: matmul_extapi_algo_method_tuning_skgrid
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  matrix_size:
+    - { M:  4096, N:  4096, K:  40 }
+    - { M:  1024, N:  1024, K:  80 }
+  transA_transB: *transA_transB_range
+  algo_method: [2]
+  use_ext: [1]
+  use_ext_setproblem: [0]
+  grouped_gemm: [0]
+  skgrid_vector: [[0], [4], [9], [16]]
+  alpha: 1
+  beta: 2.0
+  unit_check: 1
+
 - name: matmul_extapi_algo_method_grouped_gemm_tuning_wgm
   category: pre_checkin
   function:

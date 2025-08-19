@@ -174,6 +174,7 @@ struct Arguments
     // tuning
     int32_t gsu_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
     int32_t wgm_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
+    int32_t skgrid_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
 
     // print
     bool print_solution_found;
@@ -278,6 +279,7 @@ struct Arguments
     OPER(skip_slow_solution_ratio) SEP\
     OPER(gsu_vector) SEP             \
     OPER(wgm_vector) SEP             \
+    OPER(skgrid_vector) SEP          \
     OPER(print_solution_found) SEP   \
     OPER(print_kernel_info) SEP      \
     OPER(flush) SEP                  \
