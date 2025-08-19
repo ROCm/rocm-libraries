@@ -22,13 +22,13 @@ include(dependencies)
 
 rocm_setup_version(VERSION ${PROJECT_VERSION})
 
-option(ORIGAMI_BUILD_SHARED_LIBS "Build shared libraries." ${ORIGAMI_STANDALONE})
+option(ORIGAMI_BUILD_SHARED_LIBS "Build shared libraries." ON)
 option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
 option(ORIGAMI_ENABLE_TESTS "Enable Python binding tests." OFF)
 
 find_package(hip REQUIRED)
 
-if(ORIGAMI_BUILD_SHARED_LIBS OR (BUILD_SHARED_LIBS AND ORIGAMI_STANDALONE))
+if(ORIGAMI_BUILD_SHARED_LIBS)
     add_library(origami SHARED) 
 else()
     add_library(origami STATIC)
@@ -37,6 +37,10 @@ endif()
 rocm_set_soversion(origami ${PROJECT_VERSION_MAJOR})
 
 add_library(origami::origami ALIAS origami)
+
+set_target_properties(origami PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+)
 
 target_compile_features(origami PUBLIC cxx_std_17)
 
