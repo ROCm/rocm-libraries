@@ -27,19 +27,33 @@ if (LIBCUDACXX_ENABLE_CUDA)
   find_package(CUDAToolkit REQUIRED)
   get_target_property(CUDA_INCLUDE_DIR CUDA::cudart INTERFACE_INCLUDE_DIRECTORIES)
 
-set(LIBCUDACXX_HIGHEST_COMPUTE_ARCH 90)
+  set(LIBCUDACXX_HIGHEST_COMPUTE_ARCH 90)
 
-foreach (COMPUTE_ARCH ${LIBCUDACXX_COMPUTE_ARCHS})
-  set(_compute_message "${_compute_message} sm_${COMPUTE_ARCH}")
-  set(LIBCUDACXX_COMPUTE_ARCHS_STRING "${LIBCUDACXX_COMPUTE_ARCHS_STRING} ${COMPUTE_ARCH}")
-endforeach ()
+  foreach (COMPUTE_ARCH ${LIBCUDACXX_COMPUTE_ARCHS})
+    set(_compute_message "${_compute_message} sm_${COMPUTE_ARCH}")
+    set(LIBCUDACXX_COMPUTE_ARCHS_STRING "${LIBCUDACXX_COMPUTE_ARCHS_STRING} ${COMPUTE_ARCH}")
+  endforeach ()
 
-message(STATUS "Enabled CUDA architectures:${_compute_message}")
+  message(STATUS "Enabled CUDA architectures:${_compute_message}")
 
-option(LIBCUDACXX_TEST_WITH_NVRTC
-  "Test libcu++ with runtime compilation instead of offline compilation. Only runs device side tests."
-  OFF)
+  option(LIBCUDACXX_TEST_WITH_NVRTC
+    "Test libcu++ with runtime compilation instead of offline compilation. Only runs device side tests."
+    OFF)
 elseif(LIBCUDACXX_ENABLE_HIP)
+
+  # If LIBCUDACXX_COMPUTE_ARCHS is not set, use the HIP architectures
+  if (NOT LIBCUDACXX_COMPUTE_ARCHS)
+    set(LIBCUDACXX_COMPUTE_ARCHS ${CMAKE_HIP_ARCHITECTURES})
+  endif()
+
+  # Separate the architectures with a space
+  foreach (COMPUTE_ARCH ${LIBCUDACXX_COMPUTE_ARCHS})
+    set(_compute_message "${_compute_message} ${COMPUTE_ARCH}")
+    set(LIBCUDACXX_COMPUTE_ARCHS_STRING "${LIBCUDACXX_COMPUTE_ARCHS_STRING} ${COMPUTE_ARCH}")
+  endforeach ()
+
+  message(STATUS "Enabled HIP architectures:${_compute_message}")
+
   option(LIBHIPCXX_TEST_WITH_HIPRTC
   "Test libcu++ with runtime compilation instead of offline compilation. Only runs device side tests."
   OFF)
@@ -134,12 +148,6 @@ if (${CMAKE_CUDA_COMPILER_ID} STREQUAL "HIPCC")
   )
 endif()
 
-if (LIBCUDACXX_ENABLE_HIP)
-  set(LIBCUDACXX_COMPUTE_ARCHS_STRING "${CMAKE_HIP_ARCHITECTURES}")
-else()
-  set(LIBCUDACXX_COMPUTE_ARCHS_STRING "${CMAKE_CUDA_ARCHITECTURES}")
-endif()
-
 include(AddLLVM)
 
 set(LIBCUDACXX_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
@@ -167,6 +175,11 @@ find_program(libcudacxx_LIT lit REQUIRED)
 set(libcudacxx_LIT_FLAGS "" CACHE STRING "Semi-colon separated list of flags passed to the invocation of lit.")
 message(STATUS "libcudacxx_LIT_FLAGS: ${libcudacxx_LIT_FLAGS}")
 
+# Restricted to avoid oversubscribing the GPU:
+set(libcudacxx_LIT_PARALLEL_LEVEL 8 CACHE STRING
+"Parallelism used to run libcudacxx's lit test suite."
+)
+
 if (LIBCUDACXX_ENABLE_CUDA)
   if (NOT LIBCUDACXX_TEST_WITH_NVRTC)
     # Build but don't run the tests. Used by CI to pre-seed sccache for the test machines.
@@ -174,7 +187,7 @@ if (LIBCUDACXX_ENABLE_CUDA)
     add_custom_target(libcudacxx.test.lit.precompile
       DEPENDS libcudacxx.test.public_headers libcudacxx.test.internal_headers libcudacxx.test.public_headers_host_only
       COMMAND "${CMAKE_COMMAND}" -E env "LIBCUDACXX_SITE_CONFIG=${lit_site_cfg_path}"
-      "${libcudacxx_LIT}" -vv --no-progress-bar ${libcudacxx_LIT_FLAGS} "-Dexecutor=\"NoopExecutor()\"" "${libhipcxx_SOURCE_DIR}/test/libcudacxx"
+      "${libcudacxx_LIT}" -vv --no-progress-bar ${libcudacxx_LIT_FLAGS} -j "${libcudacxx_LIT_PARALLEL_LEVEL}" "-Dexecutor=\"NoopExecutor()\"" "${libhipcxx_SOURCE_DIR}/test/libcudacxx"
     )
 
   endif()
@@ -185,16 +198,11 @@ elseif(LIBCUDACXX_ENABLE_HIP)
     add_custom_target(libcudacxx.test.lit.precompile
       DEPENDS libcudacxx.test.public_headers libcudacxx.test.internal_headers libcudacxx.test.public_headers_host_only
       COMMAND "${CMAKE_COMMAND}" -E env "LIBCUDACXX_SITE_CONFIG=${lit_site_cfg_path}"
-      "${libcudacxx_LIT}" -vv --no-progress-bar ${libcudacxx_LIT_FLAGS} "-Dexecutor=\"NoopExecutor()\"" "${libhipcxx_SOURCE_DIR}/test"
+      "${libcudacxx_LIT}" -vv --no-progress-bar ${libcudacxx_LIT_FLAGS} -j "${libcudacxx_LIT_PARALLEL_LEVEL}" "-Dexecutor=\"NoopExecutor()\"" "${libhipcxx_SOURCE_DIR}/test"
     )
 
   endif()
 endif()
-
-# Restricted to avoid oversubscribing the GPU:
-set(libcudacxx_LIT_PARALLEL_LEVEL 8 CACHE STRING
-"Parallelism used to run libcudacxx's lit test suite."
-)
 
 add_test(NAME libcudacxx.test.lit COMMAND
   "${CMAKE_COMMAND}" -E env
