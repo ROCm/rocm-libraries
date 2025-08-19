@@ -771,7 +771,7 @@ int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
         analaytical_hardware,
         6);
 
-        return result;
+    return result;
 }
 
 std::pair<int, int> pickWorkgroupSize(std::shared_ptr<SolutionParameters> gemm)
