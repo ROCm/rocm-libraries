@@ -348,6 +348,8 @@ validParameters = { # we need to make sure this matches develop
     # Assembly only
     "DirectToVgprA": [False, True],
     "DirectToVgprB": [False, True],
+    "DirectToVgprMXSA": [False, True],
+    "DirectToVgprMXSB": [False, True],
     "DirectToVgprSparseMetadata": [False, True],
     # B address interleave (restricted): non-contiguous tile columns for TN/NN-like B (TLUB == False),
     # with runtime G chosen as the largest power-of-two factor of (N/MT1), capped by LVCB.
