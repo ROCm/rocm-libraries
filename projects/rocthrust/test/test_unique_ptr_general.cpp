@@ -37,6 +37,15 @@ struct A_deleter {
     }
 };
 
+struct GetDeleterTestDeleter
+{
+    void operator()(thrust::device_ptr<int>) const {}
+    void operator()(thrust::device_ptr<int[]>) const {}
+
+    int test() { return 5; }
+    int test() const { return 6; }
+};
+
 TESTS_DEFINE(UniquePtrGeneralTests, NumericalTestsParams);
 
 TEST(UniquePtrGeneralTests, TestUniquePtrSwap)
@@ -393,4 +402,39 @@ TEST(UniquePtrGeneralTests, TestUniquePtrUserTypeCustomDeleter)
     size_t dummy = 0;
     hipError_t st = hipMemPtrGetInfo(raw_addr, &dummy);
     ASSERT_EQ(st, hipErrorInvalidValue);
+}
+
+TEST(UniquePtrGeneralTests, TestUniquePtrGetDeleter)
+{
+    SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
+
+    // Deleter stored by value
+    {
+        thrust::unique_ptr<int, GetDeleterTestDeleter> p;
+        ASSERT_EQ(p.get_deleter().test(), 5);
+
+        const thrust::unique_ptr<int, GetDeleterTestDeleter> const_p;
+        ASSERT_EQ(const_p.get_deleter().test(), 6);
+    }
+
+    // Deleter stored by const reference
+    {
+        const GetDeleterTestDeleter d;
+        thrust::unique_ptr<int, const GetDeleterTestDeleter&> p(nullptr, d);
+        const thrust::unique_ptr<int, const GetDeleterTestDeleter&>& const_p = p;
+
+        ASSERT_EQ(p.get_deleter().test(), 6);
+        ASSERT_EQ(const_p.get_deleter().test(), 6);
+    }
+
+    // Deleter stored by non-const reference
+    {
+        GetDeleterTestDeleter d;
+        thrust::device_ptr<int> dev_p;
+        thrust::unique_ptr<int, GetDeleterTestDeleter&> p(nullptr, d);
+        const thrust::unique_ptr<int, GetDeleterTestDeleter&>& const_p = p;
+
+        ASSERT_EQ(p.get_deleter().test(), 5);
+        ASSERT_EQ(const_p.get_deleter().test(), 5);
+    }
 }
