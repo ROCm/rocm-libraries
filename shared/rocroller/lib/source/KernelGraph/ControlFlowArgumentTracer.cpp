@@ -429,7 +429,7 @@ namespace rocRoller::KernelGraph
             streamJoin(msg, m_neverReferencedArguments, ", ");
             msg << " are never referenced!";
 
-            Log::warn(msg.str());
+            Log::debug(msg.str());
         }
     }
 

@@ -215,8 +215,7 @@ namespace rocRoller::KernelGraph
         void deleteUnusedArguments(AssemblyKernelPtr                kernel,
                                    ControlFlowArgumentTracer const& argTracer)
         {
-            auto arguments = kernel->arguments();
-            kernel->resetArguments();
+            auto arguments = kernel->resetArguments();
 
             auto const& neverReferencedArguments = argTracer.neverReferencedArguments();
 
@@ -434,7 +433,7 @@ namespace rocRoller::KernelGraph
         ControlFlowArgumentTracer argTracer(graph, m_context->kernel());
         deleteUnusedArguments(m_context->kernel(), argTracer);
 
-        auto                      tracer = LastRWTracer(graph);
+        auto tracer          = LastRWTracer(graph);
         auto deallocateNodes = addArgumentDeallocates(graph, tracer, argTracer, m_context);
 
         sequenceDeallocatesBeforeOtherNodes(deallocateNodes, graph);

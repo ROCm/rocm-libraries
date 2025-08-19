@@ -220,11 +220,11 @@ namespace rocRoller
         return m_argumentNames.contains(name);
     }
 
-    inline void AssemblyKernel::resetArguments()
+    inline std::vector<AssemblyKernelArgument> AssemblyKernel::resetArguments()
     {
-        m_arguments.clear();
         m_argumentNames.clear();
         m_argumentSize = 0;
+        return std::exchange(m_arguments, {});
     }
 
     inline void AssemblyKernel::addCommandArguments(std::vector<CommandArgumentPtr> args)
