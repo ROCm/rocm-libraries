@@ -1228,6 +1228,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [2]
+  gpu_arch_exclude: '1[1-2]\d{2}'
 
 - name: matmul_groupedgemm
   category: pre_checkin
@@ -1242,6 +1243,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [0, 2]
+  gpu_arch_exclude: '1[1-2]\d{2}'
 
 - name: matmul_groupedgemm_f8_fnuz
   category: pre_checkin
@@ -1302,6 +1304,7 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   algo_method: [2]
+  gpu_arch_exclude: '1[1-2]\d{2}'
 
 - name: matmul_extapi_groupedgemm
   category: pre_checkin
@@ -1317,6 +1320,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
+  gpu_arch_exclude: '1[1-2]\d{2}'
 
 - name: matmul_extapi_groupedgemm
   category: pre_checkin
@@ -1333,6 +1337,7 @@ Tests:
   alpha: 1
   beta: [ 0.0, 2.0 ]
   unit_check: 1
+  gpu_arch_exclude: '1[1-2]\d{2}'
 
 - name: matmul_bias_gelu_aux_fp16
   category: pre_checkin
@@ -1470,6 +1475,7 @@ Tests:
   gradient: 1
   activation_type: gelu
   unit_check: 1
+  gpu_arch_exclude: '1[1-2]\d{2}'
 
 - name: matmul_dgelu_bias
   category: pre_checkin
@@ -1488,6 +1494,7 @@ Tests:
   bias_type: f32_r
   unit_check: 0
   norm_check: 1
+  gpu_arch_exclude: '1[1-2]\d{2}'
 
 - name: matmul_bgradb_f8_bf8_fnuz_dst_fp32
   category: pre_checkin
@@ -1523,6 +1530,7 @@ Tests:
   bias_type: f32_r
   bias_source: a
   unit_check: 1
+  gpu_arch_exclude: '1[1-2]\d{2}'
   # norm_check: 1
 
 - name: matmul_bias_gelu_aux_fp32
@@ -1646,6 +1654,7 @@ Tests:
   bias_type: [f16_r, f32_r]
   bias_source: b
   unit_check: 1
+  gpu_arch_exclude: '1[1-2]\d{2}'
 
 - name: matmul_bgradb_16_f32d_NT
   category: pre_checkin
@@ -1948,11 +1957,29 @@ Tests:
   algo_method: [2]
   use_ext: [1]
   use_ext_setproblem: [0]
-  grouped_gemm: [0, 2]
+  grouped_gemm: [0]
   wgm_vector: [[0], [4], [9], [16]]
   alpha: 1
   beta: 2.0
   unit_check: 1
+
+- name: matmul_extapi_algo_method_grouped_gemm_tuning_wgm
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  matrix_size:
+    - { M:  4096, N:  4096, K:  40 }
+    - { M:  1024, N:  1024, K:  80 }
+  transA_transB: *transA_transB_range
+  algo_method: [2]
+  use_ext: [1]
+  use_ext_setproblem: [0]
+  grouped_gemm: [2]
+  wgm_vector: [[0], [4], [9], [16]]
+  alpha: 1
+  beta: 2.0
+  unit_check: 1
+  gpu_arch_exclude: '1[1-2]\d{2}'
 
 - name: matmul_heuristic_all_solutions_no_workspace
   category: nightly

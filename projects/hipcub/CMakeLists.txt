@@ -20,8 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
-cmake_policy(VERSION 3.16...3.25)
+cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
+cmake_policy(VERSION 3.18...3.21)
 
 # Install prefix
 set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "Install path prefix, prepended onto install directories")
@@ -71,10 +71,6 @@ else()
   set(ROCM_ROOT "/opt/rocm" CACHE PATH "Root directory of the ROCm installation")
 endif()
 
-
-# Set the header wrapper OFF by default.
-option(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY "Build with file/folder reorg with backward compatibility enabled" OFF)
-
 # Add hipCUB's CMake modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -108,11 +104,11 @@ else()
       if(BUILD_ADDRESS_SANITIZER)
         # ASAN builds require xnack
         rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-          TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+"
+          TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+"
         )
       else()
         rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-          TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
+          TARGETS "gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201"
         )
       endif()
       set(GPU_TARGETS "${DEFAULT_AMDGPU_TARGETS}" CACHE STRING "GPU architectures to compile for" FORCE)
@@ -174,18 +170,6 @@ endif()
 if(BUILD_BENCHMARK AND NOT ONLY_INSTALL)
   rocm_package_setup_client_component(benchmarks)
   add_subdirectory(benchmark)
-endif()
-
-# Create header wrapper for backward compatibility
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY AND NOT WIN32)
-  rocm_wrap_header_dir(
-            ${PROJECT_SOURCE_DIR}/hipcub/include/hipcub/
-	    PATTERNS "*.h"
-	    PATTERN "*.hpp"
-	    GUARDS SYMLINK WRAPPER
-	    WRAPPER_LOCATIONS cub/${CMAKE_INSTALL_INCLUDEDIR}/hipcub/
-            OUTPUT_LOCATIONS cub/wrapper/include/hipcub/
-	  )
 endif()
 
 # Package

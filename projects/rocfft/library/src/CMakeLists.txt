@@ -401,6 +401,11 @@ add_library( rocfft
   )
 rocfft_add_coverage_flags( rocfft )
 
+# rocFFT contains default implementations of callback functions that
+# need to be built as relocatable device code
+target_compile_options( rocfft PRIVATE -fgpu-rdc )
+target_link_options( rocfft PRIVATE -fgpu-rdc )
+
 if( ROCFFT_MPI_ENABLE )
   target_compile_definitions(rocfft PRIVATE ROCFFT_MPI_ENABLE)
   include_directories(SYSTEM ${MPI_INCLUDE_PATH})
