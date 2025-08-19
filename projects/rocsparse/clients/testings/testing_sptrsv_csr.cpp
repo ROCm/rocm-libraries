@@ -21,16 +21,127 @@
 *
 * ************************************************************************ */
 
+#include "rocsparse_clients_sptrsv.hpp"
 #include "testing.hpp"
+#include <variant>
+
+//
+// Implement missing instantiations regarding enums.
+//
+template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_sptrsv_input& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
+inline rocsparse_status auto_testing_bad_arg_get_status(rocsparse_sptrsv_output& p)
+{
+    return rocsparse_status_invalid_value;
+}
+
+template <>
+inline void auto_testing_bad_arg_set_invalid(rocsparse_sptrsv_input& p)
+{
+    p = (rocsparse_sptrsv_input)-1;
+}
+
+//
+// Convenience.
+//
+static constexpr rocsparse_sptrsv_input_all[6] = {rocsparse_sptrsv_input_alg,
+                                                  rocsparse_sptrsv_input_scalar_datatype,
+                                                  rocsparse_sptrsv_input_scalar_alpha,
+                                                  rocsparse_sptrsv_input_compute_datatype,
+                                                  rocsparse_sptrsv_input_operation,
+                                                  rocsparse_sptrsv_input_analysis_policy};
+
+void testing_sptrsv_bad_arg(const Arguments& arg)
+{
+    rocsparse_local_handle local_handle;
+
+    rocsparse_handle       handle       = local_handle;
+    rocsparse_sptrsv_descr sptrsv_descr = (rocsparse_sptrsv_descr)0x4;
+
+    rocsparse_spmat_descr A = (rocsparse_spmat_descr)0x4;
+    rocsparse_dnvec_descr x = (rocsparse_dnvec_descr)0x4;
+    rocsparse_dnvec_descr y = (rocsparse_dnvec_descr)0x4;
+
+    rocsparse_sptrsv_stage sptrsv_stage = rocsparse_sptrsv_stage_analysis;
+
+    void*            buffer  = (void*)0x4;
+    rocsparse_error* p_error = nullptr;
+    {
+        size_t* buffer_size_in_bytes = (size_t*)0x4;
+#define PARAMS_BUFFER_SIZE \
+    handle, sptrsv_descr, A, x, y, sptrsv_stage, buffer_size_in_bytes, p_error
+
+        static constexpr int nex     = 1;
+        static const int     ex[nex] = {7};
+        select_bad_arg_analysis(rocsparse_sptrsv_buffer_size, nex, ex, PARAMS_BUFFER_SIZE);
+
+#undef PARAMS_BUFFER_SIZE
+    }
+
+    {
+        const size_t buffer_size_in_bytes = 1;
+
+#define PARAMS handle, sptrsv_descr, A, x, y, sptrsv_stage, buffer_size_in_bytes, buffer, p_error
+
+        static constexpr int nex     = 2;
+        static const int     ex[nex] = {6, 8};
+        select_bad_arg_analysis(rocsparse_sptrsv, nex, ex, PARAMS);
+
+#undef PARAMS
+    }
+
+    {
+        static constexpr int         nex                = 2;
+        static const int             ex[nex]            = {4, 5};
+        const rocsparse_sptrsv_input input              = rocsparse_sptrsv_input_alg;
+        void*                        data               = (void*)0x4;
+        size_t                       data_size_in_bytes = sizeof(input);
+        select_bad_arg_analysis(rocsparse_sptrsv_set_input,
+                                nex,
+                                ex,
+                                handle, //0
+                                sptrsv_descr, //1
+                                input, //2
+                                data, //3
+                                data_size_in_bytes, //4
+                                p_error); // 5
+
+        for(auto e : rocsparse_sptrsv_input_all)
+        {
+            switch(e)
+            {
+            case rocsparse_sptrsv_input_alg:
+            case rocsparse_sptrsv_input_scalar_datatype:
+            case rocsparse_sptrsv_input_scalar_alpha:
+            case rocsparse_sptrsv_input_compute_datatype:
+            case rocsparse_sptrsv_input_operation:
+            case rocsparse_sptrsv_input_analysis_policy:
+            {
+                EXPECT_ROCSPARSE_STATUS(
+                    rocsparse_sptrsv_set_input(handle, sptrsv_descr, e, data, 0, p_error),
+                    rocsparse_status_invalid_size);
+                break;
+            }
+            }
+        }
+    }
+}
 
 template <typename I, typename J, typename T>
 void testing_sptrsv_csr_bad_arg(const Arguments& arg)
 {
+    testing_sptrsv_bad_arg(arg);
 }
 
 template <typename I, typename J, typename T>
 void testing_sptrsv_csr(const Arguments& arg)
 {
+
     if(arg.M != arg.N)
     {
         return;
@@ -118,27 +229,17 @@ void testing_sptrsv_csr(const Arguments& arg)
                                                          p_error));
     }
 
-    void*  buffer;
-    size_t buffer_size;
+    {
+        const rocsparse_analysis_policy apol = arg.apol;
+        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(handle,
+                                                         sptrsv_descr,
+                                                         rocsparse_sptrsv_input_analysis_policy,
+                                                         &apol,
+                                                         sizeof(apol),
+                                                         p_error));
+    }
 
-    CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_buffer_size(
-        handle, sptrsv_descr, A, x, y, rocsparse_sptrsv_stage_analysis, &buffer_size, p_error));
-
-    CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
-
-    CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv(handle,
-                                           sptrsv_descr,
-                                           A,
-                                           x,
-                                           y,
-                                           rocsparse_sptrsv_stage_analysis,
-                                           buffer_size,
-                                           buffer,
-                                           p_error));
-
-    CHECK_HIP_ERROR(hipDeviceSynchronize());
-
-    CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
+    rocsparse_clients::sptrsv_analysis(handle, sptrsv_descr, A, x, y, p_error);
 
     if(arg.unit_check)
     {
@@ -164,32 +265,8 @@ void testing_sptrsv_csr(const Arguments& arg)
                             &solve_pivot);
 
         const bool comparable = (analysis_pivot == -1 && solve_pivot == -1);
-        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_buffer_size(
-            handle, sptrsv_descr, A, x, y, rocsparse_sptrsv_stage_compute, &buffer_size, p_error));
-
-        CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
-
-        //
-        // Solve on host.
-        //
-        CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
-
-        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(handle,
-                                                         sptrsv_descr,
-                                                         rocsparse_sptrsv_input_scalar_alpha,
-                                                         halpha.data(),
-                                                         sizeof(halpha.data()),
-                                                         p_error));
-
-        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv(handle,
-                                               sptrsv_descr,
-                                               A,
-                                               x,
-                                               y,
-                                               rocsparse_sptrsv_stage_compute,
-                                               buffer_size,
-                                               buffer,
-                                               p_error));
+        rocsparse_clients::sptrsv_compute(
+            handle, sptrsv_descr, A, x, y, rocsparse_pointer_mode_host, halpha, p_error);
 
         if(ROCSPARSE_REPRODUCIBILITY)
         {
@@ -204,28 +281,8 @@ void testing_sptrsv_csr(const Arguments& arg)
         //
         // Solve on device.
         //
-        CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
-
-        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_set_input(handle,
-                                                         sptrsv_descr,
-                                                         rocsparse_sptrsv_input_scalar_alpha,
-                                                         dalpha.data(),
-                                                         sizeof(dalpha.data()),
-                                                         p_error));
-
-        CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv(handle,
-                                               sptrsv_descr,
-                                               A,
-                                               x,
-                                               y,
-                                               rocsparse_sptrsv_stage_compute,
-                                               buffer_size,
-                                               buffer,
-                                               p_error));
-
-        CHECK_HIP_ERROR(hipDeviceSynchronize());
-
-        CHECK_HIP_ERROR(rocsparse_hipFree(buffer));
+        rocsparse_clients::sptrsv_compute(
+            handle, sptrsv_descr, A, x, y, rocsparse_pointer_mode_device, dalpha, p_error);
 
         if(ROCSPARSE_REPRODUCIBILITY)
         {
@@ -240,9 +297,10 @@ void testing_sptrsv_csr(const Arguments& arg)
 
     if(arg.timing)
     {
+        size_t buffer_size;
         CHECK_ROCSPARSE_ERROR(rocsparse_sptrsv_buffer_size(
             handle, sptrsv_descr, A, x, y, rocsparse_sptrsv_stage_compute, &buffer_size, p_error));
-
+        void* buffer;
         CHECK_HIP_ERROR(rocsparse_hipMalloc(&buffer, buffer_size));
 
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
@@ -289,6 +347,8 @@ void testing_sptrsv_csr(const Arguments& arg)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_destroy_sptrsv_descr(sptrsv_descr));
 }
 
 #define INSTANTIATE(ITYPE, JTYPE, TTYPE)                                                 \

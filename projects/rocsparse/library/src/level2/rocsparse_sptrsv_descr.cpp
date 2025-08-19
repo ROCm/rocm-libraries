@@ -25,12 +25,40 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_logging.hpp"
 
+void _rocsparse_sptrsv_descr::set_csrsv_info(rocsparse_csrsv_info value)
+{
+    this->m_csrsv_info = std::shared_ptr<_rocsparse_csrsv_info>(value);
+}
+
+rocsparse_csrsv_info _rocsparse_sptrsv_descr::get_csrsv_info()
+{
+    return this->m_csrsv_info.get();
+}
+void _rocsparse_sptrsv_descr::set_shared_csrsv_info(std::shared_ptr<_rocsparse_csrsv_info> value)
+{
+    this->m_csrsv_info = value;
+}
+
+_rocsparse_sptrsv_descr::~_rocsparse_sptrsv_descr()
+{
+    m_stage            = ((rocsparse_sptrsv_stage)-1);
+    m_alg              = ((rocsparse_sptrsv_alg)-1);
+    m_operation        = ((rocsparse_operation)-1);
+    m_scalar_datatype  = ((rocsparse_datatype)-1);
+    m_compute_datatype = ((rocsparse_datatype)-1);
+    m_analysis_policy  = ((rocsparse_analysis_policy)-1);
+    this->m_csrsv_info.reset();
+    this->m_zero_pivot_position = 0;
+    this->m_scalar_alpha        = nullptr;
+}
+
 _rocsparse_sptrsv_descr::_rocsparse_sptrsv_descr()
     : m_stage((rocsparse_sptrsv_stage)-1)
     , m_alg((rocsparse_sptrsv_alg)-1)
     , m_operation((rocsparse_operation)-1)
     , m_scalar_datatype((rocsparse_datatype)-1)
     , m_compute_datatype((rocsparse_datatype)-1)
+    , m_analysis_policy((rocsparse_analysis_policy)-1)
 {
 }
 
@@ -47,6 +75,16 @@ rocsparse_sptrsv_stage _rocsparse_sptrsv_descr::get_stage() const
 rocsparse_sptrsv_alg _rocsparse_sptrsv_descr::get_alg() const
 {
     return this->m_alg;
+}
+
+rocsparse_analysis_policy _rocsparse_sptrsv_descr::get_analysis_policy() const
+{
+    return this->m_analysis_policy;
+}
+
+void _rocsparse_sptrsv_descr::set_analysis_policy(rocsparse_analysis_policy value)
+{
+    this->m_analysis_policy = value;
 }
 
 rocsparse_operation _rocsparse_sptrsv_descr::get_operation() const

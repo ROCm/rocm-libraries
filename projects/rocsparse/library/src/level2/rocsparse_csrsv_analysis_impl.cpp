@@ -44,7 +44,7 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
                                          const T*                  csr_val,
                                          const I*                  csr_row_ptr,
                                          const J*                  csr_col_ind,
-                                         rocsparse::trm_info_t*    info,
+                                         rocsparse::trm_info_t*    trm_info,
                                          J**                       zero_pivot,
                                          void*                     temp_buffer)
 {
@@ -58,8 +58,9 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
     {
         // TODO: this need to be changed.
         // LCOV_EXCL_START
-        if(info->get_transposed_perm() != nullptr || info->get_transposed_row_ptr() != nullptr
-           || info->get_transposed_col_ind() != nullptr)
+        if(trm_info->get_transposed_perm() != nullptr
+           || trm_info->get_transposed_row_ptr() != nullptr
+           || trm_info->get_transposed_col_ind() != nullptr)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
         }
@@ -84,24 +85,24 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
             tmp_work1, csr_col_ind, sizeof(J) * nnz, hipMemcpyDeviceToDevice, stream));
 
         RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-            info->get_ref_transposed_row_ptr(), sizeof(I) * (m + 1), stream));
+            trm_info->get_ref_transposed_row_ptr(), sizeof(I) * (m + 1), stream));
 
         if(nnz > 0)
         {
-            RETURN_IF_HIP_ERROR(
-                rocsparse_hipMallocAsync(info->get_ref_transposed_perm(), sizeof(I) * nnz, stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-                info->get_ref_transposed_col_ind(), sizeof(J) * nnz, stream));
+                trm_info->get_ref_transposed_perm(), sizeof(I) * nnz, stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
+                trm_info->get_ref_transposed_col_ind(), sizeof(J) * nnz, stream));
 
             RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
 
-            I* transposed_perm = (I*)info->get_transposed_perm();
+            I* transposed_perm = (I*)trm_info->get_transposed_perm();
             // Create identity permutation
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::create_identity_permutation_template(handle, nnz, transposed_perm));
 
             // Stable sort COO by columns
-            J* transposed_col_ind = (J*)info->get_transposed_col_ind();
+            J* transposed_col_ind = (J*)trm_info->get_transposed_col_ind();
             rocsparse::primitives::double_buffer<J> keys(tmp_work1, transposed_col_ind);
             rocsparse::primitives::double_buffer<I> vals(transposed_perm, tmp_work2);
 
@@ -124,7 +125,7 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
                                                    stream));
             }
 
-            I* transposed_row_ptr = (I*)info->get_transposed_row_ptr();
+            I* transposed_row_ptr = (I*)trm_info->get_transposed_row_ptr();
             // Create column pointers
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coo2csr_template(
                 handle, keys.current(), nnz, m, transposed_row_ptr, descr->base));
@@ -144,7 +145,7 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
         else
         {
             RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
-            I* transposed_row_ptr = (I*)info->get_transposed_row_ptr();
+            I* transposed_row_ptr = (I*)trm_info->get_transposed_row_ptr();
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::valset(handle, m + 1, static_cast<I>(descr->base), transposed_row_ptr));
         }
@@ -177,7 +178,8 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
     void* rocprim_buffer = reinterpret_cast<void*>(ptr);
 
     // Allocate buffer to hold diagonal entry point
-    RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(info->get_ref_diag_ind(), sizeof(I) * m, stream));
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMallocAsync(trm_info->get_ref_diag_ind(), sizeof(I) * m, stream));
 
     // Allocate buffer to hold zero pivot
     if(*zero_pivot == nullptr)
@@ -186,7 +188,8 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
     }
 
     // Allocate buffer to hold row map
-    RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(info->get_ref_row_map(), sizeof(J) * m, stream));
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMallocAsync(trm_info->get_ref_row_map(), sizeof(J) * m, stream));
 
     //
     // Synchronization needed.
@@ -199,8 +202,8 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::assign_async(*zero_pivot, std::numeric_limits<J>::max(), stream));
 
-    J* row_map  = (J*)info->get_row_map();
-    I* diag_ind = (I*)info->get_diag_ind();
+    J* row_map  = (J*)trm_info->get_row_map();
+    I* diag_ind = (I*)trm_info->get_diag_ind();
 
     // Determine archid and ASIC revision
     const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
@@ -355,8 +358,8 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
                     0,
                     stream,
                     m,
-                    (const I*)info->get_transposed_row_ptr(),
-                    (const J*)info->get_transposed_col_ind(),
+                    (const I*)trm_info->get_transposed_row_ptr(),
+                    (const J*)trm_info->get_transposed_col_ind(),
                     diag_ind,
                     done_array,
                     d_max_nnz,
@@ -373,8 +376,8 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
                     0,
                     stream,
                     m,
-                    (const I*)info->get_transposed_row_ptr(),
-                    (const J*)info->get_transposed_col_ind(),
+                    (const I*)trm_info->get_transposed_row_ptr(),
+                    (const J*)trm_info->get_transposed_col_ind(),
                     diag_ind,
                     done_array,
                     d_max_nnz,
@@ -398,8 +401,8 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
                         0,
                         stream,
                         m,
-                        (const I*)info->get_transposed_row_ptr(),
-                        (const J*)info->get_transposed_col_ind(),
+                        (const I*)trm_info->get_transposed_row_ptr(),
+                        (const J*)trm_info->get_transposed_col_ind(),
                         diag_ind,
                         done_array,
                         d_max_nnz,
@@ -416,8 +419,8 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
                         0,
                         stream,
                         m,
-                        (const I*)info->get_transposed_row_ptr(),
-                        (const J*)info->get_transposed_col_ind(),
+                        (const I*)trm_info->get_transposed_row_ptr(),
+                        (const J*)trm_info->get_transposed_col_ind(),
                         diag_ind,
                         done_array,
                         d_max_nnz,
@@ -440,8 +443,8 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
                         0,
                         stream,
                         m,
-                        (const I*)info->get_transposed_row_ptr(),
-                        (const J*)info->get_transposed_col_ind(),
+                        (const I*)trm_info->get_transposed_row_ptr(),
+                        (const J*)trm_info->get_transposed_col_ind(),
                         diag_ind,
                         done_array,
                         d_max_nnz,
@@ -458,8 +461,8 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
                         0,
                         stream,
                         m,
-                        (const I*)info->get_transposed_row_ptr(),
-                        (const J*)info->get_transposed_col_ind(),
+                        (const I*)trm_info->get_transposed_row_ptr(),
+                        (const J*)trm_info->get_transposed_col_ind(),
                         diag_ind,
                         done_array,
                         d_max_nnz,
@@ -483,7 +486,7 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
     RETURN_IF_HIP_ERROR(
         hipMemcpyAsync(&max_nnz, d_max_nnz, sizeof(I), hipMemcpyDeviceToHost, stream));
     RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
-    info->set_max_nnz(max_nnz);
+    trm_info->set_max_nnz(max_nnz);
 
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::create_identity_permutation_template(handle, m, workspace));
@@ -509,21 +512,21 @@ rocsparse_status rocsparse::trm_analysis(rocsparse_handle          handle,
 
     // Store some pointers to verify correct execution
 
-    info->set_m(m);
-    info->set_nnz(nnz);
-    info->set_descr(descr);
+    trm_info->set_m(m);
+    trm_info->set_nnz(nnz);
+    trm_info->set_descr(descr);
 
-    info->set_row_ptr((trans == rocsparse_operation_none) ? csr_row_ptr
-                                                          : info->get_transposed_row_ptr());
-    info->set_col_ind((trans == rocsparse_operation_none) ? csr_col_ind
-                                                          : info->get_transposed_col_ind());
+    trm_info->set_row_ptr((trans == rocsparse_operation_none) ? csr_row_ptr
+                                                              : trm_info->get_transposed_row_ptr());
+    trm_info->set_col_ind((trans == rocsparse_operation_none) ? csr_col_ind
+                                                              : trm_info->get_transposed_col_ind());
 
-    info->set_offset_indextype(
+    trm_info->set_offset_indextype(
         (sizeof(I) == sizeof(uint16_t))
             ? rocsparse_indextype_u16
             : ((sizeof(I) == sizeof(int32_t)) ? rocsparse_indextype_i32 : rocsparse_indextype_i64));
 
-    info->set_index_indextype(
+    trm_info->set_index_indextype(
         (sizeof(J) == sizeof(uint16_t))
             ? rocsparse_indextype_u16
             : ((sizeof(J) == sizeof(int32_t)) ? rocsparse_indextype_i32 : rocsparse_indextype_i64));
@@ -543,9 +546,9 @@ rocsparse_status rocsparse::csrsv_analysis_template(rocsparse_handle          ha
                                                     rocsparse_mat_info        info,
                                                     rocsparse_analysis_policy analysis,
                                                     rocsparse_solve_policy    solve,
+                                                    rocsparse_csrsv_info*     p_csrsv_info,
                                                     void*                     temp_buffer)
 {
-
     const T* csr_val     = reinterpret_cast<const T*>(csr_val_);
     const I* csr_row_ptr = reinterpret_cast<const I*>(csr_row_ptr_);
     const J* csr_col_ind = reinterpret_cast<const J*>(csr_col_ind_);
@@ -556,6 +559,7 @@ rocsparse_status rocsparse::csrsv_analysis_template(rocsparse_handle          ha
     ROCSPARSE_CHECKARG_HANDLE(0, handle);
     ROCSPARSE_CHECKARG_POINTER(4, descr);
     ROCSPARSE_CHECKARG_POINTER(8, info);
+    ROCSPARSE_CHECKARG_POINTER(11, p_csrsv_info);
 
     // Logging
     rocsparse::log_trace(handle,
@@ -570,6 +574,7 @@ rocsparse_status rocsparse::csrsv_analysis_template(rocsparse_handle          ha
                          info,
                          solve,
                          analysis,
+                         p_csrsv_info,
                          (const void*&)temp_buffer);
 
     ROCSPARSE_CHECKARG_ENUM(1, trans);
@@ -606,159 +611,53 @@ rocsparse_status rocsparse::csrsv_analysis_template(rocsparse_handle          ha
     ROCSPARSE_CHECKARG_ARRAY(6, m, csr_row_ptr);
     ROCSPARSE_CHECKARG_ARRAY(7, nnz, csr_col_ind);
 
-    // Switch between lower and upper triangular analysis
-    if(descr->fill_mode == rocsparse_fill_mode_upper)
+    auto csrsv_info = p_csrsv_info[0];
+
+    // Differentiate the analysis policies
+    if(analysis == rocsparse_analysis_policy_reuse)
     {
-        // Differentiate the analysis policies
-        if(analysis == rocsparse_analysis_policy_reuse)
+        rocsparse::trm_info_t* p = nullptr;
+        p = (p != nullptr) ? p : info->get_csrsv_info(trans, descr->fill_mode);
+
+        if((descr->fill_mode == rocsparse_fill_mode_lower) && (trans == rocsparse_operation_none))
         {
-            // We try to re-use already analyzed lower part, if available.
-            // It is the user's responsibility that this data is still valid,
-            // since he passed the 'reuse' flag.
-
-            // If csrsv meta data is already available, do nothing
-            if(trans == rocsparse_operation_none && info->csrsv_upper_info != nullptr)
-            {
-                return rocsparse_status_success;
-            }
-            else if(trans == rocsparse_operation_transpose && info->csrsvt_upper_info != nullptr)
-            {
-                return rocsparse_status_success;
-            }
-            else if(trans == rocsparse_operation_conjugate_transpose
-                    && info->csrsvt_upper_info != nullptr)
-            {
-                return rocsparse_status_success;
-            }
-
-            // Check for other lower analysis meta data
-
-            if(trans == rocsparse_operation_none && info->csrsm_upper_info != nullptr)
-            {
-                // csrsm meta data
-                info->csrsv_upper_info = info->csrsm_upper_info;
-                return rocsparse_status_success;
-            }
-
-            if(trans == rocsparse_operation_transpose && info->csrsmt_upper_info != nullptr)
-            {
-                // csrsv meta data
-                info->csrsvt_upper_info = info->csrsmt_upper_info;
-                return rocsparse_status_success;
-            }
-
-            if(trans == rocsparse_operation_conjugate_transpose
-               && info->csrsmt_upper_info != nullptr)
-            {
-                // csrsv meta data
-                info->csrsvt_upper_info = info->csrsmt_upper_info;
-                return rocsparse_status_success;
-            }
+            p = (p != nullptr) ? p : info->get_csrilu0_info(trans, descr->fill_mode);
+            p = (p != nullptr) ? p : info->get_csric0_info(trans, descr->fill_mode);
         }
 
-        // User is explicitly asking to force a re-analysis, or no valid data has been
-        // found to be re-used.
-
-        rocsparse::trm_info_t** p_trm_info = (trans == rocsparse_operation_none)
-                                                 ? &info->csrsv_upper_info
-                                                 : &info->csrsvt_upper_info;
-
-        rocsparse::trm_info_t::recreate(p_trm_info);
-
-        // Perform analysis
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::trm_analysis(handle,
-                                                          trans,
-                                                          static_cast<J>(m),
-                                                          static_cast<I>(nnz),
-                                                          descr,
-                                                          csr_val,
-                                                          csr_row_ptr,
-                                                          csr_col_ind,
-                                                          p_trm_info[0],
-                                                          (J**)&info->zero_pivot,
-                                                          temp_buffer));
-    }
-    else
-    {
-        // Differentiate the analysis policies
-        if(analysis == rocsparse_analysis_policy_reuse)
+        p = (p != nullptr) ? p : info->get_csrsm_info(trans, descr->fill_mode);
+        if(csrsv_info == nullptr)
         {
-            // We try to re-use already analyzed lower part, if available.
-            // It is the user's responsibility that this data is still valid,
-            // since he passed the 'reuse' flag.
-
-            // If csrsv meta data is already available, do nothing
-            if(trans == rocsparse_operation_none && info->csrsv_lower_info != nullptr)
-            {
-                return rocsparse_status_success;
-            }
-            else if(trans == rocsparse_operation_transpose && info->csrsvt_lower_info != nullptr)
-            {
-                return rocsparse_status_success;
-            }
-            else if(trans == rocsparse_operation_conjugate_transpose
-                    && info->csrsvt_lower_info != nullptr)
-            {
-                return rocsparse_status_success;
-            }
-
-            // Check for other lower analysis meta data
-
-            if(trans == rocsparse_operation_none && info->csrilu0_info != nullptr)
-            {
-                // csrilu0 meta data
-                info->csrsv_lower_info = info->csrilu0_info;
-                return rocsparse_status_success;
-            }
-            else if(trans == rocsparse_operation_none && info->csric0_info != nullptr)
-            {
-                // csric0 meta data
-                info->csrsv_lower_info = info->csric0_info;
-                return rocsparse_status_success;
-            }
-            else if(trans == rocsparse_operation_none && info->csrsm_lower_info != nullptr)
-            {
-                // csrsm meta data
-                info->csrsv_lower_info = info->csrsm_lower_info;
-                return rocsparse_status_success;
-            }
-            else if(trans == rocsparse_operation_transpose && info->csrsmt_lower_info != nullptr)
-            {
-                // csrsm meta data
-                info->csrsvt_lower_info = info->csrsmt_lower_info;
-                return rocsparse_status_success;
-            }
-            else if(trans == rocsparse_operation_conjugate_transpose
-                    && info->csrsmt_lower_info != nullptr)
-            {
-                // csrsm meta data
-                info->csrsvt_lower_info = info->csrsmt_lower_info;
-                return rocsparse_status_success;
-            }
+            std::cerr << "can't" << std::endl;
+            exit(1);
+            csrsv_info      = info->get_csrsv_info();
+            p_csrsv_info[0] = csrsv_info;
         }
-
-        // User is explicitly asking to force a re-analysis, or no valid data has been
-        // found to be re-used.
-
-        rocsparse::trm_info_t** p_trm_info = (trans == rocsparse_operation_none)
-                                                 ? &info->csrsv_lower_info
-                                                 : &info->csrsvt_lower_info;
-
-        rocsparse::trm_info_t::recreate(p_trm_info);
-
-        // Perform analysis
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::trm_analysis(handle,
-                                                          trans,
-                                                          static_cast<J>(m),
-                                                          static_cast<I>(nnz),
-                                                          descr,
-                                                          csr_val,
-                                                          csr_row_ptr,
-                                                          csr_col_ind,
-                                                          p_trm_info[0],
-                                                          (J**)&info->zero_pivot,
-                                                          temp_buffer));
+        if(p != nullptr)
+        {
+            info->set_csrsv_info(trans, descr->fill_mode, p);
+            return rocsparse_status_success;
+        }
     }
+
+    if(csrsv_info == nullptr)
+    {
+        csrsv_info      = new _rocsparse_csrsv_info();
+        p_csrsv_info[0] = csrsv_info;
+    }
+
+    // Perform analysis
+
+    RETURN_IF_ROCSPARSE_ERROR(csrsv_info->recreate(handle,
+                                                   trans,
+                                                   static_cast<J>(m),
+                                                   static_cast<I>(nnz),
+                                                   descr,
+                                                   csr_val,
+                                                   csr_row_ptr,
+                                                   csr_col_ind,
+                                                   (J**)&info->zero_pivot,
+                                                   temp_buffer));
 
     return rocsparse_status_success;
 }
@@ -811,6 +710,7 @@ INSTANTIATE(int32_t, int64_t, rocsparse_double_complex);
         rocsparse_mat_info        info,                                    \
         rocsparse_analysis_policy analysis,                                \
         rocsparse_solve_policy    solve,                                   \
+        rocsparse_csrsv_info*     p_csrsv_info,                            \
         void*                     temp_buffer)
 
 INSTANTIATE(int32_t, int32_t, float);
@@ -857,6 +757,7 @@ INSTANTIATE(int32_t, int64_t, rocsparse_double_complex);
     try                                                                                          \
     {                                                                                            \
         ROCSPARSE_ROUTINE_TRACE;                                                                 \
+        rocsparse_csrsv_info csrsv_info = (info != nullptr) ? info->get_csrsv_info() : nullptr;  \
         RETURN_IF_ROCSPARSE_ERROR(                                                               \
             (rocsparse::csrsv_analysis_template<rocsparse_int, rocsparse_int, T>(handle,         \
                                                                                  trans,          \
@@ -869,6 +770,7 @@ INSTANTIATE(int32_t, int64_t, rocsparse_double_complex);
                                                                                  info,           \
                                                                                  analysis,       \
                                                                                  solve,          \
+                                                                                 &csrsv_info,    \
                                                                                  temp_buffer))); \
         return rocsparse_status_success;                                                         \
     }                                                                                            \

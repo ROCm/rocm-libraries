@@ -25,7 +25,7 @@
 #pragma once
 
 #include "rocsparse_control.hpp"
-
+#include "rocsparse_csrsm_info.hpp"
 namespace rocsparse
 {
     rocsparse_status coosm_buffer_size_quickreturn(rocsparse_handle          handle,
@@ -149,6 +149,7 @@ namespace rocsparse
                                          rocsparse_mat_info        info,
                                          rocsparse_analysis_policy analysis,
                                          rocsparse_solve_policy    solve,
+                                         rocsparse_csrsm_info*     p_csrsm_info,
                                          void*                     temp_buffer);
 
     template <typename I, typename T>
@@ -168,6 +169,7 @@ namespace rocsparse
                                              rocsparse_mat_info        info,
                                              rocsparse_analysis_policy analysis,
                                              rocsparse_solve_policy    solve,
+                                             rocsparse_csrsm_info*     p_csrsm_info,
                                              void*                     temp_buffer)
     {
 
@@ -211,6 +213,7 @@ namespace rocsparse
                                                                         info,
                                                                         analysis,
                                                                         solve,
+                                                                        p_csrsm_info,
                                                                         temp_buffer)));
         return rocsparse_status_success;
     }
@@ -250,7 +253,9 @@ namespace rocsparse
                                       rocsparse_order           order_B,
                                       rocsparse_mat_info        info,
                                       rocsparse_solve_policy    policy,
-                                      void*                     temp_buffer);
+                                      rocsparse_csrsm_info      csrsm_info,
+
+                                      void* temp_buffer);
 
     template <typename I, typename T>
     rocsparse_status coosm_solve_template(rocsparse_handle          handle,
@@ -269,6 +274,7 @@ namespace rocsparse
                                           rocsparse_order           order_B,
                                           rocsparse_mat_info        info,
                                           rocsparse_solve_policy    policy,
+                                          rocsparse_csrsm_info      csrsm_info,
                                           void*                     temp_buffer)
     {
         const rocsparse_status status = rocsparse::coosm_solve_quickreturn(handle,
@@ -311,6 +317,7 @@ namespace rocsparse
                                                                      order_B,
                                                                      info,
                                                                      policy,
+                                                                     csrsm_info,
                                                                      temp_buffer)));
         return rocsparse_status_success;
     }
@@ -356,7 +363,9 @@ namespace rocsparse
                                     rocsparse_mat_info        info,
                                     rocsparse_analysis_policy analysis,
                                     rocsparse_solve_policy    solve,
-                                    void*                     temp_buffer);
+                                    rocsparse_csrsm_info*     p_csrsm_info,
+
+                                    void* temp_buffer);
 
     rocsparse_status coosm_solve(rocsparse_handle          handle,
                                  rocsparse_operation       trans_A,
@@ -379,6 +388,7 @@ namespace rocsparse
                                  rocsparse_order           order_B,
                                  rocsparse_mat_info        info,
                                  rocsparse_solve_policy    policy,
+                                 rocsparse_csrsm_info      csrsm_info,
                                  void*                     temp_buffer);
 
 }

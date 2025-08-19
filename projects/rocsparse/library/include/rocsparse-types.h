@@ -991,11 +991,12 @@ typedef enum rocsparse_sptrsv_stage_
  */
 typedef enum rocsparse_sptrsv_input_
 {
-    rocsparse_sptrsv_input_alg, /**< Select algorithm for input on SpTRSV descriptor. */
-    rocsparse_sptrsv_input_operation, /**< Select matrix operation for input on SpTRSV descriptor. */
-    rocsparse_sptrsv_input_scalar_datatype, /**< Select scalar datatype for input on SpTRSV descriptor. */
-    rocsparse_sptrsv_input_compute_datatype, /**< Select compute datatype for input on SpTRSV descriptor. */
-    rocsparse_sptrsv_input_scalar_alpha, /**< Select scalar alpha for input on SpTRSV descriptor. */
+    rocsparse_sptrsv_input_alg, /**< Select algorithm \ref rocsparse_sptrsv_alg for input on SpTRSV descriptor. */
+    rocsparse_sptrsv_input_operation, /**< Select matrix operation \ref rocsparse_operation for input on SpTRSV descriptor. */
+    rocsparse_sptrsv_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on SpTRSV descriptor. */
+    rocsparse_sptrsv_input_compute_datatype, /**< Select compute datatype  \ref rocsparse_datatype for input on SpTRSV descriptor. */
+    rocsparse_sptrsv_input_scalar_alpha, /**< Select scalar alpha pointer for input on SpTRSV descriptor. */
+    rocsparse_sptrsv_input_analysis_policy /**< Select the analysis policy  \ref rocsparse_analysis_policy for input on SpTRSV descriptor. */
 } rocsparse_sptrsv_input;
 
 /*! \ingroup types_module
@@ -1041,11 +1042,13 @@ typedef enum rocsparse_sptrsm_stage_
  */
 typedef enum rocsparse_sptrsm_input_
 {
-    rocsparse_sptrsm_input_alg, /**< Select algorithm for input on SpTRSM descriptor. */
-    rocsparse_sptrsm_input_operation_A, /**< Select matrix A operation for input on SpTRSM descriptor. */
-    rocsparse_sptrsm_input_operation_X, /**< Select matrix X operation for input on SpTRSM descriptor. */
-    rocsparse_sptrsm_input_scalar_datatype, /**< Select scalar datatype for input on SpTRSM descriptor, this datatype is used as the compute type. */
-    rocsparse_sptrsm_input_scalar_alpha, /**< Select scalar alpha for input on SpTRSM descriptor, this datatype is used as the compute type. */
+    rocsparse_sptrsm_input_alg, /**< Select algorithm \ref rocsparse_sptrsm_alg for input on SpTRSM descriptor. */
+    rocsparse_sptrsm_input_operation_A, /**< Select matrix A operation \ref rocsparse_operation for input on SpTRSM descriptor. */
+    rocsparse_sptrsm_input_operation_X, /**< Select matrix X operation \ref rocsparse_operation  for input on SpTRSM descriptor. */
+    rocsparse_sptrsm_input_scalar_datatype, /**< Select scalar datatype \ref rocsparse_datatype for input on SpTRSM descriptor, this datatype is used as the compute type. */
+    rocsparse_sptrsm_input_scalar_alpha, /**< Select scalar alpha pointer for input on SpTRSM descriptor, this datatype is used as the compute type. */
+    rocsparse_sptrsm_input_analysis_policy /**< Select the analysis policy \ref rocsparse_analysis_policy for input on SpTRSM descriptor */
+
 } rocsparse_sptrsm_input;
 
 /*! \ingroup types_module

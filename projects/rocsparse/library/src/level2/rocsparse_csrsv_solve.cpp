@@ -44,6 +44,7 @@ namespace rocsparse
                                               int64_t                   x_inc,
                                               void*                     y,
                                               rocsparse_solve_policy    policy,
+                                              rocsparse_csrsv_info      csrsv_info,
                                               void*                     temp_buffer);
 
     using csrsv_solve_tuple
@@ -156,6 +157,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle          handle,
                                         rocsparse_datatype        y_val_datatype,
                                         void*                     y,
                                         rocsparse_solve_policy    policy,
+                                        rocsparse_csrsv_info      csrsv_info,
                                         void*                     temp_buffer)
 {
     rocsparse::csrsv_solve_t f;
@@ -175,6 +177,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle          handle,
                                 x_inc,
                                 y,
                                 policy,
+                                csrsv_info,
                                 temp_buffer));
     return rocsparse_status_success;
 }

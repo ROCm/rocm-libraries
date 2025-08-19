@@ -86,6 +86,7 @@ namespace rocsparse
                                           int64_t                   x_inc,
                                           T*                        y,
                                           rocsparse_solve_policy    policy,
+                                          rocsparse_csrsv_info      csrsv_info,
                                           void*                     temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
@@ -105,13 +106,7 @@ namespace rocsparse
         // Initialize buffers
         RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, sizeof(int) * m, stream));
 
-        const rocsparse::trm_info_t* csrsv
-            = (descr->fill_mode == rocsparse_fill_mode_upper)
-                  ? ((trans == rocsparse_operation_none) ? info->csrsv_upper_info
-                                                         : info->csrsvt_upper_info)
-                  : ((trans == rocsparse_operation_none) ? info->csrsv_lower_info
-                                                         : info->csrsvt_lower_info);
-
+        const rocsparse::trm_info_t* csrsv = csrsv_info->get(trans, descr->fill_mode);
         if(csrsv == nullptr)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
@@ -276,6 +271,7 @@ rocsparse_status rocsparse::csrsv_solve_template(rocsparse_handle          handl
                                                  int64_t                   x_inc, // non-classified
                                                  void*                     y_, //11
                                                  rocsparse_solve_policy    policy, //12
+                                                 rocsparse_csrsv_info      csrsv_info, // ignore
                                                  void*                     temp_buffer) //13
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -309,6 +305,7 @@ rocsparse_status rocsparse::csrsv_solve_template(rocsparse_handle          handl
                          x,
                          y,
                          policy,
+                         csrsv_info,
                          temp_buffer);
 
     ROCSPARSE_CHECKARG_ENUM(1, trans);
@@ -362,6 +359,7 @@ rocsparse_status rocsparse::csrsv_solve_template(rocsparse_handle          handl
                                                               x_inc,
                                                               y,
                                                               policy,
+                                                              csrsv_info,
                                                               temp_buffer));
     return rocsparse_status_success;
 }
@@ -382,6 +380,7 @@ rocsparse_status rocsparse::csrsv_solve_template(rocsparse_handle          handl
         int64_t                   x_inc,                                \
         void*                     y,                                    \
         rocsparse_solve_policy    policy,                               \
+        rocsparse_csrsv_info      csrsv_info,                           \
         void*                     temp_buffer)
 
 INSTANTIATE(int32_t, int32_t, float);
@@ -442,6 +441,7 @@ INSTANTIATE(int32_t, int64_t, rocsparse_double_complex);
                 static_cast<int64_t>(1),                                       \
                 y,                                                             \
                 policy,                                                        \
+                (info != nullptr) ? info->get_csrsv_info() : nullptr,          \
                 temp_buffer)));                                                \
         return rocsparse_status_success;                                       \
     }                                                                          \

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -64,17 +64,21 @@ void testing_csrsm_bad_arg(const Arguments& arg)
 #define PARAMS_BUFFER_SIZE                                                                      \
     handle, trans_A, trans_B, m, nrhs, nnz, alpha, descr, csr_val, csr_row_ptr, csr_col_ind, B, \
         ldb, info, policy, buffer_size
+    std::cout << "allo " << __LINE__ << std::endl;
     bad_arg_analysis(rocsparse_csrsm_buffer_size<T>, PARAMS_BUFFER_SIZE);
 
 #define PARAMS_ANALYSIS                                                                         \
     handle, trans_A, trans_B, m, nrhs, nnz, alpha, descr, csr_val, csr_row_ptr, csr_col_ind, B, \
         ldb, info, analysis, solve, temp_buffer
+    std::cout << "allo " << __LINE__ << std::endl;
     bad_arg_analysis(rocsparse_csrsm_analysis<T>, PARAMS_ANALYSIS);
 
 #define PARAMS_SOLVE                                                                            \
     handle, trans_A, trans_B, m, nrhs, nnz, alpha, descr, csr_val, csr_row_ptr, csr_col_ind, B, \
         ldb, info, policy, temp_buffer
+    std::cout << "allo " << __LINE__ << std::endl;
     bad_arg_analysis(rocsparse_csrsm_solve<T>, PARAMS_SOLVE);
+    std::cout << "allo " << __LINE__ << std::endl;
 
     for(auto matrix_type : rocsparse_matrix_type_t::values)
     {

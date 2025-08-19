@@ -22,46 +22,33 @@
  *
  * ************************************************************************ */
 
-#pragma once
-
-#include "rocsparse_csrmv_info.hpp"
+#include "rocsparse_bsrmv_info.hpp"
+#include "rocsparse_control.hpp"
+#include "rocsparse_utility.hpp"
 
 /********************************************************************************
- * \brief rocsparse_bsrmv_info is a structure holding the rocsparse bsrmv info
- * data gathered during bsrmv_analysis.
+ * \brief Copy csrmv info.
  *******************************************************************************/
-typedef struct _rocsparse_bsrmv_info
+rocsparse_status rocsparse::copy_bsrmv_info(rocsparse_bsrmv_info       dest,
+                                            const rocsparse_bsrmv_info src)
 {
-protected:
-    rocsparse_csrmv_info m_csrmv_info{};
+    ROCSPARSE_ROUTINE_TRACE;
 
-public:
-    _rocsparse_bsrmv_info() {}
-
-    ~_rocsparse_bsrmv_info()
+    if(dest == nullptr || src == nullptr || dest == src)
     {
-        if(this->m_csrmv_info)
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
+    }
+    rocsparse_csrmv_info src_csrmv_info = src->get_csrmv_info();
+    if(src_csrmv_info != nullptr)
+    {
+        rocsparse_csrmv_info csrmv_info = dest->get_csrmv_info();
+        if(csrmv_info == nullptr)
         {
-            delete this->m_csrmv_info;
-            this->m_csrmv_info = nullptr;
+            csrmv_info = new _rocsparse_csrmv_info();
+            dest->set_csrmv_info(csrmv_info);
         }
-    }
 
-    rocsparse_csrmv_info get_csrmv_info()
-    {
-        return this->m_csrmv_info;
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::copy_csrmv_info(csrmv_info, src_csrmv_info));
     }
-    void set_csrmv_info(rocsparse_csrmv_info value)
-    {
-        this->m_csrmv_info = value;
-    }
-
-} * rocsparse_bsrmv_info;
-
-namespace rocsparse
-{
-    /********************************************************************************
-   * \brief Copy csrmv info.
-   *******************************************************************************/
-    rocsparse_status copy_bsrmv_info(rocsparse_bsrmv_info dest, const rocsparse_bsrmv_info src);
+    return rocsparse_status_success;
 }

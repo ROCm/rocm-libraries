@@ -47,6 +47,7 @@ rocsparse_status rocsparse::csrsm_analysis_core(rocsparse_handle          handle
                                                 rocsparse_mat_info        info,
                                                 rocsparse_analysis_policy analysis,
                                                 rocsparse_solve_policy    solve,
+                                                rocsparse_csrsm_info*     p_csrsm_info,
                                                 void*                     temp_buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -74,165 +75,62 @@ rocsparse_status rocsparse::csrsm_analysis_core(rocsparse_handle          handle
                                                                                info,
                                                                                analysis,
                                                                                solve,
+                                                                               p_csrsm_info,
                                                                                temp_buffer)));
         return rocsparse_status_success;
     }
 
-    // Switch between lower and upper triangular analysis
-    if(descr->fill_mode == rocsparse_fill_mode_upper)
+    auto csrsm_info = p_csrsm_info[0];
+
+    // Differentiate the analysis policies
+    if(analysis == rocsparse_analysis_policy_reuse)
     {
-        // Differentiate the analysis policies
-        if(analysis == rocsparse_analysis_policy_reuse)
+        //
+        //
+        //
+        rocsparse::trm_info_t* p = nullptr;
+
+        p = (p != nullptr) ? p : info->get_csrsm_info(trans_A, descr->fill_mode);
+
+        if((descr->fill_mode == rocsparse_fill_mode_lower) && (trans_A == rocsparse_operation_none))
         {
-            // We try to re-use already analyzed upper part, if available.
-            // It is the user's responsibility that this data is still valid,
-            // since he passed the 'reuse' flag.
-
-            // If csrsm meta data is already available, do nothing
-            if(trans_A == rocsparse_operation_none && info->csrsm_upper_info != nullptr)
-            {
-                return rocsparse_status_success;
-            }
-            else if(trans_A == rocsparse_operation_transpose && info->csrsmt_upper_info != nullptr)
-            {
-                return rocsparse_status_success;
-            }
-            else if(trans_A == rocsparse_operation_conjugate_transpose
-                    && info->csrsmt_upper_info != nullptr)
-            {
-                return rocsparse_status_success;
-            }
-
-            // Check for other upper analysis meta data
-
-            if(trans_A == rocsparse_operation_none && info->csrsv_upper_info != nullptr)
-            {
-                // csrsv meta data
-                info->csrsm_upper_info = info->csrsv_upper_info;
-                return rocsparse_status_success;
-            }
-
-            if(trans_A == rocsparse_operation_transpose && info->csrsvt_upper_info != nullptr)
-            {
-                // csrsv meta data
-                info->csrsmt_upper_info = info->csrsvt_upper_info;
-                return rocsparse_status_success;
-            }
-
-            if(trans_A == rocsparse_operation_conjugate_transpose
-               && info->csrsvt_upper_info != nullptr)
-            {
-                // csrsv meta data
-                info->csrsmt_upper_info = info->csrsvt_upper_info;
-                return rocsparse_status_success;
-            }
+            p = (p != nullptr) ? p : info->get_csrilu0_info(trans_A, descr->fill_mode);
+            p = (p != nullptr) ? p : info->get_csric0_info(trans_A, descr->fill_mode);
         }
 
-        // User is explicitly asking to force a re-analysis, or no valid data has been
-        // found to be re-used
-
-        rocsparse::trm_info_t** p_trm_info = (trans_A == rocsparse_operation_none)
-                                                 ? &info->csrsm_upper_info
-                                                 : &info->csrsmt_upper_info;
-
-        rocsparse::trm_info_t::recreate(p_trm_info);
-
-        // Perform analysis
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::trm_analysis(handle,
-                                                          trans_A,
-                                                          m,
-                                                          nnz,
-                                                          descr,
-                                                          csr_val,
-                                                          csr_row_ptr,
-                                                          csr_col_ind,
-                                                          p_trm_info[0],
-                                                          (J**)&info->zero_pivot,
-                                                          temp_buffer));
-    }
-    else
-    {
-        // Differentiate the analysis policies
-        if(analysis == rocsparse_analysis_policy_reuse)
+        p = (p != nullptr) ? p : info->get_csrsv_info(trans_A, descr->fill_mode);
+        if(p != nullptr)
         {
-            // We try to re-use already analyzed lower part, if available.
-            // It is the user's responsibility that this data is still valid,
-            // since he passed the 'reuse' flag.
-
-            // If csrsm meta data is already available, do nothing
-            if(trans_A == rocsparse_operation_none && info->csrsm_lower_info != nullptr)
-            {
-                return rocsparse_status_success;
-            }
-            else if(trans_A == rocsparse_operation_transpose && info->csrsmt_lower_info != nullptr)
-            {
-                return rocsparse_status_success;
-            }
-            else if(trans_A == rocsparse_operation_conjugate_transpose
-                    && info->csrsmt_lower_info != nullptr)
-            {
-                return rocsparse_status_success;
-            }
-
-            // Check for other lower analysis meta data
-
-            if(trans_A == rocsparse_operation_none && info->csrilu0_info != nullptr)
-            {
-                // csrilu0 meta data
-                info->csrsm_lower_info = info->csrilu0_info;
-                return rocsparse_status_success;
-            }
-            else if(trans_A == rocsparse_operation_none && info->csric0_info != nullptr)
-            {
-                // csric0 meta data
-                info->csrsm_lower_info = info->csric0_info;
-                return rocsparse_status_success;
-            }
-            else if(trans_A == rocsparse_operation_none && info->csrsv_lower_info != nullptr)
-            {
-                // csrsv meta data
-                info->csrsm_lower_info = info->csrsv_lower_info;
-                return rocsparse_status_success;
-            }
-
-            if(trans_A == rocsparse_operation_transpose && info->csrsvt_lower_info != nullptr)
-            {
-                // csrsv meta data
-                info->csrsm_upper_info = info->csrsvt_lower_info;
-                return rocsparse_status_success;
-            }
-
-            if(trans_A == rocsparse_operation_conjugate_transpose
-               && info->csrsvt_lower_info != nullptr)
-            {
-                // csrsv meta data
-                info->csrsm_upper_info = info->csrsvt_lower_info;
-                return rocsparse_status_success;
-            }
+            info->set_csrsm_info(trans_A, descr->fill_mode, p);
+            return rocsparse_status_success;
         }
 
-        // User is explicitly asking to force a re-analysis, or no valid data has been
-        // found to be re-used
-
-        rocsparse::trm_info_t** p_trm_info = (trans_A == rocsparse_operation_none)
-                                                 ? &info->csrsm_lower_info
-                                                 : &info->csrsmt_lower_info;
-
-        rocsparse::trm_info_t::recreate(p_trm_info);
-
-        // Perform analysis
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::trm_analysis(handle,
-                                                          trans_A,
-                                                          m,
-                                                          nnz,
-                                                          descr,
-                                                          csr_val,
-                                                          csr_row_ptr,
-                                                          csr_col_ind,
-                                                          p_trm_info[0],
-                                                          (J**)&info->zero_pivot,
-                                                          temp_buffer));
+        if(csrsm_info == nullptr)
+        {
+            std::cerr << "can't" << std::endl;
+            exit(1);
+            csrsm_info      = info->get_csrsm_info();
+            p_csrsm_info[0] = csrsm_info;
+        }
     }
+
+    if(csrsm_info == nullptr)
+    {
+        csrsm_info      = new _rocsparse_csrsm_info();
+        p_csrsm_info[0] = csrsm_info;
+    }
+
+    // Perform analysis
+    RETURN_IF_ROCSPARSE_ERROR(csrsm_info->recreate(handle,
+                                                   trans_A,
+                                                   m,
+                                                   nnz,
+                                                   descr,
+                                                   csr_val,
+                                                   csr_row_ptr,
+                                                   csr_col_ind,
+                                                   (J**)&info->zero_pivot,
+                                                   temp_buffer));
 
     return rocsparse_status_success;
 }
@@ -417,6 +315,7 @@ namespace rocsparse
             return rocsparse_status_success;
         }
 
+        rocsparse_csrsm_info csrsm_info = info->get_csrsm_info();
         RETURN_IF_ROCSPARSE_ERROR((rocsparse::csrsm_analysis_core<I, J, T>(handle,
                                                                            trans_A,
                                                                            trans_B,
@@ -433,12 +332,12 @@ namespace rocsparse
                                                                            info,
                                                                            analysis,
                                                                            solve,
+                                                                           &csrsm_info,
                                                                            temp_buffer)));
+
         return rocsparse_status_success;
     }
 }
-
-// rocsparse_status_ rocsparse::csrsm_analysis_core<long, long, double>(_rocsparse_handle*, rocsparse_operation_, rocsparse_operation_, long, long, long, void const*, _rocsparse_mat_descr*, void const*, void const*, void const*, void const*, long, _rocsparse_mat_info*, rocsparse_analysis_policy_, rocsparse_solve_policy_, void*)
 
 #define INSTANTIATE(I, J, T)                                           \
     template rocsparse_status rocsparse::csrsm_analysis_core<I, J, T>( \
@@ -458,6 +357,7 @@ namespace rocsparse
         rocsparse_mat_info        info,                                \
         rocsparse_analysis_policy analysis,                            \
         rocsparse_solve_policy    solve,                               \
+        rocsparse_csrsm_info*     p_csrsm_info,                        \
         void*                     temp_buffer)
 
 INSTANTIATE(int32_t, int32_t, float);
@@ -538,4 +438,3 @@ C_IMPL(rocsparse_ccsrsm_analysis, rocsparse_float_complex);
 C_IMPL(rocsparse_zcsrsm_analysis, rocsparse_double_complex);
 
 #undef C_IMPL
-

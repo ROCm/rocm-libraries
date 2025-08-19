@@ -29,19 +29,6 @@
 namespace rocsparse
 {
     template <typename I, typename J, typename T>
-    rocsparse_status trm_analysis(rocsparse_handle          handle,
-                                  rocsparse_operation       trans,
-                                  J                         m,
-                                  I                         nnz,
-                                  const rocsparse_mat_descr descr,
-                                  const T*                  csr_val,
-                                  const I*                  csr_row_ptr,
-                                  const J*                  csr_col_ind,
-                                  rocsparse::trm_info_t*    info,
-                                  J**                       zero_pivot,
-                                  void*                     temp_buffer);
-
-    template <typename I, typename J, typename T>
     rocsparse_status csrsv_buffer_size_template(rocsparse_handle          handle,
                                                 rocsparse_operation       trans,
                                                 int64_t                   m,
@@ -65,6 +52,7 @@ namespace rocsparse
                                              rocsparse_mat_info        info,
                                              rocsparse_analysis_policy analysis,
                                              rocsparse_solve_policy    solve,
+                                             rocsparse_csrsv_info*     p_csrsv_info,
                                              void*                     temp_buffer);
 
     template <typename I, typename J, typename T>
@@ -82,6 +70,7 @@ namespace rocsparse
                                           int64_t                   x_inc,
                                           void*                     y,
                                           rocsparse_solve_policy    policy,
+                                          rocsparse_csrsv_info      csrsv_info,
                                           void*                     temp_buffer);
 
     rocsparse_status csrsv_buffer_size(rocsparse_handle          handle,
@@ -112,6 +101,7 @@ namespace rocsparse
                                     rocsparse_mat_info        info,
                                     rocsparse_analysis_policy analysis,
                                     rocsparse_solve_policy    solve,
+                                    rocsparse_csrsv_info*     p_csrsv_info,
                                     void*                     temp_buffer);
 
     rocsparse_status csrsv_solve(rocsparse_handle          handle,
@@ -134,6 +124,7 @@ namespace rocsparse
                                  rocsparse_datatype        y_val_datatype,
                                  void*                     y,
                                  rocsparse_solve_policy    policy,
+                                 rocsparse_csrsv_info      csrsv_info,
                                  void*                     temp_buffer);
 
 }

@@ -182,7 +182,7 @@ void testing_spsv_coo(const Arguments& arg)
         handle, trans_A, &halpha, A, x, y1, ttype, alg, buffersize, &buffer_size, nullptr));
 
     // Allocate buffer
-    void*  dbuffer;
+    void* dbuffer;
     CHECK_HIP_ERROR(rocsparse_hipMalloc(&dbuffer, buffer_size));
 
     // Perform analysis on host
@@ -198,8 +198,8 @@ void testing_spsv_coo(const Arguments& arg)
     //
     // The buffer must be be non persistent, let's put garbage in it.
     //
-    CHECK_HIP_ERROR(hipMemset(dbuffer, 255-1, buffer_size));
-    
+    CHECK_HIP_ERROR(hipMemset(dbuffer, 255 - 1, buffer_size));
+
     if(arg.unit_check)
     {
         // Solve on host

@@ -1380,7 +1380,7 @@ rocsparse_status rocsparse_destroy_spgeam_descr(rocsparse_spgeam_descr descr);
  *  @param[in]
  *  data_size_in_bytes   input data size.
  *  @param[out]
- *  error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if the user is not interested in obtaining an error descriptor.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
@@ -1393,7 +1393,7 @@ rocsparse_status rocsparse_spgeam_set_input(rocsparse_handle       handle,
                                             rocsparse_spgeam_input input,
                                             const void*            data,
                                             size_t                 data_size_in_bytes,
-                                            rocsparse_error*       error);
+                                            rocsparse_error*       p_error);
 
 /*! \ingroup aux_module
  *  \brief Get the requested \ref rocsparse_spgeam_output data from the SpGEAM descriptor

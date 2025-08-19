@@ -73,6 +73,7 @@ add_rocsparse_example(example_spmv_ell.cpp)
 add_rocsparse_example(example_gebsrmv.cpp)
 add_rocsparse_example(example_gemvi.cpp)
 add_rocsparse_example(example_v2_spmv_csr.cpp)
+add_rocsparse_example(example_sptrsv.cpp)
 
 
 

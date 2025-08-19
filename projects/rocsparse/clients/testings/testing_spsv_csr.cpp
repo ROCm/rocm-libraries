@@ -201,7 +201,7 @@ void testing_spsv_csr(const Arguments& arg)
     //
     // The buffer must be be non persistent, let's put garbage in it.
     //
-    CHECK_HIP_ERROR(hipMemset(dbuffer, 255-1, buffer_size));
+    CHECK_HIP_ERROR(hipMemset(dbuffer, 255 - 1, buffer_size));
 
     if(arg.unit_check)
     {

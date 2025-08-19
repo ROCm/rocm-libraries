@@ -22,28 +22,38 @@
  * ************************************************************************ */
 
 #include "rocsparse-types.h"
+#include "rocsparse_csrsm_info.hpp"
+#include <memory>
 
 struct _rocsparse_sptrsm_descr
 {
 protected:
-    rocsparse_sptrsm_stage m_stage;
-    rocsparse_sptrsm_alg   m_alg;
-    rocsparse_operation    m_operation_A;
-    rocsparse_operation    m_operation_X;
-    rocsparse_datatype     m_X_datatype;
-    rocsparse_datatype     m_Y_datatype;
-    rocsparse_order        m_X_order;
-    rocsparse_order        m_Y_order;
-    rocsparse_datatype     m_scalar_datatype;
-    int64_t                m_zero_pivot_position;
-    int64_t                m_nrhs;
-    const void*            m_scalar_alpha;
+    rocsparse_sptrsm_stage                 m_stage;
+    rocsparse_sptrsm_alg                   m_alg;
+    rocsparse_operation                    m_operation_A;
+    rocsparse_operation                    m_operation_X;
+    rocsparse_datatype                     m_X_datatype;
+    rocsparse_datatype                     m_Y_datatype;
+    rocsparse_order                        m_X_order;
+    rocsparse_order                        m_Y_order;
+    rocsparse_datatype                     m_scalar_datatype;
+    int64_t                                m_zero_pivot_position;
+    int64_t                                m_nrhs;
+    const void*                            m_scalar_alpha;
+    rocsparse_analysis_policy              m_analysis_policy;
+    std::shared_ptr<_rocsparse_csrsm_info> m_csrsm_info{};
 
 public:
-    ~_rocsparse_sptrsm_descr() = default;
+    rocsparse_csrsm_info get_csrsm_info();
+    void                 set_csrsm_info(rocsparse_csrsm_info value);
+    void                 set_shared_csrsm_info(std::shared_ptr<_rocsparse_csrsm_info> value);
+
+    ~_rocsparse_sptrsm_descr();
 
     _rocsparse_sptrsm_descr();
-    int64_t get_zero_pivot_position() const;
+    int64_t                   get_zero_pivot_position() const;
+    rocsparse_analysis_policy get_analysis_policy() const;
+    void                      set_analysis_policy(rocsparse_analysis_policy value);
 
     rocsparse_sptrsm_stage get_stage() const;
     rocsparse_sptrsm_alg   get_alg() const;
@@ -64,7 +74,7 @@ public:
 
     rocsparse_order get_Y_order() const;
 
-  void             set_nrhs(int64_t);
+    void set_nrhs(int64_t);
     void set_stage(rocsparse_sptrsm_stage value);
     void set_alg(rocsparse_sptrsm_alg value);
     void set_scalar_alpha(const void* value);

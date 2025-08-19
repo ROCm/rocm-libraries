@@ -91,6 +91,7 @@ namespace rocsparse
                                                  rocsparse_order           order_B,
                                                  rocsparse_mat_info        info,
                                                  rocsparse_solve_policy    policy,
+                                                 rocsparse_csrsm_info      csrsm_info,
                                                  void*                     temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
@@ -139,12 +140,7 @@ namespace rocsparse
         // Initialize buffers
         RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, sizeof(int) * m * narrays, stream));
 
-        const rocsparse::trm_info_t* csrsm_info
-            = (descr->fill_mode == rocsparse_fill_mode_upper)
-                  ? ((trans_A == rocsparse_operation_none) ? info->csrsm_upper_info
-                                                           : info->csrsmt_upper_info)
-                  : ((trans_A == rocsparse_operation_none) ? info->csrsm_lower_info
-                                                           : info->csrsmt_lower_info);
+        const rocsparse::trm_info_t* trm_info = csrsm_info->get(trans_A, descr->fill_mode);
 
         // If diag type is unit, re-initialize zero pivot to remove structural zeros
         if(descr->diag_type == rocsparse_diag_type_unit)
@@ -186,7 +182,7 @@ namespace rocsparse
                                                 nnz,
                                                 csr_val,
                                                 csrt_val,
-                                                (const I*)csrsm_info->get_transposed_perm(),
+                                                (const I*)trm_info->get_transposed_perm(),
                                                 rocsparse_index_base_zero)));
 
             if(trans_A == rocsparse_operation_conjugate_transpose)
@@ -195,8 +191,8 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::conjugate(handle, nnz, csrt_val));
             }
 
-            local_csr_row_ptr = (const I*)csrsm_info->get_transposed_row_ptr();
-            local_csr_col_ind = (const J*)csrsm_info->get_transposed_col_ind();
+            local_csr_row_ptr = (const I*)trm_info->get_transposed_row_ptr();
+            local_csr_col_ind = (const J*)trm_info->get_transposed_col_ind();
             local_csr_val     = (const T*)csrt_val;
 
             fill_mode = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper
@@ -234,7 +230,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)csrsm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -259,7 +255,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)csrsm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -287,7 +283,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)csrsm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -312,7 +308,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)csrsm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -340,7 +336,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)csrsm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -365,7 +361,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)csrsm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -393,7 +389,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)csrsm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -418,7 +414,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)csrsm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -446,7 +442,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)csrsm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -471,7 +467,7 @@ namespace rocsparse
                         Bt,
                         ldimB,
                         done_array,
-                        (const J*)csrsm_info->get_row_map(),
+                        (const J*)trm_info->get_row_map(),
                         (J*)info->zero_pivot,
                         descr->base,
                         fill_mode,
@@ -524,6 +520,7 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
                                              rocsparse_order           order_B,
                                              rocsparse_mat_info        info,
                                              rocsparse_solve_policy    policy,
+                                             rocsparse_csrsm_info      csrsm_info,
                                              void*                     temp_buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
@@ -562,6 +559,7 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
                                                                             b_inc,
                                                                             y,
                                                                             policy,
+                                                                            csrsm_info,
                                                                             temp_buffer)));
 
         if((trans_B == rocsparse_operation_none && order_B == rocsparse_order_column))
@@ -602,6 +600,7 @@ rocsparse_status rocsparse::csrsm_solve_core(rocsparse_handle          handle,
                                                               order_B,
                                                               info,
                                                               policy,
+                                                              csrsm_info,
                                                               temp_buffer));
     return rocsparse_status_success;
 }
@@ -802,6 +801,7 @@ namespace rocsparse
                                                                         order_B,
                                                                         info,
                                                                         policy,
+                                                                        info->get_csrsm_info(),
                                                                         temp_buffer)));
         return rocsparse_status_success;
     }
@@ -825,6 +825,7 @@ namespace rocsparse
         rocsparse_order           order_B,                          \
         rocsparse_mat_info        info,                             \
         rocsparse_solve_policy    policy,                           \
+        rocsparse_csrsm_info      csrsm_info,                       \
         void*                     temp_buffer);
 
 INSTANTIATE(int32_t, int32_t, float);

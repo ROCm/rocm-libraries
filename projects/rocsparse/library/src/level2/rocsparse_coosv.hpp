@@ -52,6 +52,7 @@ namespace rocsparse
                                              rocsparse_mat_info        info,
                                              rocsparse_analysis_policy analysis,
                                              rocsparse_solve_policy    solve,
+                                             rocsparse_csrsv_info*     p_csrsv_info,
                                              void*                     temp_buffer);
 
     template <typename I, typename T>
@@ -68,6 +69,7 @@ namespace rocsparse
                                           const void*               x,
                                           void*                     y,
                                           rocsparse_solve_policy    policy,
+                                          rocsparse_csrsv_info      csrsv_info,
                                           void*                     temp_buffer);
 
     rocsparse_status coosv_buffer_size(rocsparse_handle          handle,
@@ -98,6 +100,7 @@ namespace rocsparse
                                     rocsparse_mat_info        info,
                                     rocsparse_analysis_policy analysis,
                                     rocsparse_solve_policy    solve,
+                                    rocsparse_csrsv_info*     p_csrsv_info,
                                     void*                     temp_buffer);
 
     rocsparse_status coosv_solve(rocsparse_handle          handle,
@@ -119,6 +122,7 @@ namespace rocsparse
                                  rocsparse_datatype        y_datatype,
                                  void*                     y,
                                  rocsparse_solve_policy    policy,
+                                 rocsparse_csrsv_info      csrsv_info,
                                  void*                     temp_buffer);
 
 }

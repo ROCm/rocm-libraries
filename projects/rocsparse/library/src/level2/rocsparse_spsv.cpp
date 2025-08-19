@@ -140,6 +140,7 @@ namespace rocsparse
             {
                 if(mat->analysed == false)
                 {
+                    rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::csrsv_analysis(handle,
                                                    trans,
@@ -155,6 +156,7 @@ namespace rocsparse
                                                    mat->info,
                                                    rocsparse_analysis_policy_force,
                                                    rocsparse_solve_policy_auto,
+                                                   &csrsv_info,
                                                    temp_buffer)));
                     mat->analysed = true;
                 }
@@ -184,6 +186,7 @@ namespace rocsparse
                                                                  datatype,
                                                                  y->values,
                                                                  rocsparse_solve_policy_auto,
+                                                                 mat->info->get_csrsv_info(),
                                                                  temp_buffer));
                 return rocsparse_status_success;
             }
@@ -221,6 +224,7 @@ namespace rocsparse
             {
                 if(mat->analysed == false)
                 {
+                    rocsparse_csrsv_info csrsv_info = mat->info->get_csrsv_info();
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::coosv_analysis(handle,
                                                    trans,
@@ -236,6 +240,7 @@ namespace rocsparse
                                                    mat->info,
                                                    rocsparse_analysis_policy_force,
                                                    rocsparse_solve_policy_auto,
+                                                   &csrsv_info,
                                                    temp_buffer)));
                     mat->analysed = true;
                 }
@@ -264,6 +269,7 @@ namespace rocsparse
                                                                  datatype,
                                                                  y->values,
                                                                  rocsparse_solve_policy_auto,
+                                                                 mat->info->get_csrsv_info(),
                                                                  temp_buffer));
                 return rocsparse_status_success;
             }

@@ -25,6 +25,38 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_logging.hpp"
 
+void _rocsparse_sptrsm_descr::set_csrsm_info(rocsparse_csrsm_info value)
+{
+    this->m_csrsm_info = std::shared_ptr<_rocsparse_csrsm_info>(value);
+}
+
+rocsparse_csrsm_info _rocsparse_sptrsm_descr::get_csrsm_info()
+{
+    return this->m_csrsm_info.get();
+}
+void _rocsparse_sptrsm_descr::set_shared_csrsm_info(std::shared_ptr<_rocsparse_csrsm_info> value)
+{
+    this->m_csrsm_info = value;
+}
+
+_rocsparse_sptrsm_descr::~_rocsparse_sptrsm_descr()
+{
+    m_stage           = ((rocsparse_sptrsm_stage)-1);
+    m_alg             = ((rocsparse_sptrsm_alg)-1);
+    m_operation_A     = ((rocsparse_operation)-1);
+    m_operation_X     = ((rocsparse_operation)-1);
+    m_X_datatype      = ((rocsparse_datatype)-1);
+    m_Y_datatype      = ((rocsparse_datatype)-1);
+    m_X_order         = ((rocsparse_order)-1);
+    m_Y_order         = ((rocsparse_order)-1);
+    m_scalar_datatype = ((rocsparse_datatype)-1);
+    m_nrhs            = -1;
+    m_scalar_alpha    = nullptr;
+    m_analysis_policy = ((rocsparse_analysis_policy)-1);
+    this->m_csrsm_info.reset();
+    this->m_zero_pivot_position = 0;
+    this->m_scalar_alpha        = nullptr;
+}
 _rocsparse_sptrsm_descr::_rocsparse_sptrsm_descr()
     : m_stage((rocsparse_sptrsm_stage)-1)
     , m_alg((rocsparse_sptrsm_alg)-1)
@@ -37,7 +69,18 @@ _rocsparse_sptrsm_descr::_rocsparse_sptrsm_descr()
     , m_scalar_datatype((rocsparse_datatype)-1)
     , m_nrhs(-1)
     , m_scalar_alpha(nullptr)
+    , m_analysis_policy((rocsparse_analysis_policy)-1)
 {
+}
+
+rocsparse_analysis_policy _rocsparse_sptrsm_descr::get_analysis_policy() const
+{
+    return this->m_analysis_policy;
+}
+
+void _rocsparse_sptrsm_descr::set_analysis_policy(rocsparse_analysis_policy value)
+{
+    this->m_analysis_policy = value;
 }
 
 int64_t _rocsparse_sptrsm_descr::get_zero_pivot_position() const
@@ -102,7 +145,7 @@ rocsparse_order _rocsparse_sptrsm_descr::get_Y_order() const
 
 void _rocsparse_sptrsm_descr::set_nrhs(int64_t value)
 {
-  this->m_nrhs = value;
+    this->m_nrhs = value;
 }
 
 void _rocsparse_sptrsm_descr::set_stage(rocsparse_sptrsm_stage value)

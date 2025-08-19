@@ -136,27 +136,7 @@ try
     rocsparse::log_trace(handle, "rocsparse_csrsv_clear", (const void*&)descr, (const void*&)info);
 
     // Clear csrsv meta data (this includes lower, upper and their transposed equivalents
-    if(!rocsparse::check_trm_shared(info, info->csrsv_lower_info))
-    {
-        rocsparse::trm_info_t::destroy(info->csrsv_lower_info);
-    }
-    if(!rocsparse::check_trm_shared(info, info->csrsvt_lower_info))
-    {
-        rocsparse::trm_info_t::destroy(info->csrsvt_lower_info);
-    }
-    if(!rocsparse::check_trm_shared(info, info->csrsv_upper_info))
-    {
-        rocsparse::trm_info_t::destroy(info->csrsv_upper_info);
-    }
-    if(!rocsparse::check_trm_shared(info, info->csrsvt_upper_info))
-    {
-        rocsparse::trm_info_t::destroy(info->csrsvt_upper_info);
-    }
-
-    info->csrsv_lower_info  = nullptr;
-    info->csrsvt_lower_info = nullptr;
-    info->csrsv_upper_info  = nullptr;
-    info->csrsvt_upper_info = nullptr;
+    info->clear(rocsparse::trm_t::from_csrsv);
 
     return rocsparse_status_success;
     // LCOV_EXCL_START

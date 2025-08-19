@@ -24,44 +24,7 @@
 
 #pragma once
 
-#include "rocsparse_csrmv_info.hpp"
+#include "rocsparse_trm_data_t.hpp"
 
-/********************************************************************************
- * \brief rocsparse_bsrmv_info is a structure holding the rocsparse bsrmv info
- * data gathered during bsrmv_analysis.
- *******************************************************************************/
-typedef struct _rocsparse_bsrmv_info
-{
-protected:
-    rocsparse_csrmv_info m_csrmv_info{};
-
-public:
-    _rocsparse_bsrmv_info() {}
-
-    ~_rocsparse_bsrmv_info()
-    {
-        if(this->m_csrmv_info)
-        {
-            delete this->m_csrmv_info;
-            this->m_csrmv_info = nullptr;
-        }
-    }
-
-    rocsparse_csrmv_info get_csrmv_info()
-    {
-        return this->m_csrmv_info;
-    }
-    void set_csrmv_info(rocsparse_csrmv_info value)
-    {
-        this->m_csrmv_info = value;
-    }
-
-} * rocsparse_bsrmv_info;
-
-namespace rocsparse
-{
-    /********************************************************************************
-   * \brief Copy csrmv info.
-   *******************************************************************************/
-    rocsparse_status copy_bsrmv_info(rocsparse_bsrmv_info dest, const rocsparse_bsrmv_info src);
-}
+typedef rocsparse::trm_data_t   _rocsparse_csric0_info;
+typedef _rocsparse_csric0_info* rocsparse_csric0_info;

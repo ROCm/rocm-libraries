@@ -175,7 +175,9 @@ namespace rocsparse
         RETURN_IF_HIP_ERROR(hipMemsetAsync(d_done_array, 0, sizeof(int) * m, stream));
 
         // Max nnz per row
-        const rocsparse_int max_nnz = info->csrilu0_info->get_max_nnz();
+        rocsparse::trm_info_t* trm_info
+            = info->get_csrilu0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
+        const rocsparse_int max_nnz = trm_info->get_max_nnz();
 
         // Determine gcnArch and ASIC revision
         const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
@@ -199,9 +201,9 @@ namespace rocsparse
                 csr_row_ptr,
                 csr_col_ind,
                 csr_val,
-                (const rocsparse_int*)info->csrilu0_info->get_diag_ind(),
+                (const rocsparse_int*)trm_info->get_diag_ind(),
                 d_done_array,
-                (const rocsparse_int*)info->csrilu0_info->get_row_map(),
+                (const rocsparse_int*)trm_info->get_row_map(),
                 (rocsparse_int*)info->zero_pivot,
                 (rocsparse_int*)info->singular_pivot,
                 info->singular_tol,
@@ -229,9 +231,9 @@ namespace rocsparse
                         csr_row_ptr,
                         csr_col_ind,
                         csr_val,
-                        (const rocsparse_int*)info->csrilu0_info->get_diag_ind(),
+                        (const rocsparse_int*)trm_info->get_diag_ind(),
                         d_done_array,
-                        (const rocsparse_int*)info->csrilu0_info->get_row_map(),
+                        (const rocsparse_int*)trm_info->get_row_map(),
                         (rocsparse_int*)info->zero_pivot,
                         (rocsparse_int*)info->singular_pivot,
                         info->singular_tol,
@@ -255,9 +257,9 @@ namespace rocsparse
                         csr_row_ptr,
                         csr_col_ind,
                         csr_val,
-                        (const rocsparse_int*)info->csrilu0_info->get_diag_ind(),
+                        (const rocsparse_int*)trm_info->get_diag_ind(),
                         d_done_array,
-                        (const rocsparse_int*)info->csrilu0_info->get_row_map(),
+                        (const rocsparse_int*)trm_info->get_row_map(),
                         (rocsparse_int*)info->zero_pivot,
                         (rocsparse_int*)info->singular_pivot,
                         info->singular_tol,
@@ -281,9 +283,9 @@ namespace rocsparse
                         csr_row_ptr,
                         csr_col_ind,
                         csr_val,
-                        (const rocsparse_int*)info->csrilu0_info->get_diag_ind(),
+                        (const rocsparse_int*)trm_info->get_diag_ind(),
                         d_done_array,
-                        (const rocsparse_int*)info->csrilu0_info->get_row_map(),
+                        (const rocsparse_int*)trm_info->get_row_map(),
                         (rocsparse_int*)info->zero_pivot,
                         (rocsparse_int*)info->singular_pivot,
                         info->singular_tol,
@@ -307,9 +309,9 @@ namespace rocsparse
                         csr_row_ptr,
                         csr_col_ind,
                         csr_val,
-                        (const rocsparse_int*)info->csrilu0_info->get_diag_ind(),
+                        (const rocsparse_int*)trm_info->get_diag_ind(),
                         d_done_array,
-                        (const rocsparse_int*)info->csrilu0_info->get_row_map(),
+                        (const rocsparse_int*)trm_info->get_row_map(),
                         (rocsparse_int*)info->zero_pivot,
                         (rocsparse_int*)info->singular_pivot,
                         info->singular_tol,
@@ -333,9 +335,9 @@ namespace rocsparse
                         csr_row_ptr,
                         csr_col_ind,
                         csr_val,
-                        (const rocsparse_int*)info->csrilu0_info->get_diag_ind(),
+                        (const rocsparse_int*)trm_info->get_diag_ind(),
                         d_done_array,
-                        (const rocsparse_int*)info->csrilu0_info->get_row_map(),
+                        (const rocsparse_int*)trm_info->get_row_map(),
                         (rocsparse_int*)info->zero_pivot,
                         (rocsparse_int*)info->singular_pivot,
                         info->singular_tol,
@@ -359,9 +361,9 @@ namespace rocsparse
                         csr_row_ptr,
                         csr_col_ind,
                         csr_val,
-                        (const rocsparse_int*)info->csrilu0_info->get_diag_ind(),
+                        (const rocsparse_int*)trm_info->get_diag_ind(),
                         d_done_array,
-                        (const rocsparse_int*)info->csrilu0_info->get_row_map(),
+                        (const rocsparse_int*)trm_info->get_row_map(),
                         (rocsparse_int*)info->zero_pivot,
                         (rocsparse_int*)info->singular_pivot,
                         info->singular_tol,
@@ -388,9 +390,9 @@ namespace rocsparse
                         csr_row_ptr,
                         csr_col_ind,
                         csr_val,
-                        (const rocsparse_int*)info->csrilu0_info->get_diag_ind(),
+                        (const rocsparse_int*)trm_info->get_diag_ind(),
                         d_done_array,
-                        (const rocsparse_int*)info->csrilu0_info->get_row_map(),
+                        (const rocsparse_int*)trm_info->get_row_map(),
                         (rocsparse_int*)info->zero_pivot,
                         (rocsparse_int*)info->singular_pivot,
                         info->singular_tol,
@@ -414,9 +416,9 @@ namespace rocsparse
                         csr_row_ptr,
                         csr_col_ind,
                         csr_val,
-                        (const rocsparse_int*)info->csrilu0_info->get_diag_ind(),
+                        (const rocsparse_int*)trm_info->get_diag_ind(),
                         d_done_array,
-                        (const rocsparse_int*)info->csrilu0_info->get_row_map(),
+                        (const rocsparse_int*)trm_info->get_row_map(),
                         (rocsparse_int*)info->zero_pivot,
                         (rocsparse_int*)info->singular_pivot,
                         info->singular_tol,
@@ -440,9 +442,9 @@ namespace rocsparse
                         csr_row_ptr,
                         csr_col_ind,
                         csr_val,
-                        (const rocsparse_int*)info->csrilu0_info->get_diag_ind(),
+                        (const rocsparse_int*)trm_info->get_diag_ind(),
                         d_done_array,
-                        (const rocsparse_int*)info->csrilu0_info->get_row_map(),
+                        (const rocsparse_int*)trm_info->get_row_map(),
                         (rocsparse_int*)info->zero_pivot,
                         (rocsparse_int*)info->singular_pivot,
                         info->singular_tol,
@@ -466,9 +468,9 @@ namespace rocsparse
                         csr_row_ptr,
                         csr_col_ind,
                         csr_val,
-                        (const rocsparse_int*)info->csrilu0_info->get_diag_ind(),
+                        (const rocsparse_int*)trm_info->get_diag_ind(),
                         d_done_array,
-                        (const rocsparse_int*)info->csrilu0_info->get_row_map(),
+                        (const rocsparse_int*)trm_info->get_row_map(),
                         (rocsparse_int*)info->zero_pivot,
                         (rocsparse_int*)info->singular_pivot,
                         info->singular_tol,
@@ -492,9 +494,9 @@ namespace rocsparse
                         csr_row_ptr,
                         csr_col_ind,
                         csr_val,
-                        (const rocsparse_int*)info->csrilu0_info->get_diag_ind(),
+                        (const rocsparse_int*)trm_info->get_diag_ind(),
                         d_done_array,
-                        (const rocsparse_int*)info->csrilu0_info->get_row_map(),
+                        (const rocsparse_int*)trm_info->get_row_map(),
                         (rocsparse_int*)info->zero_pivot,
                         (rocsparse_int*)info->singular_pivot,
                         info->singular_tol,
@@ -518,9 +520,9 @@ namespace rocsparse
                         csr_row_ptr,
                         csr_col_ind,
                         csr_val,
-                        (const rocsparse_int*)info->csrilu0_info->get_diag_ind(),
+                        (const rocsparse_int*)trm_info->get_diag_ind(),
                         d_done_array,
-                        (const rocsparse_int*)info->csrilu0_info->get_row_map(),
+                        (const rocsparse_int*)trm_info->get_row_map(),
                         (rocsparse_int*)info->zero_pivot,
                         (rocsparse_int*)info->singular_pivot,
                         info->singular_tol,
@@ -606,8 +608,8 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_ENUM(8, policy);
         ROCSPARSE_CHECKARG_ARRAY(9, m, temp_buffer);
 
-        ROCSPARSE_CHECKARG(
-            7, info, (info->csrilu0_info == nullptr), rocsparse_status_invalid_pointer);
+        auto trm = info->get_csrilu0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
+        ROCSPARSE_CHECKARG(7, info, (trm == nullptr), rocsparse_status_invalid_pointer);
         return rocsparse_status_continue;
     }
 
@@ -822,13 +824,7 @@ try
     // Logging
     rocsparse::log_trace(handle, "rocsparse_csrilu0_clear", (const void*&)info);
 
-    // If meta data is not shared, delete it
-    if(!rocsparse::check_trm_shared(info, info->csrilu0_info))
-    {
-        rocsparse::trm_info_t::destroy(info->csrilu0_info);
-    }
-
-    info->csrilu0_info = nullptr;
+    info->clear(rocsparse::trm_t::from_csrilu0);
 
     return rocsparse_status_success;
     // LCOV_EXCL_START
@@ -959,7 +955,8 @@ try
 
     // If m == 0 || nnz == 0 it can happen, that info structure is not created.
     // In this case, always return -1.
-    if(info->csrilu0_info == nullptr)
+    auto trm = info->get_csrilu0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
+    if(trm == nullptr)
     {
         if(handle->pointer_mode == rocsparse_pointer_mode_device)
         {
@@ -1049,7 +1046,8 @@ try
 
     // If m == 0 || nnz == 0 it can happen, that info structure is not created.
     // In this case, always return -1.
-    if(info->csrilu0_info == nullptr)
+    auto trm = info->get_csrilu0_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
+    if(trm == nullptr)
     {
         if(handle->pointer_mode == rocsparse_pointer_mode_device)
         {

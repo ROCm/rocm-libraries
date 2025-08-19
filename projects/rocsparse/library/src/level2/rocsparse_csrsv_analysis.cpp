@@ -43,6 +43,7 @@ namespace rocsparse
                                                  rocsparse_mat_info        info,
                                                  rocsparse_analysis_policy analysis,
                                                  rocsparse_solve_policy    solve,
+                                                 rocsparse_csrsv_info*     p_csrsv_info,
                                                  void*                     temp_buffer);
 
     using csrsv_analysis_tuple
@@ -150,6 +151,7 @@ rocsparse_status rocsparse::csrsv_analysis(rocsparse_handle          handle,
                                            rocsparse_mat_info        info,
                                            rocsparse_analysis_policy analysis,
                                            rocsparse_solve_policy    solve,
+                                           rocsparse_csrsv_info*     p_csrsv_info,
                                            void*                     temp_buffer)
 {
     rocsparse::csrsv_analysis_t f;
@@ -166,6 +168,7 @@ rocsparse_status rocsparse::csrsv_analysis(rocsparse_handle          handle,
                                 info,
                                 analysis,
                                 solve,
+                                p_csrsv_info,
                                 temp_buffer));
     return rocsparse_status_success;
 }

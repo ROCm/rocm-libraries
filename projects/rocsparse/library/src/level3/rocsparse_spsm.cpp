@@ -120,29 +120,24 @@ namespace rocsparse
         {
             // 1) B col order + transposed and C row order
             // 2) B row order + non-transposed and C row order
-	  std::cout << "sptrsm_case::T_T " << std::endl;
             return spsm_case::T_T;
         }
         else if(B_is_transposed && !C_is_transposed)
         {
             // 1) B col order + transposed and C col order
             // 2) B row order + non-transposed and C col order
-	  std::cout << "sptrsm_case::T_NT " << std::endl;
             return spsm_case::T_NT;
         }
         else if(!B_is_transposed && C_is_transposed)
         {
             // 1) B row order + transposed and C row order
             // 2) B col order + non-transposed and C row order
-	  std::cout << "sptrsm_case::NT_T " << std::endl;
             return spsm_case::NT_T;
         }
         else
         {
             // 1) B row order + transposed and C col order
             // 2) B col order + non-transposed and C col order
-	  	  std::cout << "sptrsm_case::NT_NT " << std::endl;
-
             return spsm_case::NT_NT;
         }
     }
@@ -214,6 +209,7 @@ namespace rocsparse
                                                              matC->order,
                                                              matA->info,
                                                              rocsparse_solve_policy_auto,
+                                                             matA->info->get_csrsm_info(),
                                                              csrsm_buffer));
             break;
         }
@@ -241,6 +237,7 @@ namespace rocsparse
                                                              matC->order,
                                                              matA->info,
                                                              rocsparse_solve_policy_auto,
+                                                             matA->info->get_csrsm_info(),
                                                              csrsm_buffer));
             break;
         }
@@ -330,6 +327,7 @@ namespace rocsparse
                                                              rocsparse_order_row,
                                                              matA->info,
                                                              rocsparse_solve_policy_auto,
+                                                             matA->info->get_csrsm_info(),
                                                              csrsm_buffer));
             break;
         }
@@ -357,6 +355,7 @@ namespace rocsparse
                                                              rocsparse_order_row,
                                                              matA->info,
                                                              rocsparse_solve_policy_auto,
+                                                             matA->info->get_csrsm_info(),
                                                              csrsm_buffer));
             break;
         }
@@ -471,6 +470,7 @@ namespace rocsparse
                                                              matC->order,
                                                              matA->info,
                                                              rocsparse_solve_policy_auto,
+                                                             matA->info->get_csrsm_info(),
                                                              csrsm_buffer));
             break;
         }
@@ -498,6 +498,7 @@ namespace rocsparse
                                                              matC->order,
                                                              matA->info,
                                                              rocsparse_solve_policy_auto,
+                                                             matA->info->get_csrsm_info(),
                                                              csrsm_buffer));
             break;
         }
@@ -590,6 +591,7 @@ namespace rocsparse
                                                              rocsparse_order_row,
                                                              matA->info,
                                                              rocsparse_solve_policy_auto,
+                                                             matA->info->get_csrsm_info(),
                                                              csrsm_buffer));
             break;
         }
@@ -617,6 +619,7 @@ namespace rocsparse
                                                              rocsparse_order_row,
                                                              matA->info,
                                                              rocsparse_solve_policy_auto,
+                                                             matA->info->get_csrsm_info(),
                                                              csrsm_buffer));
             break;
         }
@@ -785,6 +788,7 @@ namespace rocsparse
             {
                 if(matA->analysed == false)
                 {
+                    rocsparse_csrsm_info csrsm_info = matA->info->get_csrsm_info();
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::csrsm_analysis(handle,
                                                    trans_A,
@@ -807,6 +811,7 @@ namespace rocsparse
                                                    matA->info,
                                                    rocsparse_analysis_policy_force,
                                                    rocsparse_solve_policy_auto,
+                                                   &csrsm_info,
                                                    csrsm_buffer)));
 
                     matA->analysed = true;
@@ -818,6 +823,7 @@ namespace rocsparse
             {
                 if(matA->analysed == false)
                 {
+                    rocsparse_csrsm_info csrsm_info = matA->info->get_csrsm_info();
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::coosm_analysis(handle,
                                                    trans_A,
@@ -840,6 +846,7 @@ namespace rocsparse
                                                    matA->info,
                                                    rocsparse_analysis_policy_force,
                                                    rocsparse_solve_policy_auto,
+                                                   &csrsm_info,
                                                    csrsm_buffer)));
                     matA->analysed = true;
                 }

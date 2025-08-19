@@ -61,10 +61,20 @@ rocsparse_spsv()
 
 .. doxygenfunction:: rocsparse_spsv
 
+rocsparse_sptrsv()
+------------------
+
+.. doxygenfunction:: rocsparse_sptrsv
+
 rocsparse_spsm()
 ----------------
 
 .. doxygenfunction:: rocsparse_spsm
+
+rocsparse_sptrsm()
+------------------
+
+.. doxygenfunction:: rocsparse_sptrsm
 
 rocsparse_spmm()
 ----------------

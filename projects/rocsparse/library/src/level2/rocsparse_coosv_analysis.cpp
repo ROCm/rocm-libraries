@@ -41,6 +41,7 @@ namespace rocsparse
                                                  rocsparse_mat_info        info,
                                                  rocsparse_analysis_policy analysis,
                                                  rocsparse_solve_policy    solve,
+                                                 rocsparse_csrsv_info*     p_csrsv_info,
                                                  void*                     temp_buffer);
 
     using coosv_analysis_tuple = std::tuple<rocsparse_indextype, rocsparse_datatype>;
@@ -122,6 +123,7 @@ rocsparse_status rocsparse::coosv_analysis(rocsparse_handle          handle,
                                            rocsparse_mat_info        info,
                                            rocsparse_analysis_policy analysis,
                                            rocsparse_solve_policy    solve,
+                                           rocsparse_csrsv_info*     p_csrsv_info,
                                            void*                     temp_buffer)
 {
     rocsparse::coosv_analysis_t f;
@@ -138,6 +140,7 @@ rocsparse_status rocsparse::coosv_analysis(rocsparse_handle          handle,
                                 info,
                                 analysis,
                                 solve,
+                                p_csrsv_info,
                                 temp_buffer));
     return rocsparse_status_success;
 }

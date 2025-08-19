@@ -70,15 +70,14 @@ rocsparse_status rocsparse::coosm_buffer_size_core(rocsparse_handle          han
                                                                         info,
                                                                         policy,
                                                                         buffer_size)));
-
     }
     else
     {
-      //
-      // Trick since it is not used in csrsm_buffer_size, otherwise we need to create a proper ptr array for nothing.
-      //
-      // Note: If this is not used, then it shouldn't be there!
-      //
+        //
+        // Trick since it is not used in csrsm_buffer_size, otherwise we need to create a proper ptr array for nothing.
+        //
+        // Note: If this is not used, then it shouldn't be there!
+        //
         const int64_t* ptr = (const int64_t*)0x4;
         RETURN_IF_ROCSPARSE_ERROR(
             (rocsparse::csrsm_buffer_size_template<int64_t, int64_t, T>(handle,
@@ -95,7 +94,6 @@ rocsparse_status rocsparse::coosm_buffer_size_core(rocsparse_handle          han
                                                                         info,
                                                                         policy,
                                                                         buffer_size)));
-
     }
 
     return rocsparse_status_success;

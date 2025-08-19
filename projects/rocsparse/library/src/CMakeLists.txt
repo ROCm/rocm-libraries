@@ -45,6 +45,8 @@ set(rocsparse_source
   src/common/rocsparse_debug.cpp
   src/common/rocsparse_roctx.cpp
   src/common/rocsparse_argdescr.cpp
+  src/common/rocsparse_trm_t.cpp
+  src/common/rocsparse_trm_data_t.cpp
   src/common/rocsparse_message.cpp
   src/common/rocsparse_determine_indextype.cpp
 
@@ -79,6 +81,7 @@ set(rocsparse_source
 # Level2
   src/level2/rocsparse_bsrmv_impl.cpp
   src/level2/rocsparse_bsrmv.cpp
+  src/level2/rocsparse_bsrmv_info.cpp
   src/level2/rocsparse_bsrmv_analysis.cpp
   #
   src/level2/rocsparse_bsrxmv.cpp

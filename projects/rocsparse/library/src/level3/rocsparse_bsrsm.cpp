@@ -131,17 +131,7 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, info);
 
     // Clear bsrsm meta data (this includes lower, upper and their transposed equivalents
-    if(!rocsparse::check_trm_shared(info, info->bsrsm_lower_info))
-    {
-        rocsparse::trm_info_t::destroy(info->bsrsm_lower_info);
-    }
-    if(!rocsparse::check_trm_shared(info, info->bsrsm_upper_info))
-    {
-        rocsparse::trm_info_t::destroy(info->bsrsm_upper_info);
-    }
-
-    info->bsrsm_lower_info = nullptr;
-    info->bsrsm_upper_info = nullptr;
+    info->clear(rocsparse::trm_t::from_bsrsm);
 
     return rocsparse_status_success;
     // LCOV_EXCL_START

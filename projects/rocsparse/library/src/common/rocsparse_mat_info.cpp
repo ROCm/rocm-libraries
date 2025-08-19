@@ -25,6 +25,224 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
 
+rocsparse_csrsm_info _rocsparse_mat_info::get_csrsm_info()
+{
+    return this->m_trm.create(rocsparse::trm_t::from_csrsm);
+}
+
+rocsparse_bsrsm_info _rocsparse_mat_info::get_bsrsm_info()
+{
+    return this->m_trm.create(rocsparse::trm_t::from_bsrsm);
+}
+
+rocsparse_bsrsv_info _rocsparse_mat_info::get_bsrsv_info()
+{
+    return this->m_trm.create(rocsparse::trm_t::from_bsrsv);
+}
+
+rocsparse_csrsv_info _rocsparse_mat_info::get_csrsv_info()
+{
+    return this->m_trm.create(rocsparse::trm_t::from_csrsv);
+}
+
+rocsparse_csric0_info _rocsparse_mat_info::get_csric0_info()
+{
+    return this->m_trm.create(rocsparse::trm_t::from_csric0);
+}
+
+rocsparse_csrilu0_info _rocsparse_mat_info::get_csrilu0_info()
+{
+    return this->m_trm.create(rocsparse::trm_t::from_csrilu0);
+}
+
+rocsparse_bsric0_info _rocsparse_mat_info::get_bsric0_info()
+{
+    return this->m_trm.create(rocsparse::trm_t::from_bsric0);
+}
+
+rocsparse_bsrilu0_info _rocsparse_mat_info::get_bsrilu0_info()
+{
+    return this->m_trm.create(rocsparse::trm_t::from_bsrilu0);
+}
+
+rocsparse::trm_info_t* _rocsparse_mat_info::get_csrsm_info(rocsparse_operation operation,
+                                                           rocsparse_fill_mode fill_mode)
+{
+    return this->get_trm_info(rocsparse::trm_t::from_csrsm, operation, fill_mode);
+}
+
+rocsparse::trm_info_t* _rocsparse_mat_info::get_bsrsm_info(rocsparse_operation operation,
+                                                           rocsparse_fill_mode fill_mode)
+{
+    return this->get_trm_info(rocsparse::trm_t::from_bsrsm, operation, fill_mode);
+}
+rocsparse::trm_info_t* _rocsparse_mat_info::get_bsrsv_info(rocsparse_operation operation,
+                                                           rocsparse_fill_mode fill_mode)
+{
+    return this->get_trm_info(rocsparse::trm_t::from_bsrsv, operation, fill_mode);
+}
+
+rocsparse::trm_info_t* _rocsparse_mat_info::get_csric0_info(rocsparse_operation operation,
+                                                            rocsparse_fill_mode fill_mode)
+{
+    return this->get_trm_info(rocsparse::trm_t::from_csric0, operation, fill_mode);
+}
+
+rocsparse::trm_info_t* _rocsparse_mat_info::get_csrilu0_info(rocsparse_operation operation,
+                                                             rocsparse_fill_mode fill_mode)
+{
+    return this->get_trm_info(rocsparse::trm_t::from_csrilu0, operation, fill_mode);
+}
+
+rocsparse::trm_info_t* _rocsparse_mat_info::get_bsrilu0_info(rocsparse_operation operation,
+                                                             rocsparse_fill_mode fill_mode)
+{
+    return this->get_trm_info(rocsparse::trm_t::from_bsrilu0, operation, fill_mode);
+}
+
+rocsparse::trm_info_t* _rocsparse_mat_info::get_bsric0_info(rocsparse_operation operation,
+                                                            rocsparse_fill_mode fill_mode)
+{
+    return this->get_trm_info(rocsparse::trm_t::from_bsric0, operation, fill_mode);
+}
+
+rocsparse::trm_info_t* _rocsparse_mat_info::get_csrsv_info(rocsparse_operation operation,
+                                                           rocsparse_fill_mode fill_mode)
+{
+    return this->get_trm_info(rocsparse::trm_t::from_csrsv, operation, fill_mode);
+}
+
+void _rocsparse_mat_info::set_bsrsm_info(rocsparse_operation    operation,
+                                         rocsparse_fill_mode    fill_mode,
+                                         rocsparse::trm_info_t* trm)
+{
+    this->set_trm_info(rocsparse::trm_t::from_bsrsm, operation, fill_mode, trm);
+}
+
+void _rocsparse_mat_info::set_bsrsv_info(rocsparse_operation    operation,
+                                         rocsparse_fill_mode    fill_mode,
+                                         rocsparse::trm_info_t* trm)
+{
+    this->set_trm_info(rocsparse::trm_t::from_bsrsv, operation, fill_mode, trm);
+}
+
+void _rocsparse_mat_info::set_csrsv_info(rocsparse_operation    operation,
+                                         rocsparse_fill_mode    fill_mode,
+                                         rocsparse::trm_info_t* trm)
+{
+    this->set_trm_info(rocsparse::trm_t::from_csrsv, operation, fill_mode, trm);
+}
+
+void _rocsparse_mat_info::set_bsric0_info(rocsparse_operation    operation,
+                                          rocsparse_fill_mode    fill_mode,
+                                          rocsparse::trm_info_t* trm)
+{
+    this->set_trm_info(rocsparse::trm_t::from_bsric0, operation, fill_mode, trm);
+}
+
+void _rocsparse_mat_info::set_bsrilu0_info(rocsparse_operation    operation,
+                                           rocsparse_fill_mode    fill_mode,
+                                           rocsparse::trm_info_t* trm)
+{
+    this->set_trm_info(rocsparse::trm_t::from_bsrilu0, operation, fill_mode, trm);
+}
+
+void _rocsparse_mat_info::set_csric0_info(rocsparse_operation    operation,
+                                          rocsparse_fill_mode    fill_mode,
+                                          rocsparse::trm_info_t* trm)
+{
+    this->set_trm_info(rocsparse::trm_t::from_csric0, operation, fill_mode, trm);
+}
+
+void _rocsparse_mat_info::set_csrilu0_info(rocsparse_operation    operation,
+                                           rocsparse_fill_mode    fill_mode,
+                                           rocsparse::trm_info_t* trm)
+{
+    this->set_trm_info(rocsparse::trm_t::from_csrilu0, operation, fill_mode, trm);
+}
+
+void _rocsparse_mat_info::set_csrsm_info(rocsparse_operation    operation,
+                                         rocsparse_fill_mode    fill_mode,
+                                         rocsparse::trm_info_t* trm)
+{
+    return this->set_trm_info(rocsparse::trm_t::from_csrsm, operation, fill_mode, trm);
+}
+
+rocsparse::trm_info_t* _rocsparse_mat_info::get_csrsv_lower_info()
+{
+    return this->get_csrsv_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
+}
+
+rocsparse::trm_info_t* _rocsparse_mat_info::get_csrsvt_upper_info()
+{
+    return this->get_csrsv_info(rocsparse_operation_transpose, rocsparse_fill_mode_upper);
+}
+
+rocsparse::trm_info_t* _rocsparse_mat_info::get_csrsm_lower_info()
+{
+    return this->get_csrsm_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
+}
+
+rocsparse::trm_info_t* _rocsparse_mat_info::get_csrsmt_upper_info()
+{
+    return this->get_csrsm_info(rocsparse_operation_transpose, rocsparse_fill_mode_upper);
+}
+
+rocsparse::trm_info_t* _rocsparse_mat_info::get_bsrsm_lower_info()
+{
+    return this->get_bsrsm_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
+}
+
+rocsparse::trm_info_t* _rocsparse_mat_info::get_bsrsv_lower_info()
+{
+    return this->get_bsrsv_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
+}
+
+void _rocsparse_mat_info::clear(rocsparse::trm_t::index_t index)
+{
+    this->m_trm.clear(index);
+}
+
+void _rocsparse_mat_info::set_trm_info(rocsparse::trm_t::index_t index,
+                                       rocsparse_operation       operation,
+                                       rocsparse_fill_mode       fill_mode,
+                                       rocsparse::trm_info_t*    that)
+{
+
+    this->m_trm.create(index)->set(operation, fill_mode, that);
+}
+
+std::shared_ptr<_rocsparse_csrsv_info> _rocsparse_mat_info::get_shared_csrsv_info()
+{
+    return this->m_trm.get_shared(rocsparse::trm_t::from_csrsv);
+}
+
+std::shared_ptr<_rocsparse_csrsm_info> _rocsparse_mat_info::get_shared_csrsm_info()
+{
+    return this->m_trm.get_shared(rocsparse::trm_t::from_csrsm);
+}
+
+rocsparse::trm_info_t* _rocsparse_mat_info::get_trm_info(rocsparse::trm_t::index_t index,
+                                                         rocsparse_operation       operation,
+                                                         rocsparse_fill_mode       fill_mode)
+{
+    return this->m_trm.create(index)->get(operation, fill_mode);
+}
+
+//
+// Duplicate all the trm_info_t.
+//
+void _rocsparse_mat_info::duplicate_trdata(rocsparse_mat_info src)
+{
+    this->m_trm.copy(src->m_trm);
+}
+
+rocsparse_indextype _rocsparse_mat_info::get_indextype_J()
+{
+
+    return this->m_trm.first()->get_indextype_J();
+}
+
 rocsparse_csrmv_info _rocsparse_mat_info::get_csrmv_info()
 {
     return this->csrmv_info;
@@ -57,139 +275,6 @@ rocsparse::sorted_coo2csr_info_t* _rocsparse_mat_info::get_sorted_coo2csr_info()
 
 _rocsparse_mat_info::~_rocsparse_mat_info()
 {
-    // Uncouple shared meta data
-    if(this->bsrsv_lower_info == this->bsrilu0_info || this->bsrsv_lower_info == this->bsric0_info
-       || this->bsrsv_lower_info == this->bsrsm_lower_info)
-    {
-        this->bsrsv_lower_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(this->bsrsm_lower_info == this->bsrilu0_info || this->bsrsm_lower_info == this->bsric0_info)
-    {
-        this->bsrsm_lower_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(this->bsrilu0_info == this->bsric0_info)
-    {
-        this->bsrilu0_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(this->csrsv_lower_info == this->csrilu0_info || this->csrsv_lower_info == this->csric0_info
-       || this->csrsv_lower_info == this->csrsm_lower_info)
-    {
-        this->csrsv_lower_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(this->csrsm_lower_info == this->csrilu0_info || this->csrsm_lower_info == this->csric0_info)
-    {
-        this->csrsm_lower_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(this->csrilu0_info == this->csric0_info)
-    {
-        this->csrilu0_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(this->csrsv_upper_info == this->csrsm_upper_info)
-    {
-        this->csrsv_upper_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(this->bsrsv_upper_info == this->bsrsm_upper_info)
-    {
-        this->bsrsv_upper_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(this->csrsvt_lower_info == this->csrsmt_lower_info)
-    {
-        this->csrsvt_lower_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(this->bsrsvt_lower_info == this->bsrsmt_lower_info)
-    {
-        this->bsrsvt_lower_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(this->csrsvt_upper_info == this->csrsmt_upper_info)
-    {
-        this->csrsvt_upper_info = nullptr;
-    }
-
-    // Uncouple shared meta data
-    if(this->bsrsvt_upper_info == this->bsrsmt_upper_info)
-    {
-        this->bsrsvt_upper_info = nullptr;
-    }
-
-    // Clear bsrsvt upper info struct
-    rocsparse::trm_info_t::destroy(this->bsrsvt_upper_info);
-
-    // Clear bsrsvt lower info struct
-    rocsparse::trm_info_t::destroy(this->bsrsvt_lower_info);
-
-    // Clear bsric0 info struct
-    rocsparse::trm_info_t::destroy(this->bsric0_info);
-
-    // Clear bsrilu0 info struct
-    rocsparse::trm_info_t::destroy(this->bsrilu0_info);
-
-    // Clear csrsvt upper info struct
-    rocsparse::trm_info_t::destroy(this->csrsvt_upper_info);
-
-    // Clear csrsvt lower info struct
-    rocsparse::trm_info_t::destroy(this->csrsvt_lower_info);
-
-    // Clear csrsmt upper info struct
-    rocsparse::trm_info_t::destroy(this->csrsmt_upper_info);
-
-    // Clear csrsmt lower info struct
-    rocsparse::trm_info_t::destroy(this->csrsmt_lower_info);
-
-    // Clear bsrsmt upper info struct
-    rocsparse::trm_info_t::destroy(this->bsrsmt_upper_info);
-
-    // Clear bsrsmt lower info struct
-    rocsparse::trm_info_t::destroy(this->bsrsmt_lower_info);
-
-    // Clear csric0 info struct
-    rocsparse::trm_info_t::destroy(this->csric0_info);
-
-    // Clear csrilu0 info struct
-    rocsparse::trm_info_t::destroy(this->csrilu0_info);
-
-    // Clear bsrsv upper info struct
-    rocsparse::trm_info_t::destroy(this->bsrsv_upper_info);
-
-    // Clear bsrsv lower info struct
-    rocsparse::trm_info_t::destroy(this->bsrsv_lower_info);
-
-    // Clear csrsv upper info struct
-    rocsparse::trm_info_t::destroy(this->csrsv_upper_info);
-
-    // Clear csrsv lower info struct
-    rocsparse::trm_info_t::destroy(this->csrsv_lower_info);
-
-    // Clear csrsm upper info struct
-    rocsparse::trm_info_t::destroy(this->csrsm_upper_info);
-
-    // Clear csrsm lower info struct
-    rocsparse::trm_info_t::destroy(this->csrsm_lower_info);
-
-    // Clear bsrsm upper info struct
-    rocsparse::trm_info_t::destroy(this->bsrsm_upper_info);
-
-    // Clear bsrsm lower info struct
-    rocsparse::trm_info_t::destroy(this->bsrsm_lower_info);
 
     // Clear csrgemm info struct
     WARNING_IF_ROCSPARSE_ERROR(rocsparse::destroy_csrgemm_info(this->csrgemm_info));
@@ -202,6 +287,10 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
 
     // Clear singular pivot
     WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->singular_pivot));
+
+    //
+    // TRM_INFO data are automatically destroyed.
+    //
 
     if(this->csrmv_info != nullptr)
     {
@@ -222,55 +311,4 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
         delete sorted_coo2csr_info;
         this->set_sorted_coo2csr_info(nullptr);
     }
-}
-
-/********************************************************************************
- * \brief check_trm_shared checks if the given trm info structure
- * shares its meta data with another trm info structure.
- *******************************************************************************/
-bool rocsparse::check_trm_shared(const rocsparse_mat_info info, rocsparse::trm_info_t* trm)
-{
-    ROCSPARSE_ROUTINE_TRACE;
-
-    if(info == nullptr)
-    {
-        return false;
-    }
-
-    int shared = -1;
-
-    if(trm == info->bsrsv_lower_info)
-        ++shared;
-    if(trm == info->bsrsv_upper_info)
-        ++shared;
-    if(trm == info->bsrsvt_lower_info)
-        ++shared;
-    if(trm == info->bsrsvt_upper_info)
-        ++shared;
-    if(trm == info->bsrilu0_info)
-        ++shared;
-    if(trm == info->bsric0_info)
-        ++shared;
-    if(trm == info->csrilu0_info)
-        ++shared;
-    if(trm == info->csric0_info)
-        ++shared;
-    if(trm == info->csrsv_lower_info)
-        ++shared;
-    if(trm == info->csrsv_upper_info)
-        ++shared;
-    if(trm == info->csrsvt_lower_info)
-        ++shared;
-    if(trm == info->csrsvt_upper_info)
-        ++shared;
-    if(trm == info->csrsm_lower_info)
-        ++shared;
-    if(trm == info->csrsm_upper_info)
-        ++shared;
-    if(trm == info->bsrsm_lower_info)
-        ++shared;
-    if(trm == info->bsrsm_upper_info)
-        ++shared;
-
-    return (shared > 0) ? true : false;
 }

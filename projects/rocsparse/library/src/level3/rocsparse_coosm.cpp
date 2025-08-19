@@ -46,6 +46,7 @@ namespace rocsparse
                                               rocsparse_order           order_B,
                                               rocsparse_mat_info        info,
                                               rocsparse_solve_policy    policy,
+                                              rocsparse_csrsm_info      csrsm_info,
                                               void*                     temp_buffer);
 
     using coosm_solve_tuple = std::tuple<rocsparse_indextype, rocsparse_datatype>;
@@ -134,6 +135,7 @@ rocsparse_status rocsparse::coosm_solve(rocsparse_handle          handle,
                                         rocsparse_order           order_B,
                                         rocsparse_mat_info        info,
                                         rocsparse_solve_policy    policy,
+                                        rocsparse_csrsm_info      csrsm_info,
                                         void*                     temp_buffer)
 {
     rocsparse::coosm_solve_t f;
@@ -155,6 +157,7 @@ rocsparse_status rocsparse::coosm_solve(rocsparse_handle          handle,
                                 order_B,
                                 info,
                                 policy,
+                                csrsm_info,
                                 temp_buffer));
     return rocsparse_status_success;
 }

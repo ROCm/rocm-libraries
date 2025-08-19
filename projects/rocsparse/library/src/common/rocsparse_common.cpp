@@ -386,6 +386,11 @@ rocsparse_status rocsparse::dense_transpose(rocsparse_handle   handle,
 {
     switch(A_datatype)
     {
+
+    case rocsparse_datatype_bf16_r:
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_internal_error);
+    }
     case rocsparse_datatype_f32_r:
     {
         static const float s_one = static_cast<float>(1);
