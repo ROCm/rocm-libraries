@@ -2596,6 +2596,28 @@ class Solution(collections.abc.Mapping):
         GlobalReadVectorWidthA = state["GlobalReadVectorWidthA"]
         totalVectorsCoalescedA = totalElementsCoalescedA // GlobalReadVectorWidthA
 
+        # handle global read vector width MXSA
+        if state["ProblemType"]["MXBlockA"]:
+          if state["ProblemType"]["TLUMXSA"]: # NT/NN
+            totalElementsCoalescedMXSA = state["MacroTileMXSA"]
+            totalElementsPerpMXSA = state["_DepthUMXSA"]
+            if state["DirectToVgprMXSA"]:
+              totalElementsCoalescedMXSA *= state["MIWaveGroup"][1]
+          else: # TN/TT
+            totalElementsCoalescedMXSA = state["_DepthUMXSA"]
+            totalElementsPerpMXSA = state["MacroTileMXSA"]
+            if state["DirectToVgprMXSA"]:
+              totalElementsPerpMXSA *= state["MIWaveGroup"][1]
+
+          totalElementsMXSA = totalElementsCoalescedMXSA * totalElementsPerpMXSA
+
+          tvmxsa = totalElementsMXSA // state["GlobalReadVectorWidthMXSA"]
+          if not Solution.setGlobalReadVectorWidth(state, "MXSA", tvmxsa, state["GlobalReadVectorWidthMXSA"], printRejectionReason):
+            validDepthU = False
+
+          GlobalReadVectorWidthMXSA = state["GlobalReadVectorWidthMXSA"]
+          totalVectorsCoalescedMXSA = totalElementsCoalescedMXSA // GlobalReadVectorWidthMXSA
+
         # handle global read vector width B
         if state["ProblemType"]["TLUB"]: # NT/TT
           totalElementsCoalescedB = state["MacroTileB"]
@@ -2646,7 +2668,29 @@ class Solution(collections.abc.Mapping):
         GlobalReadVectorWidthB = state["GlobalReadVectorWidthB"]
         totalVectorsCoalescedB = totalElementsCoalescedB // GlobalReadVectorWidthB
 
-        # handle global read vector width M
+        # handle global read vector width MXSB
+        if state["ProblemType"]["MXBlockB"]:
+          if state["ProblemType"]["TLUMXSB"]: # NT/NN
+            totalElementsCoalescedMXSB = state["MacroTileMXSB"]
+            totalElementsPerpMXSB = state["_DepthUMXSB"]
+            if state["DirectToVgprMXSB"]:
+              totalElementsCoalescedMXSB *= state["MIWaveGroup"][1]
+          else: # TN/TT
+            totalElementsCoalescedMXSB = state["_DepthUMXSB"]
+            totalElementsPerpMXSB = state["MacroTileMXSB"]
+            if state["DirectToVgprMXSB"]:
+              totalElementsPerpMXSB *= state["MIWaveGroup"][1]
+
+          totalElementsMXSB = totalElementsCoalescedMXSB * totalElementsPerpMXSB
+
+          tvmxsa = totalElementsMXSB // state["GlobalReadVectorWidthMXSB"]
+          if not Solution.setGlobalReadVectorWidth(state, "MXSB", tvmxsa, state["GlobalReadVectorWidthMXSB"], printRejectionReason):
+            validDepthU = False
+
+          GlobalReadVectorWidthMXSB = state["GlobalReadVectorWidthMXSB"]
+          totalVectorsCoalescedMXSB = totalElementsCoalescedMXSB // GlobalReadVectorWidthMXSB
+
+         # handle global read vector width Metadata
         if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
           grvw = 1
           vw = 1
@@ -2888,11 +2932,19 @@ class Solution(collections.abc.Mapping):
       state["NumLoadsCoalescedMetadata"] = 1
 
     if not Solution.setGlobalLoadTileDimClassic(state, "A", state["NumLoadsA"], \
-        totalVectorsCoalescedA, totalElementsPerpA, depthUA, printRejectionReason):
+        totalVectorsCoalescedA, totalElementsPerpA, state["_DepthUA"], printRejectionReason):
       return
+    if state["ProblemType"]["MXBlockA"]:
+      if not Solution.setGlobalLoadTileDimClassic(state, "MXSA", state["NumLoadsMXSA"], \
+          totalVectorsCoalescedMXSA, totalElementsPerpMXSA, state["_DepthUMXSA"], printRejectionReason):
+        return
     if not Solution.setGlobalLoadTileDimClassic(state, "B", state["NumLoadsB"], \
-        totalVectorsCoalescedB, totalElementsPerpB, depthUB, printRejectionReason):
+        totalVectorsCoalescedB, totalElementsPerpB, state["_DepthUB"], printRejectionReason):
       return
+    if state["ProblemType"]["MXBlockB"]:
+      if not Solution.setGlobalLoadTileDimClassic(state, "MXSB", state["NumLoadsMXSB"], \
+          totalVectorsCoalescedMXSB, totalElementsPerpMXSB, state["_DepthUMXSB"], printRejectionReason):
+        return
 
     if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
       if state["ProblemType"]["TLUMetadata"]:
@@ -2956,6 +3008,11 @@ class Solution(collections.abc.Mapping):
 
     state["LVCA"] = roundupRatio(state["LSCA"] , state["GlobalReadVectorWidthA"])
     state["LVPA"] = roundupRatio(state["LSPA"] , state["GlobalReadVectorWidthA"])
+
+    if state["ProblemType"]["MXBlockA"]:
+      state["LVCMXSA"] = roundupRatio(state["LSCMXSA"] , state["GlobalReadVectorWidthMXSA"])
+      state["LVPMXSA"] = roundupRatio(state["LSPMXSA"] , state["GlobalReadVectorWidthMXSA"])
+
     state["LVCB"] = roundupRatio(state["LSCB"] , state["GlobalReadVectorWidthB"])
     state["LVPB"] = roundupRatio(state["LSPB"] , state["GlobalReadVectorWidthB"])
 
@@ -2982,6 +3039,10 @@ class Solution(collections.abc.Mapping):
                f"lvcb={lvcb}, lscb={state.get('LSCB', None)}, grvwB={state.get('GlobalReadVectorWidthB', None)}, "
                f"bpeB={bpeB})")
         return
+
+    if state["ProblemType"]["MXBlockB"]:
+      state["LVCMXSB"] = roundupRatio(state["LSCMXSB"] , state["GlobalReadVectorWidthMXSB"])
+      state["LVPMXSB"] = roundupRatio(state["LSPMXSB"] , state["GlobalReadVectorWidthMXSB"])
 
     if state["ProblemType"]["Sparse"] and not state["DirectToVgprSparseMetadata"]:
       state["LVCMetadata"] = roundupRatio(state["LSCMetadata"] , state["GlobalReadVectorWidthMetadata"])
