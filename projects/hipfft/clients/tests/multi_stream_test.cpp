@@ -27,7 +27,6 @@
 #include "../../shared/params_gen.h" // hash_prob
 #include "../../shared/test_params.h" // externally-declared test parameters
 #include "../hipfft_params.h"
-#define _USE_MATH_DEFINES
 #include <algorithm> // copy_n, any_of
 #include <cmath> // M_PI, cos, sin
 #include <exception>
@@ -37,7 +36,15 @@
 #include <random> // ranlux24_base, uniform_int_distribution
 #include <sstream>
 #include <stdexcept>
+#ifdef WIN32
+#include <synchapi.h> // Sleep
+#else
 #include <unistd.h> // usleep
+#endif
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 DISABLE_WARNING_PUSH
 DISABLE_WARNING_DEPRECATED_DECLARATIONS
@@ -689,7 +696,11 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
                           [](const decltype(stream_is_done)::value_type& val) { return val == 0; })
               && time_waited <= failure_time_threshold)
         {
+#ifdef WIN32
+            Sleep(sleep_time / 1000);
+#else
             usleep(sleep_time);
+#endif
             time_waited += sleep_time;
         }
         if(time_waited > failure_time_threshold)
