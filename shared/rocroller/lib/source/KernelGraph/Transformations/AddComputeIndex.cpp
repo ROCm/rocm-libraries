@@ -686,16 +686,6 @@ namespace rocRoller::KernelGraph
                     kgraph.control.addElement(ForLoopIncrement(), {spec.forLoop}, {chain.update});
                 }
 
-                // Add deferred connections
-                for(auto candidate : candidates)
-                {
-                    auto count = 0;
-                    for(auto const& dc : chain.connections)
-                    {
-                        kgraph.mapper.connect(candidate, dc.coordinate, dc.connectionSpec);
-                    }
-                }
-
                 // Add mapper connections to unroll stride coordinates
                 for (auto const& candidate : candidates)
                 {
@@ -738,6 +728,17 @@ namespace rocRoller::KernelGraph
                         }
                     }
                 }
+
+                // Add deferred connections
+                for(auto candidate : candidates)
+                {
+                    auto count = 0;
+                    for(auto const& dc : chain.connections)
+                    {
+                        kgraph.mapper.connect(candidate, dc.coordinate, dc.connectionSpec);
+                    }
+                }
+                
             }
 
             return kgraph;
