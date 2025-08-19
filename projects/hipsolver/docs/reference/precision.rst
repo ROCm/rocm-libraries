@@ -1,6 +1,6 @@
 .. meta::
   :description: hipSOLVER library precision support overview
-  :keywords: hipSOLVER, ROCm, CUDA, API, Linear Algebra, documentation, precision support, data types
+  :keywords: hipSOLVER, ROCm, API, Linear Algebra, documentation, precision support, data types
 
 .. _precision-support:
 
@@ -9,8 +9,7 @@ hipSOLVER precision support
 ********************************************************************
 
 This section provides an overview of the numerical precision types supported by the hipSOLVER library.
-hipSOLVER provides a consistent interface to linear algebra solvers that can run on both AMD and NVIDIA
-hardware.
+hipSOLVER provides a consistent interface to linear algebra solvers that can run on AMD hardware.
 
 Supported precision types
 =========================
