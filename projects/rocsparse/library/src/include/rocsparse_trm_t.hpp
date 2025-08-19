@@ -28,7 +28,6 @@
 #include <memory>
 namespace rocsparse
 {
-
     struct trm_t
     {
         typedef enum item_index_
