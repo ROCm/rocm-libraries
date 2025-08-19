@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.25.2)
 project(rocm-libraries LANGUAGES C CXX Fortran ASM)
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
 include(GNUInstallDirs)
 include(disableable_option)

@@ -9,17 +9,12 @@
         {
             "name": "opt-rocm:all",
             "displayName": "Release build (all libraries)",
-            "description": "Standard release build for all libraries",
+            "description": "Configure preset for release builds with installation to /opt/rocm",
+            "toolchainFile": "${sourceDir}/cmake/toolchains/linux-amdclang.cmake",
             "binaryDir": "${sourceDir}/build",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
-                "CMAKE_CXX_COMPILER": "/opt/rocm/bin/amdclang++",
-                "CMAKE_C_COMPILER": "/opt/rocm/bin/amdclang",
-                "CMAKE_PREFIX_PATH": "/opt/rocm",
                 "CMAKE_INSTALL_PREFIX": "/opt/rocm"
-            },
-            "environment": {
-                "ROCM_PATH": "/opt/rocm"
             }
         },
         {
@@ -51,8 +46,8 @@
     "buildPresets": [
         {
             "name": "default",
-            "displayName": "Build (Release) default GPU",
-            "description": "Build using the opt-rocm:all configure preset",
+            "displayName": "Default build preset",
+            "description": "Build using the default preset",
             "configurePreset": "opt-rocm:all"
         }
     ]
