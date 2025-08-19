@@ -387,6 +387,8 @@ defaultBenchmarkCommonParameters = [
     {"BufferStore": [True]},
     {"DirectToVgprA": [False]},
     {"DirectToVgprB": [False]},
+    {"DirectToVgprMXSA": [False]},
+    {"DirectToVgprMXSB": [False]},
     {"DirectToVgprSparseMetadata": [False]},
     # Restricted address remap features (default off unless explicitly enabled in the solution config):
     {"BAddrInterleave": [False]},
