@@ -36,7 +36,6 @@
 
 namespace origami
 {
-
     /**
         * Performs `(n + d - 1) / d`, but is robust against the case where
         * `(n + d - 1)` would overflow.
@@ -304,7 +303,7 @@ namespace origami
         if(element_size_B < 8 && mx_block_size != 0)
         {
             //Number of scales per tile
-            size_t num_scales_B = safe_ceil_div(MT_M * MT_K, mx_block_size);
+            size_t num_scales_B = safe_ceil_div(MT_N * MT_K, mx_block_size);
             Ld_CU_bytes += num_scales_B; //One Byte per scale
         }
         // 3) occupancy
@@ -415,7 +414,6 @@ namespace origami
 
             hardware.log_debug("H_mem1 (mem1 hit ratio)", H_mem1);
             hardware.log_debug("H_mem2 (mem2 hit ratio)", H_mem2);
-            hardware.log_debug("Ld_mem1 (bytes)", Ld_mem2);
             hardware.log_debug("Active CUs", active_cu);
             hardware.log_debug("Total Load (bytes)", total_Ld);
             hardware.log_debug("L_mem_mem1 (cycles)", L_mem_mem1);
@@ -1113,5 +1111,4 @@ namespace origami
             return true; // Within LDS capacity
         }
     }
-
 } // namespace origami

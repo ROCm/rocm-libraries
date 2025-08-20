@@ -29,7 +29,7 @@
 #include <set>
 #include <vector>
 
-#include <Tensile/analytical/Utils.hpp>
+#include <origami/Utils.hpp>
 
 namespace TensileLite
 {
@@ -46,8 +46,8 @@ namespace TensileLite
     struct ProblemPredictionLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
         std::unordered_map<int, std::shared_ptr<MySolution>>        solutionmap;
-        std::vector<TensileLite::analytical::TileTuple>             tile_list;
-        std::unordered_map<TensileLite::analytical::TileTuple, int> tile_map;
+        std::vector<origami::TileTuple>             tile_list;
+        std::unordered_map<origami::TileTuple, int> tile_map;
 
         static std::string Type()
         {
@@ -164,13 +164,13 @@ namespace TensileLite
                 = problem.b().elementBytes() * 8;
             size_t elementSizeC_bits
                 = problem.c().elementBytes() * 8;
-            const analytical::Hardware& analaytical_hardware = *(pAMDGPU->analyticalHardware);
+            const origami::Hardware& analaytical_hardware = *(pAMDGPU->analyticalHardware);
             int WGM
                 = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
-            analytical::DataType miDataType = static_cast<analytical::DataType>(problem.computeInputType());
+            origami::DataType miDataType = static_cast<origami::DataType>(problem.computeInputType());
             if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
-                miDataType = analytical::DataType::XFloat32;
-            auto selected_tiles = analytical::select_best_macro_tile_size(
+                miDataType = origami::DataType::XFloat32;
+            auto selected_tiles = origami::select_best_macro_tile_size(
                 m,
                 n,
                 k,

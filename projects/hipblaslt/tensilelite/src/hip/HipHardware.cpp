@@ -38,9 +38,9 @@ namespace TensileLite
                      std::string(prop.name))
             , properties(prop)
         {
-            if(analytical::Hardware::isHardwareSupported(prop))
+            if(origami::Hardware::isHardwareSupported(prop))
             {
-                analyticalHardware = std::make_shared<analytical::Hardware>(prop);
+                analyticalHardware = std::make_shared<origami::Hardware>(prop);
             }
         }
 

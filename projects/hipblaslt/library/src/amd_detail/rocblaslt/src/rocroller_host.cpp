@@ -39,7 +39,7 @@
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 
-#include <Tensile/analytical/Utils.hpp>
+#include <origami/Utils.hpp>
 
 using namespace rocRoller;
 
@@ -623,24 +623,24 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
 {
     std::vector<SolutionIndexParameters> params;
 
-    std::vector<TensileLite::analytical::TileTuple> tile_list = getTileListForKernelType(kernelType);
+    std::vector<origami::TileTuple> tile_list = getTileListForKernelType(kernelType);
 
     size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(kernelType.typeA).elementBits; 
     size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(kernelType.typeB).elementBits;
     size_t elementSizeC_bits = rocRoller::DataTypeInfo::Get(kernelType.typeC).elementBits; 
 
     size_t maxAB_bits = std::max(elementSizeA_bits, elementSizeB_bits);
-    TensileLite::analytical::DataType dataType = TensileLite::analytical::DataType::Float8;
+    origami::DataType dataType = origami::DataType::Float8;
     if(maxAB_bits == 6)
-        dataType = TensileLite::analytical::DataType::Float6;
+        dataType = origami::DataType::Float6;
     else if(maxAB_bits == 4)
-        dataType = TensileLite::analytical::DataType::Float4;
+        dataType = origami::DataType::Float4;
 
-    const TensileLite::analytical::Hardware analaytical_hardware = TensileLite::analytical::Hardware::getHardwareForDevice(0);
+    const origami::Hardware analaytical_hardware = origami::Hardware::getHardwareForDevice(0);
 
     int WGM = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
 
-    auto selected_tiles = TensileLite::analytical::select_best_macro_tile_size(
+    auto selected_tiles = origami::select_best_macro_tile_size(
         prob.m,
         prob.n,
         prob.k,

@@ -55,6 +55,7 @@ target_sources(origami
         "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/AnalyticalGemm.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/Hardware.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/Utils.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/StreamK.cpp"
 )
 
 target_link_libraries(origami PUBLIC hip::host)

@@ -35,7 +35,6 @@
 
 namespace origami
 {
-
         using ResultTuple = std::tuple<double, // latency
                                        size_t, // MT_M
                                        size_t, // MT_N
