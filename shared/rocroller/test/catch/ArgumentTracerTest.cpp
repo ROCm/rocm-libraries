@@ -272,27 +272,17 @@ namespace ArgumentTracerTest
         kgraph = rocRollerTest::transform<KG::UpdateWavefrontParameters>(kgraph, commandParameters);
         kgraph = rocRollerTest::transform<KG::CleanArguments>(kgraph, context.get(), command);
 
-        //
-        // Get unused arguments using ControlFlowArgumentTracer for verifying
-        // they will be removed after applying AddDeallocateArguments.
-        //
-        KG::ControlFlowArgumentTracer argTracer(kgraph, context->kernel());
-        auto const&                   unusedArgs = argTracer.neverReferencedArguments();
+        // Add a new unused argument
+        context->kernel()->addArgument(
+            {"unusedArg", {DataType::Int32, PointerType::PointerGlobal}, DataDirection::WriteOnly});
 
-        //
-        // Make sure there exists unused arguments
-        //
-        REQUIRE(not unusedArgs.empty());
+        // Ensure the unused arg has been added to the kernel successfully
+        CHECK_NOTHROW(context->kernel()->findArgument("unusedArg"));
 
         kgraph = rocRollerTest::transform<KG::AddDeallocateArguments>(kgraph, context.get());
 
-        //
-        // Verify unused arguments are removed by checking an error is thrown when
-        // finding them in the kernel.
-        //
-        for(auto const& arg : unusedArgs)
-        {
-            CHECK_THROWS_AS(context->kernel()->findArgument(arg), FatalError);
-        }
+        // Verify unused argument is removed after AddDeallocateArguments by
+        // checking an error is thrown when finding it in the kernel.
+        CHECK_THROWS_AS(context->kernel()->findArgument("unusedArg"), FatalError);
     }
 }
