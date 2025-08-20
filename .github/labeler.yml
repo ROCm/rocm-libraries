@@ -44,8 +44,7 @@
 
 "project: none":
 - changed-files:
-  - all-globs-to-all-files: '!projects/**/*'
-  - all-globs-to-all-files: '!shared/**/*'
+  - all-globs-to-all-files: ['!projects/**/*', '!shared/**/*']
 
 "project: rocblas":
 - changed-files:
