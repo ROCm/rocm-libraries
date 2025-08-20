@@ -18,6 +18,8 @@ subtrees:
   entries:
   - file: conceptual/rocblas-design-notes
     title: rocBLAS design notes
+  - file: conceptual/blas-operations-intro
+    title: BLAS operations introduction
 
 - caption: How to 
   entries:

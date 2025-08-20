@@ -221,7 +221,7 @@ void rocsparse_init(T*     A,
                     T      a,
                     T      b)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(use_exact)
     {
@@ -245,7 +245,7 @@ void rocsparse_init(rocsparse_float_complex* A,
                     rocsparse_float_complex  a,
                     rocsparse_float_complex  b)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(use_exact)
     {
@@ -275,7 +275,7 @@ void rocsparse_init(rocsparse_double_complex* A,
                     rocsparse_double_complex  a,
                     rocsparse_double_complex  b)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     if(use_exact)
     {
@@ -338,7 +338,7 @@ void rocsparse_init(std::vector<T>& A,
                     T               a,
                     T               b)
 {
-    ROCSPARSE_CLIENTS_ROUTINE_TRACE
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
     rocsparse_init(A.data(), M, N, lda, use_exact, stride, batch_count, a, b);
 }
