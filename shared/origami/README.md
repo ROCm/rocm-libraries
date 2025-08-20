@@ -45,6 +45,11 @@ After configuring and building, run the following command to install:
 cmake --target install
 ```
 
+### Options
+* `ORIGAMI_BUILD_SHARED_LIBS`: Enables building of shared libraries (default: `ON`)
+* `ORIGAMI_ENABLE_PYTHON`: Enables generation of origami Python bindings (default: `OFF`)
+* `ORIGAMI_ENABLE_TESTS`: Build the Python binding tests (default: `OFF`)
+
 ## API & Usage
 
 The core API is centered around the function `select_best_macro_tile_size` provided in `Utils.hpp`. This function evaluates a list of candidate macro-tile configurations for GEMM operations and selects the one that minimizes total latency while applying a tie-breaking strategy based on problem dimensions. The API provides several additional functions for ranking, sweeping tile configurations, and even selecting the best workgroup multiplier based on L2 hit rate.
