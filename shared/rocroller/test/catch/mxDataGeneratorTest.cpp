@@ -213,8 +213,8 @@ namespace mxDataGeneratorTest
 
         SUPPORTED_ARCH_SECTION(arch)
         {
-            const int dim1 = 32;
-            const int dim2 = 32;
+            const int dim1 = 1024;
+            const int dim2 = 1024;
 
             t.differentSeeds<TestType>(dim1, dim2);
         }
