@@ -68,6 +68,17 @@ namespace rocRoller::KernelGraph
             }
         };
 
+        // struct UnrollStide
+        // {
+        //     std::string id;
+        //     int subdimension;
+
+        //     bool operator==(UnrollStride const& other) const
+        //     {
+        //         return this->id == other.id && this->unrollCoord == other.unrollCoord;
+        //     }
+        // }
+
         bool inline operator<(TypeAndSubDimension const& a, TypeAndSubDimension const& b)
         {
             if(a.id == b.id)

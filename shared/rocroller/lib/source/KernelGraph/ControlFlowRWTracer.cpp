@@ -213,7 +213,6 @@ namespace rocRoller::KernelGraph
     void ControlFlowRWTracer::trackOffsetAndStride(int                            control,
                                                     ReadWrite                      rw)
     {
-        // return;
         AssertFatal(control > 0);
         for(auto const& c : m_graph.mapper.getConnections(control))
         {
@@ -224,7 +223,6 @@ namespace rocRoller::KernelGraph
                 trackRegister(control, c.coordinate, rw);
             }
         }
-
     }
 
     bool ControlFlowRWTracer::hasGeneratedInputs(int const& tag)
