@@ -5,7 +5,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-// namespace origami = origami;
 using Hardware = origami::hardware_t;
 
 PYBIND11_MODULE(origami, m)

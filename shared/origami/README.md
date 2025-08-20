@@ -45,6 +45,22 @@ After configuring and building, run the following command to install:
 cmake --target install
 ```
 
+### Testing Origami Python Bindings
+
+To test the origami Python bindings:
+
+```bash
+# configure with python bindings and tests enabled 
+cmake -S . -B build/ -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ -DCMAKE_INSTALL_PREFIX=/opt/rocm -D ORIGAMI ENABLE_PYTHON=ON -D ORIGAMI_BUILD_TESTING=ON
+
+# build 
+cmake --build build/ --parallel
+
+# run tests
+cd build/
+ctest --output-on-failure
+```
+
 ### Options
 * `ORIGAMI_BUILD_SHARED_LIBS`: Enables building of shared libraries (default: `ON`)
 * `ORIGAMI_ENABLE_PYTHON`: Enables generation of origami Python bindings (default: `OFF`)
