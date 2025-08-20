@@ -287,13 +287,24 @@ namespace
     template <fft_precision prec>
     void test_existence_of_utility_functions()
     {
-        // call utility functions - they need to exist but don't need to work
-        const auto& hipfftw_ = hipfftw_funcs<prec>::get_instance();
-        hipfftw_.print_plan(nullptr);
-        hipfftw_.set_timelimit(0.0);
-        hipfftw_.cost(nullptr);
-        hipfftw_.flops(nullptr, nullptr, nullptr, nullptr);
-        hipfftw_.cleanup();
+        try
+        {
+            // call utility functions - they need to exist but don't need to work
+            const auto& hipfftw_ = hipfftw_funcs<prec>::get_instance();
+            hipfftw_.print_plan(nullptr);
+            hipfftw_.set_timelimit(0.0);
+            hipfftw_.cost(nullptr);
+            hipfftw_.flops(nullptr, nullptr, nullptr, nullptr);
+            hipfftw_.cleanup();
+        }
+        catch(const hipfftw_undefined_function_ptr& e)
+        {
+            GTEST_FAIL() << "Undefined function pointers detected. Error info: " << e.what();
+        }
+        catch(...)
+        {
+            GTEST_FAIL() << "Unexpected failure";
+        }
     }
 
     //
@@ -2452,19 +2463,8 @@ namespace
 
 TEST(hipfftw_test, utility_functions)
 {
-    try
-    {
-        test_existence_of_utility_functions<fft_precision_single>();
-        test_existence_of_utility_functions<fft_precision_double>();
-    }
-    catch(const hipfftw_undefined_function_ptr& e)
-    {
-        GTEST_FAIL() << "Undefined function pointers detected. Error info: " << e.what();
-    }
-    catch(...)
-    {
-        GTEST_FAIL() << "Unexpected failure";
-    }
+    test_existence_of_utility_functions<fft_precision_single>();
+    test_existence_of_utility_functions<fft_precision_double>();
 }
 
 INSTANTIATE_TEST_SUITE_P(

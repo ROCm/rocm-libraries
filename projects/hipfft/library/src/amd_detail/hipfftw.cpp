@@ -386,6 +386,27 @@ namespace
         bundle.set(temp);
     }
 
+    void init_rocfft()
+    {
+        struct rocfft_initializer
+        {
+            rocfft_initializer()
+            {
+                rocfft_setup();
+            }
+            ~rocfft_initializer()
+            {
+                rocfft_cleanup();
+            }
+        };
+        // magic static to handle rocfft setup/cleanup
+        static rocfft_initializer init;
+    }
+
+    template <rocfft_precision prec,
+              // single or double precision only
+              std::enable_if_t<prec == rocfft_precision_single || prec == rocfft_precision_double,
+                               bool> = true>
     struct hipfftw_plan_internal
     {
         hipfftw_plan_internal() = default;
@@ -418,6 +439,7 @@ namespace
         rocfft_plan_description internal_rocfft_desc = nullptr;
         rocfft_execution_info   internal_rocfft_info = nullptr;
         rocfft_result_placement plan_placement;
+        rocfft_transform_type   plan_dft_type;
         // Sizes of the buffers so we know how much to copy
         size_t in_bytes         = 0;
         size_t out_bytes        = 0;
@@ -426,9 +448,9 @@ namespace
         int device_id = hipInvalidDeviceId;
         // bundles for owned data pointers
         hipfftw_data_ptr_bundle<hipfftw_owns_it> work_buffer;
-        // mutables below because possibly modified in new-array execute paths
-        mutable hipfftw_data_ptr_bundle<hipfftw_owns_it> in_device;
-        mutable hipfftw_data_ptr_bundle<hipfftw_owns_it> out_device;
+        // possibly allocated in new-array execute paths if not allocated at plan creation
+        hipfftw_data_ptr_bundle<hipfftw_owns_it> in_device;
+        hipfftw_data_ptr_bundle<hipfftw_owns_it> out_device;
         // bundles for non-owned (user's) data pointers used at plan creation
         hipfftw_data_ptr_bundle<!hipfftw_owns_it> plan_creation_input;
         hipfftw_data_ptr_bundle<!hipfftw_owns_it> plan_creation_output;
@@ -440,11 +462,7 @@ namespace
         // TODO:
         // void execute(new_in, new_out) const {...}
 
-        template <rocfft_transform_type dft_type,
-                  rocfft_precision      prec,
-                  size_t                rank,
-                  typename T,
-                  size_t batch_rank>
+        template <rocfft_transform_type dft_type, size_t rank, typename T, size_t batch_rank>
         void init(const std::array<T, rank>&                                          lengths_rm,
                   const std::array<T, rank>&                                          istrides_rm,
                   const std::array<T, rank>&                                          ostrides_rm,
@@ -458,8 +476,6 @@ namespace
             // compile-time validations of template specialization values
             static_assert(1 <= rank && rank <= 3);
             static_assert(1 == batch_rank); // only supported case at the moment
-            // single of double precision only
-            static_assert(prec == rocfft_precision_single || prec == rocfft_precision_double);
             // assuming no overflow when converting values from T into size_t below
             static_assert(std::numeric_limits<T>::max() <= std::numeric_limits<size_t>::max());
             // Validation of input arguments:
@@ -509,6 +525,7 @@ namespace
             plan_placement = plan_creation_input == plan_creation_output
                                  ? rocfft_placement_inplace
                                  : rocfft_placement_notinplace;
+            plan_dft_type  = dft_type;
             if(plan_placement == rocfft_placement_inplace)
             {
                 // Check that the memory location is identical on input an output for the first
@@ -679,29 +696,11 @@ namespace
         }
 
     private:
-        void init_rocfft() const
-        {
-            // magic static to handle rocfft setup/cleanup
-            struct rocfft_initializer
-            {
-                rocfft_initializer()
-                {
-                    rocfft_setup();
-                }
-                ~rocfft_initializer()
-                {
-                    rocfft_cleanup();
-                }
-            };
-            static rocfft_initializer init;
-        }
-
-        // NOTE: const-qualified routine possibly modifying mutable members
-        // Motivation: new-array execute paths require const qualifier yet they may need
-        // to create the I/O device buffers
+        // NOTE: new-array execute paths may need to allocate the I/O device buffers if the new
+        // I/O require them (and if the I/O from plan creation did not).
         void set_io_device_buffers_for_execution(
             const hipfftw_data_ptr_bundle<!hipfftw_owns_it>& intended_execute_in,
-            const hipfftw_data_ptr_bundle<!hipfftw_owns_it>& intended_execute_out) const
+            const hipfftw_data_ptr_bundle<!hipfftw_owns_it>& intended_execute_out)
         {
             // TODO: check if the current device is an APU and simply never use
             // I/O device buffers in that case
@@ -710,7 +709,7 @@ namespace
                 // buffers are ready to go, nothing to do
                 return;
             }
-            // set device I/O buffer, if they're needed (possibly modifying mutable members)
+            // set device I/O buffer, if they're needed
             if(!in_device
                && intended_execute_in.get_copy_kind<hipfftw_memcpy_direction::TO>(device_id)
                       != hipfftw_memcpy_kind::NONE)
@@ -732,7 +731,7 @@ namespace
         {
             if(!internal_rocfft_plan)
                 throw hipfftw_internal_logic_error("the rocfft plan (internal detail to hipfftw) "
-                                                   "was unexpectedly uninitialized for execution.");
+                                                   "was uninitialized for execution (unexpected).");
             if(!exec_in || !exec_out)
                 throw hipfftw_invalid_arg("nullptr(s) cannot be used for execution data pointers.");
             // in/out may or may not need to be copied to the device
@@ -744,10 +743,10 @@ namespace
             void* exec_in_ptr = exec_in.get_data_ptr();
             if(input_copy_kind != hipfftw_memcpy_kind::NONE)
             {
-                auto hip_status = hipMemcpyAsync(in_device.get_data_ptr(),
-                                                 exec_in_ptr,
-                                                 in_bytes,
-                                                 static_cast<hipMemcpyKind>(input_copy_kind));
+                const auto hip_status = hipMemcpyAsync(in_device.get_data_ptr(),
+                                                       exec_in_ptr,
+                                                       in_bytes,
+                                                       static_cast<hipMemcpyKind>(input_copy_kind));
                 if(hip_status != hipSuccess)
                 {
                     throw hipfftw_runtime_error(
@@ -764,10 +763,11 @@ namespace
             rocfft_execute(internal_rocfft_plan, &exec_in_ptr, &exec_out_ptr, internal_rocfft_info);
             if(output_copy_kind != hipfftw_memcpy_kind::NONE)
             {
-                auto hip_status = hipMemcpyAsync(exec_out.get_data_ptr(),
-                                                 exec_out_ptr,
-                                                 out_bytes,
-                                                 static_cast<hipMemcpyKind>(output_copy_kind));
+                const auto hip_status
+                    = hipMemcpyAsync(exec_out.get_data_ptr(),
+                                     exec_out_ptr,
+                                     out_bytes,
+                                     static_cast<hipMemcpyKind>(output_copy_kind));
                 if(hip_status != hipSuccess)
                 {
                     throw hipfftw_runtime_error(
@@ -784,28 +784,6 @@ namespace
             return;
         }
     };
-
-    template <rocfft_transform_type dft_type,
-              rocfft_precision      prec,
-              size_t                rank,
-              typename T,
-              size_t batch_rank = 1>
-    hipfftw_plan_internal* hipfftw_create_plan(
-        const std::array<T, rank>&                                          lengths_rm,
-        const std::array<T, rank>&                                          istrides_rm,
-        const std::array<T, rank>&                                          ostrides_rm,
-        hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>*  user_in,
-        hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>* user_out,
-        const std::array<T, batch_rank>&                                    batch,
-        const std::array<T, batch_rank>&                                    idist,
-        const std::array<T, batch_rank>&                                    odist,
-        unsigned                                                            flags)
-    {
-        auto ret = std::make_unique<hipfftw_plan_internal>();
-        ret->init<dft_type, prec, rank, T, batch_rank>(
-            lengths_rm, istrides_rm, ostrides_rm, user_in, user_out, batch, idist, odist, flags);
-        return ret.release();
-    }
 
     template <size_t rank,
               size_t batch_rank,
@@ -874,97 +852,10 @@ namespace
         return ret;
     }
 
-    template <rocfft_transform_type dft_type, rocfft_precision prec, size_t rank>
-    hipfftw_plan_internal* hipfftw_create_default_unbatched_plan(
-        const std::array<int, rank>&                                        n,
-        hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>*  in,
-        hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>* out,
-        unsigned                                                            flags)
-    {
-        auto layout_data = hipfftw_get_default_data_layout_info_rm<rank, dft_type>(
-            static_cast<void*>(in) == static_cast<void*>(out), n);
-        return hipfftw_create_plan<dft_type, prec, rank, int>(layout_data.lengths,
-                                                              layout_data.istrides,
-                                                              layout_data.ostrides,
-                                                              in,
-                                                              out,
-                                                              layout_data.batches,
-                                                              layout_data.idist,
-                                                              layout_data.odist,
-                                                              flags);
-    }
-
-    template <rocfft_transform_type dft_type, rocfft_precision prec>
-    hipfftw_plan_internal* hipfftw_create_default_unbatched_plan(
-        int                                                                 rank,
-        const int*                                                          n,
-        hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>*  in,
-        hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>* out,
-        unsigned                                                            flags)
-    {
-        if(rank <= 0)
-            throw hipfftw_invalid_arg("ranks must be strictly positive.");
-        if(!n)
-            throw hipfftw_invalid_arg("lengths argument must not be nullptr.");
-        // rank == 1, 2, 3, or unsupported
-        switch(rank)
-        {
-        case 1:
-            return hipfftw_create_default_unbatched_plan<dft_type, prec, 1>(
-                std::array<int, 1>({n[0]}), in, out, flags);
-        case 2:
-            return hipfftw_create_default_unbatched_plan<dft_type, prec, 2>(
-                std::array<int, 2>({n[0], n[1]}), in, out, flags);
-        case 3:
-            return hipfftw_create_default_unbatched_plan<dft_type, prec, 3>(
-                std::array<int, 3>({n[0], n[1], n[2]}), in, out, flags);
-        default:
-            throw hipfftw_unsupported("rank values larger than 3 are not supported.");
-        }
-        // unreachable
-    }
-
     inline void hipfftw_validate_sign(int sign)
     {
         if(sign != FFTW_FORWARD && sign != FFTW_BACKWARD)
             throw hipfftw_invalid_arg("sign values must be FFTW_FORWARD or FFTW_BACKWARD.");
-    }
-
-    template <rocfft_precision prec, size_t rank>
-    hipfftw_plan_internal*
-        hipfftw_create_default_unbatched_complex_plan(const std::array<int, rank>&  n,
-                                                      int                           sign,
-                                                      hipfftw_complex_data_t<prec>* in,
-                                                      hipfftw_complex_data_t<prec>* out,
-                                                      unsigned                      flags)
-    {
-        hipfftw_validate_sign(sign);
-        if(sign == FFTW_FORWARD)
-            return hipfftw_create_default_unbatched_plan<rocfft_transform_type_complex_forward,
-                                                         prec,
-                                                         rank>(n, in, out, flags);
-        else
-            return hipfftw_create_default_unbatched_plan<rocfft_transform_type_complex_inverse,
-                                                         prec,
-                                                         rank>(n, in, out, flags);
-    }
-
-    template <rocfft_precision prec>
-    hipfftw_plan_internal*
-        hipfftw_create_default_unbatched_complex_plan(int                           rank,
-                                                      const int*                    n,
-                                                      int                           sign,
-                                                      hipfftw_complex_data_t<prec>* in,
-                                                      hipfftw_complex_data_t<prec>* out,
-                                                      unsigned                      flags)
-    {
-        hipfftw_validate_sign(sign);
-        if(sign == FFTW_FORWARD)
-            return hipfftw_create_default_unbatched_plan<rocfft_transform_type_complex_forward,
-                                                         prec>(rank, n, in, out, flags);
-        else
-            return hipfftw_create_default_unbatched_plan<rocfft_transform_type_complex_inverse,
-                                                         prec>(rank, n, in, out, flags);
     }
 
     // read the environment variable env_var and convert it to a size_t value.
@@ -1178,6 +1069,138 @@ namespace
     }
 } // end of implementation details
 
+// definition of the header's precision-specific structures
+struct fftwf_plan_s : public hipfftw_plan_internal<rocfft_precision_single>
+{
+};
+struct fftw_plan_s : public hipfftw_plan_internal<rocfft_precision_double>
+{
+};
+
+template <rocfft_precision prec>
+struct hipfftw_plan;
+template <>
+struct hipfftw_plan<rocfft_precision_single>
+{
+    using type = fftwf_plan_s;
+};
+template <>
+struct hipfftw_plan<rocfft_precision_double>
+{
+    using type = fftw_plan_s;
+};
+template <rocfft_precision prec>
+using hipfftw_plan_t = typename hipfftw_plan<prec>::type;
+
+template <rocfft_transform_type dft_type,
+          rocfft_precision      prec,
+          size_t                rank,
+          typename T,
+          size_t batch_rank = 1>
+static hipfftw_plan_t<prec>* hipfftw_create_plan(
+    const std::array<T, rank>&                                          lengths_rm,
+    const std::array<T, rank>&                                          istrides_rm,
+    const std::array<T, rank>&                                          ostrides_rm,
+    hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>*  user_in,
+    hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>* user_out,
+    const std::array<T, batch_rank>&                                    batch,
+    const std::array<T, batch_rank>&                                    idist,
+    const std::array<T, batch_rank>&                                    odist,
+    unsigned                                                            flags)
+{
+    auto ret = std::make_unique<hipfftw_plan_t<prec>>();
+    ret->template init<dft_type, rank, T, batch_rank>(
+        lengths_rm, istrides_rm, ostrides_rm, user_in, user_out, batch, idist, odist, flags);
+    return ret.release();
+}
+
+template <rocfft_transform_type dft_type, rocfft_precision prec, size_t rank>
+static hipfftw_plan_t<prec>* hipfftw_create_default_unbatched_plan(
+    const std::array<int, rank>&                                        n,
+    hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>*  in,
+    hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>* out,
+    unsigned                                                            flags)
+{
+    auto layout_data = hipfftw_get_default_data_layout_info_rm<rank, dft_type>(
+        static_cast<void*>(in) == static_cast<void*>(out), n);
+    return hipfftw_create_plan<dft_type, prec, rank, int>(layout_data.lengths,
+                                                          layout_data.istrides,
+                                                          layout_data.ostrides,
+                                                          in,
+                                                          out,
+                                                          layout_data.batches,
+                                                          layout_data.idist,
+                                                          layout_data.odist,
+                                                          flags);
+}
+
+template <rocfft_transform_type dft_type, rocfft_precision prec>
+static hipfftw_plan_t<prec>* hipfftw_create_default_unbatched_plan(
+    int                                                                 rank,
+    const int*                                                          n,
+    hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::INPUT_DATA>*  in,
+    hipfftw_user_data_t<dft_type, prec, hipfftw_io_label::OUTPUT_DATA>* out,
+    unsigned                                                            flags)
+{
+    if(rank <= 0)
+        throw hipfftw_invalid_arg("ranks must be strictly positive.");
+    if(!n)
+        throw hipfftw_invalid_arg("lengths argument must not be nullptr.");
+    // rank == 1, 2, 3, or unsupported
+    switch(rank)
+    {
+    case 1:
+        return hipfftw_create_default_unbatched_plan<dft_type, prec, 1>(
+            std::array<int, 1>({n[0]}), in, out, flags);
+    case 2:
+        return hipfftw_create_default_unbatched_plan<dft_type, prec, 2>(
+            std::array<int, 2>({n[0], n[1]}), in, out, flags);
+    case 3:
+        return hipfftw_create_default_unbatched_plan<dft_type, prec, 3>(
+            std::array<int, 3>({n[0], n[1], n[2]}), in, out, flags);
+    default:
+        throw hipfftw_unsupported("rank values larger than 3 are not supported.");
+    }
+    // unreachable
+}
+
+template <rocfft_precision prec, size_t rank>
+static hipfftw_plan_t<prec>*
+    hipfftw_create_default_unbatched_complex_plan(const std::array<int, rank>&  n,
+                                                  int                           sign,
+                                                  hipfftw_complex_data_t<prec>* in,
+                                                  hipfftw_complex_data_t<prec>* out,
+                                                  unsigned                      flags)
+{
+    hipfftw_validate_sign(sign);
+    if(sign == FFTW_FORWARD)
+        return hipfftw_create_default_unbatched_plan<rocfft_transform_type_complex_forward,
+                                                     prec,
+                                                     rank>(n, in, out, flags);
+    else
+        return hipfftw_create_default_unbatched_plan<rocfft_transform_type_complex_inverse,
+                                                     prec,
+                                                     rank>(n, in, out, flags);
+}
+
+template <rocfft_precision prec>
+static hipfftw_plan_t<prec>*
+    hipfftw_create_default_unbatched_complex_plan(int                           rank,
+                                                  const int*                    n,
+                                                  int                           sign,
+                                                  hipfftw_complex_data_t<prec>* in,
+                                                  hipfftw_complex_data_t<prec>* out,
+                                                  unsigned                      flags)
+{
+    hipfftw_validate_sign(sign);
+    if(sign == FFTW_FORWARD)
+        return hipfftw_create_default_unbatched_plan<rocfft_transform_type_complex_forward, prec>(
+            rank, n, in, out, flags);
+    else
+        return hipfftw_create_default_unbatched_plan<rocfft_transform_type_complex_inverse, prec>(
+            rank, n, in, out, flags);
+}
+
 void* fftw_malloc(size_t n)
 try
 {
@@ -1268,27 +1291,24 @@ catch(...)
 
 void fftw_destroy_plan(fftw_plan plan)
 {
-    auto internal_plan = static_cast<hipfftw_plan_internal*>(plan);
-    delete internal_plan;
+    delete plan;
 }
 
 void fftwf_destroy_plan(fftwf_plan plan)
 {
-    auto internal_plan = static_cast<hipfftw_plan_internal*>(plan);
-    delete internal_plan;
+    delete plan;
 }
 
 void fftw_cleanup() {}
 
 void fftwf_cleanup() {}
 
-void fftw_execute(const fftwf_plan plan)
+void fftw_execute(const fftw_plan plan)
 try
 {
-    auto internal_plan = static_cast<const hipfftw_plan_internal*>(plan);
-    if(!internal_plan)
+    if(!plan)
         throw hipfftw_invalid_arg("plan argument cannot be nullptr.");
-    internal_plan->execute();
+    plan->execute();
 }
 catch(...)
 {
@@ -1299,10 +1319,9 @@ catch(...)
 void fftwf_execute(const fftwf_plan plan)
 try
 {
-    auto internal_plan = static_cast<const hipfftw_plan_internal*>(plan);
-    if(!internal_plan)
+    if(!plan)
         throw hipfftw_invalid_arg("plan argument cannot be nullptr.");
-    internal_plan->execute();
+    plan->execute();
 }
 catch(...)
 {

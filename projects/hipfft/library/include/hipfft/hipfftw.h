@@ -63,8 +63,9 @@ HIPFFT_EXPORT void fftw_free(void* p);
 HIPFFT_EXPORT void fftwf_free(void* p);
 
 // Plan usage
-typedef void*      fftw_plan;
-typedef void*      fftwf_plan;
+typedef struct fftw_plan_s*  fftw_plan;
+typedef struct fftwf_plan_s* fftwf_plan;
+
 HIPFFT_EXPORT void fftw_destroy_plan(fftw_plan plan);
 HIPFFT_EXPORT void fftwf_destroy_plan(fftwf_plan plan);
 HIPFFT_EXPORT void fftw_cleanup();
