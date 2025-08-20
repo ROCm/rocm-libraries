@@ -35,8 +35,8 @@
 namespace rocRoller
 {
     /**
- * \ingroup DataTypes
- */
+     * \ingroup DataTypes
+     */
     struct Int8 : public DistinctType<int8_t, Int8>
     {
     };

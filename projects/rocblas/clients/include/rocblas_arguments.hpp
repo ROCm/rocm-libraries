@@ -69,7 +69,8 @@ bool gpu_arch_match(const std::string& gpu_arch, const char pattern[4]);
  ***************************************************************************/
 struct Arguments
 {
-    static constexpr int64_t c_scan_value = -999;
+    static constexpr int64_t c_scan_value   = -999;
+    static constexpr int64_t c_scan_value_2 = -998;
 
     /*************************************************************************
      *                    Beginning Of Arguments                             *
@@ -116,6 +117,7 @@ struct Arguments
     int64_t batch_count;
 
     int64_t scan;
+    int64_t scan_2;
 
     int32_t iters;
     int32_t cold_iters;
@@ -229,6 +231,7 @@ struct Arguments
     OPER(incy) SEP                   \
     OPER(batch_count) SEP            \
     OPER(scan) SEP                   \
+    OPER(scan_2) SEP                 \
     OPER(iters) SEP                  \
     OPER(cold_iters) SEP             \
     OPER(algo) SEP                   \
@@ -247,8 +250,8 @@ struct Arguments
     OPER(api) SEP                    \
     OPER(pad) SEP                    \
     OPER(math_mode) SEP              \
-    OPER(flush_batch_count) SEP             \
-    OPER(flush_memory_size) SEP             \
+    OPER(flush_batch_count) SEP      \
+    OPER(flush_memory_size) SEP      \
     OPER(threads) SEP                \
     OPER(streams) SEP                \
     OPER(devices) SEP                \
@@ -382,14 +385,14 @@ enum rocblas_argument : int
 namespace ArgumentsHelper
 {
     template <rocblas_argument>
-    static constexpr auto apply = nullptr;
+    inline constexpr auto apply = nullptr;
 
     // Macro defining specializations for specific arguments
     // e_alpha and e_beta get turned into negative sentinel value specializations
     // clang-format off
 #define APPLY(NAME)                                                                         \
     template <>                                                                             \
-    ROCBLAS_CLANG_STATIC constexpr auto                                                     \
+    inline constexpr auto                                                     \
         apply<e_##NAME == e_alpha ? rocblas_argument(-1)                                    \
                                   : e_##NAME == e_beta ? rocblas_argument(-2) : e_##NAME> = \
             [](auto&& func, const Arguments& arg, auto) { func(#NAME, arg.NAME); }
@@ -399,14 +402,14 @@ namespace ArgumentsHelper
 
     // Specialization for e_alpha
     template <>
-    ROCBLAS_CLANG_STATIC constexpr auto apply<e_alpha> =
+    inline constexpr auto apply<e_alpha> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("alpha", arg.get_alpha<decltype(T)>());
         };
 
     // Specialization for e_beta
     template <>
-    ROCBLAS_CLANG_STATIC constexpr auto apply<e_beta> =
+    inline constexpr auto apply<e_beta> =
         [](auto&& func, const Arguments& arg, auto T) {
             func("beta", arg.get_beta<decltype(T)>());
         };

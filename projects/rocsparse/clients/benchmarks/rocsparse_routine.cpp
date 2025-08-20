@@ -148,6 +148,7 @@ rocsparse_status rocsparse_routine::dispatch_precision(const char       precisio
     case rocsparse_datatype_i32_r:
     case rocsparse_datatype_u32_r:
     case rocsparse_datatype_f16_r:
+    case rocsparse_datatype_bf16_r:
         return rocsparse_status_invalid_value;
     }
     return rocsparse_status_invalid_value;
@@ -501,7 +502,7 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
     switch(FNAME)
     {
         DEFINE_CASE_T(axpyi);
-        DEFINE_CASE_IT_X(bellmm, testing_spmm_bell);
+        DEFINE_CASE_IABCT_X(bellmm, testing_spmm_bell);
         DEFINE_CASE_IT_X(bellmm_batched, testing_spmm_batched_bell);
         DEFINE_CASE_T(bsrgeam);
         DEFINE_CASE_T(bsric0);

@@ -52,28 +52,54 @@ This section provides the information required to build hipRAND from source.
 Requirements
 ----------------------------
 
-To build hipRAND, CMake version 3.16 or later is required.
-
-Additionally, to build hipRAND for the ROCm platform, the following components are required:
+To build hipRAND for the ROCm platform, CMake version 3.16 or later is required,
+along with the following components:
 
 * `ROCm Software <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/>`_ (version 5.0.0 or later)
-* `rocRAND <https://github.com/ROCm/rocRAND.git>`_
-
-To build hipRAND for the CUDA platform, the following applications are required:
-
-* The CUDA toolkit (version 11.5.1 or newer)
-* cuRAND (included in the CUDA Toolkit)
+* `rocRAND <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand>`_
 
 Downloading the source code
 ----------------------------
 
-You can find the hipRAND source code in the `hipRAND GitHub Repository <https://github.com/ROCm/hipRAND>`_.
+The hipRAND source code is available from the `hiprand folder <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hiprand>`_ of
+the `rocm-libraries <https://github.com/ROCm/rocm-libraries>`_ GitHub repository.
 Use the branch that matches the ROCm version installed on the system.
-For example, on a system with ROCm 6.3 installed, use the following command to obtain the hipRAND version 6.3 source code:
+The hipRAND source code can be cloned in two different ways.
 
-.. code-block:: shell
+.. note::
 
-    git checkout -b release/rocm-rel-6.3 https://github.com/ROCm/hipRAND.git
+   For both methods, replace all occurrences of "x.y" in the commands with the version number matching your ROCm installation.
+   For example, if you have ROCm 7.0 installed, clone the ``release/rocm-rel-7.0`` branch.
+
+*  Clone the entire `rocm-libraries <https://github.com/ROCm/rocm-libraries>`_ repository.
+   This is the default method and is the recommended option if you need to install other
+   ROCm libraries alongside hipRAND. However, due to the download size, ``git clone``
+   might take a significant amount of time to complete.
+
+   On a system with ROCm x.y installed, use the following command to obtain the source code
+   for hipRAND version x.y. Replace x.y with the actual version:
+
+   .. code-block:: shell
+
+      git clone -b release/rocm-rel-7.0 https://github.com/ROCm/rocm-libraries.git
+
+*  Clone the individual hipRAND project folder. This option only fetches the hipRAND source code,
+   without any additional ROCm libraries. This significantly reduces the amount of time required
+   to complete the clone operation. However, it requires Git 2.25 or later.
+   To use this method to obtain the source code for hipRAND version x.y, run the following commands.
+   Replace x.y with the actual version:
+
+   .. code-block:: shell
+
+      git clone -b release/rocm-rel-x.y --no-checkout --depth=1 --filter=tree:0 https://github.com/ROCm/rocm-libraries.git
+      cd rocm-libraries
+      git sparse-checkout set --cone projects/hiprand
+      git checkout release/rocm-rel-x.y
+
+.. note::
+
+   To build ROCm 6.4 and earlier, use the hipRAND repository at `<https://github.com/ROCm/hipRAND>`_.
+   For more information, see the documentation associated with the release you want to build.
 
 Building the library
 ----------------------------
@@ -82,7 +108,7 @@ After obtaining the sources and dependencies, build hipRAND for ROCm software us
 
 .. code-block:: shell
 
-    cd hipRAND
+    cd rocm-libraries/projects/hiprand
     ./install --install
 
 This automatically builds all required dependencies, excluding Git and the requirements listed above,
@@ -95,12 +121,12 @@ Building with CMake
 ----------------------------
 
 For a more detailed installation process, build hipRAND manually using CMake.
-This enables certain configuration options that are not available through the ``./install`` script.
+This enables certain configuration options that are not available through the ``install`` script.
 To build hipRAND, use CMake with the following configuration:
 
 .. code-block:: shell
 
-    cd hipRAND; mkdir build; cd build
+    cd rocm-libraries/projects/hiprand; mkdir build; cd build
     # Configure the project
     CXX=<compiler> cmake [options] ..
     # Build
@@ -110,12 +136,11 @@ To build hipRAND, use CMake with the following configuration:
     # Install
     [sudo] make install
 
-Where ``<compiler>`` should be set to ``hipcc`` or ``amdclang`` for ROCm or to a regular C++ compiler such as ``g++`` on a CUDA platform.
+Where ``<compiler>`` should be set to ``hipcc`` or ``amdclang`` for ROCm.
 The default build configuration is ``Release``.
 
 Here are the CMake options:
 
-* ``BUILD_WITH_LIB``: Determines whether to build hipRAND with the rocRAND or cuRAND backend. If it's set to ``CUDA``, hipRAND is built using the cuRAND backend. Otherwise, the rocRAND backend is used.
 * ``BUILD_FORTRAN_WRAPPER``: Builds the Fortran wrapper when set to ``ON``. Defaults to ``OFF``.
 * ``BUILD_TEST``: Builds the hipRAND tests when set to ``ON``. Defaults to ``OFF``.
 * ``BUILD_BENCHMARK``: Builds the hipRAND benchmarks when set to ``ON``. Defaults to ``OFF``.
@@ -143,7 +168,7 @@ Use the following tips to troubleshoot build problems.
       rocrandConfig.cmake
       rocrand-config.cmake
 
-   **Solution**: Install `rocRAND <https://github.com/ROCm/rocRAND.git>`_.
+   **Solution**: Install `rocRAND <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocrand>`_.
 
 *  ``ROCM`` package configuration file not found:
 
@@ -178,7 +203,7 @@ The hipRAND Python API Wrapper requires the following dependencies:
 
    .. code-block:: shell
 
-      export HIPRAND_PATH=~/hipRAND/build/library/
+      export HIPRAND_PATH=~/rocm-libraries/projects/hiprand/build/library/
 
 Installation
 ----------------------------
@@ -187,12 +212,12 @@ To install the Python hipRAND module using ``pip``, run these commands:
 
 .. code-block:: shell
 
-   cd hipRAND/python/hiprand
+   cd rocm-libraries/projects/hiprand/python/hiprand
    pip install .
 
 Use these commands to run the tests:
 
 .. code-block:: shell
 
-   cd hipRAND/python/hiprand
+   cd rocm-libraries/projects/hiprand/python/hiprand
    python tests/hiprand_test.py

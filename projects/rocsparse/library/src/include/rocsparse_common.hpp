@@ -41,6 +41,11 @@
 #endif
 
 // clang-format off
+// ELL indexing macros
+#define ELL_IND_ROW(i, el, m, width) (el) * (m) + (i)
+#define ELL_IND_EL(i, el, m, width) (el) + (width) * (i)
+#define ELL_IND(i, el, m, width) ELL_IND_ROW(i, el, m, width)
+
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) ((dir == rocsparse_direction_row) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
 #define BSR_IND_R(j, bi, bj) (block_dim * block_dim * (j) + (bi) * block_dim + (bj))
@@ -69,6 +74,10 @@ namespace rocsparse
     }
 
     __device__ __forceinline__ _Float16 ldg(const _Float16* ptr)
+    {
+        return *ptr;
+    }
+    __device__ __forceinline__ rocsparse_bfloat16 ldg(const rocsparse_bfloat16* ptr)
     {
         return *ptr;
     }
@@ -287,6 +296,10 @@ namespace rocsparse
     {
         return x;
     }
+    __device__ __forceinline__ rocsparse_bfloat16 conj(const rocsparse_bfloat16& x)
+    {
+        return x;
+    }
     __device__ __forceinline__ int32_t conj(const int32_t& x)
     {
         return x;
@@ -373,6 +386,10 @@ namespace rocsparse
     }
 
     __device__ __forceinline__ _Float16 nontemporal_load(const _Float16* ptr)
+    {
+        return *ptr;
+    }
+    __device__ __forceinline__ rocsparse_bfloat16 nontemporal_load(const rocsparse_bfloat16* ptr)
     {
         return *ptr;
     }

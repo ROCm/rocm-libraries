@@ -355,6 +355,12 @@ namespace rocsparse
             RETURN_IF_ROCSPARSE_ERROR((internal_extract_analysis_dispatch_I<_Float16>)(p...));
             return rocsparse_status_success;
         }
+        case rocsparse_datatype_bf16_r:
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                (internal_extract_analysis_dispatch_I<rocsparse_bfloat16>)(p...));
+            return rocsparse_status_success;
+        }
         case rocsparse_datatype_f32_r:
         {
             RETURN_IF_ROCSPARSE_ERROR((internal_extract_analysis_dispatch_I<float>)(p...));
@@ -616,6 +622,12 @@ namespace rocsparse
         case rocsparse_datatype_f16_r:
         {
             RETURN_IF_ROCSPARSE_ERROR((internal_extract_compute_dispatch_I<_Float16>)(p...));
+            return rocsparse_status_success;
+        }
+        case rocsparse_datatype_bf16_r:
+        {
+            RETURN_IF_ROCSPARSE_ERROR(
+                (internal_extract_compute_dispatch_I<rocsparse_bfloat16>)(p...));
             return rocsparse_status_success;
         }
         case rocsparse_datatype_f32_r:

@@ -12,9 +12,7 @@ The hipSPARSELt interface is compatible with cuSPARSELt APIs. Porting a CUDA app
 originally calls the cuSPARSELt API to an application that calls the hipSPARSELt API should be relatively
 straightforward.
 
-For example, the hipSPARSELt matrix multiplication interface is:
-
-Matrix multiplication API
+For example, the hipSPARSELt matrix multiplication interface in the API is:
 
 .. code-block:: c
 
@@ -30,5 +28,5 @@ Matrix multiplication API
                                        hipStream_t*                   streams,
                                        int32_t                        numStreams);
 
-hipSPARSELt assumes matrix A, B, C, D and workspace are allocated in GPU memory space filled with
-data. Users are responsible for copying data from/to the host and device memory.
+hipSPARSELt assumes matrices ``A``, ``B``, ``C``, ``D``, and ``workspace`` are allocated in the GPU memory space and filled with
+data. Users are responsible for copying data to and from the host and device memory.

@@ -58,12 +58,12 @@ THRUST_NAMESPACE_BEGIN
  * `[first,last)` for all iterators `i` in the range `[map,map + (last - first))`.
  *
  *  \pre The iterator `result + i` shall not refer to any element referenced by any iterator `j` in the range
- * `[map,map + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.
+ *  `[map, map + (last - first))` for all iterators `i` in the range `[map, map + (last - first))`.
  *
- *  \pre The expression `result[*i]` shall be valid for all iterators in the range `[map,map + (last - first))`.
+ *  \pre The expression `result[*i]` shall be valid for all iterators in the range `[map, map + (last - first))`.
  *
- *  The following code snippet demonstrates how to use \p scatter to
- *  reorder a range using the \p thrust::device execution policy for parallelization:
+ *  The following code snippet demonstrates how to use \p scatter to reorder a range using
+ *  the \p thrust::device execution policy for parallelization:
  *
  *  \code
  *  #include <thrust/scatter.h>
@@ -119,12 +119,11 @@ scatter(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
  * `[first,last)` for all iterators `i` in the range `[map,map + (last - first))`.
  *
  *  \pre The iterator `result + i` shall not refer to any element referenced by any iterator `j` in the range
- * `[map,map + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.
+ *  `[map,map + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.
  *
  *  \pre The expression `result[*i]` shall be valid for all iterators in the range `[map,map + (last - first))`.
  *
- *  The following code snippet demonstrates how to use \p scatter to
- *  reorder a range.
+ *  The following code snippet demonstrates how to use \p scatter to reorder a range.
  *
  *  \code
  *  #include <thrust/scatter.h>
@@ -181,13 +180,13 @@ void scatter(InputIterator1 first, InputIterator1 last, InputIterator2 map, Rand
  * `[first,last)` for all iterators `i` in the range `[map,map + (last - first))`.
  *
  *  \pre The iterator `result + i` shall not refer to any element referenced by any iterator `j` in the range
- * `[map,map + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.
+ *  `[map,map + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.
  *
  *  \pre The iterator `result + i` shall not refer to any element referenced by any iterator `j` in the range
  * `[stencil,stencil + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.
  *
  *  \pre The expression `result[*i]` shall be valid for all iterators `i` in the range `[map,map + (last - first))` for
- * which the following condition holds: `*(stencil + i) != false`.
+ *  which the following condition holds: `*(stencil + i) != false`.
  *
  *  \code
  *  #include <thrust/scatter.h>
@@ -245,13 +244,13 @@ THRUST_HOST_DEVICE void scatter_if(
  * `[first,last)` for all iterators `i` in the range `[map,map + (last - first))`.
  *
  *  \pre The iterator `result + i` shall not refer to any element referenced by any iterator `j` in the range
- * `[map,map + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.
+ *  `[map,map + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.
  *
  *  \pre The iterator `result + i` shall not refer to any element referenced by any iterator `j` in the range
  * `[stencil,stencil + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.
  *
  *  \pre The expression `result[*i]` shall be valid for all iterators `i` in the range `[map,map + (last - first))` for
- * which the following condition holds: `*(stencil + i) != false`.
+ *  which the following condition holds: `*(stencil + i) != false`.
  *
  *  \code
  *  #include <thrust/scatter.h>
@@ -385,7 +384,7 @@ THRUST_HOST_DEVICE void scatter_if(
  * `[first,last)` for all iterators `i` in the range `[map,map + (last - first))`.
  *
  *  \pre The iterator `result + i` shall not refer to any element referenced by any iterator `j` in the range
- * `[map,map + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.
+ *  `[map,map + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.
  *
  *  \pre The iterator `result + i` shall not refer to any element referenced by any iterator `j` in the range
  * `[stencil,stencil + (last - first))` for all iterators `i` in the range `[map,map + (last - first))`.

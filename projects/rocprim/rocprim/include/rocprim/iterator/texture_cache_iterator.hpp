@@ -218,7 +218,7 @@ public:
         #else
         texture_type words[multiple];
 
-        #if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1200__) || defined(__gfx1201__)
+        #if defined(__gfx942__) || defined(__gfx950__) || defined(__gfx9_4_generic__) || defined(__GFX12__)
         #pragma message "Texture cache iterator is not supported on gfx94x, gfx120x or gfx95x as the texture fetch functions in HIP are not available."
         ROCPRIM_PRINT_ERROR_ONCE("WARNING: Usage of texture_cache_iterator on gfx94x, gfx120x or gfx95x devices is not supported and will not produce valid results.")
         #else
@@ -306,25 +306,25 @@ public:
     ROCPRIM_HOST_DEVICE inline
     bool operator<(texture_cache_iterator other) const
     {
-        return (ptr - other.ptr) > 0;
+        return (ptr - other.ptr) < 0;
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator<=(texture_cache_iterator other) const
     {
-        return (ptr - other.ptr) >= 0;
+        return (ptr - other.ptr) <= 0;
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator>(texture_cache_iterator other) const
     {
-        return (ptr - other.ptr) < 0;
+        return (ptr - other.ptr) > 0;
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator>=(texture_cache_iterator other) const
     {
-        return (ptr - other.ptr) <= 0;
+        return (ptr - other.ptr) >= 0;
     }
     #endif // DOXYGEN_SHOULD_SKIP_THIS
 

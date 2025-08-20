@@ -19314,12 +19314,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrtri_strided_batched(rocblas_handle     
     Note about memory allocation:
     When trsm is launched with a k evenly divisible by the internal block size of 128,
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
-    memory found in the handle to increase overall performance. This memory can be managed by using
-    the environment variable WORKBUF_TRSM_B_CHNK. When this variable is not set the device memory
-    used for temporary storage will default to 1 MB and may result in chunking, which in turn may
-    reduce performance. Under these circumstances it is recommended that WORKBUF_TRSM_B_CHNK be set
-    to the desired chunk of right hand sides to be used at a time
-    (where k is m when rocblas_side_left and is n when rocblas_side_right).
+    memory found in the handle to increase overall performance (where k is m
+    when rocblas_side_left and is n when rocblas_side_right).
 
     Although not widespread, some gemm kernels used by trsm may use atomic operations.
     See Atomic Operations in the API Reference Guide for more information.
@@ -19513,12 +19509,8 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_64(rocblas_handle                han
     Note about memory allocation:
     When trsm is launched with a k evenly divisible by the internal block size of 128,
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
-    memory found in the handle to increase overall performance. This memory can be managed by using
-    the environment variable WORKBUF_TRSM_B_CHNK. When this variable is not set the device memory
-    used for temporary storage will default to 1 MB and may result in chunking, which in turn may
-    reduce performance. Under these circumstances it is recommended that WORKBUF_TRSM_B_CHNK be set
-    to the desired chunk of right hand sides to be used at a time
-    (where k is m when rocblas_side_left and is n when rocblas_side_right).
+    memory found in the handle to increase overall performance (where k is m
+    when rocblas_side_left and is n when rocblas_side_right).
 
     @param[in]
     handle    [rocblas_handle]
@@ -19707,12 +19699,9 @@ ROCBLAS_EXPORT rocblas_status rocblas_ztrsm_batched_64(rocblas_handle           
     Note about memory allocation:
     When trsm is launched with a k evenly divisible by the internal block size of 128,
     and is no larger than 10 of these blocks, the API takes advantage of utilizing pre-allocated
-    memory found in the handle to increase overall performance. This memory can be managed by using
-    the environment variable WORKBUF_TRSM_B_CHNK. When this variable is not set the device memory
-    used for temporary storage will default to 1 MB and may result in chunking, which in turn may
-    reduce performance. Under these circumstances it is recommended that WORKBUF_TRSM_B_CHNK be set
-    to the desired chunk of right hand sides to be used at a time
-    (where k is m when rocblas_side_left and is n when rocblas_side_right).
+    memory found in the handle to increase overall performance (where k is m when
+    HIPBLAS_SIDE_LEFT and is n when HIPBLAS_SIDE_RIGHT).
+
     @param[in]
     handle    [rocblas_handle]
               handle to the rocblas library context queue.
@@ -25024,7 +25013,25 @@ ROCBLAS_EXPORT rocblas_status rocblas_get_device_memory_size(rocblas_handle hand
 
 /*! \brief
     \details
-    Allows user to set the device memory for the handle to use as a workspace (user-owned scheme).
+    Changes the size of allocated device memory at runtime.
+
+    Any previously allocated device memory managed by the handle is freed.
+
+    If size > 0 sets the device memory size to the specified size (in bytes).
+    If size == 0, frees the memory allocated so far, and lets rocBLAS manage device memory in the future, expanding it when necessary.
+    Returns rocblas_status_invalid_handle if handle is nullptr; rocblas_status_invalid_pointer if size is nullptr; rocblas_status_success otherwise
+    @param[in]
+    handle          rocblas handle
+    @param[in]
+    size            size of allocated device memory
+ ******************************************************************************/
+ROCBLAS_DEPRECATED_MSG("rocblas_set_device_memory_size will be removed in a future release and "
+                       "supported modes will be rocblas_managed & user_owned")
+ROCBLAS_EXPORT rocblas_status rocblas_set_device_memory_size(rocblas_handle handle, size_t size);
+
+/*! \brief
+    \details
+    Sets the device workspace for the handle to use.
 
     Any previously allocated device memory managed by the handle is freed.
 
@@ -25046,6 +25053,16 @@ ROCBLAS_EXPORT rocblas_status rocblas_set_workspace(rocblas_handle handle, void*
     handle          rocblas handle
  ******************************************************************************/
 ROCBLAS_EXPORT bool rocblas_is_managing_device_memory(rocblas_handle handle);
+
+/*! \brief
+    \details
+    Returns true when device memory in handle is managed by the user
+    @param[in]
+    handle          rocblas handle
+ ******************************************************************************/
+ROCBLAS_DEPRECATED_MSG("rocblas_is_user_managing_device_memory will be removed in a future release "
+                       "and supported modes will be rocblas_managed and user_owned")
+ROCBLAS_EXPORT bool rocblas_is_user_managing_device_memory(rocblas_handle handle);
 
 /*! \brief
     \details

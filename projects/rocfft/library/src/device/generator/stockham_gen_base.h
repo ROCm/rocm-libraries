@@ -70,8 +70,9 @@ struct StockhamKernel : public StockhamGeneratorSpecs
             workgroup_size = threads_per_transform * transforms_per_block;
         }
 
-        nregisters = compute_nregisters(length, factors, threads_per_transform);
-        R.size     = Expression{nregisters};
+        nregisters                = compute_nregisters(length, factors, threads_per_transform);
+        R.size                    = Expression{nregisters};
+        lds_reg_sync.decl_default = Literal{"true"};
     }
     virtual ~StockhamKernel(){};
 
@@ -102,7 +103,6 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     Variable scalar_type{"scalar_type", "typename"};
     Variable callback_type{"cbtype", "CallbackType"};
     Variable stride_type{"sb", "StrideBin"};
-    Variable embedded_type{"ebtype", "EmbeddedType"};
     Variable directReg_type{"drtype", "DirectRegType"};
 
     //
@@ -148,6 +148,9 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     Variable lds_real{"lds_real", "real_type_t<scalar_type>", true, true};
     Variable lds_complex{"lds_complex", "scalar_type", true, true};
     Variable lds_row_padding{"lds_row_padding", "unsigned int"};
+
+    // hip thread grid dim
+    Variable grid_dim{"gridDim.x", "unsigned int"};
 
     // hip thread block id
     Variable block_id{"blockIdx.x", "unsigned int"};
@@ -211,6 +214,19 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     // butterfly registers
     Variable R{"R", "scalar_type", false, false};
 
+    // do syncthreads in lds_reg device functions
+    Variable lds_reg_sync{"lds_reg_sync", "bool"};
+
+    virtual unsigned int launcher_workgroup_size()
+    {
+        return workgroup_size;
+    }
+
+    virtual unsigned int launcher_transforms_per_block()
+    {
+        return transforms_per_block;
+    }
+
     virtual std::vector<unsigned int> launcher_lengths()
     {
         return {length};
@@ -225,6 +241,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         TemplateList tpls;
         tpls.append(scalar_type);
         tpls.append(stride_type);
+        tpls.append(lds_reg_sync);
         return tpls;
     }
 
@@ -241,7 +258,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
     virtual TemplateList global_templates()
     {
-        return {scalar_type, stride_type, embedded_type, callback_type, directReg_type};
+        return {scalar_type, stride_type, callback_type, directReg_type};
     }
 
     virtual ArgumentList device_lds_reg_inout_arguments()
@@ -275,9 +292,11 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     {
         // by default (RR): "direct-to-reg" and "direct-from-reg" at the same time
         if(direct_to_from_reg)
-            return {Declaration{direct_load_to_reg,
-                                And{directReg_type == "DirectRegType::TRY_ENABLE_IF_SUPPORT",
-                                    embedded_type == "EmbeddedType::NONE"}},
+            return {Declaration{
+                        direct_load_to_reg,
+                        ebtype == EmbeddedType::NONE
+                            ? Expression{directReg_type == "DirectRegType::TRY_ENABLE_IF_SUPPORT"}
+                            : Expression{Literal{"false"}}},
                     Declaration{direct_store_from_reg, direct_load_to_reg},
                     Declaration{lds_linear, Literal{"true"}}};
         else
@@ -289,7 +308,8 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     virtual StatementList set_lds_is_real()
     {
         if(half_lds)
-            return {Declaration{lds_is_real, embedded_type == "EmbeddedType::NONE"}};
+            return {Declaration{lds_is_real,
+                                ebtype == EmbeddedType::NONE ? Literal{"true"} : Literal{"false"}}};
         else
             return {Declaration{lds_is_real, Literal{"false"}}};
     }
@@ -305,12 +325,6 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         return {};
     }
 
-    enum class ProcessingType
-    {
-        PRE,
-        POST,
-    };
-
     enum class ThreadGuardMode
     {
         NO_GUARD,
@@ -318,7 +332,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         GURAD_BY_FUNC_ARG,
     };
 
-    virtual StatementList real_trans_pre_post(ProcessingType type)
+    virtual StatementList real_trans_pre_post()
     {
         return {};
     }
@@ -327,7 +341,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
     // processing
     virtual Expression get_lds_padding()
     {
-        return Ternary{embedded_type == "EmbeddedType::NONE", 0, 1};
+        return ebtype == EmbeddedType::NONE ? Literal{0} : Literal{1};
     }
 
     StatementList load_lds_generator(unsigned int h,
@@ -493,7 +507,9 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                  unsigned int                                                             width,
                  double                                                                   height,
                  ThreadGuardMode                                                          guard,
-                 bool trans_dir = false) const
+                 bool                               trans_dir    = false,
+                 const std::optional<unsigned int>& guard_factor = std::nullopt,
+                 const std::optional<unsigned int>& work_length  = std::nullopt) const
     {
         StatementList stmts;
         unsigned int  iheight = std::floor(height);
@@ -502,17 +518,21 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
         Expression guard_expr = Expression{Literal{"true"}};
 
+        const auto effective_length = work_length ? *work_length : length;
+        const auto thread_guard_cond
+            = (effective_length / width) * (guard_factor ? *guard_factor : 1);
+
         // do thread gurad when guard_by_if or guard_by_arg
         if(guard != ThreadGuardMode::NO_GUARD)
         {
             // using ">" : no need to test "if(thread < XXX)"" if it is always true
-            if((!trans_dir && threads_per_transform > length / width)
-               || (trans_dir && workgroup_size / transforms_per_block > length / width))
+            if((!trans_dir && threads_per_transform > (effective_length / width))
+               || (trans_dir && workgroup_size / transforms_per_block > (effective_length / width)))
             {
                 if(writeGuard)
-                    guard_expr = Expression{write && (thread < length / width)};
+                    guard_expr = Expression{write && (thread < thread_guard_cond)};
                 else
-                    guard_expr = Expression{thread < length / width};
+                    guard_expr = Expression{thread < thread_guard_cond};
             }
             else
             {
@@ -536,16 +556,16 @@ struct StockhamKernel : public StockhamGeneratorSpecs
             stmts += work;
         }
 
-        if(height > iheight && threads_per_transform < length / width)
+        if(height > iheight && threads_per_transform < effective_length / width)
         {
             stmts += CommentLines{"not enough threads, some threads do extra work"};
             unsigned int dt = iheight * threads_per_transform;
 
             // always do thread gurad
             if(writeGuard)
-                guard_expr = Expression{write && (thread + dt < length / width)};
+                guard_expr = Expression{write && (thread + dt < thread_guard_cond)};
             else
-                guard_expr = Expression{thread + dt < length / width};
+                guard_expr = Expression{thread + dt < thread_guard_cond};
 
             work = generator(0, iheight, width, dt, guard_expr);
 
@@ -578,7 +598,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         // first pass of load (full)
         unsigned int width  = factors[0];
         float        height = static_cast<float>(length) / width / threads_per_transform;
-        body += SyncThreads();
+        body += If{lds_reg_sync, {SyncThreads()}};
         body += add_work(std::bind(load_lds, this, _1, _2, _3, _4, _5, Component::BOTH),
                          width,
                          height,
@@ -608,7 +628,7 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         unsigned int width     = factors.back();
         float        height    = static_cast<float>(length) / width / threads_per_transform;
         unsigned int cumheight = product(factors.begin(), factors.end() - 1);
-        body += SyncThreads();
+        body += If{lds_reg_sync, {SyncThreads()}};
         body += add_work(std::bind(store_lds, this, _1, _2, _3, _4, _5, Component::BOTH, cumheight),
                          width,
                          height,
@@ -794,7 +814,8 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         loadlds += load_from_global(false);
         loadlds += LineBreak{};
         // handle even-length real to complex pre-process in lds before transform
-        loadlds += real_trans_pre_post(ProcessingType::PRE);
+        if(ebtype == EmbeddedType::C2Real_PRE)
+            loadlds += real_trans_pre_post();
 
         if(!direct_to_from_reg)
         {
@@ -868,7 +889,8 @@ struct StockhamKernel : public StockhamGeneratorSpecs
         StatementList storelds;
         storelds += LineBreak{};
         // handle even-length complex to real post-process in lds after transform
-        storelds += real_trans_pre_post(ProcessingType::POST);
+        if(ebtype == EmbeddedType::Real2C_POST)
+            storelds += real_trans_pre_post();
         storelds += LineBreak{};
         storelds += CommentLines{"store global"};
         storelds += SyncThreads{};
@@ -901,9 +923,10 @@ struct StockhamKernel : public StockhamGeneratorSpecs
 
     virtual StatementList store_to_global(bool store_registers) = 0;
 
-    virtual TemplateList device_lds_reg_inout_device_call_templates()
+    virtual TemplateList device_lds_reg_inout_device_call_templates(bool syncthreads = true)
     {
-        return {scalar_type, stride_type};
+        Variable sync_var{syncthreads ? "true" : "false", "bool"};
+        return {scalar_type, stride_type, sync_var};
     }
 
     virtual std::vector<Expression> device_lds_reg_inout_device_call_arguments()
@@ -929,16 +952,15 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                 Literal{"true"}};
     }
 
-    StatementList real2cmplx_pre_post(unsigned int   half_N,
-                                      ProcessingType type,
-                                      unsigned int   tpt,
-                                      unsigned int   twd_offset)
+    StatementList
+        real2cmplx_pre_post(unsigned int half_N, unsigned int tpt, unsigned int twd_offset)
     {
-        std::string function_name = type == ProcessingType::PRE
+        if(ebtype == EmbeddedType::NONE)
+            return {};
+
+        std::string function_name = ebtype == EmbeddedType::C2Real_PRE
                                         ? "real_pre_process_kernel_inplace"
                                         : "real_post_process_kernel_inplace";
-        std::string template_type = type == ProcessingType::PRE ? "EmbeddedType::C2Real_PRE"
-                                                                : "EmbeddedType::Real2C_POST";
         Variable    Ndiv4{half_N % 2 == 0 ? "true" : "false", "bool"};
         auto        quarter_N = half_N / 2;
         if(half_N % 2 == 1)
@@ -970,12 +992,12 @@ struct StockhamKernel : public StockhamGeneratorSpecs
                                          twiddles + twd_offset};
             stmts += Call{function_name, tpls, args};
         }
-        if(type == ProcessingType::PRE)
+        if(ebtype == EmbeddedType::C2Real_PRE)
         {
             stmts += SyncThreads();
             stmts += LineBreak();
         }
 
-        return {If{Equal{embedded_type, template_type}, stmts}};
+        return stmts;
     }
 };

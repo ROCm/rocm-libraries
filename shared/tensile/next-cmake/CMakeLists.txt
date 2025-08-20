@@ -48,9 +48,10 @@ set_property(CACHE TENSILE_CXX_STANDARD PROPERTY STRINGS "14" "17" "20")
 set(GPU_TARGETS "" CACHE STRING "AMD GFX targets to cross-compile")
 
 if(NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all")
-    set(GPU_TARGETS "${SUPPORTED_ARCHITECTURES}")
+    tensile_get_base_architectures(GPU_TARGETS)
+else()
+    tensile_validate_gpu_targets("${GPU_TARGETS}")
 endif()
-tensile_validate_gpu_targets("${GPU_TARGETS}")
 message(STATUS "Building for GPU targets: ${GPU_TARGETS}")
 
 find_package(OpenMP REQUIRED)

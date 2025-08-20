@@ -1,57 +1,57 @@
 .. meta::
-   :description: MI300 features
+   :description: MI300 features for hipSPARSELt
    :keywords: hipSPARSELt, ROCm, MI300
 
 .. _mi300-features:
 
 **********************************************************************
-MI300 features
+hipSPARSELt features for the Instinct MI300 series
 **********************************************************************
 
 hipSPARSELt provides hardware acceleration support for sparse matrix multiplication operations
-on MI300 devices via SMFMA (Sparse Matrix Fused Multiply Add) matrix instructions.
+on AMD Instinct™ MI300 series accelerators using SMFMA (Sparse Matrix Fused Multiply Add) matrix instructions.
 
 For hardware-accelerated sparse-dense matrix operations, the following conditions apply:
 
-* One matrix must be structurally sparse. Two out of every four elements on the K axis must be zero.
-* The other matrix must be dense.
-* The output matrix serves as the accumulation (destination) matrix.
-* The sparse indexes determine which two elements out of every four are non-zero, where for each index pair,
-  ``index0 < index1`` and ``index0 != index1``.
+*  One matrix must be structurally sparse. Two out of every four elements on the K axis must be zero.
+*  The other matrix must be dense.
+*  The output matrix serves as the accumulation (destination) matrix.
+*  The sparse indexes determine which two elements out of every four are non-zero, where for each index pair,
+   ``index0 < index1`` and ``index0 != index1``.
 
 Data types and precision
 ========================
 
-While the MI300 hardware supports multiple data types for hardware-accelerated sparse matrix operations,
+While the Instinct MI300 series supports multiple data types for hardware-accelerated sparse matrix operations,
 the hipSPARSELt library currently enables hardware acceleration for a subset of these types:
 
 .. list-table::
     :header-rows: 1
 
-    * - Input/Output Type
-      - Library Data Type
-      - Hardware Acceleration in hipSPARSELt
+    * - Input/output type
+      - Library data type
+      - Hardware acceleration in hipSPARSELt
 
     * - float16
-      - HIP_R_16F
+      - ``HIP_R_16F``
       - ✅
 
     * - bfloat16
-      - HIP_R_16BF
+      - ``HIP_R_16BF``
       - ✅
 
     * - int8
-      - HIP_R_8I
+      - ``HIP_R_8I``
       - ✅
 
 .. note::
 
-  While the MI300 hardware supports additional formats like ``FP8`` (E4M3 and E5M2) and ``BF8``, these are not currently
-  enabled at the library level for hardware acceleration.
-  All floating-point operations accumulate in ``float32``, while integer operations accumulate in ``int32``.
+   While the Instinct MI300 series supports additional formats such as ``FP8`` (E4M3 and E5M2) and ``BF8``, these are not currently
+   enabled at the library level for hardware acceleration.
+   All floating-point operations accumulate in ``float32``, while integer operations accumulate in ``int32``.
 
-  For comprehensive information on the supported data types and their characteristics, see
-  :ref:`Data type support <data-type-support>` page.
+   For comprehensive information on the supported data types and their characteristics, see the
+   :ref:`Data type support <data-type-support>` page.
 
 Matrix format requirements
 ==========================
@@ -63,23 +63,23 @@ Sparse matrix
 
 Sparse matrices must:
 
-* Follow a 2:4 structured sparsity pattern
-* Use a compressed sparse format
-* Meet the alignment requirements for the selected data type
+*  Follow a 2:4 structured sparsity pattern
+*  Use a compressed sparse format
+*  Meet the alignment requirements for the selected data type
 
 Dense matrix
 ------------
 
 Dense matrices must:
 
-* Be in standard dense format
-* Meet the alignment requirements for the selected data type
+*  Be in standard dense format
+*  Meet the alignment requirements for the selected data type
 
 .. note::
 
-  The hipSPARSELt library supports configurations where either the first or second operand is the
-  structured sparse matrix. The other operand must be a dense matrix. This flexibility is achieved
-  through library-level handling that adjusts the memory layout and operation order accordingly.
+   The hipSPARSELt library supports configurations where either the first or second operand is the
+   structured sparse matrix. The other operand must be a dense matrix. This flexibility is achieved
+   through library-level handling that adjusts the memory layout and operation order accordingly.
 
 Matrix preparation
 ==================
@@ -103,12 +103,12 @@ Pruning and compression workflow
 
 The complete process involves several steps:
 
-1. **Initialize the matrix descriptors and matmul descriptor**
-2. **Determine the workspace requirements for compression**
-3. **Allocate memory for the pruned and compressed matrices**
-4. **Perform pruning using the 2:4 sparsity pattern**
-5. **Verify the pruning was successful**
-6. **Compress the pruned matrix**
+#.  Initialize the matrix descriptors and matmul descriptor.
+#.  Determine the workspace requirements for compression.
+#.  Allocate memory for the pruned and compressed matrices.
+#.  Perform pruning using the 2:4 sparsity pattern.
+#.  Verify the pruning was successful.
+#.  Compress the pruned matrix.
 
 .. figure:: ../data/prune-workflow.svg
 
@@ -174,20 +174,19 @@ Pruning options and parameters
 
 The pruning function supports different strategies through the ``alg`` parameter:
 
-* ``HIPSPARSELT_PRUNE_SPMMA_STRIP`` - Zero out two elements in a 1x4 strip, nonzero elements
+* ``HIPSPARSELT_PRUNE_SPMMA_STRIP``: Zeroes out two elements in a 1x4 strip. Non-zero elements
   have the maximum L1-norm value in all combinations in the strip.
 
-* ``HIPSPARSELT_PRUNE_SPMMA_TILE`` - Zero out eight elements in a 4x4 tile, nonzero elements
-  have the maximum L1-norm value in all combinations in the tile. Exactly two elements in each
+* ``HIPSPARSELT_PRUNE_SPMMA_TILE``: Zeroes out eight elements in a 4x4 tile. Non-zero elements
+  have the maximum L1-norm value in all combinations in the tile. There are exactly two elements in each
   row and column.
 
 Performance considerations
 --------------------------
 
-* Pruning is typically performed once during initialization, not in the critical path of
-  computation.
+* Pruning is typically performed once during initialization, not in the critical computation path.
 * The quality of pruning affects the accuracy of matrix multiplication results.
-* For matrices that don't naturally fit the 2:4 pattern, consider pre-training with
+* For matrices that don't naturally fit the 2:4 pattern, consider pretraining with
   structured sparsity constraints.
 
 Matrix operation setup
@@ -278,10 +277,10 @@ Create and execute the matrix multiplication plan:
 Stream usage notes
 ------------------
 
-* Single stream is sufficient for most operations
-* Multiple streams can improve performance when processing independent operations
-* Ensure proper synchronization when using multiple streams with dependent operations
-* The stream count is specified using the ``num_streams`` parameter
+* Single stream is sufficient for most operations.
+* Multiple streams can improve performance when processing independent operations.
+* Ensure proper synchronization when using multiple streams with dependent operations.
+* The stream count is specified using the ``num_streams`` parameter.
 
 Supported operations
 ====================
@@ -316,7 +315,7 @@ Batched operations
 hipSPARSELt supports multiple types of batched operations, which provide support for
 MI300 hardware acceleration:
 
-* **Broadcast Mode (Single Sparse Matrix/Multiple Dense Matrices)**
+* Broadcast mode (single sparse matrix/multiple dense matrices)
 
   A single sparse matrix is multiplied with multiple dense matrices.
 
@@ -334,7 +333,7 @@ MI300 hardware acceleration:
     CHECK_HIPSPARSELT_ERROR(hipsparseLtMatDescSetAttribute(
         &handle, &dense_mat, HIPSPARSELT_MAT_BATCH_STRIDE, &dense_stride, sizeof(dense_stride)));
 
-* **Multiple Sparse and Dense Matrices**
+* Multiple sparse and dense matrices
 
   Different sparse and dense matrix pairs are multiplied in each batch operation.
 
@@ -352,7 +351,7 @@ MI300 hardware acceleration:
     CHECK_HIPSPARSELT_ERROR(hipsparseLtMatDescSetAttribute(
         &handle, &dense_mat, HIPSPARSELT_MAT_BATCH_STRIDE, &dense_stride, sizeof(dense_stride)));
 
-* **Batched Bias Addition**
+* Batched bias addition
 
   This feature can be combined with matrix multiplication operations to add
   different bias vectors for each batch operation. The bias addition is supported as
@@ -394,7 +393,7 @@ Matrix multiplication operations can be fused with additional operations to impr
         &bias_ptr,
         sizeof(void*)));
 
-    // Configure activation function (e.g., ReLU)
+    // Configure activation function (for example, ReLU)
     hipsparseLtActivationType_t act_type = HIPSPARSELT_ACTIVATION_RELU;
     CHECK_HIPSPARSELT_ERROR(hipsparseLtMatmulDescriptorSetAttribute(
         &handle,

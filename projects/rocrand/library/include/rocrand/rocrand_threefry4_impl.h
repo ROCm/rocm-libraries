@@ -153,7 +153,7 @@ public:
     __forceinline__ __device__ __host__ value next()
     {
 #if defined(__HIP_PLATFORM_AMD__)
-        value ret = m_state.result.data[m_state.substate];
+        value ret = ROCRAND_HIPVEC_ACCESS(m_state.result)[m_state.substate];
 #else
         value ret = (&m_state.result.x)[m_state.substate];
 #endif

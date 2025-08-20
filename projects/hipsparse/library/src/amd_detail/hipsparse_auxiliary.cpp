@@ -29,6 +29,7 @@
 #include <rocsparse/rocsparse.h>
 
 #include "utility.h"
+#include <cstdio>
 
 hipsparseStatus_t hipsparseCreate(hipsparseHandle_t* handle)
 {

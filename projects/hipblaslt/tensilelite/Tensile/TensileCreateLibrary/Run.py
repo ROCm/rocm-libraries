@@ -49,12 +49,12 @@ from Tensile.Common import (
     state,
     tqdm,
     setVerbosity,
-    getVerbosity
+    getVerbosity,
 )
-from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX
+from Tensile.Common.Architectures import gfxToIsa, isaToGfx, SUPPORTED_GFX, splitArchsFromPredicates, filterLogicFilesByPredicates
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters, globalParameters
-from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs
+from Tensile.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs, getKernelNameMin
 
 from Tensile.CustomYamlLoader import load_logic_gfx_arch
 from Tensile.KernelHelperNaming import kernelObjectNameCallables, initHelperKernelObjects
@@ -90,6 +90,11 @@ class KernelCodeGenResult(NamedTuple):
     pgr: int
     mathclk: int
 
+class KernelMinResult(NamedTuple):
+    err: int
+    cuoccupancy: int
+    pgr: int
+    mathclk: int
 
 def processKernelSource(kernelWriterAssembly, data, splitGSU, kernel) -> KernelCodeGenResult:
     """
@@ -160,12 +165,12 @@ def removeInvalidSolutionsAndKernels(results, kernels, solutions, errorTolerant,
 def passPostKernelInfoToSolution(results, kernels, solutions, splitGSU: bool):
     resultDict = {}
     for kernIdx, r in enumerate(results):
-        kName = getKeyNoInternalArgs(kernels[kernIdx], splitGSU)
+        kName = getKernelNameMin(kernels[kernIdx], splitGSU)
         resultDict["%s"%kName] = r
     for solution in solutions:
         solutionKernels = solution.getKernels()
         for kernel in solutionKernels:
-            kName = getKeyNoInternalArgs(kernel, splitGSU)
+            kName = getKernelNameMin(kernel, splitGSU)
             result = resultDict["%s"%kName]
             solution._state["CUOccupancy"] = result.cuoccupancy
             solution._state["PrefetchGlobalRead"] = result.pgr
@@ -180,10 +185,8 @@ def writeAssembly(asmPath: Union[Path, str], result: KernelCodeGenResult):
     with open(path, "w", encoding="utf-8") as f:
         f.write(result.src)
 
-    # result.src is very large so let garbage collector know to clean up
-    del result
-
-    return path, isa, wfsize
+    minResult = KernelMinResult(result.err, result.cuoccupancy, result.pgr, result.mathclk)
+    return path, isa, wfsize, minResult
 
 
 def writeHelpers(
@@ -280,7 +283,7 @@ def writeSolutionsAndKernels(
     )
 
     def assemble(ret):
-        p, isa, wavefrontsize = ret
+        p, isa, wavefrontsize, result = ret
         asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")))
 
     unaryWriteAssembly = functools.partial(writeAssembly, assemblyTmpPath)
@@ -309,7 +312,6 @@ def writeSolutionsAndKernels(
         codeObjectFiles += buildAssemblyCodeObjectFiles(
             asmToolchain.linker,
             asmToolchain.bundler,
-            globalParameters["ROCmLdPath"],
             asmKernels,
             destLibPath,
             assemblyTmpPath,
@@ -332,6 +334,7 @@ def writeSolutionsAndKernelsTCL(
     outputPath,
     asmToolchain,
     srcToolchain,
+    solutions,
     kernels,
     kernelHelperObjs,
     kernelWriterAssembly,
@@ -367,8 +370,9 @@ def writeSolutionsAndKernelsTCL(
     uniqueAsmKernels = [k for k in asmKernels if not k.duplicate]
 
     def assemble(ret):
-        p, isa, wavefrontsize = ret
+        p, isa, wavefrontsize, result = ret
         asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(p.with_suffix(".o")))
+        return result
 
     unaryProcessKernelSource = functools.partial(
         processKernelSource,
@@ -386,10 +390,14 @@ def writeSolutionsAndKernelsTCL(
         multiArg=False,
         return_as="list"
     )
+    passPostKernelInfoToSolution(
+        ret, uniqueAsmKernels, solutions, splitGSU
+    )
+    # result.src is very large so let garbage collector know to clean up
+    del ret
     buildAssemblyCodeObjectFiles(
         asmToolchain.linker,
         asmToolchain.bundler,
-        globalParameters["ROCmLdPath"],
         asmKernels,
         destLibPath,
         assemblyTmpPath,
@@ -497,7 +505,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     masterLibraries = {}
     nextSolIndex = 0
     splitGSU = False
-    printSolutionRejectionReason = False
+    printSolutionRejectionReason = True
     printIndexAssignmentInfo = False
 
     fIter = zip(
@@ -564,13 +572,30 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
             if key != "fallback":
                 value.merge(masterLibraries["fallback"])
         masterLibraries.pop("fallback")
+    solIndex = []
     for _, masterLibrary in masterLibraries.items():
         for _, sol in masterLibrary.solutions.items():
             solutions.append(sol.originalSolution)
+            solIndex.append(sol.index)
         for name, lib in masterLibrary.lazyLibraries.items():
             for _, sol in lib.solutions.items():
                 sol.originalSolution._state["codeObjectFile"] = name
                 solutions.append(sol.originalSolution)
+                solIndex.append(sol.index)
+
+    # Get the solution index and it's codeObjectFile name
+    codeObjectFilesIndex = {}
+    for solution, index in zip(solutions, solIndex):
+        if "codeObjectFile" in solution._state and solution._state["codeObjectFile"] is not None:
+            if solution._state["codeObjectFile"] in codeObjectFilesIndex:
+                codeObjectFilesIndex[solution._state["codeObjectFile"]] = min(index, codeObjectFilesIndex[solution._state["codeObjectFile"]])
+            else:
+                codeObjectFilesIndex[solution._state["codeObjectFile"]] = index
+
+    # Reorder to int: name format
+    codeObjectFilesIndex = {v: k for k, v in codeObjectFilesIndex.items()}
+    # Reorder to maintain ascending order by index
+    codeObjectFilesIndex = dict(sorted(codeObjectFilesIndex.items()))
 
     # remove duplicates while preserving order
     numSoln = len(solutions)
@@ -579,7 +604,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     print1(f"Number of solutions parsed: {numSoln}")
     print1(f"Number of unique solutions: {len(solutions)}")
 
-    return solutions, masterLibraries
+    return solutions, masterLibraries, codeObjectFilesIndex
 
 
 ################################################################################
@@ -610,6 +635,7 @@ def run():
     else:
         archs = arguments["Architecture"].split("_")
     archs = SUPPORTED_GFX if "all" in archs else archs
+    archs, requestedPredicateMap = splitArchsFromPredicates(archs)
 
     targetIsas = [gfxToIsa(a) for a in archs]
     isaInfoMap = makeIsaInfoMap(targetIsas, cxxCompiler)
@@ -656,10 +682,10 @@ def run():
         arguments["LogicPath"], f"**/{arguments['LogicFilter']}{logicExtFormat}"
     )
     print1(f"# LogicFilter:       {globPattern}")
-    logicFiles = (
-        os.path.join(arguments["LogicPath"], file)
-        for file in glob.iglob(globPattern, recursive=True)
-    )
+    logicFiles = [
+        file for file in glob.iglob(globPattern, recursive=True)
+    ]
+
     logicFiles = [file for file in logicFiles if validLogicFile(Path(file))]
 
     print1(f"# Experimental:      {arguments['Experimental']}")
@@ -668,13 +694,20 @@ def run():
             file for file in logicFiles if "experimental" not in map(str.lower, Path(file).parts)
         ]
 
-    print2(f"# LibraryLogicFiles: {len(logicFiles)}")
+    print1("# Archs: " + ' ,'.join(archs))
+    if requestedPredicateMap:
+        print1("# Predicates:\n" + "\n".join(f"#   {arch}: {', '.join(v) if v else 'all variants'}" for arch, v in requestedPredicateMap.items()))
+        numPrior = len(logicFiles)
+        logicFiles = filterLogicFilesByPredicates(logicFiles, requestedPredicateMap)
+        print1(f"# Filtered {numPrior - len(logicFiles)} logic files not matching requested predicates")
+
+    print1(f"# LibraryLogicFiles: {len(logicFiles)}")
 
     for logicFile in logicFiles:
         print2("#   %s" % logicFile)
 
     start_glds = timer()
-    solutions, masterLibraries = generateLogicDataAndSolutions(
+    solutions, masterLibraries, libraryMapping = generateLogicDataAndSolutions(
         logicFiles, arguments, asmToolchain.assembler, isaInfoMap
     )
     stop_glds = timer()
@@ -692,6 +725,7 @@ def run():
         outputPath,
         asmToolchain,
         srcToolchain,
+        solutions,
         kernels,
         kernelHelperObjs,
         kernelWriterAssembly,
@@ -709,10 +743,21 @@ def run():
     newLibraryDir = ensurePath(os.path.join(outputPath, "library"))
     splitGSU = False
 
+    solDict = {}
+    for solution in solutions:
+        solutionKernels = solution.getKernels()
+        for kernel in solutionKernels:
+            kName = getKeyNoInternalArgs(kernel, False)
+            if kName not in solDict:
+                solDict["%s"%kName] = kernel
+
     def writeMsl(name, lib):
         filename = os.path.join(newLibraryDir, name)
         lib.applyNaming(splitGSU)
         LibraryIO.write(filename, state(lib), arguments["LibraryFormat"])
+
+    filename = os.path.join(newLibraryDir, "TensileLiteLibrary_lazy_Mapping")
+    LibraryIO.write(filename, libraryMapping, "msgpack")
 
     start_msl = timer()
     for archName, newMasterLibrary in masterLibraries.items():
@@ -723,6 +768,12 @@ def run():
                 masterFile = os.path.join(newLibraryDir, "TensileLibrary_" + archName)
             newMasterLibrary.applyNaming(splitGSU)
             LibraryIO.write(masterFile, state(newMasterLibrary), arguments["LibraryFormat"])
+
+            for name, lib in newMasterLibrary.lazyLibraries.items():
+                for k, s in lib.solutions.items():
+                    kName = getKeyNoInternalArgs(s.originalSolution, splitGSU)
+                    s.sizeMapping.CUOccupancy = solDict["%s"%kName]["CUOccupancy"]
+
             ParallelMap2(writeMsl,
                          newMasterLibrary.lazyLibraries.items(),
                          "Writing master solution libraries",

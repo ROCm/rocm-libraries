@@ -29,6 +29,12 @@ rocsparse_datatype rocsparse::get_datatype<_Float16>()
 }
 
 template <>
+rocsparse_datatype rocsparse::get_datatype<rocsparse_bfloat16>()
+{
+    return rocsparse_datatype_bf16_r;
+}
+
+template <>
 rocsparse_datatype rocsparse::get_datatype<float>()
 {
     return rocsparse_datatype_f32_r;
@@ -79,6 +85,11 @@ size_t rocsparse::datatype_sizeof(rocsparse_datatype that)
     case rocsparse_datatype_f16_r:
     {
         return sizeof(_Float16);
+    }
+
+    case rocsparse_datatype_bf16_r:
+    {
+        return sizeof(rocsparse_bfloat16);
     }
 
     case rocsparse_datatype_f32_r:

@@ -2,6 +2,18 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## hipCUB-4.1.0 for ROCm 7.1
+
+### Added
+
+### Removed
+* Removed `TexRefInputIterator`, which was removed from CUB after CCCL's 2.6.0 release. This API should have already been removed, but somehow it remained and was not tested.
+
+### Changed
+* Changed `CUDA_STANDARD` for tests in `test/hipcub`, due to C++17 APIs such as `std::exclusive_scan` is used in some tests. Still use `CUDA_STANDARD 14` for `test/extra`.
+* Changed `CCCL_MINIMUM_VERSION` to `2.8.2` to align with CUB.
+* Changed `cmake_minimum_required` from `3.16` to `3.18`, in order to support `CUDA_STANDARD 17` as a valid value.
+
 ## hipCUB-4.0.0 for ROCm 7.0
 
 ### Added
@@ -19,6 +31,13 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * `UnrolledThreadLoad`, `UnrolledCopy`, and `ThreadLoadVolatilePointer` were added to align hipCUB with CUB.
 * `ThreadStoreVolatilePtr` and the `IterateThreadStore` struct were added to align hipCUB with CUB.
 * Added `hipcub::InclusiveScanInit` for CUB parity.
+* Additional Unit Tests for:
+  * block_exchange
+  * block_merge_sort
+  * block_radix_rank
+  * block_radix_sort
+  * block_reduce
+  * block_shuffle
 
 ### Removed
 
@@ -37,6 +56,10 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 * Modified the broadcast kernel in warp scan benchmarks. The reported performance may be different to previous versions.
 * The `hipcub::detail::accumulator_t` in rocPRIM backend has been changed to utilise `rocprim::accumulator_t`.
 * The usage of `rocprim::invoke_result_binary_op_t` has been replaced with `rocprim::accumulator_t`.
+
+### Resolved issues
+* Fixed an issue where `Sort(keys, compare_op, valid_items, oob_default)` in `block_merge_sort.hpp` would not fill in elements that are out of range (items after `valid_items`) with `oob_default`.
+* Fixed an issue where `ScatterToStripedFlagged` in `block_exhange.hpp` was calling the wrong function.
 
 ### Known issues
 

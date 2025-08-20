@@ -20,7 +20,8 @@
 #include <thrust/iterator/retag.h>
 #include <thrust/replace.h>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(ReplaceTests, FullTestsParams);
 

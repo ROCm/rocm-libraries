@@ -39,14 +39,14 @@ namespace rocRoller
 //TODO: If ROCROLLER_USE_HIP is defined, invoke and use the HIP compiler
 #if defined(ROCROLLER_USE_HIP) || defined(ROCROLLER_USE_FLOAT16_BUILTIN)
     /**
- * \ingroup DataTypes
- */
+     * \ingroup DataTypes
+     */
     using Half = __half;
 #define ROCROLLER_USE_HALF
 #else
     /**
- * \ingroup DataTypes
- */
+     * \ingroup DataTypes
+     */
     struct Half : public DistinctType<uint16_t, Half>
     {
     };

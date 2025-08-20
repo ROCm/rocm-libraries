@@ -28,6 +28,7 @@
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 
 template <typename T>
 constexpr auto cast_to_unsigned(T val)
@@ -59,7 +60,7 @@ namespace rocRoller
             LaunchTimeExpressionVisitor(ContextPtr ctx, bool allowNewArgs)
                 : m_context(ctx)
                 , m_allowNewArgs(allowNewArgs)
-                , m_minComplexity(ctx->kernelOptions().minLaunchTimeExpressionComplexity)
+                , m_minComplexity(ctx->kernelOptions()->minLaunchTimeExpressionComplexity)
             {
             }
 
@@ -78,8 +79,9 @@ namespace rocRoller
 
                 auto argName = kernel->uniqueArgName(argumentName(expr));
 
-                Log::debug("LTSE: Adding arg {}: varType {}, expr {}",
+                Log::debug("LTSE: Adding arg {} complexity {}, varType {}, expr {}",
                            argName,
+                           complexity(expr),
                            toString(varType),
                            toString(expr));
 
@@ -109,7 +111,8 @@ namespace rocRoller
                 auto                        ex2    = sub.call(expr);
                 auto                        myComp = complexity(ex2);
 
-                if(ignoreComplexity || complexity(expr) >= m_minComplexity)
+                if(ignoreComplexity || !evalTimes[EvaluationTime::KernelExecute]
+                   || complexity(expr) >= m_minComplexity)
                     return addLaunchEval(expr);
 
                 return nullptr;
@@ -264,6 +267,8 @@ namespace rocRoller
 
                 AssertFatal(resultVariableType(expr) == resultVariableType(v2),
                             ShowValue(expr),
+                            ShowValue(v0),
+                            ShowValue(v1),
                             ShowValue(v2));
 
                 return v2;

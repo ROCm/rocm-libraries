@@ -610,6 +610,11 @@ benchmark:
       --benchmark_filename_regex "${BENCHMARK_FILENAME_REGEX}"
       --benchmark_filter_regex "${BENCHMARK_ALGORITHM_REGEX}"
       --seed "${BENCHMARK_SEED}"
+    - python3
+      .gitlab/report_noise.py
+      --benchmark_json_dir "${BENCHMARK_RESULT_DIR}"
+      --noise_threshold_percentage 1.0
+      --accept_high_noise
   artifacts:
     paths:
       - ${BENCHMARK_RESULT_DIR}
@@ -698,6 +703,11 @@ autotune:execute-tuning:
       --size="${AUTOTUNE_SIZE}"
       --trials="${AUTOTUNE_TRIALS}"
       --seed=82589933
+    - python3
+      .gitlab/report_noise.py
+      --benchmark_json_dir "${AUTOTUNE_RESULT_DIR}"
+      --noise_threshold_percentage 1.0
+      --accept_high_noise
 
 autotune:generate-config:
   image: python:3.10.5-buster

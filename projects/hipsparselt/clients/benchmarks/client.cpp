@@ -96,10 +96,23 @@ struct perf_sparse<
             && std::is_same<Tc, int32_t>{})
         || (std::is_same<Ti, int8_t>{} && (std::is_same<To, hip_bfloat16>{})
             && std::is_same<Tc, int32_t>{})
-        || (std::is_same<Ti, __hip_fp8_e4m3>{} && (std::is_same<To, float>{})
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
+        || (std::is_same<Ti, hipsparselt_fp8_e4m3>{} && (std::is_same<To, float>{})
             && std::is_same<Tc, float>{})
-        || (std::is_same<Ti, __hip_fp8_e5m2>{} && (std::is_same<To, float>{})
-            && std::is_same<Tc, float>{})>> : hipsparselt_test_valid
+        || (std::is_same<Ti, hipsparselt_fp8_e5m2>{} && (std::is_same<To, float>{})
+            && std::is_same<Tc, float>{})
+#ifdef __HIP_PLATFORM_NVIDIA__
+        || (std::is_same<Ti, hipsparselt_fp8_e4m3>{} && (std::is_same<To, __half>{})
+            && std::is_same<Tc, float>{})
+        || (std::is_same<Ti, hipsparselt_fp8_e4m3>{} && (std::is_same<To, hip_bfloat16>{})
+            && std::is_same<Tc, float>{})
+        || (std::is_same<Ti, hipsparselt_fp8_e5m2>{} && (std::is_same<To, __half>{})
+            && std::is_same<Tc, float>{})
+        || (std::is_same<Ti, hipsparselt_fp8_e5m2>{} && (std::is_same<To, hip_bfloat16>{})
+            && std::is_same<Tc, float>{})
+#endif
+#endif
+	>> : hipsparselt_test_valid
 {
     void operator()(const Arguments& arg)
     {
@@ -229,6 +242,7 @@ int run_bench_test(Arguments& arg, const std::string& filter, bool any_stride, b
                          << min_bias_stride << std::endl;
         arg.bias_stride = min_bias_stride;
     }
+    arg.norm_check_assert = false;
     hipsparselt_spmm_dispatch<perf_sparse>(arg);
     return 0;
 }
@@ -574,6 +588,7 @@ try
 #else
                            ? (is_f16   ? HIPSPARSELT_COMPUTE_16F
                               : is_f32 ? HIPSPARSELT_COMPUTE_TF32
+                              : is_f8  ? HIPSPARSELT_COMPUTE_32F
                                        : HIPSPARSELT_COMPUTE_32I)
 #endif
                            : string_to_hipsparselt_computetype(compute_type);
@@ -582,13 +597,45 @@ try
 
     if(bias_type == "")
     {
+#ifdef __HIP_PLATFORM_AMD__
+        switch(arg.a_type)
+        {
+        case HIP_R_16BF:
+        case HIP_R_16F:
+            arg.bias_type = arg.a_type;
+            break;
+        default:
+            arg.bias_type = HIP_R_32F;
+            break;
+        }
+#endif
+#ifdef __HIP_PLATFORM_NVIDIA__
         arg.bias_type
-            = (arg.a_type == HIP_R_16F || arg.a_type == HIP_R_16BF) ? arg.a_type : HIP_R_32F;
+            = (arg.a_type == HIP_R_8I ? HIP_R_32F : arg.c_type);
+#endif
     }
     else
     {
         arg.bias_type = string_to_hip_datatype(bias_type);
-        if(!(arg.a_type == arg.bias_type || arg.bias_type == HIP_R_32F))
+
+        bool valid = false;
+#ifdef __HIP_PLATFORM_AMD__
+        switch(arg.a_type)
+        {
+        case HIP_R_16BF:
+        case HIP_R_16F:
+            valid = arg.bias_type == arg.a_type || arg.bias_type == HIP_R_32F;
+            break;
+        default:
+            valid = arg.bias_type == HIP_R_32F;
+            break;
+        }
+#endif
+#ifdef __HIP_PLATFORM_NVIDIA__
+        valid = (arg.a_type == HIP_R_8I && arg.bias_type == HIP_R_32F) ||
+                (arg.a_type != HIP_R_8I && arg.bias_type == arg.c_type);
+#endif
+        if(!valid)
             throw std::invalid_argument("Invalid value for --bias_type " + bias_type);
     }
 

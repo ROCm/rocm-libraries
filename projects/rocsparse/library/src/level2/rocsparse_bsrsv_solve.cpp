@@ -40,7 +40,7 @@ namespace rocsparse
                                        stream,                                               \
                                        dir,                                                  \
                                        nnzb,                                                 \
-                                       (rocsparse_int*)bsrsv->trmt_perm,                     \
+                                       (rocsparse_int*)bsrsv->get_transposed_perm(),         \
                                        bsr_val,                                              \
                                        bsrt_val,                                             \
                                        block_dim)
@@ -103,7 +103,7 @@ namespace rocsparse
         x,                                                            \
         y,                                                            \
         done_array,                                                   \
-        (rocsparse_int*)bsrsv->row_map,                               \
+        (rocsparse_int*)bsrsv->get_row_map(),                         \
         (rocsparse_int*)info->zero_pivot,                             \
         descr->base,                                                  \
         descr->diag_type,                                             \
@@ -126,7 +126,7 @@ namespace rocsparse
         x,                                                            \
         y,                                                            \
         done_array,                                                   \
-        (rocsparse_int*)bsrsv->row_map,                               \
+        (rocsparse_int*)bsrsv->get_row_map(),                         \
         (rocsparse_int*)info->zero_pivot,                             \
         descr->base,                                                  \
         descr->diag_type,                                             \
@@ -173,7 +173,7 @@ namespace rocsparse
         x,                                                            \
         y,                                                            \
         done_array,                                                   \
-        (rocsparse_int*)bsrsv->row_map,                               \
+        (rocsparse_int*)bsrsv->get_row_map(),                         \
         (rocsparse_int*)info->zero_pivot,                             \
         descr->base,                                                  \
         descr->diag_type,                                             \
@@ -196,7 +196,7 @@ namespace rocsparse
         x,                                                            \
         y,                                                            \
         done_array,                                                   \
-        (rocsparse_int*)bsrsv->row_map,                               \
+        (rocsparse_int*)bsrsv->get_row_map(),                         \
         (rocsparse_int*)info->zero_pivot,                             \
         descr->base,                                                  \
         descr->diag_type,                                             \
@@ -378,7 +378,7 @@ namespace rocsparse
         // Initialize buffers
         RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, sizeof(int) * mb, stream));
 
-        rocsparse_trm_info bsrsv
+        rocsparse::trm_info_t* bsrsv
             = (descr->fill_mode == rocsparse_fill_mode_upper)
                   ? ((trans == rocsparse_operation_none) ? info->bsrsv_upper_info
                                                          : info->bsrsvt_upper_info)
@@ -415,8 +415,8 @@ namespace rocsparse
             // Gather transposed values
             LAUNCH_BSRSV_GTHR(256, 64, block_dim);
 
-            local_bsr_row_ptr = (rocsparse_int*)bsrsv->trmt_row_ptr;
-            local_bsr_col_ind = (rocsparse_int*)bsrsv->trmt_col_ind;
+            local_bsr_row_ptr = (rocsparse_int*)bsrsv->get_transposed_row_ptr();
+            local_bsr_col_ind = (rocsparse_int*)bsrsv->get_transposed_col_ind();
             local_bsr_val     = (T*)bsrt_val;
 
             fill_mode = (fill_mode == rocsparse_fill_mode_lower) ? rocsparse_fill_mode_upper

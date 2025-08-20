@@ -212,7 +212,7 @@ void testing_herk(const Arguments& arg)
     rocblas_init_matrix(
         hA, arg, rocblas_client_alpha_sets_nan, rocblas_client_general_matrix, true, true);
     rocblas_init_matrix(
-        hC, arg, rocblas_client_beta_sets_nan, rocblas_client_hermitian_matrix, false, true);
+        hC, arg, rocblas_client_beta_sets_nan, rocblas_client_general_matrix, false, true);
 
     hC_gold = hC;
 

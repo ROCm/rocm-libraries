@@ -45,8 +45,8 @@ namespace rocsparse
 {
     rocsparse_status exception_to_rocsparse_status(std::exception_ptr e = std::current_exception());
     /*******************************************************************************
-    * \brief convert hipError_t to rocsparse_status
-    ******************************************************************************/
+     * \brief convert hipError_t to rocsparse_status
+     ******************************************************************************/
     rocsparse_status get_rocsparse_status_for_hip_status(hipError_t status);
 }
 

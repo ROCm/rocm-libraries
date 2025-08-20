@@ -196,6 +196,7 @@ rocsparse_status rocsparse::gcsr2csc(rocsparse_handle     handle,
         DISPATCH_INDEX_TYPE_PTR(int8_t);
     }
     case rocsparse_datatype_f16_r:
+    case rocsparse_datatype_bf16_r:
     {
         // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);

@@ -172,7 +172,7 @@ void testing_csrsm(const Arguments& arg)
     rocsparse_int hB_n = (transB == rocsparse_operation_none) ? nrhs : M;
 
     host_dense_matrix<T> hB(hB_m, hB_n);
-    rocsparse_init<T>(hB, 1, M * nrhs, 1);
+    rocsparse_init<T>(hB, 1, M * nrhs, 1, arg.convert_to_int);
 
     host_scalar<rocsparse_int> h_analysis_pivot;
     host_scalar<rocsparse_int> h_solve_pivot;

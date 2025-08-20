@@ -29,6 +29,7 @@
 #include <rocsparse/rocsparse.h>
 
 #include "../utility.h"
+#include <cassert>
 
 // csru2csr struct - to hold permutation array
 struct csru2csrInfo

@@ -148,12 +148,6 @@ def parse_args():
     general_opts.add_argument( '-r', '--relocatable', required=False, default=False, action='store_true',
                         help='Linux only: Add RUNPATH (based on ROCM_RPATH) and remove ldconf entry.')
 
-    experimental_opts.add_argument(      '--rm-legacy-include-dir', dest='legacy_include_dir', required=False, default=False, action='store_false',
-                        help='Deprecated, Linux only: Install without legacy include dir (default option).')
-
-    experimental_opts.add_argument(      '--legacy-include-dir', dest='legacy_include_dir', required=False, default=False, action='store_true',
-                        help='Deprecated, Linux only: Install with legacy include dir for file/folder backward compatibility.')
-
     experimental_opts.add_argument(      '--run_header_testing', required=False, default=False, action='store_true',
                         help='Linux only: Run post build header testing. (options, default: False')
 
@@ -500,11 +494,6 @@ def config_cmd():
             cmake_options.append(f"-DBUILD_WITH_HIPBLASLT=ON")
             if args.hipblaslt_path:
                 cmake_options.append(f"-Dhipblaslt_path={args.hipblaslt_path}")
-
-    if args.legacy_include_dir:
-        cmake_options.append(f"-DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=ON")
-    else:
-        cmake_options.append(f"-DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=OFF")
 
     if args.run_header_testing:
         cmake_options.append(f"-DRUN_HEADER_TESTING=ON")

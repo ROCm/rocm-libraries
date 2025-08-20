@@ -28,6 +28,8 @@
 #include "blas1/rocblas_dot.hpp" // int32 API called
 #include "blas1/rocblas_dot_kernels.hpp"
 
+#include <cassert>
+
 // assume workspace has already been allocated, recommended for repeated calling of dot_strided_batched product
 // routine
 template <typename API_INT, int NB, bool CONJ, typename T, typename U, typename V>

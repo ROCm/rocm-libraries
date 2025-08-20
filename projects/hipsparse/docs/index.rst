@@ -16,7 +16,12 @@ of the AMD ROCm runtime and toolchains and optimized for AMD discrete GPUs.
 
 For more information, see :doc:`What is hipSPARSE? <./what-is-hipsparse>`
 
-The hipSPARSE public repository is located at `<https://github.com/ROCm/hipSPARSE>`_.
+The hipSPARSE public repository is located at `<https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparse>`_.
+
+
+.. note::
+
+   The hipSPARSE repository for ROCm 6.4.2 and earlier is located at `<https://github.com/ROCm/hipSPARSE>`_.
 
 .. grid:: 2
   :gutter: 3
@@ -31,7 +36,7 @@ The hipSPARSE public repository is located at `<https://github.com/ROCm/hipSPARS
 
   .. grid-item-card:: Examples
 
-    * `Client samples <https://github.com/ROCm/hipSPARSE/tree/develop/clients/samples>`_
+    * `Client samples <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsparse/clients/samples>`_
 
   .. grid-item-card:: API reference
 

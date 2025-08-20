@@ -212,6 +212,11 @@ inline rocsparse_datatype rocsparse_datatype_t::get<_Float16>()
     return rocsparse_datatype_f16_r;
 }
 template <>
+inline rocsparse_datatype rocsparse_datatype_t::get<rocsparse_bfloat16>()
+{
+    return rocsparse_datatype_bf16_r;
+}
+template <>
 inline rocsparse_datatype rocsparse_datatype_t::get<float>()
 {
     return rocsparse_datatype_f32_r;

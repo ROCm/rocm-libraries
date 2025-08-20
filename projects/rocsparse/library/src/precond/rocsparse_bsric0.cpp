@@ -45,9 +45,9 @@
         bsr_row_ptr,                                                                  \
         bsr_col_ind,                                                                  \
         bsr_val,                                                                      \
-        (rocsparse_int*)info->bsric0_info->trm_diag_ind,                              \
+        (const rocsparse_int*)info->bsric0_info->get_diag_ind(),                      \
         done_array,                                                                   \
-        (rocsparse_int*)info->bsric0_info->row_map,                                   \
+        (const rocsparse_int*)info->bsric0_info->get_row_map(),                       \
         (rocsparse_int*)info->zero_pivot,                                             \
         base);
 
@@ -64,9 +64,9 @@
         bsr_row_ptr,                                                         \
         bsr_col_ind,                                                         \
         bsr_val,                                                             \
-        (rocsparse_int*)info->bsric0_info->trm_diag_ind,                     \
+        (const rocsparse_int*)info->bsric0_info->get_diag_ind(),             \
         done_array,                                                          \
-        (rocsparse_int*)info->bsric0_info->row_map,                          \
+        (const rocsparse_int*)info->bsric0_info->get_row_map(),              \
         (rocsparse_int*)info->zero_pivot,                                    \
         base);
 
@@ -83,9 +83,9 @@
         bsr_row_ptr,                                                          \
         bsr_col_ind,                                                          \
         bsr_val,                                                              \
-        (rocsparse_int*)info->bsric0_info->trm_diag_ind,                      \
+        (const rocsparse_int*)info->bsric0_info->get_diag_ind(),              \
         done_array,                                                           \
-        (rocsparse_int*)info->bsric0_info->row_map,                           \
+        (const rocsparse_int*)info->bsric0_info->get_row_map(),               \
         (rocsparse_int*)info->zero_pivot,                                     \
         base);
 
@@ -102,9 +102,9 @@
         bsr_row_ptr,                                                           \
         bsr_col_ind,                                                           \
         bsr_val,                                                               \
-        (rocsparse_int*)info->bsric0_info->trm_diag_ind,                       \
+        (const rocsparse_int*)info->bsric0_info->get_diag_ind(),               \
         done_array,                                                            \
-        (rocsparse_int*)info->bsric0_info->row_map,                            \
+        (const rocsparse_int*)info->bsric0_info->get_row_map(),                \
         (rocsparse_int*)info->zero_pivot,                                      \
         base);
 
@@ -121,9 +121,9 @@
         bsr_row_ptr,                                                      \
         bsr_col_ind,                                                      \
         bsr_val,                                                          \
-        (rocsparse_int*)info->bsric0_info->trm_diag_ind,                  \
+        (const rocsparse_int*)info->bsric0_info->get_diag_ind(),          \
         done_array,                                                       \
-        (rocsparse_int*)info->bsric0_info->row_map,                       \
+        (const rocsparse_int*)info->bsric0_info->get_row_map(),           \
         (rocsparse_int*)info->zero_pivot,                                 \
         base);
 
@@ -219,12 +219,7 @@ rocsparse_status rocsparse::bsric0_analysis_template(rocsparse_handle          h
 
     // User is explicitly asking to force a re-analysis, or no valid data has been
     // found to be re-used.
-
-    // Clear bsric0 info
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsric0_info));
-
-    // Create bsric0 info
-    RETURN_IF_ROCSPARSE_ERROR(rocsparse::create_trm_info(&info->bsric0_info));
+    rocsparse::trm_info_t::recreate(&info->bsric0_info);
 
     // Perform analysis
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::trm_analysis(handle,
@@ -444,7 +439,7 @@ rocsparse_status rocsparse::bsric0_template(rocsparse_handle          handle,
     RETURN_IF_HIP_ERROR(hipMemsetAsync(d_done_array, 0, sizeof(int) * mb, stream));
 
     // Max nnz blocks per row
-    rocsparse_int max_nnzb = info->bsric0_info->max_nnz;
+    const rocsparse_int max_nnzb = info->bsric0_info->get_max_nnz();
 
     rocsparse::bsric0_launcher<T>(handle,
                                   dir,
@@ -693,7 +688,7 @@ try
 
     if(!rocsparse::check_trm_shared(info, info->bsric0_info))
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->bsric0_info));
+        rocsparse::trm_info_t::destroy(info->bsric0_info);
     }
 
     info->bsric0_info = nullptr;

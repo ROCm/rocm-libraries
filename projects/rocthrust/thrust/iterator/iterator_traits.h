@@ -31,8 +31,6 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/type_traits/void_t.h>
-
 #include <iterator>
 
 THRUST_NAMESPACE_BEGIN

@@ -67,6 +67,7 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
 
     src += rocfft_complex_h;
     src += common_h;
+    src += device_enum_h;
     src += callback_h;
 
     src += rtc_precision_type_decl(specs.precision);
@@ -352,6 +353,7 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
 
     src += rocfft_complex_h;
     src += common_h;
+    src += device_enum_h;
     src += callback_h;
 
     src += rtc_precision_type_decl(specs.precision);
@@ -615,6 +617,7 @@ std::string realcomplex_even_transpose_rtc(const std::string&                   
 
     src += rocfft_complex_h;
     src += common_h;
+    src += device_enum_h;
     src += callback_h;
 
     src += rtc_precision_type_decl(specs.precision);

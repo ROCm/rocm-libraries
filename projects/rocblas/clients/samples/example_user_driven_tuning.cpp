@@ -27,6 +27,7 @@
 #include <hip/hip_runtime.h>
 #include <rocblas/rocblas.h>
 
+#include <cassert>
 #include <chrono>
 #include <map>
 #include <random>

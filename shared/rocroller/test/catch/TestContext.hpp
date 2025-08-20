@@ -39,10 +39,17 @@ class TestContext;
  * Will by default name the kernel for the current test name. Since catch2 does not
  * include the test parameterization in the name, the helper functions all can take any
  * number of arguments that will be stringified into the kernel name.
+ *
+ * Because TestContext restores settings in its destructor, the lifetime of the
+ * TestContext object should be at least the lifetime of the Context it
+ * contains.
  */
 class TestContext
 {
 public:
+    /**
+     * Resets Settings.
+     */
     ~TestContext();
 
     /**

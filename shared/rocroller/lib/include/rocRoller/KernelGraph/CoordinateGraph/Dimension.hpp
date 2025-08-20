@@ -626,9 +626,7 @@ namespace rocRoller
         template <typename T>
         inline Expression::ExpressionPtr getStride(const T& x)
         {
-            auto rv = std::visit([](const auto a) { return a.stride; }, x);
-            AssertFatal(rv, "Unable to get valid stride for dimension: ", toString(x));
-            return rv;
+            return std::visit([](const auto a) { return a.stride; }, x);
         }
 
         template <typename T>

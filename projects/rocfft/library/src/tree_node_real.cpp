@@ -477,13 +477,13 @@ void Real2DEvenNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     if(inArrayType == rocfft_array_type_real) //forward
     {
         nodeData.length = {length[0] / 2, length[1]};
-        if(NodeFactory::use_CS_2D_SINGLE(pool, nodeData))
+        if(NodeFactory::use_CS_2D_SINGLE(pool, nodeData, inArrayType, outArrayType))
             solution = REAL_2D_SINGLE;
     }
     else
     {
         nodeData.length = {outputLength[1], outputLength[0] / 2};
-        if(NodeFactory::use_CS_2D_SINGLE(pool, nodeData))
+        if(NodeFactory::use_CS_2D_SINGLE(pool, nodeData, inArrayType, outArrayType))
             solution = REAL_2D_SINGLE;
     }
 
@@ -1003,7 +1003,7 @@ void Real3DEvenNode::Build_solution()
     if(forward)
     {
         nodeData.length = {length[0] / 2, length[1]};
-        if(NodeFactory::use_CS_2D_SINGLE(pool, nodeData)
+        if(NodeFactory::use_CS_2D_SINGLE(pool, nodeData, inArrayType, outArrayType)
            && SBCC_dim_available(pool, length, 2, precision)
            && (planInStrideUnit && planOutStrideUnit))
         {
@@ -1014,7 +1014,7 @@ void Real3DEvenNode::Build_solution()
     else
     {
         nodeData.length = {outputLength[1], outputLength[0] / 2};
-        if(NodeFactory::use_CS_2D_SINGLE(pool, nodeData)
+        if(NodeFactory::use_CS_2D_SINGLE(pool, nodeData, inArrayType, outArrayType)
            && SBCC_dim_available(pool, outputLength, 2, precision)
            && (planInStrideUnit && planOutStrideUnit))
         {

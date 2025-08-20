@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
+#include <rocRoller/KernelGraph/TopoVisitor.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 
 namespace rocRoller
@@ -33,6 +34,7 @@ namespace rocRoller
     {
         ConstraintStatus NoDanglingMappings(const KernelGraph& k)
         {
+            TIMER(t, "Constraint::NoDanglingMappings");
             ConstraintStatus retval;
             for(auto control : k.mapper.getControls())
             {
@@ -61,6 +63,7 @@ namespace rocRoller
 
         ConstraintStatus SingleControlRoot(const KernelGraph& k)
         {
+            TIMER(t, "Constraint::SingleControlRoot");
             ConstraintStatus retval;
 
             auto controlRoots = k.control.roots().to<std::vector>();
@@ -81,6 +84,7 @@ namespace rocRoller
 
         ConstraintStatus NoRedundantSetCoordinates(const KernelGraph& k)
         {
+            TIMER(t, "Constraint::NoRedundantSetCoordinates");
             using namespace ControlGraph;
             using GD = rocRoller::Graph::Direction;
             ConstraintStatus retval;
@@ -127,6 +131,56 @@ namespace rocRoller
             }
 
             return retval;
+        }
+
+        struct WalkableControlGraphVisitor
+            : public TopoControlGraphVisitor<WalkableControlGraphVisitor>
+        {
+            using TopoControlGraphVisitor<WalkableControlGraphVisitor>::TopoControlGraphVisitor;
+
+            ConstraintStatus status;
+            std::set<int>    visitedNodes;
+
+            void operator()(int nodeIdx, auto const& node)
+            {
+                visitedNodes.insert(nodeIdx);
+            }
+
+            virtual void errorCondition(std::string const& message) override
+            {
+                status.combine(false, message);
+            }
+        };
+
+        ConstraintStatus WalkableControlGraph(KernelGraph const& k)
+        {
+            TIMER(t, "Constraint::WalkableControlGraph");
+            WalkableControlGraphVisitor visitor(k);
+            visitor.walk();
+
+            auto allNodes = k.control.getNodes().to<std::set>();
+
+            if(visitor.visitedNodes != allNodes)
+            {
+                std::set<int> nonVisitedNodes;
+                std::set_difference(allNodes.begin(),
+                                    allNodes.end(),
+                                    visitor.visitedNodes.begin(),
+                                    visitor.visitedNodes.end(),
+                                    std::inserter(nonVisitedNodes, nonVisitedNodes.end()));
+
+                std::ostringstream msg;
+                msg << "Not all nodes were visited! Missing: ";
+                streamJoin(msg, nonVisitedNodes, ", ");
+                msg << "\n All nodes: ";
+                streamJoin(msg, allNodes, ", ");
+                msg << "\n Visited nodes: ";
+                streamJoin(msg, visitor.visitedNodes, ", ");
+
+                visitor.status.combine(false, msg.str());
+            }
+
+            return visitor.status;
         }
     }
 }

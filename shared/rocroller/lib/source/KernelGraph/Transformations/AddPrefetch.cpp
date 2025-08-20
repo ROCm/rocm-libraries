@@ -24,6 +24,24 @@
  *
  *******************************************************************************/
 
+#include <rocRoller/KernelGraph/Transforms/AddPrefetch.hpp>
+#include <rocRoller/KernelGraph/Transforms/AddPrefetch_detail.hpp>
+
+#include <rocRoller/CommandSolution.hpp>
+#include <rocRoller/Expression.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
+
+#include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
+#include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
+#include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
+#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
+#include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
+#include <rocRoller/KernelGraph/Utils.hpp>
+#include <rocRoller/KernelGraph/Visitors.hpp>
+#include <rocRoller/Operations/Command.hpp>
+#include <rocRoller/Operations/Operations.hpp>
+
 /**
 @class AddPrefetch
 @brief Add prefetching for load operations.
@@ -140,25 +158,108 @@ the scheduling of operations in unrolled segment $u$ are:
 
 */
 
-#include <rocRoller/CommandSolution.hpp>
-#include <rocRoller/Expression.hpp>
-#include <rocRoller/KernelGraph/ControlGraph/ControlGraph.hpp>
-#include <rocRoller/KernelGraph/ControlGraph/LastRWTracer.hpp>
-#include <rocRoller/KernelGraph/ControlGraph/Operation.hpp>
-#include <rocRoller/KernelGraph/ControlToCoordinateMapper.hpp>
-#include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
-#include <rocRoller/KernelGraph/Transforms/AddLDS.hpp>
-#include <rocRoller/KernelGraph/Transforms/AddPrefetch.hpp>
-#include <rocRoller/KernelGraph/Transforms/Simplify.hpp>
-#include <rocRoller/KernelGraph/Utils.hpp>
-#include <rocRoller/KernelGraph/Visitors.hpp>
-#include <rocRoller/Operations/Command.hpp>
-#include <rocRoller/Operations/Operations.hpp>
-
 namespace rocRoller
 {
     namespace KernelGraph
     {
+        namespace AddPrefetchDetail
+        {
+            namespace CF = rocRoller::KernelGraph::ControlGraph;
+            namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+
+            using GD = rocRoller::Graph::Direction;
+            using namespace ControlGraph;
+            using namespace CoordinateGraph;
+
+            std::map<int, int> findPrefetch(KernelGraph const& kgraph)
+            {
+                std::map<int, int> rv;
+
+                auto candidates = kgraph.control.getNodes<LoadTiled>();
+                for(auto const& candidate : candidates)
+                {
+                    auto [user, direction] = getOperationTarget(candidate, kgraph);
+                    if(!kgraph.coordinates.get<User>(user).has_value())
+                        continue;
+                    auto [required, path]   = findRequiredCoordinates(user, direction, kgraph);
+                    auto forLoopCoordinates = filterCoordinates<ForLoop>(required, kgraph);
+                    auto unrollCoordinates  = filterCoordinates<Unroll>(required, kgraph);
+
+                    auto maybeForLoop = findContainingOperation<ForLoopOp>(candidate, kgraph);
+
+                    if(maybeForLoop.has_value())
+                    {
+                        if(rv.contains(*maybeForLoop))
+                            continue;
+
+                        // TODO: Only do the K-Loop for now
+                        auto fl = kgraph.control.get<ForLoopOp>(*maybeForLoop);
+                        if(fl->loopName != rocRoller::KLOOP)
+                            continue;
+
+                        auto forLoopCoord     = getForLoopCoords(*maybeForLoop, kgraph).first;
+                        auto maybeUnrollCoord = findUnrollNeighbour(kgraph, forLoopCoord);
+                        if(forLoopCoordinates.contains(forLoopCoord)
+                           && maybeUnrollCoord.has_value())
+                        {
+                            auto myUnroll
+                                = getUnrollValueForOp(kgraph, *maybeUnrollCoord, candidate);
+
+                            if(myUnroll > 0)
+                            {
+                                Dimension unroll
+                                    = kgraph.coordinates.get<Unroll>(*maybeUnrollCoord).value();
+                                auto unrollSize = getUnsignedInt(evaluate(getSize(unroll)));
+
+                                Log::debug("KernelGraph::AddPrefetch(): ForLoop {} is a prefetch "
+                                           "candidate: "
+                                           "{} {} ({})",
+                                           *maybeForLoop,
+                                           *maybeUnrollCoord,
+                                           unrollSize,
+                                           candidate);
+
+                                rv[*maybeForLoop] = unrollSize;
+                            }
+                        }
+                    }
+                }
+
+                return rv;
+            }
+
+            bool isLoadForExchange(int loadTag, KernelGraph const& graph)
+            {
+                auto isExchangePredicate = [&](int operation) -> bool {
+                    auto maybeExchange = graph.control.get<Exchange>(operation);
+                    return maybeExchange.has_value();
+                };
+
+                auto checkConnections = [&](int coordinate) -> bool {
+                    for(auto c : graph.mapper.getCoordinateConnections(coordinate))
+                        if(isExchangePredicate(c.control))
+                            return true;
+                    return false;
+                };
+
+                auto tileTag = graph.mapper.get<MacroTile>(loadTag);
+                if(checkConnections(tileTag))
+                    return true;
+
+                for(auto edge : graph.coordinates.getNeighbours<GD::Upstream>(tileTag))
+                {
+                    auto maybeIndex = graph.coordinates.get<Index>(edge);
+                    if(!maybeIndex)
+                        continue;
+                    auto indexTileTag
+                        = only(graph.coordinates.getNeighbours<GD::Upstream>(edge)).value();
+                    if(checkConnections(indexTileTag))
+                        return true;
+                }
+                return false;
+            }
+        }
+
         namespace CF = rocRoller::KernelGraph::ControlGraph;
         namespace CT = rocRoller::KernelGraph::CoordinateGraph;
 
@@ -167,6 +268,7 @@ namespace rocRoller
         using namespace CoordinateGraph;
         using namespace Expression;
         using namespace Register;
+        using namespace AddPrefetchDetail;
 
         /**
          * Add Barrier transformer.
@@ -258,120 +360,6 @@ namespace rocRoller
             }
         }
 
-        /**
-         * @brief Is the LoadTile for an Exchange?
-         *
-         * Checks if the loads destination tile is associated with an
-         * Exchange operation.
-         *
-         * The tile is either directly connected to an Exchange, or
-         * it's connected through an Index to a tile that is directly
-         * connected to an Exchange.
-         */
-        bool isLoadForExchange(int loadTag, KernelGraph const& graph)
-        {
-            auto isExchangePredicate = [&](int operation) -> bool {
-                auto maybeExchange = graph.control.get<Exchange>(operation);
-                return maybeExchange.has_value();
-            };
-
-            auto checkConnections = [&](int coordinate) -> bool {
-                for(auto c : graph.mapper.getCoordinateConnections(coordinate))
-                    if(isExchangePredicate(c.control))
-                        return true;
-                return false;
-            };
-
-            auto tileTag = graph.mapper.get<MacroTile>(loadTag);
-            if(checkConnections(tileTag))
-                return true;
-
-            for(auto edge : graph.coordinates.getNeighbours<GD::Upstream>(tileTag))
-            {
-                auto maybeIndex = graph.coordinates.get<Index>(edge);
-                if(!maybeIndex)
-                    continue;
-                auto indexTileTag
-                    = only(graph.coordinates.getNeighbours<GD::Upstream>(edge)).value();
-                if(checkConnections(indexTileTag))
-                    return true;
-            }
-            return false;
-        }
-
-        /**
-         * @brief Find loops (and loads in them) that can be prefetched.
-         *
-         * To find prefetch candidates:
-         *
-         * 1. Look for LoadTiled operations that have ForLoop
-         *    dimensions in their associated coordinate transform.
-         *
-         * 2. Find their containing ForLoop operation and make sure
-         *    the loops associated coordinate is contained in the set
-         *    above.
-         *
-         * 3. Make sure there is a neighboring Unroll coordinate
-         *    beside the ForLoop coordinate.
-         *
-         * 4. Make sure the size of the Unroll coordinate is
-         *    consistent with the requested number of prefetches.
-         */
-        std::map<int, int> findPrefetch(KernelGraph const& kgraph)
-        {
-            std::map<int, int> rv;
-
-            auto candidates = kgraph.control.getNodes<LoadTiled>();
-            for(auto const& candidate : candidates)
-            {
-                auto [user, direction] = getOperationTarget(candidate, kgraph);
-                if(!kgraph.coordinates.get<User>(user).has_value())
-                    continue;
-                auto [required, path]   = findRequiredCoordinates(user, direction, kgraph);
-                auto forLoopCoordinates = filterCoordinates<ForLoop>(required, kgraph);
-                auto unrollCoordinates  = filterCoordinates<Unroll>(required, kgraph);
-
-                auto maybeForLoop = findContainingOperation<ForLoopOp>(candidate, kgraph);
-
-                if(maybeForLoop.has_value())
-                {
-                    if(rv.contains(*maybeForLoop))
-                        continue;
-
-                    // TODO: Only do the K-Loop for now
-                    auto fl = kgraph.control.get<ForLoopOp>(*maybeForLoop);
-                    if(fl->loopName != rocRoller::KLOOP)
-                        continue;
-
-                    auto forLoopCoord     = getForLoopCoords(*maybeForLoop, kgraph).first;
-                    auto maybeUnrollCoord = findUnrollNeighbour(kgraph, forLoopCoord);
-                    if(forLoopCoordinates.contains(forLoopCoord) && maybeUnrollCoord.has_value())
-                    {
-                        auto myUnroll = getUnrollValueForOp(kgraph, *maybeUnrollCoord, candidate);
-
-                        if(myUnroll > 0)
-                        {
-                            Dimension unroll
-                                = kgraph.coordinates.get<Unroll>(*maybeUnrollCoord).value();
-                            auto unrollSize = getUnsignedInt(evaluate(getSize(unroll)));
-
-                            Log::debug(
-                                "KernelGraph::AddPrefetch(): ForLoop {} is a prefetch candidate: "
-                                "{} {} ({})",
-                                *maybeForLoop,
-                                *maybeUnrollCoord,
-                                unrollSize,
-                                candidate);
-
-                            rv[*maybeForLoop] = unrollSize;
-                        }
-                    }
-                }
-            }
-
-            return rv;
-        }
-
         void AddPrefetchVisitor::trackStores(KernelGraph const& graph, int start)
         {
             for(auto tag : graph.control.depthFirstVisit(start, GD::Downstream))
@@ -389,8 +377,6 @@ namespace rocRoller
 
         KernelGraph AddPrefetch::apply(KernelGraph const& original)
         {
-            TIMER(t, "KernelGraph::AddPrefetch");
-
             auto graph = original;
             removeRedundantBodyEdges(graph);
             removeRedundantNOPs(graph);
@@ -501,9 +487,12 @@ namespace rocRoller
             for(auto exchangeTag : graph.control.findNodes(starts, isExchangePredicate))
             {
                 auto destTileTag = graph.mapper.get(exchangeTag, NaryArgument::DEST);
+
+                auto pred = m_context->kernelOptions()->scaleSkipPermlane ? CT::isEdge<Segment>
+                                                                          : CT::isEdge<Index>;
+
                 auto tileTags
-                    = graph.coordinates.getInputNodeIndices(destTileTag, CT::isEdge<Index>)
-                          .to<std::vector>();
+                    = graph.coordinates.getInputNodeIndices(destTileTag, pred).to<std::vector>();
                 AssertFatal(!tileTags.empty(), "swizzle indexed tiles not found");
                 for(auto tileTag : tileTags)
                     loadMap[tileTag] = getTopSetCoordinate(graph, exchangeTag);
@@ -996,8 +985,12 @@ namespace rocRoller
         std::optional<int>
             getExchangeForMultiply(KernelGraph const& graph, int multiplyTag, NaryArgument arg)
         {
-            auto isIndexPredicate    = rocRoller::KernelGraph::CoordinateGraph::isEdge<Index>;
-            auto isExchangePredicate = [&](int operation) -> bool {
+            auto coordPredicate = [](auto const& edge) {
+                return rocRoller::KernelGraph::CoordinateGraph::isEdge<Segment>(edge)
+                       || rocRoller::KernelGraph::CoordinateGraph::isEdge<Index>(edge);
+            };
+
+            auto isExchangePredicate = [&graph](int operation) -> bool {
                 auto maybeExchange = graph.control.get<Exchange>(operation);
                 return maybeExchange.has_value();
             };
@@ -1006,7 +999,7 @@ namespace rocRoller
             if(scale == -1)
                 return {};
 
-            auto tileTag = only(graph.coordinates.getOutputNodeIndices(scale, isIndexPredicate));
+            auto tileTag = only(graph.coordinates.getOutputNodeIndices(scale, coordPredicate));
             if(not tileTag)
                 return {};
 
@@ -1407,6 +1400,8 @@ namespace rocRoller
 
         ConstraintStatus AcceptablePrefetchNodes(const KernelGraph& k)
         {
+            TIMER(t, "Constraint::AcceptablePrefetchNodes");
+
             ConstraintStatus retval;
 
             for(auto [forLoop, numUnroll] : findPrefetch(k))

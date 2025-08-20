@@ -29,10 +29,8 @@ struct StockhamKernelFused2D : public StockhamKernelRR
         , kernel0(specs0)
         , kernel1(specs1)
     {
-        threads_per_transform = std::max(specs1.length * specs0.threads_per_transform,
-                                         specs0.length * specs1.threads_per_transform);
+        threads_per_transform = specs0.threads_per_transform;
         // 2D_SINGLE does one 2D slab per workgroup(threadblock)
-        workgroup_size       = threads_per_transform;
         transforms_per_block = 1;
         R.size               = std::max(kernel0.nregisters, kernel1.nregisters);
         kernel0.writeGuard   = true;
@@ -87,6 +85,11 @@ struct StockhamKernelFused2D : public StockhamKernelRR
             auto length1  = kernel1.length;
             auto rw_iters = length0 * length1 / workgroup_size;
 
+            // assert that workgroup_size evenly divides the lengths,
+            // as currently there's no logic to load the remainder
+            if(length0 * length1 % workgroup_size)
+                throw std::runtime_error("workgroup size does not evenly divide 2d length");
+
             StatementList load_stmts;
             StatementList load_trans_stmts;
 
@@ -132,8 +135,10 @@ struct StockhamKernelFused2D : public StockhamKernelRR
                                   LoadGlobal{buf, offset + thread_id * stride[0] + length1}}}};
             }
 
-            stmts += If{embedded_type != "EmbeddedType::C2Real_PRE", load_stmts};
-            stmts += Else{load_trans_stmts};
+            if(ebtype != EmbeddedType::C2Real_PRE)
+                stmts += load_stmts;
+            else
+                stmts += load_trans_stmts;
         }
         else
         {
@@ -152,6 +157,9 @@ struct StockhamKernelFused2D : public StockhamKernelRR
             auto length0  = kernel0.length;
             auto length1  = kernel1.length;
             auto rw_iters = length0 * length1 / workgroup_size;
+
+            if(length0 * length1 % workgroup_size)
+                throw std::runtime_error("workgroup size does not evenly divide 2d length");
 
             StatementList store_stmts;
             StatementList store_trans_stmts;
@@ -178,12 +186,13 @@ struct StockhamKernelFused2D : public StockhamKernelRR
                 store_stmts += LineBreak{};
                 store_stmts += CommentLines{"append extra global store for Real2C "
                                             "post-process only, one more element per row."};
-                store_stmts
-                    += If{Equal{embedded_type, "EmbeddedType::Real2C_POST"},
-                          {If{Less{thread_id, length1},
+
+                if(ebtype == EmbeddedType::Real2C_POST)
+                    store_stmts
+                        += If{Less{thread_id, length1},
                               {StoreGlobal{buf,
                                            offset + (thread_id * stride[1]) + length0,
-                                           lds_complex[(thread_id * stride_lds) + length0]}}}}};
+                                           lds_complex[(thread_id * stride_lds) + length0]}}};
             }
 
             // store when shape is transposed (for C2Real_PRE)
@@ -204,8 +213,10 @@ struct StockhamKernelFused2D : public StockhamKernelRR
                 }
             }
 
-            stmts += If{embedded_type != "EmbeddedType::C2Real_PRE", store_stmts};
-            stmts += Else{store_trans_stmts};
+            if(ebtype != EmbeddedType::C2Real_PRE)
+                stmts += store_stmts;
+            else
+                stmts += store_trans_stmts;
         }
         else
         {
@@ -215,11 +226,14 @@ struct StockhamKernelFused2D : public StockhamKernelRR
         return stmts;
     }
 
-    StatementList real_trans_pre_post(ProcessingType type) override
+    StatementList real_trans_pre_post() override
     {
-        std::string pre_post     = (type == ProcessingType::PRE) ? " before " : " after ";
-        auto        pre_post_len = (type == ProcessingType::PRE) ? kernel1.length : kernel0.length;
-        auto        pre_post_tpt = (type == ProcessingType::PRE) ? kernel1.threads_per_transform
+        if(ebtype == EmbeddedType::NONE)
+            return {};
+
+        std::string pre_post = (ebtype == EmbeddedType::C2Real_PRE) ? " before " : " after ";
+        auto pre_post_len = (ebtype == EmbeddedType::C2Real_PRE) ? kernel1.length : kernel0.length;
+        auto pre_post_tpt = (ebtype == EmbeddedType::C2Real_PRE) ? kernel1.threads_per_transform
                                                                  : kernel0.threads_per_transform;
 
         auto twd_offset = (kernel0.length - kernel0.factors.front());
@@ -231,7 +245,7 @@ struct StockhamKernelFused2D : public StockhamKernelRR
         StatementList stmts;
         stmts += CommentLines{"handle even-length real to complex pre-process in lds" + pre_post
                               + "transform"};
-        stmts += real2cmplx_pre_post(pre_post_len, type, pre_post_tpt, twd_offset);
+        stmts += real2cmplx_pre_post(pre_post_len, pre_post_tpt, twd_offset);
         return stmts;
     }
 
@@ -262,12 +276,9 @@ struct StockhamKernelFused2D : public StockhamKernelRR
         body += LineBreak{};
         body += CommentLines{"",
                              "this kernel:",
-                             "  uses " + std::to_string(threads_per_transform)
+                             "  uses " + std::to_string(workgroup_size)
                                  + " threads per 2d transform",
-                             "  does 1 2d transforms per thread block",
-                             "therefore it should be called with " + std::to_string(workgroup_size)
-                                 + " threads per block",
-                             ""};
+                             "  (1 2d slab per thread block)"};
 
         Variable d{"d", "int"};
         Variable index_along_d{"index_along_d", "size_t"};
@@ -296,12 +307,10 @@ struct StockhamKernelFused2D : public StockhamKernelRR
         body += Declaration{direct_store_from_reg, "false"};
         body += CallbackLoadDeclaration{scalar_type.name, callback_type.name};
         body += CallbackStoreDeclaration{scalar_type.name, callback_type.name};
-        body += Declaration{
-            SB_1ST,
-            Ternary{Parens(embedded_type == "EmbeddedType::C2Real_PRE"), "SB_NONUNIT", "SB_UNIT"}};
-        body += Declaration{
-            SB_2ND,
-            Ternary{Parens(embedded_type == "EmbeddedType::C2Real_PRE"), "SB_UNIT", "SB_NONUNIT"}};
+        body
+            += Declaration{SB_1ST, (ebtype == EmbeddedType::C2Real_PRE) ? "SB_NONUNIT" : "SB_UNIT"};
+        body
+            += Declaration{SB_2ND, (ebtype == EmbeddedType::C2Real_PRE) ? "SB_UNIT" : "SB_NONUNIT"};
 
         body += LineBreak{};
         body += CommentLines{"transform is: 2D slab number (1 per block)"};
@@ -326,11 +335,10 @@ struct StockhamKernelFused2D : public StockhamKernelRR
         body += Assign{offset, offset + batch0 * stride[dim]};
 
         body += Assign{stride_lds,
-                       Ternary{Parens(embedded_type == "EmbeddedType::Real2C_POST"),
-                               length0_ebtype_post_padded,
-                               Ternary{Parens(embedded_type == "EmbeddedType::C2Real_PRE"),
-                                       length1_ebtype_pre_padded,
-                                       length0_padded}}};
+                       ebtype == EmbeddedType::Real2C_POST
+                           ? length0_ebtype_post_padded
+                           : (ebtype == EmbeddedType::C2Real_PRE ? length1_ebtype_pre_padded
+                                                                 : length0_padded)};
 
         // load
         body += LineBreak{};
@@ -339,105 +347,120 @@ struct StockhamKernelFused2D : public StockhamKernelRR
         // -------------
         // length0 part
         // -------------
+
+        // how many rows can we transform at a time with the threads we have?
+        const unsigned int max_rows_tpb = workgroup_size / kernel0.threads_per_transform;
         body += LineBreak{};
         body += CommentLines{"", "length: " + std::to_string(length0), ""};
 
-        auto height              = kernel0.threads_per_transform;
-        auto active_threads_rows = kernel0.threads_per_transform * kernel1.length;
+        // we have length1 total rows to transform
+        unsigned int rows_remaining = length1;
+        // but if embedded C2Real_PRE, then dim 1 has to do an extra transform
+        if(ebtype == EmbeddedType::C2Real_PRE)
+            ++rows_remaining;
+
+        auto height = kernel0.threads_per_transform;
 
         body += CommentLines{
             "this dim: length-" + std::to_string(length0),
             "  uses " + std::to_string(kernel0.threads_per_transform)
                 + " threads per row-transform of length-" + std::to_string(length0),
-            "  does " + std::to_string(length1) + " row-transforms per thread block",
-            "therefore it uses " + std::to_string(active_threads_rows) + " active threads",
+            "  does max " + std::to_string(max_rows_tpb) + " row-transforms per thread block",
             "row-elem is contigous (SB_UNIT)",
             "NOTE: if this is a fused C2Real_PRE, then the shape is transposed"};
 
-        if(active_threads_rows == workgroup_size)
-            body += Assign{write, 1};
-        else
-            body += Assign{write, thread_id < active_threads_rows};
-
-        body += CommentLines{"offset_lds is the starting lds-ptr of each ROW (or COL if C2R_PRE)"};
-        body += Assign{offset_lds,
-                       Ternary{Parens(embedded_type != "EmbeddedType::C2Real_PRE"),
-                               stride_lds * (thread_id / height),
-                               thread_id / height}};
         body += CommentLines{"calc the thread_in_device value once and for all device funcs"};
         body += Declaration{thread_in_device,
                             Ternary{lds_linear,
                                     thread_id % kernel0.threads_per_transform,
                                     thread_id / kernel0.transforms_per_block}};
 
-        body += LineBreak{};
-
-        StatementList dim1_work_stmts;
-        dim1_work_stmts += CommentLines{"call a pre-load from lds to registers (if necessary)"};
-        auto pre_post_lds_tmpl0 = device_lds_reg_inout_device_call_templates();
-        auto pre_post_lds_args0 = device_lds_reg_inout_device_call_arguments();
-        pre_post_lds_tmpl0.set_value(stride_type.name, "SB_1ST");
-        dim1_work_stmts += Call{"lds_to_reg_input_length" + std::to_string(length0) + "_device",
-                                pre_post_lds_tmpl0,
-                                pre_post_lds_args0};
-        dim1_work_stmts += LineBreak{};
-
-        auto templates = device_call_templates();
-        templates.set_value(stride_type.name, "SB_1ST");
-        dim1_work_stmts += Call{"forward_length" + std::to_string(length0) + "_SBRR_device",
-                                templates,
-                                device_call_arguments(0)};
-        dim1_work_stmts += LineBreak{};
-
-        dim1_work_stmts += CommentLines{"call a post-store from registers to lds (if necessary)"};
-        dim1_work_stmts += Call{"lds_from_reg_output_length" + std::to_string(length0) + "_device",
-                                pre_post_lds_tmpl0,
-                                pre_post_lds_args0};
-
-        // if embedded C2Real_PRE, then dim 1 has to do an extra transform
+        unsigned int row_iteration = 0;
+        while(rows_remaining > 0)
         {
-            StatementList dim1_work_pre_stmts;
-            dim1_work_pre_stmts += Assign{offset_lds, length1};
-            dim1_work_pre_stmts += Assign{thread_in_device, thread_id};
-            dim1_work_pre_stmts += Assign{write, thread_id < kernel0.threads_per_transform};
-            dim1_work_pre_stmts += dim1_work_stmts;
+            auto row_transforms = std::min(rows_remaining, max_rows_tpb);
+            body += CommentLines{"row pass " + std::to_string(row_iteration) + ", "
+                                 + std::to_string(row_transforms) + " transforms"};
 
-            body += dim1_work_stmts;
+            unsigned int active_threads_rows = row_transforms * kernel0.threads_per_transform;
+
+            if(active_threads_rows == workgroup_size)
+                body += Assign{write, 1};
+            else
+                body += Assign{write, thread_id < Literal{active_threads_rows}};
+
+            body += CommentLines{
+                "offset_lds is the starting lds-ptr of each ROW (or COL if C2R_PRE)"};
+            if(row_transforms == 1)
+            {
+                body += Assign{offset_lds, Literal{row_iteration * max_rows_tpb}};
+                body += Assign{thread_in_device, thread_id};
+            }
+            else
+            {
+                body += Assign{
+                    offset_lds,
+                    Parens{Literal{row_iteration * max_rows_tpb} + (thread_id / Literal{height})}
+                        * (ebtype == EmbeddedType::C2Real_PRE ? Expression{Literal{1}}
+                                                              : Expression{stride_lds})};
+            }
+
             body += LineBreak{};
-            body += CommentLines{"if C2Real_PRE, then we have to do an extra transform"};
-            body += If{Equal{embedded_type, "EmbeddedType::C2Real_PRE"}, dim1_work_pre_stmts};
+
+            body += CommentLines{"call a pre-load from lds to registers (if necessary)"};
+            auto lds_to_reg_tmpl   = device_lds_reg_inout_device_call_templates(row_iteration == 0);
+            auto lds_from_reg_tmpl = device_lds_reg_inout_device_call_templates(false);
+            auto lds_args          = device_lds_reg_inout_device_call_arguments();
+            lds_to_reg_tmpl.set_value(stride_type.name, "SB_1ST");
+            lds_from_reg_tmpl.set_value(stride_type.name, "SB_1ST");
+            body += Call{"lds_to_reg_input_length" + std::to_string(length0) + "_device",
+                         lds_to_reg_tmpl,
+                         lds_args};
+            body += LineBreak{};
+
+            auto templates = device_call_templates();
+            templates.set_value(stride_type.name, "SB_1ST");
+            body += Call{"forward_length" + std::to_string(length0) + "_SBRR_device",
+                         templates,
+                         device_call_arguments(0)};
+            body += LineBreak{};
+
+            body += CommentLines{"call a post-store from registers to lds (if necessary)"};
+            body += Call{"lds_from_reg_output_length" + std::to_string(length0) + "_device",
+                         lds_from_reg_tmpl,
+                         lds_args};
+
+            if(ebtype == EmbeddedType::Real2C_POST)
+                body += real_trans_pre_post();
+
+            rows_remaining -= row_transforms;
+            ++row_iteration;
         }
 
         // handle even-length complex to real post-process in lds after transform
-        body += real_trans_pre_post(ProcessingType::POST);
 
-        // note there is a syncthreads at the start of the next call
         // -------------
         // length1 part
         // -------------
+
+        // how many columns can we transform at a time with the threads we have?
+        const unsigned int max_cols_tpb = workgroup_size / kernel1.threads_per_transform;
         body += CommentLines{"", "length: " + std::to_string(length1), ""};
 
-        height                   = kernel1.threads_per_transform;
-        auto active_threads_cols = kernel1.threads_per_transform * length0;
+        unsigned int cols_remaining = length0;
+        // if Real2C_POST, then we have to do an extra transform
+        if(ebtype == EmbeddedType::Real2C_POST)
+            ++cols_remaining;
+
+        height = kernel1.threads_per_transform;
 
         body += CommentLines{
             "this dim: length-" + std::to_string(length1),
             "  uses " + std::to_string(kernel1.threads_per_transform)
                 + " threads per col-transform of length-" + std::to_string(length1),
-            "  does " + std::to_string(length0) + " col-transforms per thread block",
-            "therefore it uses " + std::to_string(active_threads_cols) + " active threads",
+            "  does max " + std::to_string(max_cols_tpb) + " col-transforms per thread block",
             "col-elem is non-contigous (SB_NONUNIT), each elem is strided with stride_lds",
             "NOTE: if this is a fused C2Real_PRE, then the shape is transposed"};
-
-        if(active_threads_cols == workgroup_size)
-            body += Assign{write, 1};
-        else
-            body += Assign{write, thread_id < active_threads_cols};
-        body += CommentLines{"offset_lds is the starting lds-ptr of each COL (or ROW if R2C_POST)"};
-        body += Assign{offset_lds,
-                       Ternary{Parens(embedded_type != "EmbeddedType::C2Real_PRE"),
-                               thread_id / height,
-                               stride_lds * (thread_id / height)}};
 
         body += CommentLines{"calc the thread_in_device value once and for all device funcs"};
         body += Assign{thread_in_device,
@@ -445,48 +468,73 @@ struct StockhamKernelFused2D : public StockhamKernelRR
                                thread_id % kernel1.threads_per_transform,
                                thread_id / kernel1.transforms_per_block}};
 
-        // handle even-length real to complex pre-process in lds before transform
-        body += real_trans_pre_post(ProcessingType::PRE);
+        unsigned int col_iteration = 0;
+        while(cols_remaining > 0)
+        {
+            auto col_transforms = std::min(cols_remaining, max_cols_tpb);
+            body += CommentLines{"col pass " + std::to_string(col_iteration) + ", "
+                                 + std::to_string(col_transforms) + " transforms"};
+
+            unsigned int active_threads_cols = col_transforms * kernel1.threads_per_transform;
+
+            if(active_threads_cols == workgroup_size)
+                body += Assign{write, 1};
+            else
+                body += Assign{write, thread_id < active_threads_cols};
+
+            body += CommentLines{
+                "offset_lds is the starting lds-ptr of each COL (or ROW if R2C_POST)"};
+            if(col_transforms == 1)
+            {
+                body += Assign{offset_lds, Literal{col_iteration * max_cols_tpb}};
+                body += Assign{thread_in_device, thread_id};
+            }
+            else
+            {
+                body += Assign{
+                    offset_lds,
+                    Parens{Literal{col_iteration * max_cols_tpb} + (thread_id / Literal{height})}
+                        * (ebtype == EmbeddedType::C2Real_PRE ? Expression{stride_lds}
+                                                              : Expression{Literal{1}})};
+            }
+
+            // handle even-length real to complex pre-process in lds before transform
+            if(ebtype == EmbeddedType::C2Real_PRE)
+                body += real_trans_pre_post();
+
+            body += LineBreak{};
+
+            body += CommentLines{"call a pre-load from lds to registers (if necessary)"};
+            auto lds_to_reg_tmpl   = device_lds_reg_inout_device_call_templates(col_iteration == 0);
+            auto lds_from_reg_tmpl = device_lds_reg_inout_device_call_templates(false);
+            auto lds_args          = device_lds_reg_inout_device_call_arguments();
+            lds_to_reg_tmpl.set_value(stride_type.name, "SB_2ND");
+            lds_from_reg_tmpl.set_value(stride_type.name, "SB_2ND");
+            body += Call{"lds_to_reg_input_length" + std::to_string(length1) + "_device",
+                         lds_to_reg_tmpl,
+                         lds_args};
+            body += LineBreak{};
+
+            auto templates2 = device_call_templates();
+            templates2.set_value(stride_type.name, "SB_2ND");
+            auto arguments2 = device_call_arguments(0);
+            if(factors != kernel1.factors)
+                arguments2[3] = twiddles + length0 - factors.front();
+            body += Call{"forward_length" + std::to_string(length1) + "_SBRR_device",
+                         templates2,
+                         arguments2};
+            body += LineBreak{};
+
+            body += CommentLines{"call a post-store from registers to lds (if necessary)"};
+            body += Call{"lds_from_reg_output_length" + std::to_string(length1) + "_device",
+                         lds_to_reg_tmpl,
+                         lds_args};
+
+            cols_remaining -= col_transforms;
+            ++col_iteration;
+        }
 
         body += LineBreak{};
-
-        StatementList dim2_work_stmts;
-        dim2_work_stmts += CommentLines{"call a pre-load from lds to registers (if necessary)"};
-        auto pre_post_lds_tmpl1 = device_lds_reg_inout_device_call_templates();
-        auto pre_post_lds_args1 = device_lds_reg_inout_device_call_arguments();
-        pre_post_lds_tmpl1.set_value(stride_type.name, "SB_2ND");
-        dim2_work_stmts += Call{"lds_to_reg_input_length" + std::to_string(length1) + "_device",
-                                pre_post_lds_tmpl1,
-                                pre_post_lds_args1};
-        dim2_work_stmts += LineBreak{};
-
-        auto templates2 = device_call_templates();
-        templates2.set_value(stride_type.name, "SB_2ND");
-        auto arguments2 = device_call_arguments(0);
-        if(factors != kernel1.factors)
-            arguments2[3] = twiddles + length0 - factors.front();
-        dim2_work_stmts += Call{
-            "forward_length" + std::to_string(length1) + "_SBRR_device", templates2, arguments2};
-        dim2_work_stmts += LineBreak{};
-
-        dim2_work_stmts += CommentLines{"call a post-store from registers to lds (if necessary)"};
-        dim2_work_stmts += Call{"lds_from_reg_output_length" + std::to_string(length1) + "_device",
-                                pre_post_lds_tmpl1,
-                                pre_post_lds_args1};
-
-        // if embedded post, then dim 2 has to do an extra column
-        {
-            StatementList dim2_work_post_stmts;
-            dim2_work_post_stmts += Assign{offset_lds, length0};
-            dim2_work_post_stmts += Assign{thread_in_device, thread_id};
-            dim2_work_post_stmts += Assign{write, thread_id < kernel1.threads_per_transform};
-            dim2_work_post_stmts += dim2_work_stmts;
-
-            body += dim2_work_stmts;
-            body += LineBreak{};
-            body += CommentLines{"if Real2C_POST, then we have to do an extra transform"};
-            body += If{Equal{embedded_type, "EmbeddedType::Real2C_POST"}, dim2_work_post_stmts};
-        }
 
         // store
         body += SyncThreads{};

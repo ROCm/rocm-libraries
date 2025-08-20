@@ -900,18 +900,7 @@ void Stockham1DNode::SetupGridParam_internal(GridParam& gp)
     for(size_t j = 1; j < length.size(); j++)
         batch_accum *= length[j];
 
-    auto key    = GetKernelKey();
-    auto kernel = pool.get_kernel(key);
-
-    if(applyPartialPass)
-    {
-        // TODO: Hardcoded configuration for 64 x 64 x 64.
-        // Remove this once the partial-pass kernels are
-        // fully configurable in kernel-generator.py.
-        kernel.threads_per_transform[0] = 8;
-        kernel.workgroup_size           = 128;
-        kernel.transforms_per_block     = kernel.workgroup_size / kernel.threads_per_transform[0];
-    }
+    auto kernel = GetKernel();
 
     bwd      = kernel.transforms_per_block;
     wgs      = kernel.workgroup_size;
@@ -934,13 +923,6 @@ void Stockham1DNode::SetupGridParam_internal(GridParam& gp)
 
 bool Stockham1DNode::CreateDeviceResources()
 {
-    if(applyPartialPass)
-    {
-        // Create twiddle table for partial pass along ppDim
-        std::tie(twiddles_pp, twiddles_pp_size)
-            = Repo::GetTwiddlesPP(length[ppDim], precision, deviceProp);
-    }
-
     twd_attach_halfN = (ebtype != EmbeddedType::NONE);
     return LeafNode::CreateDeviceResources();
 }
@@ -951,14 +933,48 @@ std::vector<size_t> Stockham1DNode::CollapsibleDims()
     if(typeBlue == BT_MULTI_KERNEL_FUSED)
         return {};
 
-    // do not collapse on partial-pass nodes
-    if(applyPartialPass)
-        return {};
-
     // fastest dim is FFT, the rest is collapsible
     std::vector<size_t> ret(length.size() - 1);
     std::iota(ret.begin(), ret.end(), 1);
     return ret;
+}
+
+/*****************************************************
+ * CS_KERNEL_STOCKHAM_PP  *
+ *****************************************************/
+void StockhamPP1DNode::SetupGridParam_internal(GridParam& gp)
+{
+    // get working group size and number of transforms
+    size_t batch_accum = batch;
+    for(size_t j = 1; j < length.size(); j++)
+        batch_accum *= length[j];
+
+    auto kernel = GetKernel();
+
+    bwd      = kernel.transforms_per_block;
+    wgs      = kernel.workgroup_size;
+    gp.b_x   = (batch_accum + bwd - 1) / bwd;
+    gp.wgs_x = wgs;
+
+    const auto lds_padding = ebtype != EmbeddedType::NONE ? 1 : 0;
+
+    lds = (length[0] + lds_padding) * bwd;
+}
+
+bool StockhamPP1DNode::CreateDeviceResources()
+{
+    // Create twiddle table for partial pass along ppOffDim
+    std::tie(twiddles_pp, twiddles_pp_size)
+        = Repo::GetTwiddlesPP(length[ppOffDim], precision, deviceProp);
+
+    twd_attach_halfN = (ebtype != EmbeddedType::NONE);
+    return LeafNode::CreateDeviceResources();
+}
+
+std::vector<size_t> StockhamPP1DNode::CollapsibleDims()
+{
+    // do not collapse on partial-pass nodes
+    return {};
 }
 
 /*****************************************************
@@ -972,8 +988,7 @@ bool SBCCNode::KernelCheck(std::vector<FMKey>& kernel_keys)
 
     if(large1D > 0)
     {
-        FMKey key      = GetKernelKey();
-        auto  kernel   = pool.get_kernel(key);
+        auto kernel    = GetKernel();
         largeTwd3Steps = kernel.use_3steps_large_twd;
         get_large_twd_base_steps(large1D, largeTwd3Steps, largeTwdBase, ltwdSteps);
     }
@@ -1110,37 +1125,15 @@ void SBCCNode::TuneIntrinsicMode()
 
 void SBCCNode::SetupGridParam_internal(GridParam& gp)
 {
-    auto kernel = pool.get_kernel(GetKernelKey());
+    auto kernel = GetKernel();
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
-
-    if(applyPartialPass)
-    {
-        // TODO: Hardcoded configuration for 64 x 64 x 64.
-        // Remove this once the partial-pass kernels are
-        // fully configurable in kernel-generator.py.
-        auto tpt = 8;
-        wgs      = 64;
-        bwd      = wgs / tpt;
-    }
 
     lds = length[0] * bwd;
 
     gp.b_x = ((length[1]) - 1) / bwd + 1;
     gp.b_x *= product(length.begin() + 2, length.end()) * batch;
     gp.wgs_x = wgs;
-
-    if(applyPartialPass)
-    {
-        // Grid arrangement is different for partial
-        // pass SBCC kernels. This arrangement leads
-        // to improved global memory access patterns.
-        auto factor = *std::max_element(kernelFactorsPP.begin(), kernelFactorsPP.end());
-
-        gp.b_x /= factor;
-        gp.wgs_x *= factor;
-        lds *= factor;
-    }
 }
 
 std::vector<size_t> SBCCNode::CollapsibleDims()
@@ -1153,6 +1146,38 @@ std::vector<size_t> SBCCNode::CollapsibleDims()
     std::vector<size_t> ret(length.size() - 2);
     std::iota(ret.begin(), ret.end(), 2);
     return ret;
+}
+
+/*****************************************************
+ * SBCC Partial-Pass *
+ *****************************************************/
+
+void SBCCPPNode::SetupGridParam_internal(GridParam& gp)
+{
+    auto kernel = GetKernel();
+
+    bwd = kernel.transforms_per_block;
+    wgs = kernel.workgroup_size;
+
+    lds = length[0] * bwd;
+
+    gp.b_x = ((length[1]) - 1) / bwd + 1;
+    gp.b_x *= product(length.begin() + 2, length.end()) * batch;
+    gp.wgs_x = wgs;
+
+    // Grid arrangement is different than regular SBCC
+    // for improved global memory access patterns.
+    auto factor = *std::max_element(kernelFactorsPP.begin(), kernelFactorsPP.end());
+
+    gp.b_x /= factor;
+    gp.wgs_x *= factor;
+    lds *= factor;
+}
+
+std::vector<size_t> SBCCPPNode::CollapsibleDims()
+{
+    // do not collapse on partial-pass nodes
+    return {};
 }
 
 /*****************************************************

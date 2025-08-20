@@ -36,6 +36,7 @@
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Random.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -122,7 +123,7 @@ namespace AddStreamKTest
     protected:
         void SetUp() override
         {
-            m_kernelOptions.assertWaitCntState = false;
+            m_kernelOptions->assertWaitCntState = false;
 
             GPUContextFixtureParam<bool>::SetUp();
         }
@@ -234,7 +235,9 @@ namespace AddStreamKTest
                                                        nullptr,
                                                        m_context);
         kgraph          = kgraph.transform(addStreamK);
-        auto kg2        = std::make_shared<rocRoller::KernelGraph::KernelGraph>(kgraph);
+        kgraph          = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
+
+        auto kg2 = std::make_shared<rocRoller::KernelGraph::KernelGraph>(kgraph);
         k->setKernelGraphMeta(kg2);
 
         m_context->schedule(k->preamble());
@@ -436,7 +439,9 @@ namespace AddStreamKTest
                                                        nullptr,
                                                        m_context);
         kgraph          = kgraph.transform(addStreamK);
-        auto kg2        = std::make_shared<rocRoller::KernelGraph::KernelGraph>(kgraph);
+        kgraph          = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
+
+        auto kg2 = std::make_shared<rocRoller::KernelGraph::KernelGraph>(kgraph);
         k->setKernelGraphMeta(kg2);
 
         m_context->schedule(k->preamble());

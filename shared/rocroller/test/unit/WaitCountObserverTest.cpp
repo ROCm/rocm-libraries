@@ -41,7 +41,7 @@ namespace rocRollerTest
         void SetUp() override
         {
             Settings::getInstance()->set(Settings::AllowUnknownInstructions, true);
-            m_kernelOptions.assertWaitCntState = true;
+            m_kernelOptions->assertWaitCntState = true;
             GenericContextFixture::SetUp();
         }
 
@@ -906,8 +906,8 @@ namespace rocRollerTest
             auto [waitBeforeBarrier, logLevel] = GetParam();
             Settings::getInstance()->set(Settings::LogLvl, logLevel);
 
-            m_kernelOptions.alwaysWaitZeroBeforeBarrier = waitBeforeBarrier;
-            m_kernelOptions.logLevel                    = logLevel;
+            m_kernelOptions->alwaysWaitZeroBeforeBarrier = waitBeforeBarrier;
+            m_kernelOptions->logLevel                    = logLevel;
             WaitCountObserverTest::SetUp();
         }
     };
@@ -1316,7 +1316,7 @@ namespace rocRollerTest
 
     TEST_F(WaitCountObserverTest, LoopWaitCntStateAssertFailCase)
     {
-        EXPECT_TRUE(m_context->kernelOptions().assertWaitCntState);
+        EXPECT_TRUE(m_context->kernelOptions()->assertWaitCntState);
 
         rocRoller::Scheduling::InstructionStatus peeked;
         auto const&                              arch = m_context->targetArchitecture();
@@ -1373,7 +1373,7 @@ namespace rocRollerTest
 
     TEST_F(WaitCountObserverTest, LoopWaitCntStateAssertGoodCase)
     {
-        EXPECT_TRUE(m_context->kernelOptions().assertWaitCntState);
+        EXPECT_TRUE(m_context->kernelOptions()->assertWaitCntState);
         auto const& arch = m_context->targetArchitecture();
 
         rocRoller::Scheduling::InstructionStatus peeked;
@@ -1447,7 +1447,7 @@ namespace rocRollerTest
         // aren't equivalent between the branch and label,
         // there are no destination registers in the wait queues,
         // so it is still safe to do the branch.
-        EXPECT_TRUE(m_context->kernelOptions().assertWaitCntState);
+        EXPECT_TRUE(m_context->kernelOptions()->assertWaitCntState);
 
         rocRoller::Scheduling::InstructionStatus peeked;
 
@@ -1502,7 +1502,7 @@ namespace rocRollerTest
         // This test is similar to LoopWaitCntStateAssertGoodCase2, except that
         // it uses global stores. These require the waitcount to always be set
         // to zero, so the mismatch at the branches causes an error.
-        EXPECT_TRUE(m_context->kernelOptions().assertWaitCntState);
+        EXPECT_TRUE(m_context->kernelOptions()->assertWaitCntState);
 
         rocRoller::Scheduling::InstructionStatus peeked;
 

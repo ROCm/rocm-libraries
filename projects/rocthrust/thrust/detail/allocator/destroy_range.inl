@@ -96,7 +96,7 @@ template<typename Allocator>
   Allocator &a;
 
   THRUST_HOST_DEVICE
-  destroy_via_allocator(Allocator &a)
+  destroy_via_allocator(Allocator &a) noexcept
     : a(a)
   {}
 
@@ -113,7 +113,7 @@ template<typename Allocator>
 template<typename Allocator, typename Pointer, typename Size>
 THRUST_HOST_DEVICE
   typename enable_if_destroy_range_case1<Allocator,Pointer>::type
-    destroy_range(Allocator &a, Pointer p, Size n)
+    destroy_range(Allocator &a, Pointer p, Size n) noexcept
 {
   thrust::for_each_n(allocator_system<Allocator>::get(a), p, n, destroy_via_allocator<Allocator>(a));
 }
@@ -125,7 +125,7 @@ struct gozer
   THRUST_EXEC_CHECK_DISABLE
   template<typename T>
   inline THRUST_HOST_DEVICE
-  void operator()(T &x)
+  void operator()(T &x) noexcept
   {
     x.~T();
   }
@@ -135,7 +135,7 @@ struct gozer
 template<typename Allocator, typename Pointer, typename Size>
 THRUST_HOST_DEVICE
   typename enable_if_destroy_range_case2<Allocator,Pointer>::type
-    destroy_range(Allocator &a, Pointer p, Size n)
+    destroy_range(Allocator &a, Pointer p, Size n) noexcept
 {
   thrust::for_each_n(allocator_system<Allocator>::get(a), p, n, gozer());
 }
@@ -145,7 +145,7 @@ THRUST_HOST_DEVICE
 template<typename Allocator, typename Pointer, typename Size>
 THRUST_HOST_DEVICE
   typename enable_if_destroy_range_case3<Allocator,Pointer>::type
-    destroy_range(Allocator &, Pointer, Size)
+    destroy_range(Allocator &, Pointer, Size) noexcept
 {
   // no op
 }
@@ -156,7 +156,7 @@ THRUST_HOST_DEVICE
 
 template<typename Allocator, typename Pointer, typename Size>
 THRUST_HOST_DEVICE
-  void destroy_range(Allocator &a, Pointer p, Size n)
+  void destroy_range(Allocator &a, Pointer p, Size n) noexcept
 {
   return allocator_traits_detail::destroy_range(a,p,n);
 }

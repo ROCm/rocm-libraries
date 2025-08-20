@@ -55,12 +55,12 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
     // Stream
     hipStream_t stream = handle->stream;
 
-    RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-        (void**)&csrmv_info->lrb.rows_offsets_scratch, sizeof(J) * m, stream));
     RETURN_IF_HIP_ERROR(
-        rocsparse_hipMallocAsync((void**)&csrmv_info->lrb.rows_bins, sizeof(J) * m, stream));
+        rocsparse_hipMallocAsync(&csrmv_info->lrb.rows_offsets_scratch, sizeof(J) * m, stream));
     RETURN_IF_HIP_ERROR(
-        rocsparse_hipMallocAsync((void**)&csrmv_info->lrb.n_rows_bins, sizeof(J) * 32, stream));
+        rocsparse_hipMallocAsync(&csrmv_info->lrb.rows_bins, sizeof(J) * m, stream));
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMallocAsync(&csrmv_info->lrb.n_rows_bins, sizeof(J) * 32, stream));
 
     RETURN_IF_HIP_ERROR(
         hipMemsetAsync(csrmv_info->lrb.rows_offsets_scratch, 0, sizeof(J) * m, stream));
@@ -197,7 +197,7 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
         csrmv_info->lrb.size = max_required_grid;
 
         RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-            (void**)&csrmv_info->lrb.wg_flags, sizeof(uint32_t) * csrmv_info->lrb.size, stream));
+            &csrmv_info->lrb.wg_flags, sizeof(uint32_t) * csrmv_info->lrb.size, stream));
     }
 
     // Store some pointers to verify correct execution
@@ -710,6 +710,9 @@ INSTANTIATE(int64_t, int64_t, int8_t);
 INSTANTIATE(int32_t, int32_t, _Float16);
 INSTANTIATE(int64_t, int32_t, _Float16);
 INSTANTIATE(int64_t, int64_t, _Float16);
+INSTANTIATE(int32_t, int32_t, rocsparse_bfloat16);
+INSTANTIATE(int64_t, int32_t, rocsparse_bfloat16);
+INSTANTIATE(int64_t, int64_t, rocsparse_bfloat16);
 
 #undef INSTANTIATE
 
@@ -785,6 +788,9 @@ INSTANTIATE(float, int64_t, int64_t, int8_t, int8_t, float);
 INSTANTIATE(float, int32_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE(float, int64_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE(float, int64_t, int64_t, _Float16, _Float16, float);
+INSTANTIATE(float, int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE(float, int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE(float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE(rocsparse_float_complex,
             int32_t,
             int32_t,

@@ -126,7 +126,8 @@ namespace rocRoller
 
         HIP_CHECK(hipModuleLoadData(&(m_hipData->hipModule), kernelObject.data()));
         HIP_CHECK(
-            hipModuleGetFunction(&(m_hipData->function), m_hipData->hipModule, kernelName.c_str()));
+            hipModuleGetFunction(&(m_hipData->function), m_hipData->hipModule, kernelName.c_str()),
+            ShowValue(kernelName));
         m_kernelLoaded = true;
         m_kernelName   = kernelName;
     }

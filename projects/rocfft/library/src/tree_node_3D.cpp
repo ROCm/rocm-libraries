@@ -581,52 +581,6 @@ void BLOCKCR3DNode::AssignParams_internal()
 /*****************************************************
  * CS_3D_RC  *
  *****************************************************/
-bool RC3DNode::CheckPartialPassSupport()
-{
-    if(parent != nullptr)
-    {
-        // 3D_RC node is child of a real tranform node
-        // skip partial pass for now
-        return false;
-    }
-
-    // Partial pass is currently restricted to length 64x64x64,
-    // large enough batch sizes, unite stride, interleaved FFTs
-    // without result scaling.
-
-    // List of supported 3D sizes for partial pass.
-    typedef std::tuple<size_t, size_t, size_t> len3D_item_t;
-    const std::vector<len3D_item_t>            supportedLengthsPP = {len3D_item_t{64, 64, 64}};
-
-    bool lengthCondition = false;
-    for(const auto& lenItem : supportedLengthsPP)
-    {
-        if(std::get<0>(lenItem) == length[0] && std::get<1>(lenItem) == length[1]
-           && std::get<2>(lenItem) == length[2])
-        {
-            lengthCondition = true;
-            break;
-        }
-    }
-
-    // TODO: Revisit these restrictions once partial pass is
-    //       fully configurable in kernel-generator.py.
-    bool batchCondition = (batch >= 5);
-
-    size_t checkDist     = product(length.begin(), length.end());
-    bool   distCondition = (iDist == checkDist && oDist == checkDist);
-
-    bool strideCondition = (inStride[0] == 1 && outStride[0] == 1);
-
-    bool arrayTypeCondition = (inArrayType != rocfft_array_type_complex_planar
-                               && outArrayType != rocfft_array_type_complex_planar);
-
-    bool loadStoreOpsCondition = (!loadOps.enabled() && !storeOps.enabled());
-
-    return (lengthCondition && batchCondition && distCondition && strideCondition
-            && arrayTypeCondition && loadStoreOpsCondition);
-}
-
 void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
 {
     bool noSolution = child_scheme_trees.empty();
@@ -642,127 +596,61 @@ void RC3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
         determined_scheme_node1 = child_scheme_trees[1]->curScheme;
     }
 
-    if(CheckPartialPassSupport())
+    // 2d fft
+    NodeMetaData xyPlanData(this);
+    xyPlanData.length.push_back(length[0]);
+    xyPlanData.length.push_back(length[1]);
+    xyPlanData.dimension = 2;
+    xyPlanData.length.push_back(length[2]);
+    for(size_t index = 3; index < length.size(); index++)
     {
-        // TODO: Child nodes currently hardcoded to a x+z configuration
-        //       in 3D partial-pass. Add support for other configurations,
-        //       e.g., x+y, y+z, once partial pass is fully configurable
-        //       in kernel-generator.py.
+        xyPlanData.length.push_back(length[index]);
+    }
+    auto xyPlan = NodeFactory::CreateExplicitNode(xyPlanData, this, determined_scheme_node0);
+    xyPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
 
-        // work along y will be split between x and z
-        applyPartialPass = true;
+    // z col fft
+    NodeMetaData zPlanData(this);
+    zPlanData.length.push_back(length[2]);
+    zPlanData.dimension = 1;
+    zPlanData.length.push_back(length[0]);
+    zPlanData.length.push_back(length[1]);
+    for(size_t index = 3; index < length.size(); index++)
+    {
+        zPlanData.length.push_back(length[index]);
+    }
+    zPlanData.outputLength = length;
 
-        // x row fft + partial pass(es) along y
-        NodeMetaData xPartialPassPlanData(this);
-        xPartialPassPlanData.length.push_back(length[0]);
-        xPartialPassPlanData.length.push_back(length[1]);
-        // technically 1 < dimension < 2 for x node.
-        xPartialPassPlanData.dimension        = 1;
-        xPartialPassPlanData.applyPartialPass = true;
-        xPartialPassPlanData.length.push_back(length[2]);
-        for(size_t index = 3; index < length.size(); index++)
-        {
-            xPartialPassPlanData.length.push_back(length[index]);
-        }
+    // use explicit SBCC kernel if available
+    std::unique_ptr<TreeNode> zPlan;
 
-        // use explicit (modified) SBRR kernel
-        std::unique_ptr<TreeNode> xPartialPassPlan;
-
-        xPartialPassPlan            = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM, this);
-        xPartialPassPlan->length    = xPartialPassPlanData.length;
-        xPartialPassPlan->dimension = 1;
-        xPartialPassPlan->ppDim     = 1;
-        xPartialPassPlan->allowInplace = true;
-        xPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
-
-        // partial pass(es) along y + z col fft
-        NodeMetaData zPartialPassPlanData(this);
-        zPartialPassPlanData.length.push_back(length[2]);
-        zPartialPassPlanData.applyPartialPass = true;
-        // technically 1 < dimension < 2 for z node.
-        zPartialPassPlanData.dimension = 1;
-        zPartialPassPlanData.length.push_back(length[0]);
-        zPartialPassPlanData.length.push_back(length[1]);
-        for(size_t index = 3; index < length.size(); index++)
-        {
-            zPartialPassPlanData.length.push_back(length[index]);
-        }
-        zPartialPassPlanData.outputLength = length;
-
-        // use explicit (modified) SBCC kernel
-        std::unique_ptr<TreeNode> zPartialPassPlan;
-
-        zPartialPassPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC, this);
-        zPartialPassPlan->length       = zPartialPassPlanData.length;
-        zPartialPassPlan->dimension    = 1;
-        zPartialPassPlan->ppDim        = 1;
-        zPartialPassPlan->allowInplace = false;
-        zPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
-
-        childNodes.emplace_back(std::move(xPartialPassPlan));
-        childNodes.emplace_back(std::move(zPartialPassPlan));
+    if(determined_scheme_node1 != CS_NONE)
+    {
+        zPlan = NodeFactory::CreateExplicitNode(zPlanData, this, determined_scheme_node1);
+        zPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[1].get());
     }
     else
     {
-        // 2d fft
-        NodeMetaData xyPlanData(this);
-        xyPlanData.length.push_back(length[0]);
-        xyPlanData.length.push_back(length[1]);
-        xyPlanData.dimension = 2;
-        xyPlanData.length.push_back(length[2]);
-        for(size_t index = 3; index < length.size(); index++)
+        if(pool.has_SBCC_kernel(length[2], precision))
         {
-            xyPlanData.length.push_back(length[index]);
-        }
-        auto xyPlan = NodeFactory::CreateExplicitNode(xyPlanData, this, determined_scheme_node0);
-        xyPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[0].get());
-
-        // z col fft
-        NodeMetaData zPlanData(this);
-        zPlanData.length.push_back(length[2]);
-        zPlanData.dimension = 1;
-        zPlanData.length.push_back(length[0]);
-        zPlanData.length.push_back(length[1]);
-        for(size_t index = 3; index < length.size(); index++)
-        {
-            zPlanData.length.push_back(length[index]);
-        }
-        zPlanData.outputLength = length;
-
-        // use explicit SBCC kernel if available
-        std::unique_ptr<TreeNode> zPlan;
-
-        if(determined_scheme_node1 != CS_NONE)
-        {
-            zPlan = NodeFactory::CreateExplicitNode(zPlanData, this, determined_scheme_node1);
-            zPlan->RecursiveBuildTree((noSolution) ? nullptr : child_scheme_trees[1].get());
+            zPlan            = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC, this);
+            zPlan->length    = zPlanData.length;
+            zPlan->dimension = 1;
         }
         else
         {
-            if(pool.has_SBCC_kernel(length[2], precision))
-            {
-                zPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_BLOCK_CC, this);
-                zPlan->length    = zPlanData.length;
-                zPlan->dimension = 1;
-            }
-            else
-            {
-                zPlan = NodeFactory::CreateExplicitNode(zPlanData, this);
-                zPlan->RecursiveBuildTree(nullptr);
-            }
+            zPlan = NodeFactory::CreateExplicitNode(zPlanData, this);
+            zPlan->RecursiveBuildTree(nullptr);
         }
-
-        // RC
-        childNodes.emplace_back(std::move(xyPlan));
-        childNodes.emplace_back(std::move(zPlan));
     }
+
+    // RC
+    childNodes.emplace_back(std::move(xyPlan));
+    childNodes.emplace_back(std::move(zPlan));
 }
 
 void RC3DNode::AssignParams_internal()
 {
-    // in partial pass case:
-    // xy plan is a x row 1D-FFT + plus partial pass(es) along y
-    // z plan is partial pass(es) along y + z col 1D-FFT.
     auto& xyPlan = childNodes[0];
     auto& zPlan  = childNodes[1];
 
@@ -771,8 +659,6 @@ void RC3DNode::AssignParams_internal()
 
     xyPlan->outStride = outStride;
     xyPlan->oDist     = oDist;
-
-    xyPlan->applyPartialPass = applyPartialPass;
 
     xyPlan->AssignParams();
 
@@ -787,9 +673,161 @@ void RC3DNode::AssignParams_internal()
     zPlan->outStride = zPlan->inStride;
     zPlan->oDist     = zPlan->iDist;
 
-    zPlan->applyPartialPass = applyPartialPass;
-
     zPlan->AssignParams();
+}
+
+/*****************************************************
+ * CS_3D_PP  *
+ *****************************************************/
+size_t PP3DNode::GetPPOffDim() const
+{
+    auto key = PPFMKey(length[0], length[1], length[2], precision, scheme);
+    if(!pool.has_function(key))
+        throw std::runtime_error("GetPPOffDim failed to find a valid kernel");
+
+    // CS_3D_PP will have two corresponding kernels in
+    // the function pool, both will have the same off-dim
+    // value, and at least of one them must be an SBCC PP
+    auto child_scheme = CS_KERNEL_STOCKHAM_PP_BLOCK_CC;
+    auto kernel       = pool.get_kernel(key, child_scheme);
+
+    return kernel.pp_params.off_dim;
+}
+
+void PP3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
+{
+    ppOffDim = GetPPOffDim();
+
+    switch(ppOffDim)
+    {
+    case 0: // work along x will be split between y and z
+    {
+        // y col fft + partial pass along x
+        // partial pass along x + z col fft
+        throw std::runtime_error(
+            "PP3DNode::BuildTree_internal: partial-passes along x not currently supported");
+        break;
+    }
+    case 1: // work along y will be split between x and z
+    {
+        // x row fft + partial pass along y
+        // partial pass along y + z col fft
+
+        // Create node for x row fft + partial pass(es) along y
+        NodeMetaData xPartialPassPlanData(this);
+        xPartialPassPlanData.length.push_back(length[0]);
+        xPartialPassPlanData.length.push_back(length[1]);
+        // technically 1 < dimension < 2 for x node.
+        xPartialPassPlanData.dimension = 1;
+        xPartialPassPlanData.length.push_back(length[2]);
+        for(size_t index = 3; index < length.size(); index++)
+        {
+            xPartialPassPlanData.length.push_back(length[index]);
+        }
+
+        // use explicit SBRR partial-pass kernel
+        std::unique_ptr<TreeNode> xPartialPassPlan;
+
+        xPartialPassPlan         = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_PP, this);
+        xPartialPassPlan->length = xPartialPassPlanData.length;
+        xPartialPassPlan->dimension    = 1;
+        xPartialPassPlan->ppOffDim     = ppOffDim;
+        xPartialPassPlan->allowInplace = true;
+        xPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
+
+        // Create node for partial pass(es) along y + z col fft
+        NodeMetaData zPartialPassPlanData(this);
+        zPartialPassPlanData.length.push_back(length[2]);
+        // technically 1 < dimension < 2 for z node.
+        zPartialPassPlanData.dimension = 1;
+        zPartialPassPlanData.length.push_back(length[0]);
+        zPartialPassPlanData.length.push_back(length[1]);
+        for(size_t index = 3; index < length.size(); index++)
+        {
+            zPartialPassPlanData.length.push_back(length[index]);
+        }
+        zPartialPassPlanData.outputLength = length;
+
+        // use explicit SBCC partial-pass kernel
+        std::unique_ptr<TreeNode> zPartialPassPlan;
+
+        zPartialPassPlan = NodeFactory::CreateNodeFromScheme(CS_KERNEL_STOCKHAM_PP_BLOCK_CC, this);
+        zPartialPassPlan->length       = zPartialPassPlanData.length;
+        zPartialPassPlan->dimension    = 1;
+        zPartialPassPlan->ppOffDim     = ppOffDim;
+        zPartialPassPlan->allowInplace = false;
+        zPartialPassPlan->comments.push_back("partial-pass enabled for second dimension.");
+
+        childNodes.emplace_back(std::move(xPartialPassPlan));
+        childNodes.emplace_back(std::move(zPartialPassPlan));
+
+        break;
+    }
+    case 2: // work along z will be split between x and y
+    {
+        // x row fft + partial pass along z
+        // partial pass along z + y col fft
+        throw std::runtime_error(
+            "PP3DNode::BuildTree_internal: partial-passes along z not currently supported");
+        break;
+    }
+    default:
+        throw std::runtime_error("PP3DNode::BuildTree_internal:: Unexpected ppOffDim");
+    }
+}
+
+void PP3DNode::AssignParams_internal()
+{
+    switch(ppOffDim)
+    {
+    case 0: // work along x will be split between y and z
+    {
+        // y col fft + partial pass along x
+        // partial pass along x + z col fft
+        throw std::runtime_error(
+            "PP3DNode::AssignParams_internal: partial-passes along x not currently supported");
+        break;
+    }
+    case 1: // work along y will be split between x and z
+    {
+        // xy plan is a x row 1D-FFT + plus partial pass(es) along y
+        // z plan is partial pass(es) along y + z col 1D-FFT.
+        auto& xyPlan = childNodes[0];
+        auto& zPlan  = childNodes[1];
+
+        xyPlan->inStride = inStride;
+        xyPlan->iDist    = iDist;
+
+        xyPlan->outStride = outStride;
+        xyPlan->oDist     = oDist;
+
+        xyPlan->AssignParams();
+
+        zPlan->inStride.push_back(outStride[2]);
+        zPlan->inStride.push_back(outStride[0]);
+        zPlan->inStride.push_back(outStride[1]);
+        for(size_t index = 3; index < length.size(); index++)
+            zPlan->inStride.push_back(outStride[index]);
+
+        zPlan->iDist = xyPlan->oDist;
+
+        zPlan->outStride = zPlan->inStride;
+        zPlan->oDist     = zPlan->iDist;
+
+        zPlan->AssignParams();
+        break;
+    }
+    case 2: // work along z will be split between x and y
+    {
+        // x row fft + partial pass along z
+        // partial pass along z + y col fft
+        throw std::runtime_error(
+            "PP3DNode::AssignParams_internal: partial-passes along z not currently supported");
+        break;
+    }
+    default:
+        throw std::runtime_error("PP3DNode::AssignParams_internal: Unexpected ppOffDim");
+    }
 }
 
 // Leaf Node
@@ -892,7 +930,7 @@ void SBRCTranspose3DNode::TuneDirectRegType()
 void SBRCTransXY_ZNode::SetupGridParam_internal(GridParam& gp)
 {
     // sbrcTransType has already been assigned in KernelCheck();
-    auto kernel = pool.get_kernel(GetKernelKey());
+    auto kernel = GetKernel();
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds         = length[0] * bwd;
@@ -907,7 +945,7 @@ void SBRCTransXY_ZNode::SetupGridParam_internal(GridParam& gp)
 void SBRCTransZ_XYNode::SetupGridParam_internal(GridParam& gp)
 {
     // sbrcTransType has already been assigned in KernelCheck();
-    auto kernel = pool.get_kernel(GetKernelKey());
+    auto kernel = GetKernel();
     bwd         = kernel.transforms_per_block;
     wgs         = kernel.workgroup_size;
     lds         = length[0] * bwd;

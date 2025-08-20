@@ -60,8 +60,16 @@ add_library(hipsparselt ${hipsparselt_source} ${hipsparselt_headers_public})
 add_library(roc::hipsparselt ALIAS hipsparselt)
 
 if( BUILD_CODE_COVERAGE )
-  target_compile_options(hipsparselt PRIVATE -fprofile-arcs -ftest-coverage)
-  target_link_libraries(hipsparselt PRIVATE --coverage -lgcov)
+  set(COVERAGE_CXX_FLAGS
+    -fprofile-instr-generate
+    -fcoverage-mapping
+  )
+  set(COVERAGE_LINK_FLAGS
+    -fprofile-instr-generate
+  )
+
+  target_compile_options(hipsparselt PRIVATE ${COVERAGE_CXX_FLAGS})
+  target_link_libraries(hipsparselt PRIVATE ${COVERAGE_LINK_FLAGS})
 endif()
 
 # Target compile definitions
@@ -174,14 +182,6 @@ endif()
 include( GenerateExportHeader )
 generate_export_header( hipsparselt EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/hipsparselt/hipsparselt-export.h)
 
-if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
-  rocm_wrap_header_file(
-    hipsparselt-version.h hipsparselt-export.h
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS include hipsparselt/include
-  )
-endif( )
-
 # Following Boost conventions of prefixing 'lib' on static built libraries, across all platforms
 if( NOT BUILD_SHARED_LIBS )
   set_target_properties( hipsparselt PROPERTIES PREFIX "lib" )
@@ -239,11 +239,3 @@ else( )
 	NAMESPACE roc::
     )
 endif( )
-
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
-  rocm_install(
-    DIRECTORY
-       "${PROJECT_BINARY_DIR}/hipsparselt"
-        DESTINATION "." )
-  message( STATUS "Backward Compatible Sym Link Created for include directories" )
-endif()

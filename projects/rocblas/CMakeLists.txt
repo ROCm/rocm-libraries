@@ -20,8 +20,7 @@
 #
 # ########################################################################
 
-cmake_minimum_required( VERSION 3.16.8 )
-
+cmake_minimum_required( VERSION 3.24.4 )
 
 # This has to be initialized before the project() command appears
 # Set the default of CMAKE_BUILD_TYPE to be release, unless user specifies with -D.  MSVC_IDE does not use CMAKE_BUILD_TYPE
@@ -85,13 +84,13 @@ if (NOT BUILD_ADDRESS_SANITIZER)
   set( TARGET_LIST_ROCM_5.7 "gfx803;gfx900;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack+;gfx90a:xnack-;gfx942;gfx1010;gfx1012;gfx1030;gfx1100;gfx1101;gfx1102")
   set( TARGET_LIST_ROCM_6.0 "gfx900;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack+;gfx90a:xnack-;gfx942;gfx1010;gfx1012;gfx1030;gfx1100;gfx1101;gfx1102")
   set( TARGET_LIST_ROCM_6.3 "gfx900;gfx906:xnack-;gfx908:xnack-;gfx90a;gfx942;gfx1010;gfx1012;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201")
-  set( TARGET_LIST_ROCM_6.5 "gfx900;gfx906:xnack-;gfx908:xnack-;gfx90a;gfx942;gfx950;gfx1010;gfx1012;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201")
+  set( TARGET_LIST_ROCM_7.0 "gfx900;gfx906:xnack-;gfx908:xnack-;gfx90a;gfx942;gfx950;gfx1010;gfx1012;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1200;gfx1201")
 else()
   set( TARGET_LIST_ROCM_5.6 "gfx908:xnack+;gfx90a:xnack+")
   set( TARGET_LIST_ROCM_5.7 "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+")
   set( TARGET_LIST_ROCM_6.0 "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+")
   set( TARGET_LIST_ROCM_6.3 "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+")
-  set( TARGET_LIST_ROCM_6.5 "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+")
+  set( TARGET_LIST_ROCM_7.0 "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+")
 endif()
 
 if(ROCM_PLATFORM_VERSION)
@@ -101,15 +100,15 @@ if(ROCM_PLATFORM_VERSION)
     set(SUPPORTED_TARGETS "${TARGET_LIST_ROCM_5.7}")
   elseif(${ROCM_PLATFORM_VERSION} VERSION_LESS 6.3.0)
     set(SUPPORTED_TARGETS "${TARGET_LIST_ROCM_6.0}")
-  elseif(${ROCM_PLATFORM_VERSION} VERSION_LESS 6.5.0)
+  elseif(${ROCM_PLATFORM_VERSION} VERSION_LESS 7.0.0)
     set(SUPPORTED_TARGETS "${TARGET_LIST_ROCM_6.3}")
   else()
-    set(SUPPORTED_TARGETS "${TARGET_LIST_ROCM_6.5}")
+    set(SUPPORTED_TARGETS "${TARGET_LIST_ROCM_7.0}")
   endif()
   message(STATUS "ROCM Platform Version: ${ROCM_PLATFORM_VERSION} default supported gfx list")
 else()
   message(STATUS "ROCM Platform Version: ${ROCM_PLATFORM_VERSION} is not set, using latest supported gfx list")
-  set(SUPPORTED_TARGETS "${TARGET_LIST_ROCM_6.5}")
+  set(SUPPORTED_TARGETS "${TARGET_LIST_ROCM_7.0}")
 endif()
 
 if( AMDGPU_TARGETS AND NOT GPU_TARGETS )

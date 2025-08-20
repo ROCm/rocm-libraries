@@ -36,8 +36,8 @@
 namespace rocRoller
 {
     /**
- * \ingroup DataTypes
- */
+     * \ingroup DataTypes
+     */
     struct E8M0
     {
         E8M0()

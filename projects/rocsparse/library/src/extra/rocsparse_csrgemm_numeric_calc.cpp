@@ -348,8 +348,8 @@ namespace rocsparse
             if(mul)
             {
                 // Allocate additional buffer for C = alpha * A * B
-                RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-                    (void**)&workspace_B, sizeof(I) * nnz_A, handle->stream));
+                RETURN_IF_HIP_ERROR(
+                    rocsparse_hipMallocAsync(&workspace_B, sizeof(I) * nnz_A, handle->stream));
             }
 
             if(handle->wavefront_size == 32)
@@ -824,7 +824,7 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
         {
             // Allocate additional buffer for C = alpha * A * B
             RETURN_IF_HIP_ERROR(
-                rocsparse_hipMallocAsync((void**)&workspace_B, sizeof(I) * nnz_A, handle->stream));
+                rocsparse_hipMallocAsync(&workspace_B, sizeof(I) * nnz_A, handle->stream));
         }
 
         if(handle->wavefront_size == 32)

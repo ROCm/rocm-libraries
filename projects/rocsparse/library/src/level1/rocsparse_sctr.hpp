@@ -29,9 +29,19 @@ namespace rocsparse
 {
     template <typename I, typename T>
     rocsparse_status sctr_template(rocsparse_handle     handle,
-                                   I                    nnz,
-                                   const T*             x_val,
-                                   const I*             x_ind,
-                                   T*                   y,
+                                   int64_t              nnz,
+                                   const void*          x_val,
+                                   const void*          x_ind,
+                                   void*                y,
                                    rocsparse_index_base idx_base);
+
+    rocsparse_status sctr(rocsparse_handle     handle,
+                          int64_t              nnz,
+                          rocsparse_datatype   x_datatype,
+                          const void*          x_val,
+                          rocsparse_indextype  x_indextype,
+                          const void*          x_ind,
+                          rocsparse_datatype   y_datatype,
+                          void*                y,
+                          rocsparse_index_base idx_base);
 }

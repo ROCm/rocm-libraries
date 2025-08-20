@@ -190,10 +190,11 @@ struct match_fundamental_type
         >::type;
 };
 
-// A storage-backing wrapper that allows types with non-trivial constructors to be aliased in unions
+// A storage-backing wrapper that allows types with non-trivial constructors to be aliased in unions.
+// Due to the reinterpret cast, it may in some cases be technically UB, but the generated code is usually
+// more performant than proper code.
 template<typename T>
-struct [[deprecated("To store non default-constructible types in local memory, use "
-                    "rocprim::uninitialized_array instead")]] raw_storage
+struct raw_storage
 {
     // Biggest memory-access word that T is a whole multiple of and is not larger than the alignment of T
     using device_word = typename detail::match_fundamental_type<T>::type;
@@ -413,7 +414,7 @@ hipError_t
     hipDevice_t stream_device;
     ROCPRIM_RETURN_ON_ERROR(hipStreamGetDevice(stream, &stream_device));
 
-    // after setting device, we can't just exit on non-success
+    // After setting device, we can't just exit on non-success.
     hipError_t result = hipSetDevice(stream_device);
 
     int occupancy;
@@ -438,7 +439,7 @@ hipError_t
         result = hipDeviceGetAttribute(&num_multi_processors,
                                        hipDeviceAttribute_t::hipDeviceAttributeMultiprocessorCount,
                                        stream_device);
-        // sanity check
+        // Sanity check.
         if(num_multi_processors == 0)
         {
             result = hipErrorUnknown;
@@ -450,7 +451,7 @@ hipError_t
         grid_dim = occupancy * num_multi_processors;
     }
 
-    // always attempt to restore to default device
+    // Always attempt to restore to default device.
     hipError_t set_result = hipSetDevice(default_device);
     ROCPRIM_RETURN_ON_ERROR(result);
 

@@ -36,6 +36,10 @@
 #include <stdlib.h>
 #include <thread>
 
+#ifdef BUILD_WITH_HIPBLASLT
+#include <hipblaslt/hipblaslt-ext.hpp>
+#endif
+
 #ifdef WIN32
 #define strcasecmp(A, B) _stricmp(A, B)
 #define setenv(A, B, C) _putenv_s(A, B)
@@ -90,11 +94,11 @@ void print_rocblas_version_string()
     print_rocblas_client_commit_hashes();
 }
 
-void print_reference_lib_warning()
-{
 #define TOSTR2(s) #s
 #define TOSTR(s) TOSTR2(s)
 
+void print_reference_lib_warning()
+{
 #ifdef ROCBLAS_REFERENCE_LIB
     rocblas_cout << "rocBLAS info: Using reference library '" << TOSTR(ROCBLAS_REFERENCE_LIB) << "'"
                  << std::endl;
@@ -105,9 +109,6 @@ void print_reference_lib_warning()
                     "If running a test suite, please use "
                  << "--gtest_filter=-*stress* to avoid 64-bit test failures.\n";
 #endif
-
-#undef TOSTR
-#undef TOSTR2
 }
 
 // Print rocBLAS and Tensile commit hashes
@@ -120,6 +121,13 @@ void print_rocblas_client_commit_hashes()
     rocblas_cout << "Tensile-commit-hash: " << rocblas_tensile_commit_hash[1] << std::endl;
 #else
     rocblas_cout << "Tensile-commit-hash: N/A, as rocBLAS was built without Tensile" << std::endl;
+#endif
+#ifdef BUILD_WITH_HIPBLASLT
+    rocblas_cout << "hipBLASLt version: " << TOSTR(HIPBLASLT_VERSION_MAJOR) << "."
+                 << TOSTR(HIPBLASLT_VERSION_MINOR) << "." << TOSTR(HIPBLASLT_VERSION_PATCH)
+                 << " commit-hash: " << TOSTR(HIPBLASLT_VERSION_TWEAK) << std::endl;
+#else
+    rocblas_cout << "hipBLASLt: N/A, as rocBLAS was built without hipBLASLt" << std::endl;
 #endif
 
     size_t size;
@@ -135,6 +143,9 @@ void print_rocblas_client_commit_hashes()
             << hash << std::endl;
     }
 }
+
+#undef TOSTR
+#undef TOSTR2
 
 bool rocblas_file_exists(const char* path)
 {
@@ -261,14 +272,57 @@ double get_time_us_sync_device(void)
 /*! \brief  CPU Timer(in microsecond): synchronize with given queue/stream and return wall time */
 double get_time_us_sync(hipStream_t stream)
 {
-    hipStreamSynchronize(stream);
+    static bool oldStreamSync = [&] {
+        // set old mode if env variable is set
+        const char* str_stream_sync
+            = getenv("ROCBLAS_BENCH_STREAM_SYNC"); // windows getenv is fine for static init
+        if(str_stream_sync)
+        {
+            return (strncmp(str_stream_sync, "1", 1) == 0 ? true : false);
+        }
+        return false;
+    }();
 
-    auto now = std::chrono::steady_clock::now();
-    // now.time_since_epoch() is the duration since epoch
-    // which is converted to microseconds
-    auto duration
-        = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-    return (static_cast<double>(duration));
+    if(oldStreamSync)
+    {
+        THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+
+        auto now = std::chrono::steady_clock::now();
+        // now.time_since_epoch() is the duration since epoch
+        // which is converted to microseconds
+        auto duration
+            = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+        return (static_cast<double>(duration));
+    }
+    else
+    {
+        // avoid any stream synchronization overhead on timing
+        static thread_local hipEvent_t start{nullptr};
+        static thread_local hipEvent_t stop{nullptr};
+        if(!start)
+        {
+            THROW_IF_HIP_ERROR(hipEventCreate(&start));
+            THROW_IF_HIP_ERROR(hipEventCreate(&stop));
+            THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+            THROW_IF_HIP_ERROR(hipEventRecord(start, stream));
+
+            return 0.0;
+        }
+        else
+        {
+            THROW_IF_HIP_ERROR(hipEventRecord(stop, stream));
+            THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
+
+            float milliseconds = 0;
+            THROW_IF_HIP_ERROR(hipEventElapsedTime(&milliseconds, start, stop));
+            THROW_IF_HIP_ERROR(hipEventDestroy(stop));
+            THROW_IF_HIP_ERROR(hipEventDestroy(start));
+            start = nullptr; // reset start event for next use
+            stop  = nullptr;
+
+            return milliseconds * 1000.0; // convert to microseconds
+        }
+    }
 };
 
 /*! \brief  CPU Timer(in microsecond): no GPU synchronization */
@@ -474,6 +528,8 @@ void rocblas_local_handle::rocblas_stream_begin_capture()
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(m_handle, &m_old_stream));
     CHECK_HIP_ERROR(hipStreamSynchronize(m_old_stream));
 
+    m_handle->set_stream_order_memory_allocation(true);
+
     CHECK_HIP_ERROR(hipStreamCreate(&m_graph_stream));
     CHECK_ROCBLAS_ERROR(rocblas_set_stream(m_handle, m_graph_stream));
 
@@ -498,6 +554,8 @@ void rocblas_local_handle::rocblas_stream_end_capture()
     CHECK_ROCBLAS_ERROR(rocblas_set_stream(m_handle, m_old_stream));
     CHECK_HIP_ERROR(hipStreamDestroy(m_graph_stream));
     m_graph_stream = nullptr;
+
+    m_handle->set_stream_order_memory_allocation(false);
 }
 
 void rocblas_parallel_initialize_thread(int id, size_t& memory_used)

@@ -26,8 +26,10 @@
 
 #pragma once
 
-#include <rocRoller/Context_fwd.hpp>
 #include <rocRoller/Expression_fwd.hpp>
+
+#include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/KernelGraph/RegisterTagManager_fwd.hpp>
 
 namespace rocRoller
 {
@@ -67,6 +69,16 @@ namespace rocRoller
         void enableDivideBy(ExpressionPtr expr, ContextPtr context);
 
         /**
+         * Gets expressions which can be used to compute magic division of denominator.
+         *
+         * Returns [magicMultiple, magicShift, magicSign]
+         *
+         * If denominator is unsigned, magicSign will be nullptr.
+         */
+        std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr>
+            getMagicMultipleShiftAndSign(ExpressionPtr denominator, ContextPtr context);
+
+        /**
          * @brief Attempt to replace multiplication operations found within an expression with faster operations.
          *
          * @param expr Input expression
@@ -104,6 +116,9 @@ namespace rocRoller
          */
         ExpressionPtr fuseAssociative(ExpressionPtr expr);
 
+        ExpressionPtr dataFlowTagPropagation(ExpressionPtr             expr,
+                                             RegisterTagManager const& tagManager);
+
         /**
          * Resolve all DataFlowTags in the given expression.
          * Each DataFlowTag is transformed into either an expression or a register value.
@@ -129,6 +144,22 @@ namespace rocRoller
          * @return ExpressionPtr Transformed expression
          */
         ExpressionPtr lowerExponential(ExpressionPtr expr);
+
+        /**
+         * @brief Propagate converts to input values
+         *
+         * @param expr Input expression
+         * @return ExpressionPtr Transformed expression
+         */
+        ExpressionPtr convertPropagation(ExpressionPtr expr);
+
+        ExpressionPtr makeScalar(ExpressionPtr expr);
+
+        /**
+         * @brief Replace unsigned ArithmeticShiftR with LogicalShiftR
+         *
+         */
+        ExpressionPtr lowerUnsignedArithmeticShiftR(ExpressionPtr expr);
 
         /**
          * Helper (lambda/transducer) for applying all fast arithmetic transformations.

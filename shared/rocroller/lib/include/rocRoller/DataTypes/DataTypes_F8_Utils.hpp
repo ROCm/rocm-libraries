@@ -34,8 +34,8 @@ namespace rocRoller
     namespace DataTypes
     {
         /**
-    * @brief Count the number of leading 0 bits in x
-    */
+         * @brief Count the number of leading 0 bits in x
+         */
         inline int clz(uint32_t x)
         {
             // the result of __builtin_clz is undefined if x is 0
@@ -44,27 +44,27 @@ namespace rocRoller
         }
 
         /**
-    *  @brief Cast a half or single precision number to 8-bit floating point number (FP8 or BF8)
-    *
-    *                Sign    Exponent     Mantissa        Bias
-    *  FP8(E4M3)      1          4           3             8 (7  if IEEE/OCP mode)
-    *  BF8(E5M2)      1          5           2            16 (15 if IEEE/OCP mode)
-    *
-    *  Special values:
-    *                            +0        -0       INF/-INF     NaN/-NaN
-    *  FP8(E4M3, bias=8)        0x00      0x00       0x80         0x80
-    *  BF8(E5M2, bias=16)       0x00      0x00      +/-inf       +/-NaN
-    *
-    *  @tparam wm Number of bits for mantissa
-    *  @tparam we Number of bits for exponent
-    *  @tparam T Type (half or single precision) to be cast to f8
-    *  @tparam has_infinity if +/inf is not NaN
-    *  @tparam is_ocp Bias control
-    *  @tparam has_negative_zero_nan Bias control
-    *
-    *  @param _x Floating number to be cast to f8
-    *  @param stoch Stochastic rounding or not
-    */
+         *  @brief Cast a half or single precision number to 8-bit floating point number (FP8 or BF8)
+         *
+         *                Sign    Exponent     Mantissa        Bias
+         *  FP8(E4M3)      1          4           3             8 (7  if IEEE/OCP mode)
+         *  BF8(E5M2)      1          5           2            16 (15 if IEEE/OCP mode)
+         *
+         *  Special values:
+         *                            +0        -0       INF/-INF     NaN/-NaN
+         *  FP8(E4M3, bias=8)        0x00      0x00       0x80         0x80
+         *  BF8(E5M2, bias=16)       0x00      0x00      +/-inf       +/-NaN
+         *
+         *  @tparam wm Number of bits for mantissa
+         *  @tparam we Number of bits for exponent
+         *  @tparam T Type (half or single precision) to be cast to f8
+         *  @tparam has_infinity if +/inf is not NaN
+         *  @tparam is_ocp Bias control
+         *  @tparam has_negative_zero_nan Bias control
+         *
+         *  @param _x Floating number to be cast to f8
+         *  @param stoch Stochastic rounding or not
+         */
         template <int wm,
                   int we,
                   typename T,
@@ -179,11 +179,12 @@ namespace rocRoller
             if(exponent == 0)
             { // fp32/fp16 is in denormal.
                 /* fp32 denormal is below 2^-127 so it is usually not a concern here, we mostly concern fp16 here.
-   In this case, f8 is usually in denormal. But there could be exceptions.
-   fp16 denormal has exponent bias 15 while bf8 with NANOO has exponent bias 16.
-   It means that there are some numbers in fp16 denormal but they are bf8 (NANOO) normals - smallest bf8 (NANOO) normal is 2^-15.
-   fp16 numbers where exponent==0 (actual exponent -14) and highest bit of mantissa is 1 are bf8 (NANOO) normal.
-   In this case, the fp16 mantissa should be shift left by 1  */
+                 * In this case, f8 is usually in denormal. But there could be exceptions.
+                 * fp16 denormal has exponent bias 15 while bf8 with NANOO has exponent bias 16.
+                 * It means that there are some numbers in fp16 denormal but they are bf8 (NANOO) normals - smallest bf8 (NANOO) normal is 2^-15.
+                 * fp16 numbers where exponent==0 (actual exponent -14) and highest bit of mantissa is 1 are bf8 (NANOO) normal.
+                 * In this case, the fp16 mantissa should be shift left by 1
+                 */
                 act_exponent = exponent - bias + 1;
                 exponent_diff
                     = f8_denormal_act_exponent
@@ -195,17 +196,19 @@ namespace rocRoller
                 if(act_exponent <= f8_denormal_act_exponent)
                 {
                     /* This is the case where fp32/fp16 is normal but it is in f8 denormal range.
-           For example fp8 nanoo mode, denormal exponent is -7, but if the fp32/fp16
-           actual exponent is -7, it is actually larger due to the implict 1,
-           Therefore it needs to be adjust to -6 and mantissa shift right by 1.
-           So for fp32/fp16, exponent -8 is the cut point to convert to fp8 nanoo */
+                     * For example fp8 nanoo mode, denormal exponent is -7, but if the fp32/fp16
+                     * actual exponent is -7, it is actually larger due to the implict 1,
+                     * Therefore it needs to be adjust to -6 and mantissa shift right by 1.
+                     * So for fp32/fp16, exponent -8 is the cut point to convert to fp8 nanoo
+                     */
                     exponent_diff = f8_denormal_act_exponent - act_exponent;
                 }
                 else
                 { //both fp32/fp16 and f8 are in normal range
-                    exponent_diff
-                        = 0; // exponent_diff=0 does not mean there is no difference for this case,
-                    //act_exponent could be larger. Just that it does not need shift mantissa
+                    /* exponent_diff=0 does not mean there is no difference for this case,
+                     * act_exponent could be larger. Just that it does not need shift mantissa
+                     */
+                    exponent_diff = 0;
                 }
                 mantissa += (1 << mfmt); //Add the implicit 1 into mantissa
             }
@@ -213,10 +216,10 @@ namespace rocRoller
             bool midpoint = (mantissa & ((1 << (mfmt - wm + exponent_diff)) - 1))
                             == (1 << (mfmt - wm + exponent_diff - 1));
             /* This part is a bit tricky. The judgment of whether it is a tie needs to be done before we shift right
-         as shift right could rip off some residual part and make something not midpoint look like midpoint.
-         For example, the fp16 number 0x1002 (0 00100 0000000010), it is larger than midpoint,
-         but after shift right by 4 bits, it would look like midpoint.
-  */
+             * as shift right could rip off some residual part and make something not midpoint look like midpoint.
+             * For example, the fp16 number 0x1002 (0 00100 0000000010), it is larger than midpoint,
+             * but after shift right by 4 bits, it would look like midpoint.
+             */
 
             if(exponent_diff > 0)
             {
@@ -303,10 +306,10 @@ namespace rocRoller
         }
 
         /**
-    *  @brief Cast a floating 8-bit number (FP8 or BF8) to half or single precision number
-    *
-    *  Also see @ref cast_to_f8
-    */
+         *  @brief Cast a floating 8-bit number (FP8 or BF8) to half or single precision number
+         *
+         *  Also see @ref cast_to_f8
+         */
         template <int wm, int we, typename T, bool negative_zero_nan, bool has_infinity>
         T cast_from_f8(uint8_t x)
         {
@@ -386,12 +389,12 @@ namespace rocRoller
                 mantissa <<= sh;
                 exponent += 1 - sh;
                 /*
-        exponent++;
-        while(mantissa<(1<<wm)) {
-          mantissa <<= 1;
-          exponent--;
-        }
-        */
+                 * exponent++;
+                 * while(mantissa<(1<<wm)) {
+                 *   mantissa <<= 1;
+                 *   exponent--;
+                 * }
+                 */
                 mantissa &= ((1 << wm) - 1);
             }
             exponent += exp_low_cutoff;
@@ -422,26 +425,5 @@ namespace rocRoller
     struct BF8;
     float bf8_to_float(const BF8 v);
     BF8   float_to_bf8(const float v);
-
-    inline float scaleToFloat(uint8_t scale)
-    {
-        return std::pow(2.0f, int(scale) - 127);
-    }
-
-    inline uint8_t floatToScale(float value)
-    {
-        struct
-        {
-            uint mantissa : 23;
-            uint exponent : 8;
-            bool sign : 1;
-        } parts;
-
-        static_assert(sizeof(parts) == 4);
-
-        memcpy(&parts, &value, sizeof(parts));
-
-        return parts.exponent;
-    }
 
 }

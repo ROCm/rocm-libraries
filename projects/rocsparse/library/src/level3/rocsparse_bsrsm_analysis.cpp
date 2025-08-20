@@ -190,15 +190,11 @@ rocsparse_status rocsparse::bsrsm_analysis_core(rocsparse_handle          handle
         // User is explicitly asking to force a re-analysis, or no valid data has been
         // found to be re-used
 
-        // Clear bsrsm info
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info((trans_A == rocsparse_operation_none)
-                                                                  ? info->bsrsm_upper_info
-                                                                  : info->bsrsmt_upper_info));
+        rocsparse::trm_info_t** p_trm_info = (trans_A == rocsparse_operation_none)
+                                                 ? &info->bsrsm_upper_info
+                                                 : &info->bsrsmt_upper_info;
 
-        // Create bsrsm info
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::create_trm_info((trans_A == rocsparse_operation_none)
-                                                                 ? &info->bsrsm_upper_info
-                                                                 : &info->bsrsmt_upper_info));
+        rocsparse::trm_info_t::recreate(p_trm_info);
 
         // Perform analysis
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::trm_analysis(handle,
@@ -209,9 +205,7 @@ rocsparse_status rocsparse::bsrsm_analysis_core(rocsparse_handle          handle
                                                           bsr_val,
                                                           bsr_row_ptr,
                                                           bsr_col_ind,
-                                                          (trans_A == rocsparse_operation_none)
-                                                              ? info->bsrsm_upper_info
-                                                              : info->bsrsmt_upper_info,
+                                                          p_trm_info[0],
                                                           (rocsparse_int**)&info->zero_pivot,
                                                           temp_buffer));
     }
@@ -266,15 +260,11 @@ rocsparse_status rocsparse::bsrsm_analysis_core(rocsparse_handle          handle
         // User is explicitly asking to force a re-analysis, or no valid data has been
         // found to be re-used
 
-        // Clear bsrsm info
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info((trans_A == rocsparse_operation_none)
-                                                                  ? info->bsrsm_lower_info
-                                                                  : info->bsrsmt_lower_info));
+        rocsparse::trm_info_t** p_trm_info = (trans_A == rocsparse_operation_none)
+                                                 ? &info->bsrsm_lower_info
+                                                 : &info->bsrsmt_lower_info;
 
-        // Create bsrsm info
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::create_trm_info((trans_A == rocsparse_operation_none)
-                                                                 ? &info->bsrsm_lower_info
-                                                                 : &info->bsrsmt_lower_info));
+        rocsparse::trm_info_t::recreate(p_trm_info);
 
         // Perform analysis
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::trm_analysis(handle,
@@ -285,9 +275,7 @@ rocsparse_status rocsparse::bsrsm_analysis_core(rocsparse_handle          handle
                                                           bsr_val,
                                                           bsr_row_ptr,
                                                           bsr_col_ind,
-                                                          (trans_A == rocsparse_operation_none)
-                                                              ? info->bsrsm_lower_info
-                                                              : info->bsrsmt_lower_info,
+                                                          p_trm_info[0],
                                                           (rocsparse_int**)&info->zero_pivot,
                                                           temp_buffer));
     }

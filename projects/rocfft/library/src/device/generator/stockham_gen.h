@@ -22,6 +22,7 @@
 
 #pragma once
 #include "../../../../shared/arithmetic.h"
+#include "../kernels/device_enum.h"
 #include "rocfft/rocfft.h"
 #include <ostream>
 #include <string>
@@ -60,6 +61,8 @@ struct StockhamGeneratorSpecs
     unsigned int static_dim = 0;
     std::string  scheme;
 
+    EmbeddedType ebtype = EmbeddedType::NONE;
+
     // this value indicating if the wgs, tpt are excatly what we want
     // (i.e. were already derived somewhere)
     // to tell StockhamKernel not to do its auto-derivation again.
@@ -79,3 +82,34 @@ void stockham_variants(const std::vector<std::string>& kernel_name,
                        const StockhamGeneratorSpecs&   specs,
                        const StockhamGeneratorSpecs&   specs2d,
                        std::ostream&                   output);
+
+struct StockhamPartialPassParams
+{
+    StockhamPartialPassParams() = default;
+
+    StockhamPartialPassParams(const std::vector<unsigned int>& parent_length,
+                              const unsigned int               current_dim,
+                              const unsigned int               off_dim,
+                              const std::vector<unsigned int>& pp_factors_curr,
+                              const std::vector<unsigned int>& pp_factors_other)
+        : parent_length(parent_length)
+        , current_dim(current_dim)
+        , off_dim(off_dim)
+        , pp_factors_curr(pp_factors_curr)
+        , pp_factors_other(pp_factors_other)
+    {
+    }
+
+    std::vector<unsigned int> parent_length;
+    unsigned int              current_dim = 0;
+    unsigned int              off_dim     = 0;
+    std::vector<unsigned int> pp_factors_curr;
+    std::vector<unsigned int> pp_factors_other;
+};
+
+void stockham_partial_pass_variants(const std::string&               kernel_name,
+                                    const StockhamGeneratorSpecs&    specs1,
+                                    const StockhamGeneratorSpecs&    specs2,
+                                    const StockhamPartialPassParams& params_1,
+                                    const StockhamPartialPassParams& params_2,
+                                    std::ostream&                    output);

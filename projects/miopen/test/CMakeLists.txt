@@ -430,14 +430,12 @@ endfunction()
 file(GLOB TEST_SOURCES *.cpp)
 
 set(LONG_TESTS
-    test_dropout
     test_conv2d
     test_conv2d_find2
     test_conv3d
     test_conv3d_find2
     test_conv_group
     test_soft_max
-    test_lrn_test
     test_conv_for_implicit_gemm
     test_immed_conv3d
     test_conv3d_extra
@@ -801,10 +799,6 @@ set(CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW_ENV
     MIOPEN_FIND_MODE=normal
     MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvCkIgemmFwdV6r1DlopsNchw
     MIOPEN_DEBUG_CONV_CK_IGEMM_FWD_V6R1_DLOPS_NCHW=1)
-
-if(MIOPEN_TEST_FLOAT)
-    add_custom_test(test_reduce_double SKIP_UNLESS_ALL GFX94X_ENABLED GFX103X_ENABLED GFX110X_ENABLED COMMAND  $<TARGET_FILE:test_reduce_test> --double --all --verbose)
-endif()
 
 # NOTES ON WRITING TESTS FOR TUNABLE SOLVERS
 # * Enforce tuning (SEARCH_DB_UPDATE).

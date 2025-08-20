@@ -59,13 +59,13 @@ rocblas_status larf_run_small(rocblas_handle handle,
                               const I batch_count);
 
 // larfg
-template <typename T, typename I, typename U>
+template <typename T, typename I, typename S, typename U>
 rocblas_status larfg_run_small(rocblas_handle handle,
                                const I n,
                                U alpha,
                                const rocblas_stride shiftA,
                                const rocblas_stride strideA,
-                               T* beta,
+                               S* beta,
                                const rocblas_stride shiftB,
                                const rocblas_stride strideB,
                                U x,

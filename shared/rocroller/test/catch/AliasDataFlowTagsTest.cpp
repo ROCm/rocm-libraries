@@ -37,6 +37,7 @@
 #include "TestContext.hpp"
 #include "common/SourceMatcher.hpp"
 #include <common/CommonGraphs.hpp>
+#include <common/Utilities.hpp>
 #include <rocRoller/KernelGraph/ControlGraph/ControlFlowRWTracer.hpp>
 #include <rocRoller/KernelGraph/Transforms/AliasDataFlowTags_detail.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
@@ -55,15 +56,6 @@ namespace std
 }
 namespace AliasDataFlowTagsTest
 {
-
-    template <typename Transform, typename... Args>
-    rocRoller::KernelGraph::KernelGraph transform(rocRoller::KernelGraph::KernelGraph& graph,
-                                                  Args... args)
-    {
-        auto xform = std::make_shared<Transform>(std::forward<Args>(args)...);
-        return graph.transform(xform);
-    }
-
     TEST_CASE("AliasDataFlowTags transformation works.", "[kernel-graph][graph-transforms]")
     {
         using namespace rocRoller::KernelGraph;
@@ -98,7 +90,8 @@ namespace AliasDataFlowTagsTest
 
         graph = transform<ConstantPropagation>(graph);
         graph = transform<FuseExpressions>(graph);
-        graph = transform<ConnectWorkgroups>(graph, params, context.get());
+        graph = transform<ConnectWorkgroups>(
+            graph, context.get(), params->workgroupMappingDim, params->workgroupRemapXCC);
         graph = transform<UnrollLoops>(graph, params, context.get());
         graph = transform<FuseLoops>(graph);
         graph = transform<RemoveDuplicates>(graph);
@@ -110,7 +103,7 @@ namespace AliasDataFlowTagsTest
         graph = transform<UpdateWavefrontParameters>(graph, params);
         graph = transform<LoadPacked>(graph, context.get());
         graph = transform<AddConvert>(graph);
-        graph = transform<AddDeallocate>(graph);
+        graph = transform<AddDeallocateDataFlow>(graph);
         graph = transform<InlineIncrements>(graph);
         graph = transform<Simplify>(graph);
 

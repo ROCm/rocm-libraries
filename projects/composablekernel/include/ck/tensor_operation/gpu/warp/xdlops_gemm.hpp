@@ -889,7 +889,6 @@ struct mfma_type<MfmaInstr::mfma_scale_f32_32x32x64f8f6f4>
                         const ScaleB& scale_b,
                         FloatC& reg_c) const
     {
-
         intrin_mfma_scale_f32_32x32x64f8f6f4<MPerXdlops, NPerXdlops, OpselA, OpselB>::Run(
             a, bit_cast<uint32_t>(scale_a), b, bit_cast<uint32_t>(scale_b), reg_c);
     }
@@ -1146,15 +1145,6 @@ struct MfmaSelector
 #endif
     }
 
-    // Use single rate mfma instruction for this special case A (f8_t) * B (pk_i4_t)
-    // See example gemm_xdl_fp8_pk_i4_bpreshuffle_v3
-    // TODO: explore optimization opportunity by using new mfma instructions on gfx950
-    template <>
-    constexpr auto GetMfma<f8_t, 32, 32, pk_i4_t, true, false>()
-    {
-        return MfmaInstr::mfma_f32_32x32x16f8f8;
-    }
-
     template <>
     constexpr auto GetMfma<f8_t, 32, 32, f8_t, true, false>()
     {
@@ -1229,6 +1219,27 @@ struct MfmaSelector
 
     template <>
     constexpr auto GetMfma<bf8_t, 16, 16, f8_t, false, true>()
+    {
+        return MfmaInstr::mfma_scale_f32_16x16x128f8f6f4;
+    }
+
+    template <>
+    constexpr auto GetMfma<f6_t, 32, 32, f6_t, false, true>()
+    {
+        return MfmaInstr::mfma_scale_f32_32x32x64f8f6f4;
+    }
+    template <>
+    constexpr auto GetMfma<f6_t, 16, 16, f6_t, false, true>()
+    {
+        return MfmaInstr::mfma_scale_f32_16x16x128f8f6f4;
+    }
+    template <>
+    constexpr auto GetMfma<bf6_t, 32, 32, bf6_t, false, true>()
+    {
+        return MfmaInstr::mfma_scale_f32_32x32x64f8f6f4;
+    }
+    template <>
+    constexpr auto GetMfma<bf6_t, 16, 16, bf6_t, false, true>()
     {
         return MfmaInstr::mfma_scale_f32_16x16x128f8f6f4;
     }
@@ -1414,8 +1425,7 @@ struct XdlopsGemm
                           MPerXdlops == 64,
                       "Only support GemmMPerXdlops == 4, 8, 16, 32 or 64 for xdlops");
 
-        static_assert(KPack * 2 % mfma_instr.k_per_blk == 0,
-                      "KPack should be a multiple of k_per_blk");
+        static_assert(KPack % mfma_instr.k_per_blk == 0, "KPack should be a multiple of k_per_blk");
     }
 
     // XDL output supporting C = A * B

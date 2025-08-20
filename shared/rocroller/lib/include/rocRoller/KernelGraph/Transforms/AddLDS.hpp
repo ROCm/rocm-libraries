@@ -63,18 +63,5 @@ namespace rocRoller
             CommandParametersPtr m_params;
             ContextPtr           m_context;
         };
-
-        /**
-         * @brief Container for info related to loading from Global
-         * into LDS.
-         */
-        struct LDSOperationInfo
-        {
-            int user; // User coordinate
-            int globalOperation; // LoadTiled/StoreTiled operation
-            int ldsOperation; // StoreLDSTile/LoadLDSTile operation
-            int globalChain; // LoadTiled/StoreTiled operation
-            int ldsChain; // StoreLDStile/LoadLDSTile operation
-        };
     }
 }

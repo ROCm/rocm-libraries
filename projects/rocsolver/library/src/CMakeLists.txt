@@ -1,5 +1,5 @@
 # ##########################################################################
-# Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -470,15 +470,6 @@ set_target_properties(rocsolver PROPERTIES
 )
 generate_export_header(rocsolver EXPORT_FILE_NAME ${PROJECT_BINARY_DIR}/include/rocsolver/rocsolver-export.h)
 
-if (BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
-  rocm_wrap_header_file(
-    rocsolver-version.h rocsolver-export.h
-    GUARDS SYMLINK WRAPPER
-    WRAPPER_LOCATIONS ${CMAKE_INSTALL_INCLUDEDIR} rocsolver/${CMAKE_INSTALL_INCLUDEDIR}
-    ORIGINAL_FILES ${PROJECT_BINARY_DIR}/include/rocsolver/rocsolver-version.h
-  )
-endif( )
-
 if(NOT BUILD_SHARED_LIBS)
   # Following Boost conventions of prefixing 'lib' on static built libraries, across all platforms
   set_target_properties(rocsolver PROPERTIES PREFIX "lib")
@@ -491,6 +482,10 @@ endif()
 
 if(ROCSOLVER_USE_INTERNAL_BLAS)
   target_compile_definitions(rocsolver PRIVATE USE_INTERNAL_GEMM USE_INTERNAL_TRSM)
+endif()
+
+if(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
 endif()
 
 target_compile_definitions(rocsolver PRIVATE
@@ -546,12 +541,4 @@ rocm_export_targets(
     ${static_depends}
   NAMESPACE roc::
 )
-
-if(BUILD_FILE_REORG_BACKWARD_COMPATIBILITY)
-  rocm_install(
-    DIRECTORY
-       "${PROJECT_BINARY_DIR}/rocsolver"
-        DESTINATION "." )
-  message( STATUS "Backward Compatible Sym Link Created for include directories" )
-endif()
 

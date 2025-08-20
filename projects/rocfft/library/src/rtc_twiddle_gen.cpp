@@ -195,7 +195,7 @@ static std::string twiddle_rtc_body(TwiddleTableType type)
         auto i_row = threadIdx.x + blockIdx.x * blockDim.x;
         auto i_col = threadIdx.y + blockIdx.y * blockDim.y;
 
-        if(i_row * i_col < N * N)
+        if(i_row < N && i_col < N)
         {   
             auto n = i_row * i_col;
             double arg = -TWO_PI * n / N;
@@ -217,6 +217,7 @@ std::string
 
     src += rocfft_complex_h;
     src += common_h;
+    src += device_enum_h;
     src += rtc_precision_type_decl(precision);
     src += "static constexpr double TWO_PI = -6.283185307179586476925286766559;\n";
     src += "static const unsigned int TWIDDLES_MAX_RADICES = "

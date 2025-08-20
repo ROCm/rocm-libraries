@@ -62,15 +62,9 @@ namespace rocRoller::KernelGraph
             ReadWrite rw;
         };
 
-        ControlFlowRWTracer(KernelGraph const& graph, int start = -1, bool trackConnections = false)
-            : m_graph(graph)
-            , m_trackConnections(trackConnections)
-        {
-            if(start == -1)
-                trace();
-            else
-                trace(start);
-        }
+        ControlFlowRWTracer(KernelGraph const& graph,
+                            int                start            = -1,
+                            bool               trackConnections = false);
 
         /**
          * @brief Get all trace records.
@@ -81,11 +75,6 @@ namespace rocRoller::KernelGraph
          * @brief Get trace records for a specific coordinate.
          */
         std::vector<ReadWriteRecord> coordinatesReadWrite(int coordinate) const;
-
-        /**
-         * @brief Get map of body-parents.
-         */
-        std::unordered_map<int, int> getBodyParents() const;
 
         void operator()(ControlGraph::AssertOp const& op, int tag);
         void operator()(ControlGraph::Assign const& op, int tag);
@@ -129,7 +118,6 @@ namespace rocRoller::KernelGraph
         KernelGraph const&           m_graph;
         std::set<int>                m_completedControlNodes;
         std::vector<ReadWriteRecord> m_trace;
-        std::unordered_map<int, int> m_bodyParent;
         bool                         m_trackConnections;
 
     private:

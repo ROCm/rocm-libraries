@@ -26,15 +26,17 @@
 
 #include <algorithm>
 
-#include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CommandSolution.hpp>
+
+#include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/ExecutableKernel.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
-#include <rocRoller/Utilities/Settings_fwd.hpp>
+#include <rocRoller/Utilities/Settings.hpp>
 #include <rocRoller/Utilities/Timer.hpp>
 
 namespace rocRoller
@@ -313,10 +315,10 @@ namespace rocRoller
         auto zero = std::make_shared<Expression::Expression>(0u);
         m_context->kernel()->setDynamicSharedMemBytes(zero);
 
-        if(!m_context->kernelOptions().lazyAddArguments)
+        if(!m_context->kernelOptions()->lazyAddArguments)
             m_context->kernel()->addCommandArguments(m_command->getArguments());
 
-        auto kernelGraph = KernelGraph::translate(m_command);
+        auto kernelGraph = KernelGraph::translate(m_command, m_commandParameters);
 
         if(Settings::getInstance()->get(Settings::LogGraphs))
             Log::debug("CommandKernel::generateKernel: post translate: {}",
@@ -345,7 +347,8 @@ namespace rocRoller
             std::make_shared<KernelGraph::LowerTensorContraction>(m_commandParameters, m_context));
         transforms.push_back(std::make_shared<KernelGraph::Simplify>());
 
-        // TODO: remove the condition by making ConstantPropagation and Streamk work simultaneously
+        // TODO: simplify the condition by making ConstantPropagation and
+        // Streamk work simultaneously
         if(!m_commandParameters->streamK)
         {
             transforms.push_back(std::make_shared<KernelGraph::ConstantPropagation>());
@@ -383,9 +386,12 @@ namespace rocRoller
                 m_commandParameters->loopOverOutputTilesTopLoop,
                 m_context));
         }
-        if(m_commandParameters->workgroupMapping)
+
+        Expression::ExpressionPtr workgroupMappingValue = nullptr;
+        if(m_commandParameters->workgroupMappingDim.has_value())
         {
             Expression::ExpressionPtr size;
+
             {
                 auto arguments = m_command->getArguments();
                 auto it        = std::find_if(arguments.cbegin(), arguments.cend(), [](auto x) {
@@ -396,10 +402,14 @@ namespace rocRoller
                 size = std::make_shared<Expression::Expression>(*it);
             }
             Expression::enableDivideBy(size, m_context);
-            m_commandParameters->workgroupMapping->second = size;
+
+            workgroupMappingValue = size;
         }
-        transforms.push_back(
-            std::make_shared<KernelGraph::ConnectWorkgroups>(m_commandParameters, m_context));
+        transforms.push_back(std::make_shared<KernelGraph::ConnectWorkgroups>(
+            m_context,
+            m_commandParameters->workgroupMappingDim,
+            m_commandParameters->workgroupRemapXCC,
+            workgroupMappingValue));
         transforms.push_back(
             std::make_shared<KernelGraph::UnrollLoops>(m_commandParameters, m_context));
         if(m_commandParameters->fuseLoops)
@@ -427,12 +437,26 @@ namespace rocRoller
             std::make_shared<KernelGraph::UpdateWavefrontParameters>(m_commandParameters));
         transforms.push_back(std::make_shared<KernelGraph::LoadPacked>(m_context));
         transforms.push_back(std::make_shared<KernelGraph::AddConvert>());
-        transforms.push_back(std::make_shared<KernelGraph::AddDeallocate>());
+
+        //
+        // TODO: Turn on this transformation by default when SGPR issue gets resolved
+        //
+        if(m_context->kernelOptions()->removeSetCoordinate)
+        {
+            transforms.push_back(std::make_shared<KernelGraph::RemoveSetCoordinate>());
+            transforms.push_back(std::make_shared<KernelGraph::Simplify>());
+        }
+        transforms.push_back(std::make_shared<KernelGraph::NopExtraScopes>());
+        transforms.push_back(std::make_shared<KernelGraph::AddDeallocateDataFlow>());
         transforms.push_back(std::make_shared<KernelGraph::InlineIncrements>());
-        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
+        transforms.push_back(std::make_shared<KernelGraph::InlineInits>());
         transforms.push_back(std::make_shared<KernelGraph::OrderMultiplyNodes>());
+        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::AliasDataFlowTags>());
         transforms.push_back(std::make_shared<KernelGraph::CleanArguments>(m_context, m_command));
+        transforms.push_back(std::make_shared<KernelGraph::AddDeallocateArguments>(m_context));
+        transforms.push_back(std::make_shared<KernelGraph::MergeAdjacentDeallocates>());
+        transforms.push_back(std::make_shared<KernelGraph::Simplify>());
         transforms.push_back(std::make_shared<KernelGraph::SetWorkitemCount>(m_context));
 
         for(auto const& t : transforms)

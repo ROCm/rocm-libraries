@@ -6,7 +6,7 @@
 
 # Contributing to rocRAND #
 
-We welcome contributions to rocRAND.  Please follow these details to help ensure your contributions will be successfully accepted.
+We welcome contributions to rocRAND. Please follow these details to help ensure your contributions will be successfully accepted.
 
 ## Issue Discussion ##
 

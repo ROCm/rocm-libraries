@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -111,6 +111,33 @@ Tests:
   precision: *half_precision
   M: [777234, 1205486, 5467921]
   nnz: [30476, 54697, 200375]
+  baseA: [rocsparse_index_base_zero]
+
+- name: gather
+  category: quick
+  function: gather
+  indextype: *i32_i64
+  precision: *brain_half_precision
+  M: [1768]
+  nnz: [11, 103, 777]
+  baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
+
+- name: gather
+  category: pre_checkin
+  function: gather
+  indextype: *i32_i64
+  precision: *brain_half_precision
+  M: [15467, 23789, 31568]
+  nnz: [0, 4235, 8768, 12361]
+  baseA: [rocsparse_index_base_one]
+
+- name: gather
+  category: nightly
+  function: gather
+  indextype: *i32_i64
+  precision: *brain_half_precision
+  M: [823546, 1436587, 6234871]
+  nnz: [54678, 132456, 267120]
   baseA: [rocsparse_index_base_zero]
 
 - name: gather_graph_test

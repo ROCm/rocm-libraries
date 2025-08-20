@@ -156,6 +156,7 @@ namespace rocRollerTest
 
     TEST_F(SubassemblerPathTest, MissingPath)
     {
+        Settings::getInstance()->set(Settings::KernelAssembler, AssemblerType::Subprocess);
         Settings::getInstance()->set(
             Settings::SubprocessAssemblerPath,
             static_cast<std::string>(std::filesystem::temp_directory_path() / "foo"));

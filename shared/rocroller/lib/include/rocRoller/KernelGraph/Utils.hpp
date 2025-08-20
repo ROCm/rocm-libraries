@@ -37,6 +37,27 @@ namespace rocRoller
 {
     namespace KernelGraph
     {
+
+        class TopologicalCompare
+        {
+        public:
+            TopologicalCompare() = delete;
+            TopologicalCompare(KernelGraphPtr graph)
+                : m_graph(graph)
+            {
+                AssertFatal(graph);
+            };
+
+            bool operator()(int a, int b) const
+            {
+                return m_graph->control.compareNodes(rocRoller::UpdateCache, a, b)
+                       == ControlGraph::NodeOrdering::LeftFirst;
+            }
+
+        private:
+            KernelGraphPtr m_graph;
+        };
+
         // Return value of colourByUnrollValue.  A colour-mapping is...
         struct UnrollColouring
         {
@@ -186,6 +207,16 @@ namespace rocRoller
             findAllRequiredCoordinates(int op, KernelGraph const& graph);
 
         /**
+         * @brief Return an augmented path that includes all
+         * neighbours (in direction `direction`) of edges in the
+         * original path.
+         */
+        std::unordered_set<int> includeEdgeNeighbours(
+            rocRoller::KernelGraph::CoordinateGraph::CoordinateGraph const& coordinates,
+            Graph::Direction                                                direction,
+            std::unordered_set<int> const&                                  path);
+
+        /**
          * @brief Find the operation of type T that contains the
          * candidate load/store operation.
          */
@@ -292,6 +323,11 @@ namespace rocRoller
         void duplicateMacroTile(KernelGraph& graph, int tag);
 
         int duplicateControlNode(KernelGraph& graph, int tag);
+
+        /**
+         * @brief Delete a control node from the graph.
+         */
+        void deleteControlNode(KernelGraph& graph, int);
 
         /**
          * Updates the threadtile size for enabling the use of long dword instructions
@@ -655,6 +691,23 @@ namespace rocRoller
         *        verifying correctness.
         */
         void removeRedundantBodyEdgesBaselineMethod(KernelGraph& graph);
+
+        /**
+         * Returns all of the nodes that contain `control` with a body
+         * relationship in order from the root of the graph
+         */
+        std::deque<int> controlStack(int control, KernelGraph const& graph);
+        /**
+         * Returns all of the nodes that contain `control` with a body
+         * relationship in order from the root of the graph
+         */
+        std::deque<int> controlStack(int control, ControlGraph::ControlGraph const& graph);
+
+        /**
+        * @brief Connect all nodes in A with all nodes in B using edge with EdgeType
+        */
+        template <typename EdgeType>
+        void connectAllPairs(std::vector<int> const& A, std::vector<int> const& B, KernelGraph& kg);
     }
 }
 

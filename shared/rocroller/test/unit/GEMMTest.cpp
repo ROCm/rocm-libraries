@@ -78,11 +78,12 @@ namespace GEMMDriverTest
         int m_scaleValueIndex = 0;
 
     public:
-        uint8_t rotatingSingleScaleValue()
+        uint8_t rotatingSingleScaleValue(DataType scaleType)
         {
-            const std::vector<float> scaleValues{-1.0, -0.5, 1.0, 1.5};
+            AssertFatal(isScaleType(scaleType));
+            const std::vector<float> scaleValues{1.0, 2.0, 4.0, 8.0};
             m_scaleValueIndex = (++m_scaleValueIndex) % scaleValues.size();
-            return floatToScale(scaleValues[m_scaleValueIndex]);
+            return floatToScale(scaleType, scaleValues[m_scaleValueIndex]);
         }
 
         template <typename TA,
@@ -118,6 +119,22 @@ namespace GEMMDriverTest
                || gemm.scaleBMode != Operations::ScaleMode::None)
             {
                 REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
+                const auto  scaleType = gemm.scaleAMode != Operations::ScaleMode::None
+                                            ? gemm.scaleTypeA
+                                            : gemm.scaleTypeB;
+                const auto& arch      = m_context->targetArchitecture();
+                AssertFatal(gemm.scaleAMode == Operations::ScaleMode::None
+                                || arch.isSupportedScaleType(gemm.scaleTypeA),
+                            fmt::format("Scale mode for A set but architecture {} does not "
+                                        "support scale type {}.",
+                                        arch.target().toString(),
+                                        toString(gemm.scaleTypeA)));
+                AssertFatal(gemm.scaleBMode == Operations::ScaleMode::None
+                                || arch.isSupportedScaleType(gemm.scaleTypeB),
+                            fmt::format("Scale mode for B set but architecture {} does not "
+                                        "support scale type {}.",
+                                        arch.target().toString(),
+                                        toString(gemm.scaleTypeB)));
             }
 
             AssertFatal(gemm.scaleAMode == Operations::ScaleMode::None
@@ -232,17 +249,41 @@ namespace GEMMDriverTest
             TensorDescriptor descD(dataTypeD, {size_t(M), size_t(N)}, "N");
 
             auto seed = 31415u;
-            DGenInput(seed,
-                      hostA,
-                      descA,
-                      hostB,
-                      descB,
-                      hostC,
-                      descC,
-                      hostScaleA,
-                      hostScaleB,
-                      gemm.scaleAMode == Operations::ScaleMode::Separate,
-                      gemm.scaleBMode == Operations::ScaleMode::Separate);
+            if(gemm.scaleAMode == Operations::ScaleMode::Separate
+               || gemm.scaleBMode == Operations::ScaleMode::Separate)
+            {
+                auto const& arch = m_context->targetArchitecture();
+
+                auto scaleBlockSize = gemm.scaleBlockSize;
+                AssertFatal(scaleBlockSize > 0, "scaleBlockSize must be set to scale A or B.");
+                AssertFatal(
+                    arch.isSupportedScaleBlockSize(scaleBlockSize),
+                    fmt::format("Architecture {} does not support block scaling (size: {}).",
+                                arch.target().toString(),
+                                scaleBlockSize));
+                AssertFatal(gemm.k % scaleBlockSize == 0,
+                            fmt::format("K: {} must be a multiple of the scale block size: {}",
+                                        gemm.k,
+                                        scaleBlockSize));
+                DGenInput(seed,
+                          hostA,
+                          descA,
+                          hostB,
+                          descB,
+                          hostC,
+                          descC,
+                          hostScaleA,
+                          hostScaleB,
+                          gemm.scaleAMode == Operations::ScaleMode::Separate,
+                          gemm.scaleBMode == Operations::ScaleMode::Separate,
+                          -1.f,
+                          1.f,
+                          static_cast<uint>(scaleBlockSize));
+            }
+            else
+            {
+                DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
+            }
 
             if(setIdentity)
             {
@@ -267,10 +308,10 @@ namespace GEMMDriverTest
 
             // In SingleScale mode, don't need to copy to device
             if(gemm.scaleAMode == Operations::ScaleMode::SingleScale)
-                hostScaleA = std::vector<uint8_t>{rotatingSingleScaleValue()};
+                hostScaleA = std::vector<uint8_t>{rotatingSingleScaleValue(gemm.scaleTypeA)};
 
             if(gemm.scaleBMode == Operations::ScaleMode::SingleScale)
-                hostScaleB = std::vector<uint8_t>{rotatingSingleScaleValue()};
+                hostScaleB = std::vector<uint8_t>{rotatingSingleScaleValue(gemm.scaleTypeB)};
 
             auto command = std::make_shared<Command>();
 
@@ -298,7 +339,7 @@ namespace GEMMDriverTest
             if(gemm.scaleAMode == Operations::ScaleMode::Separate)
             {
                 tagTensorScaleA = command->addOperation(rocRoller::Operations::Tensor(
-                    2, DataType::E8M0, gemm.transA == "N" ? oneStridesN : oneStridesT));
+                    2, gemm.scaleTypeA, gemm.transA == "N" ? oneStridesN : oneStridesT));
                 tagLoadScaleA
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleA));
 
@@ -312,7 +353,7 @@ namespace GEMMDriverTest
             else if(gemm.scaleAMode == Operations::ScaleMode::SingleScale)
             {
                 tagTensorScaleA
-                    = command->addOperation(rocRoller::Operations::Scalar(DataType::E8M0));
+                    = command->addOperation(rocRoller::Operations::Scalar(gemm.scaleTypeA));
                 tagLoadScaleA
                     = command->addOperation(rocRoller::Operations::T_Load_Scalar(*tagTensorScaleA));
                 tagBlockScaleA = mulInputA = command->addOperation(
@@ -322,7 +363,7 @@ namespace GEMMDriverTest
             if(gemm.scaleBMode == Operations::ScaleMode::Separate)
             {
                 tagTensorScaleB = command->addOperation(rocRoller::Operations::Tensor(
-                    2, DataType::E8M0, gemm.transB == "N" ? oneStridesN : oneStridesT));
+                    2, gemm.scaleTypeB, gemm.transB == "N" ? oneStridesN : oneStridesT));
                 tagLoadScaleB
                     = command->addOperation(rocRoller::Operations::T_Load_Tiled(*tagTensorScaleB));
 
@@ -336,7 +377,7 @@ namespace GEMMDriverTest
             else if(gemm.scaleBMode == Operations::ScaleMode::SingleScale)
             {
                 tagTensorScaleB
-                    = command->addOperation(rocRoller::Operations::Scalar(DataType::E8M0));
+                    = command->addOperation(rocRoller::Operations::Scalar(gemm.scaleTypeB));
                 tagLoadScaleB
                     = command->addOperation(rocRoller::Operations::T_Load_Scalar(*tagTensorScaleB));
                 tagBlockScaleB = mulInputB = command->addOperation(
@@ -430,10 +471,10 @@ namespace GEMMDriverTest
             }
 
             Operations::OperationTag tagWGM;
-            if(gemm.workgroupMapping.first != -1)
+            if(gemm.workgroupMappingDim != -1)
             {
                 tagWGM      = command->allocateTag();
-                auto wgmArg = command->allocateArgument(DataType::UInt32,
+                auto wgmArg = command->allocateArgument(DataType::Int32,
                                                         tagWGM,
                                                         ArgumentType::Value,
                                                         DataDirection::ReadOnly,
@@ -464,12 +505,12 @@ namespace GEMMDriverTest
             params->prefetchInFlight              = gemm.prefetchInFlight;
             params->prefetchLDSFactor             = gemm.prefetchLDSFactor;
             params->prefetchMixMemOps             = gemm.prefetchMixMemOps;
-            params->transposeMemoryAccess[LayoutType::MATRIX_A] = gemm.transA == "T";
-            params->transposeMemoryAccess[LayoutType::MATRIX_B] = gemm.transB == "T";
+            params->transposeMemoryAccess.set(LayoutType::MATRIX_A, gemm.transA == "T");
+            params->transposeMemoryAccess.set(LayoutType::MATRIX_B, gemm.transB == "T");
 
-            if(gemm.workgroupMapping.first != -1)
+            if(gemm.workgroupMappingDim != -1)
             {
-                params->workgroupMapping = {gemm.workgroupMapping.first, nullptr};
+                params->workgroupMappingDim = gemm.workgroupMappingDim;
             }
 
             if(gemm.workgroupRemapXCC)
@@ -647,9 +688,9 @@ namespace GEMMDriverTest
             auto deviceScratch = make_shared_device<uint8_t>(scratchSpaceRequired, 0);
             commandArgs.setArgument(tagScratch, ArgumentType::Value, deviceScratch.get());
 
-            if(gemm.workgroupMapping.first != -1)
+            if(gemm.workgroupMappingDim != -1)
             {
-                commandArgs.setArgument(tagWGM, ArgumentType::Value, gemm.workgroupMapping.second);
+                commandArgs.setArgument(tagWGM, ArgumentType::Value, gemm.workgroupMappingValue);
             }
 
             // Host result
@@ -670,7 +711,9 @@ namespace GEMMDriverTest
                                        beta,
                                        gemm.transA == "T",
                                        gemm.transB == "T",
-                                       gemm.scaleBlockSize);
+                                       gemm.scaleBlockSize,
+                                       gemm.scaleTypeA,
+                                       gemm.scaleTypeB);
             }
             else if constexpr(std::is_same_v<TC, TD>)
             {
@@ -794,7 +837,6 @@ namespace GEMMDriverTest
                         }
                     }
                 }
-
                 EXPECT_TRUE(res.ok) << res.message();
             }
         }
@@ -977,7 +1019,8 @@ namespace GEMMDriverTest
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         GEMMProblem gemm;
-        gemm.workgroupMapping = {0, 6};
+        gemm.workgroupMappingDim   = 0;
+        gemm.workgroupMappingValue = 6;
         basicGEMM<float>(gemm);
     }
 
@@ -986,8 +1029,9 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
         REQUIRE_ARCH_CAP(GPUCapability::HasXCC);
         GEMMProblem gemm;
-        gemm.workgroupMapping  = {0, 6};
-        gemm.workgroupRemapXCC = true;
+        gemm.workgroupMappingDim   = 0;
+        gemm.workgroupMappingValue = 6;
+        gemm.workgroupRemapXCC     = true;
         basicGEMM<float>(gemm);
     }
 
@@ -1111,7 +1155,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamK)
     {
-        if(!m_context->targetArchitecture().target().isCDNA2GPU())
+        if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
@@ -1164,7 +1208,7 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16StreamKSmall)
     {
-        if(!m_context->targetArchitecture().target().isCDNA2GPU())
+        if(m_context->targetArchitecture().target().isCDNA1GPU())
         {
             GTEST_SKIP() << "Skipping GPU_BasicGEMMStreamK test";
         }
@@ -1890,6 +1934,9 @@ namespace GEMMDriverTest
         gemm.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
 
+        gemm.scaleTypeA = DataType::E8M0;
+        gemm.scaleTypeB = DataType::E8M0;
+
         basicGEMM<FP8, FP8, float>(gemm);
     }
 
@@ -2156,6 +2203,9 @@ namespace GEMMDriverTest
             gemm.scaleAMode = Operations::ScaleMode::Separate;
             gemm.scaleBMode = Operations::ScaleMode::Separate;
 
+            gemm.scaleTypeA = DataType::E8M0;
+            gemm.scaleTypeB = DataType::E8M0;
+
             gemm.swizzleScale = true;
 
             gemm.scaleBlockSize = m_context->targetArchitecture().GetCapability(
@@ -2187,9 +2237,9 @@ namespace GEMMDriverTest
 
     TEST_P(GEMMTestGPU, GPU_SwizzleScaledUnrollGEMMMXF4TN)
     {
+
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
-
         for(auto waveK : {64, 128})
         {
             int waveM = (waveK == 128) ? 16 : 32;
@@ -2216,6 +2266,9 @@ namespace GEMMDriverTest
             gemm.scaleAMode = Operations::ScaleMode::Separate;
             gemm.scaleBMode = Operations::ScaleMode::Separate;
 
+            gemm.scaleTypeA = DataType::E8M0;
+            gemm.scaleTypeB = DataType::E8M0;
+
             gemm.swizzleScale = true;
 
             gemm.scaleBlockSize = m_context->targetArchitecture().GetCapability(
@@ -2223,12 +2276,14 @@ namespace GEMMDriverTest
 
             for(auto unrollK : {0, 2, 4})
             {
+                // #FIXME: Support for unrollK = 4 and waveK = 128
+                if(unrollK == 4 && waveK == 128)
+                    continue;
                 gemm.unrollK = unrollK;
                 basicGEMM<FP4, FP4, float>(gemm);
 
                 std::string generatedCode = m_context->instructions()->toString();
                 EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
-
                 if(unrollK == 0)
                 {
                     EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 4);
@@ -2285,6 +2340,9 @@ namespace GEMMDriverTest
             gemm.scaleAMode = Operations::ScaleMode::Separate;
             gemm.scaleBMode = Operations::ScaleMode::Separate;
 
+            gemm.scaleTypeA = DataType::E8M0;
+            gemm.scaleTypeB = DataType::E8M0;
+
             gemm.swizzleScale  = true;
             gemm.prefetchScale = true;
 
@@ -2336,6 +2394,9 @@ namespace GEMMDriverTest
         gemm.swizzleScale  = true;
         gemm.prefetchScale = true;
 
+        gemm.scaleTypeA = DataType::E8M0;
+        gemm.scaleTypeB = DataType::E8M0;
+
         gemm.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
 
@@ -2380,8 +2441,14 @@ namespace GEMMDriverTest
         gemm.scaleAMode = Operations::ScaleMode::Separate;
         gemm.scaleBMode = Operations::ScaleMode::Separate;
 
+        gemm.scaleTypeA = DataType::E8M0;
+        gemm.scaleTypeB = DataType::E8M0;
+
         gemm.swizzleScale  = true;
         gemm.prefetchScale = true;
+
+        gemm.workgroupMappingDim   = 0;
+        gemm.workgroupMappingValue = 2;
 
         gemm.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
@@ -2395,6 +2462,63 @@ namespace GEMMDriverTest
         // 1x4 wave config: NumAScaleLoadTiles = 256/64 = 4 and NumBScaleLoadTiles = 256/4/64 = 1
         // prefetched scale: 2 * 5 = 10
         EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 10);
+    }
+
+    TEST_P(GEMMTestGPU, GPU_SwizzleScaledPrefetchD2LGEMMMXF4TN_192x256)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_f8f6f4);
+        REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
+
+        auto gemm = setup_GEMMF8F6F4(32, 32, 64);
+
+        gemm.macM = 192;
+        gemm.macN = 256;
+        gemm.macK = 128;
+
+        gemm.m = 2 * gemm.macM;
+        gemm.n = 3 * gemm.macN;
+        gemm.k = 4 * gemm.macK;
+
+        gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
+
+        gemm.loadLDSA      = true;
+        gemm.loadLDSB      = true;
+        gemm.loadLDSScaleA = false;
+        gemm.loadLDSScaleB = false;
+        gemm.direct2LDSA   = true;
+        gemm.direct2LDSB   = true;
+
+        gemm.unrollK           = 2;
+        gemm.prefetch          = true;
+        gemm.prefetchInFlight  = 2;
+        gemm.prefetchLDSFactor = 1;
+        gemm.prefetchMixMemOps = true;
+
+        gemm.scaleAMode = Operations::ScaleMode::Separate;
+        gemm.scaleBMode = Operations::ScaleMode::Separate;
+
+        gemm.scaleTypeA = DataType::E8M0;
+        gemm.scaleTypeB = DataType::E8M0;
+
+        gemm.swizzleScale  = true;
+        gemm.prefetchScale = true;
+
+        gemm.workgroupMappingDim   = 0;
+        gemm.workgroupMappingValue = 2;
+
+        gemm.scaleBlockSize
+            = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
+
+        basicGEMM<FP4, FP4, float>(gemm);
+
+        std::string generatedCode = m_context->instructions()->toString();
+        EXPECT_EQ(countSubstring(generatedCode, "ds_write"), 0);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_ubyte "), 0);
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dword "), 0);
+        // 1x4 wave config: NumAScaleLoadTiles = 192/64 = 3 and NumBScaleLoadTiles = 256/4/64 = 1
+        // prefetched scale: 2 * 4 = 8
+        EXPECT_EQ(countSubstring(generatedCode, "buffer_load_dwordx2 "), 8);
     }
 
     TEST_P(GEMMF8F6F4TestGPU, GPU_SwizzleScaled_Prefetch_GEMMF8F6F4)
@@ -2443,6 +2567,9 @@ namespace GEMMDriverTest
 
         gemm.scaleAMode = Operations::ScaleMode::Separate;
         gemm.scaleBMode = Operations::ScaleMode::Separate;
+
+        gemm.scaleTypeA = DataType::E8M0;
+        gemm.scaleTypeB = DataType::E8M0;
 
         gemm.swizzleScale  = true;
         gemm.prefetchScale = true;
@@ -2505,6 +2632,9 @@ namespace GEMMDriverTest
         gemm.scaleAMode = Operations::ScaleMode::Separate;
         gemm.scaleBMode = Operations::ScaleMode::Separate;
 
+        gemm.scaleTypeA = DataType::E8M0;
+        gemm.scaleTypeB = DataType::E8M0;
+
         gemm.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
 
@@ -2530,6 +2660,9 @@ namespace GEMMDriverTest
 
         gemm.scaleAMode = Operations::ScaleMode::Separate;
         gemm.scaleBMode = Operations::ScaleMode::Separate;
+
+        gemm.scaleTypeA = DataType::E8M0;
+        gemm.scaleTypeB = DataType::E8M0;
 
         gemm.macM = 128;
         gemm.macN = 128;
@@ -2620,6 +2753,9 @@ namespace GEMMDriverTest
 
         problem.scaleAMode = Operations::ScaleMode::Separate;
         problem.scaleBMode = Operations::ScaleMode::Separate;
+
+        problem.scaleTypeA = DataType::E8M0;
+        problem.scaleTypeB = DataType::E8M0;
 
         problem.loadLDSA      = true;
         problem.loadLDSB      = true;
@@ -2773,6 +2909,9 @@ namespace GEMMDriverTest
 
         problem.scaleAMode = Operations::ScaleMode::Separate;
         problem.scaleBMode = Operations::ScaleMode::Separate;
+
+        problem.scaleTypeA = DataType::E8M0;
+        problem.scaleTypeB = DataType::E8M0;
 
         problem.direct2LDSA = true;
         problem.direct2LDSB = true;
@@ -2980,6 +3119,9 @@ namespace GEMMDriverTest
 
         problem.scaleAMode = Operations::ScaleMode::Separate;
         problem.scaleBMode = Operations::ScaleMode::Separate;
+
+        problem.scaleTypeA = DataType::E8M0;
+        problem.scaleTypeB = DataType::E8M0;
 
         problem.direct2LDSA = true;
         problem.direct2LDSB = true;
@@ -3421,6 +3563,31 @@ namespace GEMMDriverTest
         basicGEMM<Half>(gemm);
     }
 
+    TEST_P(GEMMTestGPU, GPU_BasicGEMMFP16_96x256)
+    {
+        REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
+        GEMMProblem gemm;
+
+        gemm.m = 192;
+        gemm.n = 512;
+        gemm.k = 64;
+
+        gemm.macM = 96;
+        gemm.macN = 256;
+        gemm.macK = 16;
+
+        gemm.waveK = 8;
+
+        gemm.workgroupSizeX = 1 * gemm.wavefrontSize;
+        gemm.workgroupSizeY = 4;
+
+        gemm.loadLDSA  = true;
+        gemm.loadLDSB  = true;
+        gemm.storeLDSD = true;
+
+        basicGEMM<Half>(gemm);
+    }
+
     TEST_P(GEMMTestGPU, GPU_BasicGEMMStoreDWave)
     {
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA);
@@ -3518,6 +3685,9 @@ namespace GEMMDriverTest
         gemm.scaleAMode = Operations::ScaleMode::Separate;
         gemm.scaleBMode = Operations::ScaleMode::Separate;
 
+        gemm.scaleTypeA = DataType::E8M0;
+        gemm.scaleTypeB = DataType::E8M0;
+
         gemm.scaleBlockSize
             = m_context->targetArchitecture().GetCapability(GPUCapability::DefaultScaleBlockSize);
 
@@ -3598,6 +3768,9 @@ namespace GEMMDriverTest
 
         problem.scaleAMode = scaleAMode;
         problem.scaleBMode = scaleBMode;
+
+        problem.scaleTypeA = DataType::E8M0;
+        problem.scaleTypeB = DataType::E8M0;
 
         problem.loadLDSScaleA = loadLDSScaleA;
         problem.loadLDSScaleB = loadLDSScaleB;

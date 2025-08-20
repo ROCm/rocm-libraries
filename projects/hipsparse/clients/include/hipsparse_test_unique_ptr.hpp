@@ -27,6 +27,7 @@
 
 #include "arg_check.hpp"
 
+#include <cstdio>
 #include <hip/hip_runtime_api.h>
 #include <hipsparse.h>
 #include <memory>

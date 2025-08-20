@@ -66,7 +66,7 @@ TEST_CASE("FastArithmetic ExpressionTransformation works",
 
     SECTION("Negate")
     {
-        CHECK_THAT(fast(-(one + one)), IdenticalTo(-literal(2)));
+        CHECK_THAT(fast(-(one + one)), IdenticalTo(literal(-2)));
     }
 
     SECTION("Multiply")
@@ -129,7 +129,7 @@ TEST_CASE("FastArithmetic ExpressionTransformation works",
         CHECK_THAT(fast(one & b), IdenticalTo(zero));
         CHECK_THAT(fast(v & (a + b << one)), IdenticalTo(v & literal(266)));
         CHECK_THAT(fast(v & (zero + zero)), IdenticalTo(zero));
-        CHECK_THAT(fast(v & -one), IdenticalTo(v & -one));
+        CHECK_THAT(fast(v & -one), IdenticalTo(v & literal(-1)));
         CHECK_THAT(fast(v & one), EquivalentTo(v & one));
         CHECK_THAT(fast(v & v2), IdenticalTo(v & v2));
         CHECK_THAT(fast(v & zero), IdenticalTo(zero));
@@ -236,7 +236,7 @@ TEST_CASE("FastArithmetic ExpressionTransformation works",
     SECTION("Bitwise Or")
     {
         CHECK_THAT(fast(v | (a + b << one)), IdenticalTo(v | literal(266)));
-        CHECK_THAT(fast(v | -one), IdenticalTo(v | -one));
+        CHECK_THAT(fast(v | -one), IdenticalTo(v | literal(-1)));
         CHECK_THAT(fast(v | one), EquivalentTo(v | one));
         CHECK_THAT(fast((v | one) | a), EquivalentTo(v | a));
         CHECK_THAT(fast(fast((one | a) | v)), EquivalentTo(v | a));
@@ -334,18 +334,18 @@ TEST_CASE("fastMultiplication and fastDivision lead into combineShifts",
     SECTION("Repeated division is combined.")
     {
         auto exp = argExp / literal(2u) / literal(16u);
-        CHECK_THAT(fast(exp), IdenticalTo(argExp >> literal(5u)));
+        CHECK_THAT(fast(exp), IdenticalTo(logicalShiftR(argExp, literal(5u))));
     }
 
     SECTION("Division is combined with shift.")
     {
         auto exp = (argExp / literal(8u)) >> literal(2u);
-        CHECK_THAT(fast(exp), IdenticalTo(argExp >> literal(5u)));
+        CHECK_THAT(fast(exp), IdenticalTo(logicalShiftR(argExp, literal(5u))));
     }
 
     SECTION("Shift is combined with division.")
     {
         auto exp = (argExp >> literal(8u)) / literal(2u);
-        CHECK_THAT(fast(exp), IdenticalTo(argExp >> literal(9u)));
+        CHECK_THAT(fast(exp), IdenticalTo(logicalShiftR(argExp, literal(9u))));
     }
 }

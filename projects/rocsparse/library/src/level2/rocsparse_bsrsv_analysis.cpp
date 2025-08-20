@@ -153,28 +153,24 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
         // found to be re-used.
 
         // Clear bsrsv
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info((trans == rocsparse_operation_none)
-                                                                  ? info->bsrsv_upper_info
-                                                                  : info->bsrsvt_upper_info));
+        rocsparse::trm_info_t** p_trm_info = (trans == rocsparse_operation_none)
+                                                 ? &info->bsrsv_upper_info
+                                                 : &info->bsrsvt_upper_info;
 
-        // Create bsrsv info
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::create_trm_info((trans == rocsparse_operation_none)
-                                                                 ? &info->bsrsv_upper_info
-                                                                 : &info->bsrsvt_upper_info));
+        rocsparse::trm_info_t::recreate(p_trm_info);
 
         // Perform analysis
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::trm_analysis(
-            handle,
-            trans,
-            mb,
-            nnzb,
-            descr,
-            bsr_val,
-            bsr_row_ptr,
-            bsr_col_ind,
-            (trans == rocsparse_operation_none) ? info->bsrsv_upper_info : info->bsrsvt_upper_info,
-            (rocsparse_int**)&info->zero_pivot,
-            temp_buffer));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::trm_analysis(handle,
+                                                          trans,
+                                                          mb,
+                                                          nnzb,
+                                                          descr,
+                                                          bsr_val,
+                                                          bsr_row_ptr,
+                                                          bsr_col_ind,
+                                                          p_trm_info[0],
+                                                          (rocsparse_int**)&info->zero_pivot,
+                                                          temp_buffer));
     }
     else
     {
@@ -218,30 +214,24 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
 
         // User is explicitly asking to force a re-analysis, or no valid data has been
         // found to be re-used.
+        rocsparse::trm_info_t** p_trm_info = (trans == rocsparse_operation_none)
+                                                 ? &info->bsrsv_lower_info
+                                                 : &info->bsrsvt_lower_info;
 
-        // Clear bsrsv
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info((trans == rocsparse_operation_none)
-                                                                  ? info->bsrsv_lower_info
-                                                                  : info->bsrsvt_lower_info));
-
-        // Create bsrsv info
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::create_trm_info((trans == rocsparse_operation_none)
-                                                                 ? &info->bsrsv_lower_info
-                                                                 : &info->bsrsvt_lower_info));
+        rocsparse::trm_info_t::recreate(p_trm_info);
 
         // Perform analysis
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::trm_analysis(
-            handle,
-            trans,
-            mb,
-            nnzb,
-            descr,
-            bsr_val,
-            bsr_row_ptr,
-            bsr_col_ind,
-            (trans == rocsparse_operation_none) ? info->bsrsv_lower_info : info->bsrsvt_lower_info,
-            (rocsparse_int**)&info->zero_pivot,
-            temp_buffer));
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::trm_analysis(handle,
+                                                          trans,
+                                                          mb,
+                                                          nnzb,
+                                                          descr,
+                                                          bsr_val,
+                                                          bsr_row_ptr,
+                                                          bsr_col_ind,
+                                                          p_trm_info[0],
+                                                          (rocsparse_int**)&info->zero_pivot,
+                                                          temp_buffer));
     }
 
     return rocsparse_status_success;

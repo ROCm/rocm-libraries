@@ -32,6 +32,7 @@
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 
+#include <memory>
 #include <string>
 
 namespace rocRoller

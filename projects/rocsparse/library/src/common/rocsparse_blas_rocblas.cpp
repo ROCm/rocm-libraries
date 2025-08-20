@@ -120,6 +120,8 @@ namespace rocsparse
             return rocblas_datatype_i32_r;
         case rocsparse_datatype_u32_r:
             return rocblas_datatype_u32_r;
+        case rocsparse_datatype_bf16_r:
+            return rocblas_datatype_bf16_r;
         }
     }
 

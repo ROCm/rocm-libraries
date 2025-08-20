@@ -56,8 +56,12 @@ namespace
         Tc,
         TBias,
         std::enable_if_t<std::is_same<Ti, __half>{} || std::is_same<Ti, hip_bfloat16>{}
-                         || std::is_same<Ti, int8_t>{} || std::is_same<Ti, __hip_fp8_e4m3>{}
-                         || std::is_same<Ti, __hip_fp8_e5m2>{}>> : hipsparselt_test_valid
+                         || std::is_same<Ti, int8_t>{}
+#ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
+			 || std::is_same<Ti, hipsparselt_fp8_e4m3>{}
+                         || std::is_same<Ti, hipsparselt_fp8_e5m2>{}
+#endif
+			 >> : hipsparselt_test_valid
     {
         void operator()(const Arguments& arg)
         {
@@ -71,6 +75,8 @@ namespace
                 testing_spmm_bad_arg<Ti, To, Tc>(arg);
             else if(!strcmp(arg.function, "aux_plan_assign"))
                 testing_aux_plan_assign<Ti, To, Tc>(arg);
+            else if(!strcmp(arg.function, "spmm_logging"))
+                testing_spmm_logging<Ti, To, Tc, TBias>(arg);        
             else
                 FAIL() << "Internal error: Test called with unknown function: " << arg.function;
         }
@@ -90,7 +96,8 @@ namespace
             return !strcmp(arg.function, "spmm") || !strcmp(arg.function, "spmm_batched")
                    || !strcmp(arg.function, "spmm_strided_batched")
                    || !strcmp(arg.function, "spmm_bad_arg")
-                   || !strcmp(arg.function, "aux_plan_assign");
+                   || !strcmp(arg.function, "aux_plan_assign")
+                   || !strcmp(arg.function, "spmm_logging");
         }
 
         // Google Test name suffix based on parameters

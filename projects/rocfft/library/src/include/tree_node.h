@@ -41,6 +41,7 @@
 #include "function_pool.h"
 #include "kargs.h"
 #include "load_store_ops.h"
+#include "logging.h"
 #include "rtc_kernel.h"
 #include <hip/hip_runtime_api.h>
 
@@ -178,13 +179,12 @@ struct NodeMetaData
     size_t                  iDist = 0, oDist = 0;
     size_t                  iDistBlue = 0, oDistBlue = 0;
     size_t                  iOffset = 0, oOffset = 0;
-    bool                    applyPartialPass = false;
-    int                     direction        = -1;
-    rocfft_result_placement placement        = rocfft_placement_inplace;
-    rocfft_precision        precision        = rocfft_precision_single;
-    rocfft_array_type       inArrayType      = rocfft_array_type_unset;
-    rocfft_array_type       outArrayType     = rocfft_array_type_unset;
-    hipDeviceProp_t         deviceProp       = {};
+    int                     direction    = -1;
+    rocfft_result_placement placement    = rocfft_placement_inplace;
+    rocfft_precision        precision    = rocfft_precision_single;
+    rocfft_array_type       inArrayType  = rocfft_array_type_unset;
+    rocfft_array_type       outArrayType = rocfft_array_type_unset;
+    hipDeviceProp_t         deviceProp   = {};
     bool                    rootIsC2C;
 
     explicit NodeMetaData(TreeNode* refNode);
@@ -351,8 +351,9 @@ public:
     // sbrc transpose type
     mutable SBRC_TRANSPOSE_TYPE sbrcTranstype = SBRC_TRANSPOSE_TYPE::NONE;
 
-    // specified kernel key from solution map. (if there is any)
-    std::unique_ptr<FMKey> specified_key;
+    // specified kernel keys from solution map. (if there are any)
+    std::unique_ptr<FMKey>   specified_key;
+    std::unique_ptr<PPFMKey> specified_pp_key;
 
     // Tree structure:
     // non-owning pointer to parent node, may be null
@@ -373,11 +374,11 @@ public:
     size_t lengthBlue  = 0;
     size_t lengthBlueN = 0;
 
-    // enables partial pass for this node
-    bool applyPartialPass = false;
+    // Index of off-dimension in partial-pass nodes
+    size_t ppOffDim = 0;
 
-    // Dimension of the FFT where partial-pass is applied
-    size_t ppDim = 0;
+    // Index of current dimension (full pass) in partial-pass nodes
+    size_t ppCurrDim = 0;
 
     //
     BluesteinType     typeBlue   = BluesteinType::BT_NONE;
@@ -490,6 +491,13 @@ public:
         return {};
     }
 
+    // Check node scheme to see if partial pass is enabled
+    bool isPartialPassEnabled() const
+    {
+        return (scheme == CS_3D_PP || scheme == CS_KERNEL_STOCKHAM_PP
+                || scheme == CS_KERNEL_STOCKHAM_PP_BLOCK_CC);
+    }
+
     // able to fuse CS_KERNEL_STOCKHAM and CS_KERNEL_TRANSPOSE_Z_XY ?
     bool fuse_CS_KERNEL_TRANSPOSE_Z_XY();
     // able to fuse CS_KERNEL_STOCKHAM and CS_KERNEL_TRANSPOSE_XY_Z ?
@@ -540,6 +548,10 @@ public:
     TreeNode* GetRealEvenAncestor();
     bool      IsRootPlanC2CTransform();
 
+    // Return ancestor node of 'this' that is partial-pass, or
+    // nullptr if there is no such ancestor
+    TreeNode* GetPartialPassAncestor() const;
+
     // Set length of transpose kernel node, since those are easily
     // knowable just by looking at the scheme and they're used in
     // many plans.  Throws an exception if this is not a transpose
@@ -580,6 +592,72 @@ public:
 
         return (dimension == 1) ? FMKey(length[0], precision, scheme)
                                 : FMKey(length[0], length[1], precision, scheme);
+    }
+
+    // Partial pass parent nodes, e.g., CS_3D_PP, have
+    // two kernels associated with them. The key for
+    // querying the function pool is different from the
+    // the standard kernel key.
+    virtual PPFMKey GetPPKernelsKey() const
+    {
+        if(specified_pp_key)
+            return *specified_pp_key.get();
+
+        auto pp_parent_node = GetPartialPassAncestor();
+        if(!pp_parent_node)
+            throw std::runtime_error("Invalid parent node for partial pass");
+
+        return PPFMKey(pp_parent_node->length[0],
+                       pp_parent_node->length[1],
+                       pp_parent_node->length[2],
+                       precision,
+                       pp_parent_node->scheme);
+    }
+
+    // Query the function pool with the right key,
+    // and return the kernel linked to this node.
+    virtual FFTKernel GetKernel() const
+    {
+        if(isPartialPassEnabled())
+        {
+            auto key = GetPPKernelsKey();
+            return pool.get_kernel(key, scheme);
+        }
+        else
+        {
+            auto key = GetKernelKey();
+            return pool.get_kernel(key);
+        }
+    }
+
+    // Check if the function pool has a kernel,
+    // querying it with the key linked to this node.
+    virtual bool HasKernel() const
+    {
+        if(isPartialPassEnabled())
+        {
+            auto key = GetPPKernelsKey();
+            if(!pool.has_function(key))
+            {
+                if(LOG_TRACE_ENABLED())
+                    (*LogSingleton::GetInstance().GetTraceOS()) << PrintMissingKernelInfo(key);
+
+                return false;
+            }
+        }
+        else
+        {
+            auto key = GetKernelKey();
+            if(!pool.has_function(key))
+            {
+                if(LOG_TRACE_ENABLED())
+                    (*LogSingleton::GetInstance().GetTraceOS()) << PrintMissingKernelInfo(key);
+
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // Compute the large twd decomposition base

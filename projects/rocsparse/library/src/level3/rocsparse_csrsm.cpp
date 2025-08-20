@@ -131,11 +131,11 @@ try
     // Clear csrsm meta data (this includes lower, upper and their transposed equivalents
     if(!rocsparse::check_trm_shared(info, info->csrsm_lower_info))
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->csrsm_lower_info));
+        rocsparse::trm_info_t::destroy(info->csrsm_lower_info);
     }
     if(!rocsparse::check_trm_shared(info, info->csrsm_upper_info))
     {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse::destroy_trm_info(info->csrsm_upper_info));
+        rocsparse::trm_info_t::destroy(info->csrsm_upper_info);
     }
 
     info->csrsm_lower_info = nullptr;

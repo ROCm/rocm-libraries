@@ -24,10 +24,12 @@
  *
  *******************************************************************************/
 
+#include <rocRoller/ScheduledInstructions.hpp>
+
 #include <rocRoller/Assemblers/Assembler.hpp>
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Context.hpp>
-#include <rocRoller/ScheduledInstructions.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 
 namespace rocRoller
 {
@@ -69,7 +71,7 @@ namespace rocRoller
     void ScheduledInstructions::schedule(const Instruction& instruction)
     {
         auto context = m_context.lock();
-        instruction.toStream(m_instructionstream, context->kernelOptions().logLevel);
+        instruction.toStream(m_instructionstream, context->kernelOptions()->logLevel);
     }
 
 }

@@ -29,7 +29,25 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+#  include <cuda/std/tuple>
+#  include <cuda/std/type_traits>
+#  include <cuda/std/utility>
+#elif defined(__has_include)
+#  if __has_include(<cuda/std/tuple>)
+#    include <cuda/std/tuple>
+#  endif // __has_include(<cuda/std/tuple>)
+#  if __has_include(<cuda/std/type_traits>)
+#    include <cuda/std/type_traits>
+#  endif // __has_include(<cuda/std/type_traits>)
+#  if __has_include(<cuda/std/utility>)
+#    include <cuda/std/utility>
+#  endif // __has_include(<cuda/std/utility>)
+#endif // THRUST_DEVICE_SYSTEM
+
+#include <tuple>
 #include <type_traits>
+#include <utility>
 
 THRUST_NAMESPACE_BEGIN
 
@@ -307,6 +325,30 @@ THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(double2)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(double3)
 THRUST_PROCLAIM_TRIVIALLY_RELOCATABLE(double4)
 #endif
+
+THRUST_NAMESPACE_BEGIN
+
+#if THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+template <typename T, typename U>
+struct proclaim_trivially_relocatable<::cuda::std::pair<T, U>>
+    : ::cuda::std::conjunction<is_trivially_relocatable<T>, is_trivially_relocatable<U>>
+{};
+
+template <typename... Ts>
+struct proclaim_trivially_relocatable<::cuda::std::tuple<Ts...>>
+    : ::cuda::std::conjunction<is_trivially_relocatable<Ts>...>
+{};
+#else
+template <typename T, typename U>
+struct proclaim_trivially_relocatable<std::pair<T, U>>
+    : std::conjunction<is_trivially_relocatable<T>, is_trivially_relocatable<U>>
+{};
+
+template <typename... Ts>
+struct proclaim_trivially_relocatable<std::tuple<Ts...>> : std::conjunction<is_trivially_relocatable<Ts>...>
+{};
+#endif // THRUST_DEVICE_SYSTEM == THRUST_DEVICE_SYSTEM_CUDA
+THRUST_NAMESPACE_END
 
 /*! \endcond
  */

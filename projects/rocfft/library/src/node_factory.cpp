@@ -441,12 +441,18 @@ std::unique_ptr<TreeNode> NodeFactory::CreateNodeFromScheme(ComputeScheme s, Tre
         return std::unique_ptr<BLOCKCR3DNode>(new BLOCKCR3DNode(parent));
     case CS_3D_RC:
         return std::unique_ptr<RC3DNode>(new RC3DNode(parent));
+    case CS_3D_PP:
+        return std::unique_ptr<PP3DNode>(new PP3DNode(parent));
 
     // Leaf Node that need to check external kernel file
     case CS_KERNEL_STOCKHAM:
         return std::unique_ptr<Stockham1DNode>(new Stockham1DNode(parent, s));
+    case CS_KERNEL_STOCKHAM_PP:
+        return std::unique_ptr<StockhamPP1DNode>(new StockhamPP1DNode(parent, s));
     case CS_KERNEL_STOCKHAM_BLOCK_CC:
         return std::unique_ptr<SBCCNode>(new SBCCNode(parent, s));
+    case CS_KERNEL_STOCKHAM_PP_BLOCK_CC:
+        return std::unique_ptr<SBCCPPNode>(new SBCCPPNode(parent, s));
     case CS_KERNEL_STOCKHAM_BLOCK_RC:
         return std::unique_ptr<SBRCNode>(new SBRCNode(parent, s));
     case CS_KERNEL_STOCKHAM_BLOCK_CR:
@@ -801,7 +807,10 @@ ComputeScheme NodeFactory::Decide2DScheme(const function_pool& pool, NodeMetaDat
 {
     // First choice is 2D_SINGLE kernel, if the problem will fit into LDS.
     // Next best is CS_2D_RC. Last resort is RTRT.
-    if(use_CS_2D_SINGLE(pool, nodeData))
+    if(use_CS_2D_SINGLE(pool,
+                        nodeData,
+                        rocfft_array_type_complex_interleaved,
+                        rocfft_array_type_complex_interleaved))
         return CS_KERNEL_2D_SINGLE; // the node has all build info
     else if(use_CS_2D_RC(pool, nodeData))
         return CS_2D_RC;
@@ -834,8 +843,11 @@ ComputeScheme NodeFactory::Decide3DScheme(const function_pool& pool, NodeMetaDat
     // multi-dimension cases and small 2d, 3d within one kernel
     bool MultiDimFuseKernelsAvailable = false;
 
-    // try 3 SBCR kernels first
-    if(Apply_SBCR(pool, nodeData))
+    if(use_CS_3D_PP(pool, nodeData)) // try 2 partial-pass kernels first
+    {
+        return CS_3D_PP;
+    }
+    else if(Apply_SBCR(pool, nodeData)) // try 3 kernels next
     {
         return CS_3D_BLOCK_CR;
     }
@@ -893,10 +905,12 @@ ComputeScheme NodeFactory::Decide3DScheme(const function_pool& pool, NodeMetaDat
     // TODO: CS_KERNEL_3D_SINGLE?
 }
 
-bool NodeFactory::use_CS_2D_SINGLE(const function_pool& pool, NodeMetaData& nodeData)
+bool NodeFactory::use_CS_2D_SINGLE(const function_pool& pool,
+                                   NodeMetaData&        nodeData,
+                                   rocfft_array_type    inArrayType,
+                                   rocfft_array_type    outArrayType)
 {
     if(!pool.has_function(
-
            FMKey(nodeData.length[0], nodeData.length[1], nodeData.precision, CS_KERNEL_2D_SINGLE)))
         return false;
 
@@ -907,10 +921,40 @@ bool NodeFactory::use_CS_2D_SINGLE(const function_pool& pool, NodeMetaData& node
     auto kernel = pool.get_kernel(
         FMKey(nodeData.length[0], nodeData.length[1], nodeData.precision, CS_KERNEL_2D_SINGLE));
 
-    auto ldsUsage = nodeData.length[0] * nodeData.length[1] * kernel.transforms_per_block
-                    * complex_type_size(nodeData.precision);
-    if(1.5 * ldsUsage > ldsSize)
-        return false;
+    auto length0 = nodeData.length[0];
+    auto length1 = nodeData.length[1];
+
+    // For larger LDS, account properly for real-complex usage and
+    // aim for occupancy-2
+    if(ldsSize > 65536)
+    {
+        // Real-forward transform adds an extra element on fastest length
+        // for post-processing
+        if(inArrayType == rocfft_array_type_real
+           && outArrayType == rocfft_array_type_hermitian_interleaved)
+            ++length0;
+        // real-inverse transforms adds an extra element on second-fastest length for pre-processing
+        else if(inArrayType == rocfft_array_type_hermitian_interleaved
+                && outArrayType == rocfft_array_type_real)
+            ++length1;
+
+        auto ldsUsage = length0 * length1 * kernel.transforms_per_block
+                        * complex_type_size(nodeData.precision);
+
+        if(ldsUsage > ldsSize / 2)
+            return false;
+    }
+    // For default (64KiB) LDS, just account for 2D data size and
+    // apply a fudge factor to get good-enough occupancy.  Ideally we
+    // can use the above heuristic everywhere but some tuned
+    // 2D_SINGLE solutions are faster despite being occupancy-1.
+    else
+    {
+        auto ldsUsage = length0 * length1 * kernel.transforms_per_block
+                        * complex_type_size(nodeData.precision);
+        if(1.5 * ldsUsage > ldsSize)
+            return false;
+    }
 
     return true;
 }
@@ -976,8 +1020,7 @@ bool NodeFactory::use_CS_3D_RC(const function_pool& pool, NodeMetaData& nodeData
         return false;
 
     // Check the C part.
-    // The first R is built recursively with 2D_FFT, or with a
-    // 1_D FTT + partial pass(es). leave the check part to themselves
+    // The first R is built recursively with 2D_FFT, leave the check part to themselves
     auto kernel = pool.get_kernel(key);
 
     // hack for this special case
@@ -1003,4 +1046,31 @@ bool NodeFactory::use_CS_3D_RC(const function_pool& pool, NodeMetaData& nodeData
     return true;
 
     return false;
+}
+
+bool NodeFactory::use_CS_3D_PP(const function_pool& pool, NodeMetaData& nodeData)
+{
+    if(!pool.has_function(
+
+           PPFMKey(nodeData.length[0],
+                   nodeData.length[1],
+                   nodeData.length[2],
+                   nodeData.precision,
+                   CS_3D_PP)))
+        return false;
+
+    // Partial pass is currently restricted to large enough batch sizes,
+    // unite stride, interleaved FFTs.
+    bool batchCondition = (nodeData.batch >= 5);
+
+    size_t checkDist     = product(nodeData.length.begin(), nodeData.length.end());
+    bool   distCondition = (nodeData.iDist == checkDist && nodeData.oDist == checkDist);
+
+    bool strideCondition = ((nodeData.inStride.size() && nodeData.inStride[0]) == 1
+                            && (nodeData.outStride.size() && nodeData.outStride[0]) == 1);
+
+    bool arrayTypeCondition = (nodeData.inArrayType != rocfft_array_type_complex_planar
+                               && nodeData.outArrayType != rocfft_array_type_complex_planar);
+
+    return (batchCondition && distCondition && strideCondition && arrayTypeCondition);
 }

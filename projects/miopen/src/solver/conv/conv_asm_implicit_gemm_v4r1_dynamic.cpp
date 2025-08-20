@@ -30,6 +30,7 @@
 #include <miopen/generic_search.hpp>
 #include <miopen/gcn_asm_utils.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
+#include <miopen/solver/problem_description_helpers.hpp>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_ASM_FWD_V4R1)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_ASM_FWD_V4R1_1X1)
@@ -387,7 +388,7 @@ static inline ConvSolution GetSolutionBase(const ExecutionContext& ctx,
 
     int block_size     = GetImplicitGemmV4R1DynamicBlockSize(config);
     int grid_size      = GetImplicitGemmV4R1DynamicGridSize(problem, config);
-    bool kernel_is_1x1 = (kernel_name.find("igemm_v4r1_1x1_dynamic") == 0);
+    bool kernel_is_1x1 = (kernel_name.starts_with("igemm_v4r1_1x1_dynamic"));
 
     KernelInfo kernel;
     std::ostringstream options;

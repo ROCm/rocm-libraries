@@ -74,7 +74,7 @@ public:
     return base_traits::allocate(alloc, size);
   }
 
-  void deallocate(pointer ptr, std::size_t size)
+  void deallocate(pointer ptr, std::size_t size) noexcept
   {
     BaseAlloc alloc;
     last_deallocated = state;
@@ -87,7 +87,7 @@ public:
     return base_traits::construct(alloc, ptr);
   }
 
-  static void destroy(pointer ptr)
+  static void destroy(pointer ptr) noexcept
   {
     BaseAlloc alloc;
     return base_traits::destroy(alloc, ptr);

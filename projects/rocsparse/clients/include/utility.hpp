@@ -96,6 +96,12 @@ inline rocsparse_datatype get_datatype<_Float16>(void)
 }
 
 template <>
+inline rocsparse_datatype get_datatype<rocsparse_bfloat16>(void)
+{
+    return rocsparse_datatype_bf16_r;
+}
+
+template <>
 inline rocsparse_datatype get_datatype<float>(void)
 {
     return rocsparse_datatype_f32_r;
@@ -146,6 +152,10 @@ inline constexpr size_t rocsparse_datatype_sizeof(rocsparse_datatype datatype_)
     case rocsparse_datatype_f16_r:
     {
         return sizeof(_Float16);
+    }
+    case rocsparse_datatype_bf16_r:
+    {
+        return sizeof(rocsparse_bfloat16);
     }
     case rocsparse_datatype_f32_r:
     {
@@ -199,7 +209,7 @@ public:
         : capture_started(false)
         , graph_testing(false)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_handle(&this->handle);
         if(status != rocsparse_status_success)
@@ -211,7 +221,7 @@ public:
         : capture_started(false)
         , graph_testing(arg.graph_test)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_handle(&this->handle);
         if(status != rocsparse_status_success)
@@ -221,7 +231,7 @@ public:
     }
     ~rocsparse_local_handle()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         rocsparse_destroy_handle(this->handle);
     }
@@ -238,7 +248,7 @@ public:
 
     void rocsparse_stream_begin_capture()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(!(this->graph_testing))
         {
@@ -261,7 +271,7 @@ public:
 
     void rocsparse_stream_end_capture(rocsparse_int runs = 1)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(!(this->graph_testing))
         {
@@ -313,7 +323,7 @@ class rocsparse_local_mat_descr
 public:
     rocsparse_local_mat_descr()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_mat_descr(&this->descr);
         if(status != rocsparse_status_success)
@@ -324,7 +334,7 @@ public:
 
     ~rocsparse_local_mat_descr()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         rocsparse_destroy_mat_descr(this->descr);
     }
@@ -348,7 +358,7 @@ class rocsparse_local_mat_info
 public:
     rocsparse_local_mat_info()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_mat_info(&this->info);
         if(status != rocsparse_status_success)
@@ -358,7 +368,7 @@ public:
     }
     ~rocsparse_local_mat_info()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         rocsparse_destroy_mat_info(this->info);
     }
@@ -366,7 +376,7 @@ public:
     // Sometimes useful to reset local info
     void reset()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         rocsparse_destroy_mat_info(this->info);
         const rocsparse_status status = rocsparse_create_mat_info(&this->info);
@@ -395,7 +405,7 @@ class rocsparse_local_color_info
 public:
     rocsparse_local_color_info()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_color_info(&this->info);
         if(status != rocsparse_status_success)
@@ -405,7 +415,7 @@ public:
     }
     ~rocsparse_local_color_info()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         rocsparse_destroy_color_info(this->info);
     }
@@ -413,7 +423,7 @@ public:
     // Sometimes useful to reset local info
     void reset()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         rocsparse_destroy_color_info(this->info);
         const rocsparse_status status = rocsparse_create_color_info(&this->info);
@@ -458,7 +468,7 @@ class rocsparse_local_hyb_mat
 public:
     rocsparse_local_hyb_mat()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_hyb_mat(&this->hyb);
         if(status != rocsparse_status_success)
@@ -468,7 +478,7 @@ public:
     }
     ~rocsparse_local_hyb_mat()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         rocsparse_destroy_hyb_mat(this->hyb);
     }
@@ -498,7 +508,7 @@ public:
                           rocsparse_index_base idx_base,
                           rocsparse_datatype   compute_type)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_spvec_descr(
             &this->descr, size, nnz, indices, values, idx_type, idx_base, compute_type);
@@ -509,7 +519,7 @@ public:
     }
     ~rocsparse_local_spvec()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(this->descr != nullptr)
         {
@@ -544,7 +554,7 @@ public:
                           rocsparse_index_base idx_base,
                           rocsparse_datatype   compute_type)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_coo_descr(&this->descr,
                                                                    m,
@@ -585,7 +595,7 @@ public:
                           rocsparse_index_base idx_base,
                           rocsparse_datatype   compute_type)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_coo_aos_descr(
             &this->descr, m, n, nnz, coo_ind, coo_val, idx_type, idx_base, compute_type);
@@ -614,7 +624,7 @@ public:
                           rocsparse_datatype   compute_type,
                           bool                 csc_format = false)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(csc_format == false)
         {
@@ -688,7 +698,7 @@ public:
                           rocsparse_datatype   compute_type,
                           rocsparse_format     format)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(format == rocsparse_format_bsr)
         {
@@ -745,7 +755,7 @@ public:
                           rocsparse_index_base idx_base,
                           rocsparse_datatype   compute_type)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_bell_descr(&this->descr,
                                                                     m,
@@ -773,7 +783,7 @@ public:
                           rocsparse_index_base idx_base,
                           rocsparse_datatype   compute_type)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_ell_descr(
             &this->descr, m, n, ell_col_ind, ell_val, ell_width, idx_type, idx_base, compute_type);
@@ -792,7 +802,7 @@ public:
 
     ~rocsparse_local_spmat()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(this->descr != nullptr)
             rocsparse_destroy_spmat_descr(this->descr);
@@ -817,7 +827,7 @@ class rocsparse_local_dnvec
 public:
     rocsparse_local_dnvec(int64_t size, void* values, rocsparse_datatype compute_type)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status
             = rocsparse_create_dnvec_descr(&this->descr, size, values, compute_type);
@@ -835,7 +845,7 @@ public:
 
     ~rocsparse_local_dnvec()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(this->descr != nullptr)
             rocsparse_destroy_dnvec_descr(this->descr);
@@ -865,7 +875,7 @@ public:
                           rocsparse_datatype compute_type,
                           rocsparse_order    order)
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         const rocsparse_status status = rocsparse_create_dnmat_descr(
             &this->descr, rows, cols, ld, values, compute_type, order);
@@ -883,7 +893,7 @@ public:
 
     ~rocsparse_local_dnmat()
     {
-        ROCSPARSE_CLIENTS_ROUTINE_TRACE
+        ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(this->descr != nullptr)
             rocsparse_destroy_dnmat_descr(this->descr);
@@ -908,11 +918,6 @@ public:
  */
 double get_time_us(void);
 
-/*! \brief  CPU Timer(in microsecond): synchronize with given queue/stream and return
- *  wall time
- */
-double get_time_us_sync(hipStream_t stream);
-
 /*! \brief Return path of this executable */
 std::string rocsparse_exepath();
 
@@ -925,10 +930,11 @@ namespace rocsparse_clients
     struct timer
     {
     private:
-        hipEvent_t m_start, m_stop;
+        hipStream_t m_stream;
+        hipEvent_t  m_start, m_stop;
 
     public:
-        timer();
+        timer(hipStream_t stream);
         void  start();
         float stop();
         ~timer();
@@ -938,7 +944,10 @@ namespace rocsparse_clients
    * the median of the mean of the wall-clock time.
    */
     template <typename T, typename... ARG>
-    double run_benchmark(const Arguments& arguments, T func, ARG&&... arg)
+    double run_benchmark(const Arguments&        arguments,
+                         T                       func,
+                         rocsparse_local_handle& handle,
+                         ARG&&... arg)
     {
         if(arguments.iters_inner == 0)
         {
@@ -958,9 +967,12 @@ namespace rocsparse_clients
         const int32_t n_sub_calls  = arguments.iters_inner;
         const int32_t n_calls      = arguments.iters;
 
+        hipStream_t stream;
+        rocsparse_get_stream(handle, &stream);
+
         for(int32_t iter = 0; iter < n_cold_calls; ++iter)
         {
-            const rocsparse_status status = func(arg...);
+            const rocsparse_status status = func(handle, std::forward<ARG>(arg)...);
             if(status != rocsparse_status_success)
             {
                 std::cerr << "error " << __FUNCTION__ << ": cold call failed." << std::endl;
@@ -970,13 +982,13 @@ namespace rocsparse_clients
 
         std::vector<double> gpu_time(n_calls);
 
-        rocsparse_clients::timer t;
+        rocsparse_clients::timer t(stream);
         for(int32_t iter = 0; iter < n_calls; ++iter)
         {
             t.start();
             for(int32_t sub_iter = 0; sub_iter < n_sub_calls; ++sub_iter)
             {
-                (void)func(arg...);
+                std::ignore = func(handle, std::forward<ARG>(arg)...);
             }
             const double t_microseconds = (t.stop() * 1000);
             gpu_time[iter]              = t_microseconds / n_sub_calls;
@@ -989,7 +1001,7 @@ namespace rocsparse_clients
 
 }
 
-#define ROCSPARSE_CLIENTS_RUN_BENCHMARK(arguments_, gpu_time_used_, func_)                         \
+#define ROCSPARSE_CLIENTS_RUN_BENCHMARK(handle, arguments_, gpu_time_used_, func_)                 \
     if(arguments_.iters_inner == 0)                                                                \
     {                                                                                              \
         std::cerr << "error " << __FUNCTION__ << ": arguments_.iters_inner is zero." << std::endl; \
@@ -1005,6 +1017,10 @@ namespace rocsparse_clients
     const int32_t n_cold_calls = 2;                                                                \
     const int32_t n_sub_calls  = arguments_.iters_inner;                                           \
     const int32_t n_calls      = arguments_.iters;                                                 \
+                                                                                                   \
+    hipStream_t stream;                                                                            \
+    rocsparse_get_stream(handle, &stream);                                                         \
+                                                                                                   \
     for(int32_t iter = 0; iter < n_cold_calls; ++iter)                                             \
     {                                                                                              \
         CHECK_ROCSPARSE_ERROR(func_);                                                              \
@@ -1012,13 +1028,13 @@ namespace rocsparse_clients
                                                                                                    \
     std::vector<double> gpu_time(n_calls);                                                         \
                                                                                                    \
-    rocsparse_clients::timer t;                                                                    \
+    rocsparse_clients::timer t(stream);                                                            \
     for(int32_t iter = 0; iter < n_calls; ++iter)                                                  \
     {                                                                                              \
         t.start();                                                                                 \
         for(int32_t iter2 = 0; iter2 < n_sub_calls; ++iter2)                                       \
         {                                                                                          \
-            (void)(func_);                                                                         \
+            std::ignore = func_;                                                                   \
         }                                                                                          \
         const double t_microseconds = (t.stop() * 1000);                                           \
         gpu_time[iter]              = t_microseconds / n_sub_calls;                                \

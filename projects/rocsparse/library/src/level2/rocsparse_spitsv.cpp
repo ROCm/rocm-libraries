@@ -255,6 +255,7 @@ namespace rocsparse
         case rocsparse_datatype_i32_r:
         case rocsparse_datatype_u32_r:
         case rocsparse_datatype_f16_r:
+        case rocsparse_datatype_bf16_r:
         {
             // LCOV_EXCL_START
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);

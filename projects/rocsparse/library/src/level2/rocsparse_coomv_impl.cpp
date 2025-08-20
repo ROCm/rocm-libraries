@@ -226,10 +226,9 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
         {
             I* max_nnz     = nullptr;
             I* csr_row_ptr = nullptr;
+            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&max_nnz, sizeof(I), handle->stream));
             RETURN_IF_HIP_ERROR(
-                rocsparse_hipMallocAsync((void**)&max_nnz, sizeof(I), handle->stream));
-            RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
-                (void**)&csr_row_ptr, sizeof(I) * (m + 1), handle->stream));
+                rocsparse_hipMallocAsync(&csr_row_ptr, sizeof(I) * (m + 1), handle->stream));
             RETURN_IF_HIP_ERROR(hipMemsetAsync(max_nnz, 0, sizeof(I), handle->stream));
 
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coo2csr_template(
@@ -782,6 +781,8 @@ INSTANTIATE_MIXED_ANALYSIS(int32_t, int32_t);
 INSTANTIATE_MIXED_ANALYSIS(int64_t, int32_t);
 INSTANTIATE_MIXED_ANALYSIS(int32_t, _Float16);
 INSTANTIATE_MIXED_ANALYSIS(int64_t, _Float16);
+INSTANTIATE_MIXED_ANALYSIS(int32_t, rocsparse_bfloat16);
+INSTANTIATE_MIXED_ANALYSIS(int64_t, rocsparse_bfloat16);
 #undef INSTANTIATE_MIXED_ANALYSIS
 
 #define INSTANTIATE_MIXED(T, I, A, X, Y)                                                          \
@@ -807,6 +808,8 @@ INSTANTIATE_MIXED(float, int32_t, int8_t, int8_t, float);
 INSTANTIATE_MIXED(float, int64_t, int8_t, int8_t, float);
 INSTANTIATE_MIXED(float, int32_t, _Float16, _Float16, float);
 INSTANTIATE_MIXED(float, int64_t, _Float16, _Float16, float);
+INSTANTIATE_MIXED(float, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(float, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE_MIXED(
     rocsparse_float_complex, int32_t, float, rocsparse_float_complex, rocsparse_float_complex);
 INSTANTIATE_MIXED(

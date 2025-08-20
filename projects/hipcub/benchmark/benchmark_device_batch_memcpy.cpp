@@ -37,6 +37,7 @@
 #include <hip/hip_runtime.h>
 
 #include <iostream>
+#include <memory>
 #include <numeric>
 #include <random>
 #include <utility>

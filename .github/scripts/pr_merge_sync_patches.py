@@ -26,11 +26,11 @@ Example Usage:
 """
 
 import argparse
-import os
-import subprocess
 import logging
-import tempfile
+import os
 import re
+import subprocess
+import tempfile
 from typing import Optional, List
 from pathlib import Path
 from github_cli_client import GitHubCLIClient
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 def parse_arguments(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Apply subtree patches to sub-repositories.")
-    parser.add_argument("--repo", required=True, help="Full  repository name (e.g., org/repo)")
+    parser.add_argument("--repo", required=True, help="Full repository name (e.g., org/repo)")
     parser.add_argument("--pr", required=True, type=int, help="Pull request number")
     parser.add_argument("--subtrees", required=True, help="Newline-separated list of changed subtrees (category/name)")
     parser.add_argument("--config", required=False, default=".github/repos-config.json", help="Path to the repos-config.json file")
@@ -75,7 +75,7 @@ def _run_git(args: List[str], cwd: Optional[Path] = None) -> str:
     )
     if result.returncode != 0:
         logger.error(f"Git command failed: {' '.join(cmd)}\n{result.stderr}")
-        raise RuntimeError(f"Git command failed: {' '.join(cmd)}")
+        raise RuntimeError(f"Git command failed: {' '.join(cmd)}\n{result.stderr}")
     return result.stdout.strip()
 
 def _clone_subrepo(repo_url: str, branch: str, destination: Path) -> None:
@@ -144,6 +144,8 @@ def _commit_changes(repo_path: Path, message: str, author_name: str, author_emai
 def _set_authenticated_remote(repo_path: Path, repo_url: str) -> None:
     """Set the push URL to use the GitHub App token from GH_TOKEN env."""
     token = os.environ["GH_TOKEN"]
+    if not token:
+        raise RuntimeError("GH_TOKEN environment variable is not set")
     remote_url = f"https://x-access-token:{token}@github.com/{repo_url}.git"
     _run_git(["remote", "set-url", "origin", remote_url], cwd=repo_path)
 

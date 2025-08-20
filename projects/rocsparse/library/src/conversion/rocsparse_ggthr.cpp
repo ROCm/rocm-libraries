@@ -94,6 +94,11 @@ rocsparse_status rocsparse::ggthr(rocsparse_handle     handle_,
         CALL_TEMPLATE(PERM_TYPE, uint32_t);                 \
         return rocsparse_status_success;                    \
     }                                                       \
+    case rocsparse_datatype_bf16_r:                         \
+    {                                                       \
+        CALL_TEMPLATE(PERM_TYPE, rocsparse_bfloat16);       \
+        return rocsparse_status_success;                    \
+    }                                                       \
     }                                                       \
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value)
 
