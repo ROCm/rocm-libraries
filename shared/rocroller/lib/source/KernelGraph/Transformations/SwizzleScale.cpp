@@ -650,7 +650,6 @@ namespace rocRoller
                     = graph.control.addElement(Exchange(getVariableType(graph, load.first)));
                 auto topOp = getTopSetCoordinate(graph, load.first);
                 graph.control.addElement(Sequence(), {topOp}, {exchange});
-                //insertAfter(graph, topOp, exchange, exchange);
 
                 // add coordinate connections for Exchange
                 for(auto& dc : exchangeConnections)

@@ -74,8 +74,6 @@ namespace rocRoller
             auto nextTopOp = getTopSetCoordinate(graph, nextLoad.value());
             graph.control.addElement(Sequence(), {prevTopOp}, {preNOP});
             graph.control.addElement(Sequence(), {prev}, {nextTopOp});
-            //auto topOp = getTopSetCoordinate(graph, firstLoad);
-            //insertBefore(graph, topOp, preNOP, prev);
         }
 
         void insertInLoopLoads(KernelGraph&                            graph,
@@ -119,7 +117,6 @@ namespace rocRoller
             }
             auto prevTopOp = getTopSetCoordinate(graph, prevLoad.value());
             auto nextTopOp = getTopSetCoordinate(graph, nextLoad.value());
-            //insertBefore(graph, topOp, postNOP, prev);
             graph.control.addElement(Sequence(), {prevTopOp}, {postNOP});
             graph.control.addElement(Sequence(), {prev}, {nextTopOp});
 
@@ -166,6 +163,8 @@ namespace rocRoller
                           exchangeTags.end(),
                           TopologicalCompare(std::make_shared<KernelGraph>(graph)));
                 insertBefore(graph, exchangeTags[0], copy.first, copy.first);
+                for(auto exchangeTag : exchangeTags)
+                    graph.control.addElement(Sequence(), {copy.first}, {exchangeTag});
             }
         }
 

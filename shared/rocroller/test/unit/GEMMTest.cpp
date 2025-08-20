@@ -2309,7 +2309,7 @@ namespace GEMMDriverTest
         REQUIRE_ARCH_CAP(GPUCapability::HasMFMA_scale_f8f6f4);
         REQUIRE_ARCH_CAP(GPUCapability::HasBlockScaling32);
 
-        for(auto waveK : {128})
+        for(auto waveK : {64, 128})
         {
             int waveM = (waveK == 128) ? 16 : 32;
             int waveN = (waveK == 128) ? 16 : 32;
@@ -2335,7 +2335,7 @@ namespace GEMMDriverTest
             gemm.unrollK           = 2;
             gemm.prefetch          = true;
             gemm.prefetchInFlight  = 2;
-            gemm.prefetchLDSFactor = 1;
+            gemm.prefetchLDSFactor = 2;
 
             gemm.scaleAMode = Operations::ScaleMode::Separate;
             gemm.scaleBMode = Operations::ScaleMode::Separate;
