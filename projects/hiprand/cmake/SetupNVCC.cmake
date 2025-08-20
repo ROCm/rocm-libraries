@@ -55,7 +55,7 @@ function(hip_cuda_detect_lowest_cc out_variable)
         WORKING_DIRECTORY "${PROJECT_BINARY_DIR}/CMakeFiles/"
         RESULT_VARIABLE __nvcc_res OUTPUT_VARIABLE __nvcc_out
     )
-    message(STATUS "nvcc status: ${__nvcc_res} ${__nvcc_out}
+    message(STATUS "nvcc status: ${__nvcc_res} ${__nvcc_out}")
     if(__nvcc_res EQUAL 0)
         set(HIP_CUDA_lowest_cc ${__nvcc_out} CACHE INTERNAL "The lowest CC of installed NV GPUs" FORCE)
     endif()
