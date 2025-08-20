@@ -20,6 +20,7 @@
 
 #include "../hipfftw_helper.h"
 
+#include "../../shared/environment.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/hostbuf.h"
 #include "../../shared/params_gen.h"
@@ -336,9 +337,6 @@ namespace
 
     const std::vector<hipfftw_alloc_memkind> hipfftw_possible_memkinds
         = {pinned_host, pageable_host};
-    const std::string env_hipfftw_pageable_alloc_limit
-        = "HIPFFTW_BYTE_SIZE_LIMIT_PAGEABLE_HOST_ALLOC";
-    const std::string env_hipfftw_pinned_alloc_limit = "HIPFFTW_BYTE_SIZE_LIMIT_PINNED_HOST_ALLOC";
 
     bool hipfftw_alloc_kind_is_valid(hipfftw_alloc_memkind kind)
     {
@@ -380,85 +378,6 @@ namespace
             break;
         }
         // unreachable
-    }
-
-    size_t get_hipfftw_allocation_byte_size_limit(hipfftw_alloc_memkind kind)
-    {
-        // kind must be in hipfftw_possible_memkinds
-        if(std::find(hipfftw_possible_memkinds.begin(), hipfftw_possible_memkinds.end(), kind)
-           == hipfftw_possible_memkinds.end())
-        {
-            throw std::invalid_argument("get_hipfftw_allocation_byte_size_limit: invalid kind");
-        }
-        // kind is a well-defined value in hipfftw_possible_memkinds
-        const char* dedicated_env_var_cstr = nullptr;
-        switch(kind)
-        {
-        case hipfftw_alloc_memkind::pinned_host:
-            dedicated_env_var_cstr = env_hipfftw_pinned_alloc_limit.c_str();
-            break;
-        case hipfftw_alloc_memkind::pageable_host:
-            dedicated_env_var_cstr = env_hipfftw_pageable_alloc_limit.c_str();
-            break;
-        default:
-            break;
-        }
-        if(!dedicated_env_var_cstr)
-            throw std::runtime_error(
-                "get_hipfftw_allocation_byte_size_limit: internal error encountered "
-                "(unexpected value for kind)");
-#ifdef WIN32
-        // no more than 8*sizeof(size_t) + 3 characters for valid values
-        // (if variable defined in binary representation "0b[...]")
-        char       tmp[8 * sizeof(size_t) + 3];
-        const auto sz = GetEnvironmentVariableA(dedicated_env_var_cstr, tmp, sizeof(tmp));
-        if(sz == 0 || sz > sizeof(tmp))
-            return std::numeric_limits<size_t>::max();
-#else
-        const char* tmp = std::getenv(dedicated_env_var_cstr);
-        if(!tmp)
-            return std::numeric_limits<size_t>::max();
-#endif
-        return std::stoull(tmp);
-    }
-
-    // self-explanatory
-    // returned bool is true if the limit was successfully set
-    bool set_hipfftw_allocation_byte_size_limit(hipfftw_alloc_memkind kind, size_t limit_to_set)
-    {
-        // kind must be in hipfftw_possible_memkinds
-        if(std::find(hipfftw_possible_memkinds.begin(), hipfftw_possible_memkinds.end(), kind)
-           == hipfftw_possible_memkinds.end())
-        {
-            throw std::invalid_argument("set_hipfftw_allocation_byte_size_limit: invalid kind");
-        }
-        // kind is a well-defined value in hipfftw_possible_memkinds
-        bool       ret        = false;
-        const auto limit_str  = std::to_string(limit_to_set);
-        const auto limit_cstr = limit_str.c_str();
-        switch(kind)
-        {
-        case hipfftw_alloc_memkind::pinned_host:
-#ifdef WIN32
-            ret = SetEnvironmentVariable(env_hipfftw_pinned_alloc_limit.c_str(), limit_cstr);
-#else
-            ret = setenv(env_hipfftw_pinned_alloc_limit.c_str(), limit_cstr, 1) == EXIT_SUCCESS;
-#endif
-            break;
-        case hipfftw_alloc_memkind::pageable_host:
-#ifdef WIN32
-            ret = SetEnvironmentVariable(env_hipfftw_pageable_alloc_limit.c_str(), limit_cstr);
-#else
-            ret = setenv(env_hipfftw_pageable_alloc_limit.c_str(), limit_cstr, 1) == EXIT_SUCCESS;
-#endif
-            break;
-        default:
-            throw std::runtime_error(
-                "set_hipfftw_allocation_byte_size_limit: internal error encountered "
-                "(unexpected value for kind)");
-            break;
-        }
-        return ret;
     }
 
     template <fft_precision prec>
@@ -563,8 +482,7 @@ namespace
     protected:
         void* test_allocation = nullptr;
         bool  expect_no_allocation;
-
-        std::map<hipfftw_alloc_memkind, size_t> limits_to_reset_upon_test_completion;
+        std::map<hipfftw_alloc_memkind, std::unique_ptr<EnvironmentSetTemp>> temp_alloc_limit_env;
 
         void SetUp() override
         {
@@ -580,22 +498,39 @@ namespace
             size_t limit_for_alloc_kind = 0;
             for(auto alloc_kind_candidate : hipfftw_possible_memkinds)
             {
+                if(alloc_kind_candidate != hipfftw_alloc_memkind::pinned_host
+                   && alloc_kind_candidate != hipfftw_alloc_memkind::pageable_host)
+                {
+                    throw std::runtime_error("unexpected memory allocation kind "
+                                             + hipfftw_alloc_kind_to_string(alloc_kind_candidate));
+                }
+                const std::string control_env_var
+                    = alloc_kind_candidate == hipfftw_alloc_memkind::pinned_host
+                          ? "HIPFFTW_BYTE_SIZE_LIMIT_PINNED_HOST_ALLOC"
+                          : "HIPFFTW_BYTE_SIZE_LIMIT_PAGEABLE_HOST_ALLOC";
+
                 if(alloc_kind_candidate & params.alloc_kind)
                 {
+                    const auto test_user_limit = rocfft_getenv(control_env_var.c_str());
                     limit_for_alloc_kind
                         = std::max(limit_for_alloc_kind,
-                                   get_hipfftw_allocation_byte_size_limit(alloc_kind_candidate));
+                                   test_user_limit.empty() ? std::numeric_limits<size_t>::max()
+                                                           : size_t(std::stoull(test_user_limit)));
                 }
                 else
                 {
-                    limits_to_reset_upon_test_completion[alloc_kind_candidate]
-                        = get_hipfftw_allocation_byte_size_limit(alloc_kind_candidate);
                     // disable the other possible allocation kind(s) by temporarily
                     // setting the corresponding byte size limit to 0
-                    if(!set_hipfftw_allocation_byte_size_limit(alloc_kind_candidate, 0))
+                    temp_alloc_limit_env[alloc_kind_candidate]
+                        = std::make_unique<EnvironmentSetTemp>(control_env_var.c_str(), "0");
+                    // skip if temporary limit(s) was(were) not successfully set
+                    const auto tmp_limit = rocfft_getenv(control_env_var.c_str());
+                    if(tmp_limit.empty() || std::stoull(tmp_limit) != 0)
+                    {
                         GTEST_SKIP() << "failed to set environment variable disabling "
                                      << hipfftw_alloc_kind_to_string(alloc_kind_candidate)
                                      << " allocation(s) by hipFFTW";
+                    }
                 }
             }
             const size_t req_byte_size = params.get_byte_size();
@@ -604,11 +539,7 @@ namespace
         }
         void TearDown() override
         {
-            for(auto limit_to_reset : limits_to_reset_upon_test_completion)
-            {
-                // reset all temporarily-modified allocation limits
-                set_hipfftw_allocation_byte_size_limit(limit_to_reset.first, limit_to_reset.second);
-            }
+            temp_alloc_limit_env.clear();
             const hipfftw_funcs<prec>& hipfftw_impl = hipfftw_funcs<prec>::get_instance();
             if(test_allocation && !hipfftw_impl.free.may_be_used())
                 GTEST_FAIL() << "An allocation was created but it can't be freed";

@@ -21,6 +21,7 @@
 #ifndef HIPFFTW_HELPER_H
 #define HIPFFTW_HELPER_H
 
+#include "../shared/environment.h"
 #include "../shared/fft_params.h"
 #include <algorithm>
 #include <fftw3.h>
@@ -314,28 +315,23 @@ struct hipfftw_exception_logger
     std::stringstream     buffer;
     std::streambuf* const original_cerr_rdbuf = nullptr;
 
+    std::unique_ptr<EnvironmentSetTemp> hipfftw_temp_logger_env;
+
 public:
     hipfftw_exception_logger()
         : active(false)
         , original_cerr_rdbuf(std::cerr.rdbuf())
     {
-#ifdef WIN32
-        // no more than 8*sizeof(size_t) + 3 characters for valid values
-        // (if variable defined in binary representation "0b[...]")
-        char       hipfftw_log_trace[8 * sizeof(size_t) + 3];
-        const auto sz = GetEnvironmentVariableA(
-            "HIPFFTW_LOG_EXCEPTIONS", hipfftw_log_trace, sizeof(hipfftw_log_trace));
-        if(sz == 0 || (sz <= sizeof(hipfftw_log_trace) && std::stoull(hipfftw_log_trace) == 0))
+        const auto env_val = rocfft_getenv("HIPFFTW_LOG_EXCEPTIONS");
+        // activate temporary redirection only if not already used otherwise
+        // (e.g., in test user's environment )
+        if(env_val.empty() || std::stoull(env_val) == 0)
         {
-            active = SetEnvironmentVariable("HIPFFTW_LOG_EXCEPTIONS", "1");
+            hipfftw_temp_logger_env
+                = std::make_unique<EnvironmentSetTemp>("HIPFFTW_LOG_EXCEPTIONS", "1");
+            const auto temp_env_val = rocfft_getenv("HIPFFTW_LOG_EXCEPTIONS");
+            active                  = !temp_env_val.empty() && std::stoull(temp_env_val) != 0;
         }
-#else
-        const char* hipfftw_log_trace = std::getenv("HIPFFTW_LOG_EXCEPTIONS");
-        if(!hipfftw_log_trace || std::stoull(hipfftw_log_trace) == 0)
-        {
-            active = setenv("HIPFFTW_LOG_EXCEPTIONS", "1", 1) == EXIT_SUCCESS;
-        }
-#endif
         if(active)
             std::cerr.rdbuf(buffer.rdbuf());
     }
@@ -347,11 +343,6 @@ public:
     {
         if(active)
         {
-#ifdef WIN32
-            (void)SetEnvironmentVariable("HIPFFTW_LOG_EXCEPTIONS", "0");
-#else
-            (void)setenv("HIPFFTW_LOG_EXCEPTIONS", "0", 1);
-#endif
             // restore cerr to its original state
             std::cerr.rdbuf(original_cerr_rdbuf);
         }
