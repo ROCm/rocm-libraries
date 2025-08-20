@@ -220,16 +220,17 @@ namespace mxDataGeneratorTest
         }
     }
 
-    TEMPLATE_TEST_CASE("check mxDataGenerator different thread count produces mostly different data",
-                       "[mxDataGenerator]",
-                       FP4,
-                       FP6,
-                       BF6,
-                       FP8,
-                       BF8,
-                       Half,
-                       BFloat16,
-                       float)
+    TEMPLATE_TEST_CASE(
+        "check mxDataGenerator different thread count produces mostly different data",
+        "[mxDataGenerator]",
+        FP4,
+        FP6,
+        BF6,
+        FP8,
+        BF8,
+        Half,
+        BFloat16,
+        float)
     {
         mxDataGeneratorTest t;
 
