@@ -76,6 +76,10 @@ namespace ExpressionTest
             auto expr11 = Expression::fuseTernary((a << b) + b);
             auto expr12 = expr3 != expr7;
 
+            auto expr13
+                = Expression::positionalArgument(2, Register::Type::Vector, DataType::Int64);
+            auto expr14 = expr13 + expr1;
+
             SECTION("toString()")
             {
                 CHECK(toString(expr1) == "Add(1:I, 2:I)I");
@@ -96,6 +100,9 @@ namespace ExpressionTest
                 CHECK(toString(expr11) == "ShiftLAdd(1:I, 2:I, 2:I)I");
                 CHECK(toString(expr12)
                       == "NotEqual(" + toString(expr3) + ", " + toString(expr7) + ")BL" + waveBits);
+
+                CHECK(toString(expr13) == "PositionalArgument(2)I64");
+                CHECK(toString(expr14) == "Add(PositionalArgument(2)I64, Add(1:I, 2:I)I)I64");
             }
 
             SECTION("evaluationTimes()")
