@@ -25,7 +25,7 @@ ARG ARTF_IMAGE_VERSION=""
 # Support multiarch
 RUN dpkg --add-architecture i386
 
-RUN apt-get update && apt-get install -y ca-certificates wget gnupg2 && \
+RUN apt-get update && apt-get install -y ca-certificates wget gnupg2 curl && \
     ARTF_PRE=${ARTF_SERV}/${ARTF_IMAGE_SUB_URL} && \
     echo "deb [arch=amd64 trusted=yes] ${ARTF_PRE} ${ARTF_IMAGE_NAME} ${ARTF_IMAGE_VERSION}" | tee /etc/apt/sources.list.d/rocm.list && \
     echo "Package: *" | tee /etc/apt/preferences.d/rocm-pin-600 && \
