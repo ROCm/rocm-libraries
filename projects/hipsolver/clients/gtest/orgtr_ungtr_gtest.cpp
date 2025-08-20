@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -106,6 +106,14 @@ class UNGTR_FORTRAN : public ORGTR_UNGTR<API_FORTRAN>
 {
 };
 
+class ORGTR_COMPAT : public ORGTR_UNGTR<API_COMPAT>
+{
+};
+
+class UNGTR_COMPAT : public ORGTR_UNGTR<API_COMPAT>
+{
+};
+
 // non-batch tests
 
 TEST_P(ORGTR, __float)
@@ -148,6 +156,26 @@ TEST_P(UNGTR_FORTRAN, __double_complex)
     run_tests<rocblas_double_complex>();
 }
 
+TEST_P(ORGTR_COMPAT, __float)
+{
+    run_tests<float>();
+}
+
+TEST_P(ORGTR_COMPAT, __double)
+{
+    run_tests<double>();
+}
+
+TEST_P(UNGTR_COMPAT, __float_complex)
+{
+    run_tests<rocblas_float_complex>();
+}
+
+TEST_P(UNGTR_COMPAT, __double_complex)
+{
+    run_tests<rocblas_double_complex>();
+}
+
 // INSTANTIATE_TEST_SUITE_P(daily_lapack, ORGTR, Combine(ValuesIn(large_size_range), ValuesIn(uplo_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
@@ -174,4 +202,20 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          UNGTR_FORTRAN,
+                         Combine(ValuesIn(size_range), ValuesIn(uplo_range)));
+
+// INSTANTIATE_TEST_SUITE_P(daily_lapack,
+//                          ORGTR_COMPAT,
+//                          Combine(ValuesIn(large_size_range), ValuesIn(uplo_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         ORGTR_COMPAT,
+                         Combine(ValuesIn(size_range), ValuesIn(uplo_range)));
+
+// INSTANTIATE_TEST_SUITE_P(daily_lapack,
+//                          UNGTR_COMPAT,
+//                          Combine(ValuesIn(large_size_range), ValuesIn(uplo_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         UNGTR_COMPAT,
                          Combine(ValuesIn(size_range), ValuesIn(uplo_range)));

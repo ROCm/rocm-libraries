@@ -47,6 +47,7 @@
 #include "client/DataParallelGEMMSolution.hpp"
 #include "client/GEMMParameters.hpp"
 #include "client/GEMMParameters_serialization.hpp"
+#include "client/PreSwizzle.hpp"
 #include "client/StreamKGEMMSolution.hpp"
 
 #include <CLI/CLI.hpp>
@@ -132,12 +133,13 @@ namespace rocRoller::Client::GEMMClient
 
     // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
     template <typename A, typename B, typename C, typename D>
-    Client::BenchmarkResults GEMM(CommandPtr               command,
-                                  CommandKernelPtr         commandKernel,
-                                  GEMMSolutionPtr          gemm,
-                                  ProblemParameters const& problemParams,
-                                  RunParameters const&     runParams,
-                                  GPUArchitecture const&   arch)
+    Client::BenchmarkResults GEMM(CommandPtr                 command,
+                                  CommandKernelPtr           commandKernel,
+                                  GEMMSolutionPtr            gemm,
+                                  ProblemParameters const&   problemParams,
+                                  RunParameters const&       runParams,
+                                  BenchmarkParameters const& benchmarkParams,
+                                  GPUArchitecture const&     arch)
     {
         using namespace rocRoller::Client;
         using namespace rocRoller::Client::GEMMClient;
@@ -218,11 +220,47 @@ namespace rocRoller::Client::GEMMClient
                     ShowValue(problemParams.types.scaleB));
         if(problemParams.types.scaleA == Operations::ScaleMode::Separate)
         {
-            deviceScaleA = make_shared_device(hostScaleA);
+            if(problemParams.types.scaleSkipPermlane)
+            {
+                AssertFatal(problemParams.types.scaleShuffleTileA.size() == 3);
+
+                auto descScaleA = descA.withNormalizedDimensions();
+                {
+                    auto sizes = descScaleA.sizes();
+                    sizes[0] /= problemParams.types.scaleBlockSize;
+                    descScaleA = TensorDescriptor(descScaleA.dataType(), std::move(sizes));
+                }
+
+                auto tmpScaleA
+                    = preSwizzle(hostScaleA, descScaleA, problemParams.types.scaleShuffleTileA);
+                deviceScaleA = make_shared_device(tmpScaleA);
+            }
+            else
+            {
+                deviceScaleA = make_shared_device(hostScaleA);
+            }
         }
         if(problemParams.types.scaleB == Operations::ScaleMode::Separate)
         {
-            deviceScaleB = make_shared_device(hostScaleB);
+            if(problemParams.types.scaleSkipPermlane)
+            {
+                AssertFatal(problemParams.types.scaleShuffleTileB.size() == 3);
+
+                auto descScaleB = descB.withNormalizedDimensions();
+                {
+                    auto sizes = descScaleB.sizes();
+                    sizes[0] /= problemParams.types.scaleBlockSize;
+                    descScaleB = TensorDescriptor(descScaleB.dataType(), std::move(sizes));
+                }
+
+                auto tmpScaleB
+                    = preSwizzle(hostScaleB, descScaleB, problemParams.types.scaleShuffleTileB);
+                deviceScaleB = make_shared_device(tmpScaleB);
+            }
+            else
+            {
+                deviceScaleB = make_shared_device(hostScaleB);
+            }
         }
 
         std::cout << "Generating launch parameters and runtime arguments..." << std::endl;
@@ -279,7 +317,8 @@ namespace rocRoller::Client::GEMMClient
             hostScaleB = {scaleValue};
         }
 
-        gemm->validateRunParameters(command, problemParams, runParams, commandKernel);
+        gemm->validateRunParameters(
+            command, problemParams, runParams, benchmarkParams, commandKernel);
 
         auto runtimeArgs = commandArgs.runtimeArguments();
 
@@ -295,7 +334,7 @@ namespace rocRoller::Client::GEMMClient
             }
         }
 
-        if(runParams.visualize)
+        if(benchmarkParams.visualize)
         {
             Client::visualize(command, *commandKernel, commandArgs);
         }
@@ -307,19 +346,20 @@ namespace rocRoller::Client::GEMMClient
         std::cout << "Launching GPU kernel(s)..." << std::endl;
 
         BenchmarkResults result;
-        result.runParams = runParams;
+        result.runParams       = runParams;
+        result.benchmarkParams = benchmarkParams;
 
         // Benchmark runs
-        for(int outer = 0; outer < runParams.numOuter; ++outer)
+        for(int outer = 0; outer < benchmarkParams.numOuter; ++outer)
         {
             // Warmup runs
-            for(int i = 0; i < runParams.numWarmUp; ++i)
+            for(int i = 0; i < benchmarkParams.numWarmUp; ++i)
             {
                 commandKernel->launchKernel(runtimeArgs);
             }
 
-            HIP_TIMER(t_kernel, "GEMM", runParams.numInner);
-            for(int inner = 0; inner < runParams.numInner; ++inner)
+            HIP_TIMER(t_kernel, "GEMM", benchmarkParams.numInner);
+            for(int inner = 0; inner < benchmarkParams.numInner; ++inner)
             {
                 commandKernel->launchKernel(runtimeArgs, t_kernel, inner);
             }
@@ -333,7 +373,7 @@ namespace rocRoller::Client::GEMMClient
         double totalTime = 0;
         for(auto ke : result.kernelExecute)
             totalTime += static_cast<double>(ke) / 1.e9;
-        double averageTime = totalTime / (runParams.numInner * runParams.numOuter);
+        double averageTime = totalTime / (benchmarkParams.numInner * benchmarkParams.numOuter);
 
         std::cout << "Average runtime (s): " << averageTime << std::endl;
         std::cout << "Average GFLOPS:      "
@@ -344,7 +384,7 @@ namespace rocRoller::Client::GEMMClient
         result.kernelAssemble = TimerPool::nanoseconds("Assembler::assembleMachineCode");
         result.kernelGenerate = TimerPool::nanoseconds("CommandKernel::generateKernel");
 
-        if(runParams.check)
+        if(benchmarkParams.check)
         {
             AssertFatal(hipMemcpy(hostD.data(),
                                   deviceD.get(),
@@ -364,152 +404,239 @@ namespace rocRoller::Client::GEMMClient
     }
 
     template <typename A, typename C, typename D>
-    Client::BenchmarkResults GEMMMixed(CommandPtr               command,
-                                       CommandKernelPtr         commandKernel,
-                                       GEMMSolutionPtr          gemm,
-                                       ProblemParameters const& problemParams,
-                                       RunParameters const&     runParams,
-                                       GPUArchitecture const&   arch,
-                                       auto                     typeB)
+    Client::BenchmarkResults GEMMMixed(CommandPtr                 command,
+                                       CommandKernelPtr           commandKernel,
+                                       GEMMSolutionPtr            gemm,
+                                       ProblemParameters const&   problemParams,
+                                       RunParameters const&       runParams,
+                                       BenchmarkParameters const& benchmarkParams,
+                                       GPUArchitecture const&     arch,
+                                       auto                       typeB)
     {
         if(typeB == "fp8")
         {
-            return GEMM<A, FP8, C, D>(command, commandKernel, gemm, problemParams, runParams, arch);
+            return GEMM<A, FP8, C, D>(
+                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
         }
         else if(typeB == "bf8")
         {
-            return GEMM<A, BF8, C, D>(command, commandKernel, gemm, problemParams, runParams, arch);
+            return GEMM<A, BF8, C, D>(
+                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
         }
         else if(typeB == "fp6")
         {
-            return GEMM<A, FP6, C, D>(command, commandKernel, gemm, problemParams, runParams, arch);
+            return GEMM<A, FP6, C, D>(
+                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
         }
         else if(typeB == "bf6")
         {
-            return GEMM<A, BF6, C, D>(command, commandKernel, gemm, problemParams, runParams, arch);
+            return GEMM<A, BF6, C, D>(
+                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
         }
         else if(typeB == "fp4")
         {
-            return GEMM<A, FP4, C, D>(command, commandKernel, gemm, problemParams, runParams, arch);
+            return GEMM<A, FP4, C, D>(
+                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
         }
         else
             Throw<FatalError>("Invalid type for Mixed GEMM.");
     }
 
     template <typename C, typename D>
-    Client::BenchmarkResults GEMMMixed(CommandPtr               command,
-                                       CommandKernelPtr         commandKernel,
-                                       GEMMSolutionPtr          gemm,
-                                       ProblemParameters const& problemParams,
-                                       RunParameters const&     runParams,
-                                       GPUArchitecture const&   arch,
-                                       auto                     typeA,
-                                       auto                     typeB)
+    Client::BenchmarkResults GEMMMixed(CommandPtr                 command,
+                                       CommandKernelPtr           commandKernel,
+                                       GEMMSolutionPtr            gemm,
+                                       ProblemParameters const&   problemParams,
+                                       RunParameters const&       runParams,
+                                       BenchmarkParameters const& benchmarkParams,
+                                       GPUArchitecture const&     arch,
+                                       auto                       typeA,
+                                       auto                       typeB)
     {
         if(typeA == "fp8")
         {
-            return GEMMMixed<FP8, C, D>(
-                command, commandKernel, gemm, problemParams, runParams, arch, typeB);
+            return GEMMMixed<FP8, C, D>(command,
+                                        commandKernel,
+                                        gemm,
+                                        problemParams,
+                                        runParams,
+                                        benchmarkParams,
+                                        arch,
+                                        typeB);
         }
         else if(typeA == "bf8")
         {
-            return GEMMMixed<BF8, C, D>(
-                command, commandKernel, gemm, problemParams, runParams, arch, typeB);
+            return GEMMMixed<BF8, C, D>(command,
+                                        commandKernel,
+                                        gemm,
+                                        problemParams,
+                                        runParams,
+                                        benchmarkParams,
+                                        arch,
+                                        typeB);
         }
         else if(typeA == "fp6")
         {
-            return GEMMMixed<FP6, C, D>(
-                command, commandKernel, gemm, problemParams, runParams, arch, typeB);
+            return GEMMMixed<FP6, C, D>(command,
+                                        commandKernel,
+                                        gemm,
+                                        problemParams,
+                                        runParams,
+                                        benchmarkParams,
+                                        arch,
+                                        typeB);
         }
         else if(typeA == "bf6")
         {
-            return GEMMMixed<BF6, C, D>(
-                command, commandKernel, gemm, problemParams, runParams, arch, typeB);
+            return GEMMMixed<BF6, C, D>(command,
+                                        commandKernel,
+                                        gemm,
+                                        problemParams,
+                                        runParams,
+                                        benchmarkParams,
+                                        arch,
+                                        typeB);
         }
         else if(typeA == "fp4")
         {
-            return GEMMMixed<FP4, C, D>(
-                command, commandKernel, gemm, problemParams, runParams, arch, typeB);
+            return GEMMMixed<FP4, C, D>(command,
+                                        commandKernel,
+                                        gemm,
+                                        problemParams,
+                                        runParams,
+                                        benchmarkParams,
+                                        arch,
+                                        typeB);
         }
         else
             Throw<FatalError>("Invalid type for Mixed GEMM.");
     }
 
     template <typename AB>
-    Client::BenchmarkResults GEMMUniform(CommandPtr               command,
-                                         CommandKernelPtr         commandKernel,
-                                         GEMMSolutionPtr          gemm,
-                                         ProblemParameters const& problemParams,
-                                         RunParameters const&     runParams,
-                                         GPUArchitecture const&   arch,
-                                         auto                     typeCD)
+    Client::BenchmarkResults GEMMUniform(CommandPtr                 command,
+                                         CommandKernelPtr           commandKernel,
+                                         GEMMSolutionPtr            gemm,
+                                         ProblemParameters const&   problemParams,
+                                         RunParameters const&       runParams,
+                                         BenchmarkParameters const& benchmarkParams,
+                                         GPUArchitecture const&     arch,
+                                         auto                       typeCD)
     {
         if(typeCD == "float")
         {
             return GEMM<AB, AB, float, float>(
-                command, commandKernel, gemm, problemParams, runParams, arch);
+                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
         }
         if(typeCD == "half")
         {
             return GEMM<AB, AB, Half, Half>(
-                command, commandKernel, gemm, problemParams, runParams, arch);
+                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
         }
         if(typeCD == "bf16")
         {
             return GEMM<AB, AB, BFloat16, BFloat16>(
-                command, commandKernel, gemm, problemParams, runParams, arch);
+                command, commandKernel, gemm, problemParams, runParams, benchmarkParams, arch);
         }
         Throw<FatalError>("Invalid CD type for uniform GEMM.");
     }
 
-    Client::BenchmarkResults GEMMUniform(CommandPtr               command,
-                                         CommandKernelPtr         commandKernel,
-                                         GEMMSolutionPtr          gemm,
-                                         ProblemParameters const& problemParams,
-                                         RunParameters const&     runParams,
-                                         GPUArchitecture const&   arch,
-                                         auto                     typeAB,
-                                         auto                     typeCD)
+    Client::BenchmarkResults GEMMUniform(CommandPtr                 command,
+                                         CommandKernelPtr           commandKernel,
+                                         GEMMSolutionPtr            gemm,
+                                         ProblemParameters const&   problemParams,
+                                         RunParameters const&       runParams,
+                                         BenchmarkParameters const& benchmarkParams,
+                                         GPUArchitecture const&     arch,
+                                         auto                       typeAB,
+                                         auto                       typeCD)
     {
         if(typeAB == "float")
         {
-            return GEMMUniform<float>(
-                command, commandKernel, gemm, problemParams, runParams, arch, typeCD);
+            return GEMMUniform<float>(command,
+                                      commandKernel,
+                                      gemm,
+                                      problemParams,
+                                      runParams,
+                                      benchmarkParams,
+                                      arch,
+                                      typeCD);
         }
         if(typeAB == "half")
         {
-            return GEMMUniform<Half>(
-                command, commandKernel, gemm, problemParams, runParams, arch, typeCD);
+            return GEMMUniform<Half>(command,
+                                     commandKernel,
+                                     gemm,
+                                     problemParams,
+                                     runParams,
+                                     benchmarkParams,
+                                     arch,
+                                     typeCD);
         }
         if(typeAB == "bf16")
         {
-            return GEMMUniform<BFloat16>(
-                command, commandKernel, gemm, problemParams, runParams, arch, typeCD);
+            return GEMMUniform<BFloat16>(command,
+                                         commandKernel,
+                                         gemm,
+                                         problemParams,
+                                         runParams,
+                                         benchmarkParams,
+                                         arch,
+                                         typeCD);
         }
         if(typeAB == "fp8")
         {
-            return GEMMUniform<FP8>(
-                command, commandKernel, gemm, problemParams, runParams, arch, typeCD);
+            return GEMMUniform<FP8>(command,
+                                    commandKernel,
+                                    gemm,
+                                    problemParams,
+                                    runParams,
+                                    benchmarkParams,
+                                    arch,
+                                    typeCD);
         }
         if(typeAB == "bf8")
         {
-            return GEMMUniform<BF8>(
-                command, commandKernel, gemm, problemParams, runParams, arch, typeCD);
+            return GEMMUniform<BF8>(command,
+                                    commandKernel,
+                                    gemm,
+                                    problemParams,
+                                    runParams,
+                                    benchmarkParams,
+                                    arch,
+                                    typeCD);
         }
         if(typeAB == "fp6")
         {
-            return GEMMUniform<FP6>(
-                command, commandKernel, gemm, problemParams, runParams, arch, typeCD);
+            return GEMMUniform<FP6>(command,
+                                    commandKernel,
+                                    gemm,
+                                    problemParams,
+                                    runParams,
+                                    benchmarkParams,
+                                    arch,
+                                    typeCD);
         }
         if(typeAB == "bf6")
         {
-            return GEMMUniform<BF6>(
-                command, commandKernel, gemm, problemParams, runParams, arch, typeCD);
+            return GEMMUniform<BF6>(command,
+                                    commandKernel,
+                                    gemm,
+                                    problemParams,
+                                    runParams,
+                                    benchmarkParams,
+                                    arch,
+                                    typeCD);
         }
         if(typeAB == "fp4")
         {
-            return GEMMUniform<FP4>(
-                command, commandKernel, gemm, problemParams, runParams, arch, typeCD);
+            return GEMMUniform<FP4>(command,
+                                    commandKernel,
+                                    gemm,
+                                    problemParams,
+                                    runParams,
+                                    benchmarkParams,
+                                    arch,
+                                    typeCD);
         }
         Throw<FatalError>("Invalid AB type for uniform GEMM.");
     }
@@ -577,6 +704,7 @@ namespace rocRoller::Client::GEMMClient
                    ProblemParameters      problem,
                    TypeParameters         types,
                    RunParameters          run,
+                   BenchmarkParameters    benchmark,
                    IOParameters           io)
     {
         GEMMSolutionPtr  gemm;
@@ -612,7 +740,8 @@ namespace rocRoller::Client::GEMMClient
             auto yamlPath = std::filesystem::path{io.loadAsmPath};
             yamlPath.replace_extension(".yaml");
 
-            solution            = Serialization::readYAMLFile<SolutionParameters>(yamlPath);
+            solution = Serialization::readYAMLFile<SolutionParameters>(yamlPath);
+
             architecture.target = solution.architecture;
             if(solution.version != rocRoller::Version::Git())
             {
@@ -637,8 +766,8 @@ namespace rocRoller::Client::GEMMClient
         bool willRunOnGPU = doValidate || doBenchmark;
         if(willRunOnGPU)
         {
-            std::cout << "Setting HIP device to " << run.device << std::endl;
-            HIP_CHECK(hipSetDevice(run.device));
+            std::cout << "Setting HIP device to " << benchmark.device << std::endl;
+            HIP_CHECK(hipSetDevice(benchmark.device));
         }
 
         if(willRunOnGPU && solution.streamK)
@@ -687,6 +816,19 @@ namespace rocRoller::Client::GEMMClient
 
                 std::filesystem::path codeObjectPath{basePath};
                 codeObjectPath.replace_extension(".co");
+
+                {
+                    // Output RunParameters into a YAML file
+                    std::filesystem::path yamlRunParams{basePath};
+                    auto                  stem              = yamlRunParams.stem();
+                    std::filesystem::path yamlRunParamsPath = stem.string() + "_runParameters.yaml";
+                    if(!std::filesystem::exists(yamlRunParamsPath))
+                    {
+                        std::ofstream file(yamlRunParamsPath);
+                        Serialization::writeYAML(file, run);
+                        std::cout << "Wrote: " << yamlRunParamsPath.string() << std::endl;
+                    }
+                }
 
                 std::filesystem::path yamlPath{basePath};
                 yamlPath.replace_extension(".yaml");
@@ -763,10 +905,10 @@ namespace rocRoller::Client::GEMMClient
 
             if(doValidate)
             {
-                run.check     = true;
-                run.numWarmUp = 0;
-                run.numOuter  = 1;
-                run.numInner  = 1;
+                benchmark.check     = true;
+                benchmark.numWarmUp = 0;
+                benchmark.numOuter  = 1;
+                benchmark.numInner  = 1;
             }
 
             auto isF8F6F4 = [](auto dtype) {
@@ -776,14 +918,22 @@ namespace rocRoller::Client::GEMMClient
 
             Client::GEMMClient::Result result;
 
-            result.problemParams              = problem;
-            result.solutionParams             = solution;
-            result.benchmarkResults.runParams = run;
+            result.problemParams                    = problem;
+            result.solutionParams                   = solution;
+            result.benchmarkResults.runParams       = run;
+            result.benchmarkResults.benchmarkParams = benchmark;
 
             if(types.typeA == types.typeB && types.typeC == types.typeD)
             {
-                result.benchmarkResults = GEMMUniform(
-                    command, commandKernel, gemm, problem, run, arch, types.typeA, types.typeC);
+                result.benchmarkResults = GEMMUniform(command,
+                                                      commandKernel,
+                                                      gemm,
+                                                      problem,
+                                                      run,
+                                                      benchmark,
+                                                      arch,
+                                                      types.typeA,
+                                                      types.typeC);
             }
             else if((problem.types.typeA != problem.types.typeB) && isF8F6F4(problem.types.typeA)
                     && isF8F6F4(problem.types.typeB))
@@ -793,6 +943,7 @@ namespace rocRoller::Client::GEMMClient
                                                                   gemm,
                                                                   problem,
                                                                   run,
+                                                                  benchmark,
                                                                   arch,
                                                                   problem.types.typeA,
                                                                   problem.types.typeB);
@@ -903,56 +1054,6 @@ static bool ParseMI(const std::string&                                 arg,
     return PARSE_SUCCESS;
 }
 
-static bool ParseWorkgroupMapping(const std::string&                                 arg,
-                                  rocRoller::Client::GEMMClient::SolutionParameters& solution)
-{
-    if(arg.empty())
-        return PARSE_FAILURE;
-
-    bool fail = false;
-    try
-    {
-        std::istringstream iss(arg);
-        std::string        token;
-
-        iss.exceptions(std::ifstream::eofbit | std::ifstream::failbit | std::ifstream::badbit);
-        std::getline(iss, token, ',');
-        auto dim = std::stoi(token);
-        iss.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-        std::getline(iss, token, ',');
-        auto size                 = std::stoi(token);
-        solution.workgroupMapping = {dim, size};
-
-        fail |= (dim != -1 && dim != 0 && dim != 1);
-        fail |= (size != -1 && size < 1);
-    }
-    catch(const std::invalid_argument&)
-    {
-        fail = true;
-    }
-    catch(const std::ios_base::failure&)
-    {
-        fail = true;
-    }
-
-    if(fail)
-    {
-        std::cerr << "Invalid format for workgroupMapping." << std::endl;
-        std::cerr << std::endl;
-        std::cerr << "The workgroupMapping argument should be formatted like:" << std::endl;
-        std::cerr << std::endl;
-        std::cerr << "    --workgroupMapping=d,s" << std::endl;
-        std::cerr << std::endl;
-        std::cerr << "where d is 0 or 1, and s is a positive integer." << std::endl;
-        std::cerr << std::endl;
-        std::cerr << "For example: --workgroupMapping=0,6" << std::endl;
-
-        return PARSE_FAILURE;
-    }
-
-    return PARSE_SUCCESS;
-}
-
 /*
  * Parse the command line and dispatch.
  */
@@ -979,7 +1080,7 @@ int main(int argc, const char* argv[])
 
         .workgroupSizeX         = 128,
         .workgroupSizeY         = 2,
-        .workgroupMapping       = {-1, -1},
+        .workgroupMappingDim    = -1,
         .workgroupRemapXCC      = false,
         .workgroupRemapXCCValue = -1,
 
@@ -1036,14 +1137,18 @@ int main(int argc, const char* argv[])
 
     rocRoller::Client::GEMMClient::TypeParameters types;
 
-    rocRoller::Client::RunParameters run{
+    rocRoller::Client::RunParameters runParams{
+        .workgroupMappingValue = -1,
+        .numWGs                = 0,
+    };
+
+    rocRoller::Client::BenchmarkParameters benchmarkParams{
         .device    = 0,
         .numWarmUp = 3,
         .numOuter  = 5,
         .numInner  = 2,
         .check     = true,
         .visualize = false,
-        .numWGs    = 0,
     };
 
     rocRoller::Client::GEMMClient::IOParameters io{
@@ -1169,10 +1274,16 @@ int main(int argc, const char* argv[])
         "--workgroup_size_x", solution.workgroupSizeX, "Workgroup size in the x dimension.");
     app.add_option(
         "--workgroup_size_y", solution.workgroupSizeY, "Workgroup size in the y dimension.");
-    app.add_option(
-        "--workgroupMapping",
-        [&solution](auto& args) -> bool { return ParseWorkgroupMapping(args[0], solution); },
-        "Workgroup mapping dimension and size.");
+
+    app.add_option("--workgroupMappingDim",
+                   solution.workgroupMappingDim,
+                   "Workgroup mapping dimension (-1, 0, 1). Default: -1")
+        ->check(CLI::IsMember({-1, 0, 1}));
+    app.add_option("--workgroupMappingValue",
+                   runParams.workgroupMappingValue,
+                   "Workgroup mapping value. Default: -1")
+        ->check(CLI::IsMember({-1}) | CLI::PositiveNumber);
+
     app.add_flag(
         "--workgroupRemapXCC", solution.workgroupRemapXCC, "Use an XCC-aware workgroup remapping.");
     app.add_option("--workgroupRemapXCCValue",
@@ -1218,12 +1329,12 @@ int main(int argc, const char* argv[])
     // Benchmarking options
     //
     app.option_defaults()->ignore_case()->group("Benchmarking parameters");
-    app.add_option("--num_warmup", run.numWarmUp, "Number of warm-up runs.");
-    app.add_option("--num_outer", run.numOuter, "Number of outer runs.");
-    app.add_option("--num_inner", run.numInner, "Number of inner runs.");
-    app.add_option("--device", run.device, "GPU device ordinal");
+    app.add_option("--num_warmup", benchmarkParams.numWarmUp, "Number of warm-up runs.");
+    app.add_option("--num_outer", benchmarkParams.numOuter, "Number of outer runs.");
+    app.add_option("--num_inner", benchmarkParams.numInner, "Number of inner runs.");
+    app.add_option("--device", benchmarkParams.device, "GPU device ordinal");
     app.add_option("--numWGs",
-                   run.numWGs,
+                   runParams.numWGs,
                    "Number of workgroups to use with StreamK algorithm.  Defaults to number of WGs "
                    "present on local device.");
 
@@ -1250,8 +1361,9 @@ int main(int argc, const char* argv[])
         "Overwrite types to: --type_A=half --type_B=half --type_C=half --type_D=half "
         "--type_acc=float.");
 
-    app.add_flag(
-        "--visualize", run.visualize, "Dump out volumes describing memory access patterns.");
+    app.add_flag("--visualize",
+                 benchmarkParams.visualize,
+                 "Dump out volumes describing memory access patterns.");
 
     app.add_flag("--no-check", noCheckResult, "Do not verify GEMM results against OpenBLAS.");
 
@@ -1300,6 +1412,10 @@ int main(int argc, const char* argv[])
     benchmark->add_option(
         "--load", loadPath, "Load solution from code-object (.co) or assembly (.s) file.");
 
+    std::string loadRunParamsPath;
+    benchmark->add_option(
+        "--loadRunParams", loadRunParamsPath, "Load run parameters from YAML file.");
+
     //
     // info sub-command
     //
@@ -1323,8 +1439,9 @@ int main(int argc, const char* argv[])
     CLI11_PARSE(app, argc, argv);
 
     if(architectureName.empty())
-        architecture.target
-            = GPUArchitectureLibrary::getInstance()->GetDefaultHipDeviceArch(run.device).target();
+        architecture.target = GPUArchitectureLibrary::getInstance()
+                                  ->GetDefaultHipDeviceArch(benchmarkParams.device)
+                                  .target();
     else
         architecture.target = GPUArchitectureTarget::fromString(architectureName);
 
@@ -1359,6 +1476,15 @@ int main(int argc, const char* argv[])
         }
     }
 
+    if(!loadRunParamsPath.empty())
+    {
+        auto path = std::filesystem::path(loadRunParamsPath);
+        path.replace_extension(".yaml");
+
+        // Load RunParameters from a specified YAML file
+        runParams = Serialization::readYAMLFile<rocRoller::Client::RunParameters>(path);
+    }
+
     if(!io.loadAsmPath.empty() || !io.loadCOPath.empty())
     {
         std::filesystem::path yamlPath;
@@ -1368,6 +1494,8 @@ int main(int argc, const char* argv[])
             yamlPath = std::filesystem::path{io.loadCOPath};
         yamlPath.replace_extension(".yaml");
 
+        // YAML file does not have the workgroupMappingValue used to generate the kernel.
+        // Instead, the workgroupMappingValue specified by users in benchmarking will be used.
         solution = Serialization::readYAMLFile<rocRoller::Client::GEMMClient::SolutionParameters>(
             yamlPath);
 
@@ -1396,20 +1524,16 @@ int main(int argc, const char* argv[])
         AssertFatal(arch.HasCapability(GPUCapability::HasBlockScaling32),
                     fmt::format("Architecture {} does not support block scaling.",
                                 arch.target().toString()));
-        types.scaleBlockSize         = arch.GetCapability(GPUCapability::DefaultScaleBlockSize);
-        problem.types.scaleBlockSize = types.scaleBlockSize;
+        types.scaleBlockSize = arch.GetCapability(GPUCapability::DefaultScaleBlockSize);
     }
 
     AssertFatal((types.typeAcc == "float") || (types.typeAcc == "half")
                 || (types.typeAcc == "bf16"));
 
-    problem.types  = types;
-    solution.types = types;
-
     // TODO: Reevaluate the relationship between problem and solution params.
-    problem.workgroupMapping = solution.workgroupMapping;
+    problem.workgroupMappingDim = solution.workgroupMappingDim;
 
-    run.check = !noCheckResult;
+    benchmarkParams.check = !noCheckResult;
 
     io.doSaveAsm = asmOption->count() > 0;
     io.doSaveCO  = coOption->count() > 0;
@@ -1417,8 +1541,8 @@ int main(int argc, const char* argv[])
     // Set default MI sizes
     if(arch.HasCapability(GPUCapability::HasMFMA))
     {
-        if(solution.types.typeA == "float" && solution.types.typeB == "float"
-           && solution.types.typeC == "float" && solution.types.typeD == "float")
+        if(types.typeA == "float" && types.typeB == "float" && types.typeC == "float"
+           && types.typeD == "float")
         {
             if(solution.waveM == -1)
                 solution.waveM = 32;
@@ -1429,7 +1553,7 @@ int main(int argc, const char* argv[])
             if(solution.waveB == -1)
                 solution.waveB = 1;
         }
-        else if(solution.types.typeA == "half" && solution.types.typeB == "half")
+        else if(types.typeA == "half" && types.typeB == "half")
         {
             if(solution.waveM == -1)
                 solution.waveM = 32;
@@ -1440,7 +1564,7 @@ int main(int argc, const char* argv[])
             if(solution.waveB == -1)
                 solution.waveB = 1;
         }
-        else if(solution.types.typeA == "bf16" && solution.types.typeB == "bf16")
+        else if(types.typeA == "bf16" && types.typeB == "bf16")
         {
             if(solution.waveM == -1)
                 solution.waveM = 16;
@@ -1451,8 +1575,8 @@ int main(int argc, const char* argv[])
             if(solution.waveB == -1)
                 solution.waveB = 1;
         }
-        else if((solution.types.typeA == "fp8" && solution.types.typeB == "fp8")
-                || (solution.types.typeA == "bf8" && solution.types.typeB == "bf8"))
+        else if((types.typeA == "fp8" && types.typeB == "fp8")
+                || (types.typeA == "bf8" && types.typeB == "bf8"))
         {
             if(solution.waveM == -1)
                 solution.waveM = 16;
@@ -1468,12 +1592,12 @@ int main(int argc, const char* argv[])
     {
         if(arch.target().isRDNA4GPU())
         {
-            if((solution.types.typeA == "half" && solution.types.typeB == "half")
-               || (solution.types.typeA == "bf16" && solution.types.typeB == "bf16")
-               || (solution.types.typeA == "fp8" && solution.types.typeB == "fp8")
-               || (solution.types.typeA == "bf8" && solution.types.typeB == "bf8")
-               || (solution.types.typeA == "bf8" && solution.types.typeB == "fp8")
-               || (solution.types.typeA == "fp8" && solution.types.typeB == "bf8"))
+            if((types.typeA == "half" && types.typeB == "half")
+               || (types.typeA == "bf16" && types.typeB == "bf16")
+               || (types.typeA == "fp8" && types.typeB == "fp8")
+               || (types.typeA == "bf8" && types.typeB == "bf8")
+               || (types.typeA == "bf8" && types.typeB == "fp8")
+               || (types.typeA == "fp8" && types.typeB == "bf8"))
             {
                 if(solution.waveM == -1)
                     solution.waveM = 16;
@@ -1489,24 +1613,24 @@ int main(int argc, const char* argv[])
                 // Override default settings for the `example` and `generate` subcommands.
                 if(example->parsed() || generate->parsed())
                 {
-                    solution.types.typeA = "half";
-                    solution.types.typeB = "half";
-                    solution.types.typeC = "half";
-                    solution.types.typeD = "half";
-                    solution.waveM       = 16;
-                    solution.waveN       = 16;
-                    solution.waveK       = 16;
-                    solution.waveB       = 1;
+                    types.typeA    = "half";
+                    types.typeB    = "half";
+                    types.typeC    = "half";
+                    types.typeD    = "half";
+                    solution.waveM = 16;
+                    solution.waveN = 16;
+                    solution.waveK = 16;
+                    solution.waveB = 1;
                 }
                 else
                 {
                     Throw<FatalError>("Unsupported MI on: ",
                                       arch.target().toString(),
-                                      ShowValue(solution.types.typeA),
-                                      ShowValue(solution.types.typeB),
-                                      ShowValue(solution.types.typeC),
-                                      ShowValue(solution.types.typeD),
-                                      ShowValue(solution.types.typeAcc));
+                                      ShowValue(types.typeA),
+                                      ShowValue(types.typeB),
+                                      ShowValue(types.typeC),
+                                      ShowValue(types.typeD),
+                                      ShowValue(types.typeAcc));
                 }
             }
             // TODO Support prefetch on gfx12
@@ -1522,6 +1646,39 @@ int main(int argc, const char* argv[])
         Throw<FatalError>("Unsupported arch for GEMM client: ", arch.target().toString());
     }
 
+    if(types.scaleSkipPermlane)
+    {
+        AssertFatal(types.transA == Client::GEMMClient::TransposeType::T, ShowValue(types));
+        AssertFatal(types.scaleA == Operations::ScaleMode::Separate, ShowValue(types));
+
+        size_t kSubtile = solution.waveK / types.scaleBlockSize;
+
+        AssertFatal(kSubtile == 2 || kSubtile == 4,
+                    ShowValue(kSubtile),
+                    ShowValue(solution.waveK),
+                    ShowValue(types.scaleBlockSize));
+
+        types.scaleShuffleTileA = {64, 4, kSubtile};
+    }
+
+    if(types.scaleSkipPermlane)
+    {
+        AssertFatal(types.transB == Client::GEMMClient::TransposeType::N, ShowValue(types));
+        AssertFatal(types.scaleB == Operations::ScaleMode::Separate, ShowValue(types));
+
+        size_t kSubtile = solution.waveK / types.scaleBlockSize;
+
+        AssertFatal(kSubtile == 2 || kSubtile == 4,
+                    ShowValue(kSubtile),
+                    ShowValue(solution.waveK),
+                    ShowValue(types.scaleBlockSize));
+
+        types.scaleShuffleTileB = {64, 4, kSubtile};
+    }
+
+    problem.types  = types;
+    solution.types = types;
+
     // Set default prefetchMixMemOps
     if(prefetchMixMemOpsFlag->count() == 0)
     {
@@ -1530,10 +1687,10 @@ int main(int argc, const char* argv[])
         if(solution.prefetchLDSFactor != 0)
             solution.prefetchMixMemOps = true;
 
-        if(solution.types.scaleB == Operations::ScaleMode::Separate && !solution.loadLDSScaleB)
+        if(types.scaleB == Operations::ScaleMode::Separate && !solution.loadLDSScaleB)
             solution.prefetchMixMemOps = false;
 
-        if(solution.types.scaleA == Operations::ScaleMode::Separate && !solution.loadLDSScaleA)
+        if(types.scaleA == Operations::ScaleMode::Separate && !solution.loadLDSScaleA)
             solution.prefetchMixMemOps = false;
 
         // TODO: enable (prefetchMixMemOps == true && prefetchLDSFactor == 2 && direct2LDSA/B = true)
@@ -1569,6 +1726,7 @@ int main(int argc, const char* argv[])
                                                      solution,
                                                      problem,
                                                      types,
-                                                     run,
+                                                     runParams,
+                                                     benchmarkParams,
                                                      io);
 }

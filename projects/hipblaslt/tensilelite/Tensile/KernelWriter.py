@@ -1445,7 +1445,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                   iterCode.add(SNop(waitState=1, comment="VALU packing writes to be consumed by matrix instruction"))
                   curPackIdx += 1
                   break
-              if not kernel["SourceSwap"] and kernel["UseF32XEmulation"]:
+              if kernel["UseF32XEmulation"]:
                 # HACK add dummy waits btween swap and mfmas. TODO: improve pack scheduling to avoid this
                 numDummy = 1 if kernel["MatrixInstM"] == 16 and kernel["MatrixInstK"] == 16 else 2
                 for numd in range(numDummy):
