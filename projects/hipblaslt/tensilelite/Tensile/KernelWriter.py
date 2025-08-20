@@ -5707,6 +5707,26 @@ class KernelWriter(metaclass=abc.ABCMeta):
           vgprIdx = self.states.mxsb.startVgprValu  \
               + max(self.states.mxsb.numVgprValu + numVgprValuPackMXSB, self.states.mxsb.numVgprG2LAllocated)
 
+    if kernel["ProblemType"]["MXBlockA"]:
+      if self.states.mxsa.startVgprG2L is None and self.states.mxsa.numVgprG2LAllocated > 0:
+        # TODO: alignment hack, figure out a better solution
+        vgprIdx = ((vgprIdx+1)//2)*2
+        self.states.mxsa.startVgprG2L = vgprIdx;
+        if ("ULSGRODoubleG2L" in kernel) and kernel["ULSGRODoubleG2L"] == 1:
+          vgprIdx += self.states.mxsa.numVgprG2LAllocated * 2
+        else:
+          vgprIdx += self.states.mxsa.numVgprG2LAllocated
+
+    if kernel["ProblemType"]["MXBlockB"]:
+      if self.states.mxsb.startVgprG2L is None and self.states.mxsb.numVgprG2LAllocated > 0:
+        # TODO: alignment hack, figure out a better solution
+        vgprIdx = ((vgprIdx+1)//2)*2
+        self.states.mxsb.startVgprG2L = vgprIdx;
+        if ("ULSGRODoubleG2L" in kernel) and kernel["ULSGRODoubleG2L"] == 1:
+          vgprIdx += self.states.mxsb.numVgprG2LAllocated * 2
+        else:
+          vgprIdx += self.states.mxsb.numVgprG2LAllocated
+
     vgprIdx = (vgprIdx+1)//2*2
     self.states.lastValuMXSAB = vgprIdx
 
@@ -6006,26 +6026,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
         vgprIdx += self.states.b.numVgprG2LAllocated*2
       else:
         vgprIdx += self.states.b.numVgprG2LAllocated
-
-    if kernel["ProblemType"]["MXBlockA"]:
-      if self.states.mxsa.startVgprG2L is None and self.states.mxsa.numVgprG2LAllocated > 0:
-        # TODO: alignment hack, figure out a better solution
-        vgprIdx = ((vgprIdx+1)//2)*2
-        self.states.mxsa.startVgprG2L = vgprIdx;
-        if ("ULSGRODoubleG2L" in kernel) and kernel["ULSGRODoubleG2L"] == 1:
-          vgprIdx += self.states.mxsa.numVgprG2LAllocated * 2
-        else:
-          vgprIdx += self.states.mxsa.numVgprG2LAllocated
-
-    if kernel["ProblemType"]["MXBlockB"]:
-      if self.states.mxsb.startVgprG2L is None and self.states.mxsb.numVgprG2LAllocated > 0:
-        # TODO: alignment hack, figure out a better solution
-        vgprIdx = ((vgprIdx+1)//2)*2
-        self.states.mxsb.startVgprG2L = vgprIdx;
-        if ("ULSGRODoubleG2L" in kernel) and kernel["ULSGRODoubleG2L"] == 1:
-          vgprIdx += self.states.mxsb.numVgprG2LAllocated * 2
-        else:
-          vgprIdx += self.states.mxsb.numVgprG2LAllocated
 
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       if self.states.m.startVgprG2L is None:
