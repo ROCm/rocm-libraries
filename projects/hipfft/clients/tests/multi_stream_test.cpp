@@ -811,3 +811,8 @@ INSTANTIATE_TEST_SUITE_P(
     multiStreamTest,
     ::testing::ValuesIn(generate_full_scope_for(create_random_set_of_sizes<max_byte_size>())),
     multiStreamTest::TestName);
+
+// The list of test parameters dynamically generated in the instantiation above may be empty
+// if low test probabilities are used. The following ensures such cases do not make gtest
+// report an error due to uninstantiated multiStreamTest, e.g., with option smoketest.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(multiStreamTest);
