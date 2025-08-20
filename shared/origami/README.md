@@ -48,7 +48,7 @@ cmake --target install
 ### Options
 * `ORIGAMI_BUILD_SHARED_LIBS`: Enables building of shared libraries (default: `ON`)
 * `ORIGAMI_ENABLE_PYTHON`: Enables generation of origami Python bindings (default: `OFF`)
-* `ORIGAMI_ENABLE_TESTS`: Build the Python binding tests (default: `OFF`)
+* `ORIGAMI_BUILD_TESTING`: Build the Python binding tests (default: `OFF`)
 
 ## API & Usage
 
