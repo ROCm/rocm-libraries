@@ -222,7 +222,7 @@ endif()
 
 rocm_create_package(
         NAME ${package_name}
-        DESCRIPTION "A GPU-based random number generation library, written in HIP"
+        DESCRIPTION "GPU-based random number generation library, written in HIP"
         MAINTAINER "hipRAND Maintainer <hiprand-maintainer@amd.com>"
         LDCONFIG
         LDCONFIG_DIR ${HIPRAND_CONFIG_DIR}

@@ -363,7 +363,7 @@ set( ROCBLAS_CONFIG_DIR "\${CPACK_PACKAGING_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBD
 
 rocm_create_package(
     NAME ${package_name}
-    DESCRIPTION "rocBLAS is the AMD library for BLAS in ROCm. Implemented using the HIP language and optimized for AMD GPUs"
+    DESCRIPTION "AMD library for BLAS in ROCm. Implemented in HIP and optimized for AMD GPUs"
     MAINTAINER "rocBLAS Maintainer <rocblas-maintainer@amd.com>"
     LDCONFIG
     LDCONFIG_DIR ${ROCBLAS_CONFIG_DIR}
