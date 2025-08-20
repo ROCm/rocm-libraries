@@ -80,11 +80,11 @@ namespace mxDataGeneratorTest
         }
 
         template <typename rrDT>
-        void sameData(unsigned    dim1,
-                      unsigned    dim2,
-                      const float min          = -1.f,
-                      const float max          = 1.f,
-                      const int   blockScaling = 32)
+        void differentSeeds(unsigned    dim1,
+                            unsigned    dim2,
+                            const float min          = -1.f,
+                            const float max          = 1.f,
+                            const int   blockScaling = 32)
         {
             using DGenDT = typename rrDT2DGenDT<rrDT>::type;
 
@@ -92,37 +92,86 @@ namespace mxDataGeneratorTest
             TensorDescriptor desc(dataType, {dim1, dim2}, "T");
 
             std::vector<uint32_t> seeds = {9861u, 12345u, 54321u, 98765u, 13579u, 24680u};
-            
+
             std::vector<uint32_t> shuffledSeeds = seeds;
             std::random_shuffle(shuffledSeeds.begin(), shuffledSeeds.end());
 
             std::map<uint32_t, std::vector<uint8_t>> firstGenData;
             std::map<uint32_t, std::vector<uint8_t>> firstGenScale;
-            std::map<uint32_t, std::vector<float>> firstGenRef;
+            std::map<uint32_t, std::vector<float>>   firstGenRef;
 
-            for (uint32_t seed : shuffledSeeds)
+            for(uint32_t seed : shuffledSeeds)
             {
                 const auto dgen = getDataGenerator<rrDT>(desc, min, max, seed, blockScaling);
-                
-                firstGenData[seed] = dgen.getDataBytes();
+
+                firstGenData[seed]  = dgen.getDataBytes();
                 firstGenScale[seed] = dgen.getScaleBytes();
-                firstGenRef[seed] = dgen.getReferenceFloat();
+                firstGenRef[seed]   = dgen.getReferenceFloat();
             }
 
             std::random_shuffle(shuffledSeeds.begin(), shuffledSeeds.end());
-            
-            for (uint32_t seed : shuffledSeeds)
+
+            for(uint32_t seed : shuffledSeeds)
             {
                 const auto dgen = getDataGenerator<rrDT>(desc, min, max, seed, blockScaling);
-                
-                auto secondGenData = dgen.getDataBytes();
+
+                auto secondGenData  = dgen.getDataBytes();
                 auto secondGenScale = dgen.getScaleBytes();
-                auto secondGenRef = dgen.getReferenceFloat();
+                auto secondGenRef   = dgen.getReferenceFloat();
 
                 CHECK(firstGenData[seed] == secondGenData);
                 CHECK(firstGenScale[seed] == secondGenScale);
                 CHECK(firstGenRef[seed] == secondGenRef);
             }
+        }
+
+        template <typename rrDT>
+        void differentThreads(unsigned    dim1,
+                              unsigned    dim2,
+                              const float min          = -1.f,
+                              const float max          = 1.f,
+                              const int   blockScaling = 32)
+        {
+            using DGenDT = typename rrDT2DGenDT<rrDT>::type;
+
+            auto             dataType = TypeInfo<rrDT>::Var.dataType;
+            TensorDescriptor desc(dataType, {dim1, dim2}, "T");
+
+            int originalThreads = omp_get_max_threads();
+
+            std::vector<int> threadCounts = {1, 2, 3, 7, 8, 11, 16, 32};
+            threadCounts.erase(
+                std::remove_if(threadCounts.begin(),
+                               threadCounts.end(),
+                               [originalThreads](int count) { return count > originalThreads; }),
+                threadCounts.end());
+
+            std::vector<uint32_t> seeds = {9861u, 12345u, 54321u, 98765u};
+
+            for(uint32_t seed : seeds)
+            {
+                omp_set_num_threads(originalThreads);
+                const auto refGen   = getDataGenerator<rrDT>(desc, min, max, seed, blockScaling);
+                auto       refData  = refGen.getDataBytes();
+                auto       refScale = refGen.getScaleBytes();
+                auto       refFloat = refGen.getReferenceFloat();
+
+                for(int threadCount : threadCounts)
+                {
+                    omp_set_num_threads(threadCount);
+
+                    const auto testGen = getDataGenerator<rrDT>(desc, min, max, seed, blockScaling);
+                    auto       testData  = testGen.getDataBytes();
+                    auto       testScale = testGen.getScaleBytes();
+                    auto       testFloat = testGen.getReferenceFloat();
+
+                    CHECK(refData == testData);
+                    CHECK(refScale == testScale);
+                    CHECK(refFloat == testFloat);
+                }
+            }
+
+            omp_set_num_threads(originalThreads);
         }
     };
 
@@ -140,7 +189,7 @@ namespace mxDataGeneratorTest
         }
     }
 
-    TEMPLATE_TEST_CASE("Ensure mxDataGenerator produces same data",
+    TEMPLATE_TEST_CASE("mxDataGenerator same seeds produce same data",
                        "[mxDataGenerator]",
                        FP4,
                        FP6,
@@ -155,10 +204,32 @@ namespace mxDataGeneratorTest
 
         SUPPORTED_ARCH_SECTION(arch)
         {
-            const int dim1 = 64;
-            const int dim2 = 128;
+            const int dim1 = 32;
+            const int dim2 = 32;
 
-            t.sameData<TestType>(dim1, dim2);
+            t.differentSeeds<TestType>(dim1, dim2);
+        }
+    }
+
+    TEMPLATE_TEST_CASE("mxDataGenerator different thread count produce same data",
+                       "[mxDataGenerator]",
+                       FP4,
+                       FP6,
+                       BF6,
+                       FP8,
+                       BF8,
+                       Half,
+                       BFloat16,
+                       float)
+    {
+        mxDataGeneratorTest t;
+
+        SUPPORTED_ARCH_SECTION(arch)
+        {
+            const int dim1 = 32;
+            const int dim2 = 32;
+
+            t.differentThreads<TestType>(dim1, dim2);
         }
     }
 }
