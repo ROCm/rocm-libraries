@@ -687,6 +687,7 @@ namespace rocRoller::KernelGraph
                 }
 
                 // Add mapper connections to unroll stride coordinates
+                // TODO: move that to the place where unroll connections are added
                 for (auto const& candidate : candidates)
                 {
                     auto [target, direction] = getOperationTarget(candidate, kgraph, isDirect2LDS);
@@ -696,7 +697,6 @@ namespace rocRoller::KernelGraph
                     
                     for (auto const& unroll : unrollCoordinates)
                     {
-                        // auto const unroll = unrollCoordinates[sdim];
                         // Find the neighbour of the Unroll that:
                         // 1. is in the load/store coordinate transform path
                         // 2. has a Stride edge connected to it
