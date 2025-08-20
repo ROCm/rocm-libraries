@@ -75,7 +75,7 @@ std::tuple<double, size_t, size_t, size_t, size_t, size_t, size_t> select_best_m
 #include <vector>
 #include <tuple>
 
-using namespace TensileLite::analytical;
+using namespace origami;
 
 int main() {
     // Define GEMM dimensions
