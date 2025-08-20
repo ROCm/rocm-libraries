@@ -22,7 +22,6 @@
 #define HIPFFTW_HELPER_H
 
 #include "../shared/fft_params.h"
-#include "fftw3.h"
 #include <algorithm>
 #include <fftw3.h>
 #include <memory>
