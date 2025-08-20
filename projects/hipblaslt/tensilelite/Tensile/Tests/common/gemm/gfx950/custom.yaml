@@ -22,6 +22,39 @@ GlobalParameters:
 
 BenchmarkProblems:
   ########################################
+  # TN - standard
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      UseBias: 1
+      BiasDataTypeList: [s, b]
+      UseScaleAlphaVec: 1
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      ActivationFuncCall: true
+      ActivationHPA: True
+    -
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      CustomKernels:
+        ["Custom_Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_NTD_SK3_UserArgs_MT256x256x64_MI16x16x1_shortname0_gfx950"]
+      ForkParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[17, 235, 1024], [2, 127, 600], [1], [1, 13, 400]]
+        - BiasTypeArgs: ['b']
+
+  ########################################
   # NT - standard
   ########################################
   -
@@ -42,7 +75,7 @@ BenchmarkProblems:
       ActivationType: hipblaslt_all
       ActivationFuncCall: true
       ActivationHPA: True
-    - 
+    -
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       CustomKernels:
@@ -75,7 +108,7 @@ BenchmarkProblems:
       ActivationType: hipblaslt_all
       ActivationFuncCall: true
       ActivationHPA: True
-    - 
+    -
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
       CustomKernels:

@@ -54,7 +54,8 @@ def analyze(directory: pathlib.Path):
 
 
 def info(res: GEMMResult):
-    dim, value = res.workgroupMapping
+    dim = res.workgroupMappingDim
+    value = res.workgroupMappingValue
     time = np.median(res.kernelExecute)
     return (dim, value, time)
 

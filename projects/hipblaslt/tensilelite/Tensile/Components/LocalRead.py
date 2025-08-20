@@ -251,7 +251,7 @@ class LocalReadMFMA(LocalRead):
             numberMTilesPerWave = kernel["MIWaveTile"][tile01]
             highBits = 0
             for tIdx in range(0, numberMTilesPerWave):
-                offset_val = (tP["localReadOffset"]+MIWaveGroupShape[tile01]*tIdx) * tP["bpeDS"]
+                offset_val = (tP["localReadOffset"]+MIWaveGroupShape[tile01]*tIdx) * tP["bpeDS"] + tP["localReadSwapByteOffset"]
                 if (kernel["LdsBlockSizePerPad%s"%tc] != 0) and (kernel["LdsPad%s"%tc] != 0):
                     offset_val = offset_val + (offset_val // kernel["LdsBlockSizePerPad%s"%tc]) * kernel["LdsPad%s"%tc] * tP["bpeDS"]
                 offset, srcAddr = self.cal_offset_srcAddr(maxLDSConstOffset, tc, offset_val)

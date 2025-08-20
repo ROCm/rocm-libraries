@@ -59,7 +59,7 @@ namespace rocRoller
             explicit BlockScale(OperationTag                data,
                                 int                         dimensions,
                                 std::optional<OperationTag> scale   = {},
-                                std::vector<size_t> const&  strides = {});
+                                std::vector<size_t>         strides = {});
 
             std::unordered_set<OperationTag> getInputs() const;
             std::string                      toString() const;
@@ -74,6 +74,30 @@ namespace rocRoller
             OperationTag                m_data;
             std::optional<OperationTag> m_scale;
             std::vector<size_t>         m_strides;
+
+            template <typename T1, typename T2, typename T3>
+            friend struct rocRoller::Serialization::MappingTraits;
+        };
+
+        class SubTileTranspose : public BaseOperation
+        {
+        public:
+            SubTileTranspose() = delete;
+
+            explicit SubTileTranspose(OperationTag input, std::vector<size_t> tileDimensions);
+
+            std::unordered_set<OperationTag> getInputs() const;
+            std::string                      toString() const;
+            std::vector<size_t> const&       tileDimensions() const;
+
+            auto operator<=>(SubTileTranspose const&) const = default;
+            bool operator==(SubTileTranspose const& other) const;
+
+            OperationTag input() const;
+
+        private:
+            OperationTag        m_input;
+            std::vector<size_t> m_tileDimensions;
 
             template <typename T1, typename T2, typename T3>
             friend struct rocRoller::Serialization::MappingTraits;
