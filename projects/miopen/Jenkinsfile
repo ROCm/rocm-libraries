@@ -121,6 +121,10 @@ pipeline {
             defaultValue: false,
             description: "Navi3 currently fails to build with instruction not supported on this GPU error")
         booleanParam(
+            name: "TARGET_NAVI35",
+            defaultValue: true, //env.BRANCH_NAME == "develop" ? true : false,
+            description: "Navi3.5 Strix Halo")
+        booleanParam(
             name: "TARGET_NAVI4",
             defaultValue: false,
             description: "Navi4 currently fails to build with instruction not supported on this GPU error")
@@ -176,6 +180,8 @@ pipeline {
         NOMLIR_flags    = " -DMIOPEN_USE_MLIR=Off"
         REPO_DIR        = "${repoDir}"
         REPO_NAME       = "${repoName}"
+
+        gtest_flags = " -DMIOPEN_TEST_DISCRETE=OFF "
     }
     stages{
         stage('Build Docker'){
@@ -517,6 +523,28 @@ pipeline {
                         script {
                             withWorkingDir {
                                 utils.buildHipClangJobAndReboot(setup_flags: Full_test, build_install: true)
+                            }
+                        }
+                    }
+                }
+                stage('Fp32 Hip All Install gfx115X') {
+                    when {
+                        beforeAgent true
+                        expression { params.TARGET_NAVI35 && params.DATATYPE_FP32 }
+                    }
+                    options {
+                        retry(2)
+                    }
+                    agent{ label rocmnode("strix") }
+                    environment{
+                        execute_cmd_gtest = "python3 ../vars/gtest_sharder.py ./bin/miopen_gtest --gtest_filter=-*DBSync*:*DeepBench*:*MIOpenTestConv*:*GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamic* --num_shards=4"
+                        single_gtest_build_command = "LLVM_PATH=/opt/rocm/llvm make -j\$(nproc) miopen_gtest MIOpenDriver"
+                        build_timeout_minutes = 420
+                    }
+                    steps{
+                        script {
+                            withWorkingDir {
+                                utils.buildHipClangJobAndReboot(lfs_pull:true, setup_flags: gtest_flags + Full_test, build_cmd: single_gtest_build_command, execute_cmd: execute_cmd_gtest, needs_reboot:false, build_timeout:build_timeout_minutes)
                             }
                         }
                     }

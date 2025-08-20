@@ -237,7 +237,7 @@ def getDockerImage(Map conf=[:])
     env.DOCKER_BUILDKIT=1
     def prefixpath = conf.get("prefixpath", "/opt/rocm") // one image for each prefix 1: /usr/local 2:/opt/rocm
     // Note: With offload compress disabled for CK expanding the target list might cause issues with the docker build.
-    def gpu_arch = "gfx908;gfx90a;gfx942" // prebuilt dockers should have all the architectures enabled so one image can be used for all stages
+    def gpu_arch = "gfx908;gfx90a;gfx942;gfx1151" // prebuilt dockers should have all the architectures enabled so one image can be used for all stages
 
     def dockerArgs = "--build-arg BUILDKIT_INLINE_CACHE=1 " +
                      "--build-arg PREFIX=${prefixpath} " +
@@ -273,7 +273,7 @@ def getDockerImage(Map conf=[:])
     try{
         echo "Pulling down image: ${image}"
         dockerImage = docker.image("${image}")
-        withDockerRegistry([ credentialsId: "docker_test_cred", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
+        withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
             dockerImage.pull()
         }
     }
@@ -285,7 +285,7 @@ def getDockerImage(Map conf=[:])
     {
         echo "Building image..."
         dockerImage = docker.build("${image}", "${dockerArgs} ${env.WORKSPACE}/${env.REPO_DIR}/Dockerfile.ci")
-        withDockerRegistry([ credentialsId: "docker_test_cred", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
+        withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
             dockerImage.push()
         }
     }
@@ -303,7 +303,9 @@ def getDockerImage(Map conf=[:])
         try{
             echo "Pulling down perf test image: ${image}"
             dockerImage = docker.image("${image}")
-            dockerImage.pull()
+            withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
+                dockerImage.pull()
+            }
         }
         catch(org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e){
             echo "The job was cancelled or aborted"
@@ -311,8 +313,8 @@ def getDockerImage(Map conf=[:])
         }
         catch(Exception ex)
         {
-            dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.REPO_DIR}/.")
-            withDockerRegistry([ credentialsId: "docker_test_cred", url: "" ]) {
+            dockerImage = docker.build("${image}", "${dockerArgs} ${env.WORKSPACE}/${env.REPO_DIR}/Dockerfile.ci")
+            withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
                 dockerImage.push()
             }
         }
@@ -345,6 +347,7 @@ def buildHipClangJob(Map conf=[:]){
 
         def needs_gpu = conf.get("needs_gpu", true)
         def lfs_pull = conf.get("lfs_pull", false)
+        def build_timeout = conf.get("build_timeout", 420)
 
         def retimage
         def credentialsID = env.monorepo_status_wrapper_creds
@@ -382,7 +385,7 @@ def buildHipClangJob(Map conf=[:]){
             //grab root of node workspace. not guaranteed to be /var/jenkins
             String remote_root = env.WORKSPACE.substring(0, env.WORKSPACE.lastIndexOf("workspace/")) 
             withDockerContainer(image: image, args: dockerOpts + " -v=${remote_root}:${remote_root}") {
-                timeout(time: 420, unit:'MINUTES')
+                timeout(time: build_timeout, unit:'MINUTES')
                 {
                     if (lfs_pull) {
                         sh """
