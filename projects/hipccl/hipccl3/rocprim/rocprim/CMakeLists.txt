@@ -36,7 +36,7 @@ target_include_directories(rocprim
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include/rocprim>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 # This target links against HIP library
@@ -54,9 +54,9 @@ if (ROCPRIM_INSTALL)
 
   rocm_install(
     DIRECTORY
-      "include/"
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/"
       "${PROJECT_BINARY_DIR}/rocprim/include/"
-      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     FILES_MATCHING
     PATTERN "*.h"
     PATTERN "*.hpp"
