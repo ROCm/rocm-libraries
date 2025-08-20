@@ -34,8 +34,8 @@
 #include <Tensile/Utils.hpp>
 #include <Tensile/hip/HipHardware.hpp>
 
-#include <origami/StreamK.hpp>
-#include <origami/Utils.hpp>
+#include <origami/streamk.hpp>
+#include <origami/utils.hpp>
 
 #include <algorithm>
 #include <cmath>

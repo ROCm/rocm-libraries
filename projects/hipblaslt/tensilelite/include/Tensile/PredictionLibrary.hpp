@@ -29,7 +29,7 @@
 #include <set>
 #include <vector>
 
-#include <origami/Utils.hpp>
+#include <origami/utils.hpp>
 
 namespace TensileLite
 {

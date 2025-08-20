@@ -33,7 +33,7 @@
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/Command.hpp>
-#include <origami/Utils.hpp>
+#include <origami/utils.hpp>
 
 /**
  * @brief KernelType

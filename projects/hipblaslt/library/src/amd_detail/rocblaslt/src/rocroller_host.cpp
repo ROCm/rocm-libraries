@@ -39,7 +39,7 @@
 #include <rocRoller/KernelGraph/CoordinateGraph/Dimension.hpp>
 #include <rocRoller/TensorDescriptor.hpp>
 
-#include <origami/Utils.hpp>
+#include <origami/utils.hpp>
 
 using namespace rocRoller;
 
