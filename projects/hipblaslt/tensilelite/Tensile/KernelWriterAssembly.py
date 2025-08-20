@@ -1937,6 +1937,12 @@ class KernelWriterAssembly(KernelWriter):
 
       # C regs are not used during initialization so mark them as available -
       # we will claim then just before the start of the unroll loop:
+      if self.states.lastValuMXSAB:
+        self.vgprPool.add(0 , \
+            self.states.lastValuMXSAB - self.states.mxsa.startVgprValu, "ValuMXSAB") # Add as available
+        moduleWg.addComment0("init: add vgpr [%u...%u) to pool" % \
+                            (self.states.mxsa.startVgprValu, self.states.lastValuMXSAB+self.states.mxsa.startVgprValu))
+
       self.vgprPool.add(self.states.a.startVgprValu , \
           self.states.lastValuAB - self.states.a.startVgprValu , "ValuAB") # Add as available
       moduleWg.addComment0("init: add vgpr [%u...%u) to pool" % \
@@ -4776,6 +4782,9 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   def initC(self, kernel):
     module = Module("initC")
+    if self.states.lastValuMXSAB:
+      self.vgprPool.remove(self.states.mxsa.startVgprValu , self.states.lastValuMXSAB - self.states.mxsa.startVgprValu , "ValuMXSAB")
+      module.addComment1("initC: remove ValuMXSA/B vgpr buffer [%u...%u) from pool"%(self.states.mxsa.startVgprValu, self.states.lastValuMXSAB))
     self.vgprPool.remove(self.states.c.startVgprValu, self.states.c.numVgprValu, "ValuC")
     module.addComment1("initC: remove ValuC vgpr buffer [%u...%u) from pool"%(self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu))
     numAccvgprs = self.states.totalAgprs
@@ -7025,6 +7034,7 @@ class KernelWriterAssembly(KernelWriter):
         return VAccvgprReadB32 if read else VAccvgprWriteB32
     else:
       return VMovB32
+
   def accVgprReadWriteIndex(self, kernel, idx, sz=1):
     if not kernel["MIArchVgpr"]:
       if idx >= self.states.maxLimitAgprs:
@@ -7032,7 +7042,7 @@ class KernelWriterAssembly(KernelWriter):
       else:
         return accvgpr(idx, sz)
     else:
-      return vgpr(idx, sz)
+      return vgpr("ValuC+%u"%idx, sz)
 
   ##############################################################################
   # MFMA Iteration
