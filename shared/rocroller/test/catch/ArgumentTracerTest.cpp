@@ -212,9 +212,7 @@ namespace ArgumentTracerTest
         {
             KG::ControlFlowArgumentTracer argTracer(kgraph, context->kernel());
 
-            //
             // Create an additional kernel argument after we've made the arg tracer.
-            //
             std::string const& newArgName = "newArg";
             context->kernel()->addArgument({newArgName, DataType::Int64, DataDirection::ReadOnly});
             auto newArg = std::make_shared<AssemblyKernelArgument>(
