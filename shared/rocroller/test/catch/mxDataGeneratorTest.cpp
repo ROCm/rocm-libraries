@@ -78,6 +78,52 @@ namespace mxDataGeneratorTest
                 CHECK(toFloatPacked<DGenDT>(&scale[0], &byteData2[0], scale_i, i) == ref[i]);
             }
         }
+
+        template <typename rrDT>
+        void sameData(unsigned    dim1,
+                      unsigned    dim2,
+                      const float min          = -1.f,
+                      const float max          = 1.f,
+                      const int   blockScaling = 32)
+        {
+            using DGenDT = typename rrDT2DGenDT<rrDT>::type;
+
+            auto             dataType = TypeInfo<rrDT>::Var.dataType;
+            TensorDescriptor desc(dataType, {dim1, dim2}, "T");
+
+            std::vector<uint32_t> seeds = {9861u, 12345u, 54321u, 98765u, 13579u, 24680u};
+            
+            std::vector<uint32_t> shuffledSeeds = seeds;
+            std::random_shuffle(shuffledSeeds.begin(), shuffledSeeds.end());
+
+            std::map<uint32_t, std::vector<uint8_t>> firstGenData;
+            std::map<uint32_t, std::vector<uint8_t>> firstGenScale;
+            std::map<uint32_t, std::vector<float>> firstGenRef;
+
+            for (uint32_t seed : shuffledSeeds)
+            {
+                const auto dgen = getDataGenerator<rrDT>(desc, min, max, seed, blockScaling);
+                
+                firstGenData[seed] = dgen.getDataBytes();
+                firstGenScale[seed] = dgen.getScaleBytes();
+                firstGenRef[seed] = dgen.getReferenceFloat();
+            }
+
+            std::random_shuffle(shuffledSeeds.begin(), shuffledSeeds.end());
+            
+            for (uint32_t seed : shuffledSeeds)
+            {
+                const auto dgen = getDataGenerator<rrDT>(desc, min, max, seed, blockScaling);
+                
+                auto secondGenData = dgen.getDataBytes();
+                auto secondGenScale = dgen.getScaleBytes();
+                auto secondGenRef = dgen.getReferenceFloat();
+
+                CHECK(firstGenData[seed] == secondGenData);
+                CHECK(firstGenScale[seed] == secondGenScale);
+                CHECK(firstGenRef[seed] == secondGenRef);
+            }
+        }
     };
 
     TEMPLATE_TEST_CASE(
@@ -91,6 +137,28 @@ namespace mxDataGeneratorTest
             const int dim2 = 32;
 
             t.exeDataGeneratorTest<TestType>(dim1, dim2);
+        }
+    }
+
+    TEMPLATE_TEST_CASE("Ensure mxDataGenerator produces same data",
+                       "[mxDataGenerator]",
+                       FP4,
+                       FP6,
+                       BF6,
+                       FP8,
+                       BF8,
+                       Half,
+                       BFloat16,
+                       float)
+    {
+        mxDataGeneratorTest t;
+
+        SUPPORTED_ARCH_SECTION(arch)
+        {
+            const int dim1 = 64;
+            const int dim2 = 128;
+
+            t.sameData<TestType>(dim1, dim2);
         }
     }
 }
