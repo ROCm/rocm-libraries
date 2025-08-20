@@ -55,7 +55,7 @@ function(hip_cuda_detect_lowest_cc out_variable)
         WORKING_DIRECTORY "${PROJECT_BINARY_DIR}/CMakeFiles/"
         RESULT_VARIABLE __nvcc_res OUTPUT_VARIABLE __nvcc_out
     )
-
+    message(STATUS "nvcc status: ${__nvcc_res} ${__nvcc_out}
     if(__nvcc_res EQUAL 0)
         set(HIP_CUDA_lowest_cc ${__nvcc_out} CACHE INTERNAL "The lowest CC of installed NV GPUs" FORCE)
     endif()
@@ -96,8 +96,11 @@ set(HIP_NVCC_FLAGS " ${HIP_NVCC_FLAGS} -Wno-deprecated-gpu-targets -Xcompiler -W
 set(DEFAULT_NVGPU_TARGETS "")
 # If NVGPU_TARGETS is empty get default value for it
 if("x${NVGPU_TARGETS}" STREQUAL "x")
+    message(STATUS "equal x")
     hip_cuda_detect_lowest_cc(lowest_cc)
     set(DEFAULT_NVGPU_TARGETS "${lowest_cc}")
+else()
+    message(STATUS "not equal x")
 endif()
 set(NVGPU_TARGETS "${DEFAULT_NVGPU_TARGETS}"
     CACHE STRING "List of NVIDIA GPU targets (compute capabilities), for example \"35;50\""
