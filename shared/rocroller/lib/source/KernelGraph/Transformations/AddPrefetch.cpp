@@ -1002,21 +1002,22 @@ namespace rocRoller
                 {
                     auto prefetchGlobalU
                         = (m_exchangeSegment[exchangeTag] + numInFlight) % numUnroll;
-                    
+
                     auto loadTag = getLoadForExchange(exchangeTag, graph);
-                    AssertFatal(loadTag.has_value(), "couldn't find the load associated with the exchange");
-                    
+                    AssertFatal(loadTag.has_value(),
+                                "couldn't find the load associated with the exchange");
+
                     if(auto search = scaleLoadU.find(loadTag.value()); search != scaleLoadU.end())
                     {
                         if(search->second > prefetchGlobalU)
-                            scaleLoadU[loadTag.value()] = prefetchGlobalU;  
+                            scaleLoadU[loadTag.value()] = prefetchGlobalU;
                     }
                     else
-                        scaleLoadU[loadTag.value()] = prefetchGlobalU;  
+                        scaleLoadU[loadTag.value()] = prefetchGlobalU;
                 }
 
                 for(auto pair : scaleLoadU)
-                {  
+                {
                     std::unordered_set<int> orderBeforeTags;
                     for(auto info : loadsByUnroll[pair.second])
                         orderBeforeTags.insert(info.globalChain);

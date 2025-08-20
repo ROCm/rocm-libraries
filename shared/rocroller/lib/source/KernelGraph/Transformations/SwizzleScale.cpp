@@ -75,24 +75,27 @@ namespace rocRoller
             return scaleLoads;
         }
 
-        void orderExchangesBeforeMultiplies(KernelGraph& graph, ContextPtr context, NaryArgument arg, std::map<int, int> tileExchangeMap)
+        void orderExchangesBeforeMultiplies(KernelGraph&       graph,
+                                            ContextPtr         context,
+                                            NaryArgument       arg,
+                                            std::map<int, int> tileExchangeMap)
         {
             auto root = graph.control.roots().only();
 
             for(auto multiplyTag : filter(graph.control.isElemType<Multiply>(),
                                           graph.control.depthFirstVisit(root.value())))
-            {    
-                
+            {
+
                 auto [tileTag, tile] = graph.getDimension<MacroTile>(
                     multiplyTag, Connections::typeArgument<MacroTile>(arg));
 
                 Log::debug("Adding exchange-before-multiply Sequence edge from {} to {} for {}",
-                    tileExchangeMap.at(tileTag),
-                    multiplyTag,
-                    toString(arg));
+                           tileExchangeMap.at(tileTag),
+                           multiplyTag,
+                           toString(arg));
 
                 graph.control.addElement(Sequence(), {tileExchangeMap.at(tileTag)}, {multiplyTag});
-            }    
+            }
         }
 
         std::map<int, std::map<int, int>>

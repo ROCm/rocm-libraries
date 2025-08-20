@@ -40,7 +40,7 @@ namespace rocRoller
         using namespace Expression;
 
         void insertPreLoopLoads(KernelGraph&            graph,
-                                UnrollColouring const&    colouring,
+                                UnrollColouring const&  colouring,
                                 std::vector<int> const& preLoopLoads,
                                 std::vector<int>        loads)
         {
@@ -56,8 +56,8 @@ namespace rocRoller
             std::optional<int> prevLoad;
             std::optional<int> nextLoad;
             for(auto load : loads)
-            { 
-                auto unrollMap = colouring.operationColour.at(load);
+            {
+                auto unrollMap  = colouring.operationColour.at(load);
                 auto unrollKDim = graph.mapper.get<Unroll>(load, 2);
                 if(unrollKVal.has_value() && unrollKVal.value() != unrollMap.at(unrollKDim))
                 {
@@ -65,10 +65,11 @@ namespace rocRoller
                     break;
                 }
                 unrollKVal = unrollMap.at(unrollKDim);
-                prevLoad = load; 
+                prevLoad   = load;
             }
 
-            AssertFatal(prevLoad.has_value() && nextLoad.has_value(), "couldn't find a position to in-loop scale prefetch");
+            AssertFatal(prevLoad.has_value() && nextLoad.has_value(),
+                        "couldn't find a position to in-loop scale prefetch");
 
             auto prevTopOp = getTopSetCoordinate(graph, prevLoad.value());
             auto nextTopOp = getTopSetCoordinate(graph, nextLoad.value());
@@ -77,7 +78,7 @@ namespace rocRoller
         }
 
         void insertInLoopLoads(KernelGraph&                            graph,
-                               UnrollColouring const&    colouring,
+                               UnrollColouring const&                  colouring,
                                std::vector<std::pair<int, int>> const& inLoopLoads,
                                int                                     forLoop)
         {
@@ -94,8 +95,8 @@ namespace rocRoller
             std::optional<int> prevLoad;
             std::optional<int> nextLoad;
             for(auto loopLoad : loopLoads)
-            { 
-                auto unrollMap = colouring.operationColour.at(loopLoad);
+            {
+                auto unrollMap  = colouring.operationColour.at(loopLoad);
                 auto unrollKDim = graph.mapper.get<Unroll>(loopLoad, 2);
                 if(unrollKVal.has_value() && unrollKVal.value() != unrollMap.at(unrollKDim))
                 {
@@ -103,10 +104,11 @@ namespace rocRoller
                     break;
                 }
                 unrollKVal = unrollMap.at(unrollKDim);
-                prevLoad = loopLoad; 
+                prevLoad   = loopLoad;
             }
 
-            AssertFatal(prevLoad.has_value() && nextLoad.has_value(), "couldn't find a position to in-loop scale prefetch");
+            AssertFatal(prevLoad.has_value() && nextLoad.has_value(),
+                        "couldn't find a position to in-loop scale prefetch");
 
             auto postNOP = graph.control.addElement(NOP());
             auto prev    = postNOP;
@@ -242,7 +244,8 @@ namespace rocRoller
                     preLoopLoads.push_back(topOp);
                     auto inLoopLoad = duplicateChain(graph, {topOp});
                     graph.control.addElement(Sequence(), {copyTag}, {inLoopLoad});
-                    inLoopLoads.push_back(std::make_pair(inLoopLoad, graph.mapper.get<Unroll>(loadTag, 2)));
+                    inLoopLoads.push_back(
+                        std::make_pair(inLoopLoad, graph.mapper.get<Unroll>(loadTag, 2)));
 
                     // update the indexes of the associated exchange macrotiles
                     auto location = graph.coordinates.getLocation(macTileTag);
