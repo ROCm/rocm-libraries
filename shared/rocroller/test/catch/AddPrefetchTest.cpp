@@ -71,7 +71,8 @@ namespace AddPrefetchTest
 
         graph = transform<ConstantPropagation>(graph);
         graph = transform<FuseExpressions>(graph);
-        graph = transform<ConnectWorkgroups>(graph, params, context.get());
+        graph = transform<ConnectWorkgroups>(
+            graph, context.get(), params->workgroupMappingDim, params->workgroupRemapXCC);
         graph = transform<UnrollLoops>(graph, params, context.get());
         graph = transform<FuseLoops>(graph);
         graph = transform<RemoveDuplicates>(graph);

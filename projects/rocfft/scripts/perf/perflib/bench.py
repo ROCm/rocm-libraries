@@ -1,4 +1,4 @@
-# Copyright (C) 2021 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2021 - 2025 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -198,9 +198,12 @@ def run(bench,
             match = line[len(matchTag):]
 
     if proc.returncode == 0:
-        for m in re.finditer('Execution gpu time: ([ 0-9.]*) ms', cout,
-                             re.MULTILINE):
-            times.append(list(map(float, m.group(1).split(' '))))
+        for m in re.finditer(
+                r'(?:Max rank time|Execution gpu time):\s*([0-9. ]+)\s*ms',
+                cout, re.MULTILINE):
+            raw = m.group(1)
+            t = [float(x) for x in raw.split() if x.strip()]
+            times.append(t)
     else:
         logging.info("PROCESS FAILED with return code " + str(proc.returncode))
 

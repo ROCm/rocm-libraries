@@ -47,7 +47,8 @@ function(add_hipcub_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
   )
 
   if(HIP_COMPILER STREQUAL "nvcc")
-    set_property(TARGET ${TEST_TARGET} PROPERTY CUDA_STANDARD 14)
+    # For test/hipcub, std::exclusive_scan is used, which is a c++ 17 feature
+    target_compile_features(${TEST_TARGET} PUBLIC cuda_std_17)
     set_source_files_properties(${TEST_SOURCES} PROPERTIES LANGUAGE CUDA)
     target_link_libraries(${TEST_TARGET}
       PRIVATE

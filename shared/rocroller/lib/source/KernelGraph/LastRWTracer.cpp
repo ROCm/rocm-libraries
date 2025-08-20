@@ -90,30 +90,13 @@ namespace rocRoller::KernelGraph
     {
         std::unordered_map<std::string, std::vector<std::deque<int>>> controlStacks;
 
-        std::string theOne = "Tensor_4_extent_4";
-
         for(auto const& [controlNode, args] : argTracer.referencedArguments())
         {
-            bool debug = args.contains(theOne);
             auto stack = rocRoller::KernelGraph::controlStack(controlNode, m_graph);
             for(auto const& arg : args)
             {
                 controlStacks[arg].push_back(stack);
             }
-        }
-
-        if(controlStacks.contains(theOne))
-        {
-            std::ofstream f(fmt::format("data_{}.txt", theOne));
-            for(auto const& stack : controlStacks[theOne])
-            {
-                f << "Stack: ";
-                streamJoin(f, stack, ", ");
-                f << std::endl;
-            }
-
-            auto rv = getLastLocationsFromControlStacks(controlStacks);
-            f << ShowValue(rv[theOne]);
         }
 
         return getLastLocationsFromControlStacks(controlStacks);

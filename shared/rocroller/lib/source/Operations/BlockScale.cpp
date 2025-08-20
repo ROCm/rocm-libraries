@@ -35,21 +35,26 @@ namespace rocRoller
         BlockScale::BlockScale(OperationTag                data,
                                int                         dimensions,
                                std::optional<OperationTag> scale,
-                               std::vector<size_t> const&  strides)
+                               std::vector<size_t>         strides)
             : BaseOperation()
             , m_data(data)
             , m_scale(scale)
-            , m_strides([&]() {
-                if(dimensions >= 1)
-                {
-                    std::vector<size_t> rt(dimensions, 1);
-                    rt[0] = 32; // Default value for first stride based on hardware arch
-                    std::copy(strides.begin(), strides.end(), rt.begin());
-                    return rt;
-                }
-                return std::vector<size_t>{};
-            }())
         {
+            if(!strides.empty())
+            {
+                m_strides = std::move(strides);
+            }
+
+            if(m_strides.empty())
+            {
+                // Default value for first stride based on hardware arch
+                m_strides.push_back(32);
+            }
+
+            if(m_strides.size() != dimensions)
+            {
+                m_strides.resize(dimensions, 1);
+            }
         }
 
         std::unordered_set<OperationTag> BlockScale::getInputs() const
@@ -124,6 +129,43 @@ namespace rocRoller
         std::ostream& operator<<(std::ostream& stream, ScaleMode const& mode)
         {
             return stream << toString(mode);
+        }
+
+        SubTileTranspose::SubTileTranspose(OperationTag input, std::vector<size_t> tileDimensions)
+            : m_input(input)
+            , m_tileDimensions(std::move(tileDimensions))
+        {
+            if(!m_tileDimensions.empty())
+            {
+                AssertFatal(m_tileDimensions.size() == 3, ShowValue(m_tileDimensions));
+                AssertFatal(m_tileDimensions[0] == 64 && m_tileDimensions[1] == 4
+                                && (m_tileDimensions[2] == 2 || m_tileDimensions[2] == 4),
+                            ShowValue(m_tileDimensions));
+            }
+        }
+
+        std::unordered_set<OperationTag> SubTileTranspose::getInputs() const
+        {
+            return {m_input};
+        }
+        std::string SubTileTranspose::toString() const
+        {
+            return fmt::format(
+                "SubTileTranspose({}: input {})", concatenate(m_tileDimensions), m_input.value);
+        }
+        const std::vector<size_t>& SubTileTranspose::tileDimensions() const
+        {
+            return m_tileDimensions;
+        }
+
+        bool SubTileTranspose::operator==(SubTileTranspose const& other) const
+        {
+            return (*this <=> other) == std::strong_ordering::equal;
+        }
+
+        OperationTag SubTileTranspose::input() const
+        {
+            return m_input;
         }
     }
 }

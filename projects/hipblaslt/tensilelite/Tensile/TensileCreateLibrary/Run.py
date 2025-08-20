@@ -505,7 +505,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
     masterLibraries = {}
     nextSolIndex = 0
     splitGSU = False
-    printSolutionRejectionReason = False
+    printSolutionRejectionReason = True
     printIndexAssignmentInfo = False
 
     fIter = zip(

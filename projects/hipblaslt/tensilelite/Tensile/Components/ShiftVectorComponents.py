@@ -702,7 +702,7 @@ class ShiftVectorComponentsMFMA(ShiftVectorComponents):
                                                 module.add(DSBPermuteB32(dst=vgpr(movRegId), src0=vgpr(permuteIndexReg), src1=vgpr(movRegId), ds=ds, comment="permute edge values"))
 
                                 if needWait:
-                                    module.add(SWaitCnt(lgkmcnt=0, comment="wait for swizzle operation"))
+                                    module.add(SWaitCnt(dscnt=0, comment="wait for swizzle operation"))
 
                                 if not skip:
                                     module.add(SMovB32(dst=sgpr(tmpSgpr), src=dstThreadId, comment="which thread need to shfit in this block"))

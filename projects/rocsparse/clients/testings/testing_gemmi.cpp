@@ -183,7 +183,7 @@ void testing_gemmi(const Arguments& arg)
                                            nnz_C,
                                            *h_beta != static_cast<T>(0));
         double gpu_gbyte  = get_gpu_gbyte(gpu_time_used,
-                                         csrmm_gbyte_count<T, rocsparse_int, rocsparse_int>,
+                                         csrmm_gbyte_count<T, T, T, rocsparse_int, rocsparse_int>,
                                          hB.m,
                                          hB.nnz,
                                          nnz_A,
