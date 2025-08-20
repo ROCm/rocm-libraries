@@ -43,7 +43,7 @@ namespace TensileLite
 
             hipDeviceProp_t properties;
 
-            std::shared_ptr<origami::Hardware> analyticalHardware;
+            std::shared_ptr<origami::hardware_t> analyticalHardware;
 
             virtual std::string archName() const override;
         };

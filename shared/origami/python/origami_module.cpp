@@ -5,47 +5,47 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-namespace Origami = origami;
-using Hardware = origami::Hardware;
+// namespace origami = origami;
+using Hardware = origami::hardware_t;
 
 PYBIND11_MODULE(origami, m)
 {
-    pybind11::enum_<Hardware::Architecture>(m, "Architecture")
-        .value("gfx942", Hardware::Architecture::gfx942)
-        .value("gfx950", Hardware::Architecture::gfx950)
+    pybind11::enum_<Hardware::architecture_t>(m, "architecture_t")
+        .value("gfx942", Hardware::architecture_t::gfx942)
+        .value("gfx950", Hardware::architecture_t::gfx950)
         .export_values();
 
-    pybind11::enum_<Origami::DataType>(m, "DataType")
-        .value("Float", Origami::DataType::Float)
-        .value("ComplexFloat", Origami::DataType::ComplexFloat)
-        .value("ComplexDouble", Origami::DataType::ComplexDouble)
-        .value("Double", Origami::DataType::Double)
-        .value("Half", Origami::DataType::Half)
-        .value("Int8x4", Origami::DataType::Int8x4)
-        .value("Int32", Origami::DataType::Int32)
-        .value("BFloat16", Origami::DataType::BFloat16)
-        .value("Int8", Origami::DataType::Int8)
-        .value("Int64", Origami::DataType::Int64)
-        .value("XFloat32", Origami::DataType::XFloat32)
-        .value("Float8_fnuz", Origami::DataType::Float8_fnuz)
-        .value("BFloat8_fnuz", Origami::DataType::BFloat8_fnuz)
-        .value("Float8BFloat8_fnuz", Origami::DataType::Float8BFloat8_fnuz)
-        .value("BFloat8Float8_fnuz", Origami::DataType::BFloat8Float8_fnuz)
-        .value("Float8", Origami::DataType::Float8)
-        .value("BFloat8", Origami::DataType::BFloat8)
-        .value("Float8BFloat8", Origami::DataType::Float8BFloat8)
-        .value("BFloat8Float8", Origami::DataType::BFloat8Float8)
-        .value("Float6", Origami::DataType::Float6)
-        .value("BFloat6", Origami::DataType::BFloat6)
-        .value("Float4", Origami::DataType::Float4)
+    pybind11::enum_<origami::data_type_t>(m, "data_type_t")
+        .value("Float", origami::data_type_t::Float)
+        .value("ComplexFloat", origami::data_type_t::ComplexFloat)
+        .value("ComplexDouble", origami::data_type_t::ComplexDouble)
+        .value("Double", origami::data_type_t::Double)
+        .value("Half", origami::data_type_t::Half)
+        .value("Int8x4", origami::data_type_t::Int8x4)
+        .value("Int32", origami::data_type_t::Int32)
+        .value("BFloat16", origami::data_type_t::BFloat16)
+        .value("Int8", origami::data_type_t::Int8)
+        .value("Int64", origami::data_type_t::Int64)
+        .value("XFloat32", origami::data_type_t::XFloat32)
+        .value("Float8_fnuz", origami::data_type_t::Float8_fnuz)
+        .value("BFloat8_fnuz", origami::data_type_t::BFloat8_fnuz)
+        .value("Float8BFloat8_fnuz", origami::data_type_t::Float8BFloat8_fnuz)
+        .value("BFloat8Float8_fnuz", origami::data_type_t::BFloat8Float8_fnuz)
+        .value("Float8", origami::data_type_t::Float8)
+        .value("BFloat8", origami::data_type_t::BFloat8)
+        .value("Float8BFloat8", origami::data_type_t::Float8BFloat8)
+        .value("BFloat8Float8", origami::data_type_t::BFloat8Float8)
+        .value("Float6", origami::data_type_t::Float6)
+        .value("BFloat6", origami::data_type_t::BFloat6)
+        .value("Float4", origami::data_type_t::Float4)
         .export_values();
 
-    m.def("intToDataType",
-          &Origami::intToDataType,
-          "Convert int to DataType.");
+    m.def("intTodata_type_t",
+          &origami::int_to_data_type,
+          "Convert int to data_type_t.");
 
     pybind11::class_<Hardware>(m, "Hardware")
-        .def(pybind11::init<Hardware::Architecture,
+        .def(pybind11::init<Hardware::architecture_t,
                             size_t,
                             size_t,
                             size_t,
@@ -71,15 +71,15 @@ PYBIND11_MODULE(origami, m)
         .def_readwrite("NUM_XCD", &Hardware::NUM_XCD);
 
     m.def("getHardwareForDevice",
-          &Hardware::getHardwareForDevice,
+          &Hardware::get_hardware_for_device,
           "This gets a hardware object for a device.");
 
-    m.def("datatype_to_bits", &Origami::dataTypeToBits, "Return the number of bits in a datatype");
-    m.def("string_to_datatype", &Origami::stringToDatatype, "Convert a string representation of a datatype into DataType enum");
+    m.def("datatype_to_bits", &origami::data_type_to_bits, "Return the number of bits in a datatype");
+    m.def("string_to_datatype", &origami::string_to_data_type, "Convert a string representation of a datatype into data_type_t enum");
     m.def("select_best_macro_tile_size",
-          &Origami::select_best_macro_tile_size,
+          &origami::select_best_macro_tile_size,
           "Get best macro tile sizes.");
-    m.def("select_streamk_grid", &Origami::streamk::select_streamk_grid, "Select Best StreamK Grid Size");
-    m.def("compute_total_latency", &Origami::compute_total_latency, "compute_total_latency");
-    m.def("select_best_wgm", &Origami::select_best_wgm, "Get best workgroup mapping.");
+    m.def("select_grid", &origami::streamk::select_grid, "Select Best StreamK Grid Size");
+    m.def("compute_total_latency", &origami::compute_total_latency, "compute_total_latency");
+    m.def("select_best_wgm", &origami::select_best_wgm, "Get best workgroup mapping.");
 }

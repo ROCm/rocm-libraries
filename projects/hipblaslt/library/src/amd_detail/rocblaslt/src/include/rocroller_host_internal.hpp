@@ -167,7 +167,7 @@ constexpr int preferredUnrolling(rocRoller::DataType typeA, rocRoller::DataType 
 
 template <rocRoller::DataType typeA, rocRoller::DataType typeB>
 constexpr auto generateTileList() {
-    std::array<origami::TileTuple, possibleTileSizes.size()> tileList{};
+    std::array<origami::tile_tuple, possibleTileSizes.size()> tileList{};
 
     for (size_t i = 0; i < possibleTileSizes.size(); ++i) {
         const auto& wgt = possibleTileSizes[i];
@@ -190,10 +190,10 @@ constexpr auto generateTileList() {
     return tileList;
 }
 
-using TileListGeneratorFn = std::vector<origami::TileTuple>(*)();
+using TileListGeneratorFn = std::vector<origami::tile_tuple>(*)();
 
 template <rocRoller::DataType A, rocRoller::DataType B>
-std::vector<origami::TileTuple> generateTileListWrapper() {
+std::vector<origami::tile_tuple> generateTileListWrapper() {
     constexpr auto arr = generateTileList<A, B>();
     return {arr.begin(), arr.end()};
 }
@@ -222,7 +222,7 @@ const std::map<std::pair<rocRoller::DataType, rocRoller::DataType>, TileListGene
     INSTANTIATE_TILE_LIST_FOR(FP6)
 };
 
-std::vector<origami::TileTuple> getTileListForKernelType(KernelType kernelType)
+std::vector<origami::tile_tuple> getTileListForKernelType(KernelType kernelType)
 {
     auto key = std::make_pair(kernelType.typeA, kernelType.typeB);
     auto it = tileListGenerators.find(key);

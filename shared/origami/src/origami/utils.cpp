@@ -14,7 +14,7 @@ namespace origami
     //
     // Tiebreaker function.
     //
-    void pick_best_tile_by_arithmetic_intensity(std::vector<ResultTuple>& top_results,
+    void pick_best_tile_by_arithmetic_intensity(std::vector<result_tuple>& top_results,
                                                 size_t                    num_to_sort)
     {
         if(top_results.empty())
@@ -28,7 +28,7 @@ namespace origami
         //    - Flops for tile (MT_M, MT_N, MT_K) is: 2 * MT_M * MT_N * MT_K
         //    - Memory traffic approximated as: MT_M*MT_K + MT_K*MT_N + MT_M*MT_N
         //    - Arithmetic intensity = flops / memory_traffic
-        auto computeArithmeticIntensity = [](const ResultTuple& t) -> double {
+        auto computeArithmeticIntensity = [](const result_tuple& t) -> double {
             // The tuple is: (latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K)
             auto MT_M = std::get<1>(t);
             auto MT_N = std::get<2>(t);
@@ -48,7 +48,7 @@ namespace origami
         //    (highest arithmetic intensity first).
         std::sort(top_results.begin(),
                     top_results.begin() + num_to_sort,
-                    [&](const ResultTuple& a, const ResultTuple& b) {
+                    [&](const result_tuple& a, const result_tuple& b) {
                         double ai_a = computeArithmeticIntensity(a);
                         double ai_b = computeArithmeticIntensity(b);
                         return ai_a > ai_b; // descending
@@ -56,8 +56,8 @@ namespace origami
         // 3) Return the tile with the highest arithmetic intensity
     }
 
-    ResultTuple pick_best_tile_with_dimension_priority(
-        const std::vector<ResultTuple>& top_results, size_t M, size_t N, size_t K)
+    result_tuple pick_best_tile_with_dimension_priority(
+        const std::vector<result_tuple>& top_results, size_t M, size_t N, size_t K)
     {
         if(top_results.empty())
         {
@@ -77,7 +77,7 @@ namespace origami
 
         // 2) Helper function to extract the tile dimension:
         //    (latency, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K)
-        auto getTileSize = [](const ResultTuple& t, char dimChar) -> size_t {
+        auto getTileSize = [](const result_tuple& t, char dimChar) -> size_t {
             switch(dimChar)
             {
             case 'M':
@@ -96,9 +96,9 @@ namespace origami
         //    - If there's a tie, compare dimensionPriority[1]
         //    - If still a tie, compare dimensionPriority[2]
         //    - If they're all equal, consider them tied
-        std::vector<ResultTuple> sorted = top_results; // copy
+        std::vector<result_tuple> sorted = top_results; // copy
         std::sort(
-            sorted.begin(), sorted.end(), [&](const ResultTuple& a, const ResultTuple& b) {
+            sorted.begin(), sorted.end(), [&](const result_tuple& a, const result_tuple& b) {
                 for(char d : dimPriority)
                 {
                     size_t ta = getTileSize(a, d);
@@ -122,7 +122,7 @@ namespace origami
                                     size_t          batch,
                                     bool            transA,
                                     bool            transB,
-                                    const Hardware& hardware,
+                                    const hardware_t& hardware,
                                     size_t          MT_M,
                                     size_t          MT_N,
                                     size_t          MT_K,
@@ -132,7 +132,7 @@ namespace origami
                                     size_t          element_size_A,
                                     size_t          element_size_B,
                                     size_t          element_size_out,
-                                    DataType        miDataType,
+                                    data_type_t     mi_datatype,
                                     size_t          mx_block_size,
                                     double          H_L2,
                                     bool            debug,
@@ -170,7 +170,7 @@ namespace origami
                                                     element_size_A, //ElementSizeA
                                                     element_size_B, //ElementSizeB
                                                     element_size_out, //ElementSizeout
-                                                    miDataType,
+                                                    mi_datatype,
                                                     WGM,
                                                     mx_block_size,
                                                     debug);
@@ -188,25 +188,25 @@ namespace origami
         return best_grid;
     }
 
-    std::vector<ResultTuple> select_best_macro_tile_size(size_t                        M,
+    std::vector<result_tuple> select_best_macro_tile_size(size_t                        M,
                                                             size_t                        N,
                                                             size_t                        K,
                                                             size_t                        batch,
                                                             bool                          transA,
                                                             bool                          transB,
-                                                            const Hardware&               hardware,
-                                                            const std::vector<TileTuple>& MT_list,
+                                                            const hardware_t&             hardware,
+                                                            const std::vector<tile_tuple>& MT_list,
                                                             size_t element_size_A, //In bits
                                                             size_t element_size_B, //In bits
                                                             size_t element_size_out, //In bits
-                                                            DataType miDataType,
+                                                            data_type_t mi_datatype,
                                                             size_t mx_block_size,
                                                             double H_L2,
                                                             bool   debug,
                                                             bool   print,
                                                             size_t WGM)
     {
-        std::vector<ResultTuple> valid_results;
+        std::vector<result_tuple> valid_results;
         valid_results.reserve(MT_list.size());
 
         for(const auto& mt : MT_list)
@@ -247,7 +247,7 @@ namespace origami
                                                                 element_size_A,
                                                                 element_size_B,
                                                                 element_size_out,
-                                                                miDataType,
+                                                                mi_datatype,
                                                                 WGM,
                                                                 mx_block_size,
                                                                 debug);
@@ -284,7 +284,7 @@ namespace origami
         }
         // 3) If that tie group has at least 10 entries, we only use those.
         // 4) Otherwise, keep adding the next best latencies until we have 10 total or run out.
-        // std::vector<ResultTuple> top_candidates = tie_results;
+        // std::vector<result_tuple> top_candidates = tie_results;
         // if(tie_results.size() < 10)
         // {
         //     size_t i = tie_results.size();
@@ -335,7 +335,7 @@ namespace origami
         size_t                     N,
         size_t                     K,
         size_t                     batch,
-        Hardware&                  hardware,
+        hardware_t&                hardware,
         size_t                     MT_M,
         size_t                     MT_N,
         size_t                     MT_K,
@@ -416,8 +416,8 @@ namespace origami
         size_t                                                         M,
         size_t                                                         N,
         size_t                                                         K,
-        Hardware&                                                      hardware,
-        std::function<double(size_t, size_t, size_t, size_t, size_t, size_t, Hardware&)>
+        hardware_t&                                                    hardware,
+        std::function<double(size_t, size_t, size_t, size_t, size_t, size_t, hardware_t&)>
                 tie_breaker_fn,
         bool debug)
     {
@@ -448,20 +448,20 @@ namespace origami
             size_t                        K,
             bool                          transA,
             bool                          transB,
-            Hardware&                     hardware,
-            const std::vector<TileTuple>& MT_list,
+            hardware_t&                   hardware,
+            const std::vector<tile_tuple>& MT_list,
             size_t                        element_size,
-            DataType                      miDataType,
+            data_type_t                   mi_datatype,
             double                        H_L2,
             bool                          debug,
             bool                          print,
             size_t                        WGM,
-            std::function<double(size_t, size_t, size_t, size_t, size_t, size_t, Hardware&)>
+            std::function<double(size_t, size_t, size_t, size_t, size_t, size_t, hardware_t&)>
                 tie_breaker_fn)
     {
         std::vector<std::tuple<double, size_t, size_t, size_t, size_t, size_t, size_t>> results;
 
-        typedef std::tuple<double, size_t, size_t, size_t, size_t, size_t, size_t> ResultTuple;
+        typedef std::tuple<double, size_t, size_t, size_t, size_t, size_t, size_t> result_tuple;
 
         for(size_t i = 0; i < MT_list.size(); ++i)
         {
@@ -502,7 +502,7 @@ namespace origami
                                             element_size * 8, //Element Size A
                                             element_size * 8, //Element Size B
                                             element_size * 8, //Element Size out
-                                            miDataType,
+                                            mi_datatype,
                                             WGM, //WGM
                                             mx_block_size, //mx_block_size
                                             debug); //debug
@@ -519,7 +519,7 @@ namespace origami
 
         // Sort results by Total_latency, from worst (largest latency) to best (smallest latency)
         std::sort(
-            results.begin(), results.end(), [](const ResultTuple& a, const ResultTuple& b) {
+            results.begin(), results.end(), [](const result_tuple& a, const result_tuple& b) {
                 return std::get<0>(a) > std::get<0>(b);
             });
 
@@ -527,7 +527,7 @@ namespace origami
         {
             double best_latency = std::get<0>(results.back());
 
-            std::vector<ResultTuple> top_results;
+            std::vector<result_tuple> top_results;
             for(size_t i = 0; i < results.size(); ++i)
             {
                 if(std::abs(std::get<0>(results[i]) - best_latency) < 1e-6)
@@ -550,7 +550,7 @@ namespace origami
 
                 for(size_t i = 0; i < top_results.size(); ++i)
                 {
-                    const ResultTuple& res  = top_results[i];
+                    const result_tuple& res  = top_results[i];
                     size_t             MT_M = std::get<1>(res);
                     size_t             MT_N = std::get<2>(res);
                     size_t             MT_K = std::get<3>(res);
@@ -569,7 +569,7 @@ namespace origami
                                 const std::pair<double, size_t>& b) { return a.first > b.first; });
 
                 // Now re-order 'top_results' based on sorted indices
-                std::vector<ResultTuple> sorted_top_results;
+                std::vector<result_tuple> sorted_top_results;
                 for(size_t i = 0; i < tie_breaker_scores.size(); ++i)
                 {
                     size_t idx = tie_breaker_scores[i].second;
@@ -580,7 +580,7 @@ namespace origami
                 results.erase(
                     std::remove_if(results.begin(),
                                     results.end(),
-                                    [best_latency](const ResultTuple& res) {
+                                    [best_latency](const result_tuple& res) {
                                         return std::abs(std::get<0>(res) - best_latency) < 1e-6;
                                     }),
                     results.end());

@@ -12,7 +12,7 @@
 
 namespace origami
 {
-        using ResultTuple = std::tuple<double, // latency
+        using result_tuple = std::tuple<double, // latency
                                        size_t, // MT_M
                                        size_t, // MT_N
                                        size_t, // MT_K
@@ -22,7 +22,7 @@ namespace origami
                                        size_t  // Occupancy
                                        >;
 
-        using TileTuple = std::tuple<size_t, // MT_M
+        using tile_tuple = std::tuple<size_t, // MT_M
                                      size_t, // MT_N
                                      size_t, // MT_K
                                      size_t, // MI_M
@@ -37,7 +37,7 @@ namespace origami
                                      size_t          batch,
                                      bool            transA,
                                      bool            transB,
-                                     const Hardware& hardware,
+                                     const hardware_t& hardware,
                                      size_t          MT_M,
                                      size_t          MT_N,
                                      size_t          MT_K,
@@ -47,37 +47,37 @@ namespace origami
                                      size_t          element_size_A,
                                      size_t          element_size_B,
                                      size_t          element_size_out,
-                                     DataType        miDataType,
+                                     data_type_t     mi_datatype,
                                      size_t          mx_block_size,
                                      double          H_L2,
                                      bool            debug,
                                      size_t          WGM,
                                      size_t          biggest_allowable_split = 8);
 
-        std::vector<ResultTuple> select_best_macro_tile_size(size_t                        M,
+        std::vector<result_tuple> select_best_macro_tile_size(size_t                        M,
                                                              size_t                        N,
                                                              size_t                        K,
                                                              size_t                        batch,
                                                              bool                          transA,
                                                              bool                          transB,
-                                                             const Hardware&               hardware,
-                                                             const std::vector<TileTuple>& MT_list,
+                                                             const hardware_t&             hardware,
+                                                             const std::vector<tile_tuple>& MT_list,
                                                              size_t element_size_A,
                                                              size_t element_size_B,
                                                              size_t element_size_out,
-                                                             DataType miDataType,
+                                                             data_type_t mi_datatype,
                                                              size_t mx_block_size,
                                                              double H_L2,
                                                              bool   debug,
                                                              bool   print,
                                                              size_t WGM);
 
-        std::vector<ResultTuple> sweep_macro_tile_sizes(size_t    M,
+        std::vector<result_tuple> sweep_macro_tile_sizes(size_t    M,
                                                         size_t    N,
                                                         size_t    K,
                                                         bool      transA,
                                                         bool      transB,
-                                                        Hardware& hardware,
+                                                        hardware_t& hardware,
                                                         size_t    element_size = 2,
                                                         size_t    max_MT_M     = 256,
                                                         size_t    max_MT_N     = 256,
@@ -87,7 +87,7 @@ namespace origami
                                                         size_t    step_MT_K    = 32,
                                                         double    H_L2         = 0.8,
                                                         bool      debug        = false,
-                                                        const std::vector<TileTuple>& tiles_to_add
+                                                        const std::vector<tile_tuple>& tiles_to_add
                                                         = {},
                                                         bool print = false);
 
@@ -96,7 +96,7 @@ namespace origami
             size_t                     N,
             size_t                     K,
             size_t                     batch,
-            Hardware&                  hardware,
+            hardware_t&                hardware,
             size_t                     MT_M,
             size_t                     MT_N,
             size_t                     MT_K,

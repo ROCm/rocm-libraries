@@ -12,7 +12,7 @@
 
 namespace origami
 {
-    enum class DataType : int
+    enum class data_type_t : int
     {
         Float,
         Double,
@@ -40,111 +40,111 @@ namespace origami
         None = Count
     };
 
-    inline DataType intToDataType(int dt)
+    inline data_type_t int_to_data_type(int dt)
     {
-        return (DataType)dt;
+        return (data_type_t)dt;
     }
 
-    inline int dataTypeToBits(DataType type)
+    inline int data_type_to_bits(data_type_t type)
     {
         switch(type)
         {
-        case DataType::Float:
+        case data_type_t::Float:
             return 32;
-        case DataType::Double:
+        case data_type_t::Double:
             return 64;
-        case DataType::ComplexFloat:
+        case data_type_t::ComplexFloat:
             return 64;
-        case DataType::ComplexDouble:
+        case data_type_t::ComplexDouble:
             return 128;
-        case DataType::Half:
+        case data_type_t::Half:
             return 16;
-        case DataType::Int8x4:
+        case data_type_t::Int8x4:
             return 32;
-        case DataType::Int32:
+        case data_type_t::Int32:
             return 32;
-        case DataType::BFloat16:
+        case data_type_t::BFloat16:
             return 16;
-        case DataType::Int8:
+        case data_type_t::Int8:
             return 8;
-        case DataType::Int64:
+        case data_type_t::Int64:
             return 64;
-        case DataType::XFloat32:
+        case data_type_t::XFloat32:
             return 32;
-        case DataType::Float8_fnuz:
+        case data_type_t::Float8_fnuz:
             return 8;
-        case DataType::BFloat8_fnuz:
+        case data_type_t::BFloat8_fnuz:
             return 8;
-        case DataType::Float8BFloat8_fnuz:
+        case data_type_t::Float8BFloat8_fnuz:
             return 8;
-        case DataType::BFloat8Float8_fnuz:
+        case data_type_t::BFloat8Float8_fnuz:
             return 8;
-        case DataType::Float8:
+        case data_type_t::Float8:
             return 8;
-        case DataType::BFloat8:
+        case data_type_t::BFloat8:
             return 8;
-        case DataType::Float8BFloat8:
+        case data_type_t::Float8BFloat8:
             return 8;
-        case DataType::BFloat8Float8:
+        case data_type_t::BFloat8Float8:
             return 8;
-        case DataType::Float6:
+        case data_type_t::Float6:
             return 6;
-        case DataType::BFloat6:
+        case data_type_t::BFloat6:
             return 6;
-        case DataType::Float4:
+        case data_type_t::Float4:
             return 4;
         default:
             return -1; // Invalid type
         }
     }
 
-    inline std::string toString(DataType type)
+    inline std::string to_string(data_type_t type)
     {
         switch(type)
         {
-        case DataType::Float:
+        case data_type_t::Float:
             return "Float";
-        case DataType::Double:
+        case data_type_t::Double:
             return "Double";
-        case DataType::ComplexFloat:
+        case data_type_t::ComplexFloat:
             return "ComplexFloat";
-        case DataType::ComplexDouble:
+        case data_type_t::ComplexDouble:
             return "ComplexDouble";
-        case DataType::Half:
+        case data_type_t::Half:
             return "Half";
-        case DataType::Int8x4:
+        case data_type_t::Int8x4:
             return "Int8x4";
-        case DataType::Int32:
+        case data_type_t::Int32:
             return "Int32";
-        case DataType::BFloat16:
+        case data_type_t::BFloat16:
             return "BFloat16";
-        case DataType::Int8:
+        case data_type_t::Int8:
             return "Int8";
-        case DataType::Int64:
+        case data_type_t::Int64:
             return "Int64";
-        case DataType::XFloat32:
+        case data_type_t::XFloat32:
             return "XFloat32";
-        case DataType::Float8_fnuz:
+        case data_type_t::Float8_fnuz:
             return "Float8_fnuz";
-        case DataType::BFloat8_fnuz:
+        case data_type_t::BFloat8_fnuz:
             return "BFloat8_fnuz";
-        case DataType::Float8BFloat8_fnuz:
+        case data_type_t::Float8BFloat8_fnuz:
             return "Float8BFloat8_fnuz";
-        case DataType::BFloat8Float8_fnuz:
+        case data_type_t::BFloat8Float8_fnuz:
             return "BFloat8Float8_fnuz";
-        case DataType::Float8:
+        case data_type_t::Float8:
             return "Float8";
-        case DataType::BFloat8:
+        case data_type_t::BFloat8:
             return "BFloat8";
-        case DataType::Float8BFloat8:
+        case data_type_t::Float8BFloat8:
             return "Float8BFloat8";
-        case DataType::BFloat8Float8:
+        case data_type_t::BFloat8Float8:
             return "BFloat8Float8";
-        case DataType::Float6:
+        case data_type_t::Float6:
             return "Float6";
-        case DataType::BFloat6:
+        case data_type_t::BFloat6:
             return "BFloat6";
-        case DataType::Float4:
+        case data_type_t::Float4:
             return "Float4";
         default:
             return "Invalid";
@@ -152,97 +152,97 @@ namespace origami
         return "Invalid";
     }
 
-    inline DataType stringToDatatype(std::string s)
+    inline data_type_t string_to_data_type(std::string s)
     {
         if (s == "f32")
-            return DataType::Float;
+            return data_type_t::Float;
         if (s == "c32")
-            return DataType::ComplexFloat;
+            return data_type_t::ComplexFloat;
         if (s == "c64")
-            return DataType::ComplexDouble;
+            return data_type_t::ComplexDouble;
         if (s == "f64")
-            return DataType::Double;
+            return data_type_t::Double;
         if (s == "f16")
-            return DataType::Half;
+            return data_type_t::Half;
         if (s == "i32")
-            return DataType::Int32;
+            return data_type_t::Int32;
         if (s == "bf16")
-            return DataType::BFloat16;
+            return data_type_t::BFloat16;
         if (s == "i8")
-            return DataType::Int8;
+            return data_type_t::Int8;
         if (s == "xf32")
-            return DataType::XFloat32;
+            return data_type_t::XFloat32;
         if (s == "f8")
-            return DataType::Float8;
+            return data_type_t::Float8;
         if (s == "bf8")
-            return DataType::BFloat8;
+            return data_type_t::BFloat8;
         if (s == "f6")
-            return DataType::Float6;
+            return data_type_t::Float6;
         if (s == "bf6")
-            return DataType::BFloat6;
+            return data_type_t::BFloat6;
         if (s == "f4")
-            return DataType::Float4;
-        return DataType::None;
+            return data_type_t::Float4;
+        return data_type_t::None;
     }
 
-    struct MatrixInstruction
+    struct matrix_instruction
     {
         size_t MI_M;
         size_t MI_N;
         size_t MI_K;
-        DataType miInputType;
+        data_type_t mi_input_type;
 
-        MatrixInstruction()
+        matrix_instruction()
             : MI_M(0)
             , MI_N(0)
             , MI_K(0)
-            , miInputType(DataType::Float)
+            , mi_input_type(data_type_t::Float)
         {
         }
 
-        MatrixInstruction(size_t m, size_t n, size_t k, DataType miInputType)
+        matrix_instruction(size_t m, size_t n, size_t k, data_type_t mi_input_type)
             : MI_M(m)
             , MI_N(n)
             , MI_K(k)
-            , miInputType(miInputType)
+            , mi_input_type(mi_input_type)
         {
         }
 
-        MatrixInstruction(const MatrixInstruction& other)
+        matrix_instruction(const matrix_instruction& other)
             : MI_M(other.MI_M)
             , MI_N(other.MI_N)
             , MI_K(other.MI_K)
-            , miInputType(other.miInputType)
+            , mi_input_type(other.mi_input_type)
         {
         }
 
-        bool operator<(const MatrixInstruction& other) const
+        bool operator<(const matrix_instruction& other) const
         {
-            return std::tie(MI_M, MI_N, MI_K, miInputType)
-                    < std::tie(other.MI_M, other.MI_N, other.MI_K, other.miInputType);
+            return std::tie(MI_M, MI_N, MI_K, mi_input_type)
+                    < std::tie(other.MI_M, other.MI_N, other.MI_K, other.mi_input_type);
         }
 
-        bool operator==(const MatrixInstruction& other) const
+        bool operator==(const matrix_instruction& other) const
         {
             return MI_M == other.MI_M && MI_N == other.MI_N && MI_K == other.MI_K
-                    && miInputType == other.miInputType;
+                    && mi_input_type == other.mi_input_type;
         }
 
         std::size_t hash() const
         {
             return std::hash<size_t>()(MI_M) ^ std::hash<size_t>()(MI_N)
-                    ^ std::hash<size_t>()(MI_K) ^ std::hash<DataType>()(miInputType);
+                    ^ std::hash<size_t>()(MI_K) ^ std::hash<data_type_t>()(mi_input_type);
         }
     };
 }
 
-// Specialize std::hash for the MatrixInstruction struct to use it as an unordered_map key.
+// Specialize std::hash for the matrix_instruction struct to use it as an unordered_map key.
 namespace std
 {
     template <>
-    struct hash<origami::MatrixInstruction>
+    struct hash<origami::matrix_instruction>
     {
-        std::size_t operator()(const origami::MatrixInstruction& k) const
+        std::size_t operator()(const origami::matrix_instruction& k) const
         {
             return k.hash();
         }
@@ -251,10 +251,10 @@ namespace std
 
 namespace origami
 {
-    class Hardware
+    class hardware_t
     {
     public:
-        enum class Architecture
+        enum class architecture_t
         {
             gfx90a,
             gfx942,
@@ -262,25 +262,25 @@ namespace origami
             Count
         };
 
-        static Architecture archNameToEnum(const std::string& str)
+        static architecture_t arch_name_to_enum(const std::string& str)
         {
-            static const std::unordered_map<std::string, Architecture> strToEnumMap
-                = {{"gfx90a", Architecture::gfx90a},
-                    {"gfx942", Architecture::gfx942},
-                    {"gfx950", Architecture::gfx950}};
+            static const std::unordered_map<std::string, architecture_t> str_to_enum_map
+                = {{"gfx90a", architecture_t::gfx90a},
+                    {"gfx942", architecture_t::gfx942},
+                    {"gfx950", architecture_t::gfx950}};
 
-            auto it = strToEnumMap.find(str);
-            if(it != strToEnumMap.end())
+            auto it = str_to_enum_map.find(str);
+            if(it != str_to_enum_map.end())
             {
                 return it->second;
             }
             else
             {
-                return Architecture::Count;
+                return architecture_t::Count;
             }
         }
 
-        struct ArchitectureConstants
+        struct architecture_constants
         {
             size_t num_xcds;
             double mem1_perf_ratio;
@@ -289,7 +289,7 @@ namespace origami
             size_t parallel_MI_CU;
             double percent_bw_per_wg;
             double mem_clock_ratio;
-            ArchitectureConstants(size_t num_xcds,
+            architecture_constants(size_t num_xcds,
                                     double mem1_perf_ratio,
                                     double mem2_perf_ratio,
                                     double mem3_perf_ratio,
@@ -307,13 +307,13 @@ namespace origami
             }
         };
 
-        static const std::unordered_map<Architecture, ArchitectureConstants> ARCH_CONSTANT_MAP;
+        static const std::unordered_map<architecture_t, architecture_constants> ARCH_CONSTANT_MAP;
 
-        static const std::unordered_map<Architecture,
-                                        std::unordered_map<MatrixInstruction, size_t>>
+        static const std::unordered_map<architecture_t,
+                                        std::unordered_map<matrix_instruction, size_t>>
             INSTRUCTION_MAP;
 
-        Architecture arch;
+        architecture_t arch;
         size_t       N_CU; // Number of Compute Units
         size_t       LDS_capacity; // Capacity of LDS
         double       mem1_perf_ratio;
@@ -326,7 +326,7 @@ namespace origami
         double       percent_bw_per_wg;
         size_t       NUM_XCD;
 
-        Hardware(Architecture arch,
+        hardware_t(architecture_t arch,
                     size_t       N_CU,
                     size_t       LDS_capacity,
                     size_t       NUM_XCD,
@@ -350,18 +350,18 @@ namespace origami
             , percent_bw_per_wg(percent_bw_per_wg)
             , NUM_XCD(NUM_XCD)
         {
-            if(Hardware::is_debug_enabled())
+            if(hardware_t::is_debug_enabled())
             {
                 print();
             }
         }
 
-        Hardware(hipDeviceProp_t properties)
-            : Hardware(getHardwareForProperties(properties))
+        hardware_t(hipDeviceProp_t properties)
+            : hardware_t(get_hardware_for_properties(properties))
         {
         }
 
-        Hardware(const Hardware& other)
+        hardware_t(const hardware_t& other)
             : arch(other.arch)
             , N_CU(other.N_CU)
             , LDS_capacity(other.LDS_capacity)
@@ -377,19 +377,19 @@ namespace origami
         {
         }
 
-        static Hardware getHardwareForProperties(hipDeviceProp_t properties)
+        static hardware_t get_hardware_for_properties(hipDeviceProp_t properties)
         {
-            auto archName = get_before_first_colon(properties.gcnArchName);
-            auto archEnum = archNameToEnum(archName);
-            auto it       = ARCH_CONSTANT_MAP.find(archEnum);
+            auto arch_name = get_before_first_colon(properties.gcnArchName);
+            auto arch_enum = arch_name_to_enum(arch_name);
+            auto it       = ARCH_CONSTANT_MAP.find(arch_enum);
             if(it == ARCH_CONSTANT_MAP.end())
             {
                 throw std::runtime_error(
                     "Attempting to retrieve hardware constants for unsupported architecture: "
-                    + archName); // Could also return default values here.
+                    + arch_name); // Could also return default values here.
             }
             auto constants = it->second;
-            return Hardware(archEnum,
+            return hardware_t(arch_enum,
                             properties.multiProcessorCount,
                             properties.sharedMemPerBlock,
                             constants.num_xcds,
@@ -403,7 +403,7 @@ namespace origami
                             constants.percent_bw_per_wg);
         }
 
-        static Hardware getHardwareForDevice(int deviceId)
+        static hardware_t get_hardware_for_device(int deviceId)
         {
             hipDeviceProp_t prop;
             hipError_t      e = hipGetDeviceProperties(&prop, deviceId);
@@ -411,21 +411,21 @@ namespace origami
             {
                 throw std::runtime_error(hipGetErrorString(e));
             }
-            return getHardwareForProperties(prop);
+            return get_hardware_for_properties(prop);
         }
 
-        static bool isHardwareSupported(hipDeviceProp_t properties)
+        static bool is_hardware_supported(hipDeviceProp_t properties)
         {
-            auto archName = get_before_first_colon(properties.gcnArchName);
-            auto archEnum = archNameToEnum(archName);
-            auto it       = ARCH_CONSTANT_MAP.find(archEnum);
+            auto arch_name = get_before_first_colon(properties.gcnArchName);
+            auto arch_enum = arch_name_to_enum(arch_name);
+            auto it       = ARCH_CONSTANT_MAP.find(arch_enum);
             return it != ARCH_CONSTANT_MAP.end();
         }
 
         // Function to print hardware details
         void print()
         {
-            std::cout << "================== Hardware Configuration ==================\n";
+            std::cout << "================== hardware_t Configuration ==================\n";
             std::cout << "Number of CUs (N_CU)       : " << N_CU << "\n";
             std::cout << "LDS capacity              : " << LDS_capacity << " bytes\n";
             std::cout << "mem1_perf_ratio           : " << mem1_perf_ratio << "\n";
@@ -446,7 +446,7 @@ namespace origami
                 const auto& L_MI = kv.second;
 
                 std::cout << "Instruction: MI_M=" << key.MI_M << ", MI_N=" << key.MI_N
-                            << ", MI_K=" << key.MI_K << ", miInputType=" << toString(key.miInputType)
+                            << ", MI_K=" << key.MI_K << ", mi_input_type=" << to_string(key.mi_input_type)
                             << " bytes\n"
                             << "  -> Latency (L_MI): " << L_MI << "\n";
             }
@@ -478,7 +478,7 @@ namespace origami
 
         void print_debug_info() const
         {
-            std::cout << "=== Hardware Debug Info ===\n";
+            std::cout << "=== hardware_t Debug Info ===\n";
             for(const auto& [key, val] : debug_info)
             {
                 std::cout << key << ": " << val << "\n";
@@ -486,10 +486,10 @@ namespace origami
             std::cout << "===========================\n";
         }
 
-        size_t get_MI_latency(size_t MI_M, size_t MI_N, size_t MI_K, DataType miInputType) const
+        size_t get_MI_latency(size_t MI_M, size_t MI_N, size_t MI_K, data_type_t mi_input_type) const
         {
             const auto& instruction_map = INSTRUCTION_MAP.at(arch);
-            auto        key             = MatrixInstruction(MI_M, MI_N, MI_K, miInputType);
+            auto        key             = matrix_instruction(MI_M, MI_N, MI_K, mi_input_type);
 
             auto it = instruction_map.find(key);
             if(it != instruction_map.end())
@@ -499,7 +499,7 @@ namespace origami
             else
             {
                 std::cerr << "Warning: Latency not found for MI_M=" << MI_M << ", MI_N=" << MI_N
-                            << ", MI_K=" << MI_K << ", miInputType=" << toString(miInputType)
+                            << ", MI_K=" << MI_K << ", mi_input_type=" << to_string(mi_input_type)
                             << ". Returning latency value of 32 (really slow).\n";
                 return 32 / parallel_MI_CU; // Default latency if instruction is not found
             }

@@ -25,7 +25,7 @@ namespace origami
                                         size_t                  max_iters);
 
     // Compute the number of matrix instructions required to compute a single MT_MXMT_NXMT_K tile.
-    size_t compute_number_matrix_instructions(const Hardware& hardware,
+    size_t compute_number_matrix_instructions(const hardware_t& hardware,
                                                 size_t          MT_M,
                                                 size_t          MT_N,
                                                 size_t          MT_K,
@@ -35,7 +35,7 @@ namespace origami
                                                 bool            debug);
 
     // Determine the compute latency per MT_MxMT_NxMT_K Macro Tile (L_MT).
-    size_t compute_mt_compute_latency(const Hardware& hardware,
+    size_t compute_mt_compute_latency(const hardware_t& hardware,
                                         size_t          M,
                                         size_t          N,
                                         size_t          K,
@@ -49,11 +49,11 @@ namespace origami
                                         size_t          MI_K,
                                         size_t          element_size_A, //In bits
                                         size_t          element_size_B, //In bits,
-                                        DataType        miDataType,
+                                        data_type_t     mi_datatype,
                                         bool            debug);
 
     // Computes the number of MT timesteps required to compute all MT. Last wave may be less occupied.
-    size_t compute_number_waves(const Hardware& hardware,
+    size_t compute_number_waves(const hardware_t& hardware,
                                 size_t          M,
                                 size_t          N,
                                 size_t          batch,
@@ -75,9 +75,9 @@ namespace origami
     // Computes the number of active compute units if there is only one wave and it is partial
     // Otherwise, returns hardware.N_CU
     size_t compute_active_CU(
-        const Hardware& hardware, size_t M, size_t N, size_t MT_M, size_t MT_N);
+        const hardware_t& hardware, size_t M, size_t N, size_t MT_M, size_t MT_N);
 
-    double compute_memory_latency(const Hardware& hardware,
+    double compute_memory_latency(const hardware_t& hardware,
                                     size_t          M,
                                     size_t          N,
                                     size_t          K,
@@ -93,7 +93,7 @@ namespace origami
                                     bool            debug);
 
     // Computes the latency to compute a K-COMPLETE tile.
-    double compute_tile_latency(const Hardware& hardware,
+    double compute_tile_latency(const hardware_t& hardware,
                                 size_t          M,
                                 size_t          N,
                                 size_t          K,
@@ -111,11 +111,11 @@ namespace origami
                                 size_t          element_size_A, //In bits
                                 size_t          element_size_B, //In bits,
                                 size_t          element_size_out, //In bits
-                                DataType        miDataType,
+                                data_type_t     mi_datatype,
                                 size_t          mx_block_size,
                                 bool            debug);
 
-    double estimate_l2_hit(const Hardware& hardware,
+    double estimate_l2_hit(const hardware_t& hardware,
                             int             M,
                             int             N,
                             int             K,
@@ -125,7 +125,7 @@ namespace origami
                             int             MT_K,
                             int             WGM,
                             size_t          element_size);
-    double estimate_mall_hit(const Hardware& hardware,
+    double estimate_mall_hit(const hardware_t& hardware,
                                 int             M,
                                 int             N,
                                 int             K,
@@ -137,7 +137,7 @@ namespace origami
 
     // Computes the latency per K-complete MT wave.
     // A wave is defined as : The time it takes for one CU to complete one K-complete output tile
-    double compute_wave_latency(const Hardware& hardware,
+    double compute_wave_latency(const hardware_t& hardware,
                                 size_t          M,
                                 size_t          N,
                                 size_t          K,
@@ -155,13 +155,13 @@ namespace origami
                                 size_t          element_size_A, //In bits
                                 size_t          element_size_B, //In bits,
                                 size_t          element_size_out, //In bits
-                                DataType        miDataType,
+                                data_type_t     mi_datatype,
                                 size_t          mx_block_size,
                                 bool            debug);
 
     // Compute the total latency of a gemm based on the latency of one wave multiplied by the number of waves
     // A wave is defined as : The time it takes for one CU to complete one K-complete output tile
-    double compute_total_latency(const Hardware& hardware,
+    double compute_total_latency(const hardware_t& hardware,
                                     size_t          M,
                                     size_t          N,
                                     size_t          K,
@@ -179,7 +179,7 @@ namespace origami
                                     size_t          element_size_A, //In bits
                                     size_t          element_size_B, //In bits,
                                     size_t          element_size_out, //In bits
-                                    DataType        miDataType,
+                                    data_type_t     mi_datatype,
                                     int             WGM,
                                     size_t          mx_block_size,
                                     bool            debug);
@@ -187,7 +187,7 @@ namespace origami
     // Compute the performance from the latency.
     // IMPORTANT : This program is NOT meant to be an analytical model for performance, but rather a way to rank different macro tile sizes.
     // These performance values could be wildly inaccurate in absolute terms, but will often result in the correct ranking of MTin relative terms.
-    double compute_perf_gflops(const Hardware& hardware,
+    double compute_perf_gflops(const hardware_t& hardware,
                                 size_t          M,
                                 size_t          N,
                                 size_t          K,
@@ -206,7 +206,7 @@ namespace origami
                                 bool            debug);
 
     // Check if MT fits in LDS
-    bool check_LDS_capacity(const Hardware& hardware,
+    bool check_LDS_capacity(const hardware_t& hardware,
                             size_t          MT_M,
                             size_t          MT_N,
                             size_t          MT_K,

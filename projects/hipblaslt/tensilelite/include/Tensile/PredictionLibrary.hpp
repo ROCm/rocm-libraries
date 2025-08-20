@@ -46,8 +46,8 @@ namespace TensileLite
     struct ProblemPredictionLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
         std::unordered_map<int, std::shared_ptr<MySolution>>        solutionmap;
-        std::vector<origami::TileTuple>             tile_list;
-        std::unordered_map<origami::TileTuple, int> tile_map;
+        std::vector<origami::tile_tuple>             tile_list;
+        std::unordered_map<origami::tile_tuple, int> tile_map;
 
         static std::string Type()
         {
@@ -164,12 +164,12 @@ namespace TensileLite
                 = problem.b().elementBytes() * 8;
             size_t elementSizeC_bits
                 = problem.c().elementBytes() * 8;
-            const origami::Hardware& analaytical_hardware = *(pAMDGPU->analyticalHardware);
+            const origami::hardware_t& analaytical_hardware = *(pAMDGPU->analyticalHardware);
             int WGM
                 = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
-            origami::DataType miDataType = static_cast<origami::DataType>(problem.computeInputType());
+            origami::data_type_t miDataType = static_cast<origami::data_type_t>(problem.computeInputType());
             if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32) // Check F32 compute type
-                miDataType = origami::DataType::XFloat32;
+                miDataType = origami::data_type_t::XFloat32;
             auto selected_tiles = origami::select_best_macro_tile_size(
                 m,
                 n,

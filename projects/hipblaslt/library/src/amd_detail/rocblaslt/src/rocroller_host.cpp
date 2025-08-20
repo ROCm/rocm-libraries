@@ -623,20 +623,20 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
 {
     std::vector<SolutionIndexParameters> params;
 
-    std::vector<origami::TileTuple> tile_list = getTileListForKernelType(kernelType);
+    std::vector<origami::tile_tuple> tile_list = getTileListForKernelType(kernelType);
 
     size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(kernelType.typeA).elementBits; 
     size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(kernelType.typeB).elementBits;
     size_t elementSizeC_bits = rocRoller::DataTypeInfo::Get(kernelType.typeC).elementBits; 
 
     size_t maxAB_bits = std::max(elementSizeA_bits, elementSizeB_bits);
-    origami::DataType dataType = origami::DataType::Float8;
+    origami::data_type_t dataType = origami::data_type_t::Float8;
     if(maxAB_bits == 6)
-        dataType = origami::DataType::Float6;
+        dataType = origami::data_type_t::Float6;
     else if(maxAB_bits == 4)
-        dataType = origami::DataType::Float4;
+        dataType = origami::data_type_t::Float4;
 
-    const origami::Hardware analaytical_hardware = origami::Hardware::getHardwareForDevice(0);
+    const origami::hardware_t analaytical_hardware = origami::hardware_t::get_hardware_for_device(0);
 
     int WGM = std::sqrt(std::floor(analaytical_hardware.N_CU / analaytical_hardware.NUM_XCD));
 

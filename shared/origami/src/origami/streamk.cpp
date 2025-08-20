@@ -229,7 +229,7 @@ namespace origami
             return min_grid_runtime_v2.first;
         }
 
-        size_t select_streamk_grid(
+        size_t select_grid(
             size_t x,
             size_t y,
             size_t z,
@@ -239,7 +239,7 @@ namespace origami
             size_t          element_size_A,
             size_t          element_size_B,
             size_t          element_size_out,
-            DataType        mi_datatype,
+            data_type_t        mi_datatype,
             size_t          workspace_size,
             size_t          mt_m,
             size_t          mt_n,
@@ -250,7 +250,7 @@ namespace origami
             size_t          workgroup_mapping,
             size_t          workspace_size_per_elem_c,
             int             occupancy,
-            const Hardware& analytical_hardware,
+            const hardware_t& analytical_hardware,
             int dynamic_grid_version)
         {
             size_t cu_count = analytical_hardware.N_CU;

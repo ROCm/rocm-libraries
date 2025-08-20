@@ -2981,47 +2981,47 @@ namespace TensileLite
         return 0;
     }
 
-    origami::DataType datatypeToAnalyticalDatatype(rocisa::DataType type)
+    origami::data_type_t datatypeToAnalyticalDatatype(rocisa::DataType type)
     {
         switch(type)
         {
             case rocisa::DataType::Float:
-                return origami::DataType::Float;
+                return origami::data_type_t::Float;
             case rocisa::DataType::Double:
-                return origami::DataType::Double;
+                return origami::data_type_t::Double;
             case rocisa::DataType::Half:
-                return origami::DataType::Half;
+                return origami::data_type_t::Half;
             case rocisa::DataType::Int8x4:
-                return origami::DataType::Int8x4;
+                return origami::data_type_t::Int8x4;
             case rocisa::DataType::Int32:
-                return origami::DataType::Int32;
+                return origami::data_type_t::Int32;
             case rocisa::DataType::BFloat16:
-                return origami::DataType::BFloat16;
+                return origami::data_type_t::BFloat16;
             case rocisa::DataType::Int8:
-                return origami::DataType::Int8;
+                return origami::data_type_t::Int8;
             case rocisa::DataType::Int64:
-                return origami::DataType::Int64;
+                return origami::data_type_t::Int64;
             case rocisa::DataType::XFloat32:
-                return origami::DataType::XFloat32;
+                return origami::data_type_t::XFloat32;
             case rocisa::DataType::Float8_fnuz:
-                return origami::DataType::Float8_fnuz;
+                return origami::data_type_t::Float8_fnuz;
             case rocisa::DataType::BFloat8_fnuz:
-                return origami::DataType::BFloat8_fnuz;
+                return origami::data_type_t::BFloat8_fnuz;
             case rocisa::DataType::Float8BFloat8_fnuz:
-                return origami::DataType::Float8BFloat8_fnuz;
+                return origami::data_type_t::Float8BFloat8_fnuz;
             case rocisa::DataType::BFloat8Float8_fnuz:
-                return origami::DataType::BFloat8Float8_fnuz;
+                return origami::data_type_t::BFloat8Float8_fnuz;
             case rocisa::DataType::Float8:
-                return origami::DataType::Float8;
+                return origami::data_type_t::Float8;
             case rocisa::DataType::BFloat8:
-                return origami::DataType::BFloat8;
+                return origami::data_type_t::BFloat8;
             case rocisa::DataType::Float8BFloat8:
-                return origami::DataType::Float8BFloat8;
+                return origami::data_type_t::Float8BFloat8;
             case rocisa::DataType::BFloat8Float8:
-                return origami::DataType::BFloat8Float8;
+                return origami::data_type_t::BFloat8Float8;
 
             default:
-                return origami::DataType::None;
+                return origami::data_type_t::None;
         }
     }
 
@@ -3070,10 +3070,10 @@ namespace TensileLite
             {
                 batch *= problem.batchSize(i);
             }
-            origami::DataType miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
+            origami::data_type_t miDataType = datatypeToAnalyticalDatatype(problem.computeInputType());
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
 
-            skGrid = origami::streamk::select_streamk_grid(x,
+            skGrid = origami::streamk::select_grid(x,
                                                               y,
                                                               z,
                                                               batch,

@@ -66,7 +66,7 @@ def main():
     if args.print:
         hardware.print()
 
-    winner_grid = origami.select_streamk_grid(
+    winner_grid = origami.select_grid(
         args.m,
         args.n,
         args.k,
