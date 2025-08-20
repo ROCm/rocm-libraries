@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -93,7 +93,7 @@ public:
         /// \return The referenced value or the default-constructed value.
         ROCPRIM_HOST_DEVICE ROCPRIM_INLINE operator value_type() const
         {
-            return keep_ ? underlying_ : value_type{};
+            return keep_ ? static_cast<value_type>(underlying_) : value_type{};
         }
 
     private:
@@ -287,9 +287,7 @@ ROCPRIM_HOST_DEVICE inline predicate_iterator<DataIterator, DataIterator, UnaryP
 template<class DataIterator, class FlagIterator>
 auto make_mask_iterator(DataIterator data_iterator, FlagIterator flag_iterator)
 {
-    return make_predicate_iterator(data_iterator,
-                                   flag_iterator,
-                                   [] ROCPRIM_HOST_DEVICE(bool value) { return value; });
+    return make_predicate_iterator(data_iterator, flag_iterator, [](bool value) { return value; });
 }
 
 END_ROCPRIM_NAMESPACE
