@@ -159,12 +159,19 @@ class SignatureDefault(Signature):
 
         if writer.debugConfig.debugKernel:
             signature.addArg("AddressDbg", SVK.SIG_GLOBALBUFFER, "struct", "generic")
-        signature.addArg(    "D", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
-        signature.addArg(    "C", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
-        signature.addArg(    "A", SVK.SIG_GLOBALBUFFER, srcValueTypeA, "generic")
-        signature.addArg(    "B", SVK.SIG_GLOBALBUFFER, srcValueTypeB, "generic")
+        signature.addArg("D", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
+        signature.addArg("C", SVK.SIG_GLOBALBUFFER, dstValueType, "generic")
+        signature.addArg("A", SVK.SIG_GLOBALBUFFER, srcValueTypeA, "generic")
+        if kernel["ProblemType"]["MXBlockA"]:
+            signature.addArg("MXSA", SVK.SIG_GLOBALBUFFER, "void", "generic")
+        signature.addArg("B", SVK.SIG_GLOBALBUFFER, srcValueTypeB, "generic")
+        if kernel["ProblemType"]["MXBlockB"]:
+            signature.addArg("MXSB", SVK.SIG_GLOBALBUFFER, "void", "generic")
         userArgumentsInfo.gemmArgumentSize += (8 + 8 + 8 + 8)  # A, B, C, D buffer
-
+        if kernel["ProblemType"]["MXBlockA"]:
+            userArgumentsInfo.gemmArgumentSize += 8
+        if kernel["ProblemType"]["MXBlockB"]:
+            userArgumentsInfo.gemmArgumentSize += 8
         if kernel["ProblemType"]["Sparse"]:
             signature.addArg("MetaData", SVK.SIG_GLOBALBUFFER, "void" , "generic")
 
@@ -184,9 +191,19 @@ class SignatureDefault(Signature):
             signature.addArg(              "strideA%u"%i, SVK.SIG_VALUE,               "u32")
             userArgumentsInfo.gemmArgumentSize += 4
 
+        if kernel["ProblemType"]["MXBlockA"]:
+            for i in range(0, writer.states.mxsa.numSgprStrides):
+                signature.addArg(          "strideMXSA%u"%i, SVK.SIG_VALUE,            "u32")
+                userArgumentsInfo.gemmArgumentSize += 4
+
         for i in range(0, writer.states.b.numSgprStrides):
             signature.addArg(              "strideB%u"%i, SVK.SIG_VALUE,               "u32")
             userArgumentsInfo.gemmArgumentSize += 4
+
+        if kernel["ProblemType"]["MXBlockB"]:
+            for i in range(0, writer.states.mxsb.numSgprStrides):
+                signature.addArg(          "strideMXSB%u"%i, SVK.SIG_VALUE,            "u32")
+                userArgumentsInfo.gemmArgumentSize += 4
 
         if kernel["ProblemType"]["Sparse"]:
             for i in range(0, writer.states.m.numSgprStrides):
