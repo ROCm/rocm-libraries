@@ -144,16 +144,16 @@ int main()
 
     swizzleRunner.run([&swizzleRunner, &runner, m, n, k, scale_a_vec, scale_b_vec] {
         // copy inputs from first runner for comparison and validation
-        hipMemcpy(swizzleRunner.d_a,
+        CHECK_HIP_ERROR(hipMemcpy(swizzleRunner.d_a,
                   runner.d_a,
                   m * k * sizeof(hipblaslt_f8_fnuz),
-                  hipMemcpyDeviceToDevice);
-        hipMemcpy(swizzleRunner.d_b,
+                  hipMemcpyDeviceToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(swizzleRunner.d_b,
                   runner.d_b,
                   n * k * sizeof(hipblaslt_f8_fnuz),
-                  hipMemcpyDeviceToDevice);
-        hipMemcpy(
-            swizzleRunner.d_c, runner.d_c, m * n * sizeof(hip_bfloat16), hipMemcpyDeviceToDevice);
+                  hipMemcpyDeviceToDevice));
+        CHECK_HIP_ERROR(hipMemcpy(
+            swizzleRunner.d_c, runner.d_c, m * n * sizeof(hip_bfloat16), hipMemcpyDeviceToDevice));
 
         simpleGemm(swizzleRunner.handle,
                    HIPBLAS_OP_T,
@@ -244,9 +244,9 @@ void simpleGemm(hipblasLtHandle_t  handle,
         std::vector<hipblaslt_f8_fnuz> dst(m * k, 0);
 
         // pre-shuffle input data in host memory
-        hipMemcpy(src.data(), d_a, m * k * sizeof(hipblaslt_f8_fnuz), hipMemcpyDeviceToHost);
+        CHECK_HIP_ERROR(hipMemcpy(src.data(), d_a, m * k * sizeof(hipblaslt_f8_fnuz), hipMemcpyDeviceToHost));
         swizzleTensor(dst.data(), src.data(), m, k, false);
-        hipMemcpy(d_a, dst.data(), m * k * sizeof(hipblaslt_f8_fnuz), hipMemcpyHostToDevice);
+        CHECK_HIP_ERROR(hipMemcpy(d_a, dst.data(), m * k * sizeof(hipblaslt_f8_fnuz), hipMemcpyHostToDevice));
     }
 
     hipblasLtMatmulDesc_t matmul;
