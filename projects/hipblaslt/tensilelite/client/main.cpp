@@ -286,6 +286,8 @@ namespace TensileLite
                 ("problem-size,p",           vector_default_empty<std::string>(), "Specify a problem size.  Comma-separated list of "
                                                                                   "sizes, in the order of the Einstein notation.")
 
+                ("prob-sol-map",             vector_default_empty<std::string>(), "[probIdx, solIdx]")
+
                 ("a-strides",                vector_default_empty<std::string>(), "Unspecified means default stride "
                                                                                   "(prev_dim_stride*prev_dim_size)"
                                                                                   "specifying once applies to all problem sizes, "
@@ -511,6 +513,29 @@ namespace TensileLite
             args.at(name).value() = boost::any(type);
         }
 
+        template <typename T>
+        void parse_arg_nums_map(po::variables_map& args, std::string const& name)
+        {
+            auto inValue = args[name].as<std::vector<std::string>>();
+
+            std::map<int, int> outValue;
+            for(auto const& str : inValue)
+            {
+                auto vec = split_nums<T>(str);
+                outValue[vec[0]] = vec[1];
+                // std::cout << "map: [" << vec[0] << "," << vec[1] << "]" << std::endl;
+            }
+
+            boost::any v(outValue);
+
+            args.at(name).value() = v;
+        }
+
+        void parse_arg_ints_map(po::variables_map& args, std::string const& name)
+        {
+            parse_arg_nums_map<int>(args, name);
+        }
+
         void fix_data_types(po::variables_map& args)
         {
             auto type = args["type"].as<rocisa::DataType>();
@@ -571,6 +596,8 @@ namespace TensileLite
             parse_activation_enum_args(args, "activation-enum-args");
             parse_arg_double(args, "activation-additional-args");
             parse_arg_bools(args, "icache-flush-args");
+            // std::cout << "Pasring parse_arg_ints_map()" << std::endl;
+            parse_arg_ints_map(args, "prob-sol-map");
             return args;
         }
 
@@ -632,6 +659,7 @@ int main(int argc, const char* argv[])
     bool        exitOnError      = args["exit-on-error"].as<bool>();
     bool        groupedGemm      = args["grouped-gemm"].as<bool>();
     const auto& icacheFlushArgs  = args["icache-flush-args"].as<std::vector<bool>>();
+    const auto& probSolMap       = args["prob-sol-map"].as<std::map<int,int>>();
 
     float skip_slow_solution_ratio = args["skip-slow-solution-ratio"].as<float>();
     if(skip_slow_solution_ratio > 1.0 || skip_slow_solution_ratio < 0.0)
@@ -721,6 +749,10 @@ int main(int argc, const char* argv[])
             {
                 auto problem = problems[problemIdx].get();
 
+                int runOnlySolIdx = -1;
+                if(probSolMap.count(problemIdx) != 0)
+                    runOnlySolIdx = probSolMap.at(problemIdx);
+
                 reporters->report(ResultKey::ProblemIndex, problemIdx);
                 reporters->report(ResultKey::ProblemProgress,
                                   concatenate(problemIdx, "/", lastProblemIdx));
@@ -737,6 +769,8 @@ int main(int argc, const char* argv[])
                     maxRotatingBufferNum, problem, inputs, stream);
                 static_cast<void>(hipDeviceSynchronize());
                 bool resetInput = false;
+
+                int cur_sol_idx = 0;
                 while(solutionIterator->moreSolutionsInProblem())
                 {
                     auto solution = solutionIterator->getSolution();
@@ -744,7 +778,11 @@ int main(int argc, const char* argv[])
                         throw std::runtime_error("Could not find a solution");
 
                     listeners.preSolution(*solution);
-                    if(solutionIterator->runCurrentSolution() && runKernels)
+
+                    // skip if this problem has a specified solution to run
+                    bool skipRun = (runOnlySolIdx != -1 && cur_sol_idx != runOnlySolIdx);
+
+                    if(solutionIterator->runCurrentSolution() && runKernels && !skipRun)
                     {
                         try
                         {
@@ -845,6 +883,8 @@ int main(int argc, const char* argv[])
                     }
 
                     listeners.postSolution();
+
+                    cur_sol_idx++;
 
                     if(exitOnError && listeners.error() > 0)
                     {

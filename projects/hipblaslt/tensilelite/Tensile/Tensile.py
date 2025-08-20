@@ -73,7 +73,8 @@ def executeStepsInConfig(
         isaInfoMap: Dict[str, IsaInfo],
         cCompiler: str,
         debugConfig: DebugConfig,
-        deviceId: int
+        deviceId: int,
+        probSolDict: dict
    ):
     """Conducts the steps in the provided ``config`` according to the Tensile workflow.
 
@@ -111,6 +112,7 @@ def executeStepsInConfig(
             deviceId,
             gfxName,
             isaInfoMap,
+            probSolDict,
         )
         print1("")
 
@@ -342,6 +344,59 @@ def store_max_frequency(max_frequency):
         print(f"Error setting MAX_FREQ environment variable: {e}")
         return False
 
+def restore_prob_sol_map(logfile):
+
+    print(f"#  Restore Previous Tuning From Log File: {str(logfile)}")
+
+    startHint = "run,problem-progress,"
+    finHint = "clientExit"
+    keyword = "Contraction"
+    runningTuning = False
+
+    prob_sol_map = {}
+    allProblems = 0
+    allSolutions = 0
+
+    try:
+        with open(logfile, 'r') as sh_file:
+            # Iterate over each line in the file
+            for line in sh_file:
+                line = line.strip()
+                # run untile we see "run,problem-progress,"
+                if not runningTuning:
+                    runningTuning = line.startswith(startHint)
+                    continue
+
+                # following lines should be bench result
+                if runningTuning:
+                    # not a tuning result line (contains "Contraction")
+                    if keyword not in line:
+                        continue
+                    # we see a line with clientExit, then break
+                    if line.startswith(finHint):
+                        break
+                    else:
+                        tokens = line.split(',')
+                        probInfo = tokens[1].split('/') # tokens[1] should be "probId/AllProb"
+                        solInfo = tokens[2].split('/') # tokens[2] should be "solId/AllSol"
+                        assert len(probInfo) == 2, f'tokens[1]: {tokens[1]} should be a token as probId/AllProb'
+                        assert len(solInfo) == 2, f'tokens[2]: {tokens[2]} should be a token as solId/AllSol'
+                        prob_sol_map.update({ int(probInfo[0]) : int(solInfo[0])})
+                        if allProblems == 0:
+                            allProblems = int(probInfo[1]) + 1
+                        if allSolutions == 0:
+                            allSolutions = int(solInfo[1]) + 1
+
+    except FileNotFoundError:
+        print(f'Error: The file {logfile} was not found.')
+
+    except Exception as e:
+        print(f'An error occurred: {e}')
+
+    print(f"#  Parsed Log File is for a {allProblems} problems vs {allSolutions} solutions tuning.")
+
+    return prob_sol_map
+
 
 ################################################################################
 # Tensile
@@ -367,6 +422,8 @@ def Tensile(userArgs):
             "and optional second file is size list")
     argParser.add_argument("--use-cache", dest="useCache", action="store_true",
             help="Ignore cache; redo parameter forking and solution generation")
+    argParser.add_argument("--restore-from-log", type=str, dest="RestoreLog",
+            help="A log file captured in previous tuning. ONLY RELIABLE when configs yaml not changes")
 
     addCommonArguments(argParser)
     args = argParser.parse_args(userArgs)
@@ -384,6 +441,15 @@ def Tensile(userArgs):
     elif not altFormat and len(configPaths) != 1:
         printExit("Only 1 config_file is accepted for the default config format. "
                   "Did you mean to add '--alternate-formate'?")
+
+    prob_sol_map = {}
+    if args.RestoreLog:
+        restoreLogPath = Path(os.path.abspath(args.RestoreLog))
+        if not os.path.exists(restoreLogPath):
+            printExit(f'restore log file: {restoreLogPath} is not existing, abort. Please check')
+        prob_sol_map = restore_prob_sol_map(restoreLogPath)
+        for key,value in prob_sol_map.items():
+            print1(f'#  Restored Prob-Solution From Log: [Prob:{key},Sol:{value}]')
 
     # 2nd half of splash
     if len(configPaths) == 1:
@@ -494,7 +560,7 @@ def Tensile(userArgs):
     if "MaxFileName" in globalParameters or "MaxFileName" in config:
         printWarning("MaxFileName is no longer configurable, it will be automatically set to 64")
 
-    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id)
+    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map)
 
 def TensileConfigPath(*args):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), "Configs", *args)
