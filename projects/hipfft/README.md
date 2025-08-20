@@ -37,7 +37,6 @@ To build hipFFT from source, follow these steps:
 1. Install the library build dependencies:
 
    * On AMD platforms, you must install [rocFFT](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocfft).
-   * On NVIDIA platforms, you must install [cuFFT](https://developer.nvidia.com/cufft).
 
 2. Install the client build dependencies:
 
@@ -59,11 +58,6 @@ Here are some CMake build examples:
     * Code: `cmake -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release -L ..`
   * Case: Build a project using HIP language APIs + hipFFT + device kernels with HIP-Clang
     * Code: `cmake -DCMAKE_CXX_COMPILER=amdclang++ -DCMAKE_BUILD_TYPE=Release -DBUILD_CLIENTS=ON -L ..`
-* NVIDIA GPU
-  * Case: Build a project using HIP language APIs + hipFFT with standard host compiler
-    * Code: `cmake -DCMAKE_CXX_COMPILER=g++ -DCMAKE_BUILD_TYPE=Release -DBUILD_WITH_LIB=CUDA -L ..`
-  * Case: Build a project using HIP language APIs + hipFFT + device kernels with HIP-NVCC
-    * Code: `HIP_PLATFORM=nvidia cmake -DCMAKE_CXX_COMPILER=hipcc -DCMAKE_BUILD_TYPE=Release -DBUILD_CLIENTS=ON -L ..`
 
 ```note
 The `-DBUILD_CLIENTS=ON` option is only allowed with the amdclang++ or HIPCC compilers.
