@@ -36,26 +36,26 @@
 /shared/tensile/                                    @ROCm/tensile-reviewers
 
 # Next CMake-specific ownership
-/projects/hipblas-common/**/*.cmake                 @ROCm/rocm-math-lib-build-infra
-/projects/hipblas-common/**/CMakeLists.txt          @ROCm/rocm-math-lib-build-infra
+/projects/hipblas-common/**/*.cmake                 @ROCm/rocm-math-lib-build-infra @ROCm/hipblas-common-reviewers
+/projects/hipblas-common/**/CMakeLists.txt          @ROCm/rocm-math-lib-build-infra @ROCm/hipblas-common-reviewers
 
-/projects/hipblaslt/**/*.cmake                      @ROCm/rocm-math-lib-build-infra
-/projects/hipblaslt/**/CMakeLists.txt               @ROCm/rocm-math-lib-build-infra
+/projects/hipblaslt/**/*.cmake                      @ROCm/rocm-math-lib-build-infra @ROCm/hipblaslt-reviewers
+/projects/hipblaslt/**/CMakeLists.txt               @ROCm/rocm-math-lib-build-infra @ROCm/hipblaslt-reviewers
 
-/projects/rocblas/**/*.cmake                        @ROCm/rocm-math-lib-build-infra
-/projects/rocblas/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra
+/projects/rocblas/**/*.cmake                        @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
+/projects/rocblas/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra @ROCm/rocblas-reviewers
 
-/projects/hipsparselt/**/*.cmake                    @ROCm/rocm-math-lib-build-infra
-/projects/hipsparselt/**/CMakeLists.txt             @ROCm/rocm-math-lib-build-infra
+/projects/hipsparselt/**/*.cmake                    @ROCm/rocm-math-lib-build-infra @ROCm/hipsparselt-reviewers
+/projects/hipsparselt/**/CMakeLists.txt             @ROCm/rocm-math-lib-build-infra @ROCm/hipsparselt-reviewers
 
-/shared/rocroller/**/*.cmake                        @ROCm/rocm-math-lib-build-infra
-/shared/rocroller/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra
+/shared/rocroller/**/*.cmake                        @ROCm/rocm-math-lib-build-infra @ROCm/rocroller-developers
+/shared/rocroller/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra @ROCm/rocroller-developers
 
-/shared/mxdatagenerator/**/*.cmake                  @ROCm/rocm-math-lib-build-infra
-/shared/mxdatagenerator/**/CMakeLists.txt           @ROCm/rocm-math-lib-build-infra
+/shared/mxdatagenerator/**/*.cmake                  @ROCm/rocm-math-lib-build-infra @ROCm/rocroller-developers
+/shared/mxdatagenerator/**/CMakeLists.txt           @ROCm/rocm-math-lib-build-infra @ROCm/rocroller-developers
 
-/shared/tensile/**/*.cmake                          @ROCm/rocm-math-lib-build-infra
-/shared/tensile/**/CMakeLists.txt                   @ROCm/rocm-math-lib-build-infra
+/shared/tensile/**/*.cmake                          @ROCm/rocm-math-lib-build-infra @ROCm/tensile-reviewers
+/shared/tensile/**/CMakeLists.txt                   @ROCm/rocm-math-lib-build-infra @ROCm/tensile-reviewers
 
 # Documentation-specific ownership by project
 /projects/hipblas/**/*.md                           @ROCm/hipblas-reviewers @ROCm/hipblas-docs-reviewers
