@@ -90,7 +90,15 @@ namespace MemoryTracerTest
         std::ofstream file("lds_bank_conflicts.dot");
         file << kgraph.toDOT() << std::endl;
 
-        auto summary = memoryTrace(kgraph, {});
+        KernelInvocation inv{.workgroupSize = {256, 1, 1}};
+
+        auto summary = memoryTrace(kgraph, inv);
         std::cout << summary << std::endl;
+
+        // All visited nodes only access 4 banks in this graph
+        for(const auto& [tag, access] : summary.accesses)
+        {
+            CHECK(access.accessedBanks.size() == 4);
+        }
     }
 }
