@@ -45,11 +45,6 @@ add_executable( rocblas-example-header-check example_header_check.cpp)
 
 set( sample_list_base rocblas-example-sscal rocblas-example-scal-template rocblas-example-scal-multiple-strided-batch rocblas-example-solver rocblas-example-hip-complex-her2 rocblas-example-gemv-graph-capture rocblas-example-header-check)
 
-if ( (TARGET OpenMP::OpenMP_CXX) OR (TARGET OpenMP::omp) ) 
-  add_executable( rocblas-example-openmp example_openmp.cpp )
-  target_link_libraries( rocblas-example-openmp PRIVATE ${COMMON_LINK_LIBS} )
-  apply_omp_settings( rocblas-example-openmp )
-endif()
 
 if ( BUILD_FORTRAN_CLIENTS )
   # Fortran examples
@@ -75,7 +70,13 @@ set( sample_list_L3 rocblas-example-sgemm rocblas-example-sgemm-strided-batched 
 
 # device includes
 set( sample_list_hip_device ${sample_list_base} ${sample_list_tensile} ${sample_list_L3} )
-list(APPEND sample_list_base rocblas-example-openmp) # OpenMP not supported with hip device compilation
+
+if ( (TARGET OpenMP::OpenMP_CXX) OR (TARGET OpenMP::omp) ) 
+  add_executable( rocblas-example-openmp example_openmp.cpp )
+  target_link_libraries( rocblas-example-openmp PRIVATE ${COMMON_LINK_LIBS} )
+  apply_omp_settings( rocblas-example-openmp )
+  list(APPEND sample_list_base rocblas-example-openmp) # OpenMP not supported with hip device compilation
+endif()
 
 # combined list
 set( sample_list_all ${sample_list_c} ${sample_list_base} ${sample_list_fortran} ${sample_list_tensile} ${sample_list_L3} )
