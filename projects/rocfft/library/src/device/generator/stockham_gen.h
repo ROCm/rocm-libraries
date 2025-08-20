@@ -90,18 +90,21 @@ struct StockhamPartialPassParams
     StockhamPartialPassParams(const std::vector<unsigned int>& parent_length,
                               const unsigned int               current_dim,
                               const unsigned int               off_dim,
-                              const std::vector<unsigned int>& factors_off_dim)
+                              const std::vector<unsigned int>& pp_factors_curr,
+                              const std::vector<unsigned int>& pp_factors_other)
         : parent_length(parent_length)
         , current_dim(current_dim)
         , off_dim(off_dim)
-        , factors_off_dim(factors_off_dim)
+        , pp_factors_curr(pp_factors_curr)
+        , pp_factors_other(pp_factors_other)
     {
     }
 
     std::vector<unsigned int> parent_length;
     unsigned int              current_dim = 0;
     unsigned int              off_dim     = 0;
-    std::vector<unsigned int> factors_off_dim;
+    std::vector<unsigned int> pp_factors_curr;
+    std::vector<unsigned int> pp_factors_other;
 };
 
 void stockham_partial_pass_variants(const std::string&               kernel_name,

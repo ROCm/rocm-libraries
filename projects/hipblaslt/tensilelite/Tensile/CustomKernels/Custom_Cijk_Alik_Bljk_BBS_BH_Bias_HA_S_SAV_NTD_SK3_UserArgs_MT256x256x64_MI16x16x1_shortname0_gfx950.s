@@ -948,11 +948,11 @@ v_readfirstlane_b32 s[sgprWorkGroup2], v4          // quotient
 v_readfirstlane_b32 s100, v5                       // remainder
 v_cvt_f32_u32 v4, s[sgprNumWorkGroups0]            // TileID // nWG0
 v_rcp_iflag_f32 v4, v4                             // TileID // nWG0
-v_cvt_f32_u32 v5, s98                              // TileID // nWG0
+v_cvt_f32_u32 v5, s100                             // TileID // nWG0
 v_mul_f32 v4, v4, v5                               // TileID // nWG0
 v_cvt_u32_f32 v4, v4                               // TileID // nWG0
 v_mul_u32_u24 v5, v4, s[sgprNumWorkGroups0]        // TileID // nWG0
-v_sub_u32 v5, s98, v5                              // TileID // nWG0
+v_sub_u32 v5, s100, v5                             // TileID // nWG0
 v_cmpx_eq_u32 exec, v5, s[sgprNumWorkGroups0]      // TileID // nWG0
 v_add_u32 v4, 1, v4                                // TileID // nWG0
 v_mov_b32 v5, 0                                    // TileID // nWG0
@@ -960,7 +960,7 @@ s_mov_b64 exec, -1                                 // Reset exec
 v_cmpx_gt_u32 exec, v5, s[sgprNumWorkGroups0]      // overflow happened in remainder
 v_sub_u32 v4, v4, 1                                // quotient - 1
 v_mul_u32_u24 v5, v4, s[sgprNumWorkGroups0]        // re-calculate remainder
-v_sub_u32 v5, s98, v5                              // re-calculate remainder
+v_sub_u32 v5, s100, v5                             // re-calculate remainder
 s_mov_b64 exec, -1                                 // Reset exec
 v_readfirstlane_b32 s[sgprWorkGroup1], v4          // quotient
 v_readfirstlane_b32 s[sgprWorkGroup0], v5          // remainder

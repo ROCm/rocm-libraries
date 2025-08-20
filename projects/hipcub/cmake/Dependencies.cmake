@@ -139,20 +139,13 @@ endif(USER_BUILD_BENCHMARK)
 
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
-  set(CCCL_MINIMUM_VERSION 2.7.0)
+  set(CCCL_MINIMUM_VERSION 2.8.2) 
   if(NOT DOWNLOAD_CUB)
-    find_package(CUB ${CCCL_MINIMUM_VERSION} CONFIG)
-    find_package(Thrust ${CCCL_MINIMUM_VERSION} CONFIG)
-    find_package(libcudacxx ${CCCL_MINIMUM_VERSION} CONFIG)
+    find_package(CCCL ${CCCL_MINIMUM_VERSION} CONFIG)
   endif()
 
-  if (NOT CUB_FOUND OR NOT Thrust_FOUND OR NOT libcudacxx_FOUND)
-    if(CUB_FOUND OR Thrust_FOUND OR libcudacxx_FOUND)
-      message(WARNING "Found one of CUB, Thrust or libcu++, but not all of them.
-                       This can lead to mixing different potentially incompatible versions.")
-    endif()
-
-    message(STATUS "CUB, Thrust or libcu++ not found, downloading and extracting CCCL ${CCCL_MINIMUM_VERSION}")
+  if (NOT CCCL_FOUND)
+    message(STATUS "CCCL not found, downloading and extracting CCCL ${CCCL_MINIMUM_VERSION}")
     file(DOWNLOAD https://github.com/NVIDIA/cccl/archive/refs/tags/v${CCCL_MINIMUM_VERSION}.zip
                   ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION}.zip
          STATUS cccl_download_status LOG cccl_download_log)
@@ -176,12 +169,8 @@ if(HIP_COMPILER STREQUAL "nvcc")
       endif()
     endif()
 
-    find_package(CUB ${CCCL_MINIMUM_VERSION} CONFIG REQUIRED NO_DEFAULT_PATH
-                 PATHS ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION}/cub)
-    find_package(Thrust ${CCCL_MINIMUM_VERSION} CONFIG REQUIRED NO_DEFAULT_PATH
-                 PATHS ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION}/thrust)
-    find_package(libcudacxx ${CCCL_MINIMUM_VERSION} CONFIG REQUIRED NO_DEFAULT_PATH
-                 PATHS ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION}/libcudacxx)
+    find_package(CCCL ${CCCL_MINIMUM_VERSION} CONFIG REQUIRED NO_DEFAULT_PATH
+                 PATHS ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION})
   endif()
 else()
   # rocPRIM (only for ROCm platform)
