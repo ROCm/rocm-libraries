@@ -41,12 +41,12 @@ namespace rocRoller
 
         void insertPreLoopLoads(KernelGraph&            graph,
                                 UnrollColouring const&    colouring,
-                                std::vector<int> const& preLoopLoad,
+                                std::vector<int> const& preLoopLoads,
                                 std::vector<int>        loads)
         {
             auto preNOP = graph.control.addElement(NOP());
             auto prev   = preNOP;
-            for(auto next : preLoopLoad)
+            for(auto next : preLoopLoads)
             {
                 graph.control.addElement(Sequence(), {prev}, {next});
                 prev = next;
@@ -80,7 +80,7 @@ namespace rocRoller
 
         void insertInLoopLoads(KernelGraph&                            graph,
                                UnrollColouring const&    colouring,
-                               std::vector<std::pair<int, int>> const& inLoopLoad,
+                               std::vector<std::pair<int, int>> const& inLoopLoads,
                                int                                     forLoop)
         {
             auto loopLoads = filter(graph.control.isElemType<LoadTiled>(),
@@ -112,7 +112,7 @@ namespace rocRoller
 
             auto postNOP = graph.control.addElement(NOP());
             auto prev    = postNOP;
-            for(auto [loadChain, _ignore] : inLoopLoad)
+            for(auto [loadChain, _ignore] : inLoopLoads)
             {
                 graph.control.addElement(Sequence(), {prev}, {loadChain});
                 prev = loadChain;
@@ -124,7 +124,7 @@ namespace rocRoller
             graph.control.addElement(Sequence(), {prev}, {nextTopOp});
 
             // Update SetCoordinates
-            for(auto [loadChain, unrollCoord] : inLoopLoad)
+            for(auto [loadChain, unrollCoord] : inLoopLoads)
             {
                 std::optional<int> maybeOperation = loadChain;
                 while(maybeOperation)
@@ -173,9 +173,9 @@ namespace rocRoller
         {
             auto root = graph.control.roots().only().value();
 
-            std::vector<int>                 preLoopLoad;
-            std::map<int, std::vector<int>>  inLoopCopy;
-            std::vector<std::pair<int, int>> inLoopLoad;
+            std::vector<int>                 preLoopLoads;
+            std::map<int, std::vector<int>>  inLoopCopies;
+            std::vector<std::pair<int, int>> inLoopLoads;
 
             auto forLoop = -1;
 
@@ -240,9 +240,10 @@ namespace rocRoller
                     auto topOp = getTopSetCoordinate(graph, loadTag);
                     replaceWith(graph, topOp, graph.control.addElement(NOP()), false);
 
-                    preLoopLoad.push_back(topOp);
-                    inLoopLoad.push_back(std::make_pair(duplicateChain(graph, {topOp}),
-                                                        graph.mapper.get<Unroll>(loadTag, 2)));
+                    preLoopLoads.push_back(topOp);
+                    auto inLoopLoad = duplicateChain(graph, {topOp});
+                    graph.control.addElement(Sequence(), {copyTag}, {inLoopLoad});
+                    inLoopLoads.push_back(std::make_pair(inLoopLoad, graph.mapper.get<Unroll>(loadTag, 2)));
 
                     // update the indexes of the associated exchange macrotiles
                     auto location = graph.coordinates.getLocation(macTileTag);
@@ -270,22 +271,22 @@ namespace rocRoller
                             }
                         }
                         AssertFatal(exchangeTag.has_value());
-                        inLoopCopy[copyTag].push_back(
+                        inLoopCopies[copyTag].push_back(
                             getTopSetCoordinate(graph, exchangeTag.value()));
                     }
                 }
             }
 
-            if(preLoopLoad.empty())
+            if(preLoopLoads.empty())
                 return;
 
             AssertFatal(!loads.empty());
-            insertPreLoopLoads(graph, colouring, preLoopLoad, loads);
+            insertPreLoopLoads(graph, colouring, preLoopLoads, loads);
 
             AssertFatal(forLoop != -1);
-            insertInLoopLoads(graph, colouring, inLoopLoad, forLoop);
+            insertInLoopLoads(graph, colouring, inLoopLoads, forLoop);
 
-            insertInLoopCopies(graph, inLoopCopy);
+            insertInLoopCopies(graph, inLoopCopies);
         }
 
         KernelGraph PrefetchScale::apply(KernelGraph const& original)
