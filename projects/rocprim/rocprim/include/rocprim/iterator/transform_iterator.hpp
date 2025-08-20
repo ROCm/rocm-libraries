@@ -27,6 +27,7 @@
 
 #include "../config.hpp"
 #include "../type_traits.hpp"
+#include "detail/common.hpp"
 
 /// \addtogroup iteratormodule
 /// @{
@@ -54,30 +55,6 @@ template<class InputIterator,
              typename std::iterator_traits<InputIterator>::value_type>::type>
 class transform_iterator
 {
-private:
-    template<typename T>
-    class proxy_pointer
-    {
-        T value_;
-
-    public:
-        ROCPRIM_HOST_DEVICE inline proxy_pointer(const T& value) : value_(value) {}
-
-        ROCPRIM_HOST_DEVICE
-        const T*
-            operator->() const
-        {
-            return &value_;
-        }
-
-        ROCPRIM_HOST_DEVICE
-        const T&
-            operator*() const
-        {
-            return value_;
-        }
-    };
-
 public:
     /// The type of the value that can be obtained by dereferencing the iterator.
     using value_type = ValueType;
@@ -86,7 +63,7 @@ public:
     using reference = const std::remove_reference_t<value_type>&;
     /// \brief A pointer type of the type iterated over (\p value_type).
     /// It's `const` since transform_iterator is a read-only iterator.
-    using pointer = const proxy_pointer<std::remove_reference_t<value_type>>;
+    using pointer = const detail::proxy_pointer<std::remove_reference_t<value_type>>;
     /// A type used for identify distance between iterators.
     using difference_type = typename std::iterator_traits<InputIterator>::difference_type;
     /// The category of the iterator.
