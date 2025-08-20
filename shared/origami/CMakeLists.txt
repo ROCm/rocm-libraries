@@ -52,10 +52,10 @@ target_include_directories(origami
 
 target_sources(origami
     PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/AnalyticalGemm.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/Hardware.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/Utils.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/StreamK.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/gemm.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/hardware.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/utils.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/streamk.cpp"
 )
 
 target_link_libraries(origami PUBLIC hip::host)

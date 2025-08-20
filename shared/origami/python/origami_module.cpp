@@ -1,6 +1,6 @@
-#include "origami/Hardware.hpp"
-#include "origami/StreamK.hpp"
-#include "origami/Utils.hpp"
+#include "origami/hardware.hpp"
+#include "origami/streamk.hpp"
+#include "origami/utils.hpp"
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>

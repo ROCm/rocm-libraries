@@ -1,6 +1,9 @@
-#include "origami/Hardware.hpp"
-#include "origami/StreamK.hpp"
-#include "origami/Utils.hpp"
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#include "origami/hardware.hpp"
+#include "origami/streamk.hpp"
+#include "origami/utils.hpp"
 
 namespace origami
 {
