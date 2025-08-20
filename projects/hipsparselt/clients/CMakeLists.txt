@@ -1,6 +1,5 @@
-# Copyright Advanced Micro Devices, Inc., or its affiliates. SPDX-License-Identifier: MIT
-
-set(_CMAKE_CURRENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../clients")
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 find_package(Threads REQUIRED)
 find_package(OpenMP REQUIRED)
@@ -13,17 +12,17 @@ if(HIPSPARSELT_ENABLE_BLIS)
 endif()
 
 configure_file(
-  "${_CMAKE_CURRENT_SOURCE_DIR}/include/hipsparselt_common.yaml"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/hipsparselt_common.yaml"
   "${CMAKE_CURRENT_BINARY_DIR}/hipsparselt_common.yaml" COPYONLY
 )
 
 configure_file(
-  "${_CMAKE_CURRENT_SOURCE_DIR}/include/hipsparselt_template.yaml"
+  "${CMAKE_CURRENT_SOURCE_DIR}/include/hipsparselt_template.yaml"
   "${CMAKE_CURRENT_BINARY_DIR}/hipsparselt_template.yaml" COPYONLY
 )
 
 configure_file(
-  "${_CMAKE_CURRENT_SOURCE_DIR}/common/hipsparselt_gentest.py"
+  "${CMAKE_CURRENT_SOURCE_DIR}/common/hipsparselt_gentest.py"
   "${CMAKE_CURRENT_BINARY_DIR}/hipsparselt_gentest.py" COPYONLY
 )
 
@@ -39,20 +38,20 @@ endif()
 
 target_sources(
   hipsparselt-clients-common
-  PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/common/singletons.cpp"
-          "${_CMAKE_CURRENT_SOURCE_DIR}/common/utility.cpp"
-          "${_CMAKE_CURRENT_SOURCE_DIR}/common/cblas_interface.cpp"
-          "${_CMAKE_CURRENT_SOURCE_DIR}/common/argument_model.cpp"
-          "${_CMAKE_CURRENT_SOURCE_DIR}/common/hipsparselt_parse_data.cpp"
-          "${_CMAKE_CURRENT_SOURCE_DIR}/common/hipsparselt_arguments.cpp"
-          "${_CMAKE_CURRENT_SOURCE_DIR}/common/hipsparselt_random.cpp"
+  PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/common/singletons.cpp"
+          "${CMAKE_CURRENT_SOURCE_DIR}/common/utility.cpp"
+          "${CMAKE_CURRENT_SOURCE_DIR}/common/cblas_interface.cpp"
+          "${CMAKE_CURRENT_SOURCE_DIR}/common/argument_model.cpp"
+          "${CMAKE_CURRENT_SOURCE_DIR}/common/hipsparselt_parse_data.cpp"
+          "${CMAKE_CURRENT_SOURCE_DIR}/common/hipsparselt_arguments.cpp"
+          "${CMAKE_CURRENT_SOURCE_DIR}/common/hipsparselt_random.cpp"
 )
 
 target_include_directories(
   hipsparselt-clients-common
-  PUBLIC $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}/include>
-         $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}/include/spmm>
-         $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}/../library/include>
+  PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/spmm>
+         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../library/include>
          # Ideally, for the build interface, we can just look into the source tree
          $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>

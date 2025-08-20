@@ -1,8 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-set(_CMAKE_CURRENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../library")
-
 if(HIPSPARSELT_BUILD_SHARED_LIBS OR BUILD_SHARED_LIBS)
     add_library(hipsparselt SHARED)
 else()
@@ -54,8 +52,8 @@ set_target_properties(
 
 target_include_directories(
     hipsparselt
-    PUBLIC $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}/include>
-           $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}/src/include>
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+           $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/include>
            $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )

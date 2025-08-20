@@ -1,6 +1,5 @@
-# Copyright Advanced Micro Devices, Inc., or its affiliates. SPDX-License-Identifier: MIT
-
-set(_CMAKE_CURRENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../clients/samples")
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 set(SAMPLE_EXECUTABLES example_spmm_strided_batched example_prune_strip example_compress)
 
@@ -14,11 +13,11 @@ foreach(sample_name ${SAMPLE_EXECUTABLES})
     target_compile_definitions(${sample_name} PRIVATE HIPSPARSELT_INTERNAL_API)
   endif()
 
-  target_sources(${sample_name} PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/${sample_name}.cpp")
+  target_sources(${sample_name} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/${sample_name}.cpp")
 
   target_include_directories(
-    ${sample_name} PRIVATE $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}/../include>
-                           $<BUILD_INTERFACE:${_CMAKE_CURRENT_SOURCE_DIR}/../../library/include>
+    ${sample_name} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+                           $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/include>
   )
 
   target_link_libraries(${sample_name} PRIVATE roc::hipsparselt)

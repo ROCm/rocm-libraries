@@ -1,19 +1,18 @@
-# Copyright Advanced Micro Devices, Inc., or its affiliates. SPDX-License-Identifier: MIT
-
-set(_CMAKE_CURRENT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../library/src")
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 target_sources(
-  hipsparselt PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/hipsparselt_ostream.cpp"
-                      "${_CMAKE_CURRENT_SOURCE_DIR}/auxiliary.cpp"
+  hipsparselt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/hipsparselt_ostream.cpp"
+                      "${CMAKE_CURRENT_SOURCE_DIR}/auxiliary.cpp"
 )
 
-target_include_directories(hipsparselt PRIVATE ${_CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(hipsparselt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 if(HIPSPARSELT_ENABLE_HIP)
-  # target_include_directories(hipsparselt PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/hcc_detail")
+  # target_include_directories(hipsparselt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/hcc_detail")
   add_subdirectory(hcc_detail)
 elseif(HIPSPARSELT_ENABLE_CUDA)
-  # target_include_directories(hipsparselt PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/nvcc_detail")
+  # target_include_directories(hipsparselt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/nvcc_detail")
   add_subdirectory(nvcc_detail)
 else()
   message(

@@ -15,7 +15,7 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Set cpack license file here to avoid rocm-cmake warning
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.md")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 
 include(FetchROCmCMake)
 include(hipSPARSELtSupportedArchitectures)
@@ -35,8 +35,8 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     endif()
 endif()
 
-# Build Options and Validation
-# ============================================================================
+# --- Build options and validation ---
+
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile_commands.json for clang tooling support" ON)
 
 option(HIPSPARSELT_ENABLE_CUDA "Build hipSPARSELt with CUDA backend." OFF)
@@ -66,7 +66,7 @@ option(HIPSPARSELT_ENABLE_MARKER "Enable rocTracer marker support." ON)
 option(HIPSPARSELT_ENABLE_ASAN "Build with address sanitizer enabled." OFF)
 option(HIPSPARSELT_ENABLE_VERBOSE "Output additional build information." OFF)
 
-set(HIPSPARSELT_HIPBLASLT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../hipblaslt/next-cmake"
+set(HIPSPARSELT_HIPBLASLT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../hipblaslt"
     CACHE PATH "Path to hipblaslt directory."
 )
 set(HIPSPARSELT_COVERAGE_GTEST_FILTER "*pre_checkin*" CACHE STRING
@@ -100,8 +100,8 @@ if(HIPSPARSELT_ENABLE_FORTRAN)
     enable_language(Fortran)
 endif()
 
-# Dependency Setup
-# ============================================================================
+# --- Dependency Setup ---
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 find_package(hip REQUIRED)
 find_package(hipsparse REQUIRED)
@@ -130,21 +130,23 @@ if(HIPSPARSELT_ENABLE_HIP)
     if(NOT EXISTS "${HIPBLASLT_PATH}")
         message(
             FATAL_ERROR
-                "hipBLASLt not found at ${HIPBLASLT_PATH}. Please ensure hipblaslt is available."
+                "hipBLASLt required but no not found at ${HIPBLASLT_PATH}."
         )
     endif()
 
     block(SCOPE_FOR VARIABLES)
     set(HIPBLASLT_ENABLE_HOST OFF CACHE BOOL "" FORCE)
     set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
+    # Builds tensilelite's device libraries (.co/.dat)
     set(HIPBLASLT_ENABLE_DEVICE ON CACHE BOOL "" FORCE)
+    # Builds tensilelite::tensilelite-host target
     set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
     set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
     set(HIPBLASLT_LIBLOGIC_PATH
-        "${CMAKE_CURRENT_SOURCE_DIR}/../library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
+        "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
         CACHE STRING "" FORCE
     )
-    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.md"
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md"
         CACHE FILEPATH "License file for package" FORCE
     )
 
@@ -169,8 +171,8 @@ if(HIPSPARSELT_ENABLE_CLIENT)
     add_subdirectory(clients)
 endif()
 
-# Packaging and installation
-# ============================================================================
+# --- Packaging and installation ---
+
 if(HIPSPARSELT_ENABLE_CLIENT)
     include(ROCmClientPackages)
     rocm_setup_client_components(clients clients-common)
@@ -304,8 +306,8 @@ rocm_create_package(
     LDCONFIG_DIR ${HIPSPARSELT_CONFIG_DIR}
 )
 
-# Coverage Setup
-# ============================================================================
+# --- Coverage setup ---
+
 if(HIPSPARSELT_BUILD_COVERAGE OR BUILD_CODE_COVERAGE)
     message(STATUS "Configuring code coverage target")
     target_compile_options(hipsparselt PRIVATE -fprofile-instr-generate -fcoverage-mapping)
