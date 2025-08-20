@@ -300,6 +300,7 @@ add_rocprim_test_parallel("rocprim.device_radix_sort" test_device_radix_sort.cpp
 add_rocprim_test("rocprim.device_reduce_by_key" test_device_reduce_by_key.cpp)
 add_rocprim_test("rocprim.device_reduce" test_device_reduce.cpp)
 add_rocprim_test("rocprim.device_run_length_encode" test_device_run_length_encode.cpp)
+add_rocprim_test("rocprim.device_scan_by_key" test_device_scan_by_key.cpp)
 add_rocprim_test("rocprim.device_scan" test_device_scan.cpp)
 add_rocprim_test("rocprim.device_search" test_device_search.cpp)
 add_rocprim_test_parallel("rocprim.device_segmented_radix_sort" test_device_segmented_radix_sort.cpp.in)
