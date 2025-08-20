@@ -1198,3 +1198,69 @@ TYPED_TEST(mt19937_generator_engine_tests, jump_ahead_test)
     HIP_CHECK(hipFree(d_mt19937_jump));
     HIP_CHECK(hipFree(d_engines1));
 }
+
+/*
+    HOST SIDE TESTS
+*/
+
+TYPED_TEST(mt19937_generator_engine_tests, jump_ahead_host_test)
+{
+    // Compare states of all engines
+    // computed consecutively on host using Sliding window and Horner algorithm
+
+    using generator_t = typename TestFixture::generator_t;
+
+    const unsigned long long seed = 12345678;
+    constexpr unsigned int   n    = mt19937_constants::n;
+
+    // Test for default config
+    using ConfigProvider = default_config_provider<ROCRAND_RNG_PSEUDO_MT19937>;
+    generator_config config;
+    HIP_CHECK(
+        ConfigProvider::host_config<unsigned int>(0, ROCRAND_ORDERING_PSEUDO_DEFAULT, config));
+
+    const unsigned int generator_count
+        = config.threads * config.blocks / mt19937_octo_engine::threads_per_generator;
+
+    // Initialize the engines on host using Sliding window algorithm
+    std::vector<mt19937_engine> h_engines0;
+    h_engines0.reserve(generator_count);
+    // initialize the first engine with the seed and no skips
+    h_engines0.emplace_back(seed);
+    for(size_t i = 1; i < generator_count; i++)
+    {
+        // every consecutive engine is one subsequence away from the previous
+        h_engines0.push_back(h_engines0.back());
+        h_engines0[i].discard_subsequence();
+    }
+
+    std::vector<unsigned int> h_engines1(generator_count * n);
+
+    for(unsigned int engine_id = 0; engine_id < generator_count; ++engine_id)
+    {
+        jump_ahead_mt19937<generator_t::jump_ahead_thread_count, ConfigProvider, false>(
+            dim3(engine_id),
+            dim3(0),
+            dim3(generator_count),
+            dim3(generator_t::jump_ahead_thread_count),
+            h_engines1.data(),
+            seed,
+            rocrand_h_mt19937_jump);
+    }
+    for(unsigned int gi = 0; gi < generator_count; gi++)
+    {
+        for(unsigned int i = 0; i < n; i++)
+        {
+            unsigned int a = h_engines0[gi].m_state.mt[i];
+            unsigned int b = h_engines1[gi * n + i];
+            if(i == 0)
+            {
+                // 31 bits of the first value contain garbage, only the last bit (19937 % 32 == 1)
+                // matters
+                a &= 0x80000000U;
+                b &= 0x80000000U;
+            }
+            ASSERT_EQ(a, b);
+        }
+    }
+}
