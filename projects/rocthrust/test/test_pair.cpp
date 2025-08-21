@@ -22,7 +22,8 @@
 #include <type_traits>
 #include <utility>
 
-#include "test_header.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(PairTests, NumericalTestsParams);
 

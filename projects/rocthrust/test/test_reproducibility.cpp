@@ -22,7 +22,10 @@
 #include <cmath>
 
 #include "bitwise_repro/bwr_utils.hpp"
-#include "test_header.hpp"
+
+#include "test_real_assertions.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 using ReproducibilityTestParams =
   ::testing::Types<Params<thrust::device_vector<int>, std::decay_t<decltype(thrust::hip::par_det)>>,

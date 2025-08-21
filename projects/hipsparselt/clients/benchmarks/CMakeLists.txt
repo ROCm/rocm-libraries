@@ -91,6 +91,11 @@ target_link_libraries( hipsparselt-bench PRIVATE ${COMMON_LINK_LIBS} )
 set_target_properties( hipsparselt-bench PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
 )
+set_target_properties( hipsparselt-bench PROPERTIES BUILD_RPATH_USE_ORIGIN TRUE)
+set_target_properties( hipsparselt-bench PROPERTIES
+  BUILD_RPATH "${HIP_CLANG_ROOT}/lib"
+  INSTALL_RPATH "$ORIGIN/../llvm/lib"
+)
 
 add_dependencies( hipsparselt-bench hipsparselt-common )
 

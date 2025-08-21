@@ -21,7 +21,9 @@
 
 #include <limits>
 
-#include "test_header.hpp"
+#include "test_imag_assertions.hpp"
+#include "test_param_fixtures.hpp"
+#include "test_utils.hpp"
 
 TESTS_DEFINE(ComplexTransformTests, FloatTestsParams);
 

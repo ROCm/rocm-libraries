@@ -306,25 +306,25 @@ public:
     ROCPRIM_HOST_DEVICE inline
     bool operator<(texture_cache_iterator other) const
     {
-        return (ptr - other.ptr) > 0;
+        return (ptr - other.ptr) < 0;
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator<=(texture_cache_iterator other) const
     {
-        return (ptr - other.ptr) >= 0;
+        return (ptr - other.ptr) <= 0;
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator>(texture_cache_iterator other) const
     {
-        return (ptr - other.ptr) < 0;
+        return (ptr - other.ptr) > 0;
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator>=(texture_cache_iterator other) const
     {
-        return (ptr - other.ptr) <= 0;
+        return (ptr - other.ptr) >= 0;
     }
     #endif // DOXYGEN_SHOULD_SKIP_THIS
 

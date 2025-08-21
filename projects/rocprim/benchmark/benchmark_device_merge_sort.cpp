@@ -50,10 +50,16 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(rocprim::int128_t)
     CREATE_BENCHMARK(rocprim::uint128_t)
 
-    using custom_float2          = common::custom_type<float, float>;
-    using custom_double2         = common::custom_type<double, double>;
-    using custom_int2            = common::custom_type<int, int>;
-    using custom_char_double     = common::custom_type<char, double>; // used by ssbk benchmark
+    using custom_float2  = common::custom_type<float, float>;
+    using custom_double2 = common::custom_type<double, double>;
+    using custom_double2_copy
+        = common::custom_type_copyable<double,
+                                       double>; // specific benchmark for specialization workaround
+    using custom_int2        = common::custom_type<int, int>;
+    using custom_char_double = common::custom_type<char, double>; // used by ssbk
+    using custom_char_double_copy
+        = common::custom_type_copyable<char,
+                                       double>; // specific benchmark for specialization workaround
     using custom_longlong_double = common::custom_type<long long, double>;
     using huge_float2_1024       = common::custom_huge_type<1024, float, float>;
     using huge_float2_2048       = common::custom_huge_type<2048, float, float>;
@@ -69,8 +75,10 @@ int main(int argc, char* argv[])
     CREATE_BENCHMARK(huge_float2_2048)
     CREATE_BENCHMARK(long long, custom_double2)
     CREATE_BENCHMARK(custom_double2, custom_double2)
+    CREATE_BENCHMARK(custom_double2, custom_double2_copy)
     CREATE_BENCHMARK(custom_int2, custom_double2)
     CREATE_BENCHMARK(custom_int2, custom_char_double)
+    CREATE_BENCHMARK(custom_int2, custom_char_double_copy)
     CREATE_BENCHMARK(custom_int2, custom_longlong_double)
     CREATE_BENCHMARK(rocprim::int128_t, rocprim::int128_t)
     CREATE_BENCHMARK(rocprim::uint128_t, rocprim::uint128_t)

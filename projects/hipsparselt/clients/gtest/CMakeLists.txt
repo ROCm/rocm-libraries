@@ -111,6 +111,11 @@ set_target_properties( hipsparselt-test PROPERTIES
   LINKER_LANGUAGE CXX
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/staging"
 )
+set_target_properties( hipsparselt-test PROPERTIES BUILD_RPATH_USE_ORIGIN TRUE)
+set_target_properties( hipsparselt-test PROPERTIES
+  BUILD_RPATH "${HIP_CLANG_ROOT}/lib"
+  INSTALL_RPATH "$ORIGIN/../llvm/lib"
+)
 
 set( HIPSPARSELT_TEST_DATA "${PROJECT_BINARY_DIR}/staging/hipsparselt_gtest.data")
 add_custom_command( OUTPUT "${HIPSPARSELT_TEST_DATA}"

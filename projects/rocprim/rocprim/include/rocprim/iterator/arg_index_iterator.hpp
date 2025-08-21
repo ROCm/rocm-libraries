@@ -181,25 +181,25 @@ public:
     ROCPRIM_HOST_DEVICE inline
     bool operator<(arg_index_iterator other) const
     {
-        return (iterator_ - other.iterator_) > 0;
+        return (iterator_ - other.iterator_) < 0;
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator<=(arg_index_iterator other) const
     {
-        return (iterator_ - other.iterator_) >= 0;
+        return (iterator_ - other.iterator_) <= 0;
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator>(arg_index_iterator other) const
     {
-        return (iterator_ - other.iterator_) < 0;
+        return (iterator_ - other.iterator_) > 0;
     }
 
     ROCPRIM_HOST_DEVICE inline
     bool operator>=(arg_index_iterator other) const
     {
-        return (iterator_ - other.iterator_) <= 0;
+        return (iterator_ - other.iterator_) >= 0;
     }
 
     ROCPRIM_HOST_DEVICE inline

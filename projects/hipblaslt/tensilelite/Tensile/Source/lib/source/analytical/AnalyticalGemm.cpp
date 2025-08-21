@@ -95,6 +95,7 @@ namespace TensileLite
                                           size_t          MI_K,
                                           size_t          element_size_A,
                                           size_t          element_size_B,
+                                          DataType        miDataType,
                                           bool            debug)
         {
 
@@ -102,8 +103,7 @@ namespace TensileLite
             size_t N_MI = compute_number_matrix_instructions(
                 hardware, MT_M, MT_N, MT_K, MI_M, MI_N, MI_K, debug);
             // Latency of a single MT_MxMT_NxMT_k tile is the latency of one MI multiplied by number of MI per MT_MxMT_NxMT_k.
-            size_t L_MI = hardware.get_MI_latency(
-                MI_M, MI_N, MI_K, std::max(element_size_A, element_size_B));
+            size_t L_MI = hardware.get_MI_latency(MI_M, MI_N, MI_K, miDataType);
 
             // size_t mt_arith = arithmetic_intensity(MT_M, MT_N, MT_K, 2);
             // printf("MT_M:%d MT_N:%d MT_K:%d arith:%d\n", MT_M, MT_N, MT_K, mt_arith);
@@ -144,6 +144,9 @@ namespace TensileLite
                 {
                     L_MT = L_MT * 2;
                 }
+
+                //NT Transpose Overhead Scales in both.
+
             }
 
             //TT : A is contiguous in K and B is contiguous in N
@@ -450,6 +453,7 @@ namespace TensileLite
                                     size_t          element_size_A,
                                     size_t          element_size_B,
                                     size_t          element_size_out,
+                                    DataType        miDataType,
                                     size_t          mx_block_size,
                                     bool            debug)
         {
@@ -468,6 +472,7 @@ namespace TensileLite
                                                           MI_K,
                                                           element_size_A,
                                                           element_size_B,
+                                                          miDataType,
                                                           debug);
 
             double L_mem = compute_memory_latency(hardware,
@@ -716,6 +721,7 @@ namespace TensileLite
                                     size_t          element_size_A,
                                     size_t          element_size_B,
                                     size_t          element_size_out,
+                                    DataType        miDataType,
                                     size_t          mx_block_size,
                                     bool            debug)
         {
@@ -739,6 +745,7 @@ namespace TensileLite
                                                  element_size_A,
                                                  element_size_B,
                                                  element_size_out,
+                                                 miDataType,
                                                  mx_block_size,
                                                  debug);
 
@@ -765,11 +772,34 @@ namespace TensileLite
                                      size_t          element_size_A,
                                      size_t          element_size_B,
                                      size_t          element_size_out,
+                                     DataType        miDataType,
                                      int             WGM,
                                      size_t          mx_block_size,
                                      bool            debug)
         {
+            //Override dot2 instruction with vector lane widths
+            if(MI_N == 0 && MI_M == 0 && MI_K == 0)
+            {
+                // We only use Dot2 for NN layout where M < 3
+                if (M > 2 || transA || transB)
+                    return std::numeric_limits<double>::max();
+                MI_M = 1;
+                MI_N = 1;
+                MI_K = 64;
+            }
 
+            //Enable Customized Heuristics.
+            bool enable_heuristics = true;
+            size_t active_cu = compute_active_CU(hardware, M, N, batch, MT_M, MT_N);
+            if(active_cu < hardware.N_CU && K > 16384 && enable_heuristics) //TODO This is heuristicy
+            {
+                //If this is the case, we assume we're going to try and get an even split that fills the most CUs.
+                split = std::floor(hardware.N_CU/active_cu);
+                //We are not going to split more than 8 times though.
+                size_t max_split = 8;
+                split = std::min(split,max_split);
+            }
+            hardware.log_debug("split",split);
             //std::cout << "Split " << split << "\n";
             H_mem1
                 = estimate_l2_hit(hardware, M, N, K, batch, MT_M, MT_N, MT_K, WGM, element_size_A);
@@ -797,22 +827,31 @@ namespace TensileLite
                                                  element_size_A,
                                                  element_size_B,
                                                  element_size_out,
+                                                 miDataType,
                                                  mx_block_size,
                                                  debug);
 
-            //Enable Customized Heuristics.
-            bool enable_heuristics = true;
 
+
+            //Short circuit conditions for tiles.
             if(enable_heuristics)
             {
                 //Check if tile size is bigger than problem dimension. Invalidate it if it's not MI dimension (smallest possible dimension)
                 double edge_waste_m = 1 - (static_cast<double>(M % MT_M) / MT_M);
                 double edge_waste_n = 1 - (static_cast<double>(N % MT_N) / MT_N);
                 if(((MT_M > M && MT_M != MI_M && edge_waste_m > 0.5)
-                    || (MT_N > N && MT_N != MI_N && edge_waste_n > 0.5))
-                   || (MT_K > K && MT_K != MI_K))
+                    || (MT_N > N && MT_N != MI_N && edge_waste_n > 0.5) || (MT_K > K && !(MT_K<= MI_K)))
+                   )
                 {
-                    return std::numeric_limits<double>::max();
+                    hardware.log_debug("Edge Waste Invalidated","True");
+                    if(Hardware::is_debug_enabled())
+                    {
+                        hardware.print_debug_info();
+                    }
+                    //return std::numeric_limits<double>::max();
+                }
+                else{
+                    hardware.log_debug("Edge Waste Invalidated","False");
                 }
 
                 // //Set a minimum number of K iterations (avoid big K tile on Skinny K)
@@ -820,6 +859,26 @@ namespace TensileLite
                 // {
                 //     return std::numeric_limits<double>::max();
                 // }
+
+                //When problem dimensions are small enough that we can fit them in one tile, we should do so.
+                //This short circuit condition also decreases selection latency when problems are very small :)
+                //TODO 256 and 256 here should be largest M and N tile dimensions in library
+                if(M<=256 && N<=256 && K<1024 && (MT_M < M ||  MT_N <N))
+                {
+
+                    hardware.log_debug("Complete Tile Possible Invalidated","True");
+                    if(Hardware::is_debug_enabled())
+                    {
+                        hardware.print_debug_info();
+                    }
+
+                    return std::numeric_limits<double>::max();
+                }
+                else{
+                    hardware.log_debug("Complete Tile Possible Invalidated","False");
+                }
+
+
             }
 
             // Compute latency for all waves and return it as the latency for the MT/problem
@@ -830,8 +889,26 @@ namespace TensileLite
                 hardware.print_debug_info();
             }
 
+
+            //TODO These are quantifying effects that don't work in the current math. 
+            //TODO THESE SHOULD BE TEMPORARY FIXES AND BE MORE SOLIDLY INTEGRATED LATER
             if(enable_heuristics)
             {
+                //Pick perfect "stationary style" tiles more often.
+                if(M == MT_M || N == MT_N || K == MT_K)
+                {
+                    total_latency = total_latency * 0.5;
+                }
+                //DOT2 Kernels
+                if(MI_M == 1 && MI_N == 1 && MI_K == 64)
+                {
+                    // Bias DOT2 kernels in which the tile dimensions in M and K are equal to the problem dimensions
+                    if(MT_M == M || MT_K == K)
+                    {
+                        total_latency = total_latency * 0.8;
+                    }
+                }
+
                 if(MT_M == 256 && MT_N == 256 && MT_K == 128 && (element_size_A == 8))
                 {
                     //The kernel for this is more optimized
@@ -897,6 +974,44 @@ namespace TensileLite
                 {
                     total_latency = total_latency * 0.9;
                 }
+
+                //Bias towards having enough K iterations, penalize tiles with too few K iterations.
+                size_t K_iters = safe_ceil_div(K,MT_K);
+                if(K_iters == 1)
+                {
+                    total_latency = total_latency * 16;
+                }
+                else if(K_iters == 2)
+                {
+                    total_latency = total_latency * 8;
+                }
+                else if(K_iters <= 4)
+                {
+                    total_latency = total_latency * 4;
+                }
+                else if(K_iters <= 8)
+                {
+                    total_latency = total_latency * 2;
+                }
+
+                //Bias towards minimizing tile quantization in Each Dimension
+                if(K < MI_K && MT_K != MI_K)
+                {
+                    total_latency = total_latency * safe_ceil_div(MT_K,MI_K);
+                }
+
+                if(M<MI_M && MT_M != MI_M)
+                {
+                    total_latency = total_latency * 4;
+                }
+
+                if(N<MI_N && MT_N != MI_N)
+                {
+                    total_latency = total_latency * 4;
+                }
+
+
+
             }
             //If we can still fit one whole dimension in a singletile though, that's great! promote that
             // if(MT_M >= M || MT_N >= N)
@@ -931,6 +1046,7 @@ namespace TensileLite
                                    size_t          element_size_A,
                                    size_t          element_size_B,
                                    size_t          element_size_out,
+                                   DataType        miDataType,
                                    int             WGM,
                                    double          H_mem1,
                                    bool            debug)
@@ -959,6 +1075,7 @@ namespace TensileLite
                                                           element_size_A,
                                                           element_size_B,
                                                           element_size_out,
+                                                          miDataType,
                                                           WGM,
                                                           mx_block_size,
                                                           debug);
