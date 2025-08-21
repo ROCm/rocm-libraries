@@ -808,7 +808,7 @@ void CheckFDBEntry(size_t thread_index,
                     bool res = solv.TestPerfCfgParams(ctx, problem, perf_cfg);
                     if(env::enabled(MIOPEN_DBSYNC_CLEAN) && not res)
                     {
-                        MIOPEN_LOG_W("Inapplicable solver found fdb-key:"
+                        MIOPEN_LOG_W("Invalid perf config found fdb-key:"
                                      << kinder.first << ", pdb-key:" << pdb_key << ", solver:"
                                      << val.solver_id << ", Removing entry from fdb, pdb and updb");
                         find_db_rw.Remove(kinder.first, id.ToString());
