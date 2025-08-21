@@ -150,6 +150,22 @@ TYPED_TEST(RocprimArgIndexIteratorTests, Basic)
         Iterator normalized = mid;
         normalized.normalize();
         ASSERT_EQ((*normalized).key, 0);
+
+        struct Wrapper
+        {
+            T value;
+        };
+
+        std::vector<Wrapper> input_wrapped(input.size());
+        for(size_t i = 0; i < input.size(); i++)
+        {
+            input_wrapped[i].value = input[i];
+        }
+
+        auto test_wrap = rocprim::make_arg_index_iterator(input_wrapped.data());
+
+        ASSERT_EQ(test_wrap->value, input[0]);
+        ASSERT_EQ((++test_wrap)->value, input[1]);
     }
 }
 
