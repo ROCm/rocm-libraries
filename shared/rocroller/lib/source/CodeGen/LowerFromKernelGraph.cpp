@@ -771,11 +771,13 @@ namespace rocRoller
             }
 
             Generator<Instruction> operator()(int tag, LoadLDSTile const& load)
+            Generator<Instruction> operator()(int tag, LoadLDSTile const& load)
             {
                 co_yield m_loadStoreTileGenerator.genLoadLDSTile(
                     tag, load, m_graph->buildTransformer(tag));
             }
 
+            Generator<Instruction> operator()(int tag, LoadSGPR const& load)
             Generator<Instruction> operator()(int tag, LoadSGPR const& load)
             {
                 auto [userTag, user] = m_graph->getDimension<User>(tag);
@@ -1025,11 +1027,13 @@ namespace rocRoller
             }
 
             Generator<Instruction> operator()(int tag, StoreTiled const& store)
+            Generator<Instruction> operator()(int tag, StoreTiled const& store)
             {
                 co_yield m_loadStoreTileGenerator.genStoreTile(
                     tag, store, m_graph->buildTransformer(tag));
             }
 
+            Generator<Instruction> operator()(int tag, StoreLDSTile const& store)
             Generator<Instruction> operator()(int tag, StoreLDSTile const& store)
             {
                 rocRoller::Log::getLogger()->debug("KernelGraph::CodeGenerator::StoreLDSTiled({})",
@@ -1040,6 +1044,7 @@ namespace rocRoller
                     tag, store, m_graph->buildTransformer(tag));
             }
 
+            Generator<Instruction> operator()(int tag, LoadTileDirect2LDS const& load)
             Generator<Instruction> operator()(int tag, LoadTileDirect2LDS const& load)
             {
                 rocRoller::Log::getLogger()->debug(

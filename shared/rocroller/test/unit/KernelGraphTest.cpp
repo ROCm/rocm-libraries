@@ -2771,6 +2771,8 @@ namespace KernelGraphTest
 
         kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
 
+        kgraph = kgraph.transform(std::make_shared<RemoveSetCoordinate>());
+
         m_context->schedule(m_context->kernel()->preamble());
         m_context->schedule(m_context->kernel()->prolog());
 
