@@ -22,43 +22,44 @@ jobs:
       id-token: write
     container:
       image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:044b113562629f4bd2ec5d2e64b32eee11562d48fb1a75d7493daec9dd8d8292
+      options: -v /runner/config:/home/awsconfig/
     strategy:
       fail-fast: true
     env:
       CACHE_DIR: ${{ github.workspace }}/.container-cache
-      CCACHE_DIR: "${{ github.workspace }}/.container-cache/ccache"
-      CCACHE_MAXSIZE: "700M"
+      CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
       AMDGPU_FAMILIES: "gfx94X-dcgpu"
       TEATIME_FORCE_INTERACTIVE: 0
+      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
     steps:
-      - name: Generate a token for rocm-libraries
-        id: generate-token
-        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-
       - name: "Checking out repository for rocm-libraries"
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           sparse-checkout: |
             .github
             ${{ inputs.subtree_checkout }}
-          token: ${{ steps.generate-token.outputs.token }}
       
       - name: Checkout TheRock repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
           path: "TheRock"
+          ref: 85c8db9207bdd8b7e917cdd5cbf7f9f86b0ef62d
 
       - name: Runner Health Settings
         run: |
-          echo "CCACHE_DIR=${CCACHE_DIR}"
+          ./TheRock/build_tools/setup_ccache.py \
+            --config-preset "github-oss-presubmit" \
+            --dir "$(dirname $CCACHE_CONFIGPATH)" \
+            --local-path "$CACHE_DIR/ccache"
           df -h
+          echo "ccache version: $(ccache --version)"
+          echo "ccache config:"
+          echo "---"
+          cat "$CCACHE_CONFIGPATH"
+          echo "---"
           ccache -z
-          mkdir -p $CCACHE_DIR
+          ccache -s -v
           cmake --version
           echo "Installed Python versions:"
           ls -d /opt/python
@@ -66,7 +67,7 @@ jobs:
           echo "Git version: $(git --version)"
           git config --global --add safe.directory $PWD
           git config fetch.parallel 10
-      
+
       - name: Fetch sources
         run: |
           ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-math-libs
@@ -105,14 +106,21 @@ jobs:
           du -h -d 1 TheRock/build/artifacts
           echo "CCache Stats:"
           echo "-------------"
-          ccache -s
+          ccache -s -v
+          tail -v -n +1 .ccache/compiler_check_cache/* > TheRock/build/logs/ccache_compiler_check_cache.log
 
-      - name: Configure AWS Credentials
-        if: always()
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+      - name: Configure AWS Credentials for non-forked repos
+        if: ${{ always() && !github.event.pull_request.head.repo.fork }}
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           aws-region: us-east-2
           role-to-assume: arn:aws:iam::692859939525:role/therock-artifacts-external
+
+      - name: Create Log archive
+        if: always()
+        run: |
+          python3 TheRock/build_tools/create_log_archive.py \
+            --build-dir=TheRock/build
 
       - name: Create Logs index Files
         if: always()

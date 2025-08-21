@@ -66,16 +66,7 @@ extern "C" {
 *
 *  \par Example
 *  The following example creates an identity permutation.
-*  \code{.c}
-*      rocsparse_int size = 200;
-*
-*      // Allocate memory to hold the identity map
-*      rocsparse_int* perm;
-*      hipMalloc((void**)&perm, sizeof(rocsparse_int) * size);
-*
-*      // Fill perm with the identity permutation
-*      rocsparse_create_identity_permutation(handle, size, perm);
-*  \endcode
+*  \snippet example_rocsparse_create_identity_permutation.cpp doc example
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_create_identity_permutation(rocsparse_handle handle,

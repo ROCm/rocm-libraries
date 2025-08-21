@@ -15,15 +15,9 @@
 
 namespace ck_tile {
 
-#define LOW_CU_PROCESSORS 80
-#define HIGH_CU_PROCESSORS 228
-#define OPTIMAL_LATENCY_LOW_CU_PROCESSORS 0.005
-#define OPTIMAL_LATENCY_HIGH_CU_PROCESSORS 0.0015
-#define OPTIMAL_LATENCY_SAFE_MARGIN 0.01
-
-template <int MaxThreadPerBlock, int MinBlockPerCu, typename Kernel, typename... Args>
+template <int MinBlockPerCu, typename Kernel, typename... Args>
 #if CK_TILE_USE_LAUNCH_BOUNDS
-__launch_bounds__(MaxThreadPerBlock, MinBlockPerCu)
+__launch_bounds__(Kernel::kBlockSize, MinBlockPerCu)
 #endif
     __global__ void kentry(Args... args)
 {
@@ -41,15 +35,11 @@ __launch_bounds__(MaxThreadPerBlock, MinBlockPerCu)
 //
 // the "static __device__ operator()(some_arg)" is the entry point of KernelImpl
 //
-template <int MaxThreadPerBlock = CK_TILE_MAX_THREAD_PER_BLOCK,
-          int MinBlockPerCu     = CK_TILE_MIN_BLOCK_PER_CU,
-          typename KernelImpl,
-          typename... Args>
+template <int MinBlockPerCu = CK_TILE_MIN_BLOCK_PER_CU, typename KernelImpl, typename... Args>
 CK_TILE_HOST auto
 make_kernel(KernelImpl /*f*/, dim3 grid_dim, dim3 block_dim, std::size_t lds_byte, Args... args)
 {
-    const auto kernel = kentry<MaxThreadPerBlock, MinBlockPerCu, KernelImpl, Args...>;
-
+    const auto kernel = kentry<MinBlockPerCu, KernelImpl, Args...>;
     return [=](const stream_config& s) {
         kernel<<<grid_dim, block_dim, lds_byte, s.stream_id_>>>(args...);
     };
@@ -65,71 +55,58 @@ CK_TILE_HOST void launch_and_check(const stream_config& sc, Callables&&... calla
     }
 }
 
-template <class it>
-typename std::iterator_traits<it>::value_type median(it begin, it end)
+// Measure the preprocess time during the cold iterations
+template <typename TimerType, typename PreprocessFunc>
+CK_TILE_HOST double
+preprocess_profiling_impl(TimerType timer, const stream_config& s, PreprocessFunc preprocess)
 {
-    if(begin == end)
+    timer.start(s.stream_id_);
+    for(int i = 0; i < s.nrepeat_; i++)
     {
-        return std::numeric_limits<double>::quiet_NaN();
+        if constexpr(!std::is_same_v<PreprocessFunc, std::nullptr_t>)
+        {
+            preprocess();
+        }
     }
-    auto n  = std::distance(begin, end);
-    auto n2 = n / 2;
-    std::nth_element(begin, begin + n2, end);
-    return (n % 2) ? begin[n2] : (*std::max_element(begin, begin + n2) + begin[n2]) / 2.0;
+    timer.stop(s.stream_id_);
+
+    return timer.duration() / s.nrepeat_;
 }
 
-inline void remove_outliers(std::vector<float>& v)
-{
-    // 1.5x IQR method to detect and remove outliers
-    auto n2 = v.size() / 2;
-    std::nth_element(v.begin(), v.begin() + n2, v.end());
-    auto q1  = median(v.begin(), v.begin() + n2);
-    auto q3  = median(v.begin() + ((v.size() % 2) ? n2 + 1 : n2), v.end());
-    auto iqr = q3 - q1;
-    auto lb  = q1 - 1.5 * iqr;
-    auto ub  = q3 + 1.5 * iqr;
-    v.erase(std::remove_if(v.begin(), v.end(), [&](float f) { return f < lb || f > ub; }), v.end());
-}
-
-template <typename TimerType, typename CallablesFunc>
+template <typename TimerType, typename CallablesFunc, typename PreprocessFunc = std::nullptr_t>
 CK_TILE_HOST double timing_loop_impl(TimerType timer,
                                      const stream_config& s,
                                      CallablesFunc&& callables_func,
-                                     std::function<void()> preprocess = nullptr)
+                                     PreprocessFunc preprocess = nullptr)
 {
     for(int i = 0; i < s.cold_niters_; i++)
     {
         callables_func();
     }
-
-    float per_iter_time = 0.f;
-    std::vector<float> times;
-    int i = 0;
-    while(i < s.nrepeat_ || per_iter_time < s.bench_time_ms_)
+    // Only profile preprocess if it's provided
+    auto preprocess_time = 0.0;
+    if constexpr(!std::is_same_v<PreprocessFunc, std::nullptr_t>)
     {
-        if(preprocess)
-            preprocess();
+        preprocess_time = preprocess_profiling_impl(gpu_timer{}, s, preprocess);
+    }
 
-        timer.start(s.stream_id_, i);
-        callables_func();
-        timer.stop(s.stream_id_, i);
-
-        if(i > 0)
+    int i = 0;
+    timer.start(s.stream_id_);
+    while(i < s.nrepeat_)
+    {
+        if constexpr(!std::is_same_v<PreprocessFunc, std::nullptr_t>)
         {
-            per_iter_time = timer.duration(i - 1);
-            times.push_back(per_iter_time);
-            per_iter_time = timer.is_exceed(i - 1);
+            preprocess();
         }
+
+        callables_func();
         i++;
     }
+    timer.stop(s.stream_id_);
 
     if(!i)
         return 0.;
-
-    per_iter_time = timer.duration(i - 1);
-    times.push_back(per_iter_time);
-    remove_outliers(times);
-    return std::accumulate(times.begin(), times.end(), 0.) / times.size();
+    return (timer.duration() / s.nrepeat_) - preprocess_time;
 }
 
 // clang-format off
@@ -174,7 +151,7 @@ CK_TILE_HOST float launch_kernel(const stream_config& s, Callables&&... callable
 
     if(s.is_gpu_timer_)
     {
-        return timing_loop_impl(gpu_timer_new{s.stream_id_}, s, callables_func);
+        return timing_loop_impl(gpu_timer{}, s, callables_func);
     }
     else
     {
@@ -199,7 +176,7 @@ launch_kernel_time_mask(const stream_config& s, PreprocessFunc preprocess, Calla
 
     if(s.is_gpu_timer_)
     {
-        return timing_loop_impl(gpu_timer_new{s.stream_id_}, s, callables_func, preprocess);
+        return timing_loop_impl(gpu_timer{}, s, callables_func, preprocess);
     }
     else
     {

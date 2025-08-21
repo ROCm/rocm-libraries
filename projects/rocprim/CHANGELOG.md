@@ -2,6 +2,18 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM 4.1.0 for ROCm 7.1
+
+### Upcoming changes
+
+* Deprecated the `->` operator for the `zip_iterator`.
+
+### Resolved issues
+
+* Fixed `device_select`, `device_merge`, and `device_merge_sort` not allocating the correct amount of virtual shared memory on the host.
+* Fixed the `->` operator for the `transform_iterator`, the `texture_cache_iterator` and the `arg_index_iterator`, by now returning a proxy pointer.
+  * The `arg_index_iterator` also now only returns the internal iterator for the `->`.
+
 ## rocPRIM 4.0.0 for ROCm 7.0
 
 ### Added
@@ -25,6 +37,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added initial value support for warp- and block-level inclusive scan.
 * Added support for building tests with device-side random data generation, making them finish faster. This requires rocRAND, and is enabled with the `WITH_ROCRAND=ON` build flag.
 * Added tests and documentation to `lookback_scan_state`. It is still in the `detail` namespace.
+
+### Optimizations
+
+* Improved performance of `rocprim::device_select` and `rocprim::device_partition` when using multiple streams on the MI3XX architecture.
 
 ### Changed
 

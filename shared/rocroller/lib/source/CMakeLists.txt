@@ -19,7 +19,15 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/Error.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ExecutableKernel.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Expression.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Expression_contains.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Expression_creation.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Expression_evaluate.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Expression_evaluate_binary_arithmetic.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Expression_evaluate_binary_comparison.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Expression_evaluate_binary_logic_bitwise.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Expression_evaluate_binary_shift_srconvert.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Expression_evaluate_ternary.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Expression_evaluate_unary.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Expression_generate.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Expression_referencedKernelArguments.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Expression_resultType.cpp"
@@ -38,6 +46,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/ReplaceKernelArgs.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ScheduledInstructions.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Scheduler.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptor.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Timer.cpp"
 )
 
@@ -54,8 +63,6 @@ add_subdirectory(KernelGraph)
 add_library(rocroller-no-rtti
     OBJECT
         "${CMAKE_CURRENT_SOURCE_DIR}/Utilities/ReadELF.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Assemblers/InProcessAssembler.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/ExpressionTransformations/FastDivision.cpp"
 )
 if(ROCROLLER_ENABLE_LLD)
     target_compile_definitions(rocroller-no-rtti PRIVATE ROCROLLER_USE_LLD)
