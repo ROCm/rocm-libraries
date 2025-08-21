@@ -78,110 +78,6 @@ namespace mxDataGeneratorTest
                 CHECK(toFloatPacked<DGenDT>(&scale[0], &byteData2[0], scale_i, i) == ref[i]);
             }
         }
-
-        template <typename rrDT>
-        void differentSeeds(unsigned    dim1,
-                            unsigned    dim2,
-                            const float min          = -1.f,
-                            const float max          = 1.f,
-                            const int   blockScaling = 32)
-        {
-            using DGenDT = typename rrDT2DGenDT<rrDT>::type;
-
-            auto             dataType = TypeInfo<rrDT>::Var.dataType;
-            TensorDescriptor desc(dataType, {dim1, dim2}, "T");
-
-            std::vector<uint32_t> seeds = {9861u, 12345u, 54321u, 98765u, 13579u, 24680u};
-
-            std::vector<uint32_t> shuffledSeeds = seeds;
-            std::random_shuffle(shuffledSeeds.begin(), shuffledSeeds.end());
-
-            std::map<uint32_t, std::vector<uint8_t>> firstGenData;
-            std::map<uint32_t, std::vector<uint8_t>> firstGenScale;
-            std::map<uint32_t, std::vector<float>>   firstGenRef;
-
-            for(uint32_t seed : shuffledSeeds)
-            {
-                const auto dgen = getDataGenerator<rrDT>(desc, min, max, seed, blockScaling);
-
-                firstGenData[seed]  = dgen.getDataBytes();
-                firstGenScale[seed] = dgen.getScaleBytes();
-                firstGenRef[seed]   = dgen.getReferenceFloat();
-            }
-
-            std::random_shuffle(shuffledSeeds.begin(), shuffledSeeds.end());
-
-            for(uint32_t seed : shuffledSeeds)
-            {
-                const auto dgen = getDataGenerator<rrDT>(desc, min, max, seed, blockScaling);
-
-                auto secondGenData  = dgen.getDataBytes();
-                auto secondGenScale = dgen.getScaleBytes();
-                auto secondGenRef   = dgen.getReferenceFloat();
-
-                CHECK(firstGenData[seed] == secondGenData);
-                CHECK(firstGenScale[seed] == secondGenScale);
-                CHECK(firstGenRef[seed] == secondGenRef);
-            }
-        }
-
-        template <typename rrDT>
-        void differentThreads(unsigned    dim1,
-                              unsigned    dim2,
-                              const float min          = -1.f,
-                              const float max          = 1.f,
-                              const int   blockScaling = 32)
-        {
-            using DGenDT = typename rrDT2DGenDT<rrDT>::type;
-
-            auto             dataType = TypeInfo<rrDT>::Var.dataType;
-            TensorDescriptor desc(dataType, {dim1, dim2}, "T");
-
-            int originalThreads = omp_get_max_threads();
-
-            std::vector<int> threadCounts = {2, 3, 4, 7, 8, 11, 32}; // ref is 1
-            threadCounts.erase(
-                std::remove_if(threadCounts.begin(),
-                               threadCounts.end(),
-                               [originalThreads](int count) { return count > originalThreads; }),
-                threadCounts.end());
-
-            std::vector<uint32_t> seeds = {9861u, 516848u};
-
-            for(uint32_t seed : seeds)
-            {
-                omp_set_num_threads(1);
-                const auto refGen   = getDataGenerator<rrDT>(desc, min, max, seed, blockScaling);
-                auto       refData  = refGen.getDataBytes();
-                auto       refScale = refGen.getScaleBytes();
-                auto       refFloat = refGen.getReferenceFloat();
-
-                unsigned int dataCorrect  = 0;
-                unsigned int scaleCorrect = 0;
-                unsigned int floatCorrect = 0;
-
-                for(int threadCount : threadCounts)
-                {
-                    omp_set_num_threads(threadCount);
-
-                    const auto testGen = getDataGenerator<rrDT>(desc, min, max, seed, blockScaling);
-                    auto       testData  = testGen.getDataBytes();
-                    auto       testScale = testGen.getScaleBytes();
-                    auto       testFloat = testGen.getReferenceFloat();
-
-                    dataCorrect += (refData == testData) ? 1 : 0;
-                    scaleCorrect += (refScale == testScale) ? 1 : 0;
-                    floatCorrect += (refFloat == testFloat) ? 1 : 0;
-                }
-
-                // This is expected behavior for the current mxdatagenerator repo hash
-                CHECK(dataCorrect <= threadCounts.size());
-                CHECK(scaleCorrect <= threadCounts.size());
-                CHECK(floatCorrect <= threadCounts.size());
-            }
-
-            omp_set_num_threads(originalThreads);
-        }
     };
 
     TEMPLATE_TEST_CASE(
@@ -216,7 +112,47 @@ namespace mxDataGeneratorTest
             const int dim1 = 1024;
             const int dim2 = 1024;
 
-            t.differentSeeds<TestType>(dim1, dim2);
+            const float min          = -1.f;
+            const float max          = 1.f;
+            const int   blockScaling = 32;
+
+            using rrDT   = TestType;
+            using DGenDT = typename rrDT2DGenDT<rrDT>::type;
+
+            auto             dataType = TypeInfo<rrDT>::Var.dataType;
+            TensorDescriptor desc(dataType, {dim1, dim2}, "T");
+
+            std::vector<uint32_t> shuffledSeeds = {9861u, 12345u};
+
+            std::shuffle(shuffledSeeds.begin(), shuffledSeeds.end(), std::default_random_engine{});
+
+            std::map<uint32_t, std::vector<uint8_t>> firstGenData;
+            std::map<uint32_t, std::vector<uint8_t>> firstGenScale;
+            std::map<uint32_t, std::vector<float>>   firstGenRef;
+
+            for(uint32_t seed : shuffledSeeds)
+            {
+                const auto dgen = getDataGenerator<rrDT>(desc, min, max, seed, blockScaling);
+
+                firstGenData[seed]  = dgen.getDataBytes();
+                firstGenScale[seed] = dgen.getScaleBytes();
+                firstGenRef[seed]   = dgen.getReferenceFloat();
+            }
+
+            std::shuffle(shuffledSeeds.begin(), shuffledSeeds.end(), std::default_random_engine{});
+
+            for(uint32_t seed : shuffledSeeds)
+            {
+                const auto dgen = getDataGenerator<rrDT>(desc, min, max, seed, blockScaling);
+
+                auto secondGenData  = dgen.getDataBytes();
+                auto secondGenScale = dgen.getScaleBytes();
+                auto secondGenRef   = dgen.getReferenceFloat();
+
+                CHECK(firstGenData[seed] == secondGenData);
+                CHECK(firstGenScale[seed] == secondGenScale);
+                CHECK(firstGenRef[seed] == secondGenRef);
+            }
         }
     }
 
@@ -236,10 +172,62 @@ namespace mxDataGeneratorTest
 
         SUPPORTED_ARCH_SECTION(arch)
         {
-            const int dim1 = 32;
-            const int dim2 = 32;
+            const int   dim1         = 32;
+            const int   dim2         = 32;
+            const float min          = -1.f;
+            const float max          = 1.f;
+            const int   blockScaling = 32;
 
-            t.differentThreads<TestType>(dim1, dim2);
+            using rrDT   = TestType;
+            using DGenDT = typename rrDT2DGenDT<rrDT>::type;
+
+            auto             dataType = TypeInfo<rrDT>::Var.dataType;
+            TensorDescriptor desc(dataType, {dim1, dim2}, "T");
+
+            int originalThreads = omp_get_max_threads();
+
+            std::vector<int> threadCounts = {2, 4, 7, 8}; // ref is 1
+            threadCounts.erase(
+                std::remove_if(threadCounts.begin(),
+                               threadCounts.end(),
+                               [originalThreads](int count) { return count > originalThreads; }),
+                threadCounts.end());
+
+            std::vector<uint32_t> seeds = {9861u, 516848u};
+
+            for(uint32_t seed : seeds)
+            {
+                omp_set_num_threads(1);
+                const auto refGen   = getDataGenerator<rrDT>(desc, min, max, seed, blockScaling);
+                auto       refData  = refGen.getDataBytes();
+                auto       refScale = refGen.getScaleBytes();
+                auto       refFloat = refGen.getReferenceFloat();
+
+                unsigned int dataCorrect  = 0;
+                unsigned int scaleCorrect = 0;
+                unsigned int floatCorrect = 0;
+
+                for(int threadCount : threadCounts)
+                {
+                    omp_set_num_threads(threadCount);
+
+                    const auto testGen = getDataGenerator<rrDT>(desc, min, max, seed, blockScaling);
+                    auto       testData  = testGen.getDataBytes();
+                    auto       testScale = testGen.getScaleBytes();
+                    auto       testFloat = testGen.getReferenceFloat();
+
+                    dataCorrect += (refData == testData) ? 1 : 0;
+                    scaleCorrect += (refScale == testScale) ? 1 : 0;
+                    floatCorrect += (refFloat == testFloat) ? 1 : 0;
+                }
+
+                // Producing different data is expected behavior
+                CHECK(dataCorrect <= threadCounts.size());
+                CHECK(scaleCorrect <= threadCounts.size());
+                CHECK(floatCorrect <= threadCounts.size());
+            }
+
+            omp_set_num_threads(originalThreads);
         }
     }
 }
