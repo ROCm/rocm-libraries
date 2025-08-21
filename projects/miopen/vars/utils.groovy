@@ -218,7 +218,13 @@ def cmake_fin_build_cmd(prefixpath){
 def getDockerImageName(dockerArgs)
 {
     sh "echo ${dockerArgs} > ${env.WORKSPACE}/factors.txt"
-    def image = "${env.MIOPEN_PRIVATE_DOCKER_IMAGE_PROJECT}"
+
+    def dockerUrl = env.MIOPEN_PRIVATE_DOCKER_URL
+    if (dockerUrl.startsWith("https://")) {
+        dockerUrl = dockerUrl.substring(8)
+    }
+
+    def image = "${dockerUrl}/${env.MIOPEN_PRIVATE_DOCKER_IMAGE_PROJECT}"
     sh "cd ${env.WORKSPACE}/${env.REPO_DIR}/ && md5sum Dockerfile requirements.txt dev-requirements.txt >> ${env.WORKSPACE}/factors.txt"
     def docker_hash = sh(script: "cd ${env.WORKSPACE} && md5sum factors.txt | awk '{print \$1}' | head -c 6", returnStdout: true)
     sh "rm ${env.WORKSPACE}/factors.txt"
@@ -269,16 +275,10 @@ def getDockerImage(Map conf=[:])
 
     def image = getDockerImageName(dockerArgs)
 
-    //docker_url with https:// trimmed
-    def dockerUrl = env.MIOPEN_PRIVATE_DOCKER_URL
-    if (dockerUrl.startsWith("https://")) {
-        dockerUrl = dockerUrl.substring(8)
-    }
-
     def dockerImage
     try{
-        echo "Pulling down image: ${dockerUrl}/${image}"
-        dockerImage = docker.image("${dockerUrl}/${image}")
+        echo "Pulling down image: ${image}"
+        dockerImage = docker.image("${image}")
         withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
             dockerImage.pull()
         }
@@ -290,7 +290,7 @@ def getDockerImage(Map conf=[:])
     catch(Exception ex)
     {
         echo "Building image..."
-        dockerImage = docker.build("${dockerUrl}/${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.REPO_DIR}/Dockerfile.ci .")
+        dockerImage = docker.build("${image}", "${dockerArgs} -f ${env.WORKSPACE}/${env.REPO_DIR}/Dockerfile.ci .")
         withDockerRegistry([ credentialsId: "miopen_image_creds", url: "${env.MIOPEN_PRIVATE_DOCKER_URL}" ]) {
             dockerImage.push()
         }
