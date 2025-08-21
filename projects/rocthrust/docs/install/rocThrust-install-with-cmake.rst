@@ -32,12 +32,13 @@ Generate the rocThrust makefile using the ``cmake`` command:
 
 The available build options are:
 
-* ``BUILD_BENCHMARK``. Set this to ``ON`` to build benchmark tests. Off by default.
-* ``BUILD_EXAMPLES``. Set this to ``ON`` to build rocThrust examples. Off by default.
+* ``BUILD_BENCHMARK``. Set this to ``ON`` to build rocThrust benchmarks. Off by default.
+* ``BUILD_EXAMPLE``. Set this to ``ON`` to build rocThrust examples. Off by default.
 * ``BUILD_TEST``. Set to ``ON`` to enable rocThrust tests. Off by default.
 * ``BUILD_HIPSTDPAR_TEST``. Set to ``ON`` to enable HIPSTDPAR tests. Off by default. 
 * ``DISABLE_WERROR``. Set this to ``OFF`` to pass ``-Werror`` to the compiler. On by default.
 * ``DOWNLOAD_ROCPRIM``. Set this to ``ON`` to download rocPRIM regardless of whether or not rocPRIM is already installed. Off by default.
+* ``SQLITE_USE_SYSTEM_PACKAGE``. Set to ``ON`` to use the ``SQLite`` libaray provided by the system. Off by default - a copy of the library will then be downloaded. ``SQLite`` is needed for bitwise-reproducibility tests. For this option to take effect, either ``BUILD_TEST`` or ``BUILD_HIPSTDPAR_TEST`` must be set to ``ON``.
 * ``RNG_SEED_COUNT``. Set this to the non-repeatable random dataset count. Set to 0 by default.
 * ``PRNG_SEEDS``. Set this to the RNG seeds. The seeds are passed as a semicolon-delimited array of 32-bit unsigned integers. To avoid command line parsing errors, enclose the entire option in quotation marks. For example, ``cmake "-DPRNG_SEEDS=1;2;3;4"``. Set to 1 by default.
 
