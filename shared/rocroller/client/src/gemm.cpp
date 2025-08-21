@@ -155,8 +155,6 @@ namespace rocRoller::Client::GEMMClient
         return {res.ok, res.relativeNormL2};
     }
 
-    static size_t rotationBufferSize = 0;
-
     // D (MxN) = alpha * A (MxK) X B (KxN) + beta * C (MxN)
     template <typename A, typename B, typename C, typename D>
     Client::BenchmarkResults GEMM(CommandPtr                 command,
@@ -228,11 +226,11 @@ namespace rocRoller::Client::GEMMClient
             DGenInput(seed, hostA, descA, hostB, descB, hostC, descC);
         }
 
-        size_t rotationSize = (rotationBufferSize > 0) ? rotationBufferSize : benchmarkParams.rotatingBuffSize;
+        size_t rotatingSize = benchmarkParams.rotatingBuffSize;
 
-        RotatingBuffer<PackedTypeA> rotatingA(hostA.size(), rotationSize);
-        RotatingBuffer<PackedTypeB> rotatingB(hostB.size(), rotationSize);
-        RotatingBuffer<C>           rotatingC(hostC.size(), rotationSize);
+        RotatingBuffer<PackedTypeA> rotatingA(hostA.size(), rotatingSize);
+        RotatingBuffer<PackedTypeB> rotatingB(hostB.size(), rotatingSize);
+        RotatingBuffer<C>           rotatingC(hostC.size(), rotatingSize);
         auto deviceD = make_shared_device<D>(problemParams.m * problemParams.n, D{});
         
         std::shared_ptr<uint8_t> deviceScaleA, deviceScaleB;
