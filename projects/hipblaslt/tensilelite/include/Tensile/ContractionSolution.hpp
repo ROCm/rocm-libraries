@@ -119,6 +119,9 @@ namespace TensileLite
     {
         size_t waveNum;
 
+        bool enableCluster = false;
+        dim3 clusterDim;
+
         dim3 workGroupSize;
         dim3 threadTile;
         dim3 macroTile;

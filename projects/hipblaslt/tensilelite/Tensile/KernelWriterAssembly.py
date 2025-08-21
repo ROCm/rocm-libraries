@@ -32,7 +32,7 @@ from rocisa.container import DSModifiers, SDWAModifiers, VOP3PModifiers, True16M
                       DPPModifiers, vgpr, sgpr, accvgpr, mgpr, ContinuousRegister, \
                       HWRegContainer, GLOBALModifiers, MemTokenData
 from rocisa.instruction import SGetPositivePCOffset, SLongBranch, SLongBranchPositive, SLongBranchNegative, SCLongBranchScc0, SCLongBranchScc1, SCLongBranchVccnz, \
-                        SMulInt64to32, VCvtBF16toFP32
+                        SMulInt64to32, VCvtBF16toFP32, SGetRegB32, SBfeU32
 from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUInt32CeilDivideAndRemainder, \
                         vectorStaticDivideAndRemainder, scalarStaticDivideAndRemainder, scalarStaticCeilDivide, \
                         scalarStaticRemainder, scalarUInt32DivideAndRemainder, sMagicDiv, vectorStaticMultiply, \
@@ -2300,10 +2300,53 @@ class KernelWriterAssembly(KernelWriter):
 
       # init workgroup id from ttmp
       if self.states.archCaps["WorkGroupIdFromTTM"]:
-        moduleRegInit.addComment1("Init workgroup id from ttmp")
-        moduleRegInit.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9"))
-        moduleRegInit.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7"))
-        moduleRegInit.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7"))
+        module.addComment1("Init workgroup id from ttmp")
+        with self.allocTmpSgpr(5) as tmpSgprInfo:
+          sTmp = tmpSgprInfo.idx
+          label_enable_cluster = Label(label="EnableCluster", comment="")
+          label_calculate_workgroup_done = Label(label="RemapWorkGroupDone", comment="")
+          moduleRegInit.add(SGetRegB32(dst=sgpr(sTmp+0), src=HWRegContainer(reg="HW_REG_IB_STS2", \
+                     value=[6, 4]), comment="cluster_id"))
+          moduleRegInit.add(SCmpEQU32(src0=sgpr(sTmp+0), src1=0, comment="cluster_id == 0x0 ?"))
+          moduleRegInit.add(SCBranchSCC0(label_enable_cluster.getLabelName()))
+          moduleRegInit.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment=""))
+          moduleRegInit.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment=""))
+          moduleRegInit.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7"))
+          moduleRegInit.add(SBranch(label_calculate_workgroup_done.getLabelName()))
+          moduleRegInit.add(label_enable_cluster)
+          moduleRegInit.add(SMovB32(dst=sgpr(sTmp+0), src="ttmp6", comment="Read TTMP6 register"))
+          moduleRegInit.add(SMovB32(dst=sgpr(sTmp+1), src="ttmp7", comment="Read TTMP7 register, \
+                                                                     cluster_z | cluster_y."))
+
+          moduleRegInit.add(SBfeU32(dst=sgpr(sTmp+2), src0=sgpr(sTmp+0), src1=((4 << 16) | 4), \
+                     comment="Etract wg_y."))
+          moduleRegInit.add(SBfeU32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+0), src1=((4 << 16) | 16), \
+                             comment="Etract nwg_y. Value is nwg_y - 1"))
+          moduleRegInit.add(SAddU32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+3), src1=1, comment=""))
+          moduleRegInit.add(SAndB32(dst=sgpr(sTmp+4), src0=sgpr(sTmp+1), src1=hex(0xFFFF), \
+                             comment="Etract cluster_y."))
+          moduleRegInit.add(SMulI32(dst=sgpr("WorkGroup1"), src0=sgpr(sTmp+4), src1=sgpr(sTmp+3),\
+                             comment="cluster_y * nwg_y"))
+          moduleRegInit.add(SAddU32(dst=sgpr("WorkGroup1"), src0=sgpr("WorkGroup1"), \
+                             src1=sgpr(sTmp+2), \
+                             comment="WorkGroup1 = (cluster_y * nwg_y) + wg_y"))
+
+          moduleRegInit.add(SAndB32(dst=sgpr(sTmp+1), src0=sgpr(sTmp+0), src1=hex(0xF), \
+                             comment="Etract wg_x."))
+          moduleRegInit.add(SBfeU32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+0), src1=((4 << 16) | 12), \
+                     comment="Etract nwg_x. Value is nwg_x - 1"))
+          moduleRegInit.add(SAddU32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+3), src1=1, comment=""))
+          moduleRegInit.add(SMulI32(dst=sgpr("WorkGroup0"), src0="ttmp9", src1=sgpr(sTmp+3),\
+                             comment="cluster_x * nwg_x"))
+          moduleRegInit.add(SAddU32(dst=sgpr("WorkGroup0"), src0=sgpr("WorkGroup0"), \
+                             src1=sgpr(sTmp+1), \
+                             comment="WorkGroup0 = (cluster_x * nwg_x) + wg_x"))
+          moduleRegInit.add(SBfeU32(dst=sgpr(sTmp+4), src0=sgpr(sTmp+0), src1=((4 << 16) | 8), \
+                     comment="Etract wg_z."))
+          moduleRegInit.add(SAddU32(dst=sgpr("WorkGroup2"), src0=0, \
+                             src1=sgpr(sTmp+4), \
+                             comment="WorkGroup2 = (cluster_z(0) * nwg_z(1)) + wg_z"))
+          moduleRegInit.add(label_calculate_workgroup_done)
 
       # set m0
       moduleRegInit.add(SMovB32(dst=mgpr(0), src=hex(kernel["LdsNumBytes"]),
@@ -2429,6 +2472,8 @@ class KernelWriterAssembly(KernelWriter):
       module.add(ArgType3_Routed_To_ArgType0)      
       module.add(deepcopy(moduleWg))
       if kernel["StreamK"] == 0:
+        module.addComment0("end remap 1")
+        module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName()))  # gfx1250
         module.add(self.remapWgSerial(kernel, earlyStop=False))
 
       module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName()))
@@ -2633,6 +2678,8 @@ class KernelWriterAssembly(KernelWriter):
       earlyReturnModule.add(noEarlyReturnLabel)
       module.add(earlyReturnModule)
       if kernel["StreamK"] == 0:
+        module.addComment0("end remap 2")
+        module.add(SBranch(labelName=labelMultiGemmEnd.getLabelName()))
         module.add(self.remapWgSerial(kernel))
       module.addSpaceLine()
       module.add(labelMultiGemmEnd)

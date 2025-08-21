@@ -71,6 +71,13 @@ for i in validMacroTileSides:
         validMacroTiles.append([i, j])
 validTT = 32
 
+maxWGsInCluster = 16
+validClusterDimensions = []
+for i in range(1, maxWGsInCluster + 1):
+  for j in range(1, maxWGsInCluster + 1):
+    if i * j <= maxWGsInCluster:
+      validClusterDimensions.append([i, j])
+
 @lru_cache
 def makeValidWorkGroups():
     validWorkGroups = []
@@ -1014,6 +1021,9 @@ validParameters = { # we need to make sure this matches develop
     #   "Auto":        triggers defaulting in Solution.assignDerivedParameters. The default is
     #                  TDM iff TDMInst != 0, otherwise BufferLoad.
     "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
+    # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
+    # cluster runs on a separate WGP.
+    "ClusterDim": validClusterDimensions
 }
 
 newMIValidParameters = {

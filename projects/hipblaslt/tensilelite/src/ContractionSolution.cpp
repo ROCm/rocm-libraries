@@ -1484,13 +1484,20 @@ namespace TensileLite
             }
             return s;
         };
+
         auto gpu_arch_no_prefix = removePrefix(hardware.archName());
-        if(internalArgsSupport.version >= 1)
+        if(stoi(gpu_arch_no_prefix) / 10 != 125)
         {
-            rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
-            rv.numWorkGroups.y = 1;
-            rv.numWorkGroups.z = 1;
+            if(internalArgsSupport.version >= 1)
+            {
+                rv.numWorkGroups.x *= (rv.numWorkGroups.y * rv.numWorkGroups.z);
+                rv.numWorkGroups.y = 1;
+                rv.numWorkGroups.z = 1;
+            }
         }
+
+        rv.enableCluster = sizeMapping.enableCluster;
+        rv.clusterDim = sizeMapping.clusterDim;
 
         rv.numWorkItems.x = rv.workGroupSize.x * rv.numWorkGroups.x;
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;

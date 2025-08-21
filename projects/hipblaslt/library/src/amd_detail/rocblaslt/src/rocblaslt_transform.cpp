@@ -213,6 +213,8 @@ namespace
         TensileLite::KernelInvocation invocation{kernelName,
                                                  transformCodeObjectFileName(),
                                                  false,
+                                                 false,
+                                                 {0, 0, 0},
                                                  {NUM_WORKITEMS, 1, 1},
                                                  {numWg, 1, batchSize},
                                                  {numWg * NUM_WORKITEMS, 1, batchSize},

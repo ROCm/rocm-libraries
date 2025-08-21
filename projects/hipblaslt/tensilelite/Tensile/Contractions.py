@@ -586,6 +586,15 @@ class ProblemPredicate(Properties.Predicate):
         if state['ProblemType']['SwizzleTensorB']:
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
 
+        if state['EnableCluster'] == True:
+            valuepredicates = []
+            valuepredicates.append(state["MacroTile0"])
+            valuepredicates.append(state["MacroTile1"])
+            valuepredicates.append(state["GlobalSplitU"])
+            valuepredicates.append(state["ClusterDim"][0])
+            valuepredicates.append(state["ClusterDim"][1])
+            rv += [cls('ClusterDimCheck', value=valuepredicates)]
+
         return rv
 
     @classmethod
@@ -650,7 +659,9 @@ class SizeMapping:
                  'LocalSplitU',
                  'DirectToLdsA',
                  'DirectToLdsB',
-                 'ExpertSchedulingMode'
+                 'ExpertSchedulingMode',
+                 'enableCluster',
+                 'clusterDim'
                  ]
 
     @classmethod
@@ -741,6 +752,8 @@ class SizeMapping:
                    DirectToLdsA             = dtlA,
                    DirectToLdsB             = dtlB,
                    ExpertSchedulingMode     = d['ExpertSchedulingMode'],
+                   enableCluster            = d['EnableCluster'],
+                   clusterDim               = d['ClusterDim']
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):
