@@ -714,12 +714,14 @@ class LraTileAssignmentMFMA(LraTileAssignment):
            sReg    = writer.vgprPool.checkOut(1,"sReg") # remainder
            mReg    = writer.vgprPool.checkOut(1,"mReg") # remainder
 
-        isWmma_v1 = writer.states.asmCaps["HasWMMA_V1"]
+        duplicateK = writer.states.asmCaps["HasWMMA_V1"]  or ("MXS" in tP["tensorChar"])
+
         # get constant parameter
         tc               = tP["tensorChar"]
         tile01           = tP["tile01Idx"]
         waveWidth        = writer.states.kernel["WavefrontSize"]
-        inputPerThread   = kernel["LocalReadVectorWidth"] if not writer.states.inTailLoop else kernel["MIInputPerThread%s"%tc]
+        lrvw             = kernel["LocalReadVectorWidthMXS"] if ("MXS" in tc) else kernel["LocalReadVectorWidth"]
+        inputPerThread   = lrvw if not writer.states.inTailLoop else kernel["MIInputPerThread%s"%tc]
         if kernel["ProblemType"]["Sparse"]:
           if (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]):
             inputPerThread = inputPerThread // 2
@@ -879,7 +881,7 @@ class LraTileAssignmentMFMA(LraTileAssignment):
 
             # unroll offset
             #if isMfma and (dividendForKId != waveWidth):
-            if not isWmma_v1:
+            if not duplicateK:
                 if (dividendForKId != waveWidth) and (not isDTVAB):
                     if enableLDSTr:
                         module.add(vectorStaticRemainder(dummy, mReg, kReg, 16, tmpVgprRes, tmpSgprInfo, \

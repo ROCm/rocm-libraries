@@ -1788,18 +1788,30 @@ class KernelWriterAssembly(KernelWriter):
     # final offsets
     module.addComment1("local read addresses: final offsets a")
     module.add(self.lraFinalOffset(kernel, tPA))
+    if kernel["ProblemType"]["MXBlockA"]:
+      module.addComment1("local read addresses: final offsets mxsa")
+      module.add(self.lraFinalOffset(kernel, tPA["MX"]))
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       module.addComment1("local read addresses: final offsets metadata")
       module.add(self.lraFinalOffset(kernel, tPM))
+    if kernel["ProblemType"]["MXBlockB"]:
+      module.addComment1("local read addresses: final offsets mxsb")
+      module.add(self.lraFinalOffset(kernel, tPB["MX"]))
     module.addComment1("local read addresses: final offsets b")
     module.add(self.lraFinalOffset(kernel, tPB))
 
     # declare addresses
     module.addComment1("local read addresses: declare addresses a")
     module.add(self.lraDeclareAddresses(kernel, tPA))
+    if kernel["ProblemType"]["MXBlockA"]:
+      module.addComment1("local read addresses: declare addresses mxsa")
+      module.add(self.lraDeclareAddresses(kernel, tPA["MX"]))
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       module.addComment1("local read addresses: declare addresses metadata")
       module.add(self.lraDeclareAddresses(kernel, tPM))
+    if kernel["ProblemType"]["MXBlockB"]:
+      module.addComment1("local read addresses: declare addresses mxsb")
+      module.add(self.lraDeclareAddresses(kernel, tPB["MX"]))
     module.addComment1("local read addresses: declare addresses b")
     module.add(self.lraDeclareAddresses(kernel, tPB))
 
@@ -4656,18 +4668,27 @@ class KernelWriterAssembly(KernelWriter):
 
     component = Component.LraTileAssignment.find(self)
 
-    tP0 = tPA if tPB["tile01Idx"] else tPB
-    tP1 = tPB if tPB["tile01Idx"] else tPA
+    tPMXSA = tPA["MX"] if kernel["ProblemType"]["MXBlockA"] else None
+    tPMXSB = tPB["MX"] if kernel["ProblemType"]["MXBlockB"] else None
+
+    tP0    = tPA    if tPB["tile01Idx"] else tPB
+    tPMXS0 = tPMXSA if tPB["tile01Idx"] else tPMXSB
+    tP1    = tPB    if tPB["tile01Idx"] else tPA
+    tPMXS1 = tPMXSB if tPB["tile01Idx"] else tPMXSA
 
     if component:
       # do not generate local read code if DirectToVgpr is enabled
       tc = tP0["tensorChar"]
       if not kernel["DirectToVgpr%s"%tc]:
         module.add(component(self, kernel, tP0))
+        if tPMXS0:
+          module.add(component(self, kernel, tPMXS0))
       # do not generate local read code if DirectToVgpr is enabled
       tc = tP1["tensorChar"]
       if not kernel["DirectToVgpr%s"%tc]:
         module.add(component(self, kernel, tP1))
+        if tPMXS1:
+          module.add(component(self, kernel, tPMXS1))
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
         tPM = tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]
         module.add(component(self, kernel, tPM))
@@ -4684,7 +4705,7 @@ class KernelWriterAssembly(KernelWriter):
 
     tc = tP["tensorChar"]
     # do not generate local read code if DirectToVgpr is enabled
-    if (tP["isA"] or tP["isB"]) and kernel["DirectToVgpr%s"%tc]:
+    if (tc in ("A", "MXSA", "B", "MXSB")) and kernel["DirectToVgpr%s"%tc]:
       return Module("lraFinalOffset (Empty)")
 
     if kernel["EnableMatrixInstruction"]:
@@ -4701,7 +4722,7 @@ class KernelWriterAssembly(KernelWriter):
       mtAddPad    = kernel["MacroTile%u" % tile01] + LdsPad
       umlds       = kernel["UnrollMajorLDS%s" % tc]
       lsu         = kernel["LocalSplitU"]
-      du          = kernel["DepthU"]
+      du          = kernel["_DepthU%s"%tc]
       lsuStride   = du // lsu
       numWaves = kernel["MIWaveGroup"][0] * kernel["MIWaveGroup"][1]
 
@@ -4855,7 +4876,10 @@ class KernelWriterAssembly(KernelWriter):
 
     else:
       # no need to generate add code if LdsOffset is 0 or DirectToVgprB
-      if kernel["LdsOffset%s"%tP["tensorChar"]] == 0 or tP["isB"] and kernel["DirectToVgprB"]:
+      if kernel["LdsOffset%s"%tP["tensorChar"]] == 0 \
+          or (tP["isMXSA"] and kernel["DirectToVgprMXSA"]) \
+          or (tP["isB"] and kernel["DirectToVgprB"]) \
+          or (tP["isMXSB"] and kernel["DirectToVgprMXSB"]):
         module = Module("lraDeclareAddresses (Empty)")
       else:
         module.add(VAddCOU32(
