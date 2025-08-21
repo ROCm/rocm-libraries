@@ -41,7 +41,6 @@
 #include "../hipfft_params.h"
 #include "hipfft/hipfft.h"
 #include "hipfft_accuracy_test.h"
-#include "hipfft_test_params.h"
 
 // initialize static class member of hipfft_params
 std::vector<gpubuf> hipfft_params::externally_managed_workareas = std::vector<gpubuf>();
