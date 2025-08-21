@@ -27,6 +27,7 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 #include <iostream>
+#include <algorithm>
 
 #include "TensorDataManipulation.hpp"
 #include "datatype_interface.hpp"
@@ -65,18 +66,18 @@ void swizzleTensor(T* dst, const T* src, size_t m, size_t k, bool colMaj)
     size_t MiK = 0, MiKv = 0, PackK = 0;
     calculateKforSwizzling(hipblaslt_type2datatype<T>(), MiK, MiKv, PackK);
     auto tmpTensor = Tensor::create<T>({m, k});
-    memcpy(tmpTensor.template as<void>(), src, m * k * sizeof(T));
+    std::copy(src, src + m * k, static_cast<T*>(tmpTensor.template as<void>()));
 
     if(colMaj)
     {
         auto orgTensor = Tensor::create<T>({k, m});
-        memcpy(orgTensor.template as<void>(), src, m * k * sizeof(T));
+        std::copy(src, src + m * k, static_cast<T*>(orgTensor.template as<void>()));
         tmpTensor = permute(orgTensor, {1, 0});
     }
 
     tmpTensor.reshape({m / MiM, MiM, k / (MiK * PackK), MiK / MiKv, MiKv * PackK});
     Tensor permuted = permute(tmpTensor, {0, 2, 3, 1, 4});
-    memcpy(dst, permuted.template as<void>(), m * k * sizeof(T));
+    std::copy(static_cast<const T*>(permuted.template as<void>()), static_cast<const T*>(permuted.template as<void>()) + m * k, dst);
 }
 
 void simpleGemm(hipblasLtHandle_t  handle,
