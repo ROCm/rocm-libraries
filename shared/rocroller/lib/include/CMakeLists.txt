@@ -21,6 +21,8 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ExecutableKernel_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ExpressionTransformations.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression_evaluate_detail.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression_evaluate_detail_binary.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Expression_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelArguments.hpp"
@@ -33,6 +35,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ScheduledInstructions.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/ScheduledInstructions_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/TensorDescriptor.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/TensorDescriptor_impl.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Assemblers/Assembler.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/Assemblers/Assembler_fwd.hpp"
@@ -41,6 +44,7 @@ target_sources(rocroller
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/AddInstruction.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/Annotate.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/Annotate_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/ArgumentLoader.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/ArgumentLoader_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/CodeGen/ArgumentLoader_impl.hpp"
@@ -122,6 +126,7 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Scale_Utils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_UInt8x4.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_Utils.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DataTypes_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/DataTypes/DistinctType.hpp"
 
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/GPUArchitecture/GPUArchitecture.hpp"
@@ -239,6 +244,8 @@ target_sources(rocroller
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/OrderMultiplyNodes.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/PrefetchScale.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/RemoveDuplicates.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/RemoveSetCoordinate.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/RemoveSetCoordinate_details.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/Simplify.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/SwizzleScale.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/rocRoller/KernelGraph/Transforms/UnrollLoops.hpp"

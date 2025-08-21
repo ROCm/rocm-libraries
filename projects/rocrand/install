@@ -33,7 +33,6 @@ rocm_path=/opt/rocm
 build_relocatable=false
 install_dependencies=false
 build_address_sanitizer=false
-build_freorg_bkwdcomp=false
 
 # #################################################
 # Parameter parsing
@@ -94,9 +93,6 @@ while true; do
         shift ;;
     --address-sanitizer)
         build_address_sanitizer=true
-        shift ;;
-    --rm-legacy-include-dir)
-        build_freorg_bkwdcomp=false
         shift ;;
 	--) shift ; break ;;
 	*)  echo "Unexpected command line parameter received; aborting";
@@ -160,12 +156,6 @@ fi
 
 if ($install_dependencies); then
     cmake_common_options="${cmake_common_options} -DDEPENDENCIES_FORCE_DOWNLOAD=ON"
-fi
-
-if ($build_freorg_bkwdcomp); then
-    cmake_common_options="${cmake_common_options} -DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=ON"
-else
-    cmake_common_options="${cmake_common_options} -DBUILD_FILE_REORG_BACKWARD_COMPATIBILITY=OFF"
 fi
 
 if [[ "${build_relocatable}" == true ]]; then

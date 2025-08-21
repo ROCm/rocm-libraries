@@ -25,11 +25,13 @@
 #include "rocsparse_clients_envariables.hpp"
 #include "rocsparse_parse_data.hpp"
 #include "rocsparse_reproducibility.hpp"
+#include "rocsparse_test_listeners.hpp"
 #include "utility.hpp"
 
 #include <gtest/gtest.h>
 
 #include "test_check.hpp"
+
 bool test_check::s_auto_testing_bad_arg;
 
 bool display_timing_info_is_stdout_disabled()
@@ -51,122 +53,6 @@ rocsparse_status rocsparse_record_timing(double msec, double gflops, double gbs)
 {
     return rocsparse_status_success;
 }
-
-class ConfigurableEventListener : public testing::TestEventListener
-{
-    testing::TestEventListener* eventListener;
-
-public:
-    bool showTestCases; // Show the names of each test case.
-    bool showTestNames; // Show the names of each test.
-    bool showSuccesses; // Show each success.
-    bool showInlineFailures; // Show each failure as it occurs.
-    bool showEnvironment; // Show the setup of the global environment.
-
-    explicit ConfigurableEventListener(testing::TestEventListener* theEventListener)
-        : eventListener(theEventListener)
-        , showTestCases(true)
-        , showTestNames(true)
-        , showSuccesses(true)
-        , showInlineFailures(true)
-        , showEnvironment(true)
-    {
-    }
-
-    ~ConfigurableEventListener() override
-    {
-        delete eventListener;
-    }
-
-    void OnTestProgramStart(const testing::UnitTest& unit_test) override
-    {
-        eventListener->OnTestProgramStart(unit_test);
-    }
-
-    void OnTestIterationStart(const testing::UnitTest& unit_test, int iteration) override
-    {
-        eventListener->OnTestIterationStart(unit_test, iteration);
-    }
-
-    void OnEnvironmentsSetUpStart(const testing::UnitTest& unit_test) override
-    {
-        if(showEnvironment)
-        {
-            eventListener->OnEnvironmentsSetUpStart(unit_test);
-        }
-    }
-
-    void OnEnvironmentsSetUpEnd(const testing::UnitTest& unit_test) override
-    {
-        if(showEnvironment)
-        {
-            eventListener->OnEnvironmentsSetUpEnd(unit_test);
-        }
-    }
-
-    void OnTestCaseStart(const testing::TestCase& test_case) override
-    {
-        if(showTestCases)
-        {
-            eventListener->OnTestCaseStart(test_case);
-        }
-    }
-
-    void OnTestStart(const testing::TestInfo& test_info) override
-    {
-        if(showTestNames)
-        {
-            eventListener->OnTestStart(test_info);
-        }
-    }
-
-    void OnTestPartResult(const testing::TestPartResult& result) override
-    {
-        eventListener->OnTestPartResult(result);
-    }
-
-    void OnTestEnd(const testing::TestInfo& test_info) override
-    {
-        if(test_info.result()->Failed() ? showInlineFailures : showSuccesses)
-        {
-            eventListener->OnTestEnd(test_info);
-        }
-    }
-
-    void OnTestCaseEnd(const testing::TestCase& test_case) override
-    {
-        if(showTestCases)
-        {
-            eventListener->OnTestCaseEnd(test_case);
-        }
-    }
-
-    void OnEnvironmentsTearDownStart(const testing::UnitTest& unit_test) override
-    {
-        if(showEnvironment)
-        {
-            eventListener->OnEnvironmentsTearDownStart(unit_test);
-        }
-    }
-
-    void OnEnvironmentsTearDownEnd(const testing::UnitTest& unit_test) override
-    {
-        if(showEnvironment)
-        {
-            eventListener->OnEnvironmentsTearDownEnd(unit_test);
-        }
-    }
-
-    void OnTestIterationEnd(const testing::UnitTest& unit_test, int iteration) override
-    {
-        eventListener->OnTestIterationEnd(unit_test, iteration);
-    }
-
-    void OnTestProgramEnd(const testing::UnitTest& unit_test) override
-    {
-        eventListener->OnTestProgramEnd(unit_test);
-    }
-};
 
 /* =====================================================================
       Main function:
@@ -336,15 +222,30 @@ int main(int argc, char** argv)
     // [==========] 149 tests from 53 test cases ran. (1 ms total)
     // [  PASSED  ] 149 tests.
     //
-    auto listener       = new ConfigurableEventListener(default_printer);
     auto gtest_listener = getenv("GTEST_LISTENER");
 
-    if(gtest_listener && !strcmp(gtest_listener, "NO_PASS_LINE_IN_LOG"))
+    if(!gtest_listener || strcmp(gtest_listener, "VERBOSE_PASS_IN_LOG") != 0)
     {
-        listener->showTestNames = listener->showSuccesses = listener->showInlineFailures = false;
-    }
+        // If the GTEST_LISTENER environment variable is not set to "VERBOSE_PASS_IN_LOG",
+        // we use the configurable_event_listener to capture output.
+        // This listener will redirect the output to a stringstream and print it only if a test fails.
+        // listeners.Append(new rocsparse_clients::configurable_event_listener(default_printer));
+        auto listener = new rocsparse_clients::configurable_event_listener(default_printer);
+        if(gtest_listener && !strcmp(gtest_listener, "NO_PASS_LINE_IN_LOG"))
+        {
+            listener->showTestNames = listener->showSuccesses = listener->showInlineFailures
+                = false;
+        }
 
-    listeners.Append(listener);
+        listeners.Append(listener);
+    }
+    else
+    {
+        auto listener = new rocsparse_clients::configurable_event_listener(default_printer);
+        listener->redirectOutput = false;
+
+        listeners.Append(listener);
+    }
 
     // Run all tests
     int ret = RUN_ALL_TESTS();

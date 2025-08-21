@@ -31,6 +31,9 @@
 #include "../../shared/client_except.h"
 #include "../../shared/gpubuf.h"
 
+// initialize static class member of hipfft_params
+std::vector<gpubuf> hipfft_params::externally_managed_workareas = std::vector<gpubuf>();
+
 int main(int argc, char* argv[])
 {
     // This helps with mixing output of both wide and narrow characters to the screen
@@ -78,6 +81,11 @@ int main(int argc, char* argv[])
                      "Type of transform:\n0) complex forward\n1) complex inverse\n2) real "
                      "forward\n3) real inverse")
         ->default_val(fft_transform_type_complex_forward);
+    non_token
+        ->add_option("--auto_allocation",
+                     params.auto_allocate,
+                     "hipFFT's auto-allocation behavior: \"on\", \"off\", or \"default\"")
+        ->default_val("default");
     non_token
         ->add_option(
             "--precision", params.precision, "Transform precision: single (default), double, half")

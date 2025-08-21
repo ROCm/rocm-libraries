@@ -41,6 +41,7 @@
 #include "device_transform.hpp"
 #include "rocprim/detail/virtual_shared_memory.hpp"
 #include "rocprim/device/config_types.hpp"
+#include "rocprim/device/detail/ordered_block_id.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -60,22 +61,23 @@ template<select_method SelectMethod,
          class OutputValueIterator,
          class InequalityOp,
          class OffsetLookbackScanState,
+         class BlockIdWrapper,
          class... UnaryPredicates>
-ROCPRIM_KERNEL
-    ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
-    partition_kernel(KeyIterator             keys_input,
-                     ValueIterator           values_input,
-                     FlagIterator            flags,
-                     OutputKeyIterator       keys_output,
-                     OutputValueIterator     values_output,
-                     size_t*                 selected_count,
-                     size_t*                 prev_selected_count,
-                     size_t                  prev_processed,
-                     const size_t            total_size,
-                     InequalityOp            inequality_op,
-                     OffsetLookbackScanState offset_scan_state,
-                     const unsigned int      number_of_blocks,
-                     detail::vsmem_t         vsmem,
+ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(device_params<Config>().kernel_config.block_size) void
+    partition_kernel(KeyIterator                        keys_input,
+                     ValueIterator                      values_input,
+                     FlagIterator                       flags,
+                     OutputKeyIterator                  keys_output,
+                     OutputValueIterator                values_output,
+                     size_t*                            selected_count,
+                     size_t*                            prev_selected_count,
+                     size_t                             prev_processed,
+                     const size_t                       total_size,
+                     InequalityOp                       inequality_op,
+                     OffsetLookbackScanState            offset_scan_state,
+                     const unsigned int                 number_of_blocks,
+                     detail::vsmem_t                    vsmem,
+                     BlockIdWrapper                     block_id,
                      UnaryPredicates... predicates)
 {
     using offset_type = typename OffsetLookbackScanState::value_type;
@@ -92,7 +94,8 @@ ROCPRIM_KERNEL
                                                            key_type,
                                                            value_type,
                                                            flag_type,
-                                                           offset_type>;
+                                                           offset_type,
+                                                           BlockIdWrapper>;
 
     using VSmemHelperT = detail::vsmem_helper_impl<partition_kernel_impl_t>;
     ROCPRIM_SHARED_MEMORY typename VSmemHelperT::static_temp_storage_t static_temp_storage;
@@ -112,9 +115,44 @@ ROCPRIM_KERNEL
                                         inequality_op,
                                         offset_scan_state,
                                         number_of_blocks,
+                                        block_id,
                                         storage,
                                         predicates...);
 }
+
+// Templated helper that instantiates partition_kernel_impl_ for an Arch,
+// and puts its vsmem_per_block in the vsmem_size_out member variable.
+template<select_method SelectMethod,
+         bool          OnlySelected,
+         class Config,
+         class Key,
+         class Value,
+         class FlagType,
+         class OffsetType,
+         class BlockIdWrapper>
+struct partition_vsmem_size_visitor
+{
+    size_t& vsmem_size_out;
+
+    template<target_arch Arch>
+    inline hipError_t operator()() const
+    {
+        using forced_conf_t = force_arch_config<Arch, Config, partition_config_params>;
+
+        using partition_kernel_impl_t = partition_kernel_impl_<SelectMethod,
+                                                               OnlySelected,
+                                                               forced_conf_t,
+                                                               Key,
+                                                               Value,
+                                                               FlagType,
+                                                               OffsetType,
+                                                               BlockIdWrapper>;
+
+        vsmem_size_out = vsmem_helper_impl<partition_kernel_impl_t>::vsmem_per_block;
+
+        return hipSuccess;
+    }
+};
 
 template<select_method SelectMethod,
          bool          OnlySelected,
@@ -122,23 +160,23 @@ template<select_method SelectMethod,
          class Key,
          class Value,
          class FlagType,
-         class OffsetLookbackScanState>
-inline size_t get_partition_vsmem_size_per_block()
+         class OffsetType,
+         class BlockIdWrapper>
+inline hipError_t get_partition_vsmem_size_per_block(target_arch target_arch, size_t& vsmem_size)
 {
-    using offset_type             = typename OffsetLookbackScanState::value_type;
-    using partition_kernel_impl_t = partition_kernel_impl_<SelectMethod,
-                                                           OnlySelected,
-                                                           Config,
-                                                           Key,
-                                                           Value,
-                                                           FlagType,
-                                                           offset_type>;
-
-    using PartitionVSmemHelperT = detail::vsmem_helper_impl<partition_kernel_impl_t>;
-    return PartitionVSmemHelperT::vsmem_per_block;
+    return generic_dispatch_target_arch(target_arch,
+                                        partition_vsmem_size_visitor<SelectMethod,
+                                                                     OnlySelected,
+                                                                     Config,
+                                                                     Key,
+                                                                     Value,
+                                                                     FlagType,
+                                                                     OffsetType,
+                                                                     BlockIdWrapper>{vsmem_size});
 }
 
 template<partition_subalgo SubAlgo,
+         bool              UsingOrderedBlockId,
          class Config,
          class OffsetT,
          class KeyIterator,
@@ -195,9 +233,6 @@ inline hipError_t partition_impl(void*                       temporary_storage,
     }
     const partition_config_params params = dispatch_target_arch<config>(target_arch);
 
-    using offset_scan_state_type = detail::lookback_scan_state<offset_type>;
-    using offset_scan_state_with_sleep_type = detail::lookback_scan_state<offset_type, true>;
-
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;
     const auto         items_per_block  = block_size * items_per_thread;
@@ -214,10 +249,17 @@ inline hipError_t partition_impl(void*                       temporary_storage,
     const unsigned int number_of_blocks
         = static_cast<unsigned int>(::rocprim::detail::ceiling_div(limited_size, items_per_block));
 
+    using block_id_wrapper_type = block_id_wrapper<uint32_t, UsingOrderedBlockId>;
+
     // Calculate required temporary storage
-    void*                           offset_scan_state_storage;
-    size_t*                         selected_count;
-    size_t*                         prev_selected_count;
+    void*                                    offset_scan_state_storage;
+    size_t*                                  selected_count;
+    size_t*                                  prev_selected_count;
+    typename block_id_wrapper_type::id_type* block_id_pool;
+    void*                                    vsmem;
+
+    using offset_scan_state_type            = detail::lookback_scan_state<offset_type>;
+    using offset_scan_state_with_sleep_type = detail::lookback_scan_state<offset_type, true>;
 
     detail::temp_storage::layout layout{};
     result = offset_scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout);
@@ -226,40 +268,27 @@ inline hipError_t partition_impl(void*                       temporary_storage,
         return result;
     }
 
-    bool use_sleep;
-    ROCPRIM_RETURN_ON_ERROR(is_sleep_scan_state_used(stream, use_sleep));
-
-    // vsmem size
-    void*  vsmem                      = nullptr;
-    size_t virtual_shared_memory_size = 0;
     using flag_type =
         typename std::conditional<method == select_method::predicated_flag,
                                   typename std::iterator_traits<FlagIterator>::value_type,
                                   bool>::type;
-    if(use_sleep)
-    {
-        virtual_shared_memory_size
-            = get_partition_vsmem_size_per_block<method,
-                                                 write_only_selected,
-                                                 config,
-                                                 key_type,
-                                                 value_type,
-                                                 flag_type,
-                                                 offset_scan_state_with_sleep_type>();
-    }
-    else
-    {
-        virtual_shared_memory_size = get_partition_vsmem_size_per_block<method,
-                                                                        write_only_selected,
-                                                                        config,
-                                                                        key_type,
-                                                                        value_type,
-                                                                        flag_type,
-                                                                        offset_scan_state_type>();
-    }
-    virtual_shared_memory_size *= number_of_blocks;
 
-    // temporary storage partition
+    size_t vsmem_size;
+    result = get_partition_vsmem_size_per_block<method,
+                                                write_only_selected,
+                                                config,
+                                                key_type,
+                                                value_type,
+                                                flag_type,
+                                                offset_type,
+                                                block_id_wrapper_type>(target_arch, vsmem_size);
+    if(result != hipSuccess)
+    {
+        return result;
+    }
+
+    vsmem_size *= number_of_blocks;
+
     result = detail::temp_storage::partition(
         temporary_storage,
         storage_size,
@@ -271,14 +300,16 @@ inline hipError_t partition_impl(void*                       temporary_storage,
             // They have the same base type, so there is no padding between the types.
             detail::temp_storage::ptr_aligned_array(&selected_count, selected_count_size),
             detail::temp_storage::ptr_aligned_array(&prev_selected_count, selected_count_size),
+            detail::temp_storage::ptr_aligned_array(&block_id_pool,
+                                                    block_id_wrapper_type::get_storage_size()),
             // vsmem
-            detail::temp_storage::make_partition(&vsmem,
-                                                 virtual_shared_memory_size,
-                                                 cache_line_size)));
+            detail::temp_storage::make_partition(&vsmem, vsmem_size, cache_line_size)));
     if(result != hipSuccess || temporary_storage == nullptr)
     {
         return result;
     }
+
+    auto block_id = block_id_wrapper_type::create(block_id_pool);
 
     // Start point for time measurements
     std::chrono::steady_clock::time_point start;
@@ -302,6 +333,9 @@ inline hipError_t partition_impl(void*                       temporary_storage,
     {
         return result;
     }
+
+    bool use_sleep;
+    ROCPRIM_RETURN_ON_ERROR(is_sleep_scan_state_used(stream, use_sleep));
 
     // Call the provided function with either offset_scan_state or offset_scan_state_with_sleep based on
     // the value of use_sleep
@@ -371,6 +405,15 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                                                     current_number_of_blocks,
                                                     start);
 
+        if (UsingOrderedBlockId)
+        {
+            result = hipMemsetAsync(block_id_pool, 0, sizeof(unsigned int), stream);
+            if (result != hipSuccess)
+            {
+                return result;
+            }
+        }
+
         if(debug_synchronous) start = std::chrono::steady_clock::now();
 
         with_scan_state(
@@ -391,6 +434,7 @@ inline hipError_t partition_impl(void*                       temporary_storage,
                         scan_state,
                         current_number_of_blocks,
                         detail::vsmem_t{vsmem},
+                        block_id,
                         predicates...);
             });
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("partition_kernel", size, start);
@@ -440,6 +484,9 @@ inline hipError_t partition_impl(void*                       temporary_storage,
 /// \tparam SelectedCountOutputIterator random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
 /// \tparam Predicate type of the selection predicate.
+/// \tparam UsingOrderedBlockId If true, uses an atomic counter to assign block id instead of natural
+/// blockIdx-based ordering.  Can increase performance on MI3xx architectures when using streams. The
+/// default is false.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When a null
 /// pointer is passed, the required allocation size (in bytes) is written to
@@ -515,7 +562,8 @@ template<class Config = default_config,
          class SelectedOutputIterator,
          class RejectedOutputIterator,
          class SelectedCountOutputIterator,
-         class Predicate>
+         class Predicate,
+         bool  UsingOrderedBlockId = false>
 inline hipError_t partition_two_way(void*                       temporary_storage,
                                     size_t&                     storage_size,
                                     InputIterator               input,
@@ -542,6 +590,7 @@ inline hipError_t partition_two_way(void*                       temporary_storag
     const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
 
     return detail::partition_impl<detail::partition_subalgo::partition_two_way_predicate,
+                                  UsingOrderedBlockId,
                                   Config,
                                   offset_type>(temporary_storage,
                                                storage_size,
@@ -588,6 +637,9 @@ inline hipError_t partition_two_way(void*                       temporary_storag
 /// can be a simple pointer type
 /// \tparam SelectedCountOutputIterator random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
+/// \tparam UsingOrderedBlockId If true, uses an atomic counter to assign block id instead of natural
+/// blockIdx-based ordering.  Can increase performance on MI3xx architectures when using streams. The
+/// default is false.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -655,7 +707,8 @@ template<class Config = default_config,
          typename FlagIterator,
          typename SelectedOutputIterator,
          typename RejectedOutputIterator,
-         typename SelectedCountOutputIterator>
+         typename SelectedCountOutputIterator,
+         bool     UsingOrderedBlockId = false>
 inline hipError_t partition_two_way(void*                       temporary_storage,
                                     size_t&                     storage_size,
                                     InputIterator               input,
@@ -680,6 +733,7 @@ inline hipError_t partition_two_way(void*                       temporary_storag
     const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
 
     return detail::partition_impl<detail::partition_subalgo::partition_two_way_flag,
+                                  UsingOrderedBlockId,
                                   Config,
                                   offset_type>(temporary_storage,
                                                storage_size,
@@ -721,6 +775,9 @@ inline hipError_t partition_two_way(void*                       temporary_storag
 /// a simple pointer type.
 /// \tparam SelectedCountOutputIterator random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
+/// \tparam UsingOrderedBlockId If true, uses an atomic counter to assign block id instead of natural
+/// blockIdx-based ordering.  Can increase performance on MI3xx architectures when using streams. The
+/// default is false.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -779,8 +836,8 @@ template<
     class InputIterator,
     class FlagIterator,
     class OutputIterator,
-    class SelectedCountOutputIterator
->
+    class SelectedCountOutputIterator,
+    bool  UsingOrderedBlockId = false>
 inline
 hipError_t partition(void * temporary_storage,
                      size_t& storage_size,
@@ -804,20 +861,22 @@ hipError_t partition(void * temporary_storage,
     using output_value_iterator_tuple = tuple<::rocprim::empty_type*, ::rocprim::empty_type*>;
     const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
 
-    return detail::partition_impl<detail::partition_subalgo::partition_flag, Config, offset_type>(
-        temporary_storage,
-        storage_size,
-        input,
-        no_input_values,
-        flags,
-        keys_output,
-        no_output_values,
-        selected_count_output,
-        size,
-        inequality_op_type(),
-        stream,
-        debug_synchronous,
-        unary_predicate_type());
+    return detail::partition_impl<detail::partition_subalgo::partition_flag,
+                                  UsingOrderedBlockId,
+                                  Config,
+                                  offset_type>(temporary_storage,
+                                               storage_size,
+                                               input,
+                                               no_input_values,
+                                               flags,
+                                               keys_output,
+                                               no_output_values,
+                                               selected_count_output,
+                                               size,
+                                               inequality_op_type(),
+                                               stream,
+                                               debug_synchronous,
+                                               unary_predicate_type());
 }
 
 /// \brief Parallel select primitive for device level using selection predicate.
@@ -841,6 +900,9 @@ hipError_t partition(void * temporary_storage,
 /// \tparam SelectedCountOutputIterator random-access iterator type of the selected_count_output
 /// value. It can be a simple pointer type.
 /// \tparam UnaryPredicate type of a unary selection predicate.
+/// \tparam UsingOrderedBlockId If true, uses an atomic counter to assign block id instead of natural
+/// blockIdx-based ordering.  Can increase performance on MI3xx architectures when using streams. The
+/// default is false.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -910,8 +972,8 @@ template<
     class InputIterator,
     class OutputIterator,
     class SelectedCountOutputIterator,
-    class UnaryPredicate
->
+    class UnaryPredicate,
+    bool  UsingOrderedBlockId = false>
 inline
 hipError_t partition(void * temporary_storage,
                      size_t& storage_size,
@@ -938,6 +1000,7 @@ hipError_t partition(void * temporary_storage,
     const output_value_iterator_tuple no_output_values{nullptr, nullptr}; // key only
 
     return detail::partition_impl<detail::partition_subalgo::partition_predicate,
+                                  UsingOrderedBlockId,
                                   Config,
                                   offset_type>(temporary_storage,
                                                storage_size,
@@ -991,6 +1054,9 @@ hipError_t partition(void * temporary_storage,
 /// value. It can be a simple pointer type.
 /// \tparam FirstUnaryPredicate type of the first unary selection predicate.
 /// \tparam SecondUnaryPredicate type of the second unary selection predicate.
+/// \tparam UsingOrderedBlockId If true, uses an atomic counter to assign block id instead of natural
+/// blockIdx-based ordering.  Can increase performance on MI3xx architectures when using streams. The
+/// default is false.
 ///
 /// \param [in] temporary_storage pointer to a device-accessible temporary storage. When
 /// a null pointer is passed, the required allocation size (in bytes) is written to
@@ -1087,7 +1153,8 @@ template <
     typename UnselectedOutputIterator,
     typename SelectedCountOutputIterator,
     typename FirstUnaryPredicate,
-    typename SecondUnaryPredicate>
+    typename SecondUnaryPredicate,
+    bool     UsingOrderedBlockId = false>
 inline
 hipError_t partition_three_way(void * temporary_storage,
                                size_t& storage_size,
@@ -1120,6 +1187,7 @@ hipError_t partition_three_way(void * temporary_storage,
     output_key_iterator_tuple output{ output_first_part, output_second_part, output_unselected };
 
     return detail::partition_impl<detail::partition_subalgo::partition_three_way,
+                                  UsingOrderedBlockId,
                                   Config,
                                   offset_type>(temporary_storage,
                                                storage_size,

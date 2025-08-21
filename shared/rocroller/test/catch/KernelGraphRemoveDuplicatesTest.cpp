@@ -61,7 +61,8 @@ TEST_CASE("Remove duplicates", "[kernel-graph]")
     transforms.push_back(std::make_shared<LowerLinear>(ctx));
     transforms.push_back(std::make_shared<LowerTile>(params, ctx));
     transforms.push_back(std::make_shared<LowerTensorContraction>(params, ctx));
-    transforms.push_back(std::make_shared<ConnectWorkgroups>(params, ctx));
+    transforms.push_back(std::make_shared<ConnectWorkgroups>(
+        ctx, params->workgroupMappingDim, params->workgroupRemapXCC));
     transforms.push_back(std::make_shared<UnrollLoops>(params, ctx));
     transforms.push_back(std::make_shared<FuseLoops>());
 
