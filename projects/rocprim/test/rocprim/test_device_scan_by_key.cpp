@@ -66,11 +66,6 @@
 #include <utility>
 #include <vector>
 
-struct default_config_helper
-{
-    using type = ::rocprim::default_config;
-};
-
 template<unsigned int SizeLimit>
 using size_limit_config
     = rocprim::scan_by_key_config<256,
