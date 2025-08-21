@@ -735,7 +735,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
 int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
                           const RocblasltContractionProblem& prob)
 {
-    const origami::hardware_t analaytical_hardware = origami:hardware_t::get_hardware_for_device(0);
+    const origami::hardware_t analaytical_hardware = origami::hardware_t::get_hardware_for_device(0);
 
     size_t elementSizeA_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeA).elementBits;
     size_t elementSizeB_bits = rocRoller::DataTypeInfo::Get(gemm->params->kernelType.typeB).elementBits;
